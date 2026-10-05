@@ -8,8 +8,8 @@ file cleanup rule. Requires pyturso; everything runs on temporary files.
 import asyncio
 
 import pytest
+from sqlalchemy import event, text
 from sqlalchemy import inspect as sa_inspect
-from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
@@ -29,6 +29,7 @@ from cognee.infrastructure.databases.turso import (
     remove_database_files,
     retry_on_conflict,
     turso_url,
+    write_transaction,
 )
 from cognee.infrastructure.databases.turso.transactions import _exclusive_ddl
 
@@ -105,6 +106,10 @@ class TestTransactionHelpers:
         assert begin_statement(wal) is None
         assert begin_statement(mvcc) == "BEGIN CONCURRENT"
         assert begin_statement(mvcc, ddl=True) == "BEGIN"
+        # Read-modify-write transactions: the read must already hold the write lock.
+        assert begin_statement(wal, write=True) == "BEGIN IMMEDIATE"
+        assert begin_statement(mvcc, write=True) == "BEGIN CONCURRENT"
+        assert connect_args_for_mode(wal, immediate_writes=True) == {"isolation_level": None}
 
     @pytest.mark.parametrize(
         "message",
@@ -182,6 +187,36 @@ class TestTransactionHelpers:
         with pytest.raises(RuntimeError, match="no such table"):
             _run(retry_on_conflict(broken, attempts=5, base_delay=0))
         assert calls["n"] == 1
+
+    def test_write_transaction_begins_immediate_in_wal(self, tmp_path):
+        """With immediate_writes, writes open BEGIN IMMEDIATE and reads stay deferred."""
+        config = TursoConfig(_env_file=None)
+        seen: list[str] = []
+
+        async def probe():
+            engine = create_async_engine(
+                turso_url(str(tmp_path / "w.db")),
+                poolclass=NullPool,
+                connect_args=connect_args_for_mode(config, immediate_writes=True),
+            )
+            configure_engine(engine, config=config, immediate_writes=True)
+
+            @event.listens_for(engine.sync_engine, "before_cursor_execute")
+            def record(conn, cursor, statement, *args):
+                if statement.startswith("BEGIN"):
+                    seen.append(statement)
+
+            async with engine.begin() as connection:
+                await connection.execute(text("CREATE TABLE t (v TEXT)"))
+            async with write_transaction(), engine.begin() as connection:
+                await connection.execute(text("INSERT INTO t VALUES ('a')"))
+            async with engine.connect() as connection:
+                rows = (await connection.execute(text("SELECT v FROM t"))).all()
+            await engine.dispose()
+            return rows
+
+        assert _run(probe()) == [("a",)]
+        assert seen == ["BEGIN", "BEGIN IMMEDIATE", "BEGIN"]
 
     def test_exclusive_transaction_scopes_the_flag(self):
         async def probe():

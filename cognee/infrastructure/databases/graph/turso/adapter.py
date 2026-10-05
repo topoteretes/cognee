@@ -33,6 +33,7 @@ from cognee.infrastructure.databases.turso import (
     get_turso_config,
     retry_on_conflict,
     turso_url,
+    write_transaction,
 )
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.engine.models.Timestamp import Timestamp
@@ -124,12 +125,17 @@ class TursoAdapter(GraphDBInterface):
         # schema vanishes between operations, so leave those on the default pool.
         engine_kwargs = {} if ":memory:" in database_path else {"poolclass": NullPool}
         self.engine = create_async_engine(
-            self.db_uri, connect_args=connect_args_for_mode(self.turso_config), **engine_kwargs
+            self.db_uri,
+            connect_args=connect_args_for_mode(self.turso_config, immediate_writes=True),
+            **engine_kwargs,
         )
         # Connection PRAGMAs (journal mode, busy_timeout, foreign_keys=ON so
-        # graph_edge's ON DELETE CASCADE fires) and, in mvcc mode, the
-        # BEGIN CONCURRENT hook. Connection scoped, so applied on every connect.
-        configure_engine(self.engine, foreign_keys=True, config=self.turso_config)
+        # graph_edge's ON DELETE CASCADE fires) and the transaction hook: BEGIN
+        # CONCURRENT in mvcc, BEGIN IMMEDIATE for _write() transactions in wal, so a
+        # read-modify-write holds the write lock from its first read.
+        configure_engine(
+            self.engine, foreign_keys=True, config=self.turso_config, immediate_writes=True
+        )
 
         self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
         self._write_lock = asyncio.Lock()
@@ -157,8 +163,13 @@ class TursoAdapter(GraphDBInterface):
             await session.commit()
 
     async def _write(self, operation) -> None:
-        """Serialize this adapter's writes and retry the whole transaction on a conflict."""
-        async with self._write_lock:
+        """Serialize this adapter's writes and retry the whole transaction on a conflict.
+
+        ``operation`` runs as a write transaction (``BEGIN IMMEDIATE`` in wal), so a
+        read inside it already holds the write lock: another connection's write
+        cannot slip in between the read and the write that depends on it.
+        """
+        async with self._write_lock, write_transaction():
             await retry_on_conflict(operation)
 
     @asynccontextmanager
@@ -1023,41 +1034,39 @@ class TursoAdapter(GraphDBInterface):
             return
 
         tag_set = set(tags)
-        async with self._session() as session:
-            if node_ids is not None:
-                subquery, params = _id_subquery("bts", node_ids)
-                result = await session.execute(
-                    text(f"SELECT id, properties FROM graph_node WHERE id IN {subquery}"), params
-                )
-            else:
-                result = await session.execute(text("SELECT id, properties FROM graph_node"))
-            rows = result.fetchall()
+        # The engine binds only None/numbers/str/bytes; the typed bindparam renders
+        # the datetime the way the DateTime column stores it.
+        update_stmt = text(
+            "UPDATE graph_node SET properties = :p, updated_at = :now WHERE id = :id"
+        ).bindparams(bindparam("now", type_=DateTime(timezone=True)))
 
-        updates = []
-        for row in rows:
-            properties = json.loads(row[1]) if row[1] else {}
-            current = properties.get("belongs_to_set")
-            if not isinstance(current, list) or not any(tag in tag_set for tag in current):
-                continue
-            properties["belongs_to_set"] = [tag for tag in current if tag not in tag_set]
-            updates.append({"id": row[0], "properties": self._serialize_properties(properties)})
-
-        if updates:
-            now = datetime.now(timezone.utc)
-            # The engine binds only None/numbers/str/bytes; the typed bindparam
-            # renders the datetime the way the DateTime column stores it.
-            update_stmt = text(
-                "UPDATE graph_node SET properties = :p, updated_at = :now WHERE id = :id"
-            ).bindparams(bindparam("now", type_=DateTime(timezone=True)))
-
-            async def apply_updates() -> None:
-                async with self._session() as session:
-                    for update in updates:
-                        await session.execute(
-                            update_stmt,
-                            {"id": update["id"], "p": update["properties"], "now": now},
-                        )
+        async def strip_tags() -> None:
+            # Read and write in one write transaction, re-run from the read on a
+            # conflict, so a concurrent change to the same node is never
+            # overwritten from a stale read.
+            async with self._session() as session:
+                if node_ids is not None:
+                    subquery, params = _id_subquery("bts", node_ids)
+                    result = await session.execute(
+                        text(f"SELECT id, properties FROM graph_node WHERE id IN {subquery}"),
+                        params,
+                    )
+                else:
+                    result = await session.execute(text("SELECT id, properties FROM graph_node"))
+                now = datetime.now(timezone.utc)
+                changed = False
+                for row in result.fetchall():
+                    properties = json.loads(row[1]) if row[1] else {}
+                    current = properties.get("belongs_to_set")
+                    if not isinstance(current, list) or not any(tag in tag_set for tag in current):
+                        continue
+                    properties["belongs_to_set"] = [tag for tag in current if tag not in tag_set]
+                    await session.execute(
+                        update_stmt,
+                        {"id": row[0], "p": self._serialize_properties(properties), "now": now},
+                    )
+                    changed = True
+                if changed:
                     await session.commit()
 
-            await self._write(apply_updates)
-        return
+        await self._write(strip_tags)

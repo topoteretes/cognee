@@ -295,3 +295,109 @@ async def test_concurrent_payload_updates_on_the_same_row_merge(tmp_path, journa
     finally:
         await first.close()
         await second.close()
+
+
+# --------------------------------------------------------------------------- #
+# Read-modify-write: the read must already hold the write lock (wal) or be
+# re-run after a conflict (mvcc). Each test widens the read-to-write window of
+# one writer so the other commits inside it; without that guarantee the slow
+# writer overwrites the fast one from its stale read, every time.
+# --------------------------------------------------------------------------- #
+READ_TO_WRITE_DELAY = 0.3
+
+
+class _SlowReadCursor:
+    def __init__(self, cursor):
+        self._cursor = cursor
+
+    def fetchall(self):
+        rows = self._cursor.fetchall()
+        threading.Event().wait(READ_TO_WRITE_DELAY)  # runs in the adapter's worker thread
+        return rows
+
+    def __getattr__(self, name):
+        return getattr(self._cursor, name)
+
+
+class _SlowReadConnection:
+    """A pyturso connection whose payload SELECTs pause after reading."""
+
+    def __init__(self, connection):
+        self._connection = connection
+
+    def execute(self, sql, *args):
+        cursor = self._connection.execute(sql, *args)
+        return (
+            _SlowReadCursor(cursor)
+            if sql.lstrip().upper().startswith("SELECT ID, PAYLOAD")
+            else cursor
+        )
+
+    def __getattr__(self, name):
+        return getattr(self._connection, name)
+
+
+@pytest.mark.asyncio
+async def test_vector_update_payload_never_overwrites_a_concurrent_commit(tmp_path, journal_mode):
+    path = str(tmp_path / "rmw_vector.db")
+    slow = TursoVectorAdapter(url=path, api_key=None, embedding_engine=_Embedding())
+    fast = TursoVectorAdapter(url=path, api_key=None, embedding_engine=_Embedding())
+    doc = _Doc(text="original", belongs_to_set=["original"])
+    await slow.create_data_points("Doc_text", [doc])
+    slow._connection = _SlowReadConnection(slow._get_connection())
+
+    async def fast_update():
+        await asyncio.sleep(READ_TO_WRITE_DELAY / 3)  # land inside the slow writer's window
+        await fast.update_payload("Doc_text", {doc.id: {"belongs_to_set": ["from fast"]}})
+
+    try:
+        await asyncio.gather(
+            slow.update_payload("Doc_text", {doc.id: {"text": "from slow"}}), fast_update()
+        )
+        [result] = await fast.retrieve("Doc_text", [str(doc.id)])
+        assert result.payload["text"] == "from slow"
+        assert result.payload["belongs_to_set"] == ["from fast"]
+    finally:
+        await slow.close()
+        await fast.close()
+
+
+@pytest.mark.asyncio
+async def test_graph_tag_removal_never_overwrites_a_concurrent_commit(tmp_path, journal_mode):
+    path = str(tmp_path / "rmw_graph.db")
+    slow = GraphAdapter(database_path=path)
+    fast = GraphAdapter(database_path=path)
+    await slow.initialize()
+    await slow.add_nodes(
+        [("n1", {"name": "node", "type": "T", "belongs_to_set": ["A", "B", "keep"]})]
+    )
+
+    original_session = slow._session
+
+    @contextlib.asynccontextmanager
+    async def slow_reads():
+        async with original_session() as session:
+            execute = session.execute
+
+            async def execute_then_pause(statement, *args, **kwargs):
+                result = await execute(statement, *args, **kwargs)
+                if str(statement).lstrip().upper().startswith("SELECT ID, PROPERTIES"):
+                    await asyncio.sleep(READ_TO_WRITE_DELAY)
+                return result
+
+            session.execute = execute_then_pause
+            yield session
+
+    slow._session = slow_reads
+
+    async def fast_removal():
+        await asyncio.sleep(READ_TO_WRITE_DELAY / 3)  # land inside the slow writer's window
+        await fast.remove_belongs_to_set_tags(["B"])
+
+    try:
+        await asyncio.gather(slow.remove_belongs_to_set_tags(["A"]), fast_removal())
+        node = await fast.get_node("n1")
+        assert node["belongs_to_set"] == ["keep"]
+    finally:
+        await slow.close()
+        await fast.close()

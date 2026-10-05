@@ -11,9 +11,10 @@ tag removal rewrites payloads in Python and writes them back with plain binds).
 
 Concurrency: one synchronous driver connection per adapter, used only inside
 ``asyncio.to_thread`` under ``self._connection_lock``. That lock is load-bearing —
-a pyturso connection used from two threads at once aborts the process. Under
-``TURSO_JOURNAL_MODE=mvcc`` writes run as ``BEGIN CONCURRENT`` and retry on
-``Write-write conflict``.
+a pyturso connection used from two threads at once aborts the process.
+Read-modify-write transactions run as ``BEGIN IMMEDIATE`` in wal (the write lock is
+taken before the read) and as ``BEGIN CONCURRENT`` under ``TURSO_JOURNAL_MODE=mvcc``,
+retried on ``Write-write conflict``.
 """
 
 import asyncio
@@ -142,9 +143,11 @@ class TursoVectorAdapter(VectorDBInterface):
         import turso
 
         config = self.turso_config
-        # mvcc: driver autocommit so _run controls BEGIN CONCURRENT / COMMIT itself.
-        connect_kwargs = {"isolation_level": None} if config.concurrent_writes else {}
-        connection = turso.connect(self.url, **connect_kwargs)
+        # Driver autocommit in both modes: single statements commit on their own,
+        # and _transaction() opens its own BEGIN (CONCURRENT in mvcc, IMMEDIATE in
+        # wal). The driver's implicit BEGIN would only start at the first write,
+        # leaving a read-modify-write's read outside the transaction.
+        connection = turso.connect(self.url, isolation_level=None)
         for statement in connect_pragmas(config):
             # Step the PRAGMA: pyturso runs a statement when its cursor is read.
             connection.execute(statement).fetchall()
@@ -178,9 +181,8 @@ class TursoVectorAdapter(VectorDBInterface):
                 raise
 
     def _commit(self, connection, begin: str | None) -> None:
-        # With an explicit BEGIN (mvcc) the connection is in driver autocommit and
-        # COMMIT must be a statement; otherwise the driver's own transaction ends
-        # with commit().
+        # After an explicit BEGIN, COMMIT must be a statement (the connection is in
+        # driver autocommit); otherwise commit() is a harmless no-op.
         if begin:
             connection.execute("COMMIT")
         else:
@@ -198,16 +200,18 @@ class TursoVectorAdapter(VectorDBInterface):
     def _transaction(self, work):
         """Run ``work(connection)`` inside one committed transaction (sync, locked).
 
-        Reads and writes issued by ``work`` share a snapshot: under MVCC a row
-        another transaction committed after the snapshot fails the write with
-        ``Write-write conflict``, under WAL the read-to-write lock upgrade fails
-        with ``database is locked``; both are retried by the async callers, which
-        re-run ``work`` and therefore re-read. That is what makes the adapter's
-        read-modify-write paths safe across processes.
+        Reads and writes issued by ``work`` see one consistent state. Under WAL the
+        transaction is ``BEGIN IMMEDIATE``: it takes the write lock before the first
+        read, so another connection's writer waits (``busy_timeout``) and then reads
+        this commit. Under MVCC it is ``BEGIN CONCURRENT``: a row another
+        transaction committed after the snapshot fails the write with
+        ``Write-write conflict``, which the async callers retry by re-running
+        ``work``, and therefore re-reading. That is what keeps the adapter's
+        read-modify-write paths from losing a concurrent update.
         """
         with self._connection_lock:
             connection = self._get_connection()
-            begin = begin_statement(self.turso_config)
+            begin = begin_statement(self.turso_config, write=True)
             if begin:
                 connection.execute(begin)
             try:

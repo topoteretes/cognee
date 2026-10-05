@@ -29,7 +29,7 @@ class TursoConfig(BaseSettings):
     turso_busy_timeout_ms: int = 120000
     turso_conflict_retries: int = 5
 
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    model_config = SettingsConfigDict(extra="allow")
 
     @pydantic.model_validator(mode="after")
     def normalize(self):

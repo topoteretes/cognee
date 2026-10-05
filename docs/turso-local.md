@@ -88,7 +88,11 @@ next to a separate SDK/CLI process, or several server workers, on the same files
 ## Transactions and concurrent writes
 
 `wal` mode is SQLite's behaviour: writers take one lock, others wait up to `TURSO_BUSY_TIMEOUT_MS`
-and then fail with `database is locked`. Files stay readable by stock SQLite.
+and then fail with `database is locked`. Files stay readable by stock SQLite. The driver's implicit
+`BEGIN` only starts at the first INSERT/UPDATE/DELETE, so the graph and vector adapters open their
+write transactions with `BEGIN IMMEDIATE` themselves (`write_transaction()`): a read-modify-write
+(tag merges and removals, payload updates) holds the write lock from its first read, and a
+concurrent writer waits and then reads its commit instead of being overwritten from a stale read.
 
 `mvcc` mode (`PRAGMA journal_mode=mvcc`, applied on every connection) makes the **graph and
 vector** adapters open write transactions with `BEGIN CONCURRENT`. Independent connections commit

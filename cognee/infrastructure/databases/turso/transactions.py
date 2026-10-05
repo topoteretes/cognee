@@ -12,6 +12,15 @@ MVCC ("DDL statements require an exclusive transaction"), so schema work runs in
 :func:`exclusive_transaction`, which flips a context variable the listener reads and
 emits a plain ``BEGIN`` instead. The variable is a ``ContextVar``: SQLAlchemy runs
 the sync listener in a greenlet that inherits the awaiting task's context.
+
+Engines with read-modify-write paths (graph, vector) need the same control in
+``wal`` mode: the driver's implicit ``BEGIN`` is only issued before the first
+INSERT/UPDATE/DELETE, so a SELECT that precedes the write runs outside the
+transaction and a concurrent commit in between is silently overwritten. Such
+engines opt in with ``immediate_writes=True``; their writes then run inside
+:func:`write_transaction`, which makes the listener emit ``BEGIN IMMEDIATE``. That
+takes the write lock before the first read, so a second writer waits on
+``busy_timeout`` and then reads the first one's commit.
 """
 
 from __future__ import annotations
@@ -35,6 +44,7 @@ logger = get_logger()
 T = TypeVar("T")
 
 _exclusive_ddl: ContextVar[bool] = ContextVar("cognee_turso_exclusive_ddl", default=False)
+_write_txn: ContextVar[bool] = ContextVar("cognee_turso_write_transaction", default=False)
 
 # The engine's own messages for a transient write collision, matched exactly (lowercased):
 #   "Write-write conflict"  -- mvcc: two BEGIN CONCURRENT transactions wrote the same row
@@ -65,14 +75,19 @@ def connect_pragmas(config: TursoConfig | None = None, *, foreign_keys: bool = F
     return statements
 
 
-def connect_args_for_mode(config: TursoConfig | None = None) -> dict[str, Any]:
+def connect_args_for_mode(
+    config: TursoConfig | None = None, *, immediate_writes: bool = False
+) -> dict[str, Any]:
     """Driver connect kwargs the journal mode requires.
 
-    MVCC needs driver autocommit so the ``begin`` listener controls the transaction
-    statement; WAL keeps the driver's implicit ``BEGIN DEFERRED``.
+    MVCC, and WAL engines with ``immediate_writes``, need driver autocommit so the
+    ``begin`` listener controls the transaction statement; other WAL engines keep
+    the driver's implicit ``BEGIN DEFERRED``. Pass the same ``immediate_writes`` to
+    :func:`configure_engine`.
     """
     config = config or get_turso_config()
-    return {"isolation_level": None} if config.concurrent_writes else {}
+    explicit_begin = config.concurrent_writes or immediate_writes
+    return {"isolation_level": None} if explicit_begin else {}
 
 
 def apply_pragmas(dbapi_connection, statements: Iterable[str]) -> None:
@@ -99,36 +114,55 @@ def install_connect_pragmas(engine: AsyncEngine, statements: Iterable[str]) -> N
         apply_pragmas(dbapi_connection, statements)
 
 
-def install_transaction_hook(engine: AsyncEngine, config: TursoConfig | None = None) -> None:
-    """In mvcc mode, open transactions with ``BEGIN CONCURRENT`` (plain ``BEGIN`` for DDL).
+def install_transaction_hook(
+    engine: AsyncEngine, config: TursoConfig | None = None, *, immediate_writes: bool = False
+) -> None:
+    """Have the engine emit its own ``BEGIN`` (see :func:`begin_statement`).
 
-    Requires the engine's connections to be in driver autocommit (see
-    :func:`connect_args_for_mode`). A no-op in WAL mode.
+    In mvcc mode always; in wal mode only with ``immediate_writes``. Requires the
+    engine's connections to be in driver autocommit (see :func:`connect_args_for_mode`).
     """
     config = config or get_turso_config()
-    if not config.concurrent_writes:
+    if not (config.concurrent_writes or immediate_writes):
         return
 
     @event.listens_for(engine.sync_engine, "begin")
     def _turso_begin(connection):
-        connection.exec_driver_sql("BEGIN" if _exclusive_ddl.get() else "BEGIN CONCURRENT")
+        statement = begin_statement(config, ddl=_exclusive_ddl.get(), write=_write_txn.get())
+        connection.exec_driver_sql(statement or "BEGIN")
 
 
 def configure_engine(
-    engine: AsyncEngine, *, foreign_keys: bool = False, config: TursoConfig | None = None
+    engine: AsyncEngine,
+    *,
+    foreign_keys: bool = False,
+    config: TursoConfig | None = None,
+    immediate_writes: bool = False,
 ) -> None:
-    """Install cognee's connection PRAGMAs and (in mvcc mode) the transaction hook."""
+    """Install cognee's connection PRAGMAs and, when needed, the transaction hook.
+
+    ``immediate_writes`` (graph engine) makes writes inside :func:`write_transaction`
+    take the write lock up front in wal mode; build the engine with the matching
+    :func:`connect_args_for_mode`.
+    """
     config = config or get_turso_config()
     install_connect_pragmas(engine, connect_pragmas(config, foreign_keys=foreign_keys))
-    install_transaction_hook(engine, config)
+    install_transaction_hook(engine, config, immediate_writes=immediate_writes)
 
 
-def begin_statement(config: TursoConfig | None = None, *, ddl: bool = False) -> str | None:
-    """Statement a raw DB-API caller opens a transaction with, or None to rely on the driver."""
+def begin_statement(
+    config: TursoConfig | None = None, *, ddl: bool = False, write: bool = False
+) -> str | None:
+    """Statement that opens a transaction, or None to rely on the driver / autocommit.
+
+    mvcc: ``BEGIN CONCURRENT``, or a plain exclusive ``BEGIN`` for DDL. wal:
+    ``BEGIN IMMEDIATE`` for a write transaction that reads before it writes, so the
+    read already holds the write lock; otherwise None.
+    """
     config = config or get_turso_config()
-    if not config.concurrent_writes:
-        return None
-    return "BEGIN" if ddl else "BEGIN CONCURRENT"
+    if config.concurrent_writes:
+        return "BEGIN" if ddl else "BEGIN CONCURRENT"
+    return "BEGIN IMMEDIATE" if write else None
 
 
 @asynccontextmanager
@@ -139,6 +173,20 @@ async def exclusive_transaction() -> AsyncIterator[None]:
         yield
     finally:
         _exclusive_ddl.reset(token)
+
+
+@asynccontextmanager
+async def write_transaction() -> AsyncIterator[None]:
+    """Run read-modify-write transactions inside; wal engines then use ``BEGIN IMMEDIATE``.
+
+    Only engines configured with ``immediate_writes`` act on it; in mvcc mode the
+    transaction stays ``BEGIN CONCURRENT``, whose conflicts the caller retries.
+    """
+    token = _write_txn.set(True)
+    try:
+        yield
+    finally:
+        _write_txn.reset(token)
 
 
 def is_retryable_conflict(error: BaseException) -> bool:

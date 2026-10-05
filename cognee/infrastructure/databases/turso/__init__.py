@@ -24,6 +24,7 @@ from .transactions import (
     install_transaction_hook,
     is_retryable_conflict,
     retry_on_conflict,
+    write_transaction,
 )
 
 DIALECT_NAME = "sqlite"
@@ -76,4 +77,5 @@ __all__ = [
     "require_turso",
     "retry_on_conflict",
     "turso_url",
+    "write_transaction",
 ]
