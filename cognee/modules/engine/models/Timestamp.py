@@ -32,8 +32,10 @@ class Timestamp(DataPoint):
     precision: TimestampPrecision = "second"
     time_at: int = Field(...)
     # Exclusive upper bound in ms; defaults to one second after ``time_at``, the
-    # period a full ``YYYY-MM-DD HH:MM:SS`` timestamp names.
-    time_until: int = 0
+    # period a full ``YYYY-MM-DD HH:MM:SS`` timestamp names. ``None`` means
+    # "not given" — ``0`` is a real bound (1970-01-01T00:00:00Z, the end of
+    # ``1969``, ``1969-12`` and ``1969-12-31``) and must survive as-is.
+    time_until: int | None = None
     year: int = Field(...)
     month: int = Field(...)
     day: int = Field(...)
@@ -53,6 +55,6 @@ class Timestamp(DataPoint):
         filled = dict(data)
         if not filled.get("name") and filled.get("timestamp_str"):
             filled["name"] = filled["timestamp_str"]
-        if not filled.get("time_until") and isinstance(filled.get("time_at"), int):
+        if filled.get("time_until") is None and isinstance(filled.get("time_at"), int):
             filled["time_until"] = filled["time_at"] + 1000
         return filled

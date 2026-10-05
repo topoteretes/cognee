@@ -222,3 +222,29 @@ def test_a_window_inside_a_span_overlaps_it():
     assert timestamp_overlaps(node, _epoch_ms(1805, 1, 1), _epoch_ms(1806, 1, 1)) is True
     assert timestamp_overlaps(node, _epoch_ms(1816, 1, 1), _epoch_ms(1817, 1, 1)) is False
     assert timestamp_overlaps(node, _epoch_ms(1802, 1, 1), _epoch_ms(1803, 1, 1)) is False
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["1969", "1969-12", "1969-12-31", "1968/1969", "1969-12-31 23:59:59"],
+)
+def test_a_period_ending_at_the_epoch_keeps_its_real_upper_bound(text):
+    """``time_until`` of 0 is 1970-01-01T00:00:00Z, not "missing": the default of
+    one second after ``time_at`` must apply only when no bound was given."""
+    timestamp = timestamp_from_text(text)
+
+    assert timestamp.time_until == 0
+    # A July-1969 window overlaps a date that spans all of 1969.
+    if text == "1969":
+        assert timestamp.time_at < _epoch_ms(1969, 8, 1) and timestamp.time_until > _epoch_ms(
+            1969, 7, 1
+        )
+
+
+def test_time_until_defaults_only_when_absent():
+    base = {"timestamp_str": "1970-01-01 00:00:00", "time_at": 0, "year": 1970, "month": 1}
+    base.update(day=1, hour=0, minute=0, second=0)
+
+    assert Timestamp(**base).time_until == 1000  # not given: one second
+    assert Timestamp(**base, time_until=0).time_until == 0  # given as zero: kept
+    assert Timestamp(**base, time_until=None).time_until == 1000  # explicit None: absent
