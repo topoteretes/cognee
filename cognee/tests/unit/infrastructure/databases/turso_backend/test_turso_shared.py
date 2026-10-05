@@ -497,6 +497,78 @@ class TestDialect:
             assert stock_db.execute(flat_sql).fetchall() == stock, name
         _run(engine.dispose())
 
+    def test_predicates_never_land_on_another_joins_outer_step(self, tmp_path):
+        """A predicate stays on the steps its own join may take, or the rows change.
+
+        Each shape runs flattened and nested on stdlib sqlite3; the rows must match.
+        Before the rule, the first two put an inner join's filter onto an earlier
+        LEFT JOIN's ON (a row filter became a NULL-ing condition), and the third put
+        an outer join's filter onto an earlier inner join's ON (dropping rows).
+        """
+        import sqlite3
+
+        from sqlalchemy import Column, ForeignKey, Integer, MetaData, Table, and_, select
+        from sqlalchemy.dialects import sqlite as sqlite_dialect
+
+        metadata = MetaData()
+        a = Table("a", metadata, Column("id", Integer, primary_key=True), Column("flag", Integer))
+        b = Table(
+            "b",
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("aid", Integer),
+            Column("x", Integer),
+        )
+        c = Table("c", metadata, Column("id", Integer, primary_key=True), Column("aid", Integer))
+        principals = Table(
+            "principals", metadata, Column("id", Integer, primary_key=True), Column("aid", Integer)
+        )
+        users = Table(
+            "users", metadata, Column("id", Integer, ForeignKey("principals.id"), primary_key=True)
+        )
+        stock_db = sqlite3.connect(":memory:")
+        stock_db.executescript(
+            "CREATE TABLE a (id INT, flag INT); CREATE TABLE b (id INT, aid INT, x INT);"
+            "CREATE TABLE c (id INT, aid INT);"
+            "CREATE TABLE principals (id INT, aid INT); CREATE TABLE users (id INT);"
+            "INSERT INTO a VALUES (10, 1), (20, 0), (30, 1);"
+            "INSERT INTO b VALUES (100, 10, 5); INSERT INTO c VALUES (1, 10), (2, 20);"
+            "INSERT INTO principals VALUES (1, 10), (2, 20), (3, 30);"
+            "INSERT INTO users VALUES (1), (2), (3);"
+        )
+        inheritance = principals.join(users, principals.c.id == users.c.id)
+        left_outer = a.outerjoin(b, b.c.aid == a.c.id)
+        shapes = {
+            "inner filter over a left outer join": select(a.c.id, b.c.id, users.c.id)
+            .select_from(
+                left_outer.join(inheritance, and_(principals.c.aid == a.c.id, a.c.flag == 1))
+            )
+            .order_by(a.c.id),
+            "inner anti-join over a left outer join": select(a.c.id, b.c.id, users.c.id)
+            .select_from(
+                left_outer.join(inheritance, and_(principals.c.aid == a.c.id, b.c.x.is_(None)))
+            )
+            .order_by(a.c.id),
+            "outer filter over a left inner join": select(a.c.id, c.c.id, users.c.id)
+            .select_from(
+                a.join(c, c.c.aid == a.c.id).outerjoin(
+                    inheritance, and_(users.c.id == c.c.id, a.c.flag == 1)
+                )
+            )
+            .order_by(a.c.id),
+        }
+        engine = create_async_engine(turso_url(str(tmp_path / "j5.db")), poolclass=NullPool)
+        literal = {"literal_binds": True}
+        for name, statement in shapes.items():
+            flat_sql = str(statement.compile(engine.sync_engine, compile_kwargs=literal))
+            stock_sql = str(
+                statement.compile(dialect=sqlite_dialect.dialect(), compile_kwargs=literal)
+            )
+            assert "JOIN (" not in flat_sql, flat_sql
+            stock = stock_db.execute(stock_sql).fetchall()
+            assert stock_db.execute(flat_sql).fetchall() == stock, (name, flat_sql)
+        _run(engine.dispose())
+
     def test_unverified_join_shapes_fail_to_compile(self, tmp_path):
         """Shapes the flattening has not been verified for raise instead of changing results."""
         from sqlalchemy import Column, Integer, MetaData, Table, select

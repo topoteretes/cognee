@@ -6,8 +6,8 @@ engine has no ``libsql_vector_idx`` / ``vector_top_k`` approximate index.
 
 Engine constraints that shape the SQL here: no scalar subquery inside
 ``ON CONFLICT DO UPDATE SET`` (so ``belongs_to_set`` merges happen in Python before
-a plain upsert), and no bind parameter inside a nested ``json_each`` subquery (so
-tag removal rewrites payloads in Python and writes them back with plain binds).
+a plain upsert), and an outer ``json_each`` over an unaliased column is misresolved
+inside UPDATE/DELETE (so tag removal aliases the table and stays pure SQL).
 
 Concurrency: one synchronous driver connection per adapter, used only inside
 ``asyncio.to_thread`` under ``self._connection_lock``. That lock is load-bearing —
@@ -352,19 +352,27 @@ class TursoVectorAdapter(VectorDBInterface):
                 f"WHERE id IN (SELECT value FROM json_each(?))",
                 (json.dumps(list(rows)),),
             ).fetchall()
+            # Merge into copies, never into ``rows``: a retry after a write conflict
+            # must start from the caller's tags again, or it would union the tags
+            # merged on the failed attempt (including ones removed since) back in.
+            payloads = {row_id: row["payload"] for row_id, row in rows.items()}
             for row_id, stored_tags in existing:
-                payload = rows[row_id]["payload"]
-                payload["belongs_to_set"] = _union_tags(
-                    json.loads(stored_tags) if stored_tags else None,
-                    payload.get("belongs_to_set"),
-                )
+                payloads[row_id] = {
+                    **payloads[row_id],
+                    "belongs_to_set": _union_tags(
+                        json.loads(stored_tags) if stored_tags else None,
+                        payloads[row_id].get("belongs_to_set"),
+                    ),
+                }
             insert_sql = (
                 f'INSERT INTO "{collection_name}" (id, payload, vector) '
                 f"VALUES (?, ?, vector32(?)) "
                 f"ON CONFLICT(id) DO UPDATE SET payload = excluded.payload"
             )
             for row_id, row in rows.items():
-                connection.execute(insert_sql, (row_id, json.dumps(row["payload"]), row["vector"]))
+                connection.execute(
+                    insert_sql, (row_id, json.dumps(payloads[row_id]), row["vector"])
+                )
 
         self._transaction(work)
 
@@ -634,7 +642,6 @@ class TursoVectorAdapter(VectorDBInterface):
         ]
 
         tags_json = json.dumps(list(tags))
-        tag_set = set(tags)
         node_ids_list = [str(node_id) for node_id in node_ids] if node_ids is not None else None
         failures: list[tuple[str, Exception]] = []
 
@@ -643,51 +650,47 @@ class TursoVectorAdapter(VectorDBInterface):
             scope_params: list[Any] = []
             if node_ids_list is not None:
                 placeholders = ",".join("?" for _ in node_ids_list)
-                id_scope = f" AND id IN ({placeholders})"
+                id_scope = f" AND t.id IN ({placeholders})"
                 scope_params = list(node_ids_list)
 
-            # Capture the rows that actually contain one of the removed tags
-            # FIRST. Only these rows are rewritten or deleted-when-empty,
-            # otherwise a row that was already stored with an empty
-            # belongs_to_set (e.g. an untagged index row) would be deleted as
-            # collateral on any unrelated tag removal. Mirrors PGVector.
+            # Only rows that actually contain one of the removed tags are rewritten
+            # or deleted-when-empty; a row already stored with an empty
+            # belongs_to_set (e.g. an untagged index row) is never collateral.
+            # Mirrors PGVector. Both statements compute the new arrays in SQL from
+            # the row as it is now, so there is no read-modify-write to race: a
+            # concurrent change to the same row is never undone from a stale read.
             #
-            # The engine cannot bind a parameter inside the nested json_each()
-            # a SQL-side rewrite needs, so the arrays are filtered here and the
-            # payloads written back with plain binds: UPDATE the survivors,
-            # DELETE the rows whose array became empty. Read and writes share
-            # one transaction and the whole unit is retried on a conflict, so a
-            # concurrent removal of another tag from the same row is never
-            # undone from a stale read.
-            select_sql = (
-                f'SELECT id, payload FROM "{table_name}" '
-                f"WHERE json_type(payload, '$.belongs_to_set') = 'array' "
-                f"AND EXISTS (SELECT 1 FROM json_each(payload, '$.belongs_to_set') je "
-                f"WHERE je.value IN (SELECT value FROM json_each(?))){id_scope}"
+            # The table is aliased (``AS t``): the engine resolves an outer
+            # json_each() over an unqualified or quoted-name payload column wrongly
+            # inside UPDATE/DELETE (see docs/turso-local.md, upstream finding 4).
+            has_removed_tag = (
+                "json_type(t.payload, '$.belongs_to_set') = 'array' "
+                "AND EXISTS (SELECT 1 FROM json_each(t.payload, '$.belongs_to_set') je "
+                "WHERE je.value IN (SELECT value FROM json_each(?)))"
             )
-
-            def work(connection, select_sql=select_sql, table_name=table_name, scope=scope_params):
-                rows = connection.execute(select_sql, (tags_json, *scope)).fetchall()
-                for row_id, payload_text in rows:
-                    payload = json.loads(payload_text) if payload_text else {}
-                    remaining = [
-                        tag for tag in payload.get("belongs_to_set", []) if tag not in tag_set
-                    ]
-                    if remaining:
-                        payload["belongs_to_set"] = remaining
-                        connection.execute(
-                            f'UPDATE "{table_name}" SET payload = ? WHERE id = ?',
-                            (json.dumps(payload), row_id),
-                        )
-                    else:
-                        connection.execute(f'DELETE FROM "{table_name}" WHERE id = ?', (row_id,))
+            # Rows left with no tags at all are deleted...
+            delete_sql = (
+                f'DELETE FROM "{table_name}" AS t WHERE {has_removed_tag} '
+                f"AND NOT EXISTS (SELECT 1 FROM json_each(t.payload, '$.belongs_to_set') je "
+                f"WHERE je.value NOT IN (SELECT value FROM json_each(?))){id_scope}"
+            )
+            # ...the rest keep the tags that were not removed.
+            update_sql = (
+                f'UPDATE "{table_name}" AS t SET payload = json_set(t.payload, '
+                f"'$.belongs_to_set', (SELECT json_group_array(je.value) "
+                f"FROM json_each(t.payload, '$.belongs_to_set') je "
+                f"WHERE je.value NOT IN (SELECT value FROM json_each(?)))) "
+                f"WHERE {has_removed_tag}{id_scope}"
+            )
+            params = (tags_json, tags_json, *scope_params)
+            statements = [(delete_sql, params), (update_sql, params)]
 
             # One table's failure must not stop the others, but it must not be
             # lost either: every failure is re-raised together once all tables
             # have been attempted, so a stale tag never survives silently.
             try:
                 await retry_on_conflict(
-                    lambda work=work: asyncio.to_thread(self._transaction, work)
+                    lambda statements=statements: asyncio.to_thread(self._run_write, statements)
                 )
             except Exception as error:
                 logger.warning(

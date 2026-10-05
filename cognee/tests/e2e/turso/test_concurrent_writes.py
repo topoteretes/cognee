@@ -259,10 +259,11 @@ async def test_concurrent_tag_removal_on_the_same_rows_loses_nothing(tmp_path, j
     await first.create_data_points("Doc_text", docs)
 
     try:
-        for _ in range(5):
-            await asyncio.gather(
-                first.remove_belongs_to_set_tags(["A"]), second.remove_belongs_to_set_tags(["B"])
-            )
+        # One round only: a second round would strip again a tag that a lost update
+        # had brought back, and hide it.
+        await asyncio.gather(
+            first.remove_belongs_to_set_tags(["A"]), second.remove_belongs_to_set_tags(["B"])
+        )
         rows = await first._execute('SELECT payload FROM "Doc_text"', fetch=True)
         assert len(rows) == 40
         import json as _json
@@ -320,18 +321,15 @@ class _SlowReadCursor:
 
 
 class _SlowReadConnection:
-    """A pyturso connection whose payload SELECTs pause after reading."""
+    """A pyturso connection whose SELECTs starting with ``prefix`` pause after reading."""
 
-    def __init__(self, connection):
+    def __init__(self, connection, prefix: str = "SELECT ID, PAYLOAD"):
         self._connection = connection
+        self._prefix = prefix
 
     def execute(self, sql, *args):
         cursor = self._connection.execute(sql, *args)
-        return (
-            _SlowReadCursor(cursor)
-            if sql.lstrip().upper().startswith("SELECT ID, PAYLOAD")
-            else cursor
-        )
+        return _SlowReadCursor(cursor) if sql.lstrip().upper().startswith(self._prefix) else cursor
 
     def __getattr__(self, name):
         return getattr(self._connection, name)
@@ -401,3 +399,77 @@ async def test_graph_tag_removal_never_overwrites_a_concurrent_commit(tmp_path, 
     finally:
         await slow.close()
         await fast.close()
+
+
+@pytest.mark.asyncio
+async def test_vector_upsert_retry_does_not_restore_a_removed_tag(tmp_path, journal_mode):
+    """An upsert merging tags races a removal of one of them; the removal must stick.
+
+    In mvcc the upsert's write conflicts and is retried. The retry must merge from
+    the caller's tags again, not from the payload the failed attempt merged into,
+    or the removed tag comes back.
+    """
+    path = str(tmp_path / "upsert_vs_removal.db")
+    slow = TursoVectorAdapter(url=path, api_key=None, embedding_engine=_Embedding())
+    fast = TursoVectorAdapter(url=path, api_key=None, embedding_engine=_Embedding())
+    doc = _Doc(text="shared", belongs_to_set=["A", "B", "keep"])
+    await slow.create_data_points("Doc_text", [doc])
+    slow._connection = _SlowReadConnection(slow._get_connection(), "SELECT ID, JSON_EXTRACT")
+
+    async def fast_removal():
+        await asyncio.sleep(READ_TO_WRITE_DELAY / 3)  # land inside the upsert's window
+        await fast.remove_belongs_to_set_tags(["B"])
+
+    try:
+        await asyncio.gather(
+            slow.create_data_points(
+                "Doc_text", [_Doc(id=doc.id, text="shared", belongs_to_set=["new"])]
+            ),
+            fast_removal(),
+        )
+        [result] = await fast.retrieve("Doc_text", [str(doc.id)])
+        assert sorted(result.payload["belongs_to_set"]) == ["A", "keep", "new"]
+    finally:
+        await slow.close()
+        await fast.close()
+
+
+@pytest.mark.asyncio
+async def test_graph_single_adapter_tag_removal_and_writes_lose_nothing(tmp_path, journal_mode):
+    """One cached adapter, plain gather, no forced timing (how get_graph_engine runs it).
+
+    Two removals of different tags, and a removal overlapping an add_nodes of the
+    same nodes (a forget racing a cognify), must both keep every write.
+    """
+    adapter = GraphAdapter(database_path=str(tmp_path / "single.db"))
+    await adapter.initialize()
+    ids = [f"n{i}" for i in range(50)]
+
+    def nodes(description):
+        return [
+            (
+                node_id,
+                {
+                    "name": node_id,
+                    "type": "T",
+                    "description": description,
+                    "belongs_to_set": ["A", "B", "keep"],
+                },
+            )
+            for node_id in ids
+        ]
+
+    try:
+        await adapter.add_nodes(nodes("old"))
+        await asyncio.gather(
+            adapter.remove_belongs_to_set_tags(["A"]), adapter.remove_belongs_to_set_tags(["B"])
+        )
+        assert all(node["belongs_to_set"] == ["keep"] for node in await adapter.get_nodes(ids))
+
+        await adapter.add_nodes(nodes("old"))
+        await asyncio.gather(
+            adapter.remove_belongs_to_set_tags(["A"]), adapter.add_nodes(nodes("new"))
+        )
+        assert all(node["description"] == "new" for node in await adapter.get_nodes(ids))
+    finally:
+        await adapter.close()

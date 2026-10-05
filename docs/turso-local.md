@@ -162,7 +162,7 @@ that silently ran on SQLite would fail.
 | No approximate vector index (`libsql_vector_idx` / `vector_top_k` are not supported) | similarity search is an exact `vector_distance_cos` scan | ~16–20 ms for top-15 over 20k × 384-dim rows on a laptop; fine for local datasets, not for millions of rows |
 | No recursive CTEs (0.7.x) | k-hop neighborhoods, connected components | one query per hop; union-find in Python |
 | No scalar subquery in `ON CONFLICT DO UPDATE SET` | vector upsert that merged `belongs_to_set` in SQL | tags are read and merged in Python, then a plain `excluded.payload` upsert |
-| No bind parameter inside a nested `json_each(?)` subquery | vector tag removal | payloads filtered in Python, written back with plain binds |
+| An outer `json_each()` over an unaliased (or quoted-name-qualified) column is misresolved inside `UPDATE`/`DELETE` | vector tag removal | the table is aliased (`UPDATE "t" AS t ... json_each(t.payload, ...)`); removal stays one atomic `DELETE` + `UPDATE`, no read-modify-write |
 | Bind parameters must be `None`, numbers, `str` or `bytes` (no `register_adapter`) | raw `text()` statements binding `datetime`/`UUID` | SQLAlchemy-typed columns are unaffected; raw statements use a typed `bindparam` |
 | Quoted identifiers are stored lowercased in `sqlite_master` | `has_collection` by exact name, PascalCase collection detection | case-insensitive lookup; collections detected by schema (`id, payload, vector`) |
 | Parenthesized joins in a FROM clause (`JOIN (a JOIN b ON …)`) are rejected | SQLAlchemy emits them for joined-table inheritance (`User`/`Tenant` are `Principal` subclasses) | the dialect's compiler (`turso/compiler.py`) flattens the tree into a left-deep join chain |
@@ -185,9 +185,12 @@ be retired.
    dialect restores stock SQLite reflection. Fixed upstream in the 0.8.0 release candidates.
 3. Scalar subquery in `ON CONFLICT DO UPDATE SET`: `Parse error: Subquery is not supported in this
    position` (0.7.2 and 0.8.0rc11).
-4. Bind parameter inside a nested `json_each(?)` subquery is misapplied: on 0.7.2 the tag-removal
-   `UPDATE` runs without error but changes no rows (stock SQLite strips the tag), and earlier shapes
-   failed with `bind index 1 is out of bounds`; 0.8.0rc11 reports `'json_each' is not a function`.
+4. An outer `json_each()` over an unaliased column is misresolved inside `UPDATE`/`DELETE`: on
+   0.7.2 the tag-removal `UPDATE ... json_each(payload, ...)` runs without error but changes no rows
+   (stock SQLite strips the tag), and qualifying the column with a quoted mixed-case table name fails
+   with `no such table` (finding 6). Aliasing the table (`AS t`, `json_each(t.payload, ...)`) works.
+   Earlier shapes failed with `bind index 1 is out of bounds`; 0.8.0rc11 reports `'json_each' is not
+   a function`.
 5. `WITH RECURSIVE`: `Recursive CTEs are not yet supported` (0.7.2); 0.8.0rc11 accepts the syntax
    but aborts the process (`Fatal Python error: Abort`) on cognee's neighborhood query.
 6. Quoted identifiers lowercased in `sqlite_master` (stock SQLite preserves case).

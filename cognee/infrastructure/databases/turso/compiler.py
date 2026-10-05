@@ -16,8 +16,15 @@ This compiler renders such a tree as a left-deep chain instead::
     FROM a JOIN b ON 1 = 1 JOIN c ON b.id = c.id AND c.id = a.c_id
 
 Every table of the tree is joined in left-to-right order, and each ON clause
-receives the predicates whose tables are all available at that point. For inner
-joins this is exact (a conjunction over the same cross product).
+receives the predicates whose tables are all available at that point, subject to
+where a predicate may land. A predicate belongs to the join whose ON it came from:
+it may go on the steps that join introduces (for a join inside a nested group, any
+step of that group, since the group's tables are reordered), and a predicate of an
+INNER join may also go on any inner step, where a conjunct is exact. It never goes
+on another join's OUTER step: ``(a LEFT JOIN b ON ab) JOIN c ON ac AND a.f = 1``
+must not become ``LEFT JOIN b ON ab AND a.f = 1``, which keeps the rows the filter
+drops, and an outer join's filter must not land on an earlier inner step, which
+drops rows the outer join keeps. Such a predicate waits for a step it may land on.
 
 A table that arrives through an OUTER join keeps the outer join type, so
 ``a LEFT OUTER JOIN (b JOIN c ON bc) ON ab`` becomes
@@ -44,7 +51,8 @@ Only shapes the compiler can prove equivalent are rewritten; anything else raise
   ``LEFT OUTER JOIN ... ON 1 = 1`` would multiply rows;
 * every OUTER step after the first of its group must be total, as above. A filter
   (``u.active = 1``) or a predicate naming a table outside the group landing on
-  such a step would turn "no match" into "half a match".
+  such a step would turn "no match" into "half a match";
+* every predicate must find a step it may land on (see above).
 
 FULL OUTER joins are left to the stock renderer (SQLite has none).
 """
@@ -121,8 +129,15 @@ class CogneeTursoCompiler(SQLiteCompiler):
 
         # (from object, arrives through an outer join, nested group id or None)
         steps: list[tuple[Any, bool, int | None]] = []
-        predicates: list[ClauseElement] = []
+        # (predicate, its join's right-side group or None, ids of its join's
+        # right-side steps, comes from an INNER join)
+        found: list[tuple[ClauseElement, int | None, set[int], bool]] = []
         group_ids = itertools.count()
+
+        def collect(join_node, right_group, first_right_step: int) -> None:
+            right_ids = {id(step[0]) for step in steps[first_right_step:]}
+            for clause in _predicates(join_node.onclause):
+                found.append((clause, right_group, right_ids, not join_node.isouter))
 
         def walk(node, outer: bool, group: int | None) -> None:
             node = _unwrap(node)
@@ -137,14 +152,41 @@ class CogneeTursoCompiler(SQLiteCompiler):
                 right_group = group
                 if right_group is None and isinstance(_unwrap(node.right), Join):
                     right_group = next(group_ids)
+                first_right_step = len(steps)
                 walk(node.right, outer or node.isouter, right_group)
-                predicates.extend(_predicates(node.onclause))
+                collect(node, right_group, first_right_step)
             else:
                 steps.append((node, outer, group))
 
         walk(join.left, False, None)
-        walk(join.right, join.isouter, next(group_ids))
-        predicates.extend(_predicates(join.onclause))
+        top_group = next(group_ids)
+        first_right_step = len(steps)
+        walk(join.right, join.isouter, top_group)
+        collect(join, top_group, first_right_step)
+
+        # Where each predicate may land: on the steps its own join introduces (a
+        # group's tables are placed in any order, so for a join that is part of a
+        # group, that is the whole group), and, for a predicate of an INNER join,
+        # on any inner step, where a conjunct is exact. Never on another join's
+        # OUTER step: there a row filter would become a NULL-ing condition.
+        group_members: dict[int, set[int]] = {}
+        for from_object, _outer, group in steps:
+            if group is not None:
+                group_members.setdefault(group, set()).add(id(from_object))
+        owners = {
+            id(clause): (
+                frozenset(group_members[right_group])
+                if right_group is not None
+                else frozenset(right_ids),
+                from_inner,
+            )
+            for clause, right_group, right_ids, from_inner in found
+        }
+        predicates = [clause for clause, *_ in found]
+
+        def allowed(clause: ClauseElement, step: tuple[Any, bool, int | None]) -> bool:
+            owner, from_inner = owners[id(clause)]
+            return id(step[0]) in owner or (from_inner and not step[1])
 
         # Tables of each outer-joined group already placed (ids): the first one
         # placed may take any predicate, every later one must be a total step.
@@ -187,6 +229,7 @@ class CogneeTursoCompiler(SQLiteCompiler):
                     break
                 if any(
                     ready(clause, extra=candidate[0])
+                    and allowed(clause, candidate)
                     and any(_unwrap(item) is candidate[0] for item in clause._from_objects)
                     for clause in remaining
                 ):
@@ -209,7 +252,7 @@ class CogneeTursoCompiler(SQLiteCompiler):
                 parts.append(rendered)
                 previous = from_object
                 continue
-            on_clauses = [clause for clause in remaining if ready(clause)]
+            on_clauses = [clause for clause in remaining if ready(clause) and allowed(clause, step)]
             remaining = [clause for clause in remaining if clause not in on_clauses]
             if on_clauses:
                 on_sql = " AND ".join(
@@ -234,11 +277,18 @@ class CogneeTursoCompiler(SQLiteCompiler):
             parts.append(f"{join_type}{rendered} ON {on_sql}")
             previous = from_object
 
+        if any(ready(clause) for clause in remaining):
+            raise CompileError(
+                "Turso: cannot flatten this join; a predicate has no step whose ON clause "
+                "can take it without turning a row filter into a NULL-ing condition."
+            )
         if remaining:  # predicates over tables outside the tree: append to the last step
-            if last_step_checked and len(placed_in_group.get(group, ())) > 1:
+            if any(not allowed(clause, step) for clause in remaining) or (
+                last_step_checked and len(placed_in_group.get(group, ())) > 1
+            ):
                 raise CompileError(
                     "Turso: cannot flatten this join; a predicate over a table outside "
-                    "the join would land on a later step of an OUTER-joined group."
+                    "the join would land on a step it does not belong to."
                 )
             tail = " AND ".join(
                 clause._compiler_dispatch(self, from_linter=from_linter, **kwargs)
