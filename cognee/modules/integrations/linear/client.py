@@ -29,6 +29,25 @@ class LinearUnauthorizedError(RuntimeError):
     """Linear answered 401: the token was rejected, whatever its stored expiry says."""
 
 
+class LinearRateLimitedError(RuntimeError):
+    """Linear answered HTTP 400 with the ``RATELIMITED`` code."""
+
+
+async def _is_rate_limited(response: Any) -> bool:
+    """Whether a 400 carries the RATELIMITED code. Only the code is read, never echoed."""
+    try:
+        body = await response.json()
+    except Exception:  # noqa: BLE001 - an unreadable body is just a plain 400
+        return False
+    errors = body.get("errors") if isinstance(body, dict) else None
+    return isinstance(errors, list) and any(
+        isinstance(error, dict)
+        and isinstance(error.get("extensions"), dict)
+        and error["extensions"].get("code") == "RATELIMITED"
+        for error in errors
+    )
+
+
 _AGENT_ACTIVITY_CREATE_MUTATION = """
 mutation AgentActivityCreate($input: AgentActivityCreateInput!) {
   agentActivityCreate(input: $input) {
@@ -72,6 +91,9 @@ async def graphql(
     ):
         if response.status == 401:
             raise LinearUnauthorizedError(f"Linear {operation} failed: HTTP 401")
+        if response.status == 400 and await _is_rate_limited(response):
+            # Linear answers a rate limit with HTTP 400 and a RATELIMITED code.
+            raise LinearRateLimitedError(f"Linear {operation} failed: HTTP 400 RATELIMITED")
         if response.status != 200:
             raise RuntimeError(f"Linear {operation} failed: HTTP {response.status}")
         body: dict[str, Any] = await response.json()

@@ -59,6 +59,13 @@ def test_google_module_delegates_to_the_neutral_one():
         "empty_resource",
         "source_counts",
         "add_source_counts",
+        "extraction_checkpoint",
+        "retire_resources",
+        "run_sync",
+        "sync_is_running",
+        "dataset_summary",
+        "require_active_credential",
+        "_running_syncs",
     ):
         assert getattr(google_ingestion, name) is getattr(ingestion, name)
 
