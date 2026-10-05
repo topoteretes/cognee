@@ -70,6 +70,7 @@ from cognee.modules.integrations.credentials import (
     revoke_credential_by_account,
     update_provider_metadata,
 )
+from cognee.modules.integrations.linear.resume_sync import linear_resume_lifespan
 from cognee.modules.integrations.oauth_flow import (
     DEFAULT_STATE_TTL_SECONDS,
     make_state,
@@ -406,7 +407,7 @@ def _frontend_redirect(integration: OAuthIntegration, outcome: str) -> RedirectR
 
 
 def get_integrations_router():
-    integrations_router = APIRouter()
+    integrations_router = APIRouter(lifespan=linear_resume_lifespan)
 
     # ------------------------------------------------------------------ #
     # Aggregate status (fixed /status path — before the {provider} routes)
@@ -800,13 +801,12 @@ def get_integrations_router():
         if credential is None:
             return ConnectionStatusDTO(connected=False)
 
-        from cognee.modules.integrations.google.ingestion import dataset_summary, sync_is_running
+        from cognee.modules.integrations.ingestion import dataset_summary, sync_is_running
 
         dataset_id, stored_items = None, None
-        if provider in {"google_drive", "gmail"}:
-            dataset_id, stored_items = await dataset_summary(
-                credential, integration.dataset_name(credential)
-            )
+        dataset_name = integration.dataset_name(credential)
+        if dataset_name is not None:
+            dataset_id, stored_items = await dataset_summary(credential, dataset_name)
 
         # Token material stays server-side; the frontend only needs display state.
         return ConnectionStatusDTO(
@@ -917,6 +917,12 @@ def get_integrations_router():
         credential = await get_active_credential_for_user(user.id, integration.provider)
         if credential is None:
             raise HTTPException(status_code=404, detail=f"{provider} is not connected")
+        from cognee.modules.integrations.ingestion import sync_is_running
+
+        if sync_is_running(provider, credential.provider_account_id):
+            # The running sync owns the cursor and a second request is dropped, so
+            # saying "accepted" would be telling the user a sync started.
+            return IntegrationSyncResultDTO(accepted=False)
         _spawn_background(integration.sync_now(credential), description=f"{provider} manual sync")
         return IntegrationSyncResultDTO(accepted=True)
 
