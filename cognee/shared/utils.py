@@ -575,6 +575,7 @@ def send_telemetry(
     additional_properties: dict | None = None,
     *,
     user_id=None,
+    tenant_id: UUID | str | None = None,
 ):
     """Send a product telemetry event.
 
@@ -587,6 +588,9 @@ def send_telemetry(
         additional_properties: Extra event properties.
         user_id: Deprecated alias for ``user``, kept so out-of-tree callers that
             pass it by keyword keep working. Ignored when ``user`` is given.
+        tenant_id: Explicit tenant for callers holding a stored identity rather
+            than a ``User`` model, such as abandoned-run recovery. When supplied,
+            overrides the tenant resolved from ``user``.
 
     Identity layers sent with every event:
 
@@ -614,7 +618,9 @@ def send_telemetry(
     additional_properties = _sanitize_nested_properties(
         obj=additional_properties, property_names=TELEMETRY_SANITIZED_PROPERTIES
     )
-    resolved_user_id, tenant_id = _resolve_identity(user if user is not None else user_id)
+    resolved_user_id, resolved_tenant_id = _resolve_identity(user if user is not None else user_id)
+    if tenant_id is not None:
+        resolved_tenant_id = str(tenant_id)
     anonymous_id = str(get_anonymous_id())
     persistent_id = str(get_persistent_id())
     api_key_tracking_id = _get_api_key_tracking_id()
@@ -628,7 +634,7 @@ def send_telemetry(
         "event_name": event_name,
         "user_properties": {
             "user_id": resolved_user_id,
-            "tenant_id": tenant_id or "Single User Tenant",
+            "tenant_id": resolved_tenant_id or "Single User Tenant",
             "persistent_id": persistent_id,
             "api_key_tracking_id": api_key_tracking_id,
             "api_key_hash": api_key_tracking_id,
@@ -636,7 +642,7 @@ def send_telemetry(
         "properties": {
             "time": current_time.strftime("%m/%d/%Y"),
             "user_id": resolved_user_id,
-            "tenant_id": tenant_id or "Single User Tenant",
+            "tenant_id": resolved_tenant_id or "Single User Tenant",
             "anonymous_id": anonymous_id,
             "persistent_id": persistent_id,
             "api_key_tracking_id": api_key_tracking_id,

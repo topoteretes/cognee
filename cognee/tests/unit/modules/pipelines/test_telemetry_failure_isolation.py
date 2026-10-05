@@ -31,26 +31,50 @@ async def test_error_reporting_preserves_original_exception(monkeypatch):
         await op()
 
 
+class ImmutableError(Exception):
+    """Accept Python's exception bookkeeping, but forbid diagnostic attributes."""
+
+    def __setattr__(self, name, value):
+        if name not in {"__traceback__", "__cause__", "__context__", "__suppress_context__"}:
+            raise AttributeError("exception attributes are immutable")
+        super().__setattr__(name, value)
+
+
 @pytest.mark.asyncio
-async def test_deduplication_expires_between_independent_runs(monkeypatch):
+@pytest.mark.parametrize("error_type", [ValueError, ImmutableError])
+async def test_nested_error_is_reported_once_per_run_without_mutating_it(monkeypatch, error_type):
     events = []
-    monkeypatch.setattr(base, "send_telemetry", lambda name, *a, **k: events.append(name))
+    monkeypatch.setattr(
+        base,
+        "send_telemetry",
+        lambda name, *a, **k: events.append((name, k["additional_properties"])),
+    )
     failed_future = asyncio.get_running_loop().create_future()
-    failed_future.set_exception(ValueError("upstream failure"))
+    failure = error_type("upstream failure")
+    failed_future.set_exception(failure)
+
+    async def upstream(data):
+        return data
 
     async def task(data):
         return await failed_future
 
-    for _ in range(2):
-        with pytest.raises(ValueError):
+    run_ids = [uuid4(), uuid4()]
+    for run_id in run_ids:
+        with pytest.raises(error_type) as raised:
             async for _ in base.run_tasks_base(
-                [Task(task)],
+                [Task(upstream), Task(task)],
                 [1],
                 SimpleNamespace(id=uuid4(), tenant_id=None),
-                PipelineContext(pipeline_run_id=uuid4()),
+                PipelineContext(pipeline_run_id=run_id),
             ):
                 pass
-    assert events.count("Coroutine Task Errored") == 2
+        assert raised.value is failure
+    errors = [props for name, props in events if name == "Coroutine Task Errored"]
+    assert [(p["pipeline_run_id"], p["task_name"], p["exception_type"]) for p in errors] == [
+        (str(run_id), "task", error_type.__name__) for run_id in run_ids
+    ]
+    assert vars(failure) == {}
 
 
 def test_item_profile_is_total_for_nonfinite_sizes():

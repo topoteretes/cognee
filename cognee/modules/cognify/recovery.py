@@ -9,7 +9,6 @@ import asyncio
 import os
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timedelta, timezone
-from types import SimpleNamespace
 
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.relational import get_relational_engine
@@ -27,7 +26,7 @@ from cognee.modules.pipelines.operations.run_tasks_with_telemetry import (
 )
 from cognee.modules.pipelines.run_ownership import claim_run_ownership
 from cognee.shared.logging_utils import get_logger
-from cognee.shared.utils import send_telemetry, telemetry_guard
+from cognee.shared.utils import send_telemetry
 
 logger = get_logger("cognify.recovery")
 
@@ -145,7 +144,6 @@ async def pipeline_recovery_service():
 
 async def _close_as_abandoned(pipeline_run, dataset) -> None:
     """Write the ERRORED row for ``pipeline_run``, carrying the STARTED row's metadata."""
-    user_id = getattr(pipeline_run, "user_id", None)
     await log_pipeline_run_error(
         pipeline_run_id=pipeline_run.pipeline_run_id,
         pipeline_id=pipeline_run.pipeline_id,
@@ -153,9 +151,8 @@ async def _close_as_abandoned(pipeline_run, dataset) -> None:
         dataset_id=dataset.id,
         data=None,
         e=AbandonedPipelineRunError(),
-        user=SimpleNamespace(id=user_id, tenant_id=getattr(pipeline_run, "tenant_id", None))
-        if user_id
-        else None,
+        user_id=pipeline_run.user_id,
+        tenant_id=pipeline_run.tenant_id,
         started_at=getattr(pipeline_run, "started_at", None),
         data_info=(getattr(pipeline_run, "run_info", None) or {}).get("data"),
         origin=getattr(pipeline_run, "origin", None),
@@ -170,12 +167,11 @@ def _send_abandoned_run_telemetry(pipeline_run) -> None:
     warehouse counts an abandoned run as a silent gap forever while the local
     ``pipeline_runs`` table shows it closed. ``pipeline_name`` is the pipeline
     id, as the live emitter sends it; ``exception_type`` is the class the ERRORED
-    row carries. Never raises: telemetry must not turn a successful recovery
-    into a logged failure.
+    row carries. Diagnostic failures warn without turning a successful recovery
+    into a failed recovery or preventing other runs from being recovered.
     """
-    with telemetry_guard():
-        user_id = getattr(pipeline_run, "user_id", None)
-        tenant_id = getattr(pipeline_run, "tenant_id", None)
+    try:
+        tenant_id = pipeline_run.tenant_id
         properties = pipeline_run_telemetry_properties(
             pipeline_run.pipeline_id, pipeline_run.pipeline_run_id, tenant_id, recovered=True
         ) | {
@@ -185,6 +181,13 @@ def _send_abandoned_run_telemetry(pipeline_run) -> None:
         }
         send_telemetry(
             PIPELINE_RUN_ERRORED,
-            SimpleNamespace(id=user_id, tenant_id=tenant_id) if user_id else None,
+            pipeline_run.user_id,
+            tenant_id=tenant_id,
             additional_properties=properties,
+        )
+    except Exception:
+        logger.warning(
+            "Failed to emit telemetry for recovered run %s",
+            pipeline_run.pipeline_run_id,
+            exc_info=True,
         )

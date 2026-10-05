@@ -7,6 +7,8 @@ setting that is a filesystem path (and so an account name) out of the payload.
 """
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
@@ -155,6 +157,33 @@ async def test_concurrent_origins_do_not_label_each_other(monkeypatch):
 
     assert await asyncio.gather(operation("api"), operation("sdk")) == ["api", "sdk"]
     assert utils.telemetry_origin() == "sdk"
+
+
+@pytest.mark.parametrize("override", [None, "cloud"])
+def test_threaded_origins_are_isolated_and_restored_after_failure(monkeypatch, override):
+    if override is None:
+        monkeypatch.delenv(utils.TELEMETRY_ORIGIN_ENV, raising=False)
+    else:
+        monkeypatch.setenv(utils.TELEMETRY_ORIGIN_ENV, override)
+    origins = ["api", "cli", "mcp"]
+    barrier = Barrier(len(origins), timeout=5)
+
+    def operation(origin):
+        previous = utils.telemetry_origin()
+        with pytest.raises(ValueError, match="operation failed"), operation_origin_scope(origin):
+            barrier.wait()
+            observed = utils.telemetry_origin()
+            # Keep all scopes active until every thread has read its origin.
+            barrier.wait()
+            raise ValueError("operation failed")
+        assert utils.telemetry_origin() == previous
+        return observed
+
+    with operation_origin_scope("background"):
+        with ThreadPoolExecutor(max_workers=len(origins)) as executor:
+            assert list(executor.map(operation, origins)) == [override or o for o in origins]
+        assert utils.telemetry_origin() == (override or "background")
+    assert utils.os.getenv(utils.TELEMETRY_ORIGIN_ENV) == override
 
 
 @pytest.mark.asyncio

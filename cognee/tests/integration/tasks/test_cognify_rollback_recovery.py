@@ -426,11 +426,18 @@ async def test_cognify_startup_recovery_rolls_back_stale_started_runs(clean_test
 
 
 @pytest.mark.asyncio
-async def test_startup_recovery_closes_stale_runs_of_every_pipeline(clean_test_environment):
-    """A non-cognify run left STARTED is closed as ERRORED too, carrying its own user."""
+@pytest.mark.parametrize(
+    "has_user,has_tenant", [(True, True), (True, False), (False, True), (False, False)]
+)
+async def test_startup_recovery_closes_stale_runs_of_every_pipeline(
+    clean_test_environment, has_user, has_tenant
+):
+    """Recovery preserves stored IDs even without a matching live user or tenant."""
     user = await get_default_user()
     dataset = await create_authorized_dataset("recovery_all_pipelines_dataset", user)
 
+    stored_user_id = uuid4() if has_user else None
+    stored_tenant_id = uuid4() if has_tenant else None
     stale_add_run_id = uuid4()
     started_at = datetime.now(timezone.utc) - timedelta(hours=2)
     db_engine = get_relational_engine()
@@ -443,7 +450,8 @@ async def test_startup_recovery_closes_stale_runs_of_every_pipeline(clean_test_e
                 status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
                 dataset_id=dataset.id,
                 run_info=_abandoned_run_info({"data": ["some-data-id"]}),
-                user_id=user.id,
+                user_id=stored_user_id,
+                tenant_id=stored_tenant_id,
                 created_at=started_at,
                 started_at=started_at,
             )
@@ -470,7 +478,8 @@ async def test_startup_recovery_closes_stale_runs_of_every_pipeline(clean_test_e
     ]
     closed = rows[0]
     assert closed.error_class == "AbandonedPipelineRunError"
-    assert closed.user_id == user.id
+    assert closed.user_id == stored_user_id
+    assert closed.tenant_id == stored_tenant_id
     assert closed.started_at is not None and closed.started_at.replace(
         tzinfo=None
     ) == started_at.replace(tzinfo=None)
