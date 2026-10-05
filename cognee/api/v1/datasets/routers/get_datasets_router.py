@@ -500,6 +500,7 @@ def get_datasets_router() -> APIRouter:
                 label=data.label,
                 external_metadata=data.external_metadata,
                 data_size=data.data_size,
+                node_set=getattr(data, "node_set", None),
             )
             for data in dataset_data
         ]
