@@ -1813,15 +1813,22 @@ class LanceDBAdapter(VectorDBInterface):
         )
 
     async def prune(self):
+        # Everything is about to go, so a first-open version prune is pointless;
+        # one already running, or a compaction pass (whose version cleanup runs
+        # outside VECTOR_DB_LOCK), finishes before the tables are dropped under
+        # it. Same lock order as ``compact``: compaction lock, then the write lock.
+        self._open_prune_started = True
+        await self._wait_for_open_prune()
         connection = await self.get_connection()
-        collection_names = await connection.table_names()
 
-        async with self.VECTOR_DB_LOCK:
-            for collection_name in collection_names:
-                collection = await self.get_collection(collection_name)
-                await collection.delete("id IS NOT NULL")
-                await connection.drop_table(collection_name)
-        self._compaction_dirty.clear()
+        async with self._compaction_lock:
+            collection_names = await connection.table_names()
+            async with self.VECTOR_DB_LOCK:
+                for collection_name in collection_names:
+                    collection = await self.get_collection(collection_name)
+                    await collection.delete("id IS NOT NULL")
+                    await connection.drop_table(collection_name)
+            self._compaction_dirty.clear()
 
         if self.url and not self._is_remote_store(self.url):
             db_dir_path = path.dirname(self.url)

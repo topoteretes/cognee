@@ -986,3 +986,68 @@ async def test_compact_and_close_wait_for_a_running_open_prune(
     await second.close()
     assert finished == [True, True]
     await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_prune_never_drops_tables_under_a_running_open_prune(
+    tmp_path, compaction_settings, monkeypatch
+):
+    compaction_settings(retention_seconds=0)
+    writer, _ = _adapter(tmp_path)
+    await _write_n_points(writer, "PruneRace_label", 2)
+    await writer.close()
+
+    adapter, _ = _adapter(tmp_path)
+    started, events = asyncio.Event(), []
+
+    async def slow_prune_pass(options):
+        started.set()
+        await asyncio.sleep(0.2)
+        events.append("open_prune_done")
+        return {}
+
+    monkeypatch.setattr(adapter, "_prune_pass", slow_prune_pass)
+    await adapter.get_connection()
+    await started.wait()
+
+    await adapter.prune()
+    events.append("pruned")
+
+    assert events == ["open_prune_done", "pruned"]
+    assert not await adapter.has_collection("PruneRace_label")
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_prune_on_a_fresh_adapter_starts_no_open_prune(tmp_path, compaction_settings):
+    compaction_settings(retention_seconds=0)
+    writer, _ = _adapter(tmp_path)
+    await _write_n_points(writer, "PruneFresh_label", 2)
+    await writer.close()
+
+    adapter, _ = _adapter(tmp_path)
+    await adapter.prune()
+
+    assert adapter._open_prune_task is None
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_prune_waits_for_a_running_compaction_pass(tmp_path, compaction_settings):
+    """A pass's version cleanup runs outside VECTOR_DB_LOCK; prune must not drop
+    the tables under it."""
+    compaction_settings(retention_seconds=0)
+    adapter, _ = _adapter(tmp_path)
+    await _write_n_points(adapter, "PrunePass_label", 2)
+    events = []
+
+    async with adapter._compaction_lock:  # a pass in progress
+        prune_task = asyncio.ensure_future(adapter.prune())
+        await asyncio.sleep(0.1)
+        assert not prune_task.done()
+        events.append("pass_done")
+    await prune_task
+    events.append("pruned")
+
+    assert events == ["pass_done", "pruned"]
+    await adapter.close()
