@@ -174,7 +174,7 @@ async def test_a_cold_count_cache_costs_one_count_query_and_no_traversal():
     for the bounded node/link fetch /brains does on every single call."""
     dataset = _dataset("billing")
     run_id = uuid4()
-    get_graph_metrics = AsyncMock(return_value={"num_nodes": 42, "num_edges": 99})
+    get_graph_counts = AsyncMock(return_value=(42, 99))
     get_graph_data = AsyncMock()
     datasets_patch, node_sets_patch = _summary_patches(dataset)
 
@@ -193,7 +193,7 @@ async def test_a_cold_count_cache_costs_one_count_query_and_no_traversal():
             "get_graph_engine",
             AsyncMock(
                 return_value=SimpleNamespace(
-                    get_graph_metrics=get_graph_metrics, get_graph_data=get_graph_data
+                    get_graph_counts=get_graph_counts, get_graph_data=get_graph_data
                 )
             ),
         ),
@@ -202,7 +202,7 @@ async def test_a_cold_count_cache_costs_one_count_query_and_no_traversal():
     ):
         payload = await visualize_module.build_brains_summary_payload(user=MagicMock())
 
-    get_graph_metrics.assert_awaited_once_with(include_optional=False)
+    get_graph_counts.assert_awaited_once_with()
     get_graph_data.assert_not_awaited()
     fetch_graph.assert_not_called()
     assert payload[str(dataset.id)]["node_count"] == 42
