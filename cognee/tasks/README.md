@@ -43,7 +43,7 @@ task's output, `enriches`, `ctx` injection, `Drop`) are documented in
 | `provenance/` | Write audit-ledger provenance entries for a pipeline run | `record_provenance` |
 | `schema/` | Ingest a relational database schema as graph nodes | `ingest_database_schema` |
 | `storage/` | Persist data points: graph + vector writes, index rebuilds, fact validity (`close_node`) | `add_data_points`, `index_data_points`, `index_graph_edges` |
-| `summarization/` | LLM summaries of chunks and code | `summarize_text`, `summarize_code` |
+| `summarization/` | Chunk summaries (LLM, or relations plus entity types) and code summaries | `summarize_text`, `build_summary_from_extraction`, `summarize_code` |
 | `temporal_graph/` | Event/timestamp extraction and the temporal knowledge graph | `extract_events_and_timestamps`, `extract_knowledge_graph_from_events` |
 | `translation/` | Translate chunk content before extraction (provider-pluggable) | `TranslationConfig`, `TranslatedContent` |
 | `web_scraper/` | Fetch and crawl web pages for URL ingestion | `fetch_page_content`, `DefaultUrlCrawler` |

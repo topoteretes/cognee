@@ -240,7 +240,7 @@ The stages below are the Low level operations these call underneath.
 Key files: `cognee/api/v1/add/add.py`, `cognee/tasks/ingestion/ingest_data.py`
 
 #### COGNIFY: Knowledge Graph Construction
-`cognify()` → `classify_documents` → `extract_chunks_from_documents` → `extract_graph_from_data` (LLM extracts entities/relationships using Instructor) → `summarize_text` → `add_data_points` (store in graph + vector DBs)
+`cognify()` → `classify_documents` → `extract_chunks_from_documents` → `extract_graph_from_data` (LLM extracts entities/relationships using Instructor) → `summarize_text` → `add_data_points` (store in graph + vector DBs). With SUMMARY_METHOD=from_extraction or `cognify(summary_method="from_extraction")` (opt-in), summarize_text is replaced by build_summary_from_extraction, which joins one line per extracted type, then the chunk's extracted relation texts, with no LLM call.
 
 Key files:
 - `cognee/api/v1/cognify/cognify.py`

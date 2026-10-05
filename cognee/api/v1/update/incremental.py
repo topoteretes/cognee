@@ -936,6 +936,7 @@ async def _write_and_publish(
             config=_resolve_extraction_config(),
             custom_prompt=custom_prompt,
             ctx=context,
+            summary_method=cognify_config.summary_method,
         )
         await add_data_points(
             summaries, ctx=context, embed_triplets=cognify_config.triplet_embedding
