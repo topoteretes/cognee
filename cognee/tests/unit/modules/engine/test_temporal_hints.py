@@ -95,6 +95,28 @@ def test_numbers_that_are_not_years_do_not_become_the_base(text):
     assert hint_lines(text, None) == ([], None)
 
 
+@pytest.mark.parametrize(
+    ("text", "value"),
+    [
+        ("1936\n\nSanjurjo was killed in a plane crash on 20 July.", "1936-07-20"),
+        (
+            "2005: Elections and transitional government\n\nOn January 31, Iraqis voted.",
+            "2005-01-31",
+        ),
+        ("## 1805\n\nIn October the army occupied Braunau.", "1805-10"),
+        ("1936–1937\n\nThe city fell in November.", "1936-11"),
+    ],
+)
+def test_a_year_heading_dates_the_text_under_it(text, value):
+    lines, _ = hint_lines(text, None)
+    assert len(lines) == 1 and lines[0].endswith(f"-> {value} (inferred from context)"), lines
+
+
+def test_a_line_that_starts_with_a_number_is_not_a_heading():
+    lines, base = hint_lines("1500 men marched north.\nOn 3 May they halted.", None)
+    assert (lines, base) == ([], None)
+
+
 def test_a_year_written_right_after_the_date_belongs_to_it():
     """ "On October 11, 1806" is one stated date — not a year-less "October 11"
     resolved against the previous year plus a bare "1806". The old split let a

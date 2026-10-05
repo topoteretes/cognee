@@ -102,6 +102,14 @@ _BARE_YEAR = re.compile(
     r"|[Cc]irca|[Aa]round|[Aa]bout|[Bb]efore|[Aa]fter|[Bb]etween|[Ee]arly|[Ll]ate|[Mm]id|year) "
     r"(?P<year>1\d{3}|20\d{2})\b(?![\d%])"
 )
+# A year that is a heading dates everything under it: alone on its line
+# ("1936"), as "2005: Elections", "1936–1937", or behind heading markup
+# ("## 1805"). A line that merely starts with a number ("1500 men marched")
+# does not qualify — the year must be the whole heading or end at a colon
+# or dash.
+_HEADING_YEAR = re.compile(
+    r"^[ \t#=*\-–—]*(?P<year>1\d{3}|20\d{2})(?=[ \t]*(?:[:\-–—]|$))", re.MULTILINE
+)
 _SENTENCE_END = re.compile(r"[.!?]+(?=\s)")
 
 # One pattern per expression shape, in priority order: a span carrying a
@@ -213,12 +221,13 @@ def _calendar_matches(text: str) -> list[tuple[int, int, dict]]:
                 continue
             taken.append((start, end))
             found.append((start, end, match.groupdict()))
-    for match in _BARE_YEAR.finditer(text):
-        start, end = match.span()
-        if any(start < t_end and end > t_start for t_start, t_end in taken):
-            continue
-        taken.append((start, end))
-        found.append((start, end, {"year": match["year"]}))
+    for pattern in (_BARE_YEAR, _HEADING_YEAR):
+        for match in pattern.finditer(text):
+            start, end = match.span()
+            if any(start < t_end and end > t_start for t_start, t_end in taken):
+                continue
+            taken.append((start, end))
+            found.append((start, end, {"year": match["year"]}))
     found.sort()
     return found
 
