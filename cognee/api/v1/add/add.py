@@ -340,6 +340,10 @@ async def add(
         embedding_config=embedding_config,
         data_cache=data_cache,
         skip_connection_test=skip_connection_test,
+        # The incremental pre-check resolves each item by content hash; the node
+        # set is part of that identity (same content under another node set is a
+        # new item), and this is the only way the per-item wrapper can know it.
+        extras={"node_set": node_set},
     )
 
     # run_pipeline_blocking returns {dataset_id: PipelineRunInfo} but callers

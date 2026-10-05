@@ -7,9 +7,13 @@ local and remote mode.
 """
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
+from pydantic import field_validator
+
 from cognee.api.DTO import OutDTO
+from cognee.modules.ingestion.node_set_identity import normalize_node_set
 
 
 class DataDTO(OutDTO):
@@ -28,3 +32,14 @@ class DataDTO(OutDTO):
     # rendered a size column against this row; without the field it read
     # undefined and showed a dash for every file.
     data_size: int | None = None
+    # The node-set scope the item was stored under (sorted tag names), so a
+    # client scoping data by node set — one end user of a shared cognee user,
+    # one project — can tell its items apart from another scope's identical
+    # content without reading external_metadata. Serialized as `nodeSet`.
+    node_set: list[str] | None = None
+
+    @field_validator("node_set", mode="before")
+    @classmethod
+    def _decode_node_set(cls, value: Any) -> list[str] | None:
+        # The ORM stores the list JSON-encoded; remote rows already carry a list.
+        return normalize_node_set(value)

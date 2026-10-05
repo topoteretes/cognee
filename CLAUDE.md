@@ -807,6 +807,8 @@ await cognee.recall("my question", datasets=["my_project"])
 
 `remember()`/`add()` without `dataset_name` target the default dataset `main_dataset`; `recall()`/`search()` span all accessible datasets unless one is given.
 
+**Dedup identity.** Within a dataset, `add()` dedupes by content hash scoped to (owner, tenant, **node_set**): re-adding the same bytes under the same node set is a no-op (`PipelineRunAlreadyCompleted`), while the same bytes under a different node set — another end user of one cognee user, another project — are a new `Data` row with their own graph documents, searchable and deletable in that scope alone (`cognee/modules/ingestion/node_set_identity.py`; the row's scope is `Data.node_set` / `nodeSet` on `GET /datasets/{id}/data`). Deleting one scope's row never touches the other's; shared entity nodes survive through the existing shared-node logic.
+
 ### DataPoints
 Atomic knowledge units that form the foundation of graph structures. All graph nodes extend the `DataPoint` base class with versioning and metadata support.
 

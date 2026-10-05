@@ -38,7 +38,7 @@ async def test_passthrough_item_is_hashed_while_its_file_is_open(tmp_path, monke
 
     seen = {}
 
-    async def capture_identify(content_hash, user, dataset_id):
+    async def capture_identify(content_hash, user, dataset_id, **_kwargs):
         seen["content_hash"] = content_hash
 
     monkeypatch.setattr(item_module.ingestion, "identify_data_by_hash", capture_identify)

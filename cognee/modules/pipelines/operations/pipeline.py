@@ -66,6 +66,7 @@ async def run_pipeline(
     data_cache: bool = False,
     skip_connection_test: bool = False,
     needs_llm: bool = True,
+    extras: dict | None = None,
 ):
     """``tasks`` is either the task list every data item runs, or a callable
     mapping one item to its task list (a task resolver — see ``run_tasks``);
@@ -108,6 +109,7 @@ async def run_pipeline(
             llm_config=llm_config,
             embedding_config=embedding_config,
             data_cache=data_cache,
+            extras=extras,
         ):
             yield run_info
 
@@ -124,6 +126,7 @@ async def run_pipeline_per_dataset(
     llm_config: LLMConfig | None = None,
     embedding_config: EmbeddingConfig | None = None,
     data_cache=False,
+    extras: dict | None = None,
 ):
     # The actual work of a single run, factored out so it can run either under
     # the per-dataset lock (normal case) or directly (re-entrant case below).
@@ -145,6 +148,7 @@ async def run_pipeline_per_dataset(
             llm_config=llm_config,
             embedding_config=embedding_config,
             data_cache=data_cache,
+            extras=extras,
         )
 
         async for pipeline_run_info in pipeline_run:

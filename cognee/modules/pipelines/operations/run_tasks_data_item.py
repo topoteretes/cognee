@@ -15,6 +15,7 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.modules import ingestion
 from cognee.modules.data.models import Data, Dataset
+from cognee.modules.ingestion.node_set_identity import UNSCOPED
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.models.DataItemStatus import (
     DataItemStatus,
@@ -107,6 +108,21 @@ async def _drain_item_events(
     return result
 
 
+def _node_set_scope(ctx: PipelineContext | None) -> Any:
+    """The node set the run ingests under, for the content-hash lookups below.
+
+    ``add()`` puts it on ``ctx.extras``; the same content under another node
+    set is a different data item (see ``ingestion.node_set_identity``), so a
+    lookup that ignored it would skip the second scope's item as "already
+    completed". A run that does not say (custom pipelines) keeps the
+    content-only match.
+    """
+    extras = getattr(ctx, "extras", None) if ctx is not None else None
+    if isinstance(extras, dict) and "node_set" in extras:
+        return extras["node_set"]
+    return UNSCOPED
+
+
 async def run_tasks_data_item_incremental(
     data_item: Any,
     dataset: Dataset,
@@ -180,7 +196,9 @@ async def run_tasks_data_item_incremental(
             # Dataset-scoped content lookup: the existing row (its id and
             # pipeline_status) or None for content this dataset has not
             # seen (ingestion mints the id).
-            data_point = await ingestion.identify_data_by_hash(content_hash, user, dataset.id)
+            data_point = await ingestion.identify_data_by_hash(
+                content_hash, user, dataset.id, node_set=_node_set_scope(ctx)
+            )
             data_id = data_point.id if data_point is not None else None
 
             # Hand the storage work already paid for to ``ingest_data``, which
@@ -234,7 +252,7 @@ async def run_tasks_data_item_incremental(
                 ).scalar_one_or_none()
             elif content_hash is not None:
                 data_point = await ingestion.identify_data_by_hash(
-                    content_hash, user, dataset.id, session=session
+                    content_hash, user, dataset.id, session=session, node_set=_node_set_scope(ctx)
                 )
                 data_id = data_point.id if data_point is not None else None
             else:

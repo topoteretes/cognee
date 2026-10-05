@@ -23,6 +23,7 @@ from cognee.modules.data.models import Data
 from cognee.modules.ingestion import save_data_to_file_detailed
 from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.modules.ingestion.identify_many import identify_many
+from cognee.modules.ingestion.node_set_identity import encode_node_set
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
@@ -268,8 +269,10 @@ async def ingest_data(
             # dataset+owner+tenant scope — replaces N per-file identify() calls.
             # identify_many() shares the exact same filter as identify() and chunks
             # large inputs to stay within SQLite's bind-parameter limit.
+            # Scoped by node_set too: the same content under another node set
+            # is a new data item for that scope, not a hit on this one.
             existing_by_hash: dict[str, UUID] = await identify_many(
-                list(unique_content_hashes), user, dataset.id, session=session
+                list(unique_content_hashes), user, dataset.id, session=session, node_set=node_set
             )
 
             # Resolve pinned IDs (items with explicit data_id) — still needs DB for
@@ -473,7 +476,7 @@ async def ingest_data(
                 # and break every later cognify of the dataset.
                 if item_system_metadata is not None or content_changed:
                     data_point.system_metadata = item_system_metadata
-                data_point.node_set = json.dumps(node_set) if node_set else None
+                data_point.node_set = encode_node_set(node_set)
                 data_point.tenant_id = user.tenant_id if user.tenant_id else None
                 # Absent means "leave unchanged": a re-ingest without a label
                 # (current_label None) must not clear a previously stored one.
@@ -505,7 +508,7 @@ async def ingest_data(
                     raw_content_hash=storage_file_metadata["content_hash"],
                     external_metadata=ext_metadata,
                     system_metadata=item_system_metadata,
-                    node_set=json.dumps(node_set) if node_set else None,
+                    node_set=encode_node_set(node_set),
                     data_size=original_file_metadata["file_size"],
                     tenant_id=user.tenant_id if user.tenant_id else None,
                     pipeline_status={},
