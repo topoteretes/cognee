@@ -640,7 +640,10 @@ async def test_fresh_chunks_are_extracted_in_bounded_batches(monkeypatch):
         incremental,
         "get_cognify_config",
         lambda: SimpleNamespace(
-            chunks_per_batch=3, triplet_embedding=False, contradiction_detection=False
+            chunks_per_batch=3,
+            triplet_embedding=False,
+            contradiction_detection=False,
+            summary_method="llm",
         ),
     )
 
