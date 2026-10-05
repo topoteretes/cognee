@@ -24,6 +24,8 @@ from cognee.modules.integrations.linear.client import LinearUnauthorizedError
 sync_module = importlib.import_module("cognee.modules.integrations.linear.sync")
 adapter_module = importlib.import_module("cognee.modules.integrations.linear.adapter")
 source_module = importlib.import_module("cognee.tasks.ingestion.connectors.linear")
+# Patched by module object: the string target resolves to the function on Python 3.10.
+_forget_module = importlib.import_module("cognee.api.v1.forget.forget")
 
 _USER_ID = uuid4()
 _DATASET = "linear_acme_co"
@@ -582,7 +584,7 @@ def _cleanup_patches(sessions, forget, active=None):
             "cognee.infrastructure.databases.relational.get_relational_engine",
             lambda: SimpleNamespace(get_async_session=sessions),
         ),
-        patch("cognee.api.v1.forget.forget.forget", forget),
+        patch.object(_forget_module, "forget", forget),
         patch("cognee.modules.users.methods.get_user", AsyncMock(return_value="owner")),
         patch.object(ingestion, "require_active_credential", active or AsyncMock()),
     )

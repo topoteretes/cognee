@@ -36,6 +36,11 @@ _router_module = importlib.import_module(
 )
 
 
+# The forget package re-exports the function under the submodule's name, so a
+# dotted-string patch target resolves to the function on Python 3.10.
+_forget_module = importlib.import_module("cognee.api.v1.forget.forget")
+
+
 class _FakeUser:
     id = USER_ID
 
@@ -334,7 +339,7 @@ def test_disconnect_with_delete_data_forgets_the_providers_dataset(client):
         patch.object(
             _router_module, "revoke_credential_by_account", new=AsyncMock(return_value=True)
         ),
-        patch("cognee.api.v1.forget.forget.forget", forget),
+        patch.object(_forget_module, "forget", forget),
     ):
         response = client.delete("/api/v1/integrations/fake/connection?delete_data=true")
 
