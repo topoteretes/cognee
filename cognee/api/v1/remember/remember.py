@@ -41,6 +41,7 @@ from cognee.modules.operations import record_operation
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
 )
+from cognee.modules.pipelines.utils import iter_ingestion_entries
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.data_item import DataItem
 
@@ -861,15 +862,12 @@ class RememberResult:
             ingestion_info = getattr(run_info, "data_ingestion_info", None)
             if ingestion_info and isinstance(ingestion_info, list):
                 processed = 0
-                for entry in ingestion_info:
-                    if not isinstance(entry, dict):
-                        continue
-                    status = getattr(entry.get("run_info"), "status", "")
-                    if "Errored" in status:
+                for status, data_id in iter_ingestion_entries(ingestion_info):
+                    if status == "PipelineRunErrored":
                         continue
                     processed += 1
-                    if entry.get("data_id") is not None:
-                        self.items.append({"id": str(entry["data_id"])})
+                    if data_id is not None:
+                        self.items.append({"id": str(data_id)})
                 self.items_processed = processed
 
     def _fail(self, exc: BaseException):
