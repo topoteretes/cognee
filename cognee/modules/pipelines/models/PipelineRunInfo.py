@@ -4,6 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel, computed_field
 
 from cognee.modules.data.models.Data import Data
+from cognee.modules.pipelines.utils import iter_ingestion_entries
 
 
 def extract_data_ids(data_ingestion_info: Any) -> list[UUID]:
@@ -16,25 +17,10 @@ def extract_data_ids(data_ingestion_info: Any) -> list[UUID]:
     caller re-adding known content wants back. Order follows the run's
     results; duplicates and ids that are not UUIDs are dropped.
     """
-    if not isinstance(data_ingestion_info, list):
-        return []
-
     data_ids: list[UUID] = []
     seen: set[UUID] = set()
-    for entry in data_ingestion_info:
-        if not isinstance(entry, dict):
-            continue
-        status = getattr(entry.get("run_info"), "status", "") or ""
-        if "Errored" in status:
-            continue
-        raw_id = entry.get("data_id")
-        if raw_id is None:
-            continue
-        try:
-            data_id = raw_id if isinstance(raw_id, UUID) else UUID(str(raw_id))
-        except (ValueError, TypeError, AttributeError):
-            continue
-        if data_id in seen:
+    for status, data_id in iter_ingestion_entries(data_ingestion_info):
+        if status == "PipelineRunErrored" or data_id is None or data_id in seen:
             continue
         seen.add(data_id)
         data_ids.append(data_id)

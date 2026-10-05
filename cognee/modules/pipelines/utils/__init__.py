@@ -1,3 +1,4 @@
 from .generate_pipeline_id import generate_pipeline_id
 from .generate_pipeline_run_id import generate_pipeline_run_id
+from .iter_ingestion_entries import iter_ingestion_entries
 from .summarize_run_info_data import summarize_run_info_data
