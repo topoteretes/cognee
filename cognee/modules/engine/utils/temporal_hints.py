@@ -125,7 +125,7 @@ _CALENDAR_PATTERNS = (
     # "by late August"); "May I?", "March on" and "Most August Majesty" have
     # none and are not dates.
     re.compile(
-        rf"\b(?P<lead>in|of|by|until|till|since|during|from|through|early|late|mid|that) "
+        rf"\b(?P<lead>(?i:in|of|by|until|till|since|during|from|through|early|late|mid|that)) "
         rf"{_MONTH}\b(?!\.? ?\d)"
     ),
 )

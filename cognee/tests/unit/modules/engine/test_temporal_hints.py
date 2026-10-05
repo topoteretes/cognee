@@ -122,6 +122,7 @@ BASE_1805 = DateBase(1805, 7, None)
         ("Our dispatch of November 18 was not received.", "1805-11-18"),
         ("By early May the roads were dry.", "1805-05"),
         ("She wrote in December about the frost.", "1805-12"),
+        ("In May the roads were dry again.", "1805-05"),  # sentence-initial lead word
         ("Deliveries from Sept. 3rd onward were late.", "1805-09-03"),
     ],
 )
