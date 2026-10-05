@@ -3857,8 +3857,10 @@ class LadybugAdapter(GraphDBInterface):
             conditions.append("time_until > $window_start")
             params["window_start"] = int(start)
         # Properties live in a JSON string column; the casts run only on Timestamp
-        # nodes (filtered first) and tolerate a missing or empty field, as the
-        # temporal pipeline's collect_time_ids does.
+        # nodes (filtered first). A node written before ``time_until`` existed
+        # yields '' from json_extract and a stored null yields 'null'; both must
+        # become NULL *before* the cast — Kuzu casts a whole batch at once, so a
+        # CASE guard around the CAST does not stop it from raising on them.
         query_str = f"""
         MATCH (n:Node)
         WHERE n.type = 'Timestamp'
@@ -3866,8 +3868,8 @@ class LadybugAdapter(GraphDBInterface):
              json_extract(n.properties, '$.time_at') AS at_str,
              json_extract(n.properties, '$.time_until') AS until_str
         WITH n,
-             CASE WHEN at_str IS NULL OR at_str = '' THEN NULL ELSE CAST(at_str AS INT64) END AS time_at,
-             CASE WHEN until_str IS NULL OR until_str = '' THEN NULL ELSE CAST(until_str AS INT64) END AS until_raw
+             CAST(nullif(nullif(at_str, ''), 'null') AS INT64) AS time_at,
+             CAST(nullif(nullif(until_str, ''), 'null') AS INT64) AS until_raw
         WITH n, time_at, COALESCE(until_raw, time_at + 1000) AS time_until
         WHERE {" AND ".join(conditions)}
         RETURN n.id, json_extract(n.properties, '$.timestamp_str'), time_at, time_until
@@ -3913,8 +3915,8 @@ class LadybugAdapter(GraphDBInterface):
              json_extract(t.properties, '$.time_at') AS at_str,
              json_extract(t.properties, '$.time_until') AS until_str
         WITH {{carry}}, t,
-             CASE WHEN at_str IS NULL OR at_str = '' THEN NULL ELSE CAST(at_str AS INT64) END AS time_at,
-             CASE WHEN until_str IS NULL OR until_str = '' THEN NULL ELSE CAST(until_str AS INT64) END AS until_raw
+             CAST(nullif(nullif(at_str, ''), 'null') AS INT64) AS time_at,
+             CAST(nullif(nullif(until_str, ''), 'null') AS INT64) AS until_raw
         WITH {{carry}}, t, time_at, COALESCE(until_raw, time_at + 1000) AS time_until
         WHERE {" AND ".join(conditions)}
         """
