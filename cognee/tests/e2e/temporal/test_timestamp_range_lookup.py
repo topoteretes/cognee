@@ -240,7 +240,7 @@ async def test_range_lookup_and_anchors_tolerate_timestamps_without_time_until(c
     )
 
     retriever = TemporalHybridRetriever(top_k=5)
-    candidates = {"chunks": [{"id": str(curie.id)}, {"id": str(apollo.id)}], "entities": []}
+    candidates = HybridCandidates(chunks=[{"id": str(curie.id)}, {"id": str(apollo.id)}])
     anchors = await retriever._anchors(_utc(1867, 1, 1), _utc(1868, 1, 1), candidates)
     assert anchors["chunk_ids"] == {str(curie.id)}, provider
     anchors = await retriever._anchors(_utc(1969, 1, 1), _utc(1970, 1, 1), candidates)
