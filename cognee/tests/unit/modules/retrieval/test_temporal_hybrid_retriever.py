@@ -5,10 +5,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from cognee.modules.retrieval.hybrid.candidates import HybridCandidates, finalize
+from cognee.modules.retrieval.hybrid.candidates import HybridCandidates
 from cognee.modules.retrieval.hybrid.facts import FactCandidates
 from cognee.modules.retrieval.temporal_hybrid.matching import (
-    anchored_first,
     extract_query_interval,
     to_epoch_ms,
 )
@@ -75,7 +74,11 @@ def test_to_epoch_ms():
     assert to_epoch_ms(_utc(1970, 1, 1, 0, 0, 1)) == 1000
 
 
-# --- anchored-first order + finalize ------------------------------------------------
+def prioritized(candidates: HybridCandidates, anchors: dict) -> HybridCandidates:
+    return candidates.prioritize(anchors["chunk_ids"], anchors["entity_ids"])
+
+
+# --- prioritize + finalize ------------------------------------------------
 
 HITS = [
     {"id": "f_atlas", "text": "Atlas was founded in 1950"},
@@ -105,12 +108,12 @@ def _candidates(fact_candidates: FactCandidates | None = None) -> HybridCandidat
 
 
 def _finalize(candidates: HybridCandidates, top_k: int = 2) -> dict:
-    return finalize(candidates, chunks_limit=top_k, entities_limit=top_k)
+    return candidates.finalize(chunks_limit=top_k, entities_limit=top_k)
 
 
-def test_anchored_first_puts_anchored_candidates_first_and_keeps_the_rest():
+def test_prioritize_puts_anchored_candidates_first_and_keeps_the_rest():
     anchors = {"timestamp_ids": {"ts"}, "chunk_ids": {"c3", "c2"}, "entity_ids": {"e2"}}
-    result = _finalize(anchored_first(_candidates(), anchors))
+    result = _finalize(prioritized(_candidates(), anchors))
 
     # hybrid order among the anchored, then the rest; nothing stripped from a candidate
     assert [chunk["id"] for chunk in result["chunks"]] == ["c2", "c3"]
@@ -122,20 +125,20 @@ def test_anchored_first_puts_anchored_candidates_first_and_keeps_the_rest():
     assert [fact["id"] for fact in result["facts"]] == ["f_atlas", "f_helios"]
 
 
-def test_anchored_first_with_no_anchored_candidate_is_the_plain_slice():
+def test_prioritize_with_no_anchored_candidate_is_the_plain_slice():
     anchors = {"timestamp_ids": {"ts"}, "chunk_ids": {"elsewhere"}, "entity_ids": set()}
-    assert _finalize(anchored_first(_candidates(), anchors)) == _finalize(_candidates())
+    assert _finalize(prioritized(_candidates(), anchors)) == _finalize(_candidates())
 
 
-def test_anchored_first_fills_up_with_unanchored_candidates():
+def test_prioritize_fills_up_with_unanchored_candidates():
     anchors = {"timestamp_ids": {"ts"}, "chunk_ids": {"c3"}, "entity_ids": set()}
-    result = _finalize(anchored_first(_candidates(), anchors))
+    result = _finalize(prioritized(_candidates(), anchors))
     assert [chunk["id"] for chunk in result["chunks"]] == ["c3", "c1"]
 
 
-def test_anchored_first_drops_nothing():
+def test_prioritize_drops_nothing():
     anchors = {"timestamp_ids": {"ts"}, "chunk_ids": {"c3"}, "entity_ids": {"e2"}}
-    reordered = anchored_first(_candidates(), anchors)
+    reordered = prioritized(_candidates(), anchors)
     assert [chunk["id"] for chunk in reordered.chunks] == ["c3", "c1", "c2"]
     assert [entity["id"] for entity in reordered.entities] == ["e2", "e1"]
     assert reordered.chunk_summaries == _candidates().chunk_summaries

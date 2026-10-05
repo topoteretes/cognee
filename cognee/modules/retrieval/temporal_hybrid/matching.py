@@ -1,20 +1,15 @@
-"""Helpers for TemporalHybridRetriever: interval extraction and the anchored-first order (SDK-828).
+"""Helpers for TemporalHybridRetriever: the question's time window (SDK-828).
 
 The retriever fetches an oversized hybrid candidate set, asks the graph adapter
-which of those candidates are attached to a Timestamp inside the question's
-window (``GraphDBInterface.get_temporal_anchors``), and reorders the candidates
-so the anchored ones come first. Nothing is dropped here: the cut, and the
-facts selected against the entities that survive it, happen in
-``hybrid.candidates.finalize`` — the same step plain hybrid uses — so the
-temporal result is never smaller than plain hybrid retrieval.
+which of those candidates are attached to a Timestamp inside the window
+(``GraphDBInterface.get_temporal_anchors``), moves the anchored ones to the
+front (``HybridCandidates.prioritize``) and cuts with the same ``finalize``
+plain hybrid uses, so the temporal result is never smaller than plain hybrid.
 """
 
-from dataclasses import replace
 from datetime import datetime, timezone
 
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
-from cognee.modules.retrieval.hybrid.candidates import HybridCandidates
-from cognee.modules.retrieval.hybrid.results import result_id
 from cognee.tasks.temporal_graph.models import QueryInterval
 
 QUERY_INTERVAL_PROMPT = """Extract one time window from the question.
@@ -66,24 +61,3 @@ def to_epoch_ms(moment: datetime | None) -> int | None:
 
 def empty_anchors() -> dict:
     return {"timestamp_ids": set(), "chunk_ids": set(), "entity_ids": set()}
-
-
-def _anchored_first(items: list, anchored: set[str]) -> list:
-    """Stable partition: anchored items in their original order, then the rest."""
-    first = [item for item in items if result_id(item) in anchored]
-    rest = [item for item in items if result_id(item) not in anchored]
-    return first + rest
-
-
-def anchored_first(candidates: HybridCandidates, anchors: dict) -> HybridCandidates:
-    """The candidates with anchored chunks and entities moved to the front.
-
-    A stable partition on membership in ``anchors``; the hybrid order is kept
-    within each half and nothing is removed or altered. Facts are not touched
-    here — they are selected once the entities have been cut.
-    """
-    return replace(
-        candidates,
-        chunks=_anchored_first(list(candidates.chunks), anchors["chunk_ids"]),
-        entities=_anchored_first(list(candidates.entities), anchors["entity_ids"]),
-    )

@@ -8,7 +8,7 @@ from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
-from cognee.modules.retrieval.hybrid.candidates import HybridCandidates, finalize
+from cognee.modules.retrieval.hybrid.candidates import HybridCandidates
 from cognee.modules.retrieval.hybrid.chunks import retrieve_hybrid_chunks, search_collection
 from cognee.modules.retrieval.hybrid.context import (
     extract_context_object_ids as extract_hybrid_object_ids,
@@ -120,10 +120,9 @@ class HybridRetriever(BaseRetriever):
         return await self._retrieve_one(query)
 
     async def _retrieve_one(self, query: str) -> dict[str, Any]:
-        return finalize(
-            await self._fetch_candidates(query),
-            chunks_limit=self.chunks_top_k,
-            entities_limit=self.entities_top_k,
+        candidates = await self._fetch_candidates(query)
+        return candidates.finalize(
+            chunks_limit=self.chunks_top_k, entities_limit=self.entities_top_k
         )
 
     async def _fetch_candidates(self, query: str) -> HybridCandidates:

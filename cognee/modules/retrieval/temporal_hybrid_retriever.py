@@ -4,9 +4,10 @@ The candidate fetch and the query-interval extraction run concurrently. The
 graph adapter is then asked which of the candidate chunks and entities are
 attached to a Timestamp inside the window (``get_temporal_anchors``, a native
 query on Ladybug, Neo4j and the Postgres demo, a neighbourhood walk elsewhere),
-the oversized candidate set is reordered so the anchored candidates come first,
-and ``finalize`` — the same step plain hybrid uses — cuts it to ``top_k`` and
-selects the facts against the entities that survive the cut. Context formatting
+the oversized candidate set is reordered so the anchored candidates come first
+(``HybridCandidates.prioritize``), and ``finalize`` — the same step plain hybrid
+uses — cuts it to ``top_k`` and selects the facts against the entities that
+survive the cut. Context formatting
 and completion are inherited unchanged.
 
 get_retrieved_objects returns the plain hybrid result shape — the reranked
@@ -18,11 +19,10 @@ import asyncio
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.unified import get_unified_engine
-from cognee.modules.retrieval.hybrid.candidates import HybridCandidates, finalize
+from cognee.modules.retrieval.hybrid.candidates import HybridCandidates
 from cognee.modules.retrieval.hybrid.results import empty_hybrid_result, result_id
 from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
 from cognee.modules.retrieval.temporal_hybrid.matching import (
-    anchored_first,
     empty_anchors,
     extract_query_interval,
     to_epoch_ms,
@@ -59,8 +59,7 @@ class TemporalHybridRetriever(HybridRetriever):
         self.last_baseline = empty_hybrid_result()
 
     def _finalize(self, candidates: HybridCandidates) -> dict:
-        """Cut to ``top_k`` and select facts against the entities that are kept."""
-        return finalize(candidates, chunks_limit=self.top_k, entities_limit=self.top_k)
+        return candidates.finalize(chunks_limit=self.top_k, entities_limit=self.top_k)
 
     async def _anchors(self, start, end, candidates: HybridCandidates) -> dict:
         """Which candidate chunks and entities are attached to a time in the window."""
@@ -117,7 +116,9 @@ class TemporalHybridRetriever(HybridRetriever):
             self.last_reason = "no_candidate_overlap" if in_window else "no_temporal_match"
             return self.last_baseline
 
-        reranked = self._finalize(anchored_first(candidates, self.last_anchors))
+        reranked = self._finalize(
+            candidates.prioritize(self.last_anchors["chunk_ids"], self.last_anchors["entity_ids"])
+        )
         if reranked["chunks"] == self.last_baseline["chunks"] and (
             reranked["entities"] == self.last_baseline["entities"]
         ):
