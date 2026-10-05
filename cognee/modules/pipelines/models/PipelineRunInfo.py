@@ -1,7 +1,7 @@
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_serializer
 
 from cognee.modules.data.models.Data import Data
 
@@ -28,6 +28,17 @@ class PipelineRunInfo(BaseModel):
         # Add custom encoding handler for Data ORM model
         "json_encoders": {Data: lambda d: d.to_json()},
     }
+
+    # Leave data_ids out unless add() filled it, so the run infos nested in
+    # data_ingestion_info, progress ticks and other pipelines' results don't
+    # each carry "data_ids": null. No return annotation on purpose: with one,
+    # pydantic replaces the model's serialization schema (OpenAPI) with a dict.
+    @model_serializer(mode="wrap")
+    def _omit_unset_data_ids(self, handler):
+        serialized = handler(self)
+        if self.data_ids is None and isinstance(serialized, dict):
+            serialized.pop("data_ids", None)
+        return serialized
 
 
 class PipelineRunStarted(PipelineRunInfo):
