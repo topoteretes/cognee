@@ -1,5 +1,6 @@
 import os
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -11,6 +12,11 @@ from cognee.shared.data_models import DefaultContentPrediction, SummarizedConten
 class CognifyConfig(BaseSettings):
     classification_model: object = DefaultContentPrediction
     summarization_model: object = SummarizedContent
+    # How each chunk's TextSummary is written (env: SUMMARY_METHOD, or
+    # cognify(summary_method=...)). "llm" (default): one LLM call per chunk.
+    # "from_extraction": one "Type: name, name" line per extracted type, then
+    # the chunk's relation texts, one per line, no LLM call.
+    summary_method: Literal["llm", "from_extraction"] = "llm"
     triplet_embedding: bool = False
     chunks_per_batch: int | None = None
     # Opt-in contradiction detection (issue #3699). Default OFF so the standard
@@ -55,12 +61,23 @@ class CognifyConfig(BaseSettings):
             "gliner_auto_install": self.gliner_auto_install,
             "gliner_torch_index_url": self.gliner_torch_index_url,
             "gliner_inference_threads": self.gliner_inference_threads,
+            "summary_method": self.summary_method,
         }
 
 
 @lru_cache
 def get_cognify_config():
     return CognifyConfig()
+
+
+def resolve_summary_method(value: str | None, config: CognifyConfig) -> str:
+    """The summary method for a run: the explicit argument wins over SUMMARY_METHOD."""
+    summary_method = value or config.summary_method
+    if summary_method not in ("llm", "from_extraction"):
+        raise ValueError(
+            f"Unknown summary_method {summary_method!r}; expected 'llm' or 'from_extraction'"
+        )
+    return summary_method
 
 
 LLM_EXTRACTOR = "llm"
