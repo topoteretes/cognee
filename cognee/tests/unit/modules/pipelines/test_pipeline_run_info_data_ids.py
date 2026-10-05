@@ -99,3 +99,19 @@ def test_data_ids_skip_errored_items_after_a_json_round_trip():
     rebuilt = PipelineRunInfo.model_validate(json.loads(run.model_dump_json()))
 
     assert _extract_data_ids(rebuilt.data_ingestion_info) == [stored]
+
+
+def test_unset_data_ids_are_left_out_of_the_output():
+    """Nested run infos and other pipelines' results carry no "data_ids": null."""
+    run = _run_info(
+        PipelineRunCompleted,
+        data_ingestion_info=[{"run_info": _run_info(PipelineRunCompleted), "data_id": uuid4()}],
+    )
+
+    dumped = json.loads(run.model_dump_json())
+
+    assert "data_ids" not in dumped
+    assert "data_ids" not in dumped["data_ingestion_info"][0]["run_info"]
+    # The serializer must not hide the model's fields from the OpenAPI schema.
+    schema = PipelineRunInfo.model_json_schema(mode="serialization")
+    assert "data_ids" in schema["properties"]
