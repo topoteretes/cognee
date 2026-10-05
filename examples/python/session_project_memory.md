@@ -7,7 +7,9 @@ to `POST /api/v1/remember/entry`, or from the SDK in either spelling:
 await cognee.remember(
     cognee.QAEntry(question=q, answer=a, node_set=["project-<hash>"]), session_id="s1"
 )
-await cognee.remember(cognee.QAEntry(question=q, answer=a), session_id="s1", node_set=["project-<hash>"])
+await cognee.remember(
+    cognee.QAEntry(question=q, answer=a), session_id="s1", node_set=["project-<hash>"]
+)
 await cognee.remember("a note", session_id="s1", node_set=["project-<hash>"])  # plain text pins too
 ```
 
