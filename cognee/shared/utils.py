@@ -161,15 +161,18 @@ _PATH_LIKE_MODEL = re.compile(
 _default_telemetry_origin = TELEMETRY_ORIGIN_SDK
 
 
-def set_default_telemetry_origin(origin: str) -> None:
+def set_default_telemetry_origin(origin: str) -> str:
     """Record the surface this process is: the origin used when TELEMETRY_ORIGIN is unset.
 
     Called once by each entrypoint (CLI, MCP server, API app). Deployments that
     set TELEMETRY_ORIGIN themselves (the managed cloud sets "cloud") keep their
-    value; a process that never calls this reports the SDK default.
+    value; a process that never calls this reports the SDK default. Returns the
+    previous default, so a server started in-process can restore it on shutdown.
     """
     global _default_telemetry_origin
+    previous = _default_telemetry_origin
     _default_telemetry_origin = origin
+    return previous
 
 
 def telemetry_origin() -> str:

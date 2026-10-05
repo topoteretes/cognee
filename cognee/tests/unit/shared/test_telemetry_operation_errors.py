@@ -152,3 +152,18 @@ def test_a_failure_inside_the_sender_never_reaches_the_caller(monkeypatch):
     monkeypatch.setattr(utils, "get_persistent_id", explode)
 
     utils.send_telemetry("cognee.recall ERRORED", "sdk", additional_properties={})
+
+
+def test_an_in_process_server_releases_the_api_label_on_shutdown(monkeypatch):
+    """TestClient runs the lifespan in-process: inside it the origin is "api",
+    after it the process is the SDK again."""
+    monkeypatch.delenv(utils.TELEMETRY_ORIGIN_ENV, raising=False)
+    monkeypatch.setenv("ENABLE_BACKEND_ACCESS_CONTROL", "false")
+    from fastapi.testclient import TestClient
+
+    import cognee.api.client as client_module
+
+    assert utils.telemetry_origin() == "sdk"
+    with TestClient(client_module.app):
+        assert utils.telemetry_origin() == "api"
+    assert utils.telemetry_origin() == "sdk"
