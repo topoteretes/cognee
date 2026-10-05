@@ -86,7 +86,6 @@ class TemporalHybridRetriever(HybridRetriever):
             raise NotImplementedError("TemporalHybridRetriever answers one query at a time")
         if not str(query or "").strip():
             raise ValueError("query must not be blank")
-        validate_retriever_input(query, query_batch, self._use_session_cache())
         self._reset_diagnostics()
 
         # Duplicates super()'s emptiness check on purpose: returning here keeps
@@ -96,6 +95,8 @@ class TemporalHybridRetriever(HybridRetriever):
             self.last_reason = "empty_graph"
             return empty_hybrid_result()
 
+        # The checks HybridRetriever.get_retrieved_objects runs before its fetch.
+        validate_retriever_input(query, query_batch, self._use_session_cache())
         candidates, (start, end, reason) = await asyncio.gather(
             self._fetch_candidates(query),
             extract_query_interval(query),
