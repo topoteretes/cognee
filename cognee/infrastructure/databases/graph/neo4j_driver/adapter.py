@@ -156,6 +156,11 @@ class Neo4jAdapter(GraphDBInterface):
     # get_connections returns triples edge_endpoints can normalise.
     supports_incremental_chunk_updates = True
 
+    # Core node fields get_filtered_graph_data may filter on. Anything else is
+    # rejected before it can reach the query text at all.
+    # Mirrors the guard the postgres_demo and turso adapters enforce.
+    _ALLOWED_FILTER_ATTRS = {"id", "name", "type"}
+
     def __init__(
         self,
         graph_database_url: str,
@@ -2166,32 +2171,44 @@ class Neo4jAdapter(GraphDBInterface):
         """
         Fetch nodes and edges filtered by specific attribute criteria.
 
+        Filter values are bound as query parameters rather than interpolated into the
+        Cypher text, and attribute names are restricted to ``_ALLOWED_FILTER_ATTRS``.
+
         Parameters:
         -----------
 
             - attribute_filters: A list of dictionaries representing attributes and associated
-              values for filtering.
+              values for filtering. Attribute keys must be one of ``_ALLOWED_FILTER_ATTRS``.
 
         Returns:
         --------
 
             A tuple containing filtered nodes and edges based on the specified criteria.
-        """
-        where_clauses = []
-        for attribute, values in attribute_filters[0].items():
-            values_str = ", ".join(
-                f"'{value}'" if isinstance(value, str) else str(value) for value in values
-            )
-            where_clauses.append(f"n.{attribute} IN [{values_str}]")
 
-        where_clause = " AND ".join(where_clauses)
+        Raises:
+        -------
+
+            ValueError: If an attribute is not in ``_ALLOWED_FILTER_ATTRS``.
+        """
+        filter_attrs = []
+        params = {}
+        for attribute, values in attribute_filters[0].items():
+            if attribute not in self._ALLOWED_FILTER_ATTRS:
+                raise ValueError(f"Invalid filter attribute: {attribute!r}")
+            param_name = f"filter_{attribute}"
+            filter_attrs.append((attribute, param_name))
+            params[param_name] = list(values)
+
+        where_clause = " AND ".join(
+            f"n.{attribute} IN ${param}" for attribute, param in filter_attrs
+        )
 
         query_nodes = f"""
         MATCH (n)
         WHERE {where_clause}
         RETURN n.id AS id, labels(n) AS labels, properties(n) AS properties
         """
-        result_nodes = await self.query(query_nodes)
+        result_nodes = await self.query(query_nodes, params)
 
         nodes = [
             (
@@ -2201,12 +2218,20 @@ class Neo4jAdapter(GraphDBInterface):
             for record in result_nodes
         ]
 
+        # Built from the attribute list rather than by rewriting the n.-side text with
+        # .replace("n.", "m."), which also rewrote any filter value that happened to
+        # contain the substring "n." (for example "Section n.1").
+        edge_where_clause = " AND ".join(
+            [f"n.{attribute} IN ${param}" for attribute, param in filter_attrs]
+            + [f"m.{attribute} IN ${param}" for attribute, param in filter_attrs]
+        )
+
         query_edges = f"""
         MATCH (n)-[r]->(m)
-        WHERE {where_clause} AND {where_clause.replace("n.", "m.")}
+        WHERE {edge_where_clause}
         RETURN n.id AS source, m.id AS target, TYPE(r) AS type, properties(r) AS properties
         """
-        result_edges = await self.query(query_edges)
+        result_edges = await self.query(query_edges, params)
 
         edges = []
         for record in result_edges:
