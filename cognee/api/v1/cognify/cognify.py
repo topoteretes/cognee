@@ -16,6 +16,7 @@ from cognee.modules.cognify.config import (
     ensure_extractor_runtime,
     get_cognify_config,
     resolve_extractor,
+    resolve_summary_method,
 )
 from cognee.modules.cognify.rollback import cognify_rollback_handler
 from cognee.modules.cognify.routing import CognifyRoute, cognify_route_for
@@ -132,6 +133,7 @@ async def cognify(
     chunk_attachment: Literal["direct", "all"] | None = None,
     extractor: Literal["llm", "gliner_demo", "gliner"] | None = None,
     ontology_file_path: str | None = None,
+    summary_method: Literal["llm", "from_extraction"] | None = None,
     **kwargs,
 ):
     """
@@ -238,6 +240,12 @@ async def cognify(
                  generic KnowledgeGraph, so a custom graph_model raises. Raises with
                  temporal_cognify=True, with dry_run=True, or while connected to a
                  remote instance — none of those paths can honour it yet.
+        summary_method: How the standard pipeline writes each chunk's summary. "llm"
+                 makes one LLM call per chunk; "from_extraction" joins the chunk's
+                 extracted types and relation texts with no LLM call, and a chunk
+                 with no relations gets no summary. The explicit argument wins over
+                 the SUMMARY_METHOD setting ("llm" by default). Raises while
+                 connected to a remote instance.
 
     Returns:
         Union[dict, list[PipelineRunInfo], DryRunEstimate]:
@@ -320,6 +328,7 @@ async def cognify(
     # that cannot honour it raise below instead of silently running something
     # other than what the caller selected.
     resolved_extractor = resolve_extractor(extractor, cognify_config)
+    resolved_summary_method = resolve_summary_method(summary_method, cognify_config)
 
     if temporal_cognify and resolved_extractor == GLINER_DEMO_EXTRACTOR:
         raise ValueError(
@@ -372,6 +381,12 @@ async def cognify(
                 "extractor is not supported while connected to a remote Cognee "
                 "instance. Call cognee.disconnect() to choose the extractor locally."
             )
+        if summary_method is not None:
+            # Same as extractor: client.cognify() has no summary_method field.
+            raise ValueError(
+                "summary_method is not supported while connected to a remote Cognee "
+                "instance. Call cognee.disconnect() to choose the summary method locally."
+            )
         return await client.cognify(
             datasets,
             chunk_size=chunk_size,
@@ -423,6 +438,7 @@ async def cognify(
                 chunker=chunker,
                 chunk_size=await resolve_chunk_size(chunk_size),
                 custom_prompt=custom_prompt,
+                summary_method=resolved_summary_method,
             )
 
         if temporal_cognify:
@@ -470,6 +486,7 @@ async def cognify(
                 chunks_per_batch=chunks_per_batch,
                 functional_relationships=functional_relationships,
                 chunk_attachment=chunk_attachment,
+                summary_method=resolved_summary_method,
                 **kwargs,
             )
 
@@ -577,10 +594,12 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     chunks_per_batch: int | None = None,
     functional_relationships: Collection[str] | None = None,
     chunk_attachment: Literal["direct", "all"] | None = None,
+    summary_method: Literal["llm", "from_extraction"] | None = None,
     **kwargs,
 ) -> list[Task]:
     cognify_config = get_cognify_config()
     embed_triplets = cognify_config.triplet_embedding
+    summary_method = summary_method or cognify_config.summary_method
     check_contradictions = cognify_config.contradiction_detection
     track_provenance = cognify_config.provenance_tracking
 
@@ -611,6 +630,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             config=config,
             custom_prompt=custom_prompt,
             chunk_attachment=chunk_attachment,
+            summary_method=summary_method,
             task_config={"batch_size": chunks_per_batch},
             **kwargs,
         ),
