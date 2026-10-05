@@ -14,6 +14,7 @@ from cognee.modules.graph.utils import (
     collect_stored_data_points,
     construct_data_points_and_edges,
     find_existing_edge_identities,
+    restore_entity_type_categories,
 )
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.modules.ontology.construct_data_points_and_edges_with_ontology import (
@@ -158,6 +159,8 @@ async def integrate_chunk_graphs(
             ontology_resolver,
             ontology_mode=ontology_mode,
         )
+
+    await restore_entity_type_categories(data_points_by_id)
 
     # What each chunk's own extraction yielded, recorded during construction —
     # the same record chunk ownership is derived from. These relationships get
