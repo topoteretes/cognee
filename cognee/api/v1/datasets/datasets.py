@@ -102,6 +102,45 @@ async def _invalidate_sessions_for_deleted_data_nonfatal(
         )
 
 
+def _count_elements(elements) -> int:
+    """Size of a deleted-element id collection; 0 for anything that is not sized."""
+    try:
+        return len(elements)
+    except TypeError:
+        return 0
+
+
+def _delete_data_receipt(
+    *,
+    dataset_id: UUID,
+    data_id: UUID,
+    data_record_found: bool,
+    deleted_elements: DeletedGraphElements | None,
+    remaining_data: list,
+    dataset_deleted: bool,
+) -> dict:
+    """Build the receipt ``datasets.delete_data`` returns.
+
+    ``data_remaining`` is observed, not inferred: it is computed from the
+    dataset listing taken after the delete, so ``False`` means the Data row
+    is verifiably gone.
+    """
+    node_ids = getattr(deleted_elements, "node_ids", None)
+    edge_ids = getattr(deleted_elements, "edge_ids", None)
+    return {
+        "status": "success",
+        "dataset_id": str(dataset_id),
+        "data_id": str(data_id),
+        "data_record_found": data_record_found,
+        "deleted_nodes": _count_elements(node_ids),
+        "deleted_edges": _count_elements(edge_ids),
+        "data_remaining": any(
+            str(getattr(item, "id", None)) == str(data_id) for item in remaining_data or []
+        ),
+        "dataset_deleted": dataset_deleted,
+    }
+
+
 class datasets:
     """
     Dataset management namespace for Cognee.
@@ -221,7 +260,26 @@ class datasets:
         user: User | None = None,
         mode: str = "soft",  # mode is there for backwards compatibility. Don't use "hard", it is dangerous.
         delete_dataset_if_empty: bool = False,  # if this flag is True, delete the whole dataset if it is left empty after data deletion
-    ):
+    ) -> dict:
+        """Delete one data item and return a receipt of what was removed.
+
+        The receipt keeps the historical ``{"status": "success"}`` shape and
+        adds the facts a caller needs to trust the deletion without listing
+        the dataset again:
+
+        - ``dataset_id`` / ``data_id``: the targets, as strings (``data_id``
+          is the resolved id when a legacy id was passed).
+        - ``data_record_found``: whether a ``Data`` row for ``data_id`` existed
+          in the dataset. ``False`` means the custom-graph-model path ran —
+          only graph elements owned by the id were removed.
+        - ``deleted_nodes`` / ``deleted_edges``: graph elements removed.
+        - ``data_remaining``: whether a ``Data`` row for ``data_id`` is still
+          present after the deletion, as observed by re-listing the dataset.
+          ``False`` is the verified outcome; ``True`` means the relational
+          delete did not take effect and the caller should retry.
+        - ``dataset_deleted``: whether ``delete_dataset_if_empty`` removed the
+          now-empty dataset.
+        """
         async with record_operation(
             "delete", user=user, dataset_id=dataset_id
         ) as operation_context:
@@ -267,10 +325,19 @@ class datasets:
                         )
 
                         dataset_data = await get_dataset_data(dataset.id)
+                        dataset_deleted = False
                         if not dataset_data and delete_dataset_if_empty:
                             await delete_dataset(dataset)
+                            dataset_deleted = True
 
-                    return {"status": "success"}
+                    return _delete_data_receipt(
+                        dataset_id=dataset.id,
+                        data_id=data_id,
+                        data_record_found=False,
+                        deleted_elements=deleted_elements,
+                        remaining_data=dataset_data,
+                        dataset_deleted=dataset_deleted,
+                    )
 
                 if str(data.dataset_id) != str(dataset_id):
                     raise UnauthorizedDataAccessError(f"Data {data_id} not accessible.")
@@ -306,11 +373,22 @@ class datasets:
 
                     await delete_data(data, dataset_id)
 
+                    # Re-list so the receipt reports the observed outcome, not
+                    # the intent: a caller can trust data_remaining=False.
                     dataset_data = await get_dataset_data(dataset.id)
+                    dataset_deleted = False
                     if not dataset_data and delete_dataset_if_empty:
                         await delete_dataset(dataset)
+                        dataset_deleted = True
 
-            return {"status": "success"}
+            return _delete_data_receipt(
+                dataset_id=dataset.id,
+                data_id=data_id,
+                data_record_found=True,
+                deleted_elements=deleted_elements,
+                remaining_data=dataset_data,
+                dataset_deleted=dataset_deleted,
+            )
 
     @staticmethod
     async def delete_all(user: User | None = None):
