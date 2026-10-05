@@ -98,6 +98,7 @@ CLI, and `RememberResult.improve`.
 | `session_manager_unavailable` | The session cache is not reachable |
 | `lock_held` | Another improve for the same dataset or session is running (below) |
 | `aborted_by_fatal_stage` | Stage 2 failed, so the rest did not run |
+| `budget_exhausted` | An earlier stage failed because the LLM budget is exhausted (a 402); the rest would fail the same way. Top up, then run improve again |
 | `no_new_entries`, `no_new_trace_steps`, `no_writes_since_last_improve` | With status `already_completed`: nothing new since the last run |
 
 ### How remember() triggers improve
@@ -111,6 +112,12 @@ CLI, and `RememberResult.improve`.
   `wait_for_background_tasks()`.
 - `self_improvement=False` turns it off per call; `IMPROVE_AUTO_ENABLED=false`
   turns it off everywhere and overrides `self_improvement=True`.
+- An application embedding cognee can decline one automatic improve before it
+  starts: `cognee.modules.improve.register_auto_improve_admission(check)`
+  registers one async check that `remember()` awaits on both paths. Returning
+  a reason string skips the improve and sets `result.improve_skipped`
+  (`result.improve` stays `None`); the data is stored either way. A check that
+  raises allows the improve. Explicit `improve()` calls are never gated.
 
 ### Settings (`IMPROVE_*`, `cognee/modules/improve/config.py`)
 

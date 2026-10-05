@@ -663,6 +663,12 @@ async def _wait_for_cloud_cognify(
     only the API round trip. Poll ``GET /v1/datasets/status`` until each
     started dataset reports COMPLETED (raising on ERRORED/timeout) so the
     benchmarked cognify time covers the actual knowledge-graph build.
+
+    The poll asks for ``include_error_detail``: on a Cloud tenant each status
+    then comes back as ``{status, reason, error}``, where ``error`` is the
+    text the pipeline run stored. Without it a failed build reports only
+    "errored", and the tenant is deleted at the end of the run, so the cause
+    is gone before anyone can read it.
     """
     pending = {
         str(dataset_id)
@@ -680,6 +686,7 @@ async def _wait_for_cloud_cognify(
         await asyncio.sleep(poll_interval_s)
         params = [("dataset", dataset_id) for dataset_id in sorted(pending)]
         params.append(("pipeline", "cognify_pipeline"))
+        params.append(("include_error_detail", "true"))
         async with session.get(
             f"{client.service_url}/api/v1/datasets/status", params=params
         ) as resp:
@@ -687,13 +694,29 @@ async def _wait_for_cloud_cognify(
                 continue  # transient status-endpoint hiccup; keep polling
             statuses = await resp.json()
         for dataset_id in list(pending):
-            value = statuses.get(dataset_id)
-            if isinstance(value, dict):  # nested {pipeline_name: status} shape
-                value = value.get("cognify_pipeline")
+            value, detail = _cognify_status(statuses.get(dataset_id))
             if value == "DATASET_PROCESSING_COMPLETED":
                 pending.discard(dataset_id)
             elif value == "DATASET_PROCESSING_ERRORED":
-                raise RuntimeError(f"cognify errored on the tenant for dataset {dataset_id}")
+                raise RuntimeError(
+                    f"cognify errored on the tenant for dataset {dataset_id}{detail}"
+                )
+
+
+def _cognify_status(value) -> tuple[str | None, str]:
+    """The cognify status in one dataset's entry, plus what the tenant said about it.
+
+    Three shapes reach here: a bare status string; the nested
+    ``{pipeline_name: status}`` map; and, with ``include_error_detail``, a
+    Cloud tenant's ``{status, reason, error}`` object. The detail is rendered
+    for the error message, the reason first so a budget failure reads as one.
+    """
+    if not isinstance(value, dict):
+        return value, ""
+    if "status" in value:
+        parts = [str(value[key]) for key in ("reason", "error") if value.get(key)]
+        return value["status"], f" ({'; '.join(parts)})" if parts else ""
+    return value.get("cognify_pipeline"), ""
 
 
 async def run_benchmark_cloud(
