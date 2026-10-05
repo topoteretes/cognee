@@ -2179,6 +2179,8 @@ class Neo4jAdapter(GraphDBInterface):
 
             - attribute_filters: A list of dictionaries representing attributes and associated
               values for filtering. Attribute keys must be one of ``_ALLOWED_FILTER_ATTRS``.
+              Every entry contributes a clause and the clauses are ANDed together, matching
+              the postgres_demo, turso and ladybug adapters.
 
         Returns:
         --------
@@ -2190,14 +2192,21 @@ class Neo4jAdapter(GraphDBInterface):
 
             ValueError: If an attribute is not in ``_ALLOWED_FILTER_ATTRS``.
         """
+        if not attribute_filters:
+            return [], []
+
         filter_attrs = []
         params = {}
-        for attribute, values in attribute_filters[0].items():
-            if attribute not in self._ALLOWED_FILTER_ATTRS:
-                raise ValueError(f"Invalid filter attribute: {attribute!r}")
-            param_name = f"filter_{attribute}"
-            filter_attrs.append((attribute, param_name))
-            params[param_name] = list(values)
+        for index, filter_dict in enumerate(attribute_filters):
+            for attribute, values in filter_dict.items():
+                if attribute not in self._ALLOWED_FILTER_ATTRS:
+                    raise ValueError(f"Invalid filter attribute: {attribute!r}")
+                param_name = f"filter_{index}_{attribute}"
+                filter_attrs.append((attribute, param_name))
+                params[param_name] = list(values)
+
+        if not filter_attrs:
+            return [], []
 
         where_clause = " AND ".join(
             f"n.{attribute} IN ${param}" for attribute, param in filter_attrs
