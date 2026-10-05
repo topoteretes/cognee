@@ -4,6 +4,7 @@ import asyncio
 import http.server
 import os
 import pathlib
+import re
 import socketserver
 import ssl
 from datetime import datetime, timezone
@@ -139,6 +140,55 @@ TELEMETRY_FINGERPRINT_PREFIX = "fp:"
 TELEMETRY_DATASET_NAME_PROPERTIES = ["dataset_name", "dataset"]
 
 
+# Where a telemetry event originates: the surface the process is. Each entrypoint
+# sets its own value as the process default (``set_default_telemetry_origin``);
+# an explicit TELEMETRY_ORIGIN in the environment (e.g. "cloud") always wins. The
+# default is process-local, not an environment variable: a child process (the API
+# server `cognee-cli -ui` starts) must label itself, not inherit its parent's label.
+TELEMETRY_ORIGIN_ENV = "TELEMETRY_ORIGIN"
+TELEMETRY_ORIGIN_SDK = "sdk"
+TELEMETRY_ORIGIN_API = "api"
+TELEMETRY_ORIGIN_CLI = "cli"
+TELEMETRY_ORIGIN_MCP = "mcp"
+# A model setting that is a filesystem path (a local GGUF, a mounted checkpoint)
+# carries the account name in it. It leaves the process as this closed value.
+TELEMETRY_LOCAL_PATH_LABEL = "local_path"
+_PATH_LIKE_MODEL = re.compile(
+    r"^(/|~[/\\]|\.{1,2}[/\\]|[A-Za-z]:[/\\]|\\\\)|[/\\](Users|home|root)[/\\]"
+)
+
+
+_default_telemetry_origin = TELEMETRY_ORIGIN_SDK
+
+
+def set_default_telemetry_origin(origin: str) -> None:
+    """Record the surface this process is: the origin used when TELEMETRY_ORIGIN is unset.
+
+    Called once by each entrypoint (CLI, MCP server, API app). Deployments that
+    set TELEMETRY_ORIGIN themselves (the managed cloud sets "cloud") keep their
+    value; a process that never calls this reports the SDK default.
+    """
+    global _default_telemetry_origin
+    _default_telemetry_origin = origin
+
+
+def telemetry_origin() -> str:
+    """The origin the next event carries: the environment's value, else the process default."""
+    return os.getenv(TELEMETRY_ORIGIN_ENV) or _default_telemetry_origin
+
+
+def telemetry_model_label(model: Any) -> Any:
+    """The model setting as telemetry may carry it: a path becomes ``local_path``.
+
+    Provider model names (``openai/gpt-5-mini``, ``ollama/phi4:latest``) pass
+    through. A filesystem path (``/Users/<name>/models/x.gguf``, ``C:\\models\\x``)
+    names the account and the machine layout, so only the closed label leaves.
+    """
+    if isinstance(model, str) and _PATH_LIKE_MODEL.search(model):
+        return TELEMETRY_LOCAL_PATH_LABEL
+    return model
+
+
 def telemetry_exception_type(error: BaseException) -> str:
     """The class name telemetry records for ``error`` — never its message.
 
@@ -150,6 +200,53 @@ def telemetry_exception_type(error: BaseException) -> str:
     """
     root = getattr(error, "first_error", None) or error
     return type(root).__name__
+
+
+def telemetry_on_error(event_name: str):
+    """Emit ``event_name`` with the error's class when the wrapped coroutine fails.
+
+    The terminal event the Started/Completed pair of an operation lacks: without
+    it a failed ``search`` or ``recall`` is a Started with no end, indistinguishable
+    in the warehouse from a run that is still going. Carries ``exception_type``
+    only (``telemetry_exception_type``), never the message. ``BaseException`` so a
+    cancelled call ends too, as ``run_tasks_with_telemetry`` does; the error is
+    always re-raised, telemetry never changes the outcome. The ``user`` argument
+    of the call, when there is one, is the event's identity.
+    """
+    import functools
+    import inspect
+
+    def decorate(func):
+        signature = inspect.signature(func)
+
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            try:
+                return await func(*args, **kwargs)
+            except BaseException as error:
+                try:
+                    user = signature.bind_partial(*args, **kwargs).arguments.get("user")
+                except TypeError:
+                    user = None
+                send_telemetry(
+                    event_name,
+                    user if user is not None else "sdk",
+                    additional_properties={
+                        "exception_type": telemetry_exception_type(error),
+                        "cognee_version": _cognee_version(),
+                    },
+                )
+                raise
+
+        return wrapper
+
+    return decorate
+
+
+def _cognee_version() -> str:
+    from cognee import __version__
+
+    return __version__
 
 
 def _fingerprint(value: str) -> str:
@@ -440,17 +537,26 @@ def send_telemetry(
     env = os.getenv("ENV")
     if env in ["test", "dev"]:
         return
+    try:
+        _send_telemetry(event_name, user if user is not None else user_id, additional_properties)
+    except Exception:
+        # Telemetry is best-effort and is often emitted from an except block: an
+        # error here must never surface, let alone replace the caller's exception.
+        logger.debug("Telemetry event %s dropped", event_name, exc_info=True)
+
+
+def _send_telemetry(event_name: str, user, additional_properties: dict) -> None:
     additional_properties = _sanitize_nested_properties(
         obj=additional_properties, property_names=TELEMETRY_SANITIZED_PROPERTIES
     )
-    resolved_user_id, tenant_id = _resolve_identity(user if user is not None else user_id)
+    resolved_user_id, tenant_id = _resolve_identity(user)
     anonymous_id = str(get_anonymous_id())
     persistent_id = str(get_persistent_id())
     api_key_tracking_id = _get_api_key_tracking_id()
     # Where this telemetry event originates. Defaults to "sdk"; deployments such
     # as the managed cloud set TELEMETRY_ORIGIN (e.g. "cloud") so events can be
     # segmented by origin.
-    telemetry_origin = os.getenv("TELEMETRY_ORIGIN", "sdk")
+    origin = telemetry_origin()
     current_time = datetime.now(timezone.utc)
     payload = {
         "anonymous_id": anonymous_id,
@@ -470,7 +576,7 @@ def send_telemetry(
             "persistent_id": persistent_id,
             "api_key_tracking_id": api_key_tracking_id,
             "api_key_hash": api_key_tracking_id,
-            "telemetry_origin": telemetry_origin,
+            "telemetry_origin": origin,
             **additional_properties,
         },
     }

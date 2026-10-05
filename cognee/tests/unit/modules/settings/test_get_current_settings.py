@@ -49,3 +49,59 @@ def test_llm_block_says_whether_the_llm_is_usable(monkeypatch):
 
     monkeypatch.setattr(settings_module, "llm_available", lambda *_: True)
     assert settings_module.get_current_settings()["llm"]["configured"] is True
+
+
+def test_model_settings_that_are_paths_leave_as_the_local_path_label(monkeypatch):
+    """A model pointing at a local file names the OS account; telemetry carries a label."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        settings_module,
+        "get_llm_context_config",
+        lambda: SimpleNamespace(
+            llm_provider="custom", llm_model="/Users/alice/models/x.gguf", llm_api_key=""
+        ),
+    )
+    monkeypatch.setattr(
+        settings_module, "resolve_embedding_names", lambda *_: ("custom", "/home/alice/embed")
+    )
+
+    payload = settings_module.get_current_settings()
+
+    assert payload["llm"] == {"provider": "custom", "model": "local_path", "configured": False}
+    assert payload["embedding"] == {"provider": "custom", "model": "local_path"}
+
+
+def test_llm_half_reads_the_same_context_config_as_the_embedding_half(monkeypatch):
+    """A per-call LLMConfig must describe the whole event, not only its embedder."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        settings_module,
+        "get_llm_context_config",
+        lambda: SimpleNamespace(
+            llm_provider="anthropic", llm_model="anthropic/claude", llm_api_key="sk-test"
+        ),
+    )
+    payload = settings_module.get_current_settings()
+    assert payload["llm"] == {
+        "provider": "anthropic",
+        "model": "anthropic/claude",
+        "configured": True,
+    }
+
+
+def test_configured_follows_the_per_call_config_not_the_process_one(monkeypatch):
+    """No mock of llm_available: a per-call config with a key makes the event
+    report a usable LLM, and one without a key an unused default."""
+    from types import SimpleNamespace
+
+    for key, expected in (("sk-test", True), ("", False)):
+        monkeypatch.setattr(
+            settings_module,
+            "get_llm_context_config",
+            lambda key=key: SimpleNamespace(
+                llm_provider="openai", llm_model="openai/gpt-5-mini", llm_api_key=key
+            ),
+        )
+        assert settings_module.get_current_settings()["llm"]["configured"] is expected

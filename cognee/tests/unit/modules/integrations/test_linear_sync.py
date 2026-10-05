@@ -59,7 +59,7 @@ def mocks(monkeypatch):
     monkeypatch.setattr(_remember_module, "remember", mocked.remember)
     monkeypatch.setattr(_users_methods, "get_user", mocked.get_user)
     # Imported lazily inside sync_recent_issues (circular-import seam).
-    monkeypatch.setattr(adapter_module, "access_token_for", lambda _credential: "lin_tok")
+    monkeypatch.setattr(adapter_module, "access_token_for", AsyncMock(return_value="lin_tok"))
     return mocked
 
 
@@ -132,3 +132,20 @@ async def test_sync_recent_issues_with_no_issues_remembers_nothing(mocks):
     await sync_module.sync_recent_issues(_credential())
 
     mocks.remember.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_401_on_the_issue_query_refreshes_the_token_and_asks_again(mocks, monkeypatch):
+    from cognee.modules.integrations.linear.client import LinearUnauthorizedError
+
+    mocks.graphql.side_effect = [
+        LinearUnauthorizedError("Linear RecentIssues failed: HTTP 401"),
+        {"issues": {"nodes": [_ISSUE]}},
+    ]
+    refresh = AsyncMock(side_effect=["lin_tok", "lin_tok_2"])
+    monkeypatch.setattr(adapter_module, "access_token_for", refresh)
+
+    await sync_module.sync_recent_issues(_credential())
+
+    assert [call.args[0] for call in mocks.graphql.await_args_list] == ["lin_tok", "lin_tok_2"]
+    assert mocks.remember.await_count == 1

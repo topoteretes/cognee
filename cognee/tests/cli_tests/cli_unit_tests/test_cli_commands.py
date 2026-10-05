@@ -976,36 +976,56 @@ class TestConfigGetSetPersistence:
     def test_set_persists_across_process_boundary(self, tmp_path, monkeypatch):
         """Reproduces the originally reported bug: `config set` must survive
         past the current process, since each `cognee-cli` invocation is a
-        fresh process re-reading config from scratch."""
+        fresh process re-reading config from scratch. The fresh process is a
+        real child interpreter: settings classes read only the environment the
+        .env resolver fills at import, so nothing short of a new import
+        re-reads the file."""
+        import subprocess
+
         from cognee.infrastructure.data.chunking.config import get_chunk_config
+        from cognee.shared import env_file
 
-        # A real CHUNK_SIZE env var (e.g. leftover from `dotenv.load_dotenv`
-        # picking up a developer's own .env at cognee import time) would
-        # outrank the .env file this test writes below, since pydantic-settings
-        # prioritizes real environment variables over dotenv-file values.
-        monkeypatch.delenv("CHUNK_SIZE", raising=False)
+        # Persist writes into the .env this process loaded. Pretend none was
+        # loaded, so the write lands in tmp_path/.env and never in the
+        # developer's own .env that the test session picked up at import.
+        monkeypatch.setattr(env_file, "_loaded", True)
+        monkeypatch.setattr(env_file, "_resolved", None)
+        monkeypatch.chdir(tmp_path)
 
-        original_cwd = os.getcwd()
         original_chunk_size = get_chunk_config().chunk_size
         try:
-            os.chdir(tmp_path)
-
             result = cognee.config.set("chunk_size", "999", persist=True)
-
-            assert result["created"] is True
-            env_path = tmp_path / ".env"
-            assert env_path.exists()
-            # dotenv.set_key quotes values, e.g. CHUNK_SIZE='999'.
-            assert "CHUNK_SIZE=" in env_path.read_text()
-            assert "999" in env_path.read_text()
-
-            # Simulate a fresh process re-reading config from the persisted .env.
-            get_chunk_config.cache_clear()
-            assert get_chunk_config().chunk_size == 999
         finally:
-            os.chdir(original_cwd)
-            get_chunk_config.cache_clear()
             get_chunk_config().chunk_size = original_chunk_size
+
+        env_path = tmp_path / ".env"
+        assert result["created"] is True
+        assert result["path"] == str(env_path)
+        # dotenv.set_key quotes values, e.g. CHUNK_SIZE='999'.
+        assert "CHUNK_SIZE=" in env_path.read_text()
+        assert "999" in env_path.read_text()
+
+        # The next cognee-cli invocation: a new interpreter started in the same
+        # directory, with no CHUNK_SIZE and no pinned file inherited from here.
+        child_env = {
+            k: v for k, v in os.environ.items() if k not in ("CHUNK_SIZE", "COGNEE_ENV_FILE")
+        }
+        code = (
+            "import cognee\n"
+            "from cognee.infrastructure.data.chunking.config import get_chunk_config\n"
+            "print(get_chunk_config().chunk_size)"
+        )
+        child = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=tmp_path,
+            env=child_env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+        assert child.returncode == 0, child.stderr[-2000:]
+        assert child.stdout.strip().splitlines()[-1] == "999"
 
 
 class TestFeedbackCommand:

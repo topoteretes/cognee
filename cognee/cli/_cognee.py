@@ -248,8 +248,13 @@ def main() -> int:
     # Operations run from this process record origin="cli" in pipeline_runs.
     # ContextVars set here propagate into every asyncio.run() a command makes.
     from cognee.modules.operations import ORIGIN_CLI, set_operation_origin
+    from cognee.shared.utils import TELEMETRY_ORIGIN_CLI, set_default_telemetry_origin
 
     set_operation_origin(ORIGIN_CLI)
+    # Telemetry events from this process say they came from the CLI (an explicit
+    # TELEMETRY_ORIGIN in the environment still wins). Process-local: the API
+    # server that `cognee-cli -ui` starts labels itself "api".
+    set_default_telemetry_origin(TELEMETRY_ORIGIN_CLI)
 
     parser, installed_commands = _create_parser()
     args = parser.parse_args()

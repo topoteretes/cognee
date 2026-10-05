@@ -1,25 +1,22 @@
-"""SDK-owned Google sources used by the OAuth integrations."""
+"""SDK-owned Google sources used by the OAuth integrations.
+
+The provider-keyed entry points live in ``cognee.modules.integrations.ingestion``;
+the names re-exported here keep existing callers working.
+"""
 
 import asyncio
-import json
 from collections.abc import Callable
-from hashlib import sha256
-from importlib import import_module
 from typing import Any
 
 from cognee.modules.integrations.credentials import require_active_credential
-
-
-def resource_name(provider: str, credential: Any, scope: str = "") -> str:
-    """dlt cursors belong to resources, not destination datasets.
-
-    Include the owner as well as the Google account so a later owner cannot
-    inherit the former owner's cursor, including Drive's shared 'root' scope.
-    """
-    identity = [str(credential.user_id), str(credential.provider_account_id), scope]
-    digest = sha256(json.dumps(identity).encode()).hexdigest()[:24]
-    prefix = "gmail_messages" if provider == "gmail" else "google_drive_files"
-    return f"{prefix}_{digest}"
+from cognee.modules.integrations.ingestion import (
+    add_source_counts,
+    build_service,
+    empty_resource,
+    resource_name,
+    source_counts,
+    source_factory,
+)
 
 
 def extraction_checkpoint(credential: Any) -> Callable[[], None]:
@@ -78,63 +75,7 @@ async def retire_resources(
             self_improvement=False,
         )
         if getattr(result, "status", None) == "errored":
-            raise RuntimeError("Failed to remove deselected Google resource data")
-
-
-def empty_resource(provider: str, name: str, check_active=None):
-    """Explicitly empty a staging table and reset its cursor for re-selection."""
-    import dlt
-
-    from cognee.tasks.ingestion.dlt_utils import DOCUMENT_SOURCE_ATTR, PIPELINE_SCOPE_ATTR
-
-    @dlt.resource(name=name, columns={"id": {"data_type": "text", "primary_key": True}})
-    def empty():
-        if check_active is not None:
-            check_active()
-        dlt.current.resource_state().clear()
-        yield []  # Explicit empty replace, not a zero-change merge.
-
-    resource = empty()
-    setattr(resource, DOCUMENT_SOURCE_ATTR, provider)
-    setattr(resource, PIPELINE_SCOPE_ATTR, name)
-    return resource
-
-
-def source_factory(provider: str) -> Callable[..., Any]:
-    module_name, factory_name = {
-        "google_drive": (
-            "cognee.tasks.ingestion.connectors.google_drive",
-            "google_drive_source",
-        ),
-        "gmail": ("cognee.tasks.ingestion.connectors.gmail", "gmail_source"),
-    }[provider]
-    return getattr(import_module(module_name), factory_name)
-
-
-def build_service(provider: str, access_token: str) -> Any:
-    """Inject the core-owned OAuth token without a connector-side login flow."""
-    from google.oauth2.credentials import Credentials
-    from googleapiclient.discovery import build
-
-    api, version = {"google_drive": ("drive", "v3"), "gmail": ("gmail", "v1")}[provider]
-    return build(api, version, credentials=Credentials(token=access_token), cache_discovery=False)
-
-
-def source_counts(source: Any) -> dict[str, int]:
-    """Read count-only diagnostics published by the SDK source."""
-    raw = getattr(source, "cognee_sync_stats", None)
-    if not isinstance(raw, dict):
-        return {}
-    return {
-        key: value
-        for key, value in raw.items()
-        if isinstance(key, str) and type(value) is int and value >= 0
-    }
-
-
-def add_source_counts(totals: dict[str, int], source: Any) -> None:
-    for key, value in source_counts(source).items():
-        totals[key] = totals.get(key, 0) + value
+            raise RuntimeError("Failed to remove deselected resource data")
 
 
 # This local API runs one worker. A multi-worker deployment must replace this

@@ -15,10 +15,10 @@ from cognee.infrastructure.databases.vector.embeddings.config import (
     get_embedding_context_config,
     resolve_embedding_names,
 )
-from cognee.infrastructure.llm import get_llm_config
 from cognee.infrastructure.llm.config import get_llm_context_config
 from cognee.modules.cognify.config import EXTRACTORS, get_cognify_config, resolve_extractor_name
 from cognee.modules.preflight import llm_available
+from cognee.shared.utils import telemetry_model_label
 
 
 class LLMConfig(TypedDict):
@@ -70,7 +70,10 @@ def _graph_extractor_setting() -> str:
 
 
 def get_current_settings() -> SettingsDict:
-    llm_config = get_llm_config()
+    # The context config when a per-call LLMConfig is set, else the process one:
+    # the same resolution the embedding half below uses, so one event never
+    # describes two configurations.
+    llm_config = get_llm_context_config()
     graph_config = get_graph_config()
     vector_config = get_vectordb_config()
     relational_config = get_relational_config()
@@ -84,15 +87,17 @@ def get_current_settings() -> SettingsDict:
     return {
         "llm": {
             "provider": llm_config.llm_provider,
-            "model": llm_config.llm_model,
+            # A model that is a filesystem path leaves as "local_path", never the path.
+            "model": telemetry_model_label(llm_config.llm_model),
             # provider/model are the configured values even when no key is set, so
             # a keyless install reports the unused default. ``configured`` says
-            # whether that LLM is usable: the same rule that picks the keyless path.
+            # whether that LLM is usable: the rule recall() and the keyless path use,
+            # applied to the same per-call config as the rest of this payload.
             "configured": llm_available(llm_config),
         },
         "embedding": {
             "provider": embedding_provider,
-            "model": embedding_model,
+            "model": telemetry_model_label(embedding_model),
         },
         "graph_extractor": _graph_extractor_setting(),
         "graph": {

@@ -161,3 +161,28 @@ async def test_no_context_means_no_run_id_but_the_events_still_flow(events):
     for _, props in _pipeline_events(events):
         assert "pipeline_run_id" not in props
         assert props["pipeline_name"] == "cognify_pipeline"
+
+
+@pytest.mark.asyncio
+async def test_a_nested_failure_is_reported_once_at_the_task_where_it_happened(events):
+    """Tasks nest (a task's loop drives the next task), so one failure unwinds
+    through every upstream handler; only the failing task emits Task Errored."""
+
+    async def first(data):
+        return data
+
+    async def second(data):
+        return data
+
+    async def third(data):
+        raise RuntimeError("rate limited")
+
+    with pytest.raises(RuntimeError):
+        await _drain(
+            [Task(first), Task(second), Task(third)], PipelineContext(pipeline_run_id=uuid4())
+        )
+
+    errored = _task_events(events, "Errored")
+    assert [props["task_name"] for _, props in errored] == ["third"]
+    assert errored[0][1]["exception_type"] == "RuntimeError"
+    assert len([n for n, _ in _pipeline_events(events) if n == "Pipeline Run Errored"]) == 1

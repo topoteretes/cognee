@@ -66,7 +66,7 @@ class GraphConfig(BaseSettings):
     kuzu_buffer_pool_size: int = Field(DEFAULT_KUZU_BUFFER_POOL_SIZE, env="KUZU_BUFFER_POOL_SIZE")
     kuzu_max_db_size: int = Field(DEFAULT_KUZU_MAX_DB_SIZE, env="KUZU_MAX_DB_SIZE")
 
-    model_config = SettingsConfigDict(env_file=".env", extra="allow", populate_by_name=True)
+    model_config = SettingsConfigDict(extra="allow", populate_by_name=True)
 
     # Model validator updates graph_filename and path dynamically after class creation based on current database provider
     # If no specific graph_filename or path are provided

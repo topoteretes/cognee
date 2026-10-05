@@ -164,7 +164,7 @@ def _send_abandoned_run_telemetry(pipeline_run) -> None:
         user_id = getattr(pipeline_run, "user_id", None)
         tenant_id = getattr(pipeline_run, "tenant_id", None)
         properties = pipeline_run_telemetry_properties(
-            pipeline_run.pipeline_id, pipeline_run.pipeline_run_id, tenant_id
+            pipeline_run.pipeline_id, pipeline_run.pipeline_run_id, tenant_id, recovered=True
         ) | {"exception_type": AbandonedPipelineRunError.__name__, "recovered_at_startup": True}
         send_telemetry(
             PIPELINE_RUN_ERRORED,
