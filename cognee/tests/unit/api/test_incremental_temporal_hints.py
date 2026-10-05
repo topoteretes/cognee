@@ -134,7 +134,10 @@ async def test_writer_retires_a_redated_chunk_before_re_extracting_it(monkeypatc
         events.append(("delete", list(chunk_ids)))
 
     config = SimpleNamespace(
-        chunks_per_batch=10, triplet_embedding=False, contradiction_detection=False
+        chunks_per_batch=10,
+        triplet_embedding=False,
+        contradiction_detection=False,
+        summary_method="llm",
     )
     publish = AsyncMock()
     monkeypatch.setattr(incremental, "get_cognify_config", lambda: config)
@@ -188,7 +191,10 @@ async def test_writer_leaves_untouched_dates_alone(monkeypatch):
         deletes.append(list(chunk_ids))
 
     config = SimpleNamespace(
-        chunks_per_batch=10, triplet_embedding=False, contradiction_detection=False
+        chunks_per_batch=10,
+        triplet_embedding=False,
+        contradiction_detection=False,
+        summary_method="llm",
     )
     monkeypatch.setattr(incremental, "get_cognify_config", lambda: config)
     monkeypatch.setattr(incremental, "_resolve_extraction_config", lambda: None)
