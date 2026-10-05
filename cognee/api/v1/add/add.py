@@ -23,6 +23,7 @@ from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunAlreadyCompleted,
     PipelineRunCompleted,
 )
+from cognee.modules.pipelines.utils import iter_ingestion_entries
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion import ingest_data, resolve_data_directories
@@ -34,6 +35,23 @@ from cognee.tasks.ingestion.resolve_dlt_sources import resolve_dlt_sources
 from cognee.tasks.ingestion.utils import materialize_stream_for_background
 
 logger = get_logger()
+
+
+def _extract_data_ids(data_ingestion_info: Any) -> list[UUID]:
+    """Ids of the data items an add run stored, read from its per-item results.
+
+    Errored items are skipped (they identify nothing that was stored); items
+    reporting ``PipelineRunAlreadyCompleted`` are kept, since the data item
+    exists and holds the content. Order follows the run's results; duplicates are dropped.
+    """
+    data_ids: list[UUID] = []
+    seen: set[UUID] = set()
+    for status, data_id in iter_ingestion_entries(data_ingestion_info):
+        if status == "PipelineRunErrored" or data_id is None or data_id in seen:
+            continue
+        seen.add(data_id)
+        data_ids.append(data_id)
+    return data_ids
 
 
 async def add(
@@ -136,10 +154,13 @@ async def add(
             - Pipeline run ID for tracking
             - Dataset ID where data was stored
             - Processing status and any errors
-            - ``data_ids``: the id of every ``Data`` row this call stored (or found
-              already present with identical content), in input order — use these
-              for later ``update()`` / ``datasets.delete_data()`` calls instead of
-              re-deriving ids from content
+            - ``data_ids``: the id of every data item this call stored (or found
+              already present with identical content) — use these for later
+              ``update()`` / ``datasets.delete_data()`` calls instead of
+              re-deriving ids from content. They do not line up with the inputs:
+              a directory yields one id per file, and duplicates and items that
+              failed are left out. ``None`` with ``run_in_background=True``,
+              since the items are not stored yet when ``add()`` returns
             - Execution timestamps and metadata
 
     Next Steps:
@@ -350,6 +371,12 @@ async def add(
     # expect a single PipelineRunInfo (add always processes one dataset).
     if isinstance(result, dict) and len(result) == 1:
         result = next(iter(result.values()))
+
+    # Only add() fills data_ids: for add, an already-completed item still names
+    # the data item that holds the caller's content. A run info without
+    # per-item results (a background run that just started) keeps None.
+    if getattr(result, "data_ingestion_info", None) is not None:
+        result.data_ids = _extract_data_ids(result.data_ingestion_info)
 
     # Executors may return an error result rather than raise. Only a successful
     # foreground completion proves it is safe to remove the previous records.

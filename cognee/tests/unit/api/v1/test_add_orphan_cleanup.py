@@ -166,3 +166,18 @@ async def test_detached_pipeline_never_cleans_up_even_after_return(ingestion, mo
 
     queue.assert_called_once_with(final.pipeline_run_id, final)
     ingestion.cleanup.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_add_fills_data_ids_from_per_item_results(ingestion, monkeypatch):
+    stored = uuid4()
+    completed = ingestion.run_info(PipelineRunCompleted)
+    completed.data_ingestion_info = [
+        {"run_info": ingestion.run_info(PipelineRunCompleted), "data_id": stored}
+    ]
+    executor = AsyncMock(return_value={ingestion.dataset.id: completed})
+    monkeypatch.setattr(add_module, "get_pipeline_executor", lambda **kwargs: executor)
+
+    result = await add_module.add("source", dataset_name="documents")
+
+    assert result.data_ids == [stored]
