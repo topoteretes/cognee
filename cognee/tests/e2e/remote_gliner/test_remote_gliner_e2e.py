@@ -6,7 +6,8 @@ Skipped unless a worker is configured, e.g.::
         pytest cognee/tests/e2e/remote_gliner
 
 ``grpc`` (``http://host:50051``) and ``amqp`` (``amqp://user:pass@host:5672``) work
-the same way. The worker must support windowing (topoteretes/gliner_worker#4).
+the same way. The worker must support windowing: gliner_worker main at or after
+92aba3c (topoteretes/gliner_worker#4).
 Embeddings are mocked and the databases live in a scratch directory, so no API
 key is needed. A run that reaches the end prints ``REMOTE-GLINER-E2E-RAN``.
 

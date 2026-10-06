@@ -53,6 +53,8 @@ from .settings import RemoteGlinerSettings
 logger = get_logger("gliner.remote")
 
 READINESS_TTL_SECS = 30.0
+# The worker's windowing caps (its domain.py): overlap at most half a window.
+MAX_WINDOW_WORDS = 1024
 DEFAULT_RETRY = RetryPolicy()
 OVERLAP_POLICY = "longest"
 
@@ -224,6 +226,7 @@ class RemoteGlinerAdapter:
             return []
         if schema.is_empty:
             return [{} for _ in texts]
+        self._check_window(window_words, window_overlap_words)
 
         options = {
             "threshold": threshold,
@@ -340,6 +343,19 @@ class RemoteGlinerAdapter:
                 remediation=f"Set COGNEE_GLINER_INPUTS_PER_REQUEST to {max_inputs} or less.",
             )
         return readiness
+
+    def _check_window(self, window_words: int, window_overlap_words: int) -> None:
+        """The worker caps windows so one request cannot multiply its work; a run
+        outside the caps would be rejected document by document, so fail it here."""
+        if window_words > MAX_WINDOW_WORDS or window_overlap_words > window_words // 2:
+            error = GlinerRemoteConfigError(
+                f"window_words={window_words} / window_overlap_words={window_overlap_words} "
+                "is outside what a GLiNER worker accepts: window_words at most "
+                f"{MAX_WINDOW_WORDS}, window_overlap_words at most half of it.",
+                remediation="Use the defaults (384 / 64) or values within those bounds.",
+            )
+            self._latch(error)
+            raise error
 
     @staticmethod
     def _check_batch_size(readiness: WorkerReadiness, batch_size: int) -> None:

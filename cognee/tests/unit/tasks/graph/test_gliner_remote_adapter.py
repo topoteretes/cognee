@@ -506,3 +506,25 @@ async def test_a_transport_that_cannot_be_built_fails_the_run_cleanly(monkeypatc
         await adapter.ensure_ready()
     with pytest.raises(GlinerRemoteConfigError, match="grpcio"):
         await extract(adapter, ["Alice works."])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("words", "overlap"), [(1025, 64), (384, 193), (8, 5)])
+async def test_windows_beyond_the_workers_caps_fail_the_run_before_sending(words, overlap):
+    transport = FakeTransport()
+    adapter = make_adapter(transport)
+
+    with pytest.raises(GlinerRemoteConfigError, match="half of it"):
+        await extract(adapter, ["Alice works."], window_words=words, window_overlap_words=overlap)
+    assert transport.payloads == []
+    # Every document of the run would fail the same way.
+    with pytest.raises(GlinerRemoteConfigError):
+        await extract(adapter, ["Bob works."])
+
+
+@pytest.mark.asyncio
+async def test_windows_at_the_caps_are_sent():
+    transport = FakeTransport()
+    adapter = make_adapter(transport)
+    await extract(adapter, ["Alice works."], window_words=1024, window_overlap_words=512)
+    assert transport.payloads[0]["options"]["window_overlap_words"] == 512
