@@ -36,6 +36,7 @@ async def retrieve_hybrid_chunks(
     current_truth_epoch: int | None = None,
     personal_weights: dict | None = None,
     personal_influence: float = 0.0,
+    graph_engine: Any = None,
 ) -> dict[str, Any]:
     candidate_limit = chunk_candidate_limit(chunks_top_k)
     summary_limit = summary_candidate_limit(chunks_top_k, text_summaries_top_k)
@@ -75,6 +76,37 @@ async def retrieve_hybrid_chunks(
             node_name_filter_operator,
         )
         attach_source_chunks(pairs, source_chunks)
+
+    if (
+        use_truth_weight
+        and q_coords
+        and current_truth_epoch is not None
+        and graph_engine is not None
+    ):
+        # The prefetched truth map only covers the chunk lane's vector window.
+        # Summary-sourced chunks can fall outside it, and ranking treats a
+        # missing entry as neutral — so the same chunk was truth-weighted or
+        # not depending on which channel recalled it (#3653). Backfill the
+        # map for every rankable candidate so weighting is channel-agnostic.
+        candidate_ids = sorted(
+            {
+                chunk_id
+                for pair in pairs
+                if (chunk_id := pair.get("chunk_id") or result_id(pair.get("chunk")))
+            }
+        )
+        missing_ids = [
+            chunk_id for chunk_id in candidate_ids if chunk_id not in (truth_state_by_id or {})
+        ]
+        if missing_ids:
+            try:
+                fetched = await graph_engine.get_node_truth_state(missing_ids)
+                truth_state_by_id = {**(truth_state_by_id or {}), **(fetched or {})}
+            except Exception as error:
+                logger.debug(
+                    "Truth-state backfill failed; falling back to the prefetched window: %s",
+                    error,
+                )
 
     ranked_pairs = rank_chunk_summary_pairs(
         pairs,
