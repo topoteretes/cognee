@@ -5,6 +5,7 @@ import pytest
 
 from cognee.context_global_variables import current_pipeline_stage
 from cognee.infrastructure.engine import Edge
+from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.data.processing.document_types import TextDocument
 from cognee.modules.engine.models import EntityType
@@ -61,6 +62,36 @@ async def test_names_the_model_left_out_or_made_up_are_not_classified(llm):
     result = await classify_entity_type_names(["country", "company"])
 
     assert result == {"country": "place"}
+
+
+@pytest.mark.asyncio
+async def test_an_answer_that_changes_the_case_or_pads_the_name_still_matches(llm):
+    """The prompt asks for the name copied exactly, which a model does not always do."""
+    llm.return_value = _answers(**{" Country ": "place"})
+
+    assert await classify_entity_type_names(["country"]) == {"country": "place"}
+
+
+@pytest.mark.asyncio
+async def test_a_terminal_error_stops_the_remaining_batches(llm):
+    """An exhausted budget fails every batch the same way, so none of them is worth a call."""
+    names = [f"type_{index}" for index in range(2 * NAMES_PER_CALL + 1)]
+    llm.side_effect = LLMPaymentRequiredError()
+
+    result = await classify_entity_type_names(names)
+
+    assert result == {}
+    assert llm.await_count == 1
+
+
+@pytest.mark.parametrize("label", [[], {}, None, 3])
+def test_a_label_that_is_not_even_a_string_becomes_other(label):
+    """The validator must not raise on it, or the valid answers of the call are lost too."""
+    answers = EntityTypeCategories.model_validate(
+        {"answers": [{"name": "country", "category": label}]}
+    )
+
+    assert answers.answers[0].category == "other"
 
 
 @pytest.mark.asyncio

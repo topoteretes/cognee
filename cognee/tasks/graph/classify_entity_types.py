@@ -3,6 +3,7 @@ from pydantic import BaseModel, field_validator
 from cognee.infrastructure.llm import LLMGateway
 from cognee.infrastructure.llm.pipeline_stage import pipeline_stage
 from cognee.infrastructure.llm.prompts import read_query_prompt
+from cognee.infrastructure.llm.retry_config import should_retry_llm_exception
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.engine.models import EntityType, EntityTypeCategory
 from cognee.modules.graph.utils import collect_stored_data_points
@@ -22,8 +23,8 @@ class EntityTypeCategoryAnswer(BaseModel):
     @classmethod
     def off_taxonomy_is_other(cls, value):
         # One label outside the taxonomy would fail the whole call and lose every
-        # other answer in it.
-        if value in {category.value for category in EntityTypeCategory}:
+        # other answer in it. A label that is not even a string is outside it too.
+        if isinstance(value, str) and value in {category.value for category in EntityTypeCategory}:
             return value
         return EntityTypeCategory.other
 
@@ -53,7 +54,7 @@ async def classify_entity_type_names(names: list[str]) -> dict[str, str]:
                     system_prompt=system_prompt,
                     response_model=EntityTypeCategories,
                 )
-        except Exception:
+        except Exception as error:
             # Classification is an enrichment: its failure must not drop the graph
             # the run has already extracted.
             logger.warning(
@@ -61,16 +62,16 @@ async def classify_entity_type_names(names: list[str]) -> dict[str, str]:
                 len(batch),
                 exc_info=True,
             )
+            if not should_retry_llm_exception(error):
+                # Budget, quota, authentication: every remaining batch would fail the same way.
+                break
             continue
 
-        asked = set(batch)
-        categories.update(
-            {
-                answer.name: answer.category.value
-                for answer in result.answers
-                if answer.name in asked
-            }
-        )
+        asked = {name.strip().lower(): name for name in batch}
+        for answer in result.answers:
+            name = asked.get(answer.name.strip().lower())
+            if name is not None:
+                categories[name] = answer.category.value
 
     return categories
 
@@ -85,10 +86,9 @@ async def classify_chunk_entity_types(chunks: list[DocumentChunk]) -> None:
     is classified too.
     """
     unclassified: dict[str, list[EntityType]] = {}
-    for chunk in chunks:
-        for data_point in await collect_stored_data_points(chunk):
-            if isinstance(data_point, EntityType) and data_point.category is None:
-                unclassified.setdefault(data_point.name, []).append(data_point)
+    for data_point in await collect_stored_data_points(*chunks):
+        if isinstance(data_point, EntityType) and data_point.category is None:
+            unclassified.setdefault(data_point.name, []).append(data_point)
 
     categories = await classify_entity_type_names(list(unclassified))
     for name, category in categories.items():
