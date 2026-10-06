@@ -295,7 +295,6 @@ async def test_task_resolver_composes_with_pipeline_cache(monkeypatch):
         event
         async for event in pipeline_module.run_pipeline(
             tasks=lambda item: ["LIST"],
-            use_pipeline_cache=True,
             datasets=["ds"],
         )
     ]

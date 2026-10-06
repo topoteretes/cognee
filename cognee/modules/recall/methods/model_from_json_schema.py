@@ -4,7 +4,7 @@ The recall HTTP API accepts structured-output requests as a JSON Schema
 (``response_schema``, typically produced client-side via
 ``MyModel.model_json_schema()``) because a Python class cannot cross the HTTP
 boundary. This module turns that schema back into a real ``BaseModel`` subclass
-so the entire existing completion pipeline — instructor validation, retries,
+so the entire existing completion pipeline — schema validation, retries,
 result normalization — runs unchanged against it.
 
 Deliberately supports only the structural subset Pydantic itself emits:

@@ -13,6 +13,7 @@ from uuid import UUID
 
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.orm.attributes import flag_modified
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.models import Data
@@ -119,8 +120,17 @@ async def publish_updated_data(
         await session.commit()
 
 
-async def mark_data_processed(data_id: UUID, dataset_id: UUID) -> None:
-    """Stamp cognify completion so a later cognify() doesn't redo the document."""
+async def mark_data_processed(
+    data_id: UUID,
+    dataset_id: UUID,
+    pipeline_names: tuple[str, ...] = (COGNIFY_PIPELINE_NAME,),
+) -> None:
+    """Stamp cognify completion so a later cognify() doesn't redo the document.
+
+    ``pipeline_names`` adds the stamp for pipelines that built the same graph
+    state under their own name (the code graph pipeline), so per-pipeline
+    item status reports them as done too.
+    """
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
         data_point = (
@@ -128,8 +138,35 @@ async def mark_data_processed(data_id: UUID, dataset_id: UUID) -> None:
         ).scalar_one_or_none()
         if data_point is None:
             return
-        status_for_pipeline = data_point.pipeline_status.setdefault(COGNIFY_PIPELINE_NAME, {})
-        status_for_pipeline[str(dataset_id)] = _completed_status()
+        for pipeline_name in pipeline_names:
+            status_for_pipeline = data_point.pipeline_status.setdefault(pipeline_name, {})
+            status_for_pipeline[str(dataset_id)] = _completed_status()
+        await session.merge(data_point)
+        await session.commit()
+
+
+async def reset_data_pipeline_status(
+    data_id: UUID,
+    dataset_id: UUID,
+    pipeline_names: tuple[str, ...] | None = None,
+) -> None:
+    """Forget every pipeline's completion stamp for this document in this dataset.
+
+    A pinned re-add then ingests the document again instead of skipping it as
+    already added, and cognify processes it instead of skipping it as done.
+    ``pipeline_names`` limits the reset to those pipelines' stamps.
+    """
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        data_point = (
+            await session.execute(select(Data).filter(Data.id == data_id))
+        ).scalar_one_or_none()
+        if data_point is None or not data_point.pipeline_status:
+            return
+        for pipeline_name, pipeline_status in data_point.pipeline_status.items():
+            if pipeline_names is None or pipeline_name in pipeline_names:
+                pipeline_status.pop(str(dataset_id), None)
+        flag_modified(data_point, "pipeline_status")
         await session.merge(data_point)
         await session.commit()
 
@@ -143,5 +180,8 @@ async def is_data_processed(data_id: UUID, dataset_id: UUID) -> bool:
         ).scalar_one_or_none()
         if data_point is None:
             return False
-        status = (data_point.pipeline_status or {}).get(COGNIFY_PIPELINE_NAME, {})
-        return status.get(str(dataset_id)) == _completed_status()
+        # Same deferred import as _completed_status, same cycle reason.
+        from cognee.modules.pipelines.models.DataItemStatus import is_data_item_completed
+
+        status = (data_point.pipeline_status or {}).get(COGNIFY_PIPELINE_NAME) or {}
+        return is_data_item_completed(status.get(str(dataset_id)))

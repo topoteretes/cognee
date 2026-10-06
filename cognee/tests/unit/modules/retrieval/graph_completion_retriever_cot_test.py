@@ -9,6 +9,7 @@ from cognee.modules.retrieval.graph_completion_cot_retriever import (
     GraphCompletionCotRetriever,
     _as_answer_text,
 )
+from cognee.modules.retrieval.utils.completion import SessionPrompt
 
 logger = logging.getLogger(__name__)
 
@@ -205,7 +206,7 @@ async def test_run_cot_completion_multiple_rounds(mock_edge):
 
 
 @pytest.mark.asyncio
-async def test_run_cot_completion_with_conversation_history(mock_edge):
+async def test_run_cot_completion_with_session(mock_edge):
     """Test _run_cot_completion with conversation history."""
     retriever = GraphCompletionCotRetriever(max_iter=1)
 
@@ -222,14 +223,14 @@ async def test_run_cot_completion_with_conversation_history(mock_edge):
     ):
         completion, _context_text, _triplets = await retriever._run_cot_completion(
             query_batch=["test query"],
-            conversation_history="Previous conversation",
+            session=SessionPrompt(history="Previous conversation"),
         )
 
     assert isinstance(completion, list)
     assert len(completion) == 1
     assert completion[0] == "Generated answer"
     call_kwargs = mock_generate.call_args[1]
-    assert call_kwargs.get("conversation_history") == "Previous conversation"
+    assert call_kwargs.get("session") == SessionPrompt(history="Previous conversation")
 
 
 @pytest.mark.asyncio
@@ -264,7 +265,7 @@ async def test_run_cot_completion_with_response_model(mock_edge):
 
 
 @pytest.mark.asyncio
-async def test_run_cot_completion_empty_conversation_history(mock_edge):
+async def test_run_cot_completion_without_session(mock_edge):
     """Test _run_cot_completion with empty conversation history."""
     retriever = GraphCompletionCotRetriever(max_iter=1)
 
@@ -281,14 +282,13 @@ async def test_run_cot_completion_empty_conversation_history(mock_edge):
     ):
         completion, _context_text, _triplets = await retriever._run_cot_completion(
             query_batch=["test query"],
-            conversation_history="",
         )
 
     assert isinstance(completion, list)
     assert completion[0] == "Generated answer"
-    # Verify conversation_history was passed as None when empty
+    # No session layer: nothing is passed on.
     call_kwargs = mock_generate.call_args[1]
-    assert call_kwargs.get("conversation_history") is None
+    assert call_kwargs.get("session") is None
 
 
 @pytest.mark.asyncio

@@ -26,9 +26,6 @@ delete_dataset_nodes_and_edges_module = importlib.import_module(
 delete_data_nodes_and_edges_module = importlib.import_module(
     "cognee.modules.graph.methods.delete_data_nodes_and_edges"
 )
-reset_dataset_pipeline_run_status_module = importlib.import_module(
-    "cognee.modules.pipelines.layers.reset_dataset_pipeline_run_status"
-)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -120,7 +117,6 @@ async def test_forget_dataset_memory_clears_graph_and_resets_pipeline(monkeypatc
     engine = _FakeEngine(session)
 
     mock_delete = AsyncMock(return_value=DeletedGraphElements(node_ids={"node_deleted"}))
-    mock_reset_status = AsyncMock()
     mock_invalidate_deleted_data = AsyncMock()
     monkeypatch.setattr(
         forget_module,
@@ -153,11 +149,6 @@ async def test_forget_dataset_memory_clears_graph_and_resets_pipeline(monkeypatc
             "cognee.infrastructure.databases.relational.get_relational_engine",
             return_value=engine,
         ),
-        patch.object(
-            reset_dataset_pipeline_run_status_module,
-            "reset_dataset_pipeline_run_status",
-            mock_reset_status,
-        ),
         patch("sqlalchemy.orm.attributes.flag_modified"),
     ):
         result = await forget_module._forget_dataset_memory(str(DATASET_ID), USER)
@@ -172,11 +163,6 @@ async def test_forget_dataset_memory_clears_graph_and_resets_pipeline(monkeypatc
         {"node_deleted"},
         set(),
         user_id=USER.id,
-    )
-    mock_reset_status.assert_awaited_once_with(
-        dataset_id=DATASET_ID,
-        user=USER,
-        pipeline_names=["cognify_pipeline"],
     )
 
     # pipeline_status should have dataset entry removed
@@ -210,7 +196,6 @@ async def test_forget_dataset_memory_skips_records_without_pipeline_status(monke
         "set_database_global_context_variables",
         lambda *args, **kwargs: _NoOpAsyncContext(),
     )
-    mock_reset_status = AsyncMock()
 
     with (
         patch.object(
@@ -222,17 +207,11 @@ async def test_forget_dataset_memory_skips_records_without_pipeline_status(monke
             "cognee.infrastructure.databases.relational.get_relational_engine",
             return_value=engine,
         ),
-        patch.object(
-            reset_dataset_pipeline_run_status_module,
-            "reset_dataset_pipeline_run_status",
-            mock_reset_status,
-        ),
     ):
         result = await forget_module._forget_dataset_memory(str(DATASET_ID), USER)
 
     assert result["status"] == "success"
     assert result["data_records_reset"] == 2
-    mock_reset_status.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------

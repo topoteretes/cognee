@@ -219,34 +219,23 @@ async def test_get_triplets_passes_feedback_influence_to_brute_force_search():
 
 @pytest.mark.asyncio
 async def test_get_completion_without_context(mock_edge):
-    """Test get_completion retrieves context when not provided."""
-    mock_graph_engine = AsyncMock()
-    mock_graph_engine.is_empty = AsyncMock(return_value=False)
+    """No context means no LLM call and no results (SDK-270 / gh #3728).
 
+    get_completion_from_context never re-derives a missing context; it used to
+    forward None to the LLM, which answered with a phantom "no context
+    provided" deflection indistinguishable from a real answer.
+    """
     retriever = GraphCompletionRetriever()
 
     with (
         patch(
-            "cognee.modules.retrieval.graph_completion_retriever.get_unified_engine",
-            new_callable=AsyncMock,
-        ) as mock_get_unified,
-        patch(
-            "cognee.modules.retrieval.graph_completion_retriever.brute_force_triplet_search",
-            return_value=[mock_edge],
-        ),
-        patch(
-            "cognee.modules.retrieval.graph_completion_retriever.resolve_edges_to_text",
-            return_value="Resolved context",
-        ),
-        patch(
             "cognee.modules.retrieval.graph_completion_retriever.generate_completion",
-            return_value="Generated answer",
-        ),
+            new_callable=AsyncMock,
+        ) as mock_generate,
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
         ) as mock_cache_config,
     ):
-        mock_get_unified.return_value = _make_unified_mock(mock_graph_engine)
         mock_config = MagicMock()
         mock_config.caching = False
         mock_cache_config.return_value = mock_config
@@ -255,9 +244,8 @@ async def test_get_completion_without_context(mock_edge):
             query="test query", retrieved_objects=None, context=None
         )
 
-    assert isinstance(completion, list)
-    assert len(completion) == 1
-    assert completion[0] == "Generated answer"
+    assert completion == []
+    mock_generate.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -335,7 +323,7 @@ async def test_get_completion_with_session(mock_edge):
         mock_get_sm.return_value = mock_sm
 
         completion = await retriever.get_completion_from_context(
-            query="test query", retrieved_objects=None, context=None
+            query="test query", retrieved_objects=None, context="Resolved context"
         )
 
     assert isinstance(completion, list)
@@ -443,7 +431,7 @@ async def test_get_completion_with_response_model(mock_edge):
         mock_cache_config.return_value = mock_config
 
         completion = await retriever.get_completion_from_context(
-            query="test query", retrieved_objects=None, context=None
+            query="test query", retrieved_objects=None, context="Resolved context"
         )
 
     assert isinstance(completion, list)
@@ -453,9 +441,148 @@ async def test_get_completion_with_response_model(mock_edge):
 
 @pytest.mark.asyncio
 async def test_get_completion_empty_context(mock_edge):
-    """Test get_completion with empty context."""
+    """An empty ("") context returns no results without an LLM call (SDK-270)."""
+    retriever = GraphCompletionRetriever()
+
+    with (
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.generate_completion",
+            new_callable=AsyncMock,
+        ) as mock_generate,
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
+        ) as mock_cache_config,
+    ):
+        mock_config = MagicMock()
+        mock_config.caching = False
+        mock_cache_config.return_value = mock_config
+
+        completion = await retriever.get_completion_from_context(
+            query="test query", retrieved_objects=None, context=""
+        )
+
+    assert completion == []
+    mock_generate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_empty_context_skip_blocks_session_completion():
+    """With a session active, the empty-context skip fires before the session
+    completion, so no LLM call is made and no QA turn is recorded."""
+    retriever = GraphCompletionRetriever(session_id="test_session")
+
+    with (
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
+        ) as mock_cache_config,
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.get_session_manager"
+        ) as mock_get_sm,
+    ):
+        mock_config = MagicMock()
+        mock_config.caching = True
+        mock_cache_config.return_value = mock_config
+        mock_sm = MagicMock()
+        mock_sm.generate_completion_with_session = AsyncMock(return_value="Generated answer")
+        mock_get_sm.return_value = mock_sm
+
+        completion = await retriever.get_completion_from_context(
+            query="test query", retrieved_objects=None, context=""
+        )
+
+    assert completion == []
+    mock_sm.generate_completion_with_session.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_empty_context_skip_respects_opt_out():
+    """A retriever that opts out (skip_completion_on_empty_context = False)
+    still reaches the LLM with an empty context — the agentic contract."""
+    retriever = GraphCompletionRetriever()
+    retriever.skip_completion_on_empty_context = False
+
+    with (
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.generate_completion",
+            new_callable=AsyncMock,
+            return_value="Tool-driven answer",
+        ) as mock_generate,
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
+        ) as mock_cache_config,
+    ):
+        mock_config = MagicMock()
+        mock_config.caching = False
+        mock_cache_config.return_value = mock_config
+
+        completion = await retriever.get_completion_from_context(
+            query="test query", retrieved_objects=None, context=""
+        )
+
+    assert completion == ["Tool-driven answer"]
+    mock_generate.assert_awaited_once()
+
+
+def test_empty_context_skip_flag_contract():
+    """Every completion search type skips on empty context — search is not an
+    LLM gateway. The agentic retriever opts out: its tools answer without
+    memory context."""
+    from cognee.modules.retrieval.agentic_retriever import AgenticRetriever
+    from cognee.modules.retrieval.completion_retriever import CompletionRetriever
+    from cognee.modules.retrieval.graph_completion_cot_retriever import (
+        GraphCompletionCotRetriever,
+    )
+    from cognee.modules.retrieval.graph_summary_completion_retriever import (
+        GraphSummaryCompletionRetriever,
+    )
+    from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
+    from cognee.modules.retrieval.triplet_retriever import TripletRetriever
+
+    assert GraphCompletionRetriever.skip_completion_on_empty_context is True
+    assert GraphCompletionCotRetriever.skip_completion_on_empty_context is True
+    assert GraphSummaryCompletionRetriever.skip_completion_on_empty_context is True
+    assert CompletionRetriever.skip_completion_on_empty_context is True
+    assert HybridRetriever.skip_completion_on_empty_context is True
+    assert TripletRetriever.skip_completion_on_empty_context is True
+    assert AgenticRetriever.skip_completion_on_empty_context is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "retriever_module, retriever_name",
+    [
+        ("completion_retriever", "CompletionRetriever"),
+        ("hybrid_retriever", "HybridRetriever"),
+        ("triplet_retriever", "TripletRetriever"),
+    ],
+)
+async def test_empty_context_skips_llm_across_completion_retrievers(
+    retriever_module, retriever_name
+):
+    """RAG, hybrid, and triplet completions skip the LLM on empty context too."""
+    import importlib
+
+    module = importlib.import_module(f"cognee.modules.retrieval.{retriever_module}")
+    retriever = getattr(module, retriever_name)()
+
+    with patch.object(module, "generate_completion", new_callable=AsyncMock) as mock_generate:
+        completion = await retriever.get_completion_from_context(
+            query="test query", retrieved_objects=None, context=""
+        )
+
+    assert completion == []
+    mock_generate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_empty_graph_raises_no_data_error():
+    """An empty graph is a loud state error (NoDataError -> 404 over the API),
+    not a quiet miss: symmetric with the RAG retriever's missing-collection
+    behavior (SDK-270 / gh #3728)."""
+    from cognee.modules.retrieval.exceptions.exceptions import NoDataError
+
     mock_graph_engine = AsyncMock()
-    mock_graph_engine.is_empty = AsyncMock(return_value=False)
+    mock_graph_engine.is_empty = AsyncMock(return_value=True)
 
     retriever = GraphCompletionRetriever()
 
@@ -463,31 +590,8 @@ async def test_get_completion_empty_context(mock_edge):
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.get_unified_engine",
             new_callable=AsyncMock,
-        ) as mock_get_unified,
-        patch(
-            "cognee.modules.retrieval.graph_completion_retriever.brute_force_triplet_search",
-            return_value=[],
+            return_value=_make_unified_mock(mock_graph_engine),
         ),
-        patch(
-            "cognee.modules.retrieval.graph_completion_retriever.resolve_edges_to_text",
-            return_value="",
-        ),
-        patch(
-            "cognee.modules.retrieval.graph_completion_retriever.generate_completion",
-            return_value="Generated answer",
-        ),
-        patch(
-            "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
-        ) as mock_cache_config,
+        pytest.raises(NoDataError, match="knowledge graph is empty"),
     ):
-        mock_get_unified.return_value = _make_unified_mock(mock_graph_engine)
-        mock_config = MagicMock()
-        mock_config.caching = False
-        mock_cache_config.return_value = mock_config
-
-        completion = await retriever.get_completion_from_context(
-            query="test query", retrieved_objects=None, context=None
-        )
-
-    assert isinstance(completion, list)
-    assert len(completion) == 1
+        await retriever.get_retrieved_objects(query="test query")

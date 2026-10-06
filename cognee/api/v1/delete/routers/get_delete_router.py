@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
 from cognee import __version__ as cognee_version
+from cognee.exceptions import CogneeApiError
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -64,6 +65,8 @@ def get_delete_router() -> APIRouter:
             )
             return result
 
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("Error during deletion by data_id")
             return JSONResponse(status_code=409, content={"error": "Unable to delete data."})

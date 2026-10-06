@@ -1,3 +1,14 @@
+"""Show a tenant/role constraint: granting on a dataset outside the active tenant is denied.
+
+user_1 remembers the QUANTUM dataset personally, creates the CogneeLab tenant and a Researcher
+role, and adds user_2 to both. Granting the role read access to the personal dataset via
+authorized_give_permission_on_datasets then fails with PermissionDeniedError, because the dataset
+does not belong to the active tenant.
+
+Requires: LLM_API_KEY and ENABLE_BACKEND_ACCESS_CONTROL=True.
+Run: uv run python examples/demos/permissions/tenant_role_constraints_example.py
+"""
+
 import asyncio
 from uuid import UUID
 

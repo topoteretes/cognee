@@ -222,7 +222,7 @@ class TestRecallCommand:
     def test_session_only_when_query_type_is_omitted(self, mock_asyncio_run):
         mock_cognee = MagicMock()
         mock_cognee.recall = AsyncMock(
-            return_value=[{"_source": "session", "question": "q", "answer": "a"}]
+            return_value=[{"source": "session", "question": "q", "answer": "a"}]
         )
 
         with patch.dict(sys.modules, {"cognee": mock_cognee}):
@@ -242,6 +242,89 @@ class TestRecallCommand:
         kwargs = mock_cognee.recall.await_args.kwargs
         assert "query_type" not in kwargs
         assert kwargs["session_id"] == "sess"
+
+    @patch("cognee.cli.commands.recall_command.asyncio.run", side_effect=_mock_run)
+    def test_session_entries_print_as_question_and_answer(self, mock_asyncio_run, capsys):
+        """In-process results are models, not dicts — the branch checked isinstance(dict)."""
+        from cognee.modules.recall.types.RecallResponse import ResponseQAEntry
+
+        mock_cognee = MagicMock()
+        mock_cognee.recall = AsyncMock(
+            return_value=[
+                ResponseQAEntry(
+                    time="2026-01-01T00:00:00+00:00",
+                    question="what did we decide?",
+                    context="",
+                    answer="to ship on Friday",
+                    source="session",
+                )
+            ]
+        )
+
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = RecallCommand()
+            args = argparse.Namespace(
+                query_text="what did we decide?",
+                query_type=None,
+                datasets=None,
+                top_k=10,
+                system_prompt=None,
+                session_id="sess",
+                output_format="pretty",
+            )
+            command.execute(args)
+
+        out = capsys.readouterr().out
+        assert "session entry(ies)" in out
+        assert "what did we decide?" in out
+        assert "to ship on Friday" in out
+        assert "Result 1:" not in out
+
+    @patch("cognee.cli.commands.recall_command.asyncio.run", side_effect=_mock_run)
+    def test_omitted_query_type_lets_sdk_auto_route(self, mock_asyncio_run):
+        """Without -t (and without -s) the CLI must not pin HYBRID_COMPLETION."""
+        mock_cognee = MagicMock()
+        mock_cognee.recall = AsyncMock(return_value=["answer"])
+
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = RecallCommand()
+            args = argparse.Namespace(
+                query_text="Summarize the report",
+                query_type=None,
+                datasets=["docs"],
+                top_k=10,
+                system_prompt=None,
+                session_id=None,
+                output_format="pretty",
+            )
+            command.execute(args)
+
+        kwargs = mock_cognee.recall.await_args.kwargs
+        assert "query_type" not in kwargs
+        assert "session_id" not in kwargs
+        assert kwargs["datasets"] == ["docs"]
+
+    @patch("cognee.cli.commands.recall_command.asyncio.run", side_effect=_mock_run)
+    def test_bare_datasets_flag_is_normalized_to_none(self, mock_asyncio_run):
+        """`-d` with no names parses to []; recall() keys on `is not None`, so []
+        would pin every readable dataset instead of leaving the search unscoped."""
+        mock_cognee = MagicMock()
+        mock_cognee.recall = AsyncMock(return_value=["answer"])
+
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = RecallCommand()
+            args = argparse.Namespace(
+                query_text="Summarize the report",
+                query_type=None,
+                datasets=[],
+                top_k=10,
+                system_prompt=None,
+                session_id=None,
+                output_format="pretty",
+            )
+            command.execute(args)
+
+        assert mock_cognee.recall.await_args.kwargs["datasets"] is None
 
     @patch("cognee.cli.commands.recall_command.asyncio.run", side_effect=_mock_run)
     def test_explicit_hybrid_with_session_is_not_session_only(self, mock_asyncio_run):
@@ -893,36 +976,56 @@ class TestConfigGetSetPersistence:
     def test_set_persists_across_process_boundary(self, tmp_path, monkeypatch):
         """Reproduces the originally reported bug: `config set` must survive
         past the current process, since each `cognee-cli` invocation is a
-        fresh process re-reading config from scratch."""
+        fresh process re-reading config from scratch. The fresh process is a
+        real child interpreter: settings classes read only the environment the
+        .env resolver fills at import, so nothing short of a new import
+        re-reads the file."""
+        import subprocess
+
         from cognee.infrastructure.data.chunking.config import get_chunk_config
+        from cognee.shared import env_file
 
-        # A real CHUNK_SIZE env var (e.g. leftover from `dotenv.load_dotenv`
-        # picking up a developer's own .env at cognee import time) would
-        # outrank the .env file this test writes below, since pydantic-settings
-        # prioritizes real environment variables over dotenv-file values.
-        monkeypatch.delenv("CHUNK_SIZE", raising=False)
+        # Persist writes into the .env this process loaded. Pretend none was
+        # loaded, so the write lands in tmp_path/.env and never in the
+        # developer's own .env that the test session picked up at import.
+        monkeypatch.setattr(env_file, "_loaded", True)
+        monkeypatch.setattr(env_file, "_resolved", None)
+        monkeypatch.chdir(tmp_path)
 
-        original_cwd = os.getcwd()
         original_chunk_size = get_chunk_config().chunk_size
         try:
-            os.chdir(tmp_path)
-
             result = cognee.config.set("chunk_size", "999", persist=True)
-
-            assert result["created"] is True
-            env_path = tmp_path / ".env"
-            assert env_path.exists()
-            # dotenv.set_key quotes values, e.g. CHUNK_SIZE='999'.
-            assert "CHUNK_SIZE=" in env_path.read_text()
-            assert "999" in env_path.read_text()
-
-            # Simulate a fresh process re-reading config from the persisted .env.
-            get_chunk_config.cache_clear()
-            assert get_chunk_config().chunk_size == 999
         finally:
-            os.chdir(original_cwd)
-            get_chunk_config.cache_clear()
             get_chunk_config().chunk_size = original_chunk_size
+
+        env_path = tmp_path / ".env"
+        assert result["created"] is True
+        assert result["path"] == str(env_path)
+        # dotenv.set_key quotes values, e.g. CHUNK_SIZE='999'.
+        assert "CHUNK_SIZE=" in env_path.read_text()
+        assert "999" in env_path.read_text()
+
+        # The next cognee-cli invocation: a new interpreter started in the same
+        # directory, with no CHUNK_SIZE and no pinned file inherited from here.
+        child_env = {
+            k: v for k, v in os.environ.items() if k not in ("CHUNK_SIZE", "COGNEE_ENV_FILE")
+        }
+        code = (
+            "import cognee\n"
+            "from cognee.infrastructure.data.chunking.config import get_chunk_config\n"
+            "print(get_chunk_config().chunk_size)"
+        )
+        child = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=tmp_path,
+            env=child_env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+        assert child.returncode == 0, child.stderr[-2000:]
+        assert child.stdout.strip().splitlines()[-1] == "999"
 
 
 class TestFeedbackCommand:

@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import JSON, UUID, Column, DateTime
+from sqlalchemy import JSON, Column, DateTime, Uuid
 
 from cognee.modules.data.models.metrics_base import MetricsBase
 
@@ -9,7 +9,7 @@ from cognee.modules.data.models.metrics_base import MetricsBase
 class Metrics(MetricsBase):
     __tablename__ = "eval_metrics"
 
-    id = Column(UUID, primary_key=True, default=uuid4)
+    id = Column(Uuid, primary_key=True, default=uuid4)
 
     payload = Column(JSON, nullable=False)
 

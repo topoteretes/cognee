@@ -10,6 +10,10 @@ permissions:
 
 env:
   COGNEE_SKIP_CONNECTION_TEST: 'true'
+  # The default user is created with no password; a server started with this
+  # set gives it the password once. Compose passes it into the container, and
+  # the login steps below use it.
+  DEFAULT_USER_PASSWORD: 'ci-default-user-password'
   # Profiles exercised by the full-stack e2e: the default `cognee` service plus
   # postgres (persistence) and the MCP server.
   COMPOSE_PROFILES: 'postgres,mcp'
@@ -20,13 +24,13 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3.12.0
+      uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
 
     - name: Install uv
-      uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
+      uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
       with:
         enable-cache: true
 
@@ -151,7 +155,7 @@ jobs:
     - name: Verify remember and recall round-trip
       run: |
         TOKEN=$(curl -sf -X POST http://localhost:8000/api/v1/auth/login \
-          -d "username=default_user@example.com&password=default_password" | jq -r .access_token)
+          -d "username=default_user@example.com&password=${DEFAULT_USER_PASSWORD}" | jq -r .access_token)
         [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ] || { echo "login failed"; exit 1; }
 
         FACT="The glassblower Odene Marsk crafted the twin cobalt lanterns of the Vellinge lighthouse in 1931."

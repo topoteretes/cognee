@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from cognee import __version__ as cognee_version
 from cognee.api.DTO import InDTO
 from cognee.api.v1.sync import SyncResponse
+from cognee.exceptions import CogneeApiError
 from cognee.modules.sync.methods import get_running_sync_operations_for_user, get_sync_operation
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
@@ -151,6 +152,8 @@ def get_sync_router() -> APIRouter:
         except ConnectionError as e:
             logger.error("Cloud service unavailable during sync: %s", e)
             return JSONResponse(status_code=409, content={"error": "Cloud service unavailable."})
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("Cloud sync operation failed")
             return JSONResponse(status_code=409, content={"error": "Cloud sync operation failed."})
@@ -234,6 +237,8 @@ def get_sync_router() -> APIRouter:
 
             return response
 
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("Failed to get sync status overview")
             return JSONResponse(

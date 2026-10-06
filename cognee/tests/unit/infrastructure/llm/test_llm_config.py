@@ -117,14 +117,14 @@ def test_provider_unchanged_without_prefix(monkeypatch):
 
 def test_default_config_provider_consistent(monkeypatch):
     """
-    Defaults remain backward compatible (openai provider, openai/gpt-5-mini model).
+    Defaults remain backward compatible (openai provider, openai/gpt-5.6-luna model).
     """
     for var in ("LLM_PROVIDER", "LLM_MODEL"):
         monkeypatch.delenv(var, raising=False)
 
     config = LLMConfig(_env_file=None)
     assert config.llm_provider == "openai"
-    assert config.llm_model == "openai/gpt-5-mini"
+    assert config.llm_model == "openai/gpt-5.6-luna"
 
 
 def test_unknown_provider_prefix_raises(monkeypatch):
@@ -312,7 +312,7 @@ def test_local_provider_folds_unset_temperature(monkeypatch, provider, model):
 @pytest.mark.parametrize(
     ("provider", "model"),
     [
-        ("openai", "openai/gpt-5-mini"),
+        ("openai", "openai/gpt-5.6-luna"),
         ("custom", "hosted_vllm/meta-llama/Llama-3-70B"),
         ("custom", "vllm/some-model"),
     ],
@@ -427,7 +427,7 @@ class TestEnsureEnvVarsForOllama:
     def test_llm_model_explicitly_set_to_the_default_value_still_counts_as_set(self, monkeypatch):
         """A kwarg/env value that happens to match the field default is still 'set'.
 
-        llm_model's default ("openai/gpt-5-mini") is a real, non-blank model
+        llm_model's default ("openai/gpt-5.6-luna") is a real, non-blank model
         id, so a plain non-blank check can't tell "explicitly configured,
         coincidentally matches the default" apart from "left unset". This
         must key off model_fields_set instead, the same way

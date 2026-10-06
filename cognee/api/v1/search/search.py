@@ -29,7 +29,7 @@ from cognee.modules.observability import (
 )
 from cognee.modules.operations import record_operation
 from cognee.modules.search.methods import search as search_function
-from cognee.modules.search.types import ContextFormat, SearchResult, SearchType
+from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.users.exceptions.exceptions import UserNotFoundError
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
@@ -54,7 +54,6 @@ async def search(
     # unspecified hybrid may defer to GRAPH_COMPLETION, and this return value
     # does not include the effective type.
     only_context: bool = False,
-    context_format: ContextFormat | str = ContextFormat.CONTEXT,
     session_id: str | None = None,
     wide_search_top_k: int | None = None,
     triplet_distance_penalty: float | None = None,
@@ -71,31 +70,6 @@ async def search(
     embedding_config: EmbeddingConfig | None = None,
     code_query: dict[str, Any] | None = None,
 ) -> list[SearchResult]:
-    context_format = ContextFormat.parse(context_format)
-    if neighborhood_depth is not None and (
-        not isinstance(neighborhood_depth, int) or neighborhood_depth < 1
-    ):
-        raise CogneeValidationError(
-            message="neighborhood_depth must be a positive integer.",
-            name="InvalidNeighborhoodDepth",
-        )
-    if neighborhood_seed_top_k is not None and (
-        not isinstance(neighborhood_seed_top_k, int) or neighborhood_seed_top_k < 1
-    ):
-        raise CogneeValidationError(
-            message="neighborhood_seed_top_k must be a positive integer.",
-            name="InvalidNeighborhoodSeedTopK",
-        )
-    if max_iter is not None and (not isinstance(max_iter, int) or max_iter < 1):
-        raise CogneeValidationError(
-            message="max_iter must be a positive integer.",
-            name="InvalidMaxIter",
-        )
-    if code_query is not None and query_type is not SearchType.CODE:
-        raise CogneeValidationError(
-            message="code_query requires query_type=SearchType.CODE.",
-            name="InvalidCodeSearchConfig",
-        )
     """
     Search and query the knowledge graph for insights, information, and connections.
 
@@ -112,7 +86,13 @@ async def search(
 
     Search Types & Use Cases:
 
-        **GRAPH_COMPLETION** (Default - Recommended):
+        **HYBRID_COMPLETION** (Default):
+            Document passages plus entity neighbourhoods, then LLM completion.
+            Defers to GRAPH_COMPLETION for a custom node_type, node_name with
+            node_type=None, neighborhood_depth, feedback_influence > 0, or a
+            missing chunk collection.
+
+        **GRAPH_COMPLETION**:
             Natural language Q&A using full graph context and LLM reasoning.
             Best for: Complex questions, analysis, summaries, insights.
             Returns: Conversational AI responses with graph-backed context.
@@ -161,7 +141,7 @@ async def search(
             - "What functions handle user authentication?"
 
         query_type: SearchType enum specifying the search mode.
-                   Defaults to GRAPH_COMPLETION for conversational AI responses.
+                   Defaults to HYBRID_COMPLETION.
 
         user: User context for data access permissions. Uses default if None.
 
@@ -232,7 +212,10 @@ async def search(
         - **SUMMARIES**: Fast, returns pre-computed summaries
         - **CODE**: Deterministic and model-free; request cost scales with the selected code graph
         - **FEELING_LUCKY**: Variable speed, uses LLM + search type selection intelligently
-        - **top_k**: Start with 15, increase for comprehensive analysis (max 100)
+        - **top_k**: Default 15, applied per dataset. HYBRID_COMPLETION gives each lane
+          `min(top_k, 10)`, so values above 10 do not widen it; set the lanes directly with
+          the `chunks_top_k` / `entities_top_k` / `facts_top_k` keys in
+          `retriever_specific_config` (not capped).
         - **datasets**: Specify datasets to improve speed and relevance
 
     Next Steps After Search:
@@ -251,6 +234,30 @@ async def search(
         - GRAPH_DATABASE_PROVIDER: Must match what was used during cognify
 
     """
+    if neighborhood_depth is not None and (
+        not isinstance(neighborhood_depth, int) or neighborhood_depth < 1
+    ):
+        raise CogneeValidationError(
+            message="neighborhood_depth must be a positive integer.",
+            name="InvalidNeighborhoodDepth",
+        )
+    if neighborhood_seed_top_k is not None and (
+        not isinstance(neighborhood_seed_top_k, int) or neighborhood_seed_top_k < 1
+    ):
+        raise CogneeValidationError(
+            message="neighborhood_seed_top_k must be a positive integer.",
+            name="InvalidNeighborhoodSeedTopK",
+        )
+    if max_iter is not None and (not isinstance(max_iter, int) or max_iter < 1):
+        raise CogneeValidationError(
+            message="max_iter must be a positive integer.",
+            name="InvalidMaxIter",
+        )
+    if code_query is not None and query_type is not SearchType.CODE:
+        raise CogneeValidationError(
+            message="code_query requires query_type=SearchType.CODE.",
+            name="InvalidCodeSearchConfig",
+        )
     agentic_overrides = {
         "skills": skills,
         "tools": tools,
@@ -271,7 +278,6 @@ async def search(
             top_k=top_k,
             node_name=node_name,
             only_context=only_context,
-            context_format=context_format,
             verbose=verbose,
             include_references=include_references,
             code_query=code_query,
@@ -329,9 +335,13 @@ async def search(
 
             await set_session_user_context_variable(user)
 
-            # Transform string based datasets to UUID - String based datasets can only be found for current user
+            # Transform string based datasets to UUID - String based datasets can only be found for
+            # current user. Strict: a name that resolves to nothing fails the request instead of
+            # being dropped from the scope, the same contract dataset_ids has always had.
             if datasets is not None and all(isinstance(dataset, str) for dataset in datasets):
-                datasets = await get_authorized_existing_datasets(datasets, "read", user)
+                datasets = await get_authorized_existing_datasets(
+                    datasets, "read", user, strict=True
+                )
                 datasets = [dataset.id for dataset in datasets]
                 if not datasets:
                     raise DatasetNotFoundError(message="No datasets found.")
@@ -383,7 +393,6 @@ async def search(
                 node_name=node_name,
                 node_name_filter_operator=normalized_node_name_filter_operator,
                 only_context=only_context,
-                context_format=context_format,
                 session_id=session_id,
                 wide_search_top_k=wide_search_top_k,
                 triplet_distance_penalty=triplet_distance_penalty,

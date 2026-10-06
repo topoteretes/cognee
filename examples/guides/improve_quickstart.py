@@ -1,3 +1,13 @@
+"""Compare recall before and after improve() bridges a session's memory into the dataset graph.
+
+One fact is remembered permanently and another only in a session; "What did Bohr work on?" is
+recalled from the dataset before and after improve(dataset, session_ids=[...]) so the printed
+answers show the session fact becoming part of the graph.
+
+Requires: LLM_API_KEY.
+Run: uv run python examples/guides/improve_quickstart.py
+"""
+
 import asyncio
 
 import cognee

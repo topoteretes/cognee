@@ -318,24 +318,22 @@ class CogneeApiClient:
     def recall(
         self,
         query: str,
-        search_type: str | None = "HYBRID_COMPLETION",
+        search_type: str | None = None,
         datasets: list[str] | None = None,
         top_k: int = 15,
         system_prompt: str | None = None,
         session_id: str | None = None,
         node_name: list[str] | None = None,
         only_context: bool = False,
-        context_format: str = "context",
         verbose: bool = False,
     ) -> list:
-        # search_type=None opts the server into auto-routing (session-only
-        # mode when session_id is set, graph otherwise).
+        # search_type=None (the server default) auto-routes the query; with
+        # session_id and no datasets it also searches the session cache first.
         payload: dict[str, Any] = {
             "query": query,
             "search_type": search_type,
             "top_k": top_k,
             "only_context": only_context,
-            "context_format": context_format,
             "verbose": verbose,
         }
         if datasets:
@@ -359,6 +357,9 @@ class CogneeApiClient:
         node_name: list[str] | None = None,
         session_ids: list[str] | None = None,
         run_in_background: bool = False,
+        build_global_context_index: bool = False,
+        build_truth_subspace: bool = False,
+        feedback_alpha: float | None = None,
     ) -> dict:
         payload: dict[str, Any] = {"run_in_background": run_in_background}
         if dataset_name:
@@ -369,6 +370,12 @@ class CogneeApiClient:
             payload["node_name"] = node_name
         if session_ids:
             payload["session_ids"] = session_ids
+        if build_global_context_index:
+            payload["build_global_context_index"] = True
+        if build_truth_subspace:
+            payload["build_truth_subspace"] = True
+        if feedback_alpha is not None:
+            payload["feedback_alpha"] = feedback_alpha
         r = self._get_client().post(self._url("/api/v1/improve"), json=payload)
         self._raise_for_status(r)
         return r.json()

@@ -3,6 +3,7 @@ from cognee.context_global_variables import set_session_user_context_variable
 from cognee.exceptions import CogneeValidationError
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.data.methods import get_authorized_existing_datasets
+from cognee.modules.improve.constants import AGENT_TRACE_FEEDBACKS_NODE_SET
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -18,7 +19,7 @@ async def persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
     user: User,
     session_ids: list[str] | None = None,
     dataset: str = DEFAULT_DATASET_NAME,
-    node_set_name: str = "agent_trace_feedbacks",
+    node_set_name: str = AGENT_TRACE_FEEDBACKS_NODE_SET,
     raw_trace_content: bool = False,
     last_n_steps: int | None = None,
     run_in_background: bool = False,
@@ -64,6 +65,7 @@ async def persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
             session_ids=session_ids,
             raw_trace_content=raw_trace_content,
             last_n_steps=last_n_steps,
+            needs_llm=False,
         )
     ]
     enrichment_tasks = [
@@ -72,6 +74,7 @@ async def persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
             dataset_id=dataset_to_write[0].id,
             node_set_name=node_set_name,
             user=user,
+            needs_llm=False,
         ),
     ]
 

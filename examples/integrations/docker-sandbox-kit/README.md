@@ -144,9 +144,12 @@ docker-sandbox-kit/
 - `remember` builds a knowledge graph (a few LLM calls), so the first write
 takes noticeably longer than a plain key-value store; `recall` answers from
 the graph.
-- The kit defaults to `openai/gpt-5-mini`. To use another provider, edit
+- The kit defaults to `openai/gpt-5.6-luna`. To use another provider, edit
 `environment.variables`, the `credentials`/`permissions.network` blocks, and
 the stored secret accordingly (see the [cognee provider docs](https://docs.cognee.ai/)).
 - For always-on cross-sandbox memory (concurrent agents, no shared workspace),
 run a central cognee API server and point sandboxes at it over the network
-allowlist instead of sharing embedded storage.
+allowlist instead of sharing embedded storage. That is what
+[`brainbox/`](brainbox/README.md) does with the `cognee-memory-remote/` kit:
+a disposable sandbox borrows a scoped, revocable identity on a central brain,
+runs an LLM-free transformation, and pushes the result back.

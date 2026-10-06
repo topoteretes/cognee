@@ -74,6 +74,10 @@ def _scope_from_ctx(ctx: PipelineContext | None) -> str | None:
 
 def _entity_type_name(entity) -> str | None:
     is_a = getattr(entity, "is_a", None)
+    if isinstance(is_a, tuple) and len(is_a) == 2:
+        # Entity.is_a may carry edge text as (Edge, EntityType); the type is
+        # the second element. Without this the name falls back to "Entity".
+        is_a = is_a[1]
     name = getattr(is_a, "name", None) if is_a is not None else None
     return name or type(entity).__name__
 

@@ -25,7 +25,11 @@ Three more properties are deliberate and easy to break:
   sessionless recall, ``SESSION_SEARCH_MODE=sequential`` or ``only_context``
   stream nothing at all. Zero deltas is a supported outcome. ``final`` is
   validated against the same model the JSON route declares, so the two
-  transports cannot drift into returning different shapes.
+  transports cannot drift into returning different shapes. They can also differ
+  *entirely*: a concurrent session turn whose analysis finds the message was
+  feedback-only discards the answer it just streamed and returns a short
+  acknowledgement instead, too late for a ``reset`` (see ``token_sink``). So a
+  client must render ``final`` over what it streamed, never append to it.
 * **The recall task is awaited, not backgrounded.** ``commit_turn`` writes the
   Q&A inside the session turn lock, and the driver awaits the whole call before
   emitting ``final`` — so the write still happens inside the lock exactly as in

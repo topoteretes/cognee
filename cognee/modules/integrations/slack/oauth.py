@@ -34,12 +34,12 @@ from cognee.modules.integrations.slack.slack_settings import require
 _AUTHORIZE_URL = "https://slack.com/oauth/v2/authorize"
 _ACCESS_URL = "https://slack.com/api/oauth.v2.access"
 
-# Bot scopes: commands, posting, DMs, and channels:read (basic public-channel
-# metadata only — name/id/is_private — so the Integrations page can offer a
-# per-channel allowlist for slash commands; see slack/channels.py). Still
-# deliberately NO channels:history — ingestion isn't built, and the 2025
-# non-Marketplace rate limits (1 req/min) make history reads unusable anyway.
-_BOT_SCOPES = "commands,chat:write,im:write,channels:read"
+# History is fetched only for explicitly selected channels. Metadata scopes
+# also let imports verify both bot and connecting-user membership. Existing
+# installations must re-authorize to grant these additional scopes.
+_BOT_SCOPES = (
+    "commands,chat:write,im:write,channels:read,channels:history,groups:read,groups:history"
+)
 
 # oauth.v2.access is a synchronous call inside the callback request — cap it so
 # a hanging Slack never ties up a worker.

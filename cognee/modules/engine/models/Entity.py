@@ -4,7 +4,10 @@ from cognee.modules.engine.models.EntityType import EntityType
 
 class Entity(DataPoint):
     name: str
-    is_a: EntityType | None = None
+    # Either a bare EntityType, or (Edge(relationship_type="is_a", edge_text=...),
+    # EntityType) to carry retrieval text on the edge itself - same bare-tuple
+    # convention as ``relations`` below.
+    is_a: EntityType | tuple | None = None
     description: str
     relations: list[tuple] = []
     # Optional truth-alignment fields; never embedded (kept out of index_fields)

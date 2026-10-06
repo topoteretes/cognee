@@ -11,8 +11,10 @@ from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.modules.retrieval.base_retriever import BaseRetriever
+from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
 from cognee.modules.retrieval.utils.completion import (
+    SessionPrompt,
     generate_completion,
     generate_completion_batch,
 )
@@ -46,6 +48,11 @@ class GraphCompletionRetriever(BaseRetriever):
     resolving those triplets into human-readable text context (get_context_from_objects function), and generating
     LLM completions using the retrieved graph data (get_completion_from_context function).
     """
+
+    # An empty graph must yield an empty result, not a phantom LLM deflection
+    # (SDK-270 / gh #3728). Applies to the whole graph-completion family via
+    # inheritance; AgenticRetriever opts back out.
+    skip_completion_on_empty_context = True
 
     def __init__(
         self,
@@ -131,8 +138,14 @@ class GraphCompletionRetriever(BaseRetriever):
         is_empty = await self._unified_engine.graph.is_empty()
 
         if is_empty:
-            logger.warning("Search attempt on an empty knowledge graph")
-            return []
+            # An empty graph is a state problem, not a query miss: surface it
+            # loudly (404 over the API) the same way the RAG retriever raises
+            # on a missing vector collection, instead of quietly returning
+            # nothing. A populated graph with no matching triplets still
+            # yields an empty result below — that is a normal miss.
+            raise NoDataError(
+                "The knowledge graph is empty. Ingest data through Cognee before searching."
+            )
 
         triplets = await self.get_triplets(query, query_batch)
 
@@ -330,22 +343,22 @@ class GraphCompletionRetriever(BaseRetriever):
     ) -> list[Any]:
         """Generate completion(s) without session; returns list of completions."""
         kwargs = self._completion_kwargs(context)
-        # Sessionless guidance site: preference text rides the guidance channel
-        # (conversation_history), never context. The lookup is memoized per
+        # Sessionless guidance site: preference text is the guidance layer of the
+        # session prompt, never context. The lookup is memoized per
         # context; this sessionless path runs retrieval and completion in one
         # context, so this reuses the get_triplets read. (Across a task
         # fan-out that sharing needs warm_preference_cache in the parent — the
         # ContextVar does not propagate out of gather lanes.) Empty text is
-        # falsy and leaves the system prompt untouched. The session path never
+        # falsy and adds nothing to the prompt. The session path never
         # reaches this method, so it cannot collide with the session guidance
         # block, which owns preference rendering on that path.
         preference_text = await load_preference_text()
         if query_batch:
             return await generate_completion_batch(
-                query_batch=query_batch, conversation_history=preference_text, **kwargs
+                query_batch=query_batch, session=SessionPrompt(guidance=preference_text), **kwargs
             )
         completion = await generate_completion(
-            query=query, conversation_history=preference_text, **kwargs
+            query=query, session=SessionPrompt(guidance=preference_text), **kwargs
         )
         return [completion]
 
@@ -390,6 +403,14 @@ class GraphCompletionRetriever(BaseRetriever):
         Note: To avoid duplicate retrievals, ensure that retrieved_objects and context
               are provided from previous method calls.
         """
+        if self.skip_completion_on_empty_context and not query_batch and not context:
+            # Empty context must not reach the LLM: the only possible output is
+            # a phantom "no context provided" deflection that callers cannot
+            # distinguish from a real answer (SDK-270 / gh #3728). An empty
+            # result also lets recall()'s on_empty fallback actually fire.
+            logger.warning("Empty context: skipping LLM completion, returning no results")
+            return []
+
         use_session = self._use_session_cache() and not query_batch
         if use_session:
             sm = get_session_manager()
@@ -442,7 +463,9 @@ class GraphCompletionRetriever(BaseRetriever):
         if query is not None and not query_batch:
             turn_preparation = await self.prepare_session_turn_for_retrieval(query)
             if not turn_preparation.should_answer:
-                return [turn_preparation.response_to_user or "Got it."]
+                from cognee.infrastructure.session.session_turn import acknowledgement_for_turn
+
+                return [acknowledgement_for_turn(turn_preparation.response_to_user)]
             effective_query = turn_preparation.effective_query or query
 
         retrieved_objects = await self.get_retrieved_objects(

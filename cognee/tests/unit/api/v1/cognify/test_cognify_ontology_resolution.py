@@ -32,12 +32,40 @@ async def test_cognify_normalizes_skip_config(
 
     await cognify_module.cognify(config=input_config)
 
-    mock_get_resolver.assert_called_once_with(input_config)
+    mock_get_resolver.assert_called_once_with(input_config, ontology_file_path=None)
     mock_get_mode.assert_called_once_with(input_config)
     mock_get_default_tasks.assert_awaited_once()
     passed_config = mock_get_default_tasks.await_args.kwargs["config"]
     assert passed_config == {
         "ontology_config": {"ontology_resolver": None, "ontology_mode": "annotate"}
+    }
+
+
+@pytest.mark.asyncio
+@patch.object(serve_state_module, "get_remote_client", return_value=None)
+@patch.object(cognify_module, "get_pipeline_executor")
+@patch.object(cognify_module, "get_default_tasks", new_callable=AsyncMock)
+@patch("cognee.modules.migrations.startup.run_migrations_and_block", new_callable=AsyncMock)
+@patch.object(cognify_module, "get_configured_ontology_mode", return_value="annotate")
+@patch.object(cognify_module, "get_configured_ontology_resolver")
+async def test_cognify_resolves_per_call_ontology_path(
+    mock_get_resolver,
+    mock_get_mode,
+    mock_migrations,
+    mock_get_default_tasks,
+    mock_get_pipeline_executor,
+    mock_remote_client,
+):
+    resolver = object()
+    mock_get_resolver.return_value = resolver
+    mock_get_default_tasks.return_value = []
+    mock_get_pipeline_executor.return_value = AsyncMock(return_value={})
+
+    await cognify_module.cognify(ontology_file_path="domain.owl")
+
+    mock_get_resolver.assert_called_once_with(None, ontology_file_path="domain.owl")
+    assert mock_get_default_tasks.await_args.kwargs["config"] == {
+        "ontology_config": {"ontology_resolver": resolver, "ontology_mode": "annotate"}
     }
 
 

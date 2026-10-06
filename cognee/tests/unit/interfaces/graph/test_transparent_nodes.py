@@ -12,7 +12,8 @@ import pytest
 from cognee.infrastructure.engine import DataPoint, Edge
 from cognee.modules.engine.models import NodeSet
 from cognee.modules.graph.utils import get_graph_from_model
-from cognee.modules.graph.utils.unwrap_transparent_nodes import _WARNED_DROPPED_FIELDS
+from cognee.modules.graph.utils.unwrap_transparent_nodes import unwrap_transparent
+from cognee.shared.logging_utils import _warned_once_keys
 
 TRANSPARENT = {"index_fields": [], "transparent": True}
 
@@ -217,7 +218,7 @@ async def test_edge_metadata_is_applied_to_each_child():
 @pytest.mark.asyncio
 async def test_wrapper_carrying_scalar_data_warns_once_and_drops_it(caplog):
     """Case 5 (A5): the value is dropped, no node is minted, one warning is logged."""
-    _WARNED_DROPPED_FIELDS.clear()
+    _warned_once_keys.clear()
     alice, bob, _ = _people()
     department = Department(
         name="Engineering", groups=[NamedGroup(name="Core team", members=[alice, bob])]
@@ -237,7 +238,7 @@ async def test_wrapper_carrying_scalar_data_warns_once_and_drops_it(caplog):
 
 @pytest.mark.asyncio
 async def test_dropped_field_warning_fires_at_most_once(caplog):
-    _WARNED_DROPPED_FIELDS.clear()
+    _warned_once_keys.clear()
     alice, bob, _ = _people()
 
     with caplog.at_level(logging.WARNING):
@@ -253,7 +254,7 @@ async def test_dropped_field_warning_fires_at_most_once(caplog):
 @pytest.mark.asyncio
 async def test_relationship_only_wrapper_never_warns(caplog):
     """An optional relationship left ``None`` and an empty list lose nothing."""
-    _WARNED_DROPPED_FIELDS.clear()
+    _warned_once_keys.clear()
     alice, _, _ = _people()
 
     with caplog.at_level(logging.WARNING):
@@ -512,3 +513,65 @@ async def test_collector_returns_the_originals_that_storage_writes(root):
     # relationship fields, so edges out of those nodes would never be minted.
     assert all(isinstance(node, DataPoint) for node in collected)
     assert all(type(node) is not type(copy) for node, copy in zip(collected, stored_nodes))
+
+
+@pytest.mark.asyncio
+async def test_dropped_field_and_foreign_edge_warnings_do_not_suppress_each_other(caplog):
+    """Two warning kinds on one (class, field) must both fire — the key carries the kind."""
+    _warned_once_keys.clear()
+
+    class Crowd(DataPoint):
+        friends_with: Any = None
+        metadata: dict = TRANSPARENT
+
+    alice, bob, _ = _people()
+
+    with caplog.at_level(logging.WARNING):
+        await get_graph_from_model(Crowd(friends_with="a plain value"))
+        await get_graph_from_model(Crowd(friends_with=[Edge(source=alice, target=bob)]))
+
+    messages = [
+        record.getMessage()
+        for record in caplog.records
+        if "marked transparent" in record.getMessage()
+    ]
+    assert any("that value is dropped" in message for message in messages)
+    assert any("source is not" in message for message in messages)
+
+
+def test_diamond_of_transparent_wrappers_resolves_each_leaf_once():
+    """Stacked diamonds must not explode: same object, same children, walked once."""
+
+    class Box(DataPoint):
+        a: Any = None
+        b: Any = None
+        metadata: dict = TRANSPARENT
+
+    leaf = Person(name="Leaf")
+    node: Any = leaf
+    for _ in range(12):
+        node = Box(a=node, b=node)
+
+    assert unwrap_transparent(node) == [leaf]
+
+
+@pytest.mark.asyncio
+async def test_edge_with_transparent_source_is_skipped_with_a_warning(caplog):
+    """A transparent node is never stored, so an edge from it would dangle."""
+    _warned_once_keys.clear()
+
+    class Holder(DataPoint):
+        name: str
+        links: Any = None
+        metadata: dict = {"index_fields": ["name"]}
+
+    alice, bob, _ = _people()
+    team = MemberGroup(members=[alice])
+    holder = Holder(name="Holder", links=[Edge(source=team, target=bob)])
+
+    with caplog.at_level(logging.WARNING):
+        _nodes, edges = await get_graph_from_model(holder)
+
+    assert str(team.id) not in {str(source) for source, _, _, _ in edges}
+    assert all(name != "links" for _, _, name, _ in edges)
+    assert any("appears as the source" in record.getMessage() for record in caplog.records)

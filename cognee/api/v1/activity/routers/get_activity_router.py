@@ -10,6 +10,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 
+from cognee.exceptions import CogneeApiError
 from cognee.modules.users.methods.get_authenticated_user import get_authenticated_user
 from cognee.modules.users.methods.get_visible_user_ids import get_visible_user_ids
 from cognee.modules.users.models import User
@@ -88,7 +89,8 @@ def get_activity_router() -> APIRouter:
         - **operation_name** (str|null): Operation name; for pipeline rows this
           mirrors `pipeline_name`, so it does *not* distinguish the two kinds.
         - **origin** (str|null): Initiating surface — `sdk`/`api`/`cli`/`mcp`/`background`.
-        - **outcome** (str|null): `"succeeded"` / `"failed"`. NULL on non-terminal rows.
+        - **outcome** (str|null): `"succeeded"` / `"failed"` / `"noop"` (the call ran
+          nothing — e.g. an improve that lost its lock claim). NULL on non-terminal rows.
           **Read together with `background`**: when `background` is true, a
           `"succeeded"` outcome means the work was *accepted and started*, not that
           it finished. Treating those rows as completions inflates any success-rate
@@ -250,6 +252,8 @@ def get_activity_router() -> APIRouter:
                 )
 
             return result
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("Failed to retrieve activity traces")
             return JSONResponse(

@@ -516,24 +516,24 @@ async def test_combined_mode_internal_batch_does_not_fail_with_session_cache():
 
 @pytest.mark.asyncio
 async def test_get_retrieved_objects_and_context_handle_empty_graph():
+    """An empty graph is a loud state error (NoDataError -> 404 over the API),
+    not a quiet miss (SDK-270 / gh #3728)."""
+    from cognee.modules.retrieval.exceptions.exceptions import NoDataError
+
     retriever = GraphCompletionDecompositionRetriever()
 
     mock_graph_engine = AsyncMock()
     mock_graph_engine.is_empty = AsyncMock(return_value=True)
 
-    with patch(
-        "cognee.modules.retrieval.graph_completion_decomposition_retriever.get_unified_engine",
-        new_callable=AsyncMock,
-        return_value=_make_unified_mock(mock_graph_engine),
+    with (
+        patch(
+            "cognee.modules.retrieval.graph_completion_decomposition_retriever.get_unified_engine",
+            new_callable=AsyncMock,
+            return_value=_make_unified_mock(mock_graph_engine),
+        ),
+        pytest.raises(NoDataError, match="knowledge graph is empty"),
     ):
-        objects = await retriever.get_retrieved_objects(query="Original query")
-        context = await retriever.get_context_from_objects(
-            query="Original query",
-            retrieved_objects=objects,
-        )
-
-    assert objects == []
-    assert context == ""
+        await retriever.get_retrieved_objects(query="Original query")
 
 
 @pytest.mark.asyncio

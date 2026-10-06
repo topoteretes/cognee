@@ -5,7 +5,7 @@ from sqlalchemy.orm import aliased
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 
-from ..models import PipelineRun
+from ..models import PipelineRun, PipelineRunStatus
 
 
 def _latest_run_per_dataset_query(dataset_ids: list[UUID] | None, pipeline_name: str):
@@ -58,3 +58,37 @@ async def get_latest_pipeline_runs_by_datasets(
         runs = (await session.execute(query)).scalars().all()
 
     return {run.dataset_id: run for run in runs}
+
+
+async def get_unterminated_pipeline_runs() -> list[PipelineRun]:
+    """Every run whose newest row is still STARTED: the runs no terminal row closed.
+
+    Keyed by pipeline_run_id, not by dataset: a run abandoned while a newer run of
+    the same pipeline on the same dataset later completed must still be found,
+    and "newest row per dataset" would hide it behind that newer run forever.
+    Rows without a pipeline_name (operation records) are never included. The
+    returned row is the run's newest one, so ``created_at`` is its last activity.
+    """
+    ranked = (
+        select(
+            PipelineRun,
+            func.row_number()
+            .over(
+                partition_by=PipelineRun.pipeline_run_id,
+                order_by=PipelineRun.created_at.desc(),
+            )
+            .label("rn"),
+        )
+        .filter(PipelineRun.pipeline_name.isnot(None))
+        .subquery()
+    )
+    newest_per_run = aliased(PipelineRun, ranked)
+    query = select(newest_per_run).filter(
+        ranked.c.rn == 1,
+        ranked.c.status == PipelineRunStatus.DATASET_PROCESSING_STARTED,
+    )
+
+    db_engine = get_relational_engine()
+
+    async with db_engine.get_async_session() as session:
+        return list((await session.execute(query)).scalars().all())

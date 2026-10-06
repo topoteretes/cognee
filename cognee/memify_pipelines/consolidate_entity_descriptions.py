@@ -1,224 +1,132 @@
-import asyncio
-import json
-import logging
-from typing import Any
-from uuid import UUID
+"""Memify pipeline that rewrites Entity descriptions and EntityType summaries.
 
-from pydantic import BaseModel
+Mirrors the structure of the sibling graph-mutating enrichment pipelines (e.g.
+``consolidate_entities``): a thin wrapper that builds the extraction +
+enrichment tasks and hands them to ``memify``. Dataset auth and the
+per-dataset database context stay inside ``memify`` / ``run_pipeline`` — do
+not wrap this call in ``set_database_global_context_variables`` (SDK-483).
+The actual work lives in ``cognee.tasks.memify.consolidate_entity_descriptions``.
+"""
 
-import cognee
-from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.engine.models.DataPoint import DataPoint
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
-from cognee.infrastructure.llm.prompts import render_prompt
-from cognee.modules.engine.models import EntityType
-from cognee.modules.engine.models.Entity import Entity
+from cognee import memify
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.pipelines.tasks.task import Task
+from cognee.modules.users.models import User
+from cognee.shared.logging_utils import get_logger
+from cognee.tasks.memify.consolidate_entity_descriptions import (
+    generate_consolidated_entities,
+    generate_type_descriptions,
+    get_entities_with_neighborhood,
+)
+from cognee.tasks.memify.consolidate_entity_descriptions.constants import (
+    MAX_CONCURRENT_ENTITY_LLM_CALLS,
+    MAX_CONCURRENT_TYPE_LLM_CALLS,
+    MAX_MEMBERS_PER_TYPE_PROMPT,
+    MAX_NAMED_MEMBERS,
+    MAX_NEIGHBOR_LINES_IN_PROMPT,
+    MAX_NEIGHBOR_TEXT_CHARS,
+    MAX_PERSISTED_IS_A_CHARS,
+    PARAGRAPH_MAX_COMPLETION_TOKENS,
+    TOKENS_PER_IS_A_LINE,
+)
 from cognee.tasks.storage import add_data_points
 
-prompt_name = "consolidate_entity_details.txt"
+logger = get_logger("consolidate_entity_descriptions_pipeline")
 
 
-class NodeDescription(BaseModel):
-    description: str
+async def consolidate_entity_descriptions_pipeline(
+    user: User | None = None,
+    dataset: str = DEFAULT_DATASET_NAME,
+    run_in_background: bool = False,
+    entity_max_concurrent_calls: int = MAX_CONCURRENT_ENTITY_LLM_CALLS,
+    entity_max_neighbor_lines: int = MAX_NEIGHBOR_LINES_IN_PROMPT,
+    entity_max_neighbor_text_chars: int = MAX_NEIGHBOR_TEXT_CHARS,
+    entity_description_max_completion_tokens: int = PARAGRAPH_MAX_COMPLETION_TOKENS,
+    type_max_concurrent_calls: int = MAX_CONCURRENT_TYPE_LLM_CALLS,
+    type_max_members_per_batch: int = MAX_MEMBERS_PER_TYPE_PROMPT,
+    type_max_named_members: int = MAX_NAMED_MEMBERS,
+    type_max_persisted_is_a_chars: int = MAX_PERSISTED_IS_A_CHARS,
+    type_description_max_completion_tokens: int = PARAGRAPH_MAX_COMPLETION_TOKENS,
+    type_tokens_per_is_a_line: int = TOKENS_PER_IS_A_LINE,
+):
+    """Rewrite Entity descriptions from their graph neighborhood, then summarize
+    each EntityType from its member Entities and write is_a edge text.
 
+    Every size/budget cap below is a defensive backstop against pathological
+    inputs (an unusually long description, an over-connected entity, a huge
+    type), not a rigorously derived per-model token budget - cognee is
+    model-agnostic, so there's no single number that's "correct" for every
+    deployment. The defaults are reasonable starting points; override them
+    per call site if your data or model needs something different, rather
+    than editing the module constants.
 
-# region get_entities_with_neighborhood helper functions
-async def get_all_entity_nodes(graph_engine):
-    """Retrieve all nodes of type Entity from the graph."""
-    nodes, _ = await graph_engine.get_filtered_graph_data([{"type": ["Entity"]}])
-    return nodes
+    Args:
+        user: Acting user; forwarded to ``memify`` (default user when omitted).
+        dataset: Dataset name (or id) whose graph to consolidate. Forwarded to
+            ``memify``, which resolves write access and the dataset DB context.
+        run_in_background: Forwarded to ``memify``.
+        entity_max_concurrent_calls: Max concurrent LLM calls while rewriting
+            Entity descriptions (Phase 1).
+        entity_max_neighbor_lines: Max neighborhood lines in one Entity's
+            rewrite prompt. Counted in lines, not neighbors: a neighbor linked
+            by several distinct edges contributes one line per edge.
+        entity_max_neighbor_text_chars: Max characters of text per neighbor
+            shown in that prompt.
+        entity_description_max_completion_tokens: Output token budget for the
+            Entity description call.
+        type_max_concurrent_calls: Max concurrent LLM calls while summarizing
+            EntityTypes (Phase 2/3) - bounds every individual call, not just
+            how many types are processed at once.
+        type_max_members_per_batch: Max members shown in one type-summary
+            prompt before batching + merging kicks in.
+        type_max_named_members: At or below this member count, the type
+            summary names members individually; above it, it doesn't.
+        type_max_persisted_is_a_chars: Max characters of is_a edge text
+            written to the graph, independent of the LLM call's own output
+            budget - that budget caps generation, this caps what is stored.
+            The prompt-side caps (member cards, merge partials) are module
+            constants in constants.py; they bound prompt size rather than
+            anything a caller sees.
+        type_description_max_completion_tokens: Output token budget for the
+            type description and merge calls.
+        type_tokens_per_is_a_line: Output token budget per member for the
+            is_a-only call - that call returns one line per member in the
+            batch, not a single paragraph, so its total budget scales with
+            batch size instead of being fixed.
 
-
-async def get_entity_neighborhood(
-    node_id: str, props: dict[str, Any], graph_engine
-) -> dict[str, Any]:
-    """Fetch and format data for a single entity node."""
-    edges, neighbors = await asyncio.gather(
-        graph_engine.get_edges(node_id),
-        graph_engine.get_neighbors(node_id),
-    )
-
-    entity_type, filtered_neighbors = format_neighbors(neighbors)
-    return {
-        "properties": get_entity_properties(props),
-        "edges": format_edges(edges),
-        "neighbors": filtered_neighbors,
-        "entity_type": entity_type,
-    }
-
-
-def get_entity_properties(
-    props: dict[str, Any], properties: set[str] | None = None
-) -> dict[str, Any]:
-    """Keep only relevant entity properties."""
-    if properties is None:
-        properties = {"id", "description", "name"}
-    return {k: v for k, v in props.items() if k in properties}
-
-
-def format_edges(edges: list[Any]) -> dict[str, str]:
-    """Map target node IDs to relationship names.
-
-    Handles multiple graph adapter edge tuple formats:
-    - Neo4j / Neptune: (source_id, target_id, {"relationship_name": name})
-    - Ladybug:         (source_node_dict, relationship_name_str, target_node_dict)
-    - EdgeData:        (source_id, target_id, relationship_name, properties)
+    Returns:
+        The ``memify`` pipeline result.
     """
-    result = {}
-    for edge in edges:
-        if not isinstance(edge, (list, tuple)) or len(edge) < 3:
-            continue
-
-        if isinstance(edge[2], dict) and "relationship_name" in edge[2]:
-            # Neo4j / Neptune format
-            target_id = edge[1]
-            rel_name = edge[2]["relationship_name"]
-        elif len(edge) >= 4 and isinstance(edge[1], str) and isinstance(edge[2], str):
-            # EdgeData: (source_id, target_id, relationship_name, properties)
-            target_id = edge[1]
-            rel_name = edge[2]
-        elif isinstance(edge[1], str) and isinstance(edge[2], dict):
-            # Ladybug format: (source_dict, rel_name_str, target_dict)
-            target_id = edge[2].get("id", str(edge[2]))
-            rel_name = edge[1]
-        else:
-            # Fallback: best-effort extraction
-            target_id = (
-                edge[2].get("id", str(edge[2])) if isinstance(edge[2], dict) else str(edge[1])
-            )
-            rel_name = edge[1] if isinstance(edge[1], str) else str(edge[2])
-        result[str(target_id)] = str(rel_name)
-    return result
-
-
-def format_neighbors(
-    neighbors: list[dict[str, Any]], node_fields: set[str] | None = None
-) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
-    """Filter neighbor fields and exclude those with only an ID, returning EntityType separately."""
-    if node_fields is None:
-        node_fields = {"id", "name", "description", "text", "type"}
-
-    entity_type = None
-    filtered_neighbors: list[dict[str, Any]] = []
-    for neighbor in neighbors:
-        if neighbor.get("type") == "EntityType":
-            entity_type = neighbor
-        filtered_neighbor = {k: v for k, v in neighbor.items() if k in node_fields}
-        if len(filtered_neighbor) > 1:
-            filtered_neighbors.append(filtered_neighbor)
-    return entity_type, filtered_neighbors
-
-
-# endregion
-
-
-async def get_entities_with_neighborhood(args) -> list[dict[str, Any]]:
-    """Iterate through all Entity nodes and fetch their edges and neighbor nodes."""
-    graph_engine = await get_graph_engine()
-    entity_nodes = await get_all_entity_nodes(graph_engine)
-
-    get_entity_neighborhood_tasks = (
-        get_entity_neighborhood(node_id, props, graph_engine) for node_id, props in entity_nodes
-    )
-
-    return await asyncio.gather(*get_entity_neighborhood_tasks)
-
-
-# region consolidate_entity_descriptions helper functions
-def load_metadata_to_dict(value: Any) -> dict[str, Any]:
-    if isinstance(value, str):
-        try:
-            return json.loads(value)
-        except json.JSONDecodeError:
-            return {"index_fields": ["name"]}
-    if value is None:
-        return {"index_fields": ["name"]}
-    return value
-
-
-def build_node_neighborhood_prompt(node):
-    props = node["properties"]
-
-    text = (
-        "This node's description is the following: "
-        + props["name"]
-        + " - "
-        + props["description"]
-        + ". It is connected to it's neighbors in the following way:"
-    )
-    for neighbor in node["neighbors"]:
-        edge_label = node.get("edges", {}).get(neighbor.get("id"), "related to")
-        neighbor_name = neighbor.get("name", "")
-        neighbor_desc = neighbor.get("description", "")
-        if neighbor_desc:
-            text += f"\n- {edge_label}: {neighbor_name} - {neighbor_desc}"
-        else:
-            text += f"\n- {edge_label} - {neighbor.get('text', '')}"
-
-    return text
-
-
-async def query_LLM(text_input, system_prompt):
-    return await LLMGateway.acreate_structured_output(
-        text_input=text_input,
-        system_prompt=system_prompt,  # no format()
-        response_model=NodeDescription,
-    )
-
-
-def build_entity_type(entity_type_node):
-    entity_type_id, entity_type_props = entity_type_node["id"], entity_type_node
-    entity_type_props = {
-        **entity_type_props,
-        "id": entity_type_id,
-        "metadata": load_metadata_to_dict(entity_type_props.get("metadata")),
-    }
-    entity_type = EntityType(**entity_type_props)
-    return entity_type
-
-
-def build_entity(id, name, entity_type, description):
-    return Entity(
-        id=UUID(id),
-        name=name,
-        is_a=entity_type,
-        description=description,
-    )
-
-
-async def generate_consolidated_entity(node, system_prompt) -> Entity:
-    props = node["properties"]
-    text = build_node_neighborhood_prompt(node)
-    result = await query_LLM(text, system_prompt)
-    entity_type = build_entity_type(node["entity_type"])
-    entity = build_entity(props["id"], props["name"], entity_type, result.description)
-    return entity
-
-
-# endregion
-
-
-async def generate_consolidated_entities(nodes) -> list[DataPoint]:
-    system_prompt = render_prompt(prompt_name, {})
-
-    consolidate_entity_descriptions_tasks = (
-        generate_consolidated_entity(node, system_prompt) for node in nodes
-    )
-
-    return await asyncio.gather(*consolidate_entity_descriptions_tasks)
-
-
-async def consolidate_entity_descriptions_pipeline():
     extraction_tasks = [Task(get_entities_with_neighborhood)]
 
     enrichment_tasks = [
-        Task(generate_consolidated_entities),
+        Task(
+            generate_consolidated_entities,
+            max_concurrent_calls=entity_max_concurrent_calls,
+            max_neighbor_lines=entity_max_neighbor_lines,
+            max_neighbor_text_chars=entity_max_neighbor_text_chars,
+            max_completion_tokens=entity_description_max_completion_tokens,
+        ),
+        Task(
+            generate_type_descriptions,
+            max_concurrent_calls=type_max_concurrent_calls,
+            max_members_per_batch=type_max_members_per_batch,
+            max_named_members=type_max_named_members,
+            max_persisted_is_a_chars=type_max_persisted_is_a_chars,
+            max_completion_tokens=type_description_max_completion_tokens,
+            tokens_per_is_a_line=type_tokens_per_is_a_line,
+        ),
         Task(add_data_points),
     ]
 
-    await cognee.memify(
+    result = await memify(
         extraction_tasks=extraction_tasks,
         enrichment_tasks=enrichment_tasks,
         data=[{}],  # A placeholder to prevent fetching the entire graph
+        dataset=dataset,
+        user=user,
+        run_in_background=run_in_background,
     )
+
+    logger.info("consolidate_entity_descriptions pipeline finished (dataset=%s).", dataset)
+    return result

@@ -20,6 +20,7 @@ from cognee.modules.data.methods import (
     resolve_data_id,
 )
 from cognee.modules.data.models import Data
+from cognee.modules.ingestion import save_data_to_file_detailed
 from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.modules.ingestion.identify_many import identify_many
 from cognee.modules.users.methods import get_default_user
@@ -84,15 +85,17 @@ def _source_uri_from_input(data_item: Any) -> str | None:
     its original URL would otherwise be lost. File and object-storage locators
     are preserved as well; ordinary text input deliberately returns ``None``.
     """
+    literal_text = False
     if isinstance(data_item, DataItem):
         metadata = data_item.external_metadata
         if isinstance(metadata, dict):
             explicit = metadata.get("source_uri")
             if isinstance(explicit, str) and explicit.strip():
                 return explicit.strip()
+        literal_text = data_item.literal_text
         data_item = data_item.data
 
-    if isinstance(data_item, str):
+    if isinstance(data_item, str) and not literal_text:
         parsed = urlparse(data_item)
         if parsed.scheme.lower() in {"http", "https", "s3", "file"}:
             return data_item
@@ -212,7 +215,12 @@ async def ingest_data(
             # its (I/O-free) save resolves to.
             carried = find_carried_source(ctx, data_item=data_item)
             if carried is None:
-                stored = await save_data_item_to_storage_detailed(underlying_data)
+                if isinstance(data_item, DataItem) and data_item.literal_text:
+                    # Store verbatim as text: never interpret this string as a
+                    # URL, s3 path, or local file path (see DataItem.literal_text).
+                    stored = await save_data_to_file_detailed(underlying_data)
+                else:
+                    stored = await save_data_item_to_storage_detailed(underlying_data)
                 carried = find_carried_source(ctx, file_path=stored.file_path) or stored
 
             original_file_path = carried.file_path
@@ -457,7 +465,13 @@ async def ingest_data(
                 data_point.raw_content_hash = storage_file_metadata["content_hash"]
                 data_point.data_size = original_file_metadata["file_size"]
                 data_point.external_metadata = ext_metadata
-                if item_system_metadata is not None:
+                # System metadata is the route stamp of the CONTENT (a DLT
+                # manifest, a code file), so it follows the content: new content
+                # gets the stamp its own item carries, including none. Keeping
+                # the old stamp on a replacement of another kind would route the
+                # new content down the old route — text read as a DLT manifest —
+                # and break every later cognify of the dataset.
+                if item_system_metadata is not None or content_changed:
                     data_point.system_metadata = item_system_metadata
                 data_point.node_set = json.dumps(node_set) if node_set else None
                 data_point.tenant_id = user.tenant_id if user.tenant_id else None

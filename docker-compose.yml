@@ -2,6 +2,10 @@ services:
   cognee:
     container_name: cognee
     restart: always
+    # Must exceed the shutdown hook's background-task drain (default 8s,
+    # BACKGROUND_DRAIN_TIMEOUT_SECONDS) plus the engine close/WAL checkpoint —
+    # raise BOTH together, or the worker is SIGKILLed mid-checkpoint.
+    stop_grace_period: 15s
     networks:
       - cognee-network
     build:
@@ -33,6 +37,15 @@ services:
       - DB_PASSWORD=${DB_PASSWORD:-}
       # CAUTION: Default '*' allows all origins. Override with specific domains in production.
       - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-*}
+      # Password login for the default user. This stack is local, so the
+      # well-known dev password is the default: `docker compose up` and the UI
+      # at localhost:3000 work with no configuration, the same way the
+      # POSTGRES_PASSWORD line in any database image's compose does. Override
+      # it here or in the environment. The server sets it once on a default
+      # user that has no password yet; it never changes an existing password.
+      # Do NOT reuse this value on a server reachable from a network -- there,
+      # leave it unset and no default-user login exists.
+      - DEFAULT_USER_PASSWORD=${DEFAULT_USER_PASSWORD:-default_password}
     extra_hosts:
       # Allows the container to reach your local machine using "host.docker.internal" instead of "localhost"
       - "host.docker.internal:host-gateway"
@@ -132,6 +145,9 @@ services:
       # backend directly, so when you do set this it must be the address as
       # seen from the browser, not the `cognee` service name.
       - COGNEE_BACKEND_URL=${COGNEE_BACKEND_URL:-}
+      # Same value as the backend's: the UI's server-side routes fall back to a
+      # default-user login when the browser sent no credentials.
+      - DEFAULT_USER_PASSWORD
     depends_on:
       cognee:
         condition: service_healthy
@@ -151,6 +167,7 @@ services:
       target: dev
     environment:
       - COGNEE_BACKEND_URL=${COGNEE_BACKEND_URL:-}
+      - DEFAULT_USER_PASSWORD
     volumes:
       - ./cognee-frontend/src:/app/src
       - ./cognee-frontend/public:/app/public
