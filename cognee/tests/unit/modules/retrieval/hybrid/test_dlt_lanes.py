@@ -34,6 +34,7 @@ def _vector_engine(hits_by_collection, *, dlt_rows=None):
     engine = SimpleNamespace(
         search=AsyncMock(side_effect=search),
         has_collection=AsyncMock(side_effect=lambda name: name == "DltRow_text" and has_dlt),
+        retrieve=AsyncMock(return_value=[]),  # no TextSummary rows exist in these fakes
     )
     engine.embedding_engine = SimpleNamespace(embed_text=AsyncMock(return_value=[[0.0]]))
     return engine
@@ -178,3 +179,23 @@ async def test_a_dataset_with_dlt_rows_searches_the_dlt_collections_in_both_lane
         "SchemaTable_name",
         "SchemaRelationship_name",
     }
+
+
+@pytest.mark.asyncio
+async def test_a_chunk_without_a_summary_is_not_a_warning(caplog):
+    """A summary is optional enrichment — DLT rows never have one — so none is not an error."""
+    engine = _vector_engine(
+        {
+            "DocumentChunk_text": [_hit("chunk", 0.5)],
+            "DltRow_text": [_hit("row", 0.1, type="DltRow")],
+            "TextSummary_text": [],
+        }
+    )
+
+    with caplog.at_level("WARNING", logger="HybridRetriever"):
+        result = await retrieve_hybrid_chunks(
+            engine, "q", 2, None, None, "OR", False, collections=chunk_collections(True)
+        )
+
+    assert [hit.payload["id"] for hit in result["chunks"]] == ["row", "chunk"]
+    assert caplog.text == ""

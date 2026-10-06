@@ -288,10 +288,7 @@ async def load_summary_text_for_ranked_pairs(
 
         summary = summaries_by_id.get(summary_id)
         if summary is None:
-            logger.warning(
-                "DocumentChunk_text row has no paired TextSummary_text row: chunk_id=%s",
-                chunk_id,
-            )
+            # A summary is optional enrichment: DLT rows and custom pipelines write none.
             continue
 
         summary_payload = payload(summary)
