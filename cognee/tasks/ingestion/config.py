@@ -28,17 +28,6 @@ class IngestionConfig(BaseSettings):
     # one embedding per unique value.
     dlt_max_column_value_length: int = 0
 
-    # Time edges for DLT rows: maps table name to the columns whose ISO-shaped
-    # cells (YYYY-MM, YYYY-MM-DD, date-times) become edges into shared Timestamp
-    # nodes, which temporal search anchors on. Same shape as
-    # dlt_column_value_columns; "*" is a wildcard on either side. Default
-    # {"*": ["*"]}: every date cell of every table. Narrow it when a table
-    # carries bookkeeping dates — {"orders": ["order_date"]} keeps an
-    # ``updated_at`` column from anchoring rows to the time they were revised.
-    # {} turns time edges off. Env: DLT_TEMPORAL_COLUMNS as JSON, or
-    # add(..., temporal_columns=...).
-    dlt_temporal_columns: dict[str, list[str]] = {"*": ["*"]}
-
     model_config = SettingsConfigDict(extra="allow")
 
     def to_dict(self) -> dict:
@@ -46,7 +35,6 @@ class IngestionConfig(BaseSettings):
             "dlt_max_rows_per_table": self.dlt_max_rows_per_table,
             "dlt_column_value_columns": self.dlt_column_value_columns,
             "dlt_max_column_value_length": self.dlt_max_column_value_length,
-            "dlt_temporal_columns": self.dlt_temporal_columns,
         }
 
 
