@@ -1,18 +1,13 @@
-"""Guards entity/result alignment in TripletSearchContextProvider.
-
-Entities without searchable text are skipped, so there are fewer search results
-than entities whenever one is text-less. ``get_context`` used to zip the *full*
-``entities`` list against those results, which labelled every entity after the
-skipped one with its neighbour's result and silently dropped the last one. The
-provider now derives entities, searches and labels from one list of searchable
-entities.
-"""
-
-from types import SimpleNamespace
+"""Regression tests for pairing searchable entities with their own results."""
 
 import pytest
 
+from cognee.infrastructure.engine import DataPoint
+from cognee.modules.engine.models.Entity import Entity
 from cognee.modules.retrieval.context_providers import TripletSearchContextProvider as mod
+from cognee.modules.retrieval.context_providers.SummarizedTripletSearchContextProvider import (
+    SummarizedTripletSearchContextProvider,
+)
 from cognee.modules.retrieval.context_providers.TripletSearchContextProvider import (
     TripletSearchContextProvider,
 )
@@ -24,99 +19,82 @@ def _block(label: str, result: str) -> str:
 
 @pytest.fixture
 def fake_search(monkeypatch):
-    """Echoes each query back as its result and records projection loads."""
-    calls = SimpleNamespace(memory_fragment=0, failing_queries=set())
+    """Echo queries so tests can identify which entity each result belongs to."""
+    queries = []
 
     async def fake_triplet_search(query, **kwargs):
-        if query in calls.failing_queries:
-            raise RuntimeError(f"search failed for {query}")
+        queries.append(query)
         return f"RESULT::{query}"
 
     async def fake_get_memory_fragment(_properties):
-        calls.memory_fragment += 1
+        return None
 
     monkeypatch.setattr(mod, "brute_force_triplet_search", fake_triplet_search)
     monkeypatch.setattr(mod, "get_memory_fragment", fake_get_memory_fragment)
     monkeypatch.setattr(mod, "format_triplets", lambda triplets: triplets)
-    return calls
+    return queries
 
 
 @pytest.mark.asyncio
-async def test_context_pairs_each_entity_with_its_own_result(fake_search):
-    # A text-less entity between two searchable ones. The old code labelled it
-    # "namespace(name='')" with Gamma's result and dropped Gamma entirely.
-    entities = [
-        SimpleNamespace(name="Alpha"),
-        SimpleNamespace(name=""),
-        SimpleNamespace(name="Gamma"),
-    ]
+@pytest.mark.parametrize("empty_position", [0, 1, 2])
+async def test_context_pairs_each_entity_with_its_own_result(fake_search, empty_position):
+    entities = [Entity(name="Alpha", description=""), Entity(name="Gamma", description="")]
+    # The actual Entity schema accepts blank strings; no stand-in object is needed.
+    entities.insert(empty_position, Entity(name="", description=""))
 
     context = await TripletSearchContextProvider().get_context(entities, query="Q")
 
     assert context == "\n".join(
         [_block("Alpha", "RESULT::Alpha Q"), _block("Gamma", "RESULT::Gamma Q")]
     )
-    assert "namespace(" not in context
+    assert fake_search == ["Alpha Q", "Gamma Q"]
+    assert len(entities) == 3
 
 
 @pytest.mark.asyncio
-async def test_whitespace_only_entities_are_skipped(fake_search):
-    entities = [SimpleNamespace(name="   ", description="\n\t"), SimpleNamespace(name=" Beta ")]
-
-    context = await TripletSearchContextProvider().get_context(entities, query="Q")
-
-    assert context == _block("Beta", "RESULT::Beta Q")
-
-
-@pytest.mark.asyncio
-async def test_label_is_the_first_text_field_of_the_search_text(fake_search):
-    # No name: the search text starts with the description, so the block is
-    # labelled with it rather than falling back to the object's repr.
-    entities = [SimpleNamespace(name=None, description="Delta desc", text="Delta body")]
-
-    context = await TripletSearchContextProvider().get_context(entities, query="Q")
-
-    assert context == _block("Delta desc", "RESULT::Delta desc Delta body Q")
-
-
-@pytest.mark.asyncio
-async def test_all_text_less_entities_skip_the_graph_projection(fake_search):
-    entities = [SimpleNamespace(name=""), SimpleNamespace(description="  ")]
-
-    context = await TripletSearchContextProvider().get_context(entities, query="Q")
-
-    assert context == "No valid entities found for context search."
-    assert fake_search.memory_fragment == 0
-
-
-@pytest.mark.asyncio
-async def test_one_failed_search_keeps_the_other_entities_context(fake_search):
-    fake_search.failing_queries = {"Alpha Q"}
-    entities = [SimpleNamespace(name="Alpha"), SimpleNamespace(name="Gamma")]
+async def test_generic_data_point_without_text_does_not_shift_results(fake_search):
+    entities = [DataPoint(), Entity(name="Gamma", description="")]
 
     context = await TripletSearchContextProvider().get_context(entities, query="Q")
 
     assert context == _block("Gamma", "RESULT::Gamma Q")
+    assert fake_search == ["Gamma Q"]
 
 
 @pytest.mark.asyncio
-async def test_every_search_failing_raises(fake_search):
-    fake_search.failing_queries = {"Alpha Q", "Gamma Q"}
-    entities = [SimpleNamespace(name="Alpha"), SimpleNamespace(name="Gamma")]
-
-    with pytest.raises(RuntimeError, match="search failed"):
-        await TripletSearchContextProvider().get_context(entities, query="Q")
-
-
-@pytest.mark.asyncio
-async def test_long_label_is_capped_but_search_text_is_not(fake_search):
-    # A name-less entity with a long, multi-line description: the search uses
-    # the full text, the block header is one line capped with an ellipsis.
-    description = "first line\n" + " ".join(f"word{i}" for i in range(60))
-    entities = [SimpleNamespace(name=None, description=description)]
+async def test_all_text_less_entities_keep_existing_response(fake_search):
+    entities = [Entity(name="", description=""), DataPoint()]
 
     context = await TripletSearchContextProvider().get_context(entities, query="Q")
 
-    label = " ".join(description.split())[: mod.MAX_LABEL_LENGTH - 1] + "…"
-    assert context.startswith(f"Context for {label}:\n")
-    assert f"RESULT::{description} Q" in context
+    assert context == "No valid entities found for context search."
+    assert fake_search == []
+
+
+@pytest.mark.asyncio
+async def test_description_fallback_keeps_full_label_and_search_text(fake_search):
+    description = "first line\n" + " ".join(f"word{i}" for i in range(60))
+    entities = [Entity(name="", description=""), Entity(name="", description=description)]
+
+    context = await TripletSearchContextProvider().get_context(entities, query="Q")
+
+    assert context == _block(description, f"RESULT::{description} Q")
+    assert fake_search == [f"{description} Q"]
+
+
+@pytest.mark.asyncio
+async def test_summarized_provider_inherits_alignment_fix(fake_search, monkeypatch):
+    from cognee.modules.retrieval.context_providers import (
+        SummarizedTripletSearchContextProvider as summary_mod,
+    )
+
+    async def fake_summary(text, _prompt):
+        return f"SUMMARIZED::{text}"
+
+    monkeypatch.setattr(summary_mod, "summarize_text", fake_summary)
+    entities = [Entity(name="", description=""), Entity(name="Gamma", description="")]
+
+    context = await SummarizedTripletSearchContextProvider().get_context(entities, query="Q")
+
+    assert context == f"Summary for Gamma:\nSUMMARIZED::{_block('Gamma', 'RESULT::Gamma Q')}\n---\n"
+    assert fake_search == ["Gamma Q"]

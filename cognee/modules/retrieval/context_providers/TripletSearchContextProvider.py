@@ -1,6 +1,4 @@
 import asyncio
-from collections.abc import Coroutine
-from typing import Any, NamedTuple
 
 from cognee.infrastructure.context.BaseContextProvider import BaseContextProvider
 from cognee.infrastructure.engine import DataPoint
@@ -12,23 +10,6 @@ from cognee.modules.retrieval.utils.brute_force_triplet_search import (
 )
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
-from cognee.shared.logging_utils import get_logger
-
-logger = get_logger()
-
-_TEXT_FIELDS = ("name", "description", "text")
-
-# Longest context block label; a name-less entity (a chunk, say) would otherwise
-# be labelled with its full text.
-MAX_LABEL_LENGTH = 80
-
-
-class SearchableEntity(NamedTuple):
-    """An entity that has searchable text, with its search text and display label."""
-
-    entity: DataPoint
-    search_text: str
-    label: str
 
 
 class TripletSearchContextProvider(BaseContextProvider):
@@ -44,92 +25,69 @@ class TripletSearchContextProvider(BaseContextProvider):
         self.collections = collections
         self.properties_to_project = properties_to_project
 
-    def _searchable_entities(self, entities: list[DataPoint]) -> list[SearchableEntity]:
-        """Keeps the entities that have non-blank text, in order.
+    def _get_entity_text(self, entity: DataPoint) -> str | None:
+        """Concatenates available entity text fields with graceful fallback."""
+        texts = []
+        if hasattr(entity, "name") and entity.name:
+            texts.append(entity.name)
+        if hasattr(entity, "description") and entity.description:
+            texts.append(entity.description)
+        if hasattr(entity, "text") and entity.text:
+            texts.append(entity.text)
 
-        Searches, results and labels are all derived from this one list, so a
-        skipped entity can never shift a result onto the wrong entity.
-        """
-        searchable = []
-        for entity in entities:
-            values = (getattr(entity, field, None) for field in _TEXT_FIELDS)
-            fields = [v.strip() for v in values if isinstance(v, str) and v.strip()]
-            if not fields:
-                continue
-            # Label with the field the search text starts with, on one short line.
-            label = " ".join(fields[0].split())
-            if len(label) > MAX_LABEL_LENGTH:
-                label = label[: MAX_LABEL_LENGTH - 1] + "…"
-            searchable.append(
-                SearchableEntity(entity=entity, search_text=" ".join(fields), label=label)
-            )
-        return searchable
+        return " ".join(texts) if texts else None
 
     def _get_search_tasks(
         self,
-        searchable: list[SearchableEntity],
+        entities: list[DataPoint],
         query: str,
         memory_fragment: CogneeGraph,
-    ) -> list[Coroutine[Any, Any, list]]:
-        """Creates one search coroutine per searchable entity, in the same order."""
-        return [
+    ) -> list:
+        """Creates search tasks for valid entities."""
+        tasks = [
             brute_force_triplet_search(
-                query=f"{item.search_text} {query}",
+                query=f"{entity_text} {query}",
                 top_k=self.top_k,
                 collections=self.collections,
                 properties_to_project=self.properties_to_project,
                 memory_fragment=memory_fragment,
             )
-            for item in searchable
+            for entity in entities
+            if (entity_text := self._get_entity_text(entity)) is not None
         ]
+        return tasks
 
     async def _format_triplets(self, triplets: list, entity_name: str) -> str:
         """Format triplets into readable text."""
         direct_text = format_triplets(triplets)
         return f"Context for {entity_name}:\n{direct_text}\n---\n"
 
-    async def _results_to_context(
-        self, searchable: list[SearchableEntity], results: list[list]
-    ) -> str:
-        """Formats search results into context string, one block per entity."""
-        # Formatting can call an LLM (the summarized subclass), so run the
-        # entities concurrently; gather keeps the blocks in entity order.
-        blocks = await asyncio.gather(
-            *(
-                self._format_triplets(entity_triplets, item.label)
-                for item, entity_triplets in zip(searchable, results, strict=True)
+    async def _results_to_context(self, entities: list[DataPoint], results: list) -> str:
+        """Formats search results into context string."""
+        triplets = []
+
+        for entity, entity_triplets in zip(entities, results):
+            entity_name = (
+                getattr(entity, "name", None)
+                or getattr(entity, "description", None)
+                or getattr(entity, "text", str(entity))
             )
-        )
-        return "\n".join(blocks) if blocks else "No relevant context found."
+            triplets.append(await self._format_triplets(entity_triplets, entity_name))
+
+        return "\n".join(triplets) if triplets else "No relevant context found."
 
     async def get_context(self, entities: list[DataPoint], query: str) -> str:
         """Get context for each entity using brute force triplet search."""
         if not entities:
             return "No entities provided for context search."
 
-        searchable = self._searchable_entities(entities)
-        if not searchable:
-            # Checked before the projection so a request with nothing to search
-            # never pays for loading the graph.
+        memory_fragment = await get_memory_fragment(self.properties_to_project)
+        # Search and format the same entities so skipped ones cannot shift results.
+        entities = [entity for entity in entities if self._get_entity_text(entity) is not None]
+        search_tasks = self._get_search_tasks(entities, query, memory_fragment)
+
+        if not search_tasks:
             return "No valid entities found for context search."
 
-        memory_fragment = await get_memory_fragment(self.properties_to_project)
-        search_tasks = self._get_search_tasks(searchable, query, memory_fragment)
-        outcomes = await asyncio.gather(*search_tasks, return_exceptions=True)
-
-        # One entity's failed search must not discard the others' context.
-        succeeded = []
-        for item, outcome in zip(searchable, outcomes, strict=True):
-            if not isinstance(outcome, BaseException):
-                succeeded.append((item, outcome))
-            elif isinstance(outcome, Exception):
-                logger.warning("Triplet search failed for entity %r: %s", item.label, outcome)
-            else:
-                raise outcome  # cancellation is not a search failure
-
-        if not succeeded:
-            # Every search failed, so the cause is not entity-specific; surface it.
-            raise outcomes[0]
-
-        items, results = zip(*succeeded)
-        return await self._results_to_context(list(items), list(results))
+        results = await asyncio.gather(*search_tasks)
+        return await self._results_to_context(entities, results)
