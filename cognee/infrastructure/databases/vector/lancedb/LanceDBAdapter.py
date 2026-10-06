@@ -20,6 +20,7 @@ import lancedb
 from lancedb.pydantic import LanceModel, Vector
 from pydantic import BaseModel
 
+from cognee.infrastructure.background_tasks import register_background_task
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
 from cognee.infrastructure.databases.vector.config import get_vectordb_config
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
@@ -927,13 +928,10 @@ class LanceDBAdapter(VectorDBInterface):
         if options is None or self._compaction_skip_reason():
             return
         try:
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()
         except RuntimeError:
             return
-        task = loop.create_task(self._prune_on_open(options))
-        self._open_prune_task = task
-        _OPEN_PRUNE_TASKS.add(task)
-        task.add_done_callback(_OPEN_PRUNE_TASKS.discard)
+        self._start_prune_task(options)
 
     def _schedule_followup_prune(self, options: dict) -> None:
         """Prune once more when the versions younger than the retention window at
@@ -951,14 +949,29 @@ class LanceDBAdapter(VectorDBInterface):
             )
 
     def _start_followup_prune(self, options: dict) -> None:
-        # Same slot as the first-open prune, so compact() and close() wait for it.
         self._followup_prune_handle = None
         if self._permanently_closed:
             return
+        self._start_prune_task(options)
+
+    def _start_prune_task(self, options: dict) -> asyncio.Task:
+        """Start a version prune in the background.
+
+        Every prune -- first-open or follow-up -- goes through here and takes
+        the single ``_open_prune_task`` slot that ``compact``, ``close`` and
+        ``prune`` wait on. A prune that replaces a still-running one in the slot
+        needs no explicit chaining: both take ``_compaction_lock``, which wakes
+        waiters in order, so the newer one finishes last and waiting on it
+        covers both. Registered as a background task, so
+        ``cognee.wait_for_background_tasks()`` and the server's shutdown drain
+        let it finish.
+        """
         task = asyncio.ensure_future(self._prune_on_open(options))
         self._open_prune_task = task
         _OPEN_PRUNE_TASKS.add(task)
         task.add_done_callback(_OPEN_PRUNE_TASKS.discard)
+        register_background_task(task)
+        return task
 
     async def _prune_on_open(self, options: dict) -> dict:
         try:
@@ -969,10 +982,11 @@ class LanceDBAdapter(VectorDBInterface):
             return {"error": str(exc)[:200]}
 
     async def _wait_for_open_prune(self) -> None:
-        """Let a running first-open prune finish (it is bounded) before this
-        adapter compacts or closes, so the two never overlap and closing never
-        tears the worker down under it. A prune started on another event loop
-        cannot be awaited from this one and is left alone."""
+        """Let a running version prune (first-open or follow-up, see
+        ``_start_prune_task``) finish -- it is bounded -- before this adapter
+        compacts, prunes or closes, so they never overlap and closing never tears
+        the worker down under it. A prune started on another event loop cannot be
+        awaited from this one and is left alone."""
         task = self._open_prune_task
         if task is None or task.done():
             return
@@ -982,18 +996,6 @@ class LanceDBAdapter(VectorDBInterface):
             return
         if same_loop:
             await asyncio.wait({task})
-
-    async def _wait_for_compaction_pass(self) -> None:
-        """Let a running compaction pass (it holds ``_compaction_lock``, and is
-        bounded) finish before this adapter closes. A pass running on another
-        event loop cannot be waited on from this one and is left alone."""
-        if not self._compaction_lock.locked():
-            return
-        try:
-            async with self._compaction_lock:
-                pass
-        except RuntimeError:  # the lock is bound to another event loop
-            return
 
     async def _prune_pass(self, options: dict) -> dict:
         """Prune superseded versions across the store's tables; no fragment rewrites."""
@@ -1865,6 +1867,9 @@ class LanceDBAdapter(VectorDBInterface):
         # outside VECTOR_DB_LOCK), finishes before the tables are dropped under
         # it. Same lock order as ``compact``: compaction lock, then the write lock.
         self._open_prune_started = True
+        if self._followup_prune_handle is not None:
+            self._followup_prune_handle.cancel()
+            self._followup_prune_handle = None
         await self._wait_for_open_prune()
         connection = await self.get_connection()
 
@@ -1987,8 +1992,6 @@ class LanceDBAdapter(VectorDBInterface):
             self._followup_prune_handle.cancel()
             self._followup_prune_handle = None
         await self._wait_for_open_prune()
-        # A compaction pass runs in the background after cognify; let it commit first.
-        await self._wait_for_compaction_pass()
         with self._lifecycle_lock:
             if self._permanently_closed:
                 return  # idempotent
