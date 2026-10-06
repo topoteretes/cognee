@@ -1,7 +1,12 @@
 from cognee.context_global_variables import session_user
 from cognee.exceptions import CogneeSystemError
 from cognee.infrastructure.session.get_session_manager import get_session_manager
+from cognee.infrastructure.session.session_node_set import (
+    node_set_from_rows,
+    read_session_context_strict,
+)
 from cognee.infrastructure.session.session_persist_watermark import (
+    SESSION_PERSIST_WATERMARK,
     SessionPersistWindow,
     get_persisted_qa_count,
 )
@@ -63,21 +68,20 @@ async def extract_user_sessions(
                     if not qa_data:
                         continue
 
-                    persisted_count = await get_persisted_qa_count(
+                    # One strict snapshot of the session's context rows holds both
+                    # the persist watermark and the pinned node set. It is taken
+                    # after the Q&A read, so every entry in qa_data was written
+                    # before it, and a pin written ahead of any of them is in it.
+                    # Strict: an unreadable session is skipped for this run (the
+                    # except below), never bridged from watermark 0 or untagged.
+                    context_rows = await read_session_context_strict(
                         session_manager, user_id, session_id
                     )
-                    if persisted_count > len(qa_data):
-                        # The session shrank below the watermark (cleared and
-                        # rebuilt): the watermark is stale, persist everything
-                        # currently in the session again.
-                        logger.warning(
-                            "Session %s has %d entries but watermark is %d; "
-                            "treating watermark as stale and persisting from the start",
-                            session_id,
-                            len(qa_data),
-                            persisted_count,
-                        )
-                        persisted_count = 0
+                    persisted_count = SESSION_PERSIST_WATERMARK.resolve_effective(
+                        SESSION_PERSIST_WATERMARK.count_from_rows(context_rows),
+                        len(qa_data),
+                        session_id=session_id,
+                    )
 
                     new_entries = qa_data[persisted_count:]
                     if not new_entries:
@@ -105,6 +109,7 @@ async def extract_user_sessions(
                         session_id=session_id,
                         text=session_string,
                         persisted_qa_count=len(qa_data),
+                        node_set=node_set_from_rows(context_rows),
                     )
                 except Exception as e:
                     logger.warning(f"Failed to extract session {session_id}: {e!s}", exc_info=True)

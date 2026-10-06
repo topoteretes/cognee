@@ -225,3 +225,107 @@ async def test_extract_user_sessions_session_manager_error_handling(mock_user, m
             sessions.append(session)
 
         assert len(sessions) == 2
+
+
+@pytest.mark.asyncio
+async def test_window_carries_the_sessions_pinned_node_set(mock_user, mock_qa_data):
+    """A session with a pinned node_set yields windows carrying it (SDK-336)."""
+    from cognee.infrastructure.session.session_node_set import (
+        SESSION_NODE_SET_STATE_ID,
+        SESSION_NODE_SET_STATE_KIND,
+    )
+
+    mock_session_manager = _make_mock_session_manager(mock_qa_data)
+    mock_session_manager.get_session_context_entries = AsyncMock(
+        return_value=[
+            {
+                "id": SESSION_NODE_SET_STATE_ID,
+                "kind": SESSION_NODE_SET_STATE_KIND,
+                "node_set": ["project-b", "project-a"],
+            }
+        ]
+    )
+
+    with (
+        patch.object(extract_user_sessions_module, "session_user") as mock_session_user,
+        patch.object(
+            extract_user_sessions_module,
+            "get_session_manager",
+            return_value=mock_session_manager,
+        ),
+    ):
+        mock_session_user.get.return_value = mock_user
+        windows = [w async for w in extract_user_sessions([{}], session_ids=["test_session"])]
+
+    assert [w.node_set for w in windows] == [("project-a", "project-b")]
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_pin_skips_the_session_instead_of_bridging_it_untagged(
+    mock_user, mock_qa_data
+):
+    """A failed node-set read skips the session this run; it is retried next improve()."""
+    mock_session_manager = _make_mock_session_manager(mock_qa_data)
+    mock_session_manager.get_session_context_entries = AsyncMock(
+        side_effect=ConnectionError("cache read failed")
+    )
+
+    with (
+        patch.object(extract_user_sessions_module, "session_user") as mock_session_user,
+        patch.object(
+            extract_user_sessions_module,
+            "get_session_manager",
+            return_value=mock_session_manager,
+        ),
+    ):
+        mock_session_user.get.return_value = mock_user
+        windows = [w async for w in extract_user_sessions([{}], session_ids=["test_session"])]
+
+    assert windows == []
+
+
+@pytest.mark.asyncio
+async def test_one_strict_snapshot_serves_the_watermark_and_the_pin(mock_user, mock_qa_data):
+    """One context read per session, strict, parsed for both the watermark and the pin."""
+    from cognee.infrastructure.session.session_node_set import (
+        SESSION_NODE_SET_STATE_ID,
+        SESSION_NODE_SET_STATE_KIND,
+    )
+    from cognee.infrastructure.session.session_persist_watermark import (
+        SESSION_PERSIST_STATE_ID,
+        SESSION_PERSIST_STATE_KIND,
+    )
+
+    mock_session_manager = _make_mock_session_manager(mock_qa_data)
+    mock_session_manager.get_session_context_entries = AsyncMock(
+        return_value=[
+            {
+                "id": SESSION_PERSIST_STATE_ID,
+                "kind": SESSION_PERSIST_STATE_KIND,
+                "persisted_qa_count": 1,
+            },
+            {
+                "id": SESSION_NODE_SET_STATE_ID,
+                "kind": SESSION_NODE_SET_STATE_KIND,
+                "node_set": ["project-a"],
+            },
+        ]
+    )
+
+    with (
+        patch.object(extract_user_sessions_module, "session_user") as mock_session_user,
+        patch.object(
+            extract_user_sessions_module,
+            "get_session_manager",
+            return_value=mock_session_manager,
+        ),
+    ):
+        mock_session_user.get.return_value = mock_user
+        windows = [w async for w in extract_user_sessions([{}], session_ids=["test_session"])]
+
+    assert len(windows) == 1
+    assert "How does it work?" in windows[0].text
+    assert "What is cognee?" not in windows[0].text, "entries below the watermark are skipped"
+    assert windows[0].node_set == ("project-a",)
+    mock_session_manager.get_session_context_entries.assert_awaited_once()
+    assert mock_session_manager.get_session_context_entries.await_args.kwargs["raise_on_error"]

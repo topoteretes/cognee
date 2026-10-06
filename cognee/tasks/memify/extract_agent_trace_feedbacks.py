@@ -3,6 +3,10 @@ import json
 from cognee.context_global_variables import session_user
 from cognee.exceptions import CogneeSystemError
 from cognee.infrastructure.session.get_session_manager import get_session_manager
+from cognee.infrastructure.session.session_node_set import (
+    node_set_from_rows,
+    read_session_context_strict,
+)
 from cognee.infrastructure.session.session_persist_watermark import (
     TRACE_PERSIST_WATERMARK,
     TracePersistWindow,
@@ -172,9 +176,15 @@ async def extract_agent_trace_feedbacks(
                     if not total_trace_count:
                         continue
 
-                    persisted_count = await TRACE_PERSIST_WATERMARK.read_count(
+                    # One strict snapshot of the session's context rows holds both
+                    # the trace watermark and the pinned node set. Strict: an
+                    # unreadable session is skipped for this run (the except below),
+                    # never bridged from watermark 0 or untagged.
+                    context_rows = await read_session_context_strict(
                         session_manager, user_id, session_id
                     )
+                    persisted_count = TRACE_PERSIST_WATERMARK.count_from_rows(context_rows)
+                    counted_trace_count = total_trace_count
                     if (
                         resolve_trace_window(
                             total_trace_count,
@@ -208,6 +218,14 @@ async def extract_agent_trace_feedbacks(
                         trace_values = [entry.method_return_value for entry in trace_session]
 
                     total_trace_count = len(trace_values)
+                    if total_trace_count != counted_trace_count:
+                        # Steps arrived between the count and the fetch. A first
+                        # pin written with one of them may postdate the snapshot,
+                        # so read the pin again; otherwise every fetched step was
+                        # written before the snapshot, after any pin it carries.
+                        context_rows = await read_session_context_strict(
+                            session_manager, user_id, session_id
+                        )
                     window_start, window_size = resolve_trace_window(
                         total_trace_count,
                         persisted_count,
@@ -255,6 +273,7 @@ async def extract_agent_trace_feedbacks(
                         session_id=session_id,
                         text=f"Session ID: {session_id}\n\n" + "\n".join(normalized_trace_values),
                         persisted_trace_count=window_end,
+                        node_set=node_set_from_rows(context_rows),
                     )
                 except Exception as error:
                     logger.warning(

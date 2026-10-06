@@ -361,10 +361,35 @@ class TestRenderLessonDocument:
         assert "Plain statement.\n" in document
         assert "()" not in document
 
+    @staticmethod
+    def _session_manager(context_rows):
+        """Publish reads the session's pinned node_set through the context-entry API."""
+        return SimpleNamespace(get_session_context_entries=AsyncMock(return_value=context_rows))
+
     @pytest.mark.asyncio
-    async def test_publish_tags_lessons_with_global_and_session_node_sets(self):
+    @pytest.mark.parametrize(
+        ("context_rows", "expected_node_set"),
+        [
+            ([], ["session_learnings", "session_learnings:s-1"]),
+            (
+                [
+                    {
+                        "id": "session_node_set",
+                        "kind": "session_node_set_state",
+                        "node_set": ["project-a"],
+                    }
+                ],
+                ["session_learnings", "session_learnings:s-1", "project-a"],
+            ),
+        ],
+        ids=["session-without-node-set", "session-with-node-set"],
+    )
+    async def test_publish_adds_global_session_and_pinned_node_sets_to_lessons(
+        self, context_rows, expected_node_set
+    ):
         scope = SimpleNamespace(
             session_id="s-1",
+            user_id="u-1",
             dataset=SimpleNamespace(id=uuid4()),
             user=SimpleNamespace(id=uuid4()),
         )
@@ -374,13 +399,18 @@ class TestRenderLessonDocument:
         with (
             patch("cognee.api.v1.add.add", add),
             patch("cognee.api.v1.cognify.cognify", cognify),
+            patch.object(
+                distill_module,
+                "get_session_manager",
+                return_value=self._session_manager(context_rows),
+            ),
         ):
             await distill_module.publish_distilled_lessons(
                 scope,
                 [WrittenLesson(accept=True, statement="Keep reports concise.")],
             )
 
-        assert add.await_args.kwargs["node_set"] == ["session_learnings", "session_learnings:s-1"]
+        assert add.await_args.kwargs["node_set"] == expected_node_set
         cognify.assert_awaited_once_with(datasets=[scope.dataset.id], user=scope.user)
 
 

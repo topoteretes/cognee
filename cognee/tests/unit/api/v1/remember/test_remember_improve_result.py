@@ -155,7 +155,7 @@ async def test_background_remember_records_improve_error(monkeypatch, permanent_
 
 @pytest.mark.asyncio
 async def test_session_bridge_records_improve_error(monkeypatch):
-    async def fake_add_to_session(session_id, data, user):
+    async def fake_add_to_session(session_id, data, user, node_set=None):
         return None
 
     async def failing_improve(**kwargs):
@@ -180,7 +180,7 @@ async def test_session_bridge_records_improve_error(monkeypatch):
 async def test_session_bridge_attaches_improve_result(monkeypatch):
     improve_result = _completed_improve()
 
-    async def fake_add_to_session(session_id, data, user):
+    async def fake_add_to_session(session_id, data, user, node_set=None):
         return None
 
     async def fake_improve(**kwargs):
@@ -210,7 +210,7 @@ async def test_auto_enabled_false_disables_both_paths(monkeypatch, permanent_pip
         calls["improve"] += 1
         return _completed_improve()
 
-    async def fake_add_to_session(session_id, data, user):
+    async def fake_add_to_session(session_id, data, user, node_set=None):
         return None
 
     monkeypatch.setattr(improve_pkg, "improve", counting_improve)
@@ -240,7 +240,7 @@ async def test_telemetry_never_carries_raw_session_ids(monkeypatch, permanent_pi
     def fake_send_telemetry(event_name, user, additional_properties=None, **kwargs):
         events.append((event_name, dict(additional_properties or {})))
 
-    async def fake_add_to_session(session_id, data, user):
+    async def fake_add_to_session(session_id, data, user, node_set=None):
         return None
 
     async def fake_improve(**kwargs):

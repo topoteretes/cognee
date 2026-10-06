@@ -209,6 +209,9 @@ class SessionPersistWindow:
     session_id: str
     text: str
     persisted_qa_count: int
+    # The session's pinned node set (``session_node_set``); appended to the
+    # node set the window is added under.
+    node_set: tuple[str, ...] = ()
 
 
 async def get_persisted_qa_count(session_manager, user_id: str, session_id: str) -> int:
@@ -249,6 +252,9 @@ class TracePersistWindow:
     session_id: str
     text: str
     persisted_trace_count: int
+    # The session's pinned node set (``session_node_set``); appended to the
+    # node set the window is added under.
+    node_set: tuple[str, ...] = ()
 
 
 # -- Stage 5: distilled context entries, per (session, dataset) --------------
