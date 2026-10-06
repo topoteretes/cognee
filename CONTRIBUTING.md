@@ -131,7 +131,7 @@ See the [Run with Docker](README.md#run-with-docker) section in the README for m
 
 Copy `.env.template` to `.env` and provide your OPENAI_API_KEY as LLM_API_KEY
 
-Make sure to run ```shell uv sync ``` in the root cloned folder or set up a virtual environment to run cognee
+Make sure to run `uv sync` in the root cloned folder or set up a virtual environment to run cognee
 
 ```shell
 uv run python examples/guides/simple_cognee_example.py
@@ -152,6 +152,24 @@ git push origin feature/your-feature-name
    - Click "Compare & Pull Request" and open a PR against dev branch
    - Fill in the PR template with details about your changes
    - You MUST provide screenshots of unit and integration tests passing on your machine. We can't merge PRs otherwise
+
+### PR Titles
+
+Use `type: Summary` for your PR title. The [PR title check](.github/workflows/pr_lint.yml)
+accepts these types:
+
+| Type | Example |
+| --- | --- |
+| `chore` | `chore: Update development dependencies` |
+| `ci` | `ci: Add a documentation check` |
+| `docs` | `docs: Fix broken link in setup guide` |
+| `feat` | `feat: Add dataset filtering` |
+| `fix` | `fix: Handle missing auth cookie` |
+| `perf` | `perf: Reduce search latency` |
+| `refactor` | `refactor: Simplify dataset lookup` |
+| `revert` | `revert: Restore previous search behavior` |
+| `test` | `test: Cover empty search results` |
+| `break` | `break: Remove deprecated endpoint` |
 
 ### Changelog Entries
 
