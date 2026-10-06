@@ -108,6 +108,9 @@ class RememberKwargs(TypedDict, total=False):
     repo_credentials: str
     skills_text: str
     skill_name: str
+    # DLT options: grouped in dlt_config (preferred), or the four bare spellings
+    # below kept for compatibility — see cognee.tasks.ingestion.dlt_config.
+    dlt_config: dict
     primary_key: str
     write_disposition: str
     query: str
@@ -139,6 +142,7 @@ _ADD_ONLY = frozenset(
         "node_set",
         "preferred_loaders",
         "importance_weight",
+        "dlt_config",
         "primary_key",
         "write_disposition",
         "query",

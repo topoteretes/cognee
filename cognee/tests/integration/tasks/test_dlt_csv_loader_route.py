@@ -237,3 +237,25 @@ async def test_dated_csv_rows_anchor_to_shared_timestamps(clean_env, tmp_path):
     )
     retrieved_ids = {str(chunk.payload["id"]) for chunk in retrieved["chunks"]}
     assert retrieved_ids == rows
+
+
+@pytest.mark.asyncio
+async def test_dlt_config_narrows_the_csv_time_edges(clean_env, tmp_path):
+    """``add(csv, dlt_config={"temporal_columns": ...})`` reaches the CSV loader:
+    only the selected column anchors, so a bookkeeping date stays out."""
+    from cognee.infrastructure.databases.graph import get_graph_engine
+
+    csv_path = pathlib.Path(tmp_path) / "orders.csv"
+    csv_path.write_text(DATED_CSV)
+    await cognee.add(
+        [str(csv_path)],
+        dataset_name="csv_narrowed_ds",
+        dlt_config={"temporal_columns": {"orders": ["order_date"]}},
+    )
+    await cognee.cognify(datasets=["csv_narrowed_ds"])
+
+    graph = await get_graph_engine()
+    nodes, edges = await graph.get_graph_data()
+    timestamps = {props["timestamp_str"] for _, props in nodes if props.get("type") == "Timestamp"}
+    assert timestamps == {"2024-03-01", "2024-03-15", "2024-06-20"}
+    assert not [rel for _, _, rel, _ in edges if rel == "shipped_at"]
