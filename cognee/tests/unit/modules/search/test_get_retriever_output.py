@@ -713,3 +713,21 @@ async def test_graph_completion_accepts_graph_only_knobs():
     assert result.search_type is SearchType.GRAPH_COMPLETION
     assert factory_mock.await_args.kwargs["wide_search_top_k"] == 200
     assert factory_mock.await_args.kwargs["triplet_distance_penalty"] == 2.5
+
+
+@pytest.mark.asyncio
+async def test_hybrid_deferral_to_graph_completion_is_logged_as_a_warning(caplog):
+    with (
+        patch.object(
+            get_retriever_output_module,
+            "hybrid_deferral_reason",
+            AsyncMock(return_value="DocumentChunk_text collection missing"),
+        ),
+        caplog.at_level("WARNING"),
+    ):
+        effective = await get_retriever_output_module._effective_search_type(
+            SearchType.HYBRID_COMPLETION, "q", {}, graph_is_empty=False
+        )
+
+    assert effective is SearchType.GRAPH_COMPLETION
+    assert "HYBRID_COMPLETION is not available for this search" in caplog.text

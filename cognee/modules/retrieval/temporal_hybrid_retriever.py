@@ -28,6 +28,12 @@ from cognee.modules.retrieval.temporal_hybrid.matching import (
     to_epoch_ms,
 )
 from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger("TemporalHybridRetriever")
+FALLBACK_WARNING = (
+    "No time-anchored data found for this question; answering with HYBRID search instead."
+)
 
 
 class TemporalHybridRetriever(HybridRetriever):
@@ -111,6 +117,7 @@ class TemporalHybridRetriever(HybridRetriever):
         self.last_baseline = self._finalize(candidates)
         if reason is not None:
             self.last_reason = reason
+            logger.warning(FALLBACK_WARNING)
             return self.last_baseline
 
         self.last_anchors = await self._anchors(start, end, candidates)
@@ -121,6 +128,7 @@ class TemporalHybridRetriever(HybridRetriever):
             graph = await get_graph_engine()
             in_window = await graph.get_timestamps_in_range(to_epoch_ms(start), to_epoch_ms(end))
             self.last_reason = "no_candidate_overlap" if in_window else "no_temporal_match"
+            logger.warning(FALLBACK_WARNING)
             return self.last_baseline
 
         reranked = self._finalize(

@@ -365,7 +365,7 @@ async def test_temporal_retriever_caps_facts_by_top_k_when_no_entity_is_shown(mo
     ],
 )
 async def test_temporal_retriever_fallbacks_return_the_baseline(
-    monkeypatch, interval, anchors, timestamps, reason
+    monkeypatch, caplog, interval, anchors, timestamps, reason
 ):
     retriever, _engine, _fetch, _extract = _retriever(
         monkeypatch,
@@ -374,11 +374,16 @@ async def test_temporal_retriever_fallbacks_return_the_baseline(
         interval=interval,
         candidates=_candidates(),
     )
-    result = await retriever.get_retrieved_objects(query="in 1950")
+    with caplog.at_level("WARNING", logger="TemporalHybridRetriever"):
+        result = await retriever.get_retrieved_objects(query="in 1950")
 
     assert retriever.last_reason == reason
     assert result == retriever.last_baseline
     assert [chunk["id"] for chunk in result["chunks"]] == ["c1", "c2"]
+    # A rerank that ran but moved nothing is not a fallback; the rest warn.
+    assert ("No time-anchored data found for this question" in caplog.text) is not bool(
+        anchors["chunk_ids"]
+    )
 
 
 @pytest.mark.asyncio
