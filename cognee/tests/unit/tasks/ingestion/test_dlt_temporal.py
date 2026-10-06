@@ -18,9 +18,9 @@ import pytest
 import cognee.tasks.ingestion.dlt_schema_graph as schema_graph_module
 from cognee.modules.engine.models import Timestamp
 from cognee.modules.engine.utils.timestamp_from_text import timestamp_from_text
+from cognee.tasks.ingestion.config import get_ingestion_config
 from cognee.tasks.ingestion.dlt_row_data import DltRowData
 from cognee.tasks.ingestion.dlt_schema_graph import emit_dlt_schema_graph
-from cognee.tasks.ingestion.config import get_ingestion_config
 from cognee.tasks.ingestion.dlt_temporal import temporal_cells, timestamp_str_for_cell
 
 graph_engine_module = importlib.import_module(
@@ -39,7 +39,7 @@ graph_engine_module = importlib.import_module(
         ("2024-03-02 23:30:00-05:00", "2024-03-03 04:30:00"),  # a zone is applied: next day in UTC
         ("2024-03-16T08:00:00+02:00", "2024-03-16 06:00:00"),
         (datetime(2024, 3, 2, 23, 30, tzinfo=timezone(timedelta(hours=-5))), "2024-03-03 04:30:00"),
-        (datetime(2024, 3, 2, 10, 15), "2024-03-02 10:15:00"),  # naive stays as stated
+        (datetime(2024, 3, 2, 10, 15), "2024-03-02 10:15:00"),  # noqa: DTZ001 — naive stays as stated
         (" 2024-03-01 ", "2024-03-01"),
         ("2024-03", "2024-03"),  # monthly series (Datahub gold prices)
     ],

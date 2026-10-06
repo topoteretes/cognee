@@ -8,7 +8,7 @@ import pytest
 
 pytest.importorskip("dlt")
 
-from cognee.tasks.ingestion.dlt_config import (  # noqa: E402
+from cognee.tasks.ingestion.dlt_config import (
     DLT_OPTION_NAMES,
     resolve_dlt_options,
     with_csv_loader_options,

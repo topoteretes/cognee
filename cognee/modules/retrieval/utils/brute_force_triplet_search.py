@@ -6,6 +6,7 @@ from cognee.base_config import get_base_config
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.modules.chunking.models.DltRow import DltRow
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.graph.exceptions.exceptions import EntityNotFoundError
@@ -19,7 +20,6 @@ from cognee.modules.observability import OtelStatusCode as StatusCode
 from cognee.modules.retrieval.utils.node_edge_vector_search import NodeEdgeVectorSearch
 from cognee.modules.retrieval.utils.validate_queries import validate_queries
 from cognee.shared.logging_utils import ERROR, get_logger
-from cognee.modules.chunking.models.DltRow import DltRow
 
 if TYPE_CHECKING:
     from cognee.infrastructure.databases.unified import UnifiedStoreEngine

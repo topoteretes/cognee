@@ -27,10 +27,10 @@ from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion import ingest_data, resolve_data_directories
 from cognee.tasks.ingestion.data_item import DataItem
+from cognee.tasks.ingestion.dlt_config import resolve_dlt_options, with_csv_loader_options
 from cognee.tasks.ingestion.refuse_changed_existing_documents import (
     refuse_changed_existing_documents,
 )
-from cognee.tasks.ingestion.dlt_config import resolve_dlt_options, with_csv_loader_options
 from cognee.tasks.ingestion.resolve_dlt_sources import resolve_dlt_sources
 from cognee.tasks.ingestion.utils import materialize_stream_for_background
 

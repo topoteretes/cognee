@@ -6,9 +6,9 @@ import pytest
 
 pytest.importorskip("dlt")
 
-from cognee.api.v1.add.add import add  # noqa: E402
-from cognee.api.v1.remember.remember import _ADD_ONLY, RememberKwargs  # noqa: E402
-from cognee.tasks.ingestion.dlt_config import DLT_OPTION_NAMES  # noqa: E402
+from cognee.api.v1.add.add import add
+from cognee.api.v1.remember.remember import _ADD_ONLY, RememberKwargs
+from cognee.tasks.ingestion.dlt_config import DLT_OPTION_NAMES
 
 
 def test_add_takes_dlt_config():
