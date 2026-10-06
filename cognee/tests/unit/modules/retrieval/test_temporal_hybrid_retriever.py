@@ -608,7 +608,7 @@ async def test_window_expansion_spends_its_budget_on_the_tightest_timestamp_firs
     result = await retriever.get_retrieved_objects(query="on 18 March 1965")
     assert "voskhod" in retriever.last_expansion
     assert len(retriever.last_expansion) == 20
-    assert [chunk["id"] for chunk in result["chunks"]][0] == "voskhod"
+    assert result["chunks"][0]["id"] == "voskhod"
 
 
 @pytest.mark.asyncio
@@ -616,7 +616,7 @@ async def test_window_expansion_is_capped_at_candidate_top_k(monkeypatch):
     nodes = [(f"r{i}", {}) for i in range(50)]
     edges = [(f"r{i}", "ts_1950", "order_date", {}) for i in range(50)]
     rows = {"DltRow_text": [{"id": f"r{i}", "text": str(i)} for i in range(50)]}
-    retriever, engine, _fetch, _extract = _retriever(
+    retriever, _engine, _fetch, _extract = _retriever(
         monkeypatch,
         anchors=_anchors(chunks=tuple(f"r{i}" for i in range(50))),
         interval=WINDOW_1950,

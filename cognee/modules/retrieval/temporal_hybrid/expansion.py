@@ -59,7 +59,10 @@ async def retrieve_in_collections(
     for collection in collections:
         for hit in await vector_engine.retrieve(collection, node_ids):
             hit_id = result_id(hit)
-            if hit_id and hit_id not in by_id:
-                if payload_matches_node_filter(payload(hit), node_name, node_name_filter_operator):
-                    by_id[hit_id] = hit
+            if (
+                hit_id
+                and hit_id not in by_id
+                and payload_matches_node_filter(payload(hit), node_name, node_name_filter_operator)
+            ):
+                by_id[hit_id] = hit
     return [by_id[node_id] for node_id in node_ids if node_id in by_id]
