@@ -1,3 +1,4 @@
+from dataclasses import dataclass, field
 from typing import Any
 
 from cognee.modules.graph.models.EdgeType import EdgeType
@@ -73,6 +74,39 @@ def select_facts_for_entities(
         # facts whose text is actually expressed by an edge on a scoped entity.
         candidates = [hit for hit in edge_hits if result_id(hit) in reachable_edge_type_ids]
     return select_facts(candidates, bullet_ids, facts_top_k)
+
+
+@dataclass(frozen=True)
+class FactCandidates:
+    """Everything fact selection needs except the entities it dedupes against.
+
+    Kept apart from the selection so a retriever that cuts its entity list
+    after the fetch (the temporal rerank, its fallback slice) can select facts
+    against the entities it finally shows, not the wider candidate set — a
+    fact dropped as "already under entity X" must not vanish with X.
+    """
+
+    edge_hits: list = field(default_factory=list)
+    reachable_edge_type_ids: set = field(default_factory=set)
+    node_scoped: bool = False
+    facts_top_k: int = 0
+    entity_edge_budget: int = 0
+
+
+def select_facts_from_candidates(candidates: FactCandidates, entities: list[dict]) -> list[dict]:
+    """The one assembly step: facts for the final ``entities``."""
+    return select_facts_for_entities(
+        candidates.edge_hits,
+        entities,
+        candidates.reachable_edge_type_ids,
+        resolve_facts_top_k(
+            entities,
+            node_scoped=candidates.node_scoped,
+            facts_top_k=candidates.facts_top_k,
+            entity_edge_budget=candidates.entity_edge_budget,
+        ),
+        candidates.node_scoped,
+    )
 
 
 def select_facts(edge_hits: list[Any], exclude_ids: set[str], facts_top_k: int) -> list[dict]:

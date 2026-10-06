@@ -299,6 +299,38 @@ def test_no_llm_configured_picks_chunks_before_the_router(retry_client, monkeypa
     assert retry_client.calls == [SearchType.CHUNKS]
 
 
+def test_time_scoped_question_routes_to_temporal(retry_client):
+    """SDK-829: a question scoped to an absolute date reaches TEMPORAL with no
+    query_type. It is not retried on empty — the retriever already falls back
+    to the hybrid candidates itself."""
+    retry_client.script[SearchType.TEMPORAL] = _GRAPH_HIT
+
+    response = retry_client.client.post(
+        "/api/v1/recall", json={"query": "what happened in 2019?", "scope": "graph"}
+    )
+
+    assert response.status_code == 200, response.text
+    assert retry_client.calls == [SearchType.TEMPORAL]
+    assert retry_client.logged == ["TEMPORAL"]
+
+
+def test_no_llm_sends_a_time_scoped_question_to_chunks(retry_client, monkeypatch):
+    """TEMPORAL's interval extraction is an LLM call; keyless never gets there."""
+    monkeypatch.setattr(
+        importlib.import_module("cognee.api.v1.recall.recall"),
+        "llm_available",
+        lambda _config: False,
+    )
+    retry_client.script[SearchType.CHUNKS] = _GRAPH_HIT
+
+    response = retry_client.client.post(
+        "/api/v1/recall", json={"query": "what happened in 2019?", "scope": "graph"}
+    )
+
+    assert response.status_code == 200, response.text
+    assert retry_client.calls == [SearchType.CHUNKS]
+
+
 def test_no_llm_still_honours_a_pinned_type(retry_client, monkeypatch):
     """The keyless rung is a default, not a ceiling: an explicit type still wins."""
     monkeypatch.setattr(

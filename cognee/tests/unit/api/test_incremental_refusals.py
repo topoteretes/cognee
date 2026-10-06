@@ -647,7 +647,12 @@ async def test_fresh_chunks_are_extracted_in_bounded_batches(monkeypatch):
         ),
     )
 
-    fresh = [SimpleNamespace(id=uuid4(), chunk_size=1) for _ in range(7)]
+    # Position and text are what every fresh chunk carries; the writer reads
+    # both to place the document's date hints.
+    fresh = [
+        SimpleNamespace(id=uuid4(), chunk_size=1, chunk_index=i, text=f"chunk {i}")
+        for i in range(7)
+    ]
     bundle = {
         "staged": SimpleNamespace(),
         "document": SimpleNamespace(id=uuid4(), belongs_to_set=None, source_node_set=None),

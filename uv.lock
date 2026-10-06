@@ -1294,6 +1294,7 @@ dependencies = [
     { name = "cbor2" },
     { name = "cryptography" },
     { name = "datamodel-code-generator" },
+    { name = "dateparser" },
     { name = "diskcache" },
     { name = "dlt", extra = ["sqlalchemy"] },
     { name = "enola-cli" },
@@ -1367,7 +1368,6 @@ deepeval = [
 ]
 dev = [
     { name = "coverage" },
-    { name = "dateparser" },
     { name = "deptry" },
     { name = "gitpython" },
     { name = "mkdocs-material" },
@@ -1500,7 +1500,6 @@ turso = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "dateparser" },
     { name = "httpx" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -1527,7 +1526,7 @@ requires-dist = [
     { name = "coverage", marker = "extra == 'dev'", specifier = ">=7.3.2,<8" },
     { name = "cryptography", specifier = ">=43.0.0,<51" },
     { name = "datamodel-code-generator", specifier = ">=0.54.0" },
-    { name = "dateparser", marker = "extra == 'dev'", specifier = ">=1.2,<2" },
+    { name = "dateparser", specifier = ">=1.2,<2" },
     { name = "debugpy", marker = "extra == 'debug'", specifier = ">=1.8.9,<2.0.0" },
     { name = "deepeval", marker = "extra == 'deepeval'", specifier = ">=3.0.1,<4" },
     { name = "deptry", marker = "extra == 'dev'", specifier = ">=0.20.0,<0.21" },
@@ -1653,7 +1652,6 @@ provides-extras = ["api", "scraping", "fastembed", "neo4j", "neptune", "postgres
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "dateparser", specifier = ">=1.2,<2" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "pytest", specifier = ">=7.4.4" },
     { name = "pytest-asyncio", specifier = ">=0.21.2" },
