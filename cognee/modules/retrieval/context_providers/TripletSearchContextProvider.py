@@ -18,24 +18,13 @@ logger = get_logger()
 
 _TEXT_FIELDS = ("name", "description", "text")
 
-# Longest label a context block header gets. Name-less entities (a chunk, an
-# entity with only a description) would otherwise be headed by their full text.
+# Longest context block label; a name-less entity (a chunk, say) would otherwise
+# be labelled with its full text.
 MAX_LABEL_LENGTH = 80
 
 
-def _shorten_label(text: str, limit: int = MAX_LABEL_LENGTH) -> str:
-    """Collapses whitespace and cuts ``text`` to ``limit`` characters on a word boundary."""
-    label = " ".join(text.split())
-    if len(label) <= limit:
-        return label
-    cut = label[: limit - 1]
-    if " " in cut:
-        cut = cut.rsplit(" ", 1)[0]
-    return cut.rstrip() + "…"
-
-
 class SearchableEntity(NamedTuple):
-    """An entity that has searchable text, with the strings derived from it."""
+    """An entity that has searchable text, with its search text and display label."""
 
     entity: DataPoint
     search_text: str
@@ -55,42 +44,24 @@ class TripletSearchContextProvider(BaseContextProvider):
         self.collections = collections
         self.properties_to_project = properties_to_project
 
-    @staticmethod
-    def _entity_text_fields(entity: DataPoint) -> list[str]:
-        """Returns the entity's non-blank text fields, stripped, in priority order."""
-        fields = []
-        for field in _TEXT_FIELDS:
-            value = getattr(entity, field, None)
-            if isinstance(value, str) and value.strip():
-                fields.append(value.strip())
-        return fields
-
-    def _get_entity_text(self, entity: DataPoint) -> str | None:
-        """Concatenates available entity text fields with graceful fallback."""
-        fields = self._entity_text_fields(entity)
-        return " ".join(fields) if fields else None
-
     def _searchable_entities(self, entities: list[DataPoint]) -> list[SearchableEntity]:
-        """Keeps the entities that have searchable text.
+        """Keeps the entities that have non-blank text, in order.
 
-        Each entry carries the entity together with its search text and display
-        label, so every later step reads from this one list and a skipped entity
-        can never shift results onto the wrong entity.
+        Searches, results and labels are all derived from this one list, so a
+        skipped entity can never shift a result onto the wrong entity.
         """
         searchable = []
         for entity in entities:
-            fields = self._entity_text_fields(entity)
+            values = (getattr(entity, field, None) for field in _TEXT_FIELDS)
+            fields = [v.strip() for v in values if isinstance(v, str) and v.strip()]
             if not fields:
                 continue
-            # The label is the first text field the search text starts with, so
-            # the context block is named after what was actually searched, kept
-            # short so a name-less entity does not head its block with its full text.
+            # Label with the field the search text starts with, on one short line.
+            label = " ".join(fields[0].split())
+            if len(label) > MAX_LABEL_LENGTH:
+                label = label[: MAX_LABEL_LENGTH - 1] + "…"
             searchable.append(
-                SearchableEntity(
-                    entity=entity,
-                    search_text=" ".join(fields),
-                    label=_shorten_label(fields[0]),
-                )
+                SearchableEntity(entity=entity, search_text=" ".join(fields), label=label)
             )
         return searchable
 
@@ -146,26 +117,19 @@ class TripletSearchContextProvider(BaseContextProvider):
         search_tasks = self._get_search_tasks(searchable, query, memory_fragment)
         outcomes = await asyncio.gather(*search_tasks, return_exceptions=True)
 
-        succeeded: list[SearchableEntity] = []
-        results: list[list] = []
-        failures: list[BaseException] = []
+        # One entity's failed search must not discard the others' context.
+        succeeded = []
         for item, outcome in zip(searchable, outcomes, strict=True):
-            if isinstance(outcome, BaseException):
-                if not isinstance(outcome, Exception):
-                    # Cancellation and interpreter exits are not search failures.
-                    raise outcome
-                logger.warning(
-                    "Triplet search failed for entity %r; skipping its context: %s",
-                    item.label,
-                    outcome,
-                )
-                failures.append(outcome)
-                continue
-            succeeded.append(item)
-            results.append(outcome)
+            if not isinstance(outcome, BaseException):
+                succeeded.append((item, outcome))
+            elif isinstance(outcome, Exception):
+                logger.warning("Triplet search failed for entity %r: %s", item.label, outcome)
+            else:
+                raise outcome  # cancellation is not a search failure
 
-        if failures and not succeeded:
-            # Every search failed, so the failure is not entity-specific; surface it.
-            raise failures[0]
+        if not succeeded:
+            # Every search failed, so the cause is not entity-specific; surface it.
+            raise outcomes[0]
 
-        return await self._results_to_context(succeeded, results)
+        items, results = zip(*succeeded)
+        return await self._results_to_context(list(items), list(results))

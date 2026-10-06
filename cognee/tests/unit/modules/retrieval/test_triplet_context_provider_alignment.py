@@ -109,30 +109,14 @@ async def test_every_search_failing_raises(fake_search):
 
 
 @pytest.mark.asyncio
-async def test_long_label_is_shortened_but_search_text_is_not(fake_search):
-    # A name-less entity with a long description: the search still uses the full
-    # text, but the block header is cut on a word boundary with an ellipsis.
-    description = " ".join(f"word{i}" for i in range(60))
+async def test_long_label_is_capped_but_search_text_is_not(fake_search):
+    # A name-less entity with a long, multi-line description: the search uses
+    # the full text, the block header is one line capped with an ellipsis.
+    description = "first line\n" + " ".join(f"word{i}" for i in range(60))
     entities = [SimpleNamespace(name=None, description=description)]
 
     context = await TripletSearchContextProvider().get_context(entities, query="Q")
 
-    label = context.split("\n", 1)[0].removeprefix("Context for ").removesuffix(":")
-    assert len(label) <= mod.MAX_LABEL_LENGTH
-    assert label.endswith("…")
-    assert description.startswith(label.removesuffix("…"))
-    assert not label.removesuffix("…").endswith(" ")
+    label = " ".join(description.split())[: mod.MAX_LABEL_LENGTH - 1] + "…"
+    assert context.startswith(f"Context for {label}:\n")
     assert f"RESULT::{description} Q" in context
-
-
-@pytest.mark.parametrize(
-    ("text", "expected"),
-    [
-        ("Alpha", "Alpha"),
-        ("multi\n  line\ttext", "multi line text"),
-        ("x" * 100, "x" * 79 + "…"),
-    ],
-    ids=["short", "whitespace-collapsed", "no-word-boundary"],
-)
-def test_shorten_label(text, expected):
-    assert mod._shorten_label(text) == expected
