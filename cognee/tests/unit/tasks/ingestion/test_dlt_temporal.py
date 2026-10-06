@@ -35,6 +35,7 @@ graph_engine_module = importlib.import_module(
         ("2024-03-02T10:15:00+00:00", "2024-03-02 10:15:00"),  # Postgres timestamptz as str
         ("2024-03-02T10:15:00.250Z", "2024-03-02 10:15:00"),
         (" 2024-03-01 ", "2024-03-01"),
+        ("2024-03", "2024-03"),  # monthly series (Datahub gold prices)
     ],
 )
 def test_iso_shaped_cells_normalize_to_the_forms_timestamp_from_text_accepts(value, expected):
@@ -44,7 +45,17 @@ def test_iso_shaped_cells_normalize_to_the_forms_timestamp_from_text_accepts(val
 
 @pytest.mark.parametrize(
     "value",
-    [None, "", "1947", 1947, "March 2024", "1 March 2024", "2024-03", "10:15:00", "ORD-2024-03-01"],
+    [
+        None,
+        "",
+        "1947",
+        1947,
+        "March 2024",
+        "1 March 2024",
+        "10:15:00",
+        "2024-03 10:15:00",
+        "ORD-2024-03-01",
+    ],
 )
 def test_anything_but_an_iso_date_or_datetime_is_not_a_time_cell(value):
     assert timestamp_str_for_cell(value) is None
@@ -65,10 +76,10 @@ def _row(row_data, foreign_keys=None, primary_key_column="id"):
     )
 
 
-def test_temporal_cells_skip_identity_columns_and_non_dates():
+def test_temporal_cells_skip_foreign_keys_and_non_dates():
     row = _row(
         {
-            "id": "2024-03-01",  # a date-shaped primary key is row identity, not a time
+            "id": 7,
             "customer_id": "2024-03-02",  # foreign keys are edges already
             "order_date": "2024-03-01",
             "shipped_at": "2024-03-02 10:15:00.000000",
@@ -82,6 +93,15 @@ def test_temporal_cells_skip_identity_columns_and_non_dates():
         "order_date": "2024-03-01",
         "shipped_at": "2024-03-02 10:15:00",
     }
+
+
+def test_a_date_primary_key_is_the_time_the_row_is_about():
+    """A time series has no id: dlt keys it by its first column, the date."""
+    row = _row({"date": "2009-03-01", "sp500": 757.13}, primary_key_column="date")
+    assert temporal_cells(row) == {"date": "2009-03-01"}
+    monthly = _row({"date": "2020-01", "price": 1561.0}, primary_key_column="date")
+    assert temporal_cells(monthly) == {"date": "2020-01"}
+    assert timestamp_from_text("2020-01").precision == "month"
 
 
 def _stub_graph(monkeypatch):
