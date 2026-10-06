@@ -662,6 +662,11 @@ def _row_node_set(raw: Any, source_tag: str, *, table_name: str = "") -> list[st
         try:
             parsed = json.loads(raw)
         except ValueError:
+            # ValueError only, no RecursionError guard: this column is loaded with a
+            # json type hint (NODE_SET_COLUMN_HINT) and dlt refuses a list nested
+            # deep enough to break json.loads, failing at extract before the row is
+            # stored (checked on dlt 1.28.2: 200 levels load, 1000 fail). On Postgres
+            # the value comes back already parsed. There is no input to guard against.
             parsed = raw
         raw = parsed if isinstance(parsed, list) else [parsed]
     if not isinstance(raw, list):
@@ -673,6 +678,11 @@ def _row_node_set(raw: Any, source_tag: str, *, table_name: str = "") -> list[st
             type(raw).__name__,
         )
         return None
+    # No cap on the number or length of names, on purpose. A cap would cut a
+    # row's group memberships silently: the document lands with only some of
+    # its node sets and nobody is told. If a source ever floods the graph with
+    # node sets, fail the sync loudly, naming the source, table and count.
+    # Never truncate.
     prefix = f"{source_tag}:"
     names = [
         name if name.startswith(prefix) else prefix + name
