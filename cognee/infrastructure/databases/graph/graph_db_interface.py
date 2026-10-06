@@ -48,8 +48,13 @@ def timestamp_overlaps(node: dict, start: int | None, end: int | None) -> bool:
     return (end is None or time_at < end) and (start is None or time_until > start)
 
 
-def empty_temporal_anchors() -> dict[str, set[str]]:
-    return {"timestamp_ids": set(), "chunk_ids": set(), "entity_ids": set()}
+def empty_temporal_anchors() -> dict:
+    return {
+        "timestamp_ids": set(),
+        "chunk_ids": set(),
+        "entity_ids": set(),
+        "chunk_timestamps": {},
+    }
 
 
 def temporal_anchors_from_rows(
@@ -62,16 +67,26 @@ def temporal_anchors_from_rows(
     matching timestamp, and ``(chunk_id, entity_id, timestamp_id)`` for a candidate
     chunk that ``contains`` an entity with such an edge. A directly anchored
     candidate is a chunk when the caller passed it as one (``chunk_ids``), not by
-    its node type: DLT rows are chunks of their own graph type (``DltRow``)."""
+    its node type: DLT rows are chunks of their own graph type (``DltRow``).
+
+    ``chunk_timestamps`` maps each anchored chunk to the matching timestamp ids
+    it reached, directly or through an entity. The retriever ranks anchored
+    chunks by how tightly the best of those timestamps fits the window: a chunk
+    dated "1965-03-18" is about that day, a chunk that says "1965" merely
+    overlaps it."""
     chunk_set = {str(node_id) for node_id in chunk_ids}
     anchors = empty_temporal_anchors()
     for candidate_id, timestamp_id in direct_rows:
         anchors["timestamp_ids"].add(str(timestamp_id))
-        bucket = "chunk_ids" if str(candidate_id) in chunk_set else "entity_ids"
-        anchors[bucket].add(str(candidate_id))
+        if str(candidate_id) in chunk_set:
+            anchors["chunk_ids"].add(str(candidate_id))
+            anchors["chunk_timestamps"].setdefault(str(candidate_id), set()).add(str(timestamp_id))
+        else:
+            anchors["entity_ids"].add(str(candidate_id))
     for chunk_id, entity_id, timestamp_id in via_rows:
         anchors["timestamp_ids"].add(str(timestamp_id))
         anchors["chunk_ids"].add(str(chunk_id))
+        anchors["chunk_timestamps"].setdefault(str(chunk_id), set()).add(str(timestamp_id))
         anchors["entity_ids"].add(str(entity_id))
     return anchors
 
@@ -910,8 +925,10 @@ class GraphDBInterface(ABC):
         a time carries it into every chunk that mentions it. An entity is anchored
         when any of its edges points at a matching timestamp; the relationship
         name is not inspected. Returns ``{"timestamp_ids", "chunk_ids",
-        "entity_ids"}``: the matched timestamps, the anchored candidate chunks and
-        the anchored entities (candidates and the ones reached through chunks).
+        "entity_ids", "chunk_timestamps"}``: the matched timestamps, the anchored
+        candidate chunks, the anchored entities (candidates and the ones reached
+        through chunks), and per anchored chunk the matched timestamp ids it
+        reached.
 
         Reading from the candidate side keeps the cost proportional to the
         candidate count whatever the window matches — the retriever's reason for
