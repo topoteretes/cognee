@@ -23,7 +23,7 @@ They double as the smoke-test corpus the team uses to verify behaviour across th
 | [`guides/`](guides/) | One feature per script: concise, self-contained how-tos | 38 |
 | [`advanced_guides/`](advanced_guides/) | Deeper takes on topics a guide already covers | 8 |
 | [`demos/`](demos/) | Multiple features stitched into use cases, grouped by topic | 28 |
-| [`integrations/`](integrations/) | Connector packages and deployment kits that pair cognee with other systems | 1 |
+| [`integrations/`](integrations/) | Connector packages and deployment kits that pair cognee with other systems | 2 |
 
 One line each: **guides teach a feature, advanced guides deepen a feature, demos combine
 features.** See [Contributing](#-contributing-a-new-example) for the precise category rules.
@@ -189,6 +189,7 @@ Every demo lives in a topic folder.
 |---|---|
 | [`README.md`](integrations/README.md) | Data-source connectors (Gmail, Slack, Notion, Drive, Confluence, …) — shipped as `cognee-community` packages on the DLT ingestion path |
 | [`docker-sandbox-kit/`](integrations/docker-sandbox-kit/) | Supervisor ↔ worker memory handover across containers, two cognee users under ACL ([`demo/supervisor_worker_handover.py`](integrations/docker-sandbox-kit/demo/supervisor_worker_handover.py)) |
+| [`daytona/`](integrations/daytona/) | The same handover on Daytona cloud sandboxes as a fork chain — host-scoped Secret, domain allow list, cognee baked into a snapshot ([`handover.py`](integrations/daytona/handover.py)) |
 
 ## ⚙️ Running an example
 
