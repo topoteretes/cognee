@@ -6,9 +6,9 @@ description: Chat with a companion that knows your notes folder (a journal, an O
 # Self-hosted AI companion
 
 Runs the self-hosted companion cookbook in `examples/cookbooks/self_hosted_companion/`. It
-remembers a notes folder in the cognee dataset `companion`, then answers messages about
-it; each chat is saved to memory, so a later one knows it. Setup, the scripts and what
-each one does are in the cookbook's
+remembers a notes folder in the cognee dataset `self_hosted_companion`, then answers
+messages about it; each chat is saved to memory, so a later one knows it. Setup, the
+scripts and what each one does are in the cookbook's
 [`README.md`](../../../examples/cookbooks/self_hosted_companion/README.md).
 
 Run every command from the repo root.
@@ -40,11 +40,14 @@ below: the run then uses sample notes (the `[setup]` line says so). It needs onl
 - The notes are the user's private files. Don't quote them beyond what answers the
   question, and don't print `.env`.
 - Every run uses LLM credits, so run it only when the user asked for it.
+- A sample run forgets the cookbook's dataset `self_hosted_companion` before it ingests (the `[clear]`
+  line). On the user's own data, pass `--clear` only when they asked to start over: it
+  forgets everything the dataset holds, including the earlier chats.
 - Don't pass `--ui` unless the user asked to browse the graph: it keeps running until
   Ctrl+C.
 
 ## Clean up
 
 ```bash
-uv run cognee-cli forget --dataset companion
+uv run cognee-cli forget --dataset self_hosted_companion
 ```

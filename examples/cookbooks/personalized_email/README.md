@@ -39,8 +39,12 @@ uv run python examples/cookbooks/personalized_email/personalized_email.py
 
 With neither Gmail (`credentials.json`) nor `GRANOLA_API_KEY` set up, the script runs `setup.py` itself and uses the sample, as below. Pass `--sample` to
 use it even when your own sources are set up.
+A sample run first forgets the cookbook's dataset (`personalized_email`), so copies from an
+earlier run (the sample is dated relative to today, so it changes daily) never mix with
+this one. `--no-clear` keeps it.
 
 ```text
+[clear] Forgot the dataset personalized_email
 [ingest_granola] Remembered 2 sample meetings
 [ingest_email] Remembered 2 sample inbox emails
 [ingest_email] Remembered 3 sample sent emails
@@ -78,6 +82,7 @@ personalized_email/
 ├── credentials.json        yours, git-ignored
 ├── token.json              yours, git-ignored, written on the first Gmail run
 └── scripts/
+    ├── clear.py
     ├── ingest_granola.py
     ├── ingest_email.py
     └── draft.py
@@ -89,9 +94,10 @@ script also runs alone with the same options.
 | # | Command (`uv run python examples/cookbooks/personalized_email/...`) | Does | Writes |
 |---|---|---|---|
 | 0 | `personalized_email.py --check` | Reports what is missing. Does no work | nothing |
-| 1 | `scripts/ingest_granola.py [--days N] [--sample]` | Remembers Granola meeting notes from the last 30 days by default (node set `meetings`) | cognee dataset |
-| 2 | `scripts/ingest_email.py [--emails N] [--sample]` | Remembers the newest 50 inbox and 50 sent emails by default, through cognee's Gmail connector `gmail_source` (node sets `inbox`, `sent_mail`) | cognee dataset |
-| 3 | `scripts/draft.py [--sample]` | Drafts a reply to the newest inbox email: facts from a `HYBRID_COMPLETION` recall over the graph, tone from a `CHUNKS` recall over `sent_mail` | nothing |
+| 1 | `scripts/clear.py` (or `--clear`) | Forgets the dataset `personalized_email`. Runs first with `--clear`, which is on by default for a sample run (`--no-clear` turns it off) | cognee dataset |
+| 2 | `scripts/ingest_granola.py [--days N] [--sample]` | Remembers Granola meeting notes from the last 30 days by default (node set `meetings`) | cognee dataset |
+| 3 | `scripts/ingest_email.py [--emails N] [--sample]` | Remembers the newest 50 inbox and 50 sent emails by default, through cognee's Gmail connector `gmail_source` (node sets `inbox`, `sent_mail`) | cognee dataset |
+| 4 | `scripts/draft.py [--sample]` | Drafts a reply to the newest inbox email: facts from a `HYBRID_COMPLETION` recall over the graph, tone from a `CHUNKS` recall over `sent_mail` | nothing |
 
 All scripts use the cognee dataset `personalized_email`, named once in each script.
 
@@ -127,6 +133,8 @@ M.
 
 The first Gmail run opens a browser to consent. Running it again re-remembers the same
 content; cognee skips content it already holds, and Gmail rows are merged by message id.
+Add `--clear` to forget the dataset `personalized_email` first and start over from your sources
+as they are now.
 
 ## Clean up
 

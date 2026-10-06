@@ -7,7 +7,7 @@ description: Turn your latest Granola call into next steps (owner, team, due dat
 
 Runs the follow-up agent cookbook in `examples/cookbooks/company_brain/follow_up_agent/`.
 It remembers your Granola calls, Linear issues and Gmail inbox in the cognee dataset
-`company_brain`, then works out the next steps of your latest call and posts them to
+`follow_up_agent`, then works out the next steps of your latest call and posts them to
 Slack, or prints them. Setup, the scripts and what each one does are in the cookbook's
 [`README.md`](../../../examples/cookbooks/company_brain/follow_up_agent/README.md).
 
@@ -43,14 +43,14 @@ Slack; only `LLM_API_KEY` is needed. Tell the user the steps come from sample da
   user's real calls, issues and mailbox and uses LLM credits, so run it only when the user
   asked for it.
 - Don't print the contents of `credentials.json`, `token.json` or `.env`.
+- A sample run forgets the cookbook's dataset `follow_up_agent` before it ingests (the `[clear]`
+  line). On the user's own data, pass `--clear` only when they asked to start over: it
+  forgets everything the dataset holds.
 - Don't pass `--ui` unless the user asked to browse the graph: it keeps running until
   Ctrl+C.
 
 ## Clean up
 
 ```bash
-uv run cognee-cli forget --dataset company_brain
+uv run cognee-cli forget --dataset follow_up_agent
 ```
-
-The `company_qa/` cookbook writes to the same `company_brain` dataset, so this also
-removes what it remembered.

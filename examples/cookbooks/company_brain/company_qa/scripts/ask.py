@@ -14,7 +14,7 @@ os.environ.setdefault("LOG_LEVEL", "ERROR")  # quiet cognee's logs; set before i
 
 import cognee
 
-DATASET = "company_brain"  # the same in every script
+DATASET = "company_qa"  # the same in every script
 
 
 async def ask(question: str) -> None:

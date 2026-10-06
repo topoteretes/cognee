@@ -4,7 +4,7 @@ One memory for your company, built from the three kinds of data most companies a
 have: a relational database (HR, projects, customers), a support ticket export, and a
 folder of documents (meeting notes, postmortems, memos).
 
-cognee remembers each source in one dataset (`company_brain`) and extracts all of them
+cognee remembers each source in one dataset (`company_qa`) and extracts all of them
 with one graph model, so a person in the database, the assignee of a ticket and a name in
 the meeting notes become one node. Then you ask questions that no single source can
 answer, browse the graph in the UI, or let Claude Code or Codex query it over MCP.
@@ -18,7 +18,7 @@ Agents run this cookbook through the `company-brain-company-qa` skill,
 |---|---|---|
 | `LLM_API_KEY` | cognee extracts the graph and answers with an LLM (OpenAI by default) | `.env` at the repo root |
 | A SQL database (optional) | Any database SQLAlchemy can reach, read through dlt's `sql_database` | `--database` URL |
-| A ticket export (optional) | One JSON or CSV file from your support desk | `--tickets` path |
+| Ticket exports (optional) | JSON or CSV files from your support desk. A CSV is read as text, so its rows are extracted with the graph model like the other sources | `--tickets` paths |
 | A docs folder (optional) | Meeting notes, postmortems, memos: any documents cognee reads | `--docs` path |
 | Node.js 20+ and npm (for `--ui`) | Runs the UI. Without them, cognee falls back to Docker | your machine |
 
@@ -27,8 +27,9 @@ Pass at least one source. Without data of your own, try the sample first.
 ## Try it on the sample company
 
 The sample is Acorn Analytics, a fictional company. `setup.py` holds its three sources and
-writes them to `sample/` (git-ignored): an HR and project database (`company.db`), a ticket
-export (`tickets.json`) and three documents (`docs/`). Some people, projects and customers
+writes them to `sample/` (git-ignored): an HR and project database (`company.db`), two
+ticket exports (`tickets.json` from the support desk, `escalations.csv` from a spreadsheet
+Customer Success keeps) and three documents (`docs/`). Some people, projects and customers
 appear in all three. No accounts or data of yours are needed, only `LLM_API_KEY`.
 
 ```bash
@@ -37,19 +38,22 @@ uv run python examples/cookbooks/company_brain/company_qa/company_qa.py
 
 With no `--database`, `--tickets` or `--docs` given, the script runs `setup.py` itself and uses the sample, as below. Pass `--sample` to
 use it even when your own sources are set up.
+A sample run first forgets the cookbook's dataset (`company_qa`), so copies from an
+earlier run never mix with this one. `--no-clear` keeps it.
 
 The sample run points every source at `sample/` and asks a question that needs all three:
 
 ```text
+[clear] Forgot the dataset company_qa
 [ingest] Remembered the database (employee_profiles, project_profiles, customer_profiles)
-[ingest] Remembered the tickets in .../sample/tickets.json
+[ingest] Remembered the tickets in .../sample/tickets.json, .../sample/escalations.csv
 [ingest] Remembered the docs in .../sample/docs
 [ask] Q: Who is handling Brightline Retail's open high-priority ticket, which team are they on, and what fix was decided for it?
 [ask] A: Dana Kim is handling it. She's on the Search team (owner of Atlas). The agreed fix is to change the indexer to read every file in the Brightline catalog feed and re-index the catalog.
 ```
 
-The ticket says who is assigned, the database says which team she is on, and the meeting
-notes say what fix was decided. The answer joins them because Dana Kim is one node.
+The escalated ticket in the CSV says who is assigned, the database says which team she is
+on, and the meeting notes say what fix was decided. The answer joins them because Dana Kim is one node.
 
 ## Run it on your data
 
@@ -70,7 +74,10 @@ uv run python examples/cookbooks/company_brain/company_qa/company_qa.py \
   Rows read best as sentences, so a view that joins your tables into readable text with
   `id`, `title` and `content` columns (see the `*_profiles` views in `SCHEMA` in
   `setup.py`) extracts better than raw foreign keys.
-- Running it again re-remembers the same content; cognee skips content it already holds.
+- Running it again re-remembers the sources; cognee skips content it already holds, and
+  an edited file is remembered as a new document while its old version stays. Add
+  `--clear` to forget the dataset `company_qa` first and start over from your sources as
+  they are now.
 - Later questions don't need the sources again: `scripts/ask.py "question"`.
 
 ## Steps
@@ -83,6 +90,7 @@ company_qa/
 ├── models.py           the graph model: edit it to match your company
 ├── sample/             written by setup.py, git-ignored
 └── scripts/
+    ├── clear.py
     ├── ingest.py
     ├── ask.py
     └── ui.py
@@ -94,11 +102,12 @@ also runs alone with the same options.
 | # | Command (`uv run python examples/cookbooks/company_brain/company_qa/...`) | Does | Writes |
 |---|---|---|---|
 | 0 | `company_qa.py --check [sources]` | Reports what is missing. Does no work | nothing |
-| 1 | `scripts/ingest.py [--database URL [--tables a,b]] [--tickets FILE] [--docs FOLDER]` | Remembers each source given, under its own node set (`database`, `tickets`, `docs`), extracted with `models.py` | cognee dataset |
-| 2 | `scripts/ask.py "question"` (or `--ask`) | Answers from the whole graph, across every source | nothing |
-| 3 | `scripts/ui.py` (or `--ui`) | Starts cognee's API server in this process and the UI at http://localhost:3000. Ctrl+C stops both | nothing |
+| 1 | `scripts/clear.py` (or `--clear`) | Forgets the dataset `company_qa`. Runs first with `--clear`, which is on by default for a sample run (`--no-clear` turns it off) | cognee dataset |
+| 2 | `scripts/ingest.py [--database URL [--tables a,b]] [--tickets FILE [FILE ...]] [--docs FOLDER]` | Remembers each source given, under its own node set (`database`, `tickets`, `docs`), extracted with `models.py` | cognee dataset |
+| 3 | `scripts/ask.py "question"` (or `--ask`) | Answers from the whole graph, across every source | nothing |
+| 4 | `scripts/ui.py` (or `--ui`) | Starts cognee's API server in this process and the UI at http://localhost:3000. Ctrl+C stops both | nothing |
 
-All scripts use the cognee dataset `company_brain`, named once in each script.
+All scripts use the cognee dataset `company_qa`, named once in each script.
 
 ## The graph model
 
@@ -135,7 +144,7 @@ answers "what do we know", across all sources.
 ## Open the UI
 
 Add `--ui`, or run `scripts/ui.py` later. Open http://localhost:3000, sign in with the
-prefilled default user, and select the `company_brain` dataset. The mind map shows the extracted entities grouped by type, with
+prefilled default user, and select the `company_qa` dataset. The mind map shows the extracted entities grouped by type, with
 one node per person connected to their team, projects, tickets and manager.
 
 ## Connect Claude Code or Codex
@@ -187,8 +196,5 @@ Then ask the agent a question that needs several sources, for example on the sam
 ## Clean up
 
 ```bash
-uv run cognee-cli forget --dataset company_brain
+uv run cognee-cli forget --dataset company_qa
 ```
-
-The `follow_up_agent/` cookbook writes to the same `company_brain` dataset, so this also
-removes what it remembered.

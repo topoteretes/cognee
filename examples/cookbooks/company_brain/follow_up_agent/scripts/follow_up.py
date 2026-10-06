@@ -22,7 +22,7 @@ import httpx
 import cognee  # also loads .env, so keys set there are seen
 from cognee.modules.search.types import SearchType
 
-DATASET = "company_brain"  # the same in every script
+DATASET = "follow_up_agent"  # the same in every script
 SAMPLE = Path(__file__).parent.parent / "sample"
 
 NEXT_STEPS_PROMPT = """List the next steps agreed in the call, one per action a person agreed
@@ -53,7 +53,9 @@ def latest_call(days: int, sample: bool = False) -> tuple[str, str]:
     if not notes:
         raise SystemExit(f"[follow_up] No Granola calls in the last {days} days.")
     newest = max(notes, key=lambda note: note["created_at"])
-    note = api.get(f"notes/{newest['id']}", params={"include": "transcript"}).json()
+    note = (
+        api.get(f"notes/{newest['id']}", params={"include": "transcript"}).raise_for_status().json()
+    )
     attendees = ", ".join(a.get("name") or a["email"] for a in note.get("attendees") or [])
     transcript = "\n".join(
         f"{(turn['speaker'] or {}).get('name') or 'Speaker'}: {turn['text']}"

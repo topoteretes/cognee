@@ -18,6 +18,7 @@ from pathlib import Path
 
 os.environ.setdefault("LOG_LEVEL", "ERROR")  # quiet cognee's logs; set before importing it
 
+from scripts.clear import clear
 from scripts.follow_up import follow_up
 from scripts.ingest_email import ingest_email
 from scripts.ingest_granola import ingest_granola
@@ -59,6 +60,8 @@ def optional_sources(args: argparse.Namespace) -> dict[str, bool]:
 
 
 async def run(args: argparse.Namespace, sources: dict[str, bool]) -> None:
+    if args.clear:
+        await clear()
     await ingest_granola(args.days, args.sample)
     if sources["linear"]:
         await ingest_linear(args.days, args.sample)
@@ -73,6 +76,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--check", action="store_true", help="only report what is missing")
     parser.add_argument("--sample", action="store_true", help="use the sample from setup.py")
+    parser.add_argument(
+        "--clear",
+        action=argparse.BooleanOptionalAction,
+        help="forget the dataset before remembering (default: on for the sample, off otherwise)",
+    )
     parser.add_argument("--no-linear", action="store_true", help="skip the Linear step")
     parser.add_argument("--no-email", action="store_true", help="skip the Gmail step")
     parser.add_argument("--days", type=int, default=30, help="calls and issues to remember")
@@ -85,6 +93,11 @@ if __name__ == "__main__":
     if not args.sample and no_sources(args):
         print("[setup] None of Granola, Linear or Gmail is set up, so this runs on the sample.")
         args.sample = True
+
+    if args.clear is None:  # a sample run starts from an empty dataset unless --no-clear
+        args.clear = args.sample
+    if args.clear:
+        print("[setup] CLEAR: the cookbook's dataset is forgotten before this run.")
 
     missing = missing_setup(args)
     for line in missing:

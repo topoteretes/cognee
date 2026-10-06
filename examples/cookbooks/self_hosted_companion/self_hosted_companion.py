@@ -20,6 +20,7 @@ from pathlib import Path
 os.environ.setdefault("LOG_LEVEL", "ERROR")  # quiet cognee's logs; set before importing it
 
 from scripts.chat import chat
+from scripts.clear import clear
 from scripts.ingest_notes import ingest_notes
 from scripts.ui import open_ui
 from setup import write_sample
@@ -50,6 +51,8 @@ def missing_setup(args: argparse.Namespace) -> list[str]:
 
 
 async def run(args: argparse.Namespace) -> None:
+    if args.clear:
+        await clear()
     await ingest_notes(args.notes_folder)
     await chat(args.ask)
     if args.ui:
@@ -61,6 +64,11 @@ if __name__ == "__main__":
     parser.add_argument("notes_folder", type=Path, nargs="?", help="the notes to remember")
     parser.add_argument("--check", action="store_true", help="only report what is missing")
     parser.add_argument("--sample", action="store_true", help="use the sample from setup.py")
+    parser.add_argument(
+        "--clear",
+        action=argparse.BooleanOptionalAction,
+        help="forget the dataset before remembering (default: on for the sample, off otherwise)",
+    )
     parser.add_argument("--ask", help="answer one message instead of an interactive chat")
     parser.add_argument("--ui", action="store_true", help="browse the graph afterwards")
     args = parser.parse_args()
@@ -72,6 +80,11 @@ if __name__ == "__main__":
         args.sample = True
     if args.sample:
         use_sample(args)
+
+    if args.clear is None:  # a sample run starts from an empty dataset unless --no-clear
+        args.clear = args.sample
+    if args.clear:
+        print("[setup] CLEAR: the cookbook's dataset is forgotten before this run.")
 
     missing = missing_setup(args)
     for line in missing:

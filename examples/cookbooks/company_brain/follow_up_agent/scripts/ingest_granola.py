@@ -18,7 +18,7 @@ import httpx
 
 import cognee  # also loads .env, so a GRANOLA_API_KEY set there is seen
 
-DATASET = "company_brain"  # the same in every script
+DATASET = "follow_up_agent"  # the same in every script
 SAMPLE = Path(__file__).parent.parent / "sample"
 
 
@@ -36,7 +36,11 @@ def granola_calls(days: int, sample: bool = False) -> list[str]:
     while True:
         page = api.get("notes", params=params).raise_for_status().json()
         for listed in page["notes"]:
-            note = api.get(f"notes/{listed['id']}", params={"include": "transcript"}).json()
+            note = (
+                api.get(f"notes/{listed['id']}", params={"include": "transcript"})
+                .raise_for_status()
+                .json()
+            )
             attendees = ", ".join(a.get("name") or a["email"] for a in note.get("attendees") or [])
             transcript = "\n".join(
                 f"{(turn['speaker'] or {}).get('name') or 'Speaker'}: {turn['text']}"

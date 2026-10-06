@@ -2,11 +2,11 @@
 
 Turn your latest call into next steps, posted to Slack.
 
-cognee remembers your Granola calls, Linear issues and Gmail inbox in one company dataset
-(`company_brain`). Then it works out the next steps of your latest call: who owns each one,
-which team it belongs to, its deadline, and whether Linear already tracks it. None of that
-has to be in the call itself: the team comes from earlier calls, a deadline from an email,
-a tracked issue from Linear.
+cognee remembers your Granola calls, Linear issues and Gmail inbox in one dataset
+(`follow_up_agent`). Then it works out the next steps of your latest call: who owns each
+one, which team it belongs to, its deadline, and whether Linear already tracks it. None of
+that has to be in the call itself: the team comes from earlier calls, a deadline from an
+email, a tracked issue from Linear.
 
 Agents run this cookbook through the `company-brain-follow-up-agent` skill,
 [`.agents/skills/company-brain-follow-up-agent/SKILL.md`](../../../../.agents/skills/company-brain-follow-up-agent/SKILL.md).
@@ -39,8 +39,12 @@ uv run python examples/cookbooks/company_brain/follow_up_agent/follow_up_agent.p
 
 With none of `GRANOLA_API_KEY`, `LINEAR_API_KEY` and Gmail (`credentials.json`) set up, the script runs `setup.py` itself and uses the sample, as below. Pass `--sample` to
 use it even when your own sources are set up.
+A sample run first forgets the cookbook's dataset (`follow_up_agent`), so copies from an
+earlier run (the sample is dated relative to today, so it changes daily) never mix with
+this one. `--no-clear` keeps it.
 
 ```text
+[clear] Forgot the dataset follow_up_agent
 [ingest_granola] Remembered 2 sample calls
 [ingest_linear] Remembered 2 sample Linear issues
 [ingest_email] Remembered 1 sample inbox emails
@@ -66,6 +70,7 @@ follow_up_agent/
 ├── credentials.json      yours, git-ignored (optional)
 ├── token.json            yours, git-ignored, written on the first Gmail run
 └── scripts/
+    ├── clear.py
     ├── ingest_granola.py
     ├── ingest_linear.py
     ├── ingest_email.py
@@ -79,13 +84,14 @@ script also runs alone with the same options.
 | # | Command (`uv run python examples/cookbooks/company_brain/follow_up_agent/...`) | Does | Writes |
 |---|---|---|---|
 | 0 | `follow_up_agent.py --check` | Reports what is missing and which optional sources are skipped. Does no work | nothing |
-| 1 | `scripts/ingest_granola.py [--days N] [--sample]` | Remembers Granola calls from the last 30 days by default (node set `calls`) | cognee dataset |
-| 2 | `scripts/ingest_linear.py [--days N] [--sample]` | Remembers Linear issues changed in the last 30 days by default (node set `linear`) | cognee dataset |
-| 3 | `scripts/ingest_email.py [--emails N] [--sample]` | Remembers the newest 50 inbox emails by default, through cognee's Gmail connector `gmail_source` (node set `email`) | cognee dataset |
-| 4 | `scripts/follow_up.py [--days N] [--sample]` | Fetches the latest call, and the Linear issues and emails about it (`CHUNKS` recalls over `linear` and `email`), asks a `HYBRID_COMPLETION` recall over the whole graph for its next steps, and posts them to Slack with `chat.postMessage` (or prints them) | a Slack message, when set up |
-| 5 | `scripts/ui.py` (or `--ui`) | Starts cognee's API server in this process and the UI at http://localhost:3000. Ctrl+C stops both | nothing |
+| 1 | `scripts/clear.py` (or `--clear`) | Forgets the dataset `follow_up_agent`. Runs first with `--clear`, which is on by default for a sample run (`--no-clear` turns it off) | cognee dataset |
+| 2 | `scripts/ingest_granola.py [--days N] [--sample]` | Remembers Granola calls from the last 30 days by default (node set `calls`) | cognee dataset |
+| 3 | `scripts/ingest_linear.py [--days N] [--sample]` | Remembers Linear issues changed in the last 30 days by default (node set `linear`) | cognee dataset |
+| 4 | `scripts/ingest_email.py [--emails N] [--sample]` | Remembers the newest 50 inbox emails by default, through cognee's Gmail connector `gmail_source` (node set `email`) | cognee dataset |
+| 5 | `scripts/follow_up.py [--days N] [--sample]` | Fetches the latest call, and the Linear issues and emails about it (`CHUNKS` recalls over `linear` and `email`), asks a `HYBRID_COMPLETION` recall over the whole graph for its next steps, and posts them to Slack with `chat.postMessage` (or prints them) | a Slack message, when set up |
+| 6 | `scripts/ui.py` (or `--ui`) | Starts cognee's API server in this process and the UI at http://localhost:3000. Ctrl+C stops both | nothing |
 
-All scripts use the cognee dataset `company_brain`, named once in each script.
+All scripts use the cognee dataset `follow_up_agent`, named once in each script.
 
 ## Run it
 
@@ -112,12 +118,11 @@ The output looks like this (an illustration; yours comes from your own calls):
 
 The first Gmail run opens a browser to consent. Running it again re-remembers the same
 content; cognee skips content it already holds, and Gmail rows are merged by message id.
+Add `--clear` to forget the dataset `follow_up_agent` first and start over from your sources
+as they are now.
 
 ## Clean up
 
 ```bash
-uv run cognee-cli forget --dataset company_brain
+uv run cognee-cli forget --dataset follow_up_agent
 ```
-
-The `company_qa/` cookbook writes to the same `company_brain` dataset, so this also
-removes what it remembered.

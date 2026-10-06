@@ -18,7 +18,7 @@ os.environ.setdefault("LOG_LEVEL", "ERROR")  # quiet cognee's logs; set before i
 import cognee
 from cognee.tasks.ingestion.connectors import gmail_source
 
-DATASET = "company_brain"  # the same in every script
+DATASET = "follow_up_agent"  # the same in every script
 COOKBOOK_DIR = Path(__file__).parent.parent
 CREDENTIALS, TOKEN = COOKBOOK_DIR / "credentials.json", COOKBOOK_DIR / "token.json"
 SAMPLE = COOKBOOK_DIR / "sample"

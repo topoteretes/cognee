@@ -17,7 +17,7 @@ os.environ.setdefault("LOG_LEVEL", "ERROR")  # quiet cognee's logs; set before i
 import cognee
 from cognee.modules.search.types import SearchType
 
-DATASET = "companion"  # the same in every script
+DATASET = "self_hosted_companion"  # the same in every script
 
 PROMPT = """You are the user's companion: warm, brief and practical. You know the user from
 their notes and earlier chats, which are in the context. Answer in two to four sentences, and

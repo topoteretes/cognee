@@ -15,7 +15,7 @@ os.environ.setdefault("LOG_LEVEL", "ERROR")  # quiet cognee's logs; set before i
 
 import cognee
 
-DATASET = "companion"  # the same in every script
+DATASET = "self_hosted_companion"  # the same in every script
 
 
 async def ingest_notes(notes_folder: Path) -> None:

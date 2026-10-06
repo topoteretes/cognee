@@ -41,6 +41,9 @@ when their accounts are set up.
 
 - Gmail access is read-only and nothing is sent.
 - Don't print the contents of `credentials.json`, `token.json` or `.env`.
+- A sample run forgets the cookbook's dataset `personalized_email` before it ingests (the `[clear]`
+  line). On the user's own data, pass `--clear` only when they asked to start over: it
+  forgets everything the dataset holds.
 - Ingesting reads the user's real meetings and mailbox, and every run uses LLM credits, so
   run it only when the user asked for it.
 

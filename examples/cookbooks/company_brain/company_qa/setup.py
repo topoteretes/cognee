@@ -5,6 +5,8 @@ sample/ (git-ignored), in the shape of a real company's data:
 
 - company.db: an HR and project database, built from SCHEMA below;
 - tickets.json: a support desk export;
+- escalations.csv: the escalated tickets Customer Success tracks in a spreadsheet, so the
+  run covers a CSV ticket export too;
 - docs/: meeting notes, a postmortem and a planning memo.
 
 Some people, projects and customers appear in all three, so the run shows them merge into
@@ -13,6 +15,7 @@ one node each. Only LLM_API_KEY is needed; no accounts or data of yours.
 Run: uv run python examples/cookbooks/company_brain/company_qa/setup.py
 """
 
+import csv
 import json
 import shutil
 import sqlite3
@@ -141,18 +144,8 @@ FROM customers c
 LEFT JOIN employees m ON m.id = c.account_manager_id;
 """
 
+# The support desk export (tickets.json).
 TICKETS = [
-    {
-        "ticket_id": "T-1041",
-        "title": "Search results are missing newly added products",
-        "customer": "Brightline Retail",
-        "project": "Atlas",
-        "assignee": "Dana Kim",
-        "status": "open",
-        "priority": "high",
-        "opened": "2026-09-17",
-        "description": "Products added to the Brightline Retail catalog after 15 September do not appear in storefront search.",
-    },
     {
         "ticket_id": "T-1042",
         "title": "Search autocomplete is slower than 800 ms",
@@ -163,17 +156,6 @@ TICKETS = [
         "priority": "medium",
         "opened": "2026-09-18",
         "description": "Autocomplete latency on the Brightline Retail storefront rose from 200 ms to over 800 ms during peak hours.",
-    },
-    {
-        "ticket_id": "T-1043",
-        "title": "Customers receive duplicate invoice emails",
-        "customer": "Kestrel Bank",
-        "project": "Ledger",
-        "assignee": "Lena Fischer",
-        "status": "resolved",
-        "priority": "high",
-        "opened": "2026-09-09",
-        "description": "Kestrel Bank customers received every invoice email two or three times on 9 September.",
     },
     {
         "ticket_id": "T-1044",
@@ -196,6 +178,32 @@ TICKETS = [
         "priority": "medium",
         "opened": "2026-09-21",
         "description": "Oakridge Health testers are sent back to the login page after signing in to the Harbor staging portal.",
+    },
+]
+
+# The escalations Customer Success tracks in a spreadsheet (escalations.csv).
+ESCALATIONS = [
+    {
+        "ticket_id": "T-1041",
+        "title": "Search results are missing newly added products",
+        "customer": "Brightline Retail",
+        "project": "Atlas",
+        "assignee": "Dana Kim",
+        "status": "open",
+        "priority": "high",
+        "opened": "2026-09-17",
+        "description": "Products added to the Brightline Retail catalog after 15 September do not appear in storefront search.",
+    },
+    {
+        "ticket_id": "T-1043",
+        "title": "Customers receive duplicate invoice emails",
+        "customer": "Kestrel Bank",
+        "project": "Ledger",
+        "assignee": "Lena Fischer",
+        "status": "resolved",
+        "priority": "high",
+        "opened": "2026-09-09",
+        "description": "Kestrel Bank customers received every invoice email two or three times on 9 September.",
     },
 ]
 
@@ -290,7 +298,7 @@ alerts before it goes live, starting with Harbor.
 
 
 def write_sample() -> None:
-    """Write the three sources, replacing an earlier sample/ folder."""
+    """Write the sources, replacing an earlier sample/ folder."""
     shutil.rmtree(SAMPLE, ignore_errors=True)
     (SAMPLE / "docs").mkdir(parents=True)
 
@@ -305,13 +313,20 @@ def write_sample() -> None:
     }
     (SAMPLE / "tickets.json").write_text(json.dumps(export, indent=2) + "\n")
 
+    with open(SAMPLE / "escalations.csv", "w", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=list(ESCALATIONS[0]))
+        writer.writeheader()
+        writer.writerows(ESCALATIONS)
+
     for name, text in DOCS.items():
         (SAMPLE / "docs" / name).write_text(text)
 
 
 if __name__ == "__main__":
     write_sample()
-    print("[setup] Wrote the sample company to sample/: company.db, tickets.json, docs/.")
+    print(
+        "[setup] Wrote the sample company to sample/: company.db, tickets.json, escalations.csv, docs/."
+    )
     print(
         "[setup] Now run: uv run python "
         "examples/cookbooks/company_brain/company_qa/company_qa.py --sample"

@@ -19,6 +19,7 @@ from pathlib import Path
 os.environ.setdefault("LOG_LEVEL", "ERROR")  # quiet cognee's logs; set before importing it
 
 from scripts.ask import ask
+from scripts.clear import clear
 from scripts.ingest import ingest
 from scripts.ui import open_ui
 from setup import write_sample
@@ -40,7 +41,7 @@ def use_sample(args: argparse.Namespace) -> None:
     """Point every source at the sample company that setup.py writes."""
     args.database = f"sqlite:///{SAMPLE / 'company.db'}"
     args.tables = ",".join(SAMPLE_TABLES)
-    args.tickets = SAMPLE / "tickets.json"
+    args.tickets = [SAMPLE / "tickets.json", SAMPLE / "escalations.csv"]
     args.docs = SAMPLE / "docs"
     args.ask = args.ask or SAMPLE_QUESTION
 
@@ -52,14 +53,17 @@ def missing_setup(args: argparse.Namespace) -> list[str]:
         missing.append("LLM_API_KEY is not set (put it in .env).")
     if args.sample:  # setup.py writes the sample just before the run
         return missing
-    if args.tickets and not args.tickets.expanduser().is_file():
-        missing.append(f"Ticket export not found: {args.tickets}")
+    for tickets in args.tickets or []:
+        if not tickets.expanduser().is_file():
+            missing.append(f"Ticket export not found: {tickets}")
     if args.docs and not args.docs.expanduser().is_dir():
         missing.append(f"Docs folder not found: {args.docs}")
     return missing
 
 
 async def run(args: argparse.Namespace) -> None:
+    if args.clear:
+        await clear()
     tables = args.tables.split(",") if args.tables else None
     await ingest(args.database, tables, args.tickets, args.docs)
     if args.ask:
@@ -72,9 +76,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--check", action="store_true", help="only report what is missing")
     parser.add_argument("--sample", action="store_true", help="use the sample from setup.py")
+    parser.add_argument(
+        "--clear",
+        action=argparse.BooleanOptionalAction,
+        help="forget the dataset before remembering (default: on for the sample, off otherwise)",
+    )
     parser.add_argument("--database", help="SQLAlchemy URL, e.g. postgresql://user:pw@host/db")
     parser.add_argument("--tables", help="comma-separated tables or views (default: all)")
-    parser.add_argument("--tickets", type=Path, help="a JSON or CSV ticket export")
+    parser.add_argument("--tickets", type=Path, nargs="+", help="JSON or CSV ticket exports")
     parser.add_argument("--docs", type=Path, help="a folder of documents")
     parser.add_argument("--ask", help="a question to answer once the sources are remembered")
     parser.add_argument("--ui", action="store_true", help="browse the graph afterwards")
@@ -84,6 +93,11 @@ if __name__ == "__main__":
         args.sample = True
     if args.sample:
         use_sample(args)
+
+    if args.clear is None:  # a sample run starts from an empty dataset unless --no-clear
+        args.clear = args.sample
+    if args.clear:
+        print("[setup] CLEAR: the cookbook's dataset is forgotten before this run.")
 
     missing = missing_setup(args)
     for line in missing:

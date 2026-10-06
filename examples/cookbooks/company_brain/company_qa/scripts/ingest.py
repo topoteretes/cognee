@@ -1,12 +1,12 @@
 """Remember your company's sources: a SQL database, a ticket export and a docs folder.
 
-Each source goes into the dataset `company_brain` under its own node set, and is extracted
+Each source goes into the dataset `company_qa` under its own node set, and is extracted
 with one graph model (models.py). Nodes with the same identity merge, so a person in the
 database, the assignee of a ticket and a name in the docs become one node. Every source is
 optional; pass the ones you have.
 
 Run alone: uv run python examples/cookbooks/company_brain/company_qa/scripts/ingest.py \
-    [--database URL [--tables a,b]] [--tickets FILE] [--docs FOLDER]
+    [--database URL [--tables a,b]] [--tickets FILE [FILE ...]] [--docs FOLDER]
 """
 
 import argparse
@@ -23,16 +23,22 @@ import cognee
 sys.path.insert(0, str(Path(__file__).parent.parent))  # models.py sits next to company_qa.py
 from models import EXTRACTION_PROMPT, CompanyGraph
 
-DATASET = "company_brain"  # the same in every script
+DATASET = "company_qa"  # the same in every script
+
+# A CSV file takes the relational route by default: one row node per line, with no LLM and
+# no graph model, so its people and projects would never merge with the other sources.
+# csv_loader reads it as text instead, which is extracted with the graph model like a doc.
+AS_TEXT = ["csv_loader"]
 
 
-async def remember(data, node_set: str) -> None:
+async def remember(data, node_set: str, **kwargs) -> None:
     await cognee.remember(
         data,
         dataset_name=DATASET,
         node_set=[node_set],
         graph_model=CompanyGraph,
         custom_prompt=EXTRACTION_PROMPT,
+        **kwargs,
     )
 
 
@@ -77,22 +83,22 @@ async def ingest_database(url: str, tables: list[str] | None = None) -> None:
     print(f"[ingest] Remembered the database ({', '.join(tables) if tables else 'all tables'})")
 
 
-async def ingest_tickets(path: Path) -> None:
-    """A ticket export: one JSON or CSV file."""
-    await remember(str(path.expanduser()), "tickets")
-    print(f"[ingest] Remembered the tickets in {path}")
+async def ingest_tickets(paths: list[Path]) -> None:
+    """Ticket exports: JSON or CSV files."""
+    await remember([str(path.expanduser()) for path in paths], "tickets", preferred_loaders=AS_TEXT)
+    print(f"[ingest] Remembered the tickets in {', '.join(str(path) for path in paths)}")
 
 
 async def ingest_docs(folder: Path) -> None:
     """Every document in a folder: meeting notes, postmortems, memos."""
-    await remember(str(folder.expanduser()), "docs")
+    await remember(str(folder.expanduser()), "docs", preferred_loaders=AS_TEXT)
     print(f"[ingest] Remembered the docs in {folder}")
 
 
 async def ingest(
     database: str | None = None,
     tables: list[str] | None = None,
-    tickets: Path | None = None,
+    tickets: list[Path] | None = None,
     docs: Path | None = None,
 ) -> None:
     if database:
@@ -107,7 +113,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--database", help="SQLAlchemy URL, e.g. postgresql://user:pw@host/db")
     parser.add_argument("--tables", help="comma-separated tables or views (default: all)")
-    parser.add_argument("--tickets", type=Path, help="a JSON or CSV ticket export")
+    parser.add_argument("--tickets", type=Path, nargs="+", help="JSON or CSV ticket exports")
     parser.add_argument("--docs", type=Path, help="a folder of documents")
     args = parser.parse_args()
     tables = args.tables.split(",") if args.tables else None

@@ -18,7 +18,7 @@ import httpx
 
 import cognee  # also loads .env, so a LINEAR_API_KEY set there is seen
 
-DATASET = "company_brain"  # the same in every script
+DATASET = "follow_up_agent"  # the same in every script
 SAMPLE = Path(__file__).parent.parent / "sample"
 
 QUERY = """query($since: DateTimeOrDuration!, $after: String) {
