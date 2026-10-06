@@ -70,9 +70,8 @@ def _fake_engine(added, commit_fails=False, commit_error=None):
 def _graph_engine(num_nodes=12, num_edges=34):
     return AsyncMock(
         return_value=SimpleNamespace(
-            get_graph_metrics=AsyncMock(
-                return_value={"num_nodes": num_nodes, "num_edges": num_edges}
-            )
+            # No get_graph_metrics on purpose: the count path must not reach for it.
+            get_graph_counts=AsyncMock(return_value=(num_nodes, num_edges))
         )
     )
 
@@ -264,30 +263,3 @@ async def test_an_unexpected_cache_write_failure_degrades_that_dataset_only():
     assert counts[dataset_b.id] == DatasetGraphCounts(
         pipeline_run_id=run_id_b, num_nodes=3, num_edges=4, computed_at=None
     )
-
-
-@pytest.mark.asyncio
-async def test_missing_metric_keys_read_as_zero_rather_than_none():
-    """An adapter that omits a key must not put None into an int field."""
-    dataset = _dataset()
-    run_id = uuid4()
-
-    empty_metrics = AsyncMock(
-        return_value=SimpleNamespace(get_graph_metrics=AsyncMock(return_value={}))
-    )
-
-    with (
-        patch.object(
-            counts_module,
-            "_get_latest_cognify_runs",
-            AsyncMock(return_value={dataset.id: _run(dataset.id, run_id)}),
-        ),
-        patch.object(counts_module, "_get_cached_metrics", AsyncMock(return_value={})),
-        patch.object(counts_module, "set_database_global_context_variables", _no_op_context),
-        patch.object(counts_module, "get_graph_engine", empty_metrics),
-        patch.object(counts_module, "get_relational_engine", lambda: _fake_engine([])),
-    ):
-        counts = await get_datasets_graph_counts([dataset])
-
-    assert counts[dataset.id].num_nodes == 0
-    assert counts[dataset.id].num_edges == 0
