@@ -114,7 +114,7 @@ class GlinerWorkerIncompatibleError(GlinerWorkerError):
             "GlinerWorkerIncompatibleError",
             remediation=(
                 "Upgrade gliner_worker to a version that supports the window_words option "
-                "(topoteretes/gliner_worker#4 or later)."
+                "(main at or after 92aba3c, topoteretes/gliner_worker#4)."
             ),
         )
 
