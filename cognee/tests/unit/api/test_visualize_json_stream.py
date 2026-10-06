@@ -8,14 +8,16 @@ transport: the JSON response holds the whole graph, the stream one chunk.
 The non-streaming branch used to authorize the dataset once here and again
 inside visualize_graph_json (SDK-972); it now calls
 fetch_visualization_data_for_dataset with the dataset this route already
-authorized, so the duplicate permission round trip is gone.
+authorized, so the duplicate permission round trip is gone. The HTML route,
+GET /visualize, had the same double check through visualize_graph and now
+does the same.
 """
 
 import json
 from importlib import import_module
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi import FastAPI
@@ -49,7 +51,8 @@ def _events(*, fail_with=None):
 @pytest.fixture
 def client(monkeypatch):
     monkeypatch.setattr(router_module, "send_telemetry", lambda *args, **kwargs: None)
-    authorize = AsyncMock(side_effect=lambda ids, _permission, _user: [SimpleNamespace(id=ids[0])])
+    authorized_dataset = SimpleNamespace(id=UUID(DATASET_ID))
+    authorize = AsyncMock(return_value=[authorized_dataset])
     monkeypatch.setattr(router_module, "get_authorized_existing_datasets", authorize)
     # The router calls this directly with its own already-authorized dataset
     # (SDK-972), so the JSON path no longer goes through visualize_graph_json
@@ -59,6 +62,9 @@ def client(monkeypatch):
     monkeypatch.setattr(
         router_module, "build_visualization_payload", lambda *_args, **_kwargs: JSON_PAYLOAD
     )
+    monkeypatch.setattr(
+        router_module, "cognee_network_visualization", AsyncMock(return_value="<html></html>")
+    )
     stream, calls = _events()
     monkeypatch.setattr(visualize_pkg, "stream_dataset_graph", stream)
 
@@ -67,6 +73,7 @@ def client(monkeypatch):
     app.dependency_overrides[get_authenticated_user] = lambda: SimpleNamespace(id=uuid4())
     with TestClient(app) as test_client:
         test_client.authorize = authorize
+        test_client.authorized_dataset = authorized_dataset
         test_client.fetch_dataset = fetch_dataset
         test_client.stream_calls = calls
         yield test_client
@@ -219,6 +226,7 @@ def test_the_json_path_authorizes_the_dataset_exactly_once(client):
     _get(client)
 
     client.authorize.assert_awaited_once()
+    assert client.fetch_dataset.await_args.args[0] is client.authorized_dataset
 
 
 def test_include_session_events_defaults_to_true(client):
@@ -231,3 +239,14 @@ def test_include_session_events_false_is_forwarded(client):
     _get(client, "&include_session_events=false")
 
     assert client.fetch_dataset.await_args.kwargs["include_session_events"] is False
+
+
+def test_the_html_path_authorizes_the_dataset_exactly_once(client):
+    """GET /visualize had the same double check through visualize_graph
+    (SDK-972). It now passes the dataset it authorized itself."""
+    response = client.get(f"/api/v1/visualize?dataset_id={DATASET_ID}")
+
+    assert response.status_code == 200
+    assert response.text == "<html></html>"
+    client.authorize.assert_awaited_once()
+    assert client.fetch_dataset.await_args.args[0] is client.authorized_dataset

@@ -21,6 +21,7 @@ from cognee.modules.users.methods import (
 from cognee.modules.users.models import User
 from cognee.modules.visualization.cognee_network_visualization import (
     build_visualization_payload,
+    cognee_network_visualization,
 )
 from cognee.modules.visualization.graph_stream import begin_graph_stream
 from cognee.modules.visualization.subgraph_data import (
@@ -140,21 +141,26 @@ def get_visualize_router() -> APIRouter:
             },
         )
 
-        from cognee.api.v1.visualize import visualize_graph
+        from cognee.api.v1.visualize import fetch_visualization_data_for_dataset
 
         try:
             # Verify user has permission to read dataset
             dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
 
-            html_visualization = await visualize_graph(
-                dataset=dataset[0].id,
-                user=user,
+            # dataset[0] is already authorized, so this skips the second
+            # permission check visualize_graph would run (SDK-972).
+            graph_data, search_events = await fetch_visualization_data_for_dataset(
+                dataset[0],
+                user,
                 full=full,
                 query=query,
                 seed_node_ids=seed_node_ids,
                 neighborhood_depth=neighborhood_depth,
                 neighborhood_seed_top_k=neighborhood_seed_top_k,
                 max_nodes=max_nodes,
+            )
+            html_visualization = await cognee_network_visualization(
+                graph_data, search_events=search_events
             )
             return HTMLResponse(html_visualization)
 
