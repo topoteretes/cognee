@@ -1,27 +1,39 @@
-"""Close pipeline runs that were left STARTED by a process that is gone.
+"""Recover old runs only after proving their writer no longer owns them.
 
-Runs at API startup only. A booting process has no runs of its own in flight,
-so a STARTED row it finds cannot be one it is executing. Rows younger than
-``COGNEE_STALE_RUN_RECOVERY_MIN_AGE_SECONDS`` are still left alone, in case a
-sibling process (a rolling deploy) is running them.
+The API checks at startup and periodically. The age threshold is an eligibility
+floor; a local dataset lock and the run's OS ownership marker establish whether
+recovery may proceed. Unverifiable legacy/remote rows are left untouched.
 """
 
+import asyncio
 import os
+from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timedelta, timezone
-from types import SimpleNamespace
 
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.infrastructure.locks import get_dataset_lock
 from cognee.modules.cognify.rollback import cognify_rollback_handler
 from cognee.modules.data.models import Dataset
 from cognee.modules.pipelines.exceptions import AbandonedPipelineRunError
 from cognee.modules.pipelines.methods import get_unterminated_pipeline_runs
+from cognee.modules.pipelines.methods.get_pipeline_run import get_latest_pipeline_run
+from cognee.modules.pipelines.models import PipelineRunStatus
 from cognee.modules.pipelines.operations.log_pipeline_run_error import log_pipeline_run_error
+from cognee.modules.pipelines.operations.run_tasks_with_telemetry import (
+    PIPELINE_RUN_ERRORED,
+    pipeline_run_telemetry_properties,
+)
+from cognee.modules.pipelines.run_ownership import claim_run_ownership
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.utils import send_telemetry
 
 logger = get_logger("cognify.recovery")
 
 STALE_RUN_MIN_AGE_SECONDS = int(os.getenv("COGNEE_STALE_RUN_RECOVERY_MIN_AGE_SECONDS", "3600"))
+if STALE_RUN_MIN_AGE_SECONDS < 0:
+    raise ValueError("COGNEE_STALE_RUN_RECOVERY_MIN_AGE_SECONDS must be nonnegative")
+RECOVERY_POLL_SECONDS = 60
 
 # The rollback each pipeline supplies for its own failed runs (the same policy
 # run_tasks applies when a run errors inline). A pipeline without an entry has
@@ -46,28 +58,13 @@ def _is_older_than_threshold(created_at) -> bool:
 
 
 async def recover_stale_pipeline_runs_on_startup() -> None:
-    """Roll back and close every pipeline run left STARTED, during API startup.
+    """Roll back and close eligible abandoned runs.
 
-    Candidates are the runs whose newest row is still ``DATASET_PROCESSING_STARTED``,
-    keyed by run id: a run abandoned while a newer run of the same pipeline on the
-    same dataset later completed is still found and closed. A run whose newest row
-    is already ``ERRORED`` or ``COMPLETED`` stays exactly as it is: an ERRORED run
-    was rolled back inline when it failed (see ``run_tasks``), so touching it again
-    would repeat the rollback on every restart.
-
-    A candidate is first rolled back with the pipeline's own handler from
-    ``ROLLBACK_HANDLERS``, if it has one, keeping the documents the run had
-    already completed, then closed with a
-    ``DATASET_PROCESSING_ERRORED`` row whose error is ``AbandonedPipelineRunError``.
-    The ERRORED row carries the STARTED row's user, tenant, start time, input
-    summary, origin and parent operation, so it describes the run that died,
-    not the process closing it. The run gate then no longer reports the dataset
-    as "already being processed", and the activity feed shows the run as
-    abandoned rather than making it disappear. If the rollback fails the run is
-    left at STARTED so the next startup retries it.
+    Age is only an eligibility floor. Recovery must claim the run's existing
+    OS ownership lock and re-read its status before rollback. Legacy rows and
+    workers whose marker is not on this filesystem cannot be proven abandoned
+    and are left alone. The API lifespan revisits deferred runs periodically.
     """
-    db_engine = get_relational_engine()
-
     try:
         recovery_candidates = await get_unterminated_pipeline_runs()
     except Exception:
@@ -85,48 +82,68 @@ async def recover_stale_pipeline_runs_on_startup() -> None:
             )
             continue
 
-        async with db_engine.get_async_session() as session:
-            dataset = await session.get(Dataset, pipeline_run.dataset_id)
-        if dataset is None:
-            logger.warning(
-                "Skipping startup recovery for %s run %s: dataset %s not found.",
-                pipeline_run.pipeline_name,
-                pipeline_run.pipeline_run_id,
-                pipeline_run.dataset_id,
-            )
-            continue
-
-        rollback_handler = ROLLBACK_HANDLERS.get(pipeline_run.pipeline_name)
         try:
-            async with set_database_global_context_variables(dataset.id, dataset.owner_id):
-                if rollback_handler is not None:
-                    # Documents the run had completed stay; a later run may have
-                    # trusted them and skipped them, so removing them now would
-                    # leave holes nothing refills. Only unfinished work goes.
-                    await rollback_handler(
-                        pipeline_run_id=pipeline_run.pipeline_run_id,
-                        dataset=dataset,
-                        keep_completed_data=True,
-                    )
-                await _close_as_abandoned(pipeline_run, dataset)
-            logger.info(
-                "Startup recovery closed %s run %s as abandoned (dataset=%s, rolled_back=%s).",
-                pipeline_run.pipeline_name,
-                pipeline_run.pipeline_run_id,
-                pipeline_run.dataset_id,
-                rollback_handler is not None,
-            )
+            lock = await get_dataset_lock(pipeline_run.dataset_id)
+            if lock.locked():
+                continue
+            async with lock:
+                with claim_run_ownership(pipeline_run) as ownership:
+                    if ownership is None:
+                        logger.debug(
+                            "Run %s is active or its ownership cannot be verified; skipping recovery",
+                            pipeline_run.pipeline_run_id,
+                        )
+                        continue
+                    # A writer/recoverer may have finished since candidate selection.
+                    current = await get_latest_pipeline_run(pipeline_run.pipeline_run_id)
+                    if (
+                        current is None
+                        or current.status != PipelineRunStatus.DATASET_PROCESSING_STARTED
+                    ):
+                        ownership.closed = True
+                        continue
+                    async with get_relational_engine().get_async_session() as session:
+                        dataset = await session.get(Dataset, current.dataset_id)
+                    if dataset is None:
+                        logger.warning("Recovery dataset %s no longer exists", current.dataset_id)
+                        continue
+                    rollback_handler = ROLLBACK_HANDLERS.get(current.pipeline_name)
+                    async with set_database_global_context_variables(dataset.id, dataset.owner_id):
+                        if rollback_handler is not None:
+                            await rollback_handler(
+                                pipeline_run_id=current.pipeline_run_id,
+                                dataset=dataset,
+                                keep_completed_data=True,
+                            )
+                        await _close_as_abandoned(current, dataset)
+                    ownership.closed = True
+                    logger.info("Recovery closed run %s as abandoned", current.pipeline_run_id)
+                    _send_abandoned_run_telemetry(current)
         except Exception:
-            logger.exception(
-                "Startup recovery failed for %s run %s",
-                pipeline_run.pipeline_name,
-                pipeline_run.pipeline_run_id,
-            )
+            logger.exception("Recovery failed for run %s; will retry", pipeline_run.pipeline_run_id)
+
+
+async def _recheck_stale_runs() -> None:
+    while True:
+        await asyncio.sleep(RECOVERY_POLL_SECONDS)
+        await recover_stale_pipeline_runs_on_startup()
+
+
+@asynccontextmanager
+async def pipeline_recovery_service():
+    """Run recovery now and revisit candidates until API shutdown."""
+    await recover_stale_pipeline_runs_on_startup()
+    task = asyncio.create_task(_recheck_stale_runs())
+    try:
+        yield
+    finally:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
 
 
 async def _close_as_abandoned(pipeline_run, dataset) -> None:
     """Write the ERRORED row for ``pipeline_run``, carrying the STARTED row's metadata."""
-    user_id = getattr(pipeline_run, "user_id", None)
     await log_pipeline_run_error(
         pipeline_run_id=pipeline_run.pipeline_run_id,
         pipeline_id=pipeline_run.pipeline_id,
@@ -134,11 +151,43 @@ async def _close_as_abandoned(pipeline_run, dataset) -> None:
         dataset_id=dataset.id,
         data=None,
         e=AbandonedPipelineRunError(),
-        user=SimpleNamespace(id=user_id, tenant_id=getattr(pipeline_run, "tenant_id", None))
-        if user_id
-        else None,
+        user_id=pipeline_run.user_id,
+        tenant_id=pipeline_run.tenant_id,
         started_at=getattr(pipeline_run, "started_at", None),
         data_info=(getattr(pipeline_run, "run_info", None) or {}).get("data"),
         origin=getattr(pipeline_run, "origin", None),
         parent_operation_id=getattr(pipeline_run, "parent_operation_id", None),
     )
+
+
+def _send_abandoned_run_telemetry(pipeline_run) -> None:
+    """Emit the terminal telemetry event the dead process never sent.
+
+    The run's ``Pipeline Run Started`` went out when it began; without this the
+    warehouse counts an abandoned run as a silent gap forever while the local
+    ``pipeline_runs`` table shows it closed. ``pipeline_name`` is the pipeline
+    id, as the live emitter sends it; ``exception_type`` is the class the ERRORED
+    row carries. Diagnostic failures warn without turning a successful recovery
+    into a failed recovery or preventing other runs from being recovered.
+    """
+    try:
+        tenant_id = pipeline_run.tenant_id
+        properties = pipeline_run_telemetry_properties(
+            pipeline_run.pipeline_id, pipeline_run.pipeline_run_id, tenant_id, recovered=True
+        ) | {
+            "exception_type": AbandonedPipelineRunError.__name__,
+            "recovered_at_startup": True,
+            "pipeline_event_scope": "run",
+        }
+        send_telemetry(
+            PIPELINE_RUN_ERRORED,
+            pipeline_run.user_id,
+            tenant_id=tenant_id,
+            additional_properties=properties,
+        )
+    except Exception:
+        logger.warning(
+            "Failed to emit telemetry for recovered run %s",
+            pipeline_run.pipeline_run_id,
+            exc_info=True,
+        )

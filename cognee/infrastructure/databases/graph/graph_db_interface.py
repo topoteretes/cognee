@@ -31,6 +31,7 @@ Node = tuple[str, NodeData]  # (node_id, properties)
 
 _warned_degree_fallbacks: set[type] = set()
 _warned_neighborhood_fallbacks: set[type] = set()
+_warned_graph_counts_fallbacks: set[type] = set()
 
 
 def timestamp_overlaps(node: dict, start: int | None, end: int | None) -> bool:
@@ -780,6 +781,26 @@ class GraphDBInterface(ABC):
               not. (default False)
         """
         raise NotImplementedError
+
+    async def get_graph_counts(self) -> tuple[int, int]:
+        """
+        Return ``(num_nodes, num_edges)`` and nothing else.
+
+        For callers that only need the two counts (the graph-summary endpoints), so they
+        do not pay for the component and density work ``get_graph_metrics`` also does.
+        In-tree adapters override this with two count queries. This default derives the
+        counts from ``get_graph_metrics`` so adapters that predate the method keep working.
+        """
+        adapter_type = type(self)
+        if adapter_type not in _warned_graph_counts_fallbacks:
+            _warned_graph_counts_fallbacks.add(adapter_type)
+            logger.warning(
+                "%s has no native get_graph_counts; falling back to get_graph_metrics, "
+                "which also computes connected components.",
+                adapter_type.__name__,
+            )
+        metrics = await self.get_graph_metrics(include_optional=False) or {}
+        return metrics.get("num_nodes") or 0, metrics.get("num_edges") or 0
 
     @abstractmethod
     async def has_edge(self, source_id: str, target_id: str, relationship_name: str) -> bool:

@@ -850,11 +850,20 @@ async def _cognify_standard_tasks(**kwargs):
     async def execute_pipeline(**pipeline_kwargs):
         data_item = SimpleNamespace(extension="txt", system_metadata=None)
         captured["tasks"] = pipeline_kwargs["tasks"](data_item)
+        # Telemetry must use the chosen task path, including explicit overrides.
+        expected = (
+            "gliner_demo"
+            if "extract_graph_and_summarize_with_gliner" in _task_names(captured["tasks"])
+            else "llm"
+        )
+        assert pipeline_kwargs["extras"]["graph_extractor"] == expected
         return {}
 
     with (
         patch.object(migrations, "run_migrations_and_block", AsyncMock()),
         patch.object(cognify_module, "get_pipeline_executor", return_value=execute_pipeline),
+        # These tests select task lists; runtime installation has its own suite.
+        patch.object(cognify_module, "ensure_extractor_runtime", AsyncMock()),
     ):
         await cognify_module.cognify(chunk_size=512, **kwargs)
 

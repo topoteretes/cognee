@@ -1,5 +1,6 @@
 import asyncio
 from collections.abc import Awaitable, Callable
+from contextlib import AsyncExitStack
 from typing import Any
 from uuid import UUID
 
@@ -24,14 +25,22 @@ from cognee.modules.pipelines.operations import (
     log_pipeline_run_progress,
     log_pipeline_run_start,
 )
+from cognee.modules.pipelines.run_ownership import pipeline_run_ownership
 from cognee.modules.pipelines.utils import generate_pipeline_id
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.utils import send_telemetry, telemetry_exception_properties, telemetry_guard
 from cognee.tasks.ingestion import resolve_data_directories
 
 from ..tasks.task import Task
 from .run_tasks_data_item import run_tasks_data_item
+from .run_tasks_with_telemetry import (
+    PIPELINE_RUN_COMPLETED,
+    PIPELINE_RUN_ERRORED,
+    PIPELINE_RUN_STARTED,
+    pipeline_run_telemetry_properties,
+)
 
 logger = get_logger("run_tasks(tasks: [Task], data)")
 
@@ -68,35 +77,52 @@ async def run_tasks(
 
         dataset = await session.get(Dataset, dataset_id)
 
-    pipeline_id = generate_pipeline_id(user.id, dataset.id, pipeline_name)
-    pipeline_run = await log_pipeline_run_start(
-        pipeline_id, pipeline_name, dataset.id, data, user=user
-    )
-    pipeline_run_id = pipeline_run.pipeline_run_id
-    # getattr (not attribute access) because unit tests stub
-    # log_pipeline_run_start with plain namespaces lacking the field.
-    run_started_at = getattr(pipeline_run, "started_at", None)
+    with pipeline_run_ownership() as ownership:
+        pipeline_id = generate_pipeline_id(user.id, dataset.id, pipeline_name)
+        pipeline_run = await log_pipeline_run_start(
+            pipeline_id, pipeline_name, dataset.id, data, user=user, recovery_token=ownership.token
+        )
+        pipeline_run_id = pipeline_run.pipeline_run_id
+        # getattr (not attribute access) because unit tests stub
+        # log_pipeline_run_start with plain namespaces lacking the field.
+        run_started_at = getattr(pipeline_run, "started_at", None)
 
-    yield PipelineRunStarted(
-        pipeline_run_id=pipeline_run_id,
-        dataset_id=dataset.id,
-        dataset_name=dataset.name,
-        payload=data,
-    )
-
-    # Note: Setting of global context has to be done after yielding PipelineRunStarted due to running in
-    #       background mode requiring the pipeline run started yield.
-    # parent_run_scope makes nested runs (a pipeline started by one of our
-    # tasks, or a recorded operation called mid-pipeline) parent to THIS run,
-    # mirroring how their tokens chain into run_usage.
-    with operation_usage_scope() as run_usage, parent_run_scope(pipeline_run_id):
-        async with set_database_global_context_variables(
-            dataset.id,
-            dataset.owner_id,
+        telemetry_properties = pipeline_run_telemetry_properties(
+            pipeline_id,
+            pipeline_run_id,
+            user.tenant_id,
+            graph_extractor=(extras or {}).get("graph_extractor"),
             llm_config=llm_config,
             embedding_config=embedding_config,
-        ):
+        ) | {"pipeline_event_scope": "run"}
+        with telemetry_guard():
+            send_telemetry(PIPELINE_RUN_STARTED, user, additional_properties=telemetry_properties)
+
+        run_usage = None
+        database_ready = False
+        run_finished = False
+        async with AsyncExitStack() as stack:
             try:
+                yield PipelineRunStarted(
+                    pipeline_run_id=pipeline_run_id,
+                    dataset_id=dataset.id,
+                    dataset_name=dataset.name,
+                    payload=data,
+                )
+
+                # Background execution resumes this generator in another task. Open
+                # context scopes only after the handoff; the start event is already sent.
+                run_usage = stack.enter_context(operation_usage_scope())
+                stack.enter_context(parent_run_scope(pipeline_run_id))
+                await stack.enter_async_context(
+                    set_database_global_context_variables(
+                        dataset.id,
+                        dataset.owner_id,
+                        llm_config=llm_config,
+                        embedding_config=embedding_config,
+                    )
+                )
+                database_ready = True
                 if not isinstance(data, list):
                     data = [data]
 
@@ -207,12 +233,19 @@ async def run_tasks(
                     finally:
                         await _record_item_progress()
 
-                gathered = await asyncio.gather(
-                    *[
-                        asyncio.create_task(_run_item(item, item_tasks))
-                        for item, item_tasks in work_items
-                    ],
-                )
+                item_futures = [
+                    asyncio.create_task(_run_item(item, item_tasks))
+                    for item, item_tasks in work_items
+                ]
+                try:
+                    gathered = await asyncio.gather(*item_futures)
+                except BaseException:
+                    # No item may still mutate the graph when rollback begins or
+                    # the run releases its ownership lock.
+                    for future in item_futures:
+                        future.cancel()
+                    await asyncio.gather(*item_futures, return_exceptions=True)
+                    raise
 
                 # Separate successes from unhandled exceptions
                 results = []
@@ -278,9 +311,15 @@ async def run_tasks(
                     data,
                     user=user,
                     started_at=run_started_at,
-                    tokens_in=run_usage.tokens_in,
-                    tokens_out=run_usage.tokens_out,
+                    tokens_in=run_usage.tokens_in if run_usage else 0,
+                    tokens_out=run_usage.tokens_out if run_usage else 0,
                 )
+                ownership.closed = True
+                run_finished = True
+                with telemetry_guard():
+                    send_telemetry(
+                        PIPELINE_RUN_COMPLETED, user, additional_properties=telemetry_properties
+                    )
 
                 yield PipelineRunCompleted(
                     pipeline_run_id=pipeline_run_id,
@@ -289,16 +328,12 @@ async def run_tasks(
                     data_ingestion_info=results,
                 )
 
-            except (Exception, asyncio.CancelledError) as error:
-                # asyncio.CancelledError is a BaseException (not an Exception)
-                # since Python 3.8, so a bare `except Exception` misses it —
-                # a cancelled run (deploy/restart, or a future disconnect-
-                # triggered cancel) would otherwise never reach
-                # log_pipeline_run_error below and stay stuck at
-                # DATASET_PROCESSING_STARTED forever (CLO-365). Re-raised at
-                # the end of this block either way, so cooperative
-                # cancellation still propagates once cleanup is done.
-                if callable(rollback_handler):
+            except (Exception, asyncio.CancelledError, GeneratorExit) as error:
+                if run_finished:
+                    raise
+                # Rollback needs a successfully opened database context. Failures
+                # during setup and generator closure still receive a terminal record.
+                if database_ready and callable(rollback_handler):
                     try:
                         await rollback_handler(
                             pipeline_run_id=pipeline_run_id,
@@ -319,6 +354,13 @@ async def run_tasks(
                 # broke ("AuthenticationError: invalid api key"), not
                 # "Pipeline run failed".
                 root_error = getattr(error, "first_error", None) or error
+                with telemetry_guard():
+                    send_telemetry(
+                        PIPELINE_RUN_ERRORED,
+                        user,
+                        additional_properties=telemetry_properties
+                        | telemetry_exception_properties(error),
+                    )
 
                 await log_pipeline_run_error(
                     pipeline_run_id,
@@ -329,9 +371,13 @@ async def run_tasks(
                     root_error,
                     user=user,
                     started_at=run_started_at,
-                    tokens_in=run_usage.tokens_in,
-                    tokens_out=run_usage.tokens_out,
+                    tokens_in=run_usage.tokens_in if run_usage else 0,
+                    tokens_out=run_usage.tokens_out if run_usage else 0,
                 )
+
+                ownership.closed = True
+                if isinstance(error, GeneratorExit):
+                    raise
 
                 yield PipelineRunErrored(
                     pipeline_run_id=pipeline_run_id,

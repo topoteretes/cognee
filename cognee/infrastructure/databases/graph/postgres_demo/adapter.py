@@ -998,6 +998,13 @@ class PostgresDemoAdapter(GraphDBInterface):
             edges = await self._fetch_edges_within(session, subgraph_ids)
             return nodes, edges
 
+    async def get_graph_counts(self) -> tuple[int, int]:
+        """Count nodes and edges with two aggregation queries."""
+        async with self.sessionmaker() as session:
+            num_nodes = (await session.execute(text("SELECT count(*) FROM graph_node"))).scalar()
+            num_edges = (await session.execute(text("SELECT count(*) FROM graph_edge"))).scalar()
+        return num_nodes or 0, num_edges or 0
+
     async def get_graph_metrics(self, include_optional: bool = False) -> dict[str, Any]:
         """Compute the supported graph metrics in Python."""
         async with self.sessionmaker() as session:
