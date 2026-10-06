@@ -33,7 +33,7 @@ from .create_dlt_source import (
 from .data_item import DataItem
 from .dlt_row_data import DltRowData
 from .dlt_temporal import temporal_cells
-from .dlt_utils import document_source_tag
+from .dlt_utils import column_selected, document_source_tag
 from .ingest_dlt_source import ingest_dlt_source
 
 logger = get_logger("resolve_dlt_sources")
@@ -148,6 +148,7 @@ async def resolve_dlt_sources(
     query = kwargs.get("query", None)
     max_rows_per_table = kwargs.get("max_rows_per_table")
     column_value_columns = kwargs.get("column_value_columns")
+    temporal_columns = kwargs.get("temporal_columns")
 
     # Normalise to list for uniform processing
     data_list = data if isinstance(data, list) else [data]
@@ -245,6 +246,7 @@ async def resolve_dlt_sources(
             dataset_name,
             user,
             column_value_columns=column_value_columns,
+            temporal_columns=temporal_columns,
         )
         if item is not None:
             if item.data_id in manifest_data_ids:
@@ -368,6 +370,7 @@ async def _build_source_manifest_item(
     dataset_name: str,
     user: User,
     column_value_columns: dict | None = None,
+    temporal_columns: dict | None = None,
 ) -> DataItem | None:
     """Build a single manifest DataItem describing a whole DLT source.
 
@@ -379,13 +382,17 @@ async def _build_source_manifest_item(
 
     ``column_value_columns`` selects cells to record for ColumnValue node
     emission ({"table": ["col", ...]}, "*" wildcards); None falls back to the
-    ``dlt_column_value_columns`` ingestion config setting.
+    ``dlt_column_value_columns`` ingestion config setting. ``temporal_columns``
+    selects the date cells that become Timestamp edges the same way (default
+    setting ``dlt_temporal_columns``: every date cell).
     """
     if not rows:
         return None
 
     if column_value_columns is None:
         column_value_columns = get_ingestion_config().dlt_column_value_columns
+    if temporal_columns is None:
+        temporal_columns = get_ingestion_config().dlt_temporal_columns
 
     dlt_db_name = rows[0].dlt_db_name
     unique_rows = _dedupe_rows(rows, source_name)
@@ -441,7 +448,7 @@ async def _build_source_manifest_item(
         column_values = _selected_column_values(row, column_value_columns)
         if column_values:
             manifest_row["column_values"] = column_values
-        timestamps = temporal_cells(row)
+        timestamps = temporal_cells(row, temporal_columns)
         if timestamps:
             manifest_row["timestamps"] = timestamps
         manifest_rows.append(manifest_row)
@@ -538,10 +545,6 @@ def _selected_column_values(dlt_row: DltRowData, selection: dict | None) -> dict
     """
     if not selection:
         return {}
-    columns = selection.get(dlt_row.table_name) or selection.get("*")
-    if not columns:
-        return {}
-    take_all = "*" in columns
     max_value_length = get_ingestion_config().dlt_max_column_value_length
 
     fk_columns = {fk.get("column", "") for fk in dlt_row.foreign_keys}
@@ -549,7 +552,7 @@ def _selected_column_values(dlt_row: DltRowData, selection: dict | None) -> dict
     for column, value in dlt_row.row_data.items():
         if column == dlt_row.primary_key_column or column in fk_columns:
             continue
-        if not take_all and column not in columns:
+        if not column_selected(selection, dlt_row.table_name, column):
             continue
         if value is None:
             continue

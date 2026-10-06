@@ -19,6 +19,7 @@ from cognee.modules.engine.models import Timestamp
 from cognee.modules.engine.utils.timestamp_from_text import timestamp_from_text
 from cognee.tasks.ingestion.dlt_row_data import DltRowData
 from cognee.tasks.ingestion.dlt_schema_graph import emit_dlt_schema_graph
+from cognee.tasks.ingestion.config import get_ingestion_config
 from cognee.tasks.ingestion.dlt_temporal import temporal_cells, timestamp_str_for_cell
 
 graph_engine_module = importlib.import_module(
@@ -89,7 +90,7 @@ def test_temporal_cells_skip_foreign_keys_and_non_dates():
         },
         foreign_keys=[{"column": "customer_id", "ref_table": "customers", "ref_column": "id"}],
     )
-    assert temporal_cells(row) == {
+    assert temporal_cells(row, {"*": ["*"]}) == {
         "order_date": "2024-03-01",
         "shipped_at": "2024-03-02 10:15:00",
     }
@@ -98,9 +99,9 @@ def test_temporal_cells_skip_foreign_keys_and_non_dates():
 def test_a_date_primary_key_is_the_time_the_row_is_about():
     """A time series has no id: dlt keys it by its first column, the date."""
     row = _row({"date": "2009-03-01", "sp500": 757.13}, primary_key_column="date")
-    assert temporal_cells(row) == {"date": "2009-03-01"}
+    assert temporal_cells(row, {"*": ["*"]}) == {"date": "2009-03-01"}
     monthly = _row({"date": "2020-01", "price": 1561.0}, primary_key_column="date")
-    assert temporal_cells(monthly) == {"date": "2020-01"}
+    assert temporal_cells(monthly, {"*": ["*"]}) == {"date": "2020-01"}
     assert timestamp_from_text("2020-01").precision == "month"
 
 
@@ -164,3 +165,31 @@ async def test_emit_without_timestamps_adds_no_timestamp_nodes(monkeypatch):
     )
     added = graph.add_nodes.call_args.args[0] if graph.add_nodes.call_args else []
     assert not any(isinstance(node, Timestamp) for node in added)
+
+
+QUAKE = {
+    "id": "us7000tgrk",
+    "time": "2026-09-11 21:23:55",
+    "updated": "2026-10-04 21:37:30",
+    "mag": 6.5,
+}
+
+
+def test_the_default_selection_takes_every_date_cell():
+    assert get_ingestion_config().dlt_temporal_columns == {"*": ["*"]}
+    row = _row(QUAKE)
+    assert temporal_cells(row, get_ingestion_config().dlt_temporal_columns) == {
+        "time": "2026-09-11 21:23:55",
+        "updated": "2026-10-04 21:37:30",
+    }
+
+
+def test_a_narrowed_selection_keeps_bookkeeping_dates_from_anchoring():
+    """USGS rows carry the event time and the record's revision time; selecting
+    only ``time`` stops a September quake anchoring to the October it was revised in."""
+    row = _row(QUAKE)  # table "orders" in the fixture
+    assert temporal_cells(row, {"orders": ["time"]}) == {"time": "2026-09-11 21:23:55"}
+    assert temporal_cells(row, {"*": ["time"]}) == {"time": "2026-09-11 21:23:55"}
+    assert temporal_cells(row, {"other_table": ["time"]}) == {}
+    assert temporal_cells(row, {}) == {}
+    assert temporal_cells(row, None) == {}
