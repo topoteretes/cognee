@@ -29,7 +29,6 @@ import sqlite3
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-
 from alembic import op
 
 logger = logging.getLogger(__name__)
