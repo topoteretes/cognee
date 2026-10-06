@@ -13,6 +13,7 @@ import pytest
 
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.operations import run_tasks_base as base_module
+from cognee.modules.pipelines.operations import run_tasks_data_item as data_item_module
 from cognee.modules.pipelines.operations import run_tasks_with_telemetry as telemetry_module
 from cognee.modules.pipelines.tasks.task import Task
 
@@ -149,6 +150,42 @@ async def test_closed_generator_emits_a_terminal_event(events):
     assert names == ["Pipeline Item Started", "Pipeline Item Errored"]
     (errored,) = [p for n, p in _pipeline_events(events) if n == "Pipeline Item Errored"]
     assert errored["exception_type"] == "GeneratorExit"
+
+
+def _stub_task_runner(monkeypatch):
+    """Replace run_tasks_base with a two-result generator; the event is set once it is closed."""
+    closed = asyncio.Event()
+
+    async def run_tasks_base(*_args):
+        try:
+            yield 1
+            yield 2
+        finally:
+            closed.set()
+
+    monkeypatch.setattr(telemetry_module, "run_tasks_base", run_tasks_base)
+    return closed
+
+
+@pytest.mark.asyncio
+async def test_closing_the_generator_closes_the_task_runner_at_once(events, monkeypatch):
+    closed = _stub_task_runner(monkeypatch)
+    generator = telemetry_module.run_tasks_with_telemetry([], [1], USER, "cognify_pipeline")
+
+    await generator.__anext__()
+    await generator.aclose()
+
+    assert closed.is_set()
+
+
+@pytest.mark.asyncio
+async def test_closing_an_unstarted_generator_emits_nothing(events):
+    async def identity(data):
+        return data
+
+    await telemetry_module.run_tasks_with_telemetry([Task(identity)], [1], USER, "p").aclose()
+
+    assert events == []
 
 
 @pytest.mark.asyncio
@@ -294,3 +331,61 @@ def test_item_profile_survives_an_attribute_that_raises():
         "item_count": 1,
         "item_token_bucket": "lt_1k",
     }
+
+
+def _item_events(tasks):
+    return data_item_module.run_tasks_data_item_regular(
+        data_item=1,
+        dataset=SimpleNamespace(id=uuid4(), name="dataset"),
+        tasks=tasks,
+        pipeline_id="cognify_pipeline",
+        pipeline_run_id=str(uuid4()),
+        ctx=None,
+        user=USER,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_failed_progress_push_closes_the_item_chain_at_once(events, monkeypatch):
+    """Item runner, telemetry wrapper and task close as soon as the drain loop
+    stops, so the item's terminal event goes out now, not at garbage collection."""
+    closed = _stub_task_runner(monkeypatch)
+
+    def broken_push(*_args, **_kwargs):
+        raise RuntimeError("progress queue broken")
+
+    monkeypatch.setattr(data_item_module, "push_to_queue", broken_push)
+
+    with pytest.raises(RuntimeError, match="progress queue broken"):
+        await data_item_module._drain_item_events(
+            _item_events([]), None, [], str(uuid4()), progress_state=None
+        )
+
+    assert closed.is_set()
+    names = [name for name, _ in _pipeline_events(events)]
+    assert names == ["Pipeline Item Started", "Pipeline Item Errored"]
+    (errored,) = [p for n, p in _pipeline_events(events) if n == "Pipeline Item Errored"]
+    assert errored["exception_type"] == "GeneratorExit"
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_drain_reports_the_item_once(events):
+    started = asyncio.Event()
+
+    async def wait_forever(data):
+        started.set()
+        await asyncio.Event().wait()
+
+    drain = asyncio.create_task(
+        data_item_module._drain_item_events(
+            _item_events([Task(wait_forever)]), None, [], str(uuid4()), progress_state=None
+        )
+    )
+    await asyncio.wait_for(started.wait(), timeout=2)
+    drain.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await drain
+
+    (errored,) = [p for n, p in _pipeline_events(events) if n == "Pipeline Item Errored"]
+    assert errored["exception_type"] == "CancelledError"

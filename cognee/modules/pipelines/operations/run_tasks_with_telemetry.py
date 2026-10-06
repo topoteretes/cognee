@@ -177,6 +177,9 @@ async def run_tasks_with_telemetry(
         with telemetry_guard():
             send_telemetry(PIPELINE_ITEM_STARTED, user, additional_properties=properties)
 
+        # aclosing closes the task generator as soon as this one is closed, so
+        # its cleanup runs now. An error raised by that cleanup replaces the
+        # GeneratorExit and is reported below as this item's error, which it is.
         async with aclosing(run_tasks_base(tasks, data, user, ctx)) as results:
             async for result in results:
                 yield result
@@ -191,6 +194,9 @@ async def run_tasks_with_telemetry(
         # no terminal one — the "silent gap" in the warehouse. Same reasoning as
         # run_tasks's CLO-365 handler. Re-raised below either way, so
         # cancellation still propagates.
+        # send_telemetry only schedules delivery on the running loop. When the
+        # cancellation comes from a process shutdown, the loop may close before
+        # the request goes out, so this event is best effort in that case.
         if isinstance(error, Exception):
             logger.exception("Pipeline item errored: `%s`\n", pipeline_name)
         else:
