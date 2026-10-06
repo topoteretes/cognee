@@ -162,10 +162,11 @@ that silently ran on SQLite would fail.
 | No approximate vector index (`libsql_vector_idx` / `vector_top_k` are not supported) | similarity search is an exact `vector_distance_cos` scan | ~16–20 ms for top-15 over 20k × 384-dim rows on a laptop; fine for local datasets, not for millions of rows |
 | No recursive CTEs (0.7.x) | k-hop neighborhoods, connected components | one query per hop; union-find in Python |
 | No scalar subquery in `ON CONFLICT DO UPDATE SET` | vector upsert that merged `belongs_to_set` in SQL | tags are read and merged in Python, then a plain `excluded.payload` upsert |
-| An outer `json_each()` over an unaliased (or quoted-name-qualified) column is misresolved inside `UPDATE`/`DELETE` | vector tag removal | the table is aliased (`UPDATE "t" AS t ... json_each(t.payload, ...)`); removal stays one atomic `DELETE` + `UPDATE`, no read-modify-write |
+| `json_each().value` returns a string element's raw JSON text, escapes included (`B\u00fccher` for `Bücher`); payloads are written with `json.dumps`, which escapes non-ASCII characters, quotes and backslashes | node set names in vector search filters and tag removal | names are compared on the decoded element (`payload ->> je.fullkey`); tag removal filters the names in Python inside one write transaction |
 | Bind parameters must be `None`, numbers, `str` or `bytes` (no `register_adapter`) | raw `text()` statements binding `datetime`/`UUID` | SQLAlchemy-typed columns are unaffected; raw statements use a typed `bindparam` |
 | Quoted identifiers are stored lowercased in `sqlite_master` | `has_collection` by exact name, PascalCase collection detection | case-insensitive lookup; collections detected by schema (`id, payload, vector`) |
 | Parenthesized joins in a FROM clause (`JOIN (a JOIN b ON …)`) are rejected | SQLAlchemy emits them for joined-table inheritance (`User`/`Tenant` are `Principal` subclasses) | the dialect's compiler (`turso/compiler.py`) flattens the tree into a left-deep join chain |
+| A join chain that combines several inner joins, a constant filter and a `LEFT JOIN` can drop a join condition and return extra rows; an affected query returns the wrong rows on every run | none known: no current cognee query has the shape, but users and permissions are read through joins on this engine | avoid the shape in new SQL, or check its rows against stock SQLite; `test_turso_engine_bugs.py` reproduces the smallest case and starts failing once a pyturso release fixes it |
 | `VACUUM` requires an experimental engine flag | none (cognee never runs `VACUUM`) | – |
 | MVCC files are unreadable by stock SQLite | external tooling on a live `mvcc` database | switch the file to `wal` first |
 | One synchronous connection used from two threads at once aborts the process (Rust panic) | the vector adapter shares one connection | every call runs under `_connection_lock`; keep it that way |
@@ -197,3 +198,12 @@ be retired.
 7. Only primitive bind parameter types; no `register_adapter` equivalent.
 8. `JOIN (a JOIN b ON …)`: `Parenthesized FROM clause subqueries are not supported`, although
    the engine reports SQLite 3.50 (SQLite has accepted the form since 3.7.16).
+9. `json_each().value` returns a string element's raw JSON text instead of the decoded string
+   (0.7.2): for the stored array `["B\u00fccher"]` (how `json.dumps` writes `["Bücher"]`) it
+   returns the escape text `B\u00fccher` itself, where stock SQLite returns `Bücher`.
+   `payload ->> je.fullkey` and `json_extract(payload, je.fullkey)` decode correctly.
+10. A join condition is dropped (0.7.2): with `u=(2,1)`, `a=(1,1)`, `p=(3,1)` and `b` empty
+    (`id INTEGER PRIMARY KEY, k INTEGER`), `SELECT u.id, a.id FROM u JOIN a ON u.id = a.id AND
+    a.k = 1 JOIN p ON p.k = a.k LEFT JOIN b ON u.k = b.k` returns `(2, 1)`; stock SQLite returns
+    no rows. Removing the constant filter, the third inner table or the `LEFT JOIN` gives the
+    right result; moving the conditions to `WHERE` does not.
