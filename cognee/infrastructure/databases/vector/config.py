@@ -62,6 +62,28 @@ class VectorConfig(BaseSettings):
 
     model_config = SettingsConfigDict(extra="allow")
 
+    @pydantic.field_validator("vector_db_compaction_target_rows_per_fragment")
+    @classmethod
+    def _target_rows_positive(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("VECTOR_DB_COMPACTION_TARGET_ROWS_PER_FRAGMENT must be > 0")
+        return value
+
+    @pydantic.field_validator(
+        "vector_db_compaction_max_tasks_per_run",
+        "vector_db_compaction_max_versions_per_run",
+        "vector_db_compaction_retention_seconds",
+    )
+    @classmethod
+    def _compaction_limits_non_negative(cls, value: int, info) -> int:
+        # 0 keeps its documented meaning (no limit / no retention window). A
+        # negative value is rejected: internally it marks a budget already
+        # spent, and a negative retention would silently remove the window
+        # that protects readers.
+        if value < 0:
+            raise ValueError(f"{info.field_name.upper()} must be >= 0")
+        return value
+
     @pydantic.model_validator(mode="after")
     def fill_derived(self):
         # Note: When the vector provider is pgvector, automatically use the pgvector

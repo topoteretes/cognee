@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 
 from .harness import (
@@ -14,7 +13,7 @@ from .harness import (
     Request,
     run_worker_loop,
 )
-from .lancedb_compaction import compact_fragments, open_as_lance, prune_superseded_versions
+from .lancedb_compaction import compact_table, prune_table
 from .lancedb_protocol import (
     OP_CONNECT,
     OP_CREATE_TABLE,
@@ -178,23 +177,12 @@ async def _op_table_optimize(registry: HandleRegistry, req: Request):
 
 
 async def _op_table_compact_fragments(registry: HandleRegistry, req: Request):
-    # Plan against the latest version (the caller holds its write lock), so a
-    # write committed after this handle was opened cannot make the rewrite
-    # conflict. Hand the table to pylance, do the I/O off the event loop so
-    # other requests keep flowing, then move this handle to the committed version.
-    table = registry.get(req.handle_id)
-    await table.checkout_latest()
-    dataset = await open_as_lance(table)
-    stats = await asyncio.to_thread(compact_fragments, dataset, **req.kwargs)
-    await table.checkout_latest()
-    return stats
+    # The caller (LanceDBAdapter) holds its write lock around this request.
+    return await compact_table(registry.get(req.handle_id), **req.kwargs)
 
 
 async def _op_table_prune_versions(registry: HandleRegistry, req: Request):
-    table = registry.get(req.handle_id)
-    await table.checkout_latest()
-    dataset = await open_as_lance(table)
-    return await asyncio.to_thread(prune_superseded_versions, dataset, **req.kwargs)
+    return await prune_table(registry.get(req.handle_id), **req.kwargs)
 
 
 def _apply_chain(builder, chain_steps):

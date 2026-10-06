@@ -9,6 +9,7 @@ from cognee.infrastructure.locks import get_dataset_lock, held_datasets
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.models import Data, Dataset
 from cognee.modules.pipelines.layers import validate_pipeline_tasks
+from cognee.modules.pipelines.layers.hook_for_dataset import hook_for_dataset
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
 )
@@ -69,7 +70,7 @@ async def run_pipeline(
     skip_connection_test: bool = False,
     needs_llm: bool = True,
     extras: dict | None = None,
-    after_run_completed: Callable[[], Awaitable[Any]] | None = None,
+    after_run_completed: Callable[..., Awaitable[Any]] | None = None,
 ):
     """``tasks`` is either the task list every data item runs, or a callable
     mapping one item to its task list (a task resolver — see ``run_tasks``);
@@ -84,7 +85,9 @@ async def run_pipeline(
     list the resolver can return.
 
     ``after_run_completed`` is awaited after each dataset's run completes,
-    inside that dataset's database context (see ``run_tasks``)."""
+    inside that dataset's database context (see ``run_tasks``). It also gets
+    ``last_in_invocation=False`` for every dataset but the last
+    (``hook_for_dataset``), so work on a store all datasets share can run once."""
     if tasks is None:
         raise ValueError(
             "run_pipeline requires tasks: a task list or a per-item task resolver callable"
@@ -103,7 +106,7 @@ async def run_pipeline(
 
     # TODO: If multiple datasets are provided, we currently run them sequentially to avoid overwhelming the system with too many concurrent pipeline runs.
     #       In the future, we could consider adding concurrency here with proper resource management and limits.
-    for dataset in authorized_datasets:
+    for index, dataset in enumerate(authorized_datasets):
         source = run_pipeline_per_dataset(
             dataset=dataset,
             user=user,
@@ -117,7 +120,9 @@ async def run_pipeline(
             embedding_config=embedding_config,
             data_cache=data_cache,
             extras=extras,
-            after_run_completed=after_run_completed,
+            after_run_completed=hook_for_dataset(
+                after_run_completed, index, len(authorized_datasets)
+            ),
         )
         async with aclosing(source):
             async for run_info in source:
@@ -137,7 +142,7 @@ async def run_pipeline_per_dataset(
     embedding_config: EmbeddingConfig | None = None,
     data_cache=False,
     extras: dict | None = None,
-    after_run_completed: Callable[[], Awaitable[Any]] | None = None,
+    after_run_completed: Callable[..., Awaitable[Any]] | None = None,
 ):
     # The actual work of a single run, factored out so it can run either under
     # the per-dataset lock (normal case) or directly (re-entrant case below).

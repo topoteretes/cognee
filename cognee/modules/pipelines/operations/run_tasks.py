@@ -58,7 +58,7 @@ async def run_tasks(
     llm_config: LLMConfig | None = None,
     embedding_config: EmbeddingConfig | None = None,
     data_cache: bool = False,
-    after_run_completed: Callable[[], Awaitable[Any]] | None = None,
+    after_run_completed: Callable[..., Awaitable[Any]] | None = None,
 ):
     """Run a pipeline over a dataset as ONE logical run.
 
@@ -70,11 +70,12 @@ async def run_tasks(
     record, one database context, one rollback, one terminal status.
 
     ``after_run_completed`` is awaited once the run is recorded and reported
-    complete, still inside this dataset's database context (cognify uses it
-    to compact the vector store, see ``compact_vector_store``). It sits
-    outside the run's error handling: it cannot fail, roll back, or re-mark a
-    run that already completed. An exception it raises is logged and
-    swallowed; a cancellation propagates.
+    complete, still inside this dataset's database context, with the same
+    keyword arguments as ``rollback_handler`` (cognify passes the maintenance
+    runner, see ``cognee.modules.maintenance``). It sits outside the run's
+    error handling: it cannot fail, roll back, or re-mark a run that already
+    completed. An exception it raises is logged and swallowed; a cancellation
+    propagates.
     """
     task_resolver = tasks if callable(tasks) else None
     if not user:
@@ -408,6 +409,14 @@ async def run_tasks(
             # swallowed per-item failure path leaves ``run_finished`` unset.
             if run_finished and after_run_completed is not None:
                 try:
-                    await after_run_completed()
+                    await after_run_completed(
+                        pipeline_run_id=pipeline_run_id,
+                        pipeline_id=pipeline_id,
+                        pipeline_name=pipeline_name,
+                        dataset=dataset,
+                        user=user,
+                        data=data,
+                        data_ingestion_info=results,
+                    )
                 except Exception:
                     logger.warning("after_run_completed hook failed", exc_info=True)

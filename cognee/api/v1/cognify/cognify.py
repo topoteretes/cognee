@@ -5,7 +5,6 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
-from cognee.infrastructure.databases.vector.compact_vector_store import compact_vector_store
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.llm import resolve_chunk_size
@@ -20,6 +19,7 @@ from cognee.modules.cognify.config import (
 )
 from cognee.modules.cognify.rollback import cognify_rollback_handler
 from cognee.modules.cognify.routing import CognifyRoute, cognify_route_for
+from cognee.modules.maintenance import run_maintenance
 from cognee.modules.observability import (
     COGNEE_PIPELINE_NAME,
     COGNEE_RESULT_SUMMARY,
@@ -542,10 +542,10 @@ async def cognify(
                 embedding_config=embedding_config,
                 data_cache=data_cache,
                 extras={"graph_extractor": resolved_extractor},
-                # Fold the vector fragments this run wrote, once per dataset,
-                # after the run is recorded complete; bounded per run, so a
-                # bloated store drains over several cognify runs.
-                after_run_completed=compact_vector_store,
+                # Maintenance jobs (vector compaction, ...) once per dataset,
+                # after the run is recorded complete; each bounds its own work
+                # per run, so a bloated store drains over several cognify runs.
+                after_run_completed=run_maintenance,
             )
         except Exception as error:
             # Run-level failures (e.g. an AuthenticationError escaping a task)
