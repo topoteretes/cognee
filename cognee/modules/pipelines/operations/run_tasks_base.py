@@ -11,7 +11,7 @@ from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.provenance_config import get_provenance_config
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
-from cognee.shared.utils import send_telemetry
+from cognee.shared.utils import send_telemetry, telemetry_exception_properties, telemetry_guard
 
 from ..tasks.task import Task
 
@@ -158,16 +158,19 @@ async def handle_task(
     """Handle common task workflow with logging, telemetry, and error handling."""
     task_type = running_task.task_type
 
+    # Every ``* Task *`` event of this invocation carries the same properties;
+    # pipeline_run_id joins them to their pipeline's events in the warehouse.
+    task_properties = {
+        "task_name": running_task.executable.__name__,
+        "cognee_version": cognee_version,
+        "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
+    }
+    if ctx is not None and ctx.pipeline_run_id is not None:
+        task_properties["pipeline_run_id"] = str(ctx.pipeline_run_id)
+
     logger.info(f"{task_type} task started: `{running_task.executable.__name__}`")
-    send_telemetry(
-        f"{task_type} Task Started",
-        user,
-        additional_properties={
-            "task_name": running_task.executable.__name__,
-            "cognee_version": cognee_version,
-            "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
-        },
-    )
+    with telemetry_guard():
+        send_telemetry(f"{task_type} Task Started", user, additional_properties=task_properties)
 
     # Pass ctx only to tasks that declare it in their signature.
     # Task caches this check as accepts_ctx at construction time.
@@ -192,6 +195,7 @@ async def handle_task(
     with new_span(f"cognee.pipeline.task.{task_name}") as span:
         span.set_attribute(COGNEE_PIPELINE_TASK_NAME, task_name)
 
+        downstream_failed = False
         try:
             result_count = 0
             pipe_name = ctx.pipeline_name if ctx else None
@@ -220,8 +224,12 @@ async def handle_task(
                         task_index=task_index,
                     )
 
-                async for result in run_tasks_base(leftover_tasks, result_data, user, ctx):
-                    yield result
+                try:
+                    async for result in run_tasks_base(leftover_tasks, result_data, user, ctx):
+                        yield result
+                except BaseException:
+                    downstream_failed = True
+                    raise
 
             span.set_attribute(COGNEE_RESULT_COUNT, result_count)
             span.set_attribute(
@@ -230,32 +238,36 @@ async def handle_task(
             )
 
             logger.info(f"{task_type} task completed: `{task_name}`")
-            send_telemetry(
-                f"{task_type} Task Completed",
-                user,
-                additional_properties={
-                    "task_name": task_name,
-                    "cognee_version": cognee_version,
-                    "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
-                },
-            )
+            with telemetry_guard():
+                send_telemetry(
+                    f"{task_type} Task Completed", user, additional_properties=task_properties
+                )
 
-        except Exception as error:
+        except BaseException as error:
+            # BaseException, not Exception: a cancelled or closed task (CancelledError,
+            # GeneratorExit) must still emit its terminal event, or its Started event
+            # is a permanent silent gap in the warehouse. Re-raised below.
             span.set_status(StatusCode.ERROR, str(error))
             span.record_exception(error)
 
-            logger.exception(
-                f"{task_type} task errored: `{task_name}`\n",
-            )
-            send_telemetry(
-                f"{task_type} Task Errored",
-                user,
-                additional_properties={
-                    "task_name": task_name,
-                    "cognee_version": cognee_version,
-                    "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
-                },
-            )
+            if isinstance(error, Exception):
+                logger.exception(
+                    f"{task_type} task errored: `{task_name}`\n",
+                )
+            else:
+                logger.info(f"{task_type} task cancelled: `{task_name}` ({type(error).__name__})")
+            # Tasks nest: this task's loop drives the tasks after it, so one failure
+            # unwinds through every upstream task's handler. Only the task where it
+            # happened reports it; the ones above re-raise without an event, so
+            # "which task failed" has one answer in the warehouse.
+            if not downstream_failed:
+                with telemetry_guard():
+                    send_telemetry(
+                        f"{task_type} Task Errored",
+                        user,
+                        additional_properties=task_properties
+                        | telemetry_exception_properties(error),
+                    )
             raise
 
 
