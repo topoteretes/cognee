@@ -10,7 +10,7 @@ async def restore_entity_type_categories(data_points_by_id: dict[str, DataPoint]
     adapter replaces a node's whole property set on write, so a category assigned
     earlier would be wiped by the next document. This reads the stored category before
     the write and fills only the instances that have none, so a category set in this
-    run is never replaced. A stored value outside the taxonomy fails validation.
+    run is never replaced.
 
     Not atomic with the later write: another document in this same run, or another
     worker, can store a category in between and have it replaced. Closing that needs a
