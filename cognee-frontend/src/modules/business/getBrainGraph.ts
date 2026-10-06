@@ -23,7 +23,7 @@ export default function getBrainGraph(
   datasetId: string,
 ): Promise<VisualizationPayload> {
   // Session events come from getLiveEvents/the websocket, not this fetch, so
-  // this skips collecting them server-side (SDK-972).
+  // the server is told not to collect them.
   const params = new URLSearchParams({
     dataset_id: datasetId,
     max_nodes: String(MAX_NODES),
