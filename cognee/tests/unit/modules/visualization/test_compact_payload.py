@@ -77,6 +77,33 @@ def test_projected_properties_are_enough_for_the_compact_node():
         assert compact_node(node_id, projected) == compact_node(node_id, properties)
 
 
+def test_an_entity_type_streams_its_category():
+    """The Business view colors entities by the category of their type, and the stream
+    sends a fixed set of fields, so a category the projection dropped never arrives."""
+    properties = {"type": "EntityType", "name": "country", "category": "place"}
+    projected = {key: properties[key] for key in COMPACT_PROPERTY_KEYS if key in properties}
+    projected["type"] = "EntityType"
+
+    streamed = compact_node("n1", projected)
+    in_json = {node["id"]: node for node in preprocess(([("n1", properties)], [])).nodes}["n1"]
+
+    assert streamed["category"] == in_json["category"] == "place"
+
+
+def test_an_unclassified_entity_type_streams_no_category():
+    assert "category" not in compact_node("n1", {"type": "EntityType", "name": "country"})
+    assert "category" not in compact_node(
+        "n1", {"type": "EntityType", "name": "country", "category": None}
+    )
+
+
+def test_a_category_on_any_other_node_is_not_streamed():
+    """A custom graph model's node can have a field called category that is not the taxonomy."""
+    node = compact_node("n1", {"type": "Entity", "name": "Rust", "category": "language"})
+
+    assert "category" not in node
+
+
 def test_compact_links_match_preprocess():
     nodes, edges = _graph()
     expected = {

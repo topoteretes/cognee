@@ -242,7 +242,7 @@ def get_visualize_router() -> APIRouter:
         `stream=true`, for graphs too large for one response. Events:
         `meta` (seeds, seed source, bounds); one `chunk` per read, with
         compact `nodes` (id, name, type, stage, is_unnamed, belongs_to_set,
-        source_node_set) and `links` (source, target, relation, edge_class)
+        source_node_set, and `category` on an EntityType that has one) and `links` (source, target, relation, edge_class)
         whose endpoints were all sent in this or an earlier chunk; `summary`
         (`importance` and `label_priority` per node, split into events of at
         most one chunk's size, the first also carrying `color_maps.node_set`);
