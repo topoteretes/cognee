@@ -157,6 +157,19 @@ Improve & Memify are virtually the same, though. So no reason not to use improve
 #### 1. Pipeline-Based Processing
 All data flows through task-based pipelines (`cognee/modules/pipelines/`). Tasks are composable units that can run sequentially or in parallel. Example pipeline tasks: `classify_documents`, `extract_graph_from_data`, `add_data_points`. The runner semantics (a task's `batch_size` batches the *previous* task's output, `enriches`, `ctx` injection, and which of the two `run_pipeline` functions to import) are in the `cognee/modules/pipelines/__init__.py` docstring; the index of all task implementations is `cognee/tasks/README.md`.
 
+Abandoned-run recovery checks at API startup and every 60 seconds. The
+`COGNEE_STALE_RUN_RECOVERY_MIN_AGE_SECONDS` setting (default 3600, nonnegative)
+is an eligibility floor, not proof of inactivity. Each new pipeline run holds
+an OS lock under `SYSTEM_ROOT_DIRECTORY/pipeline_run_locks` from its persisted
+start through its terminal record, including the background handoff. Recovery
+must acquire the existing ownership marker and re-read the latest run status
+before rolling back. Active dataset locks defer recovery too. Completed runs
+remove their markers; a crashed writer leaves its marker for recovery.
+Legacy rows and markers unavailable on this filesystem are skipped, so workers
+need the same persistent system directory with working OS file locks to recover
+each other's runs. Missing ownership is never inferred from run age alone.
+
+
 #### 2. Interface-Based Database Adapters
 Multiple backends are supported through adapter interfaces:
 - **Graph**: Ladybug (default), Neo4j, Neptune, Postgres (demo) via `GraphDBInterface`
@@ -910,6 +923,9 @@ shutdown = visualization_server(port=8080)  # synchronous; returns a shutdown ca
 - Set `LITELLM_LOG="DEBUG"` for verbose LLM logs (default: "ERROR")
 - Enable debug mode: `ENV="development"` or `ENV="debug"`
 - Disable telemetry: `TELEMETRY_DISABLED=1`
+- Telemetry events use the existing operation-origin context: `sdk`, `cli`, `mcp`, `api`, or `background`. An explicit `TELEMETRY_ORIGIN` (e.g. `cloud`) overrides it.
+- `Pipeline Run` events follow the dataset lifecycle in `run_tasks`; completion is emitted only after durable storage and the run record succeed. They carry `pipeline_event_scope=run`. `Pipeline Item` events follow individual items and add their loader, extension, size and token buckets (`data_item_telemetry_properties`). Both carry `pipeline_run_id` and the provider stack from `get_current_settings()`, including structured-output settings and cognify's already-resolved extractor. Historical item-scoped `Pipeline Run` events cannot establish whole-run completion; the aggregate reports keep them separate.
+- Failed `search()`/`recall()` calls emit `ERRORED`. Pipeline, item and task failures use `telemetry_exception_properties` (`cognee/shared/utils.py`): exception class (unwrapping `first_error`), cause chain (at most four links), and the innermost HTTP status, never the message. Model settings that are filesystem paths are reported as `local_path`.
 - Check logs in structured format (uses structlog)
 - Use `debugpy` optional dependency for debugging: `pip install cognee[debug]`
 

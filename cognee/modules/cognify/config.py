@@ -143,9 +143,9 @@ def resolve_extractor(
     per process. It never installs anything: the pipeline entry point awaits
     ``ensure_extractor_runtime`` for that, after its own argument checks.
 
-    This is the ONLY place the extractor setting is read. Callers resolve once,
-    up front, and pass the resolved value (or values derived from it) onward —
-    no downstream code re-reads the config.
+    This is the only place the extractor setting is read for a run. Callers
+    resolve once, up front, and pass the resolved value (or values derived from it)
+    onward — no downstream code re-reads the config.
     """
     extractor = (value or config.graph_extractor or AUTO_EXTRACTOR).strip().lower()
     extractor = EXTRACTOR_ALIASES.get(extractor, extractor)
