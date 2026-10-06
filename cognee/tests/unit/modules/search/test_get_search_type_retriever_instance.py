@@ -220,6 +220,7 @@ async def test_hybrid_completion_retriever_receives_config():
             "facts_top_k": 4,
             "include_external_metadata": True,
             "external_metadata_keys": ["created_at", "source_id"],
+            "min_score": 0.02,
         },
     )
 
@@ -237,6 +238,7 @@ async def test_hybrid_completion_retriever_receives_config():
     assert retriever_instance.facts_top_k == 4
     assert retriever_instance.include_external_metadata is True
     assert retriever_instance.external_metadata_keys == ["created_at", "source_id"]
+    assert retriever_instance.min_score == 0.02
 
 
 @pytest.mark.asyncio

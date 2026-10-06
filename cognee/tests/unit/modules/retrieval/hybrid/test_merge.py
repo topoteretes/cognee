@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from cognee.modules.retrieval.hybrid.chunks import PASSAGES_DROPPED_BY_CUTOFF
 from cognee.modules.retrieval.hybrid.merge import merge_hybrid_results
 
 EMPTY_CHANNELS = {"chunks": [], "entities": [], "facts": []}
@@ -100,3 +101,65 @@ def test_each_channel_reserves_slots_for_conversational_only_items(channel, make
         "raw2",
         "ctx0",
     ]
+
+
+def test_merge_clears_cutoff_when_secondary_lane_keeps_a_passage():
+    """Primary was fully cut off; conversational lane still has a chunk."""
+    surviving = result("chunk-ctx", "kept by conversational rewrite")
+    primary = {
+        **EMPTY_CHANNELS,
+        "chunk_summaries": {},
+        PASSAGES_DROPPED_BY_CUTOFF: True,
+        "entities": [],
+        "facts": [],
+    }
+    secondary = {
+        "chunks": [surviving],
+        "chunk_summaries": {"chunk-ctx": "ctx summary"},
+        "entities": [{"id": "entity-ctx", "name": "Kept"}],
+        "facts": [{"id": "fact-ctx", "text": "kept fact"}],
+    }
+
+    merged = merge_hybrid_results(
+        primary,
+        secondary,
+        chunks_limit=5,
+        entities_limit=5,
+        facts_limit=5,
+    )
+
+    assert merged["chunks"] == [surviving]
+    assert PASSAGES_DROPPED_BY_CUTOFF not in merged
+    assert merged["entities"] == secondary["entities"]
+
+
+def test_merge_keeps_cutoff_when_both_lanes_were_fully_cut_off():
+    primary = {**EMPTY_CHANNELS, "chunk_summaries": {}, PASSAGES_DROPPED_BY_CUTOFF: True}
+    secondary = {**EMPTY_CHANNELS, "chunk_summaries": {}, PASSAGES_DROPPED_BY_CUTOFF: True}
+
+    merged = merge_hybrid_results(
+        primary,
+        secondary,
+        chunks_limit=5,
+        entities_limit=5,
+        facts_limit=5,
+    )
+
+    assert merged["chunks"] == []
+    assert merged[PASSAGES_DROPPED_BY_CUTOFF] is True
+
+
+def test_merge_propagates_secondary_only_cutoff_when_merged_chunks_are_empty():
+    primary = {**EMPTY_CHANNELS, "chunk_summaries": {}}
+    secondary = {**EMPTY_CHANNELS, "chunk_summaries": {}, PASSAGES_DROPPED_BY_CUTOFF: True}
+
+    merged = merge_hybrid_results(
+        primary,
+        secondary,
+        chunks_limit=5,
+        entities_limit=5,
+        facts_limit=5,
+    )
+
+    assert merged["chunks"] == []
+    assert merged[PASSAGES_DROPPED_BY_CUTOFF] is True

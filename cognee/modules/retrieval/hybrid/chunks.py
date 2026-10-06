@@ -9,7 +9,7 @@ from cognee.modules.retrieval.hybrid.pairs import (
     summary_id_for_chunk,
     summary_text_by_chunk_id,
 )
-from cognee.modules.retrieval.hybrid.ranking import rank_chunk_summary_pairs
+from cognee.modules.retrieval.hybrid.ranking import rank_chunk_summary_pairs_with_cutoff
 from cognee.modules.retrieval.hybrid.results import (
     display_value,
     payload,
@@ -19,6 +19,8 @@ from cognee.modules.retrieval.hybrid.results import (
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("HybridRetriever")
+
+PASSAGES_DROPPED_BY_CUTOFF = "passages_dropped_by_cutoff"
 
 
 async def retrieve_hybrid_chunks(
@@ -36,6 +38,7 @@ async def retrieve_hybrid_chunks(
     current_truth_epoch: int | None = None,
     personal_weights: dict | None = None,
     personal_influence: float = 0.0,
+    min_score: float | None = None,
 ) -> dict[str, Any]:
     candidate_limit = chunk_candidate_limit(chunks_top_k)
     summary_limit = summary_candidate_limit(chunks_top_k, text_summaries_top_k)
@@ -76,7 +79,7 @@ async def retrieve_hybrid_chunks(
         )
         attach_source_chunks(pairs, source_chunks)
 
-    ranked_pairs = rank_chunk_summary_pairs(
+    ranked_pairs, removed_all = rank_chunk_summary_pairs_with_cutoff(
         pairs,
         chunks_top_k,
         use_importance_weight,
@@ -86,6 +89,7 @@ async def retrieve_hybrid_chunks(
         current_truth_epoch=current_truth_epoch,
         personal_weights=personal_weights,
         personal_influence=personal_influence,
+        min_score=min_score,
     )
     if summary_limit > 0:
         await load_summary_text_for_ranked_pairs(
@@ -95,10 +99,13 @@ async def retrieve_hybrid_chunks(
             node_name_filter_operator,
         )
 
-    return {
+    retrieved = {
         "chunks": [pair["chunk"] for pair in ranked_pairs if pair["chunk"] is not None],
         "chunk_summaries": summary_text_by_chunk_id(ranked_pairs),
     }
+    if removed_all:
+        retrieved[PASSAGES_DROPPED_BY_CUTOFF] = True
+    return retrieved
 
 
 def chunk_candidate_limit(chunks_top_k: int) -> int:
