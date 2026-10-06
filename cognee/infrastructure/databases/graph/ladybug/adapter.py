@@ -5,6 +5,7 @@ import json
 import os
 import tempfile
 import threading
+from collections.abc import Collection
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, nullcontext
 from datetime import datetime, timezone
@@ -2863,6 +2864,42 @@ class LadybugAdapter(GraphDBInterface):
         from cognee.infrastructure.databases.graph.degree_seeds import cypher_degree_seeds
 
         return await cypher_degree_seeds(self, top_k, typed=True)
+
+    async def get_edge_retrieval_texts_in_use(self, edge_texts: Collection[str]) -> set[str]:
+        """Read only (relationship_name, edge_text) per edge, never nodes or full properties.
+
+        Ladybug's JSON extension returns ``edge_text`` JSON-encoded and has no
+        function to unwrap it, so the trim-and-fall-back rule of
+        ``get_edge_retrieval_text`` is applied here rather than in the query.
+        Still one pass over the edges, but DISTINCT on two narrow columns instead
+        of every node and every edge's full property blob.
+        """
+        wanted = {text for text in edge_texts if text}
+        if not wanted:
+            return set()
+
+        # Lazy import: see get_edge_delete_data.
+        from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
+
+        rows = await self.query(
+            """
+            MATCH (:Node)-[r:EDGE]->(:Node)
+            RETURN DISTINCT r.relationship_name,
+                   CAST(json_extract(r.properties, '$.edge_text') AS STRING)
+            """
+        )
+        in_use: set[str] = set()
+        for relationship_name, edge_text_json in rows:
+            stored_text = None
+            if edge_text_json:
+                try:
+                    stored_text = json.loads(edge_text_json)
+                except json.JSONDecodeError:
+                    stored_text = None
+            edge_text = get_edge_retrieval_text(stored_text, relationship_name)
+            if edge_text in wanted:
+                in_use.add(edge_text)
+        return in_use
 
     async def get_graph_data(
         self,

@@ -25,6 +25,7 @@ from uuid import uuid4
 import pytest
 
 from cognee.infrastructure.databases.exceptions import UnsupportedProvenanceCapability
+from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 from cognee.infrastructure.databases.provenance import (
     EdgeDeleteData,
     EdgeIdentity,
@@ -300,6 +301,9 @@ class FakeProvenanceGraphEngine:
             for e, row in self.edges.items()
         ]
         return nodes, edges
+
+    # The interface default answers from get_graph_data above.
+    get_edge_retrieval_texts_in_use = GraphDBInterface.get_edge_retrieval_texts_in_use
 
     async def remove_belongs_to_set_tags(self, tags):
         self._guard()
