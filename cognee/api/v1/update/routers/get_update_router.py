@@ -101,8 +101,8 @@ def get_update_router() -> APIRouter:
           `"full_rebuild"` (memory dropped and rebuilt from the new content) or `"failed"` (the rebuild's
           cognify run errored; `error` says why, and the call can be retried).
         - **regions**, **deleted_chunks**, **added_chunks**, **reused_chunks**,
-          **kept_chunks**, **reindexed_chunks**, **total_chunks**: the chunk-level
-          counters; `null` on a rebuild, which has no diff.
+          **redated_chunks**, **kept_chunks**, **reindexed_chunks**, **total_chunks**:
+          the chunk-level counters; `null` on a rebuild, which has no diff.
         - **data_id**, **dataset_id**: the document, the handle to retry with.
         - **duration_seconds**: wall-clock time of the update.
         - **pipeline_run_id**: the run to inspect; `null` for a no-op.

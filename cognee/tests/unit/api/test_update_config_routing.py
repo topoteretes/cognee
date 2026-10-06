@@ -10,8 +10,9 @@ path stays first choice.
 """
 
 import sys
+from contextlib import ExitStack
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -45,6 +46,7 @@ def _engine_summary(status="incremental"):
         "deleted_chunks": 1,
         "added_chunks": 2,
         "reused_chunks": 0,
+        "redated_chunks": 0,
         "kept_chunks": 5,
         "reindexed_chunks": 0,
         "total_chunks": 7,
@@ -64,10 +66,20 @@ def _relational_engine_stub(row):
     return engine
 
 
-def _patches(data_id, incremental, full_result, row=None):
+def _patches(
+    data_id, incremental, full_result, row=None, extractor="llm", cognify=None, runtime=None
+):
+    """update() with its collaborators stubbed, as one context manager.
+
+    ``extractor`` is what the (stubbed) resolution returns; ``cognify`` and
+    ``runtime`` take the caller's mocks when a test needs to read them back.
+    """
     row = row if row is not None else SimpleNamespace(id=data_id, legacy_id=None, owner_id=uuid4())
     relational_module = sys.modules["cognee.infrastructure.databases.relational"]
-    return (
+    cognify = cognify if cognify is not None else AsyncMock(return_value=full_result)
+    runtime = runtime if runtime is not None else AsyncMock()
+    stack = ExitStack()
+    for patched in (
         patch.object(data_methods_module, "resolve_data_id", AsyncMock(return_value=data_id)),
         patch.object(
             relational_module,
@@ -78,9 +90,13 @@ def _patches(data_id, incremental, full_result, row=None):
         patch.object(update_module, "forget", AsyncMock()),
         patch.object(data_methods_module, "reset_data_pipeline_status", AsyncMock()),
         patch.object(update_module, "add", AsyncMock()),
-        patch.object(update_module, "cognify", AsyncMock(return_value=full_result)),
+        patch.object(update_module, "cognify", cognify),
         patch.object(update_module, "recorded_chunk_budget", AsyncMock(return_value=None)),
-    )
+        patch.object(update_module, "resolve_extractor", lambda value, config: extractor),
+        patch.object(update_module, "ensure_extractor_runtime", runtime),
+    ):
+        stack.enter_context(patched)
+    return stack
 
 
 async def test_custom_configs_skip_the_incremental_path():
@@ -97,8 +113,7 @@ async def test_custom_configs_skip_the_incremental_path():
         },
     ):
         incremental.reset_mock()
-        p1, p2, p3, p4, p5, p6, p7, p8 = _patches(data_id, incremental, full_result)
-        with p1, p2, p3, p4, p5, p6, p7, p8:
+        with _patches(data_id, incremental, full_result):
             result = await update_module.update(
                 data_id=data_id,
                 data="new content",
@@ -117,8 +132,7 @@ async def test_node_set_change_skips_the_incremental_path():
     incremental = AsyncMock()
     full_result = _full_result(dataset_id)
 
-    p1, p2, p3, p4, p5, p6, p7, p8 = _patches(data_id, incremental, full_result)
-    with p1, p2, p3, p4, p5, p6, p7, p8:
+    with _patches(data_id, incremental, full_result):
         result = await update_module.update(
             data_id=data_id,
             data="new content",
@@ -144,8 +158,7 @@ async def test_custom_extraction_config_skips_the_incremental_path(config_kwargs
     incremental = AsyncMock()
     full_result = _full_result(dataset_id)
 
-    p1, p2, p3, p4, p5, p6, p7, p8 = _patches(data_id, incremental, full_result)
-    with p1, p2, p3, p4, p5, p6, p7, p8:
+    with _patches(data_id, incremental, full_result):
         result = await update_module.update(
             data_id=data_id,
             data="new content",
@@ -173,8 +186,7 @@ async def test_multi_item_input_is_rejected_not_multiplied():
     data_id, dataset_id = uuid4(), uuid4()
     incremental = AsyncMock()
 
-    p1, p2, p3, p4, p5, p6, p7, p8 = _patches(data_id, incremental, _full_result(dataset_id))
-    with p1, p2, p3, p4, p5, p6, p7, p8, pytest.raises(IngestionError):
+    with _patches(data_id, incremental, _full_result(dataset_id)), pytest.raises(IngestionError):
         await update_module.update(
             data_id=data_id,
             data=["first document", "second document"],
@@ -190,8 +202,7 @@ async def test_single_item_list_is_unwrapped():
     data_id, dataset_id = uuid4(), uuid4()
     incremental = AsyncMock(return_value=_engine_summary())
 
-    p1, p2, p3, p4, p5, p6, p7, p8 = _patches(data_id, incremental, _full_result(dataset_id))
-    with p1, p2, p3, p4, p5, p6, p7, p8:
+    with _patches(data_id, incremental, _full_result(dataset_id)):
         await update_module.update(
             data_id=data_id,
             data=["only document"],
@@ -214,10 +225,7 @@ async def test_the_full_fallback_keeps_the_original_row_owner():
     row = SimpleNamespace(id=data_id, legacy_id=None, owner_id=original_owner)
     collaborator = SimpleNamespace(id=uuid4())
 
-    p1, p2, p3, p4, p5, p6, p7, p8 = _patches(
-        data_id, AsyncMock(), _full_result(dataset_id), row=row
-    )
-    with p1, p2, p3, p4, p5, p6, p7, p8:
+    with _patches(data_id, AsyncMock(), _full_result(dataset_id), row=row):
         await update_module.update(
             data_id=data_id,
             data="new content",
@@ -234,8 +242,7 @@ async def test_no_configs_take_the_incremental_path():
     summary = _engine_summary()
     incremental = AsyncMock(return_value=summary)
 
-    p1, p2, p3, p4, p5, p6, p7, p8 = _patches(data_id, incremental, _full_result(dataset_id))
-    with p1, p2, p3, p4, p5, p6, p7, p8:
+    with _patches(data_id, incremental, _full_result(dataset_id)):
         result = await update_module.update(
             data_id=data_id,
             data="new content",
@@ -248,3 +255,49 @@ async def test_no_configs_take_the_incremental_path():
     assert (result["regions"], result["deleted_chunks"], result["added_chunks"]) == (1, 1, 2)
     assert (result["kept_chunks"], result["reindexed_chunks"], result["total_chunks"]) == (5, 0, 7)
     assert result["pipeline_run_id"] == summary["pipeline_run_id"]
+
+
+async def test_the_extractor_is_resolved_once_and_forwarded_to_both_paths():
+    """One extractor decision, made like cognify()'s, drives whichever path runs.
+
+    The chunk-level engine used to hard-wire the LLM step, so a document
+    ingested with ``extractor="gliner_demo"`` (or keyless, where ``auto``
+    resolves to it) could only be updated with an LLM. The resolved value now
+    reaches the engine, and the full rebuild's cognify() gets the same one —
+    with the runtime it needs made importable first, on both paths.
+    """
+    data_id, dataset_id = uuid4(), uuid4()
+    incremental = AsyncMock(return_value=_engine_summary())
+    cognify_mock = AsyncMock(return_value=_full_result(dataset_id))
+    runtime = AsyncMock()
+
+    with _patches(
+        data_id,
+        incremental,
+        _full_result(dataset_id),
+        extractor="gliner_demo",
+        cognify=cognify_mock,
+        runtime=runtime,
+    ):
+        await update_module.update(
+            data_id=data_id,
+            data="new content",
+            dataset_id=dataset_id,
+            user=SimpleNamespace(id=uuid4()),
+            extractor="gliner",
+        )
+        assert incremental.await_args.kwargs["extractor"] == "gliner_demo"
+        cognify_mock.assert_not_awaited()
+        runtime.assert_awaited_once_with("gliner_demo", ANY)
+
+        incremental.reset_mock()
+        await update_module.update(
+            data_id=data_id,
+            data="new content",
+            dataset_id=dataset_id,
+            user=SimpleNamespace(id=uuid4()),
+            chunk_level_diff=False,
+        )
+        incremental.assert_not_awaited()
+        assert cognify_mock.await_args.kwargs["extractor"] == "gliner_demo"
+        assert runtime.await_count == 2
