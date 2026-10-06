@@ -395,6 +395,8 @@ jobs:
           MEMORY_AUTHORS: ${{ vars.PR_REVIEW_MEMORY_AUTHORS }}
           # The code-graph dataset the memory skill queries on the tenant.
           DATASET: ${{ vars.COGNEE_MCP_DATASET || 'cognee_code' }}
+          # Model for the memory-backed review; the classic review keeps its pinned model.
+          MEMORY_MODEL: ${{ vars.PR_REVIEW_MODEL || 'claude-sonnet-4-5-20250929' }}
         run: |
           author_lc="$(printf '%s' "$AUTHOR" | tr '[:upper:]' '[:lower:]')"
           if grep -vE '^[[:space:]]*#' .github/core-team.txt \
@@ -414,11 +416,23 @@ jobs:
               memory=true
             fi
           fi
-          echo "cognee_memory=$memory" >> "$GITHUB_OUTPUT"
+          # The classic path keeps exactly today's prompt, turn budget and model; only
+          # the memory path gets the larger budget (graph queries cost turns) and the
+          # PR_REVIEW_MODEL override.
           if [ "$memory" = "true" ]; then
-            echo "prompt=/pr-review-memory $DATASET" >> "$GITHUB_OUTPUT"
+            {
+              echo "cognee_memory=true"
+              echo "prompt=/pr-review-memory $DATASET"
+              echo "max_turns=80"
+              echo "model=$MEMORY_MODEL"
+            } >> "$GITHUB_OUTPUT"
           else
-            echo "prompt=/pr-review" >> "$GITHUB_OUTPUT"
+            {
+              echo "cognee_memory=false"
+              echo "prompt=/pr-review"
+              echo "max_turns=40"
+              echo "model=claude-sonnet-4-5-20250929"
+            } >> "$GITHUB_OUTPUT"
             echo "Classic review for '$AUTHOR' (secrets set: $COGNEE_SECRETS, PR_REVIEW_MEMORY_AUTHORS: '${MEMORY_AUTHORS:-}')."
           fi
 
@@ -452,20 +466,24 @@ jobs:
           mkdir -p "$HOME/.claude/skills"
           cp -r .ci-private/.claude/skills/pr-review* "$HOME/.claude/skills/"
 
-      # The two memory steps are continue-on-error: a PyPI hiccup must degrade the
-      # review to "memory unavailable", not skip it (and the Slack DM with it).
+      # The two memory steps are continue-on-error: a PyPI hiccup or a tenant outage
+      # must degrade the review to "memory unavailable", not skip it (and the Slack DM
+      # with it). No uv cache: it would key on the repo lockfiles, which have nothing
+      # to do with `uv tool install`, and the install takes seconds.
       - name: Set up uv (Cognee MCP server)
         id: uv-setup
         if: ${{ steps.gate.outputs.run == 'true' && steps.gate.outputs.cognee_memory == 'true' }}
         continue-on-error: true
-        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a  # v4.2.0
-        with:
-          enable-cache: true
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
 
-      - name: Install the Cognee MCP server
+      - name: Install and probe the Cognee MCP server
         id: mcp-install
         if: ${{ steps.gate.outputs.run == 'true' && steps.uv-setup.outcome == 'success' }}
         continue-on-error: true
+        env:
+          COGNEE_MCP_BASE_URL: ${{ secrets.COGNEE_MCP_BASE_URL }}
+          COGNEE_MCP_API_KEY: ${{ secrets.COGNEE_MCP_API_KEY }}
+          DATASET: ${{ vars.COGNEE_MCP_DATASET || 'cognee_code' }}
         run: |
           uv tool install "cognee-mcp==${COGNEE_MCP_VERSION}"
           # The server runs through this wrapper, from an EMPTY directory outside the
@@ -479,24 +497,70 @@ jobs:
           cd "$RUNNER_TEMP/cognee-cwd" && exec "$(uv tool dir --bin)/cognee-mcp" "\$@"
           EOF
           chmod +x "$RUNNER_TEMP/cognee-mcp.sh"
-          # Import cognee once here (slow, ~20s cold) so a broken install fails this
-          # step with a readable error instead of an MCP startup timeout in the review.
-          "$RUNNER_TEMP/cognee-mcp.sh" --help > /dev/null
+          # Probe the exact path the review will use: the wrapper, stdio, API mode with
+          # the tenant URL and key, one code_search over the dataset. A broken install,
+          # a rejected key or an empty dataset fails here with a readable error instead
+          # of a silent "Codebase memory: unavailable" at the end of the review.
+          cat > "$RUNNER_TEMP/cognee-probe.py" <<'PY'
+          import json, os, select, subprocess, sys, time
+          wrapper, dataset = sys.argv[1], sys.argv[2]
+          p = subprocess.Popen(
+              [wrapper, "--transport", "stdio", "--tool-mode", "all",
+               "--api-url", os.environ["COGNEE_MCP_BASE_URL"], "--api-auth-scheme", "x-api-key"],
+              stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1,
+              env={**os.environ, "COGNEE_API_KEY": os.environ["COGNEE_MCP_API_KEY"]},
+          )
+          def send(m):
+              p.stdin.write(json.dumps(m) + "\n"); p.stdin.flush()
+          def recv(i, timeout):
+              end = time.time() + timeout
+              while time.time() < end:
+                  if select.select([p.stdout], [], [], 1.0)[0]:
+                      line = p.stdout.readline()
+                      if not line:
+                          sys.exit("probe: server closed stdout (rc=%s)" % p.poll())
+                      try:
+                          m = json.loads(line)
+                      except ValueError:
+                          continue
+                      if m.get("id") == i:
+                          return m
+                  elif p.poll() is not None:
+                      sys.exit("probe: server exited rc=%s" % p.returncode)
+              sys.exit("probe: timeout waiting for response %s" % i)
+          send({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18",
+                "capabilities": {}, "clientInfo": {"name": "ci-probe", "version": "0"}}})
+          recv(1, 120)
+          send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+          send({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "code_search", "arguments": {
+                "operation": "query_facts", "arguments": {"kinds": ["module"], "limit": 1}, "datasets": dataset}}})
+          res = recv(2, 120).get("result") or {}
+          text = "".join(c.get("text", "") for c in res.get("content", []))
+          p.terminate()
+          if res.get("isError") or '"operation"' not in text:
+              sys.exit("probe: code_search over %r failed: %s" % (dataset, text[:300]))
+          print("probe: code_search over %r answered (%d chars)" % (dataset, len(text)))
+          PY
+          timeout 300 python3 "$RUNNER_TEMP/cognee-probe.py" "$RUNNER_TEMP/cognee-mcp.sh" "$DATASET"
 
-      - name: Write the Cognee MCP config
+      - name: Build the Cognee MCP config
+        id: mcp-config
         if: ${{ steps.gate.outputs.run == 'true' }}
         env:
           COGNEE_MEMORY: ${{ steps.gate.outputs.cognee_memory == 'true' && steps.mcp-install.outcome == 'success' }}
         run: |
-          # Written outside the workspace. The key is a ${VAR} placeholder that Claude
-          # Code expands from the review step's environment, so this file holds no
-          # credential. The tenant URL and auth scheme are CLI args, so nothing in the
-          # process environment can point the key at another host.
-          # For authors outside the trial, without the secrets, or with the install
-          # failed, the file declares no servers (and the memory skill, if it ran
-          # anyway, would report "Codebase memory: unavailable").
+          # Passed to the action as INLINE JSON, not a file: claude-code-action merges
+          # every --mcp-config value and keeps a file path only when no inline JSON is
+          # present, and its own GitHub servers are always inline — a file path would be
+          # silently dropped (base-action/src/parse-sdk-options.ts, mergeMcpConfigs).
+          # The key is a ${VAR} placeholder that Claude Code expands from the review
+          # step's environment, so neither this output nor the log holds a credential.
+          # The tenant URL and auth scheme are CLI args, so nothing in the process
+          # environment can point the key at another host. For authors outside the
+          # trial, without the secrets, or with the probe failed, the config declares
+          # no servers and the memory skill reports "Codebase memory: unavailable".
           if [ "$COGNEE_MEMORY" = "true" ]; then
-            jq -n --arg cmd "$RUNNER_TEMP/cognee-mcp.sh" '{
+            json=$(jq -c -n --arg cmd "$RUNNER_TEMP/cognee-mcp.sh" '{
               mcpServers: { cognee: {
                 type: "stdio",
                 command: $cmd,
@@ -504,12 +568,14 @@ jobs:
                        "--api-url", "${COGNEE_MCP_BASE_URL}", "--api-auth-scheme", "x-api-key"],
                 env: { COGNEE_API_KEY: "${COGNEE_MCP_API_KEY}" }
               } }
-            }' > "$RUNNER_TEMP/cognee-mcp.json"
+            }')
           else
-            echo '{"mcpServers": {}}' > "$RUNNER_TEMP/cognee-mcp.json"
+            json='{"mcpServers":{}}'
           fi
+          echo "json=$json" >> "$GITHUB_OUTPUT"
 
       - name: Claude Code review
+        id: review
         if: ${{ steps.gate.outputs.run == 'true' }}
         uses: anthropics/claude-code-action@756cc22e19660d20e8cc9496b4f242475a7f7790  # v1.0.235
         env:
@@ -523,10 +589,22 @@ jobs:
           # "/pr-review-memory <dataset>" for authors in the trial, "/pr-review" otherwise.
           prompt: ${{ steps.gate.outputs.prompt }}
           claude_args: >-
-            --mcp-config "${{ runner.temp }}/cognee-mcp.json"
+            --mcp-config '${{ steps.mcp-config.outputs.json }}'
             --allowed-tools "mcp__github_inline_comment__create_inline_comment,mcp__cognee__code_search,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Glob,Grep"
-            --max-turns 80
-            --model ${{ vars.PR_REVIEW_MODEL || 'claude-sonnet-4-5-20250929' }}
+            --max-turns ${{ steps.gate.outputs.max_turns }}
+            --model ${{ steps.gate.outputs.model }}
+
+      # Trial diagnostics: the action does not print Claude's transcript, so without
+      # this a "Codebase memory: unavailable" cannot be traced. Secrets are masked by
+      # Actions; drop this step once the memory review is on for everyone.
+      - name: Upload the review transcript
+        if: ${{ always() && steps.gate.outputs.run == 'true' && steps.gate.outputs.cognee_memory == 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: claude-review-transcript-${{ github.event.pull_request.number }}-${{ github.run_attempt }}
+          path: ${{ steps.review.outputs.execution_file }}
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: DM review summary to PR author on Slack
         if: ${{ steps.gate.outputs.run == 'true' }}
