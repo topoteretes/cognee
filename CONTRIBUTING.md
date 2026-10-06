@@ -140,14 +140,13 @@ uv run python examples/guides/simple_cognee_example.py
 ## 4. 📤 Submitting Changes
 
 1. Make sure that `pre-commit` and hooks are installed. See `Required tools` section for more information. Try executing `pre-commit run` if you are not sure.
-3. Push your changes:
-```shell
-git add .
-git commit -s -m "Description of your changes"
-git push origin feature/your-feature-name
-```
-
-2. Create a Pull Request:
+2. Push your changes:
+   ```shell
+   git add .
+   git commit -s -m "Description of your changes"
+   git push origin feature/your-feature-name
+   ```
+3. Create a Pull Request:
    - Go to the [**cognee** repository](https://github.com/topoteretes/cognee) or [cognee community repository](https://github.com/topoteretes/cognee-community)
    - Click "Compare & Pull Request" and open a PR against dev branch
    - Fill in the PR template with details about your changes
