@@ -240,3 +240,10 @@ class TestDecoratorValidation:
 
         assert test_func.__name__ == "test_func"
         assert "Test docstring" in test_func.__doc__
+
+
+@pytest.mark.parametrize(
+    "entries", [[(1, "integer"), ("1", "string")], [("1", "string"), (1, "integer")]]
+)
+def test_colliding_dict_keys_keep_both_values(entries):
+    assert _sanitize_value(dict(entries)) == {"1": "string", "1_2": "integer"}
