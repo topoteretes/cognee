@@ -67,6 +67,7 @@ dependencies = [
     # warning instead of writing to the tables. pylance 12 requires
     # lance-namespace<0.12, so the lockfile holds lance-namespace at 0.11.x.
     "lancedb>=0.39.0,<0.40.0",
+    "dateparser>=1.2,<2",  # temporal hints and date normalization in default graph extraction
     "nbformat>=5.7.0,<6.0.0",
     "alembic>=1.13.3,<2",
     "limits>=4.4.1,<6",
@@ -158,7 +159,7 @@ postgres-binary = [
     "pgvector>=0.3.5,<0.4",
     "asyncpg>=0.30.0,<1.0.0",
 ]
-turso = ["libsql-experimental>=0.0.55,<0.1"]
+turso = ["pyturso>=0.7.2,<0.8"]
 notebook = ["notebook>=7.1.0,<8"]
 langchain = [
     "langsmith>=0.2.3,<1.0.0",
@@ -216,8 +217,6 @@ dev = [
     "pytest-asyncio>=0.21.1,<0.22",
     "pytest-timeout>=2.3.1,<3",
     "pytest-split>=0.11.0,<0.12",
-    # examples/advanced_guides/temporal_awareness_example and its unit tests
-    "dateparser>=1.2,<2",
     "coverage>=7.3.2,<8",
     "pre-commit>=4.0.1,<5",
     "notebook>=7.1.0,<8",
@@ -430,5 +429,4 @@ dev = [
     "pytest-timeout>=2.3.1",
     "pytest-split>=0.11.0,<0.12",
     "ruff>=0.13.1",
-    "dateparser>=1.2,<2",
 ]
