@@ -18,6 +18,10 @@ class CognifyConfig(BaseSettings):
     # the chunk's relation texts, one per line, no LLM call.
     summary_method: Literal["llm", "from_extraction"] = "llm"
     triplet_embedding: bool = False
+    # Opt-in (env: ENTITY_TYPE_CLASSIFICATION). Default OFF so the standard cognify
+    # pipeline is unchanged: files each new EntityType under one of nine fixed
+    # categories with one extra LLM call per batch. Needs the LLM extractor.
+    entity_type_classification: bool = False
     chunks_per_batch: int | None = None
     # Opt-in contradiction detection (issue #3699). Default OFF so the standard
     # cognify pipeline is unchanged. Tunables gate the verdict and the LLM payload.
@@ -52,6 +56,7 @@ class CognifyConfig(BaseSettings):
             "classification_model": self.classification_model,
             "summarization_model": self.summarization_model,
             "triplet_embedding": self.triplet_embedding,
+            "entity_type_classification": self.entity_type_classification,
             "chunks_per_batch": self.chunks_per_batch,
             "contradiction_detection": self.contradiction_detection,
             "contradiction_confidence_threshold": self.contradiction_confidence_threshold,

@@ -1,8 +1,11 @@
 from pydantic import BaseModel, field_validator
 
 from cognee.infrastructure.llm import LLMGateway
+from cognee.infrastructure.llm.pipeline_stage import pipeline_stage
 from cognee.infrastructure.llm.prompts import read_query_prompt
-from cognee.modules.engine.models import EntityTypeCategory
+from cognee.modules.chunking.models import DocumentChunk
+from cognee.modules.engine.models import EntityType, EntityTypeCategory
+from cognee.modules.graph.utils import collect_stored_data_points
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("classify_entity_types")
@@ -42,11 +45,14 @@ async def classify_entity_type_names(names: list[str]) -> dict[str, str]:
     for start in range(0, len(names), NAMES_PER_CALL):
         batch = names[start : start + NAMES_PER_CALL]
         try:
-            result = await LLMGateway.acreate_structured_output(
-                text_input="\n".join(batch),
-                system_prompt=system_prompt,
-                response_model=EntityTypeCategories,
-            )
+            # The model configured for extraction, not the base one: this call is part
+            # of reading the graph out of the text, and may be a different provider.
+            with pipeline_stage("extraction"):
+                result = await LLMGateway.acreate_structured_output(
+                    text_input="\n".join(batch),
+                    system_prompt=system_prompt,
+                    response_model=EntityTypeCategories,
+                )
         except Exception:
             # Classification is an enrichment: its failure must not drop the graph
             # the run has already extracted.
@@ -67,3 +73,24 @@ async def classify_entity_type_names(names: list[str]) -> dict[str, str]:
         )
 
     return categories
+
+
+async def classify_chunk_entity_types(chunks: list[DocumentChunk]) -> None:
+    """File the unclassified EntityTypes that storing the chunks would write, in memory.
+
+    Runs before the chunks are stored, so the category is written with the node and
+    needs no second write. Types restored from the graph already have one and are
+    skipped, which leaves only the names this run introduced. The types come from
+    the same walk storage does, so one an ontology linked through ``relations``
+    is classified too.
+    """
+    unclassified: dict[str, list[EntityType]] = {}
+    for chunk in chunks:
+        for data_point in await collect_stored_data_points(chunk):
+            if isinstance(data_point, EntityType) and data_point.category is None:
+                unclassified.setdefault(data_point.name, []).append(data_point)
+
+    categories = await classify_entity_type_names(list(unclassified))
+    for name, category in categories.items():
+        for entity_type in unclassified[name]:
+            entity_type.category = category

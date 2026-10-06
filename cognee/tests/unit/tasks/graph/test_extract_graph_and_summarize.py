@@ -65,7 +65,7 @@ async def test_omitted_summary_method_reads_the_config(monkeypatch):
     monkeypatch.setattr(
         task_module,
         "get_cognify_config",
-        lambda: SimpleNamespace(summary_method="from_extraction"),
+        lambda: SimpleNamespace(summary_method="from_extraction", entity_type_classification=False),
     )
 
     result = await task_module.extract_graph_and_summarize(chunks, KnowledgeGraph)
@@ -196,3 +196,31 @@ async def test_from_extraction_summarizes_a_custom_graph_model(monkeypatch):
         "Maya reports to Priya.\n"
         "Priya works for Acme."
     )
+
+
+def _classification_config(enabled: bool, summary_method: str = "llm"):
+    return SimpleNamespace(summary_method=summary_method, entity_type_classification=enabled)
+
+
+@pytest.mark.parametrize("summary_method", ["llm", "from_extraction"])
+@pytest.mark.parametrize("enabled", [True, False])
+@pytest.mark.asyncio
+async def test_classification_runs_only_when_the_flag_is_on(monkeypatch, enabled, summary_method):
+    chunk = _chunk("Acme agreed to buy Beta Corp.")
+
+    async def extract(data_chunks, graph_model, **kwargs):
+        construct_data_points_and_edges(data_chunks, [_deal_graph()])
+        return data_chunks
+
+    _patch(monkeypatch, extract)
+    monkeypatch.setattr(
+        task_module, "get_cognify_config", lambda: _classification_config(enabled, summary_method)
+    )
+    classify = AsyncMock()
+    monkeypatch.setattr(task_module, "classify_chunk_entity_types", classify)
+
+    await task_module.extract_graph_and_summarize([chunk], KnowledgeGraph)
+
+    assert classify.await_count == (1 if enabled else 0)
+    if enabled:
+        classify.assert_awaited_once_with([chunk])

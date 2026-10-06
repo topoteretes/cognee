@@ -3,9 +3,17 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from cognee.context_global_variables import current_pipeline_stage
+from cognee.infrastructure.engine import Edge
+from cognee.modules.chunking.models import DocumentChunk
+from cognee.modules.data.processing.document_types import TextDocument
+from cognee.modules.engine.models import EntityType
+from cognee.modules.graph.utils import construct_data_points_and_edges
+from cognee.shared.data_models import KnowledgeGraph, Node
 from cognee.tasks.graph.classify_entity_types import (
     NAMES_PER_CALL,
     EntityTypeCategories,
+    classify_chunk_entity_types,
     classify_entity_type_names,
 )
 
@@ -72,3 +80,111 @@ async def test_a_failed_call_leaves_its_names_unclassified_and_the_rest_go_on(ll
 
     assert result == {"type_200": "concept"}
     assert llm.await_count == 2
+
+
+def _chunk_with_entities(*type_names: str) -> DocumentChunk:
+    """A chunk whose ``contains`` is built by the real construction code."""
+    document = TextDocument(
+        name="notes.txt",
+        raw_data_location="/tmp/notes.txt",
+        external_metadata="",
+        mime_type="text/plain",
+    )
+    chunk = DocumentChunk(
+        text="text",
+        chunk_size=1,
+        chunk_index=0,
+        cut_type="sentence_end",
+        is_part_of=document,
+        contains=[],
+    )
+    graph = KnowledgeGraph(
+        nodes=[
+            Node(id=f"n{index}", name=f"entity {index}", type=type_name, description="d")
+            for index, type_name in enumerate(type_names)
+        ],
+        edges=[],
+    )
+    construct_data_points_and_edges([chunk], [graph])
+    return chunk
+
+
+def _types_by_name(chunk: DocumentChunk) -> dict:
+    types = {}
+    for entry in chunk.contains:
+        entity = entry[1] if isinstance(entry, tuple) else entry
+        entity_type = entity.is_a[1] if isinstance(entity.is_a, tuple) else entity.is_a
+        types[entity_type.name] = entity_type
+    return types
+
+
+@pytest.mark.asyncio
+async def test_the_entity_types_of_a_chunk_get_their_category(llm):
+    chunk = _chunk_with_entities("Country", "Company")
+    llm.return_value = _answers(country="place", company="organization")
+
+    await classify_chunk_entity_types([chunk])
+
+    types = _types_by_name(chunk)
+    assert types["country"].category == "place"
+    assert types["company"].category == "organization"
+
+
+@pytest.mark.asyncio
+async def test_a_type_shared_by_two_entities_is_asked_about_once(llm):
+    chunk = _chunk_with_entities("Country", "Country", "Company")
+    llm.return_value = _answers(country="place", company="organization")
+
+    await classify_chunk_entity_types([chunk])
+
+    assert llm.await_args.kwargs["text_input"] == "country\ncompany"
+
+
+@pytest.mark.asyncio
+async def test_a_type_that_already_has_a_category_is_not_asked_about(llm):
+    """Types restored from the graph keep what they have; only new names are sent."""
+    chunk = _chunk_with_entities("Country", "Company")
+    _types_by_name(chunk)["country"].category = "place"
+    llm.return_value = _answers(company="organization")
+
+    await classify_chunk_entity_types([chunk])
+
+    assert llm.await_args.kwargs["text_input"] == "company"
+    assert _types_by_name(chunk)["country"].category == "place"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_call_leaves_the_types_unclassified(llm):
+    chunk = _chunk_with_entities("Country")
+    llm.side_effect = RuntimeError("provider down")
+
+    await classify_chunk_entity_types([chunk])
+
+    assert _types_by_name(chunk)["country"].category is None
+
+
+@pytest.mark.asyncio
+async def test_a_type_only_reachable_through_relations_is_classified_too(llm):
+    """An ontology links EntityTypes to each other through ``relations``, and storage
+    writes the linked type, so it must not go out unclassified."""
+    chunk = _chunk_with_entities("Engineer")
+    engineer = _types_by_name(chunk)["engineer"]
+    person = EntityType(name="person", description="person")
+    engineer.relations.append((Edge(relationship_type="subclass_of"), person))
+    llm.return_value = _answers(engineer="work", person="person")
+
+    await classify_chunk_entity_types([chunk])
+
+    assert person.category == "person"
+    assert engineer.category == "work"
+
+
+@pytest.mark.asyncio
+async def test_the_call_runs_in_the_extraction_stage(llm):
+    """Stage routing picks the model; outside the stage the base model answers."""
+    stages = []
+    llm.side_effect = lambda **_kwargs: stages.append(current_pipeline_stage.get()) or _answers()
+
+    await classify_entity_type_names(["country"])
+
+    assert stages == ["extraction"]
