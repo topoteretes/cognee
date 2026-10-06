@@ -12,6 +12,7 @@ from cognee.api.v1.remember.remember import remember
 remember_module = importlib.import_module("cognee.api.v1.remember.remember")
 resolve_module = importlib.import_module("cognee.tasks.code_graph.resolve_repo")
 code_repo_module = importlib.import_module("cognee.tasks.code_graph.code_repo")
+cluster_module = importlib.import_module("cognee.tasks.code_graph.cluster")
 data_methods_module = importlib.import_module("cognee.modules.data.methods")
 pipeline_module = importlib.import_module("cognee.modules.run_custom_pipeline")
 migrations_module = importlib.import_module("cognee.modules.migrations.startup")
@@ -44,7 +45,13 @@ def code_remember_env(monkeypatch, tmp_path):
     pipeline_mock = AsyncMock(return_value=None)
     monkeypatch.setattr(pipeline_module, "run_custom_pipeline", pipeline_mock)
 
+    # The dataset holds no other repositories, and is not snapshotted as a cluster.
+    monkeypatch.setattr(cluster_module, "dataset_code_repo_rows", AsyncMock(return_value=[]))
+    cluster_mock = AsyncMock(return_value=None)
+    monkeypatch.setattr(cluster_module, "snapshot_dataset_code_repos", cluster_mock)
+
     return {
+        "cluster": cluster_mock,
         "repo_dir": repo_dir,
         "resolve": resolve_mock,
         "pipeline": pipeline_mock,
@@ -402,3 +409,68 @@ async def test_code_route_never_resolves_the_graph_extractor(code_remember_env, 
 
     assert result.status == "completed"
     code_remember_env["pipeline"].assert_awaited_once()
+
+
+def _cluster_of(env, other_row, other_path):
+    """The dataset already holds another repository: both form one cluster."""
+    return cluster_module.DatasetCodeSnapshot(
+        snapshot_dir=other_path / ".enola",
+        members=[
+            cluster_module.ClusterMember(data=other_row, repo_path=other_path, label="other"),
+            cluster_module.ClusterMember(
+                data=env["data_row"], repo_path=env["repo_dir"], label="repo"
+            ),
+        ],
+    )
+
+
+@pytest.mark.asyncio
+async def test_repositories_already_in_the_dataset_are_rebuilt_with_the_new_one(
+    code_remember_env, tmp_path
+):
+    other_row = SimpleNamespace(id=uuid4())
+    code_remember_env["cluster"].return_value = _cluster_of(
+        code_remember_env, other_row, tmp_path / "other"
+    )
+
+    result = await remember("/local/repo", dataset_name="my_code", content_type="code")
+
+    calls = code_remember_env["pipeline"].await_args_list
+    assert [call.kwargs["data"] for call in calls] == [[other_row], [code_remember_env["data_row"]]]
+    scopes = [call.kwargs["tasks"][0].default_params["kwargs"]["repo_scope"] for call in calls]
+    assert scopes == ["other", "repo"]
+    # Only the repository the caller named is an item of the result.
+    assert result.status == "completed"
+    assert [item["id"] for item in result.items] == [str(code_remember_env["data_row"].id)]
+    assert code_remember_env["mark_processed"].await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_failed_rebuild_of_another_repository_is_reported(code_remember_env, tmp_path):
+    other_row = SimpleNamespace(id=uuid4())
+    code_remember_env["cluster"].return_value = _cluster_of(
+        code_remember_env, other_row, tmp_path / "other"
+    )
+    code_remember_env["pipeline"].side_effect = [RuntimeError("graph write failed"), None]
+
+    result = await remember(
+        "/local/repo", dataset_name="my_code", content_type="code", raise_on_error=False
+    )
+
+    assert result.status == "errored"
+    assert result.error == "other: graph write failed"
+    assert result.items_processed == 1
+    assert result.items[0].get("status") != "errored"
+
+
+@pytest.mark.asyncio
+async def test_failed_cluster_snapshot_fails_every_repository_of_the_call(code_remember_env):
+    code_remember_env["cluster"].side_effect = RuntimeError("enola timed out")
+
+    result = await remember(["/local/a", "/local/b"], content_type="code", raise_on_error=False)
+
+    code_remember_env["pipeline"].assert_not_awaited()
+    assert result.status == "errored"
+    assert [item["error"] for item in result.items] == ["enola timed out", "enola timed out"]
+    # The rows were stored before the snapshot was taken, so they keep their ids.
+    assert all(item["id"] == str(code_remember_env["data_row"].id) for item in result.items)
