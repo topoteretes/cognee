@@ -127,15 +127,7 @@ class SQLAlchemyAdapter:
             # letting readers proceed, so concurrent writers wait (bounded by
             # busy_timeout) instead of deadlocking. These PRAGMAs are connection
             # scoped, so they must be (re)applied on every new connection.
-            @event.listens_for(self.engine.sync_engine, "connect")
-            def _set_sqlite_pragmas(dbapi_connection, connection_record):
-                cursor = dbapi_connection.cursor()
-                try:
-                    cursor.execute("PRAGMA journal_mode=WAL")
-                    cursor.execute("PRAGMA synchronous=NORMAL")
-                    cursor.execute("PRAGMA busy_timeout=120000")
-                finally:
-                    cursor.close()
+            self._configure_sqlite_engine()
         else:
             # Transform pool_args from tuple into dict if provided
             # Note: For caching purposes, pool_args is stored as a sorted tuple of key-value pairs in the config
@@ -182,6 +174,24 @@ class SQLAlchemyAdapter:
             s3_file_storage.s3.get(self.db_path, self.temp_db_file, recursive=True)
         except FileNotFoundError:
             pass
+
+    def _configure_sqlite_engine(self) -> None:
+        """Install the per-connection setup of a file-based engine (see ``__init__``).
+
+        SQLite: the WAL/synchronous/busy_timeout PRAGMAs on every new connection.
+        Subclasses for SQLite-compatible engines (Turso) override this with their
+        own engine configuration (journal mode, timeouts, transaction hooks).
+        """
+
+        @event.listens_for(self.engine.sync_engine, "connect")
+        def _set_sqlite_pragmas(dbapi_connection, connection_record):
+            cursor = dbapi_connection.cursor()
+            try:
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA synchronous=NORMAL")
+                cursor.execute("PRAGMA busy_timeout=120000")
+            finally:
+                cursor.close()
 
     @asynccontextmanager
     async def get_async_session(self) -> AsyncGenerator[AsyncSession, None]:
