@@ -80,6 +80,11 @@ class DocumentChunk(DataPoint):
     # Per-chunk semantic graph identities used by the provenance sidecar,
     # carrying the edge text and every occurrence rather than a unique set.
     _provenance_edges: list = PrivateAttr(default_factory=list)
+    # Date-normalization hints for graph extraction, computed over the whole
+    # document in chunk order by ``attach_temporal_hints`` (see
+    # engine/utils/temporal_hints.py). None until that pass has run; private so
+    # the prompt input never becomes a node property.
+    _temporal_hints: list[str] | None = PrivateAttr(default=None)
 
     @model_validator(mode="after")
     def _inherit_document_external_metadata(self):

@@ -6,9 +6,11 @@ from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.data.processing.document_types import TextDocument
 from cognee.modules.engine.utils.temporal_hints import (
     _looks_like_date_reference,
+    attach_temporal_hints,
+    chunk_temporal_hints,
+    document_temporal_hints,
     hint_lines,
     normalize_absolute_date,
-    temporal_hints_for_chunk,
 )
 
 
@@ -111,15 +113,30 @@ def _document():
     )
 
 
-def test_base_rolls_across_a_documents_chunks_but_not_across_documents():
-    document = _document()
-    first = _chunk(document, "On 26 April 1986 the reactor exploded.")
-    second = _chunk(document, "The following night of 27 April, engineers worked.")
-    other = _chunk(_document(), "The following night of 27 April, engineers worked.")
+FIRST = "On 26 April 1986 the reactor exploded."
+SECOND = "The following night of 27 April, engineers worked."
 
-    assert temporal_hints_for_chunk(first) == []
-    assert document._temporal_hint_base.year == 1986
-    second_hints = temporal_hints_for_chunk(second)
-    assert len(second_hints) == 1 and "1986-04-27" in second_hints[0]
-    # Another document knows nothing about 1986.
-    assert temporal_hints_for_chunk(other) == []
+
+def test_document_hints_roll_the_base_in_order_and_are_a_pure_function():
+    hints = document_temporal_hints([FIRST, SECOND])
+    assert hints[0] == []
+    assert len(hints[1]) == 1 and "1986-04-27" in hints[1][0]
+    # Same texts, same hints: nothing is remembered between calls.
+    assert document_temporal_hints([FIRST, SECOND]) == hints
+    # The base only flows forward: reversed, the year-less chunk has nothing to lean on.
+    assert document_temporal_hints([SECOND, FIRST]) == [[], []]
+    # And it never crosses into another document.
+    assert document_temporal_hints([SECOND]) == [[]]
+
+
+def test_attach_temporal_hints_stores_each_chunks_lines_on_it():
+    document = _document()
+    first, second = _chunk(document, FIRST), _chunk(document, SECOND)
+    assert chunk_temporal_hints(first) is None  # no document pass has run yet
+
+    attach_temporal_hints([first, second])
+
+    assert chunk_temporal_hints(first) == []
+    assert "1986-04-27" in chunk_temporal_hints(second)[0]
+    # Private attribute: the hints are prompt input, never a node property.
+    assert "_temporal_hints" not in second.model_dump()

@@ -114,13 +114,30 @@ def hint_lines(text: str, base: Any) -> tuple[list[str], Any]:
     return lines, base
 
 
-def temporal_hints_for_chunk(chunk) -> list[str]:
-    """Hint lines for one chunk, advancing its document's rolling base.
+def document_temporal_hints(chunk_texts: list[str]) -> list[list[str]]:
+    """Hint lines for every chunk of one document, in document order.
 
-    Call in document order: the base lives on ``chunk.is_part_of`` so it
-    carries across the batches a document's chunks are extracted in.
+    A pure function of the texts: the rolling base (the last date with a
+    stated year) is a local that advances from one chunk to the next, so the
+    same texts always yield the same hints, however the chunks are later
+    batched for extraction. Dates never carry across documents — call once
+    per document.
     """
-    document = chunk.is_part_of
-    lines, base = hint_lines(chunk.text, document._temporal_hint_base)
-    document._temporal_hint_base = base
-    return lines
+    base = None
+    hints: list[list[str]] = []
+    for text in chunk_texts:
+        lines, base = hint_lines(text, base)
+        hints.append(lines)
+    return hints
+
+
+def attach_temporal_hints(chunks) -> None:
+    """Compute ``document_temporal_hints`` for ``chunks`` (one document, in order)
+    and store each chunk's lines on it, where extraction reads them."""
+    for chunk, lines in zip(chunks, document_temporal_hints([chunk.text for chunk in chunks])):
+        chunk._temporal_hints = lines
+
+
+def chunk_temporal_hints(chunk) -> list[str] | None:
+    """The hints attached to ``chunk``, or None when no document-level pass ran."""
+    return getattr(chunk, "_temporal_hints", None)

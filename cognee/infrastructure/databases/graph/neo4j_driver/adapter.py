@@ -15,6 +15,7 @@ from neo4j.exceptions import Neo4jError
 from cognee.infrastructure.databases.exceptions import DatabaseCredentialsError
 from cognee.infrastructure.databases.graph.graph_db_interface import (
     GraphDBInterface,
+    temporal_anchors_from_rows,
 )
 from cognee.infrastructure.databases.provenance import (
     EdgeDeleteData,
@@ -2569,6 +2570,54 @@ class Neo4jAdapter(GraphDBInterface):
             }
             for row in rows
         ]
+
+    async def get_temporal_anchors(
+        self,
+        chunk_ids,
+        entity_ids,
+        start: int | None,
+        end: int | None,
+    ) -> dict[str, set[str]]:
+        """Candidates attached to a Timestamp overlapping ``[start, end)``: directly,
+        or (for chunks) through an entity they ``contains``. See the interface."""
+        chunk_list = sorted({str(node_id) for node_id in chunk_ids})
+        entity_list = sorted({str(node_id) for node_id in entity_ids})
+        if not chunk_list and not entity_list:
+            return temporal_anchors_from_rows([], [])
+        conditions = ["t.type = 'Timestamp'"]
+        params: dict[str, Any] = {}
+        if end is not None:
+            conditions.append("t.time_at < $window_end")
+            params["window_end"] = int(end)
+        if start is not None:
+            conditions.append("coalesce(t.time_until, t.time_at + 1000) > $window_start")
+            params["window_start"] = int(start)
+        where = " AND ".join(conditions)
+        direct_rows = await self.query(
+            f"""
+            MATCH (c:`{BASE_LABEL}`)-[]->(t:`{BASE_LABEL}`)
+            WHERE c.id IN $candidate_ids AND {where}
+            RETURN DISTINCT c.id AS candidate_id, c.type AS candidate_type, t.id AS timestamp_id
+            """,
+            {**params, "candidate_ids": chunk_list + entity_list},
+        )
+        via_rows = []
+        if chunk_list:
+            via_rows = await self.query(
+                f"""
+                MATCH (c:`{BASE_LABEL}`)-[:contains]->(e:`{BASE_LABEL}`)-[]->(t:`{BASE_LABEL}`)
+                WHERE c.id IN $chunk_ids AND e.type = 'Entity' AND {where}
+                RETURN DISTINCT c.id AS chunk_id, e.id AS entity_id, t.id AS timestamp_id
+                """,
+                {**params, "chunk_ids": chunk_list},
+            )
+        return temporal_anchors_from_rows(
+            [
+                (row["candidate_id"], row["candidate_type"], row["timestamp_id"])
+                for row in direct_rows
+            ],
+            [(row["chunk_id"], row["entity_id"], row["timestamp_id"]) for row in via_rows],
+        )
 
     async def get_triplets_batch(self, offset: int, limit: int) -> list[dict[str, Any]]:
         """

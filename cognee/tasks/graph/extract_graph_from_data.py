@@ -9,7 +9,10 @@ from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.llm.extraction import extract_content_graph
 from cognee.infrastructure.llm.pipeline_stage import pipeline_stage
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
-from cognee.modules.engine.utils.temporal_hints import temporal_hints_for_chunk
+from cognee.modules.engine.utils.temporal_hints import (
+    chunk_temporal_hints,
+    document_temporal_hints,
+)
 from cognee.modules.graph.utils import (
     attach_new_edges_to_data_points,
     collect_stored_data_points,
@@ -57,6 +60,30 @@ def _remove_duplicate_extracted_nodes_by_id(
 
         if len(nodes_by_id) != len(extracted_graph.nodes):
             extracted_graph.nodes = list(nodes_by_id.values())
+
+
+def _temporal_hints_for(data_chunks: list) -> list[list[str]]:
+    """The date hints extraction renders for each chunk of ``data_chunks``.
+
+    The pipeline's chunker attaches them per document (``attach_temporal_hints``),
+    so normally they are read off the chunks. Chunks that arrive without them —
+    built by a caller that never ran that pass — get the same computation over
+    this batch, per document in batch order; batch-local and side-effect free,
+    so a repeat call yields the same hints.
+    """
+    attached = [chunk_temporal_hints(chunk) for chunk in data_chunks]
+    if all(hints is not None for hints in attached):
+        return attached
+    by_document: dict = {}
+    for index, chunk in enumerate(data_chunks):
+        by_document.setdefault(id(getattr(chunk, "is_part_of", None)), []).append(index)
+    computed: list = list(attached)
+    for indexes in by_document.values():
+        hints = document_temporal_hints([data_chunks[index].text for index in indexes])
+        for index, lines in zip(indexes, hints):
+            if computed[index] is None:
+                computed[index] = lines
+    return computed
 
 
 def _stamp_provenance_deep(data, pipeline_name, task_name, visited=None):
@@ -222,9 +249,7 @@ async def extract_graph_from_data(
         extracted = calculate_chunk_graphs(data_chunks, graph_model, custom_prompt, **kwargs)
         chunk_graphs = await extracted if inspect.isawaitable(extracted) else extracted
     else:
-        # Sequential on purpose: each document's rolling date base must advance
-        # in chunk order before the extractions run concurrently.
-        temporal_hints = [temporal_hints_for_chunk(chunk) for chunk in data_chunks]
+        temporal_hints = _temporal_hints_for(data_chunks)
         with pipeline_stage("extraction"):
             chunk_graphs = await asyncio.gather(
                 *[
