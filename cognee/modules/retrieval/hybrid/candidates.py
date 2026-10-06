@@ -26,17 +26,25 @@ class HybridCandidates:
     entities: list = field(default_factory=list)
     fact_candidates: FactCandidates = field(default_factory=FactCandidates)
 
-    def prioritize(self, chunk_ids: set[str], entity_ids: set[str]) -> "HybridCandidates":
+    def prioritize(
+        self,
+        chunk_ids: set[str],
+        entity_ids: set[str],
+        chunk_rank: dict[str, float] | None = None,
+    ) -> "HybridCandidates":
         """The same candidates with the named chunks and entities moved to the front.
 
-        A stable partition: the fetch order is kept within each half, nothing is
-        removed or altered.
+        A stable partition: nothing is removed or altered, and the fetch order is
+        kept among the unnamed. Among the named chunks ``chunk_rank`` (lower
+        first; a chunk without a rank goes last) orders them, else the fetch
+        order stays.
         """
-        return replace(
-            self,
-            chunks=self._first(self.chunks, chunk_ids),
-            entities=self._first(self.entities, entity_ids),
-        )
+        chunks = self._first(self.chunks, chunk_ids)
+        if chunk_rank:
+            named = [chunk for chunk in chunks if result_id(chunk) in chunk_ids]
+            named.sort(key=lambda chunk: chunk_rank.get(result_id(chunk), float("inf")))
+            chunks = named + chunks[len(named) :]
+        return replace(self, chunks=chunks, entities=self._first(self.entities, entity_ids))
 
     def extend(self, chunks: list) -> "HybridCandidates":
         """The same candidates with new chunks appended.

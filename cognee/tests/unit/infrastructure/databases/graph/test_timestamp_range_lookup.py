@@ -141,6 +141,7 @@ async def test_default_anchors_read_from_the_candidate_side():
     assert anchors["timestamp_ids"] == {"ts_1969"}
     # directly dated, and dated through the entity it mentions
     assert anchors["chunk_ids"] == {"c_apollo", "c_mention"}
+    assert anchors["chunk_timestamps"] == {"c_apollo": {"ts_1969"}, "c_mention": {"ts_1969"}}
     assert anchors["entity_ids"] == {"eagle"}
     assert "c_curie" not in anchors["chunk_ids"] and "curie" not in anchors["entity_ids"]
     # two bounded hops: the candidates, then the entities the candidate chunks contain
@@ -154,11 +155,17 @@ async def test_default_anchors_read_from_the_candidate_side():
 async def test_default_anchors_cover_candidate_entities_and_empty_input():
     adapter = _NeighborhoodAdapter(_GRAPH_NODES, _GRAPH_EDGES)
     anchors = await adapter.get_temporal_anchors([], ["curie", "eagle"], None, -3000000000000)
-    assert anchors == {"timestamp_ids": {"ts_1867"}, "chunk_ids": set(), "entity_ids": {"curie"}}
+    assert anchors == {
+        "timestamp_ids": {"ts_1867"},
+        "chunk_ids": set(),
+        "entity_ids": {"curie"},
+        "chunk_timestamps": {},
+    }
     assert await adapter.get_temporal_anchors([], [], *YEAR_1969) == {
         "timestamp_ids": set(),
         "chunk_ids": set(),
         "entity_ids": set(),
+        "chunk_timestamps": {},
     }
     assert adapter.calls[-1][0] != []  # the empty call never touched the graph
 
@@ -177,6 +184,7 @@ async def test_default_anchors_bucket_a_dlt_row_as_the_chunk_it_was_asked_about(
 
     assert anchors["timestamp_ids"] == {"ts_1969"}
     assert anchors["chunk_ids"] == {"row_1"}
+    assert anchors["chunk_timestamps"] == {"row_1": {"ts_1969"}}
     assert anchors["entity_ids"] == set()
 
 
@@ -194,4 +202,5 @@ def test_anchors_from_rows_bucket_by_the_requested_chunk_set():
         "timestamp_ids": {"ts_a", "ts_b"},
         "chunk_ids": {"row_1", "c_1"},
         "entity_ids": {"eagle", "curie"},
+        "chunk_timestamps": {"row_1": {"ts_a"}, "c_1": {"ts_b"}},
     }

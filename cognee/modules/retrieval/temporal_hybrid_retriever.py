@@ -8,7 +8,10 @@ so the rows a window names are mostly outside the fetched set. The graph adapter
 which candidates are attached to a Timestamp inside the window
 (``get_temporal_anchors``, a native query on Ladybug, Neo4j and the Postgres
 demo, a neighbourhood walk elsewhere), the oversized candidate set is reordered
-so the anchored candidates come first (``HybridCandidates.prioritize``), and
+so the anchored candidates come first (``HybridCandidates.prioritize``), ranked
+by how tightly their best matched timestamp fits the window
+(``tightness_rank``): for "18 March 1965" a chunk dated 1965-03-18 comes before
+one that only says "1965", whichever edge carried the date, and
 ``finalize`` — the same step plain hybrid uses — cuts it to ``top_k`` and selects
 the facts against the entities that survive the cut. Context formatting and
 completion are inherited unchanged.
@@ -33,6 +36,8 @@ from cognee.modules.retrieval.temporal_hybrid.expansion import (
 from cognee.modules.retrieval.temporal_hybrid.matching import (
     empty_anchors,
     extract_query_interval,
+    tightest_first,
+    tightness_rank,
     to_epoch_ms,
 )
 from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
@@ -100,6 +105,10 @@ class TemporalHybridRetriever(HybridRetriever):
             "timestamp_ids": set(anchors.get("timestamp_ids") or ()),
             "chunk_ids": set(anchors.get("chunk_ids") or ()),
             "entity_ids": set(anchors.get("entity_ids") or ()),
+            "chunk_timestamps": {
+                str(chunk_id): set(timestamp_ids)
+                for chunk_id, timestamp_ids in (anchors.get("chunk_timestamps") or {}).items()
+            },
         }
 
     async def _expand_from_window(
@@ -109,12 +118,15 @@ class TemporalHybridRetriever(HybridRetriever):
 
         Hybrid chose its candidates by similarity, which barely sees dates; the
         window's own timestamps name the rest. At most ``candidate_top_k`` attached
-        chunks are added, in timestamp order, after hybrid's candidates so the
+        chunks are added, tightest timestamp first, after hybrid's candidates so the
         fetch's ranking stays ahead within the anchored set. Entities are left to
         the entity lane: an entity attached to a window is usually a hub with
         edges into many times ("the space race"), not an answer to the question.
         """
         known = {result_id(chunk) for chunk in candidates.chunks}
+        # Tightest timestamps first: a bare year that also overlaps the window
+        # must not spend the budget before the day the question names.
+        timestamps = tightest_first(timestamps)
         neighborhood = await graph.get_neighborhood([str(ts["id"]) for ts in timestamps], depth=1)
         attached = [
             node_id
@@ -178,7 +190,11 @@ class TemporalHybridRetriever(HybridRetriever):
             return self.last_baseline
 
         reranked = self._finalize(
-            candidates.prioritize(self.last_anchors["chunk_ids"], self.last_anchors["entity_ids"])
+            candidates.prioritize(
+                self.last_anchors["chunk_ids"],
+                self.last_anchors["entity_ids"],
+                chunk_rank=tightness_rank(self.last_anchors["chunk_timestamps"], in_window),
+            )
         )
         if reranked["chunks"] == self.last_baseline["chunks"] and (
             reranked["entities"] == self.last_baseline["entities"]

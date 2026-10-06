@@ -125,6 +125,52 @@ def test_prioritize_puts_anchored_candidates_first_and_keeps_the_rest():
     assert [fact["id"] for fact in result["facts"]] == ["f_atlas", "f_helios"]
 
 
+def test_prioritize_orders_named_chunks_by_rank_and_keeps_the_rest():
+    """c1..c3 anchored; the rank puts c3 first, then c1; c2 has no rank and goes last among
+    the anchored. Nothing is dropped and entities are untouched."""
+    reordered = _candidates().prioritize(
+        {"c1", "c2", "c3"}, set(), chunk_rank={"c3": 1.0, "c1": 5.0}
+    )
+    assert [chunk["id"] for chunk in reordered.chunks] == ["c3", "c1", "c2"]
+    flat = _candidates().prioritize({"c1", "c2", "c3"}, set())
+    assert [chunk["id"] for chunk in flat.chunks] == ["c1", "c2", "c3"]
+
+
+def test_tightest_first_orders_by_precision_then_time():
+    from cognee.modules.retrieval.temporal_hybrid.matching import tightest_first
+
+    day = 86_400_000
+    nodes = [
+        {"id": "year", "time_at": 0, "time_until": 365 * day},
+        {"id": "day_late", "time_at": 200 * day, "time_until": 201 * day},
+        {"id": "day_early", "time_at": 10 * day, "time_until": 11 * day},
+        {"id": "month", "time_at": 0, "time_until": 31 * day},
+    ]
+    assert [n["id"] for n in tightest_first(nodes)] == ["day_early", "day_late", "month", "year"]
+
+
+def test_tightness_rank_prefers_the_timestamp_that_fits_the_window():
+    from cognee.modules.retrieval.temporal_hybrid.matching import tightness_rank
+
+    day, year = 86_400_000, 365 * 86_400_000
+    in_window = [
+        {"id": "ts_day", "time_at": 0, "time_until": day},
+        {"id": "ts_year", "time_at": -(100 * day), "time_until": -(100 * day) + year},
+        {"id": "ts_legacy", "time_at": 0},  # no time_until: a second
+    ]
+    rank = tightness_rank(
+        {
+            "c_day": {"ts_day", "ts_year"},
+            "c_year": {"ts_year"},
+            "c_legacy": {"ts_legacy"},
+            "c_none": {"ts_x"},
+        },
+        in_window,
+    )
+    assert rank["c_legacy"] < rank["c_day"] < rank["c_year"]
+    assert rank["c_none"] == float("inf")
+
+
 def test_prioritize_with_no_anchored_candidate_is_the_plain_slice():
     anchors = {"timestamp_ids": {"ts"}, "chunk_ids": {"elsewhere"}, "entity_ids": set()}
     assert _finalize(prioritized(_candidates(), anchors)) == _finalize(_candidates())
@@ -255,11 +301,17 @@ def _retriever(
     return retriever, FakeGraphEngine, hybrid_fetch, extract
 
 
-def _anchors(chunks=(), entities=(), timestamps=("ts_1950",)) -> dict:
+def _anchors(chunks=(), entities=(), timestamps=("ts_1950",), chunk_timestamps=None) -> dict:
+    """``chunk_timestamps`` defaults to every anchored chunk reaching the first timestamp."""
     return {
         "timestamp_ids": set(timestamps),
         "chunk_ids": set(chunks),
         "entity_ids": set(entities),
+        "chunk_timestamps": (
+            {chunk: {timestamps[0]} for chunk in chunks}
+            if chunk_timestamps is None
+            else chunk_timestamps
+        ),
     }
 
 
@@ -319,6 +371,30 @@ async def test_temporal_retriever_reranks_by_the_candidates_anchors(monkeypatch)
     assert [entity["id"] for entity in result["entities"]] == ["e2", "e1"]
     assert result["entities"][0]["description"] == "keep me"
     assert [chunk["id"] for chunk in retriever.last_baseline["chunks"]] == ["c1", "c2"]
+
+
+@pytest.mark.asyncio
+async def test_temporal_retriever_shows_the_chunk_dated_to_the_day_first(monkeypatch):
+    """Voskhod 2: the chunk whose timestamp is 1965-03-18 was ranked behind chunks that
+    only reach the year node "1965", which also overlaps the day. Tighter fit wins."""
+    day = 86_400_000
+    retriever, _engine, _fetch, _extract = _retriever(
+        monkeypatch,
+        anchors=_anchors(
+            chunks=("c1", "c2", "c3"),
+            timestamps=("ts_year", "ts_day"),
+            chunk_timestamps={"c1": {"ts_year"}, "c2": {"ts_year"}, "c3": {"ts_day", "ts_year"}},
+        ),
+        interval=(_utc(1965, 3, 18), _utc(1965, 3, 19), None),
+        candidates=_candidates(),
+        timestamps=[
+            {"id": "ts_year", "time_at": 0, "time_until": 365 * day},
+            {"id": "ts_day", "time_at": 76 * day, "time_until": 77 * day},
+        ],
+    )
+    result = await retriever.get_retrieved_objects(query="on 18 March 1965")
+    assert [chunk["id"] for chunk in result["chunks"]] == ["c3", "c1"]
+    assert retriever.last_anchors["chunk_timestamps"]["c3"] == {"ts_day", "ts_year"}
 
 
 @pytest.mark.asyncio
@@ -494,6 +570,45 @@ async def test_window_expansion_adds_the_rows_the_window_points_at(monkeypatch):
     assert [chunk["id"] for chunk in result["chunks"]] == ["c1", "r1", "r3", "r2"]
     assert [entity["id"] for entity in result["entities"]] == ["e1", "e2"]
     assert [chunk["id"] for chunk in retriever.last_baseline["chunks"]] == ["c1", "c2", "c3"]
+
+
+@pytest.mark.asyncio
+async def test_window_expansion_spends_its_budget_on_the_tightest_timestamp_first(monkeypatch):
+    """A one-day window also overlaps the bare-year node. 30 chunks hang off the year and
+    one off the day; with a budget of 20 the day's chunk must still get in."""
+    day = 86_400_000
+    year_node = {"id": "ts_year", "timestamp_str": "1965", "time_at": 0, "time_until": 365 * day}
+    day_node = {
+        "id": "ts_day",
+        "timestamp_str": "1965-03-18",
+        "time_at": 76 * day,
+        "time_until": 77 * day,
+    }
+    nodes = [(f"y{i}", {}) for i in range(30)] + [("voskhod", {})]
+    edges = [(f"y{i}", "ts_year", "contains", {}) for i in range(30)] + [
+        ("voskhod", "ts_day", "contains", {})
+    ]
+    rows = {
+        "DocumentChunk_text": [{"id": f"y{i}", "text": "1965"} for i in range(30)]
+        + [{"id": "voskhod", "text": "March 18, 1965"}]
+    }
+    retriever, _engine, _fetch, _extract = _retriever(
+        monkeypatch,
+        anchors=_anchors(
+            chunks=("voskhod",),
+            timestamps=("ts_year", "ts_day"),
+            chunk_timestamps={"voskhod": {"ts_day"}},
+        ),
+        interval=(_utc(1965, 3, 18), _utc(1965, 3, 19), None),
+        candidates=_candidates(),
+        timestamps=[year_node, day_node],  # the range lookup lists the year first
+        neighborhood=(nodes, edges),
+        vector_rows=rows,
+    )
+    result = await retriever.get_retrieved_objects(query="on 18 March 1965")
+    assert "voskhod" in retriever.last_expansion
+    assert len(retriever.last_expansion) == 20
+    assert [chunk["id"] for chunk in result["chunks"]][0] == "voskhod"
 
 
 @pytest.mark.asyncio
