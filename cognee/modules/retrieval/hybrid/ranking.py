@@ -13,6 +13,7 @@ def rank_chunk_summary_pairs(
     current_truth_epoch: int | None = None,
     personal_weights: dict | None = None,
     personal_influence: float = 0.0,
+    min_score: float | None = None,
 ) -> list[dict]:
     if limit <= 0:
         return []
@@ -50,7 +51,8 @@ def rank_chunk_summary_pairs(
                     personal_weight, personal_influence, distance_space=False
                 )
 
-        ranked.append((final_score, rrf_score, min(ranks), chunk_id, pair))
+        if min_score is None or final_score >= min_score:
+            ranked.append((final_score, rrf_score, min(ranks), chunk_id, pair))
 
     ranked.sort(key=lambda item: (-item[0], -item[1], item[2], item[3]))
     return [pair for *_, pair in ranked[:limit]]
