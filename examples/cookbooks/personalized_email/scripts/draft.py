@@ -2,7 +2,8 @@
 
 The facts come from memory: who the sender is, what was decided in your meetings, and what
 you promised them. The tone comes from a few of your own sent emails. Set MY_NAME to your
-name as it appears in your email. With --sample, it answers the newest sample email.
+name as it appears in your email. With --sample, it answers the newest sample email as
+Mira Lang, whose mailbox the sample is.
 
 Run alone: uv run python examples/cookbooks/personalized_email/scripts/draft.py [--sample]
 """
@@ -21,14 +22,15 @@ from cognee.tasks.ingestion.connectors.gmail import build_gmail_service, parse_m
 
 DATASET = "personalized_email"  # the same in every script
 ME = os.environ.get("MY_NAME", "me")  # your name, as it appears in your email
+SAMPLE_OWNER = "Mira Lang"  # the sample mailbox is hers
 COOKBOOK_DIR = Path(__file__).parent.parent
 CREDENTIALS, TOKEN = COOKBOOK_DIR / "credentials.json", COOKBOOK_DIR / "token.json"
 SAMPLE = COOKBOOK_DIR / "sample"
 
-DRAFT_PROMPT = f"""You write the reply {ME} would send to an email.
+DRAFT_PROMPT = """You write the reply {me} would send to an email.
 - Answer every question with facts from the context. Never invent a date, price or promise.
-- If {ME} owes the sender something, say plainly whether it was sent.
-- Match the greeting, length, tone and sign-off of {ME}'s own emails, in the language of
+- If {me} owes the sender something, say plainly whether it was sent.
+- Match the greeting, length, tone and sign-off of {me}'s own emails, in the language of
   the email being answered.
 - Return only the email body, from the greeting to the sign-off: no subject line, no notes,
   no explanation and no markdown."""
@@ -56,21 +58,22 @@ def header(text: str, field: str) -> str:
 
 async def draft(sample: bool = False) -> None:
     text = newest_email_text(sample)
+    me = SAMPLE_OWNER if sample else ME
     email = {"sender": header(text, "From"), "subject": header(text, "Subject"), "text": text}
     print(f"[draft] Answering: {email['subject']} (from {email['sender']})")
     own_emails = await cognee.recall(
-        f"Emails written by {ME}",
+        f"Emails written by {me}",
         query_type=SearchType.CHUNKS,
         datasets=[DATASET],
         node_name=["sent_mail"],
         top_k=3,
     )
     reply = await cognee.recall(
-        f"Write {ME}'s reply to this email:\n{email['text']}\n\nExamples of {ME}'s own emails:\n"
+        f"Write {me}'s reply to this email:\n{email['text']}\n\nExamples of {me}'s own emails:\n"
         + "\n---\n".join(str(chunk.text) for chunk in own_emails),
         query_type=SearchType.HYBRID_COMPLETION,
         datasets=[DATASET],
-        system_prompt=DRAFT_PROMPT,
+        system_prompt=DRAFT_PROMPT.format(me=me),
     )
     if not reply:
         raise SystemExit("[draft] Nothing found. Run the ingest scripts first.")

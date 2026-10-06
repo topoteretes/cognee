@@ -69,8 +69,12 @@ def latest_call(days: int, sample: bool = False) -> tuple[str, str]:
 async def follow_up(days: int = 30, sample: bool = False) -> None:
     title, call = latest_call(days, sample)
     print(f"[follow_up] Call: {title}")
-    # A search for the whole call finds the call and its issues, but an email that
-    # sets a deadline rarely ranks, so fetch the emails about the call directly.
+    # A search for the whole call finds the call, but the issues and emails it needs rarely
+    # rank against the whole call, so fetch their text directly: identifiers and dates are
+    # then copied from the source, not from the graph.
+    issues = await cognee.recall(
+        call, query_type=SearchType.CHUNKS, datasets=[DATASET], node_name=["linear"], top_k=3
+    )
     emails = await cognee.recall(
         call, query_type=SearchType.CHUNKS, datasets=[DATASET], node_name=["email"], top_k=3
     )
@@ -79,7 +83,10 @@ async def follow_up(days: int = 30, sample: bool = False) -> None:
         # reply like "Got it, I've noted the call" instead of the steps.
         f"List the next steps agreed in this call, with owner, team, due date and the Linear "
         f"issue that tracks each one. When neither the call nor the issue gives a due date, "
-        f"use a deadline from an email.\n\nThe call:\n{call}\n\nEmails about it:\n"
+        f"use a deadline from an email about that step.\n\nThe call:\n{call}\n\n"
+        f"Linear issues about it:\n"
+        + "\n---\n".join(str(issue.text) for issue in issues)
+        + "\n\nEmails about it:\n"
         + "\n---\n".join(str(email.text) for email in emails),
         query_type=SearchType.HYBRID_COMPLETION,
         datasets=[DATASET],

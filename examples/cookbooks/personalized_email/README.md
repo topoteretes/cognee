@@ -30,7 +30,8 @@ No Granola? Run with `--no-granola` to skip that step.
 `setup.py` writes a sample mailbox and meetings to `sample/` (git-ignored), in the shape
 Gmail and Granola give the scripts, dated relative to today. In a call twelve days ago,
 Mira Lang promised Priya Shah pilot pricing by Friday and never sent it; yesterday Priya
-wrote asking about it. Only `LLM_API_KEY` is needed: no Gmail or Granola account.
+wrote asking about it. The draft answers as Mira, whatever `MY_NAME` is. Only `LLM_API_KEY`
+is needed: no Gmail or Granola account.
 
 ```bash
 uv run python examples/cookbooks/personalized_email/personalized_email.py
