@@ -55,6 +55,8 @@ _OPERATIONS: list[dict[str, Any]] = [
             {"effect": "produces", "target_type": "Entity"},
             {"effect": "produces", "target_type": "EntityType"},
             {"effect": "produces", "target_type": "TextSummary"},
+            # Opt-in (ENTITY_TYPE_CLASSIFICATION): files each new EntityType under a category.
+            {"effect": "enriches", "target_type": "EntityType", "property": "category"},
         ],
     },
     {
