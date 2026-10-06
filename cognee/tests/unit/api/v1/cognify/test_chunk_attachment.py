@@ -65,10 +65,6 @@ def _no_pipeline_work():
             "requires a custom DataPoint",
         ),
         ({"graph_model": _PlainModel, "chunk_attachment": "all"}, "requires a custom DataPoint"),
-        (
-            {"graph_model": _Directory, "chunk_attachment": "all", "temporal_cognify": True},
-            "not supported with temporal_cognify",
-        ),
     ],
 )
 async def test_invalid_combinations_raise_before_any_pipeline_work(kwargs, message):
@@ -153,3 +149,17 @@ async def test_get_default_tasks_binds_chunk_attachment_onto_the_extraction_task
         task for task in tasks if task.executable.__name__ == "extract_graph_and_summarize"
     )
     assert extraction.default_params["kwargs"]["chunk_attachment"] == attachment
+
+
+@pytest.mark.asyncio
+async def test_removed_temporal_cognify_flag_raises_before_any_pipeline_work():
+    """The old event pipeline is gone; the flag must not leak into the LLM call as a kwarg."""
+    patches = _no_pipeline_work()
+    for active in patches:
+        active.start()
+    try:
+        with pytest.raises(TypeError, match="temporal_cognify was removed"):
+            await cognify_module.cognify(temporal_cognify=True)
+    finally:
+        for active in reversed(patches):
+            active.stop()

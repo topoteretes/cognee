@@ -2,23 +2,13 @@
 
 ## `temporal_hybrid_demo.py`
 
-Ordinary graph extraction with a timestamp-promotion task inserted into the default
-cognify pipeline. Builds on [`temporal_recall.py`](../../guides/temporal_recall.py),
-which uses `temporal_cognify=True` and `SearchType.TEMPORAL`. This example adds the
-custom extraction task and, later, direct temporal hybrid retrieval.
-
-### Compared to `temporal_awareness_example.py`
-
-The incumbent in this folder uses `temporal_cognify=True`, which swaps the whole
-cognify task list for an event-centric pipeline, and answers through
-`SearchType.TEMPORAL` — a separate retriever that never sees chunks or entity
-neighbourhoods. This demo keeps the ordinary extraction pipeline and filters hybrid
-candidates by time instead: chunks and entity neighbourhoods stay in the answer, at
-the price of no event timeline and no relative-date handling at query time. One more
-price: the filter only removes candidates, so a time-relevant chunk the vector search
-misses never surfaces. The oversized candidate budget (40 fetched for 5 kept) softens
-this; a real replacement should pull chunks from the time index directly, the way the
-incumbent's `collect_time_ids` does.
+The proof of concept behind core's `SearchType.TEMPORAL`: ordinary graph extraction
+with a timestamp-promotion task inserted into the default cognify pipeline, then
+temporal hybrid retrieval. Core now extracts `Timestamp` nodes by default and reranks
+hybrid retrieval by time (see [`temporal_recall.py`](../../guides/temporal_recall.py));
+this demo keeps the original filtering version for comparison. Its filter only removes
+candidates, so a time-relevant chunk the vector search misses never surfaces. The
+oversized candidate budget (40 fetched for 5 kept) softens this.
 
 ### Prerequisites
 
@@ -66,9 +56,8 @@ candidates that were left as ordinary entities (unparseable names or outgoing ed
   chunk. That is why the demo chunks on blank lines (`RegexChunker`): one section per
   chunk keeps a period's owner and bounds together, and keeps the per-chunk time
   filter sharp — the default chunker can pack several sections into one chunk.
-- Precision lives in the shape of `timestamp_str` (`1950` vs `1950-03-15`). Core's
-  `generate_timestamp_datapoint` always writes the full form, so graphs produced by
-  the two cannot be mixed; productionizing needs an explicit precision field.
+- Precision lives in the shape of `timestamp_str` (`1950` vs `1950-03-15`); core's
+  `Timestamp` carries an explicit `precision` field instead.
 - A bare-year date advances the rolling hint base with an arbitrary month and day, so
   a month-less expression like "that spring" can inherit a wrong month.
 - `promote_timestamps` places `Timestamp` objects into `DocumentChunk.contains`,

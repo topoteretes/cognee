@@ -1,8 +1,10 @@
 """Time-bounded recall over an ingested timeline.
 
-``remember(..., temporal_cognify=True)`` extracts events with their dates, so
+``remember()`` extracts the dates it reads as ``Timestamp`` nodes, so
 ``SearchType.TEMPORAL`` can answer questions that depend on ordering — before, after,
-and between a pair of dates — rather than on embedding similarity alone.
+and between a pair of dates — rather than on embedding similarity alone. ``recall()``
+also routes a question with an absolute date to TEMPORAL on its own; the query type is
+pinned here so every question takes that path.
 """
 
 import asyncio
@@ -25,13 +27,8 @@ QUERIES = [
 async def main():
     await cognee.forget(everything=True)
 
-    # temporal_cognify builds the event timeline alongside the usual graph.
-    await cognee.remember(
-        TEXT,
-        dataset_name="timeline_demo",
-        temporal_cognify=True,
-        self_improvement=False,
-    )
+    # The default extraction stores each date as a Timestamp node next to the usual graph.
+    await cognee.remember(TEXT, dataset_name="timeline_demo", self_improvement=False)
 
     for query in QUERIES:
         results = await cognee.recall(
@@ -41,7 +38,7 @@ async def main():
             top_k=15,
         )
         print(f"\nQ: {query}")
-        print(f"A: {results[0].text}")
+        print(f"A: {results[0].text if results else '(nothing found)'}")
 
 
 if __name__ == "__main__":

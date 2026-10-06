@@ -41,7 +41,7 @@ STRUCTURAL_RELATIONSHIPS = frozenset(
 
 
 def _collect_touched_node_ids(items) -> set[str]:
-    """Collect the ids of the entity/event nodes the current ingestion produced.
+    """Collect the ids of the entity/timestamp nodes the current ingestion produced.
 
     The pipeline hands this task ``TextSummary`` objects, which wrap their source
     chunk in ``made_from``; other callers may pass ``DocumentChunk`` objects
@@ -51,7 +51,7 @@ def _collect_touched_node_ids(items) -> set[str]:
     for item in items:
         chunk = getattr(item, "made_from", None) or item
         for entry in getattr(chunk, "contains", None) or []:
-            # ``contains`` entries are Entity/Event nodes or (Edge, node) tuples.
+            # ``contains`` entries are Entity/Timestamp nodes or (Edge, node) tuples.
             entity = entry[1] if isinstance(entry, tuple) else entry
             node_id = getattr(entity, "id", None)
             if node_id is not None:

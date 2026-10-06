@@ -57,7 +57,7 @@ type-to-retriever table is `cognee/modules/retrieval/README.md`.
 | `GRAPH_SUMMARY_COMPLETION` | yes | Summarizes the retrieved graph edges at query time (extra LLM call), then answers |
 | `RAG_COMPLETION` | yes | Classic chunk RAG |
 | `TRIPLET_COMPLETION` | yes | Subject-predicate-object facts (needs triplet embedding) |
-| `TEMPORAL` | yes | Time questions; needs data remembered with `temporal_cognify=True` |
+| `TEMPORAL` | yes | Time questions; hybrid retrieval reranked by the dates in the question |
 | `CHUNKS` | no | Raw passages by vector similarity |
 | `CHUNKS_LEXICAL` | no | Keyword / exact-phrase match |
 | `SUMMARIES` | no | Document summaries |

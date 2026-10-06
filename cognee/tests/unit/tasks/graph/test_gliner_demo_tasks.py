@@ -943,7 +943,7 @@ async def test_gliner_extractor_rejects_unknown_kwargs_instead_of_swallowing():
 
 # The branches that cannot honour the extractor must raise before doing any
 # work — never silently run something other than what the caller selected.
-# All three checks sit at the top of cognify(), before any DB or span setup.
+# Both checks sit at the top of cognify(), before any DB or span setup.
 
 
 @pytest.mark.asyncio
@@ -952,17 +952,6 @@ async def test_cognify_extractor_conflicts_raise_before_any_work(monkeypatch):
 
     with pytest.raises(ValueError, match="Unknown extractor"):
         await cognify_module.cognify(extractor="spacy")
-    with pytest.raises(ValueError, match="temporal"):
-        await cognify_module.cognify(temporal_cognify=True, extractor="gliner_demo")
-    with (
-        patch.object(
-            cognify_module,
-            "get_cognify_config",
-            return_value=_config_with_extractor("gliner_demo"),
-        ),
-        pytest.raises(ValueError, match="temporal"),
-    ):
-        await cognify_module.cognify(temporal_cognify=True)
     with pytest.raises(ValueError, match="dry_run"):
         await cognify_module.cognify(dry_run=True, extractor="gliner_demo")
 
