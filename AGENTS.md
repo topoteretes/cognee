@@ -128,7 +128,10 @@ graph and vector databases. Backend support (source of truth:
 - Vector — supported: LanceDB (default), PGVector, Turso. Unsupported: Neptune
   Analytics and community adapters (unless they register a handler via
   `use_dataset_database_handler()`).
-- Relational (SQLite/Postgres) is always a single shared DB (users, ACLs, registry).
+- Relational (SQLite/Postgres/Turso) is always a single shared DB (users, ACLs, registry).
+- Turso: the three layers and the session cache (`CACHE_BACKEND=turso`) can run on the Turso
+  rewrite engine (`pyturso`, local files only);
+  setup, journal modes and engine limits are in `docs/turso-local.md`.
 
 Each provider has a default handler derived from it, so no handler setting is needed
 normally. Setting `GRAPH_DATASET_DATABASE_HANDLER` / `VECTOR_DATASET_DATABASE_HANDLER`
