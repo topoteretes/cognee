@@ -33,8 +33,18 @@ def _run():
     )
 
 
+STARTED = telemetry_module.PIPELINE_ITEM_STARTED
+COMPLETED = telemetry_module.PIPELINE_ITEM_COMPLETED
+ERRORED = telemetry_module.PIPELINE_ITEM_ERRORED
+
+
 def _events(telemetry):
     return [call.args[0] for call in telemetry.call_args_list]
+
+
+def _errored_exception_type(telemetry):
+    (errored,) = [call for call in telemetry.call_args_list if call.args[0] == ERRORED]
+    return errored.kwargs["additional_properties"]["exception_type"]
 
 
 @pytest.mark.asyncio
@@ -46,7 +56,7 @@ async def test_completed_pipeline_emits_one_terminal_event(monkeypatch, telemetr
 
     monkeypatch.setattr(telemetry_module, "run_tasks_base", run_base)
     assert [result async for result in _run()] == results
-    assert _events(telemetry) == ["Pipeline Run Started", "Pipeline Run Completed"]
+    assert _events(telemetry) == [STARTED, COMPLETED]
 
 
 @pytest.mark.asyncio
@@ -66,7 +76,7 @@ async def test_failed_pipeline_preserves_exception(
         async for _ in _run():
             pass
     assert exc_info.value is error
-    assert _events(telemetry) == ["Pipeline Run Started", "Pipeline Run Errored"]
+    assert _events(telemetry) == [STARTED, ERRORED]
     pipeline_logger.exception.assert_called_once()
 
 
@@ -97,9 +107,12 @@ async def test_cancelled_consumer_emits_error_and_still_cancels(
         await consumer
     assert consumer.cancelled()
     assert finished.is_set()
-    assert _events(telemetry) == ["Pipeline Run Started", "Pipeline Run Errored"]
+    assert _events(telemetry) == [STARTED, ERRORED]
     pipeline_logger.exception.assert_not_called()
-    pipeline_logger.info.assert_any_call("Pipeline run interrupted: `%s`", "test_pipeline")
+    pipeline_logger.info.assert_any_call(
+        "Pipeline item cancelled: `%s` (%s)", "test_pipeline", "CancelledError"
+    )
+    assert _errored_exception_type(telemetry) == "CancelledError"
 
 
 @pytest.mark.asyncio
@@ -118,10 +131,14 @@ async def test_closing_partial_pipeline_emits_error_once(monkeypatch, telemetry,
     assert await anext(pipeline) == "first"
     await pipeline.aclose()
     await pipeline.aclose()
+    # aclosing closes the inner generator right away, not when it is collected.
     assert finished.is_set()
-    assert _events(telemetry) == ["Pipeline Run Started", "Pipeline Run Errored"]
+    assert _events(telemetry) == [STARTED, ERRORED]
     pipeline_logger.exception.assert_not_called()
-    pipeline_logger.info.assert_any_call("Pipeline run interrupted: `%s`", "test_pipeline")
+    pipeline_logger.info.assert_any_call(
+        "Pipeline item cancelled: `%s` (%s)", "test_pipeline", "GeneratorExit"
+    )
+    assert _errored_exception_type(telemetry) == "GeneratorExit"
 
 
 @pytest.mark.asyncio

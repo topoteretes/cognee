@@ -1,7 +1,8 @@
-import importlib.util
 import os
 from functools import lru_cache
+from typing import Literal
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from cognee.exceptions import CogneeConfigurationError
@@ -11,6 +12,11 @@ from cognee.shared.data_models import DefaultContentPrediction, SummarizedConten
 class CognifyConfig(BaseSettings):
     classification_model: object = DefaultContentPrediction
     summarization_model: object = SummarizedContent
+    # How each chunk's TextSummary is written (env: SUMMARY_METHOD, or
+    # cognify(summary_method=...)). "llm" (default): one LLM call per chunk.
+    # "from_extraction": one "Type: name, name" line per extracted type, then
+    # the chunk's relation texts, one per line, no LLM call.
+    summary_method: Literal["llm", "from_extraction"] = "llm"
     triplet_embedding: bool = False
     chunks_per_batch: int | None = None
     # Opt-in contradiction detection (issue #3699). Default OFF so the standard
@@ -25,9 +31,21 @@ class CognifyConfig(BaseSettings):
     # cognify pipeline (env: GRAPH_EXTRACTOR). "auto" (default) runs the LLM
     # path when a usable LLM key is configured and the GLiNER demo otherwise;
     # "llm" / "gliner_demo" pin one regardless of credentials. The GLiNER demo
-    # requires the `gliner` extra and makes no LLM call.
+    # installs its runtime on first use (see below) and makes no LLM call.
     graph_extractor: str = "auto"
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    # GLiNER's torch is not a cognee dependency: when the demo extractor is
+    # resolved and gliner2/torch are missing, CPU-only torch is installed from
+    # GLINER_TORCH_INDEX_URL plus the `gliner` extra (gliner_demo/install.py).
+    # GLINER_AUTO_INSTALL=false raises KeylessExtractorNotInstalledError instead,
+    # for environments installed at build time.
+    gliner_auto_install: bool = True
+    gliner_torch_index_url: str = "https://download.pytorch.org/whl/cpu"
+    # How many GLiNER model batches run at once, sharing one loaded model
+    # (env: GLINER_INFERENCE_THREADS). 0 (default) sizes it to the machine:
+    # half of torch's thread count, capped by free memory. 1 keeps the
+    # single-threaded behaviour. Output is identical at every setting.
+    gliner_inference_threads: int = Field(default=0, ge=0)
+    model_config = SettingsConfigDict(extra="allow")
 
     def to_dict(self) -> dict:
         return {
@@ -40,12 +58,26 @@ class CognifyConfig(BaseSettings):
             "contradiction_max_facts": self.contradiction_max_facts,
             "provenance_tracking": self.provenance_tracking,
             "graph_extractor": self.graph_extractor,
+            "gliner_auto_install": self.gliner_auto_install,
+            "gliner_torch_index_url": self.gliner_torch_index_url,
+            "gliner_inference_threads": self.gliner_inference_threads,
+            "summary_method": self.summary_method,
         }
 
 
 @lru_cache
 def get_cognify_config():
     return CognifyConfig()
+
+
+def resolve_summary_method(value: str | None, config: CognifyConfig) -> str:
+    """The summary method for a run: the explicit argument wins over SUMMARY_METHOD."""
+    summary_method = value or config.summary_method
+    if summary_method not in ("llm", "from_extraction"):
+        raise ValueError(
+            f"Unknown summary_method {summary_method!r}; expected 'llm' or 'from_extraction'"
+        )
+    return summary_method
 
 
 LLM_EXTRACTOR = "llm"
@@ -77,15 +109,17 @@ def _log_gliner_demo_notice_once() -> None:
 
 
 class KeylessExtractorNotInstalledError(CogneeConfigurationError):
-    """No LLM key is configured and the local extractor's package is missing."""
+    """The GLiNER demo extractor is needed, its runtime is missing, and auto-install is off."""
 
     def __init__(self):
         super().__init__(
-            "No LLM API key is configured, so cognify would extract the graph with the "
-            "local GLiNER demo model, but the `gliner2` package is not installed. Either "
-            'install it with: pip install "cognee[gliner]" or set LLM_API_KEY to extract '
-            "with an LLM.",
+            "Cognify would extract the graph with the local GLiNER demo model, but its "
+            "runtime (gliner2 + torch) is not installed and GLINER_AUTO_INSTALL is false.",
             "KeylessExtractorNotInstalledError",
+            remediation=(
+                'Install cognee with the GLiNER extra: pip install "cognee[gliner]" '
+                "(or set LLM_API_KEY to extract with an LLM)."
+            ),
         )
 
 
@@ -101,11 +135,12 @@ def resolve_extractor(
     is the inverse of ``keyless_local_defaults_apply()``, which also keeps
     ``llm`` when the preflight is disabled (mocked or deliberately partial
     config). Resolving to the demo extractor logs the enterprise notice once
-    per process.
+    per process. It never installs anything: the pipeline entry point awaits
+    ``ensure_extractor_runtime`` for that, after its own argument checks.
 
-    This is the ONLY place the extractor setting is read. Callers resolve once,
-    up front, and pass the resolved value (or values derived from it) onward —
-    no downstream code re-reads the config.
+    This is the only place the extractor setting is read for a run. Callers
+    resolve once, up front, and pass the resolved value (or values derived from it)
+    onward — no downstream code re-reads the config.
     """
     extractor = (value or config.graph_extractor or AUTO_EXTRACTOR).strip().lower()
     extractor = EXTRACTOR_ALIASES.get(extractor, extractor)
@@ -115,8 +150,6 @@ def resolve_extractor(
 
             llm_configured = not keyless_local_defaults_apply()
         extractor = LLM_EXTRACTOR if llm_configured else GLINER_DEMO_EXTRACTOR
-        if extractor == GLINER_DEMO_EXTRACTOR and importlib.util.find_spec("gliner2") is None:
-            raise KeylessExtractorNotInstalledError()
     if extractor not in EXTRACTORS:
         raise ValueError(
             f"Unknown extractor {extractor!r}; expected one of "
@@ -125,6 +158,116 @@ def resolve_extractor(
     if extractor == GLINER_DEMO_EXTRACTOR:
         _log_gliner_demo_notice_once()
     return extractor
+
+
+GLINER_INSTALL_STARTED_EVENT = "GLiNER Runtime Install Started"
+GLINER_INSTALL_COMPLETED_EVENT = "GLiNER Runtime Install Completed"
+GLINER_INSTALL_FAILED_EVENT = "GLiNER Runtime Install Failed"
+
+
+def _gliner_install_properties(config: CognifyConfig) -> dict:
+    """Environment facts for the install events: versions and platform names only.
+
+    Never paths, URLs, installer output or error messages: those carry usernames,
+    hostnames and internal mirrors. A custom index is reported as "custom".
+    """
+    import platform
+
+    from cognee import __version__ as cognee_version
+
+    default_index = CognifyConfig.model_fields["gliner_torch_index_url"].default
+    return {
+        "cognee_version": cognee_version,
+        "python_version": platform.python_version(),
+        "os": platform.system(),
+        "arch": platform.machine(),
+        "torch_index": "pytorch-cpu"
+        if config.gliner_torch_index_url == default_index
+        else "custom",
+    }
+
+
+async def ensure_extractor_runtime(extractor: str, config: CognifyConfig) -> None:
+    """Make the GLiNER runtime importable before a pipeline that uses it starts.
+
+    A no-op for the LLM extractor and when the runtime is present. Otherwise the
+    blocking install runs in a worker thread and is awaited, so the event loop keeps
+    serving other work while this caller waits for it. Raises
+    ``KeylessExtractorNotInstalledError`` when ``GLINER_AUTO_INSTALL`` is off and
+    ``GlinerInstallError`` when the install fails.
+    """
+    import asyncio
+    import concurrent.futures
+
+    from cognee.shared.utils import send_telemetry
+    from cognee.tasks.graph.gliner_demo.install import (
+        GlinerInstallError,
+        gliner_runtime_installed,
+        install_gliner_runtime,
+    )
+
+    if extractor != GLINER_DEMO_EXTRACTOR or gliner_runtime_installed():
+        return
+    if not config.gliner_auto_install:
+        raise KeylessExtractorNotInstalledError()
+    properties = _gliner_install_properties(config)
+    loop = asyncio.get_running_loop()
+
+    async def started() -> None:
+        send_telemetry(GLINER_INSTALL_STARTED_EVENT, "sdk", additional_properties=properties)
+
+    def on_start() -> None:
+        # Runs in the install thread, and only in the call that installs (a caller that
+        # waited on the lock never gets here). send_telemetry needs the event loop, and
+        # Started must land before Completed/Failed: a callback merely scheduled on the
+        # loop can run after this coroutine has already resumed (seen on Python 3.14),
+        # so wait for the loop to record it. Best effort: telemetry never blocks an
+        # install for more than a moment.
+        try:
+            asyncio.run_coroutine_threadsafe(started(), loop).result(timeout=5)
+        except concurrent.futures.TimeoutError:  # a distinct class on Python 3.10
+            pass
+
+    try:
+        outcome = await asyncio.to_thread(
+            install_gliner_runtime, config.gliner_torch_index_url, on_start
+        )
+    except GlinerInstallError as error:
+        send_telemetry(
+            GLINER_INSTALL_FAILED_EVENT,
+            "sdk",
+            additional_properties={
+                **properties,
+                "failed_step": error.step,
+                "installer": error.installer,
+                "exception_type": type(error.__cause__ or error).__name__,
+            },
+        )
+        raise
+    except Exception as error:
+        send_telemetry(
+            GLINER_INSTALL_FAILED_EVENT,
+            "sdk",
+            additional_properties={
+                **properties,
+                "failed_step": "unexpected",
+                "exception_type": type(error).__name__,
+            },
+        )
+        raise
+    if not outcome.installed:
+        return  # another caller installed it while this one waited on the lock
+    send_telemetry(
+        GLINER_INSTALL_COMPLETED_EVENT,
+        "sdk",
+        additional_properties={
+            **properties,
+            "installer": outcome.installer,
+            "installed": outcome.installed,
+            "torch_version": outcome.torch_version,
+            "duration_seconds": outcome.seconds,
+        },
+    )
 
 
 def default_pipeline_needs_llm(extractor: str, config: CognifyConfig) -> bool:

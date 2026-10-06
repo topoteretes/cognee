@@ -47,7 +47,6 @@ from .deadlock_retry import deadlock_retry
 from .neo4j_metrics_utils import (
     count_self_loops,
     get_avg_clustering,
-    get_edge_density,
     get_num_connected_components,
     get_shortest_path_lengths,
     get_size_of_connected_components,
@@ -1808,26 +1807,17 @@ class Neo4jAdapter(GraphDBInterface):
 
         return serialized_properties
 
-    async def get_model_independent_graph_data(self):
-        """
-        Retrieve the basic graph data without considering the model specifics, returning nodes
-        and edges.
-
-        Returns:
-        --------
-
-            A tuple of nodes and edges data.
-        """
-        query_nodes = f"MATCH (n:`{BASE_LABEL}`) RETURN collect(n) AS nodes"
-        nodes = await self.query(query_nodes)
-
-        query_edges = (
-            f"MATCH (n:`{BASE_LABEL}`)-[r]->(m:`{BASE_LABEL}`) "
-            "RETURN collect([n, r, m]) AS elements"
+    async def get_entity_type_names(self, entity_ids: list[str]) -> dict[str, str]:
+        """One-hop ``is_a`` lookup: entity id to its EntityType name."""
+        if not entity_ids:
+            return {}
+        rows = await self.query(
+            f"MATCH (n:`{BASE_LABEL}`)-[:is_a]->(t:`{BASE_LABEL}`) "
+            "WHERE n.id IN $ids AND t.type = 'EntityType' "
+            "RETURN n.id AS id, t.name AS name",
+            {"ids": [str(entity_id) for entity_id in entity_ids]},
         )
-        edges = await self.query(query_edges)
-
-        return (nodes, edges)
+        return {str(row["id"]): row["name"] for row in rows if row["name"]}
 
     async def get_top_degree_node_ids(self, top_k: int) -> list[str]:
         """Rank a bounded edge sample in the store; include isolated nodes."""
@@ -2312,6 +2302,27 @@ class Neo4jAdapter(GraphDBInterface):
             drop_query = f"CALL gds.graph.drop('{graph_name}');"
             await self.query(drop_query)
 
+    async def get_graph_counts(self) -> tuple[int, int]:
+        """
+        Count nodes and edges with aggregation queries.
+
+        Counting in Cypher keeps memory constant; collecting the nodes or edges to take
+        len() of them builds the whole graph inside one transaction and exhausts the
+        transaction memory pool on large graphs (#4832).
+
+        Returns:
+        --------
+
+            A ``(num_nodes, num_edges)`` tuple.
+        """
+        node_count = await self.query(f"MATCH (n:`{BASE_LABEL}`) RETURN count(n) AS count")
+        edge_count = await self.query(
+            f"MATCH (n:`{BASE_LABEL}`)-[r]->(m:`{BASE_LABEL}`) RETURN count(r) AS count"
+        )
+        num_nodes = node_count[0]["count"] if node_count else 0
+        num_edges = edge_count[0]["count"] if edge_count else 0
+        return num_nodes, num_edges
+
     async def get_graph_metrics(self, include_optional=False):
         """
         Retrieve metrics related to the graph such as number of nodes, edges, and connected
@@ -2330,19 +2341,16 @@ class Neo4jAdapter(GraphDBInterface):
             input flag.
         """
 
-        nodes, edges = await self.get_model_independent_graph_data()
+        num_nodes, num_edges = await self.get_graph_counts()
         graph_name = "myGraph"
         await self.drop_graph(graph_name)
         await self.project_entire_graph(graph_name)
-
-        num_nodes = len(nodes[0]["nodes"])
-        num_edges = len(edges[0]["elements"])
 
         mandatory_metrics = {
             "num_nodes": num_nodes,
             "num_edges": num_edges,
             "mean_degree": (2 * num_edges) / num_nodes if num_nodes != 0 else None,
-            "edge_density": await get_edge_density(self),
+            "edge_density": num_edges / (num_nodes * (num_nodes - 1)) if num_nodes > 1 else 0,
             "num_connected_components": await get_num_connected_components(self, graph_name),
             "sizes_of_connected_components": await get_size_of_connected_components(
                 self, graph_name

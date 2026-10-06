@@ -29,7 +29,7 @@ class RelationalConfig(BaseSettings):
     db_turso_url: str | None = None
     db_turso_auth_token: str | None = None
 
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    model_config = SettingsConfigDict(extra="allow")
 
     @pydantic.model_validator(mode="after")
     def fill_derived(self):
@@ -132,7 +132,7 @@ class MigrationConfig(BaseSettings):
     migration_db_password: str | None = None
     migration_db_provider: str | None = None
 
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    model_config = SettingsConfigDict(extra="allow")
 
     def to_dict(self) -> dict:
         """

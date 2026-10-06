@@ -2844,6 +2844,20 @@ class LadybugAdapter(GraphDBInterface):
 
     # Graph-wide Operations
 
+    async def get_entity_type_names(self, entity_ids: list[str]) -> dict[str, str]:
+        """One-hop ``is_a`` lookup: entity id to its EntityType name."""
+        if not entity_ids:
+            return {}
+        rows = await self.query(
+            """
+            MATCH (n:Node)-[r:EDGE]->(t:Node)
+            WHERE n.id IN $ids AND r.relationship_name = 'is_a' AND t.type = 'EntityType'
+            RETURN n.id, t.name
+            """,
+            {"ids": [str(entity_id) for entity_id in entity_ids]},
+        )
+        return {str(row[0]): row[1] for row in rows if row[1]}
+
     async def get_top_degree_node_ids(self, top_k: int) -> list[str]:
         """Rank a bounded edge sample in the store; include isolated nodes."""
         from cognee.infrastructure.databases.graph.degree_seeds import cypher_degree_seeds
@@ -3346,6 +3360,14 @@ class LadybugAdapter(GraphDBInterface):
             logger.error(f"Error during ID-filtered graph data retrieval: {e!s}")
             raise
 
+    async def get_graph_counts(self) -> tuple[int, int]:
+        """Count nodes and edges with two aggregation queries."""
+        node_count_result = await self.query("MATCH (n:Node) RETURN COUNT(n)")
+        edge_count_result = await self.query("MATCH ()-[r:EDGE]->() RETURN COUNT(r)")
+        num_nodes = node_count_result[0][0] if node_count_result else 0
+        num_edges = edge_count_result[0][0] if edge_count_result else 0
+        return num_nodes, num_edges
+
     async def get_graph_metrics(self, include_optional=False) -> dict[str, Any]:
         """
         Get metrics on graph structure and connectivity.
@@ -3367,10 +3389,7 @@ class LadybugAdapter(GraphDBInterface):
         """
 
         try:
-            node_count_result = await self.query("MATCH (n:Node) RETURN COUNT(n)")
-            edge_count_result = await self.query("MATCH ()-[r:EDGE]->() RETURN COUNT(r)")
-            num_nodes = node_count_result[0][0] if node_count_result else 0
-            num_edges = edge_count_result[0][0] if edge_count_result else 0
+            num_nodes, num_edges = await self.get_graph_counts()
 
             # Calculate mandatory metrics
             mandatory_metrics = {

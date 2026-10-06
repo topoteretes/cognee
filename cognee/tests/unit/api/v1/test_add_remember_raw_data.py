@@ -242,3 +242,32 @@ def test_remember_requires_data_or_raw_data_for_normal_ingestion(client):
         assert response.status_code == 400
         assert "raw_data" in response.json()["detail"]
         mock_remember.assert_not_awaited()
+
+
+@pytest.mark.parametrize("flag", [None, False, True])
+@pytest.mark.parametrize("session_entry", [False, True])
+def test_remember_forwards_self_improvement_without_defaulting_false(client, flag, session_entry):
+    with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
+        mock_remember.return_value = remember_completed()
+        if session_entry:
+            payload = {
+                "entry": {"type": "qa", "question": "", "answer": "memory", "context": ""},
+                "session_id": "s1",
+                "dataset_name": "ds",
+            }
+            if flag is not None:
+                payload["self_improvement"] = flag
+            response = client.post("/api/v1/remember/entry", json=payload)
+        else:
+            data = {"datasetName": "ds", "raw_data": "memory"}
+            if flag is not None:
+                data["self_improvement"] = str(flag).lower()
+            response = client.post("/api/v1/remember", data=data)
+        assert response.status_code == 200, response.text
+        mock_remember.assert_awaited_once()
+        if flag is None:
+            assert "self_improvement" not in mock_remember.call_args.kwargs
+        else:
+            assert mock_remember.call_args.kwargs["self_improvement"] is flag
+        if not session_entry:
+            assert mock_remember.call_args.args[0] == ["memory"]

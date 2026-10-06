@@ -23,7 +23,7 @@ They double as the smoke-test corpus the team uses to verify behaviour across th
 | [`guides/`](guides/) | One feature per script: concise, self-contained how-tos | 38 |
 | [`advanced_guides/`](advanced_guides/) | Deeper takes on topics a guide already covers | 8 |
 | [`demos/`](demos/) | Multiple features stitched into use cases, grouped by topic | 28 |
-| [`integrations/`](integrations/) | Connector packages and deployment kits that pair cognee with other systems | 1 |
+| [`integrations/`](integrations/) | Connector packages and deployment kits that pair cognee with other systems | 2 |
 
 One line each: **guides teach a feature, advanced guides deepen a feature, demos combine
 features.** See [Contributing](#-contributing-a-new-example) for the precise category rules.
@@ -79,6 +79,9 @@ features.** See [Contributing](#-contributing-a-new-example) for the precise cat
 | [`multimedia_audio_image_processing_example.py`](guides/multimedia_audio_image_processing_example.py) | Audio + image ingestion (bundled assets) |
 | [`image_ocr_extraction.py`](guides/image_ocr_extraction.py) | Vision transcription + OCR text for an image |
 | [`code_graph_example.py`](guides/code_graph_example.py) | Code-graph pipeline + `SearchType.CODE` |
+| [`google_integration_sync.py`](guides/google_integration_sync.py) | List/select Drive folders or Gmail labels and request sync (needs a running API and a connected Google account) |
+| [`gmail.py`](guides/gmail.py) | Ingest Gmail with the bundled SDK connector, incremental sync and delete propagation (needs `cognee[gmail]`) |
+| [`google_drive.py`](guides/google_drive.py) | Ingest a Drive folder with the bundled SDK connector (needs `cognee[google-drive]`) |
 | [`presort_downloads.py`](guides/presort_downloads.py) | Presorting a messy folder before ingestion: `remember(dry_run="presort")`, then ingest the report |
 
 ### Visualization
@@ -107,6 +110,7 @@ Each script names the simpler guide it builds on and states what it adds.
 | [`session_distillation_demo.py`](advanced_guides/session_distillation_demo.py) | `guides/session_distillation.py` | Eight-message session, hybrid recall, post-distillation verification |
 | [`global_context_index_smoke_demo.py`](advanced_guides/global_context_index_smoke_demo.py) | `guides/global_context_index.py` + `guides/global_context_index_recall.py` | 12-turn fixture, three-question sweep, pass/fail verdict |
 | [`temporal_awareness_example/`](advanced_guides/temporal_awareness_example/) | `guides/temporal_recall.py` | Real biography documents instead of inline text |
+| [`temporal_awareness_example/temporal_hybrid_demo.py`](advanced_guides/temporal_awareness_example/temporal_hybrid_demo.py) | `guides/temporal_recall.py` | Custom timestamp promotion task and direct temporal hybrid retrieval |
 | [`ontology_reference_vocabulary/`](advanced_guides/ontology_reference_vocabulary/) | `guides/ontology_quickstart.py` | Bundled OWL + texts as a constraining vocabulary |
 | [`simple_document_qa/`](advanced_guides/simple_document_qa/) | `guides/simple_cognee_example.py` | Q&A over a real 150 KB document |
 | [`truth_centroid_slots_demo.py`](advanced_guides/truth_centroid_slots_demo.py) | `guides/truth_subspace_reranking.py` | Centroid slots, epochs, and rebuilds behind truth-subspace reranking |
@@ -115,10 +119,11 @@ Each script names the simpler guide it builds on and states what it adds.
 
 Every demo lives in a topic folder.
 
-### [`company_brain/`](demos/company_brain/) — the README onboarding tour
+### [`company_brain/`](demos/company_brain/) — one memory for a whole company
 | Script | Demonstrates |
 |---|---|
-| [`company_brain_demo.py`](demos/company_brain/company_brain_demo.py) | A text fact, a code graph, and a rule stated in a session — distilled, then answered from a fresh session |
+| [`docs_code_conversations/company_brain_demo.py`](demos/company_brain/docs_code_conversations/company_brain_demo.py) | The README onboarding tour: a text fact, a code graph, and a rule stated in a session — distilled, then answered from a fresh session |
+| [`multi_source/company_brain.py`](demos/company_brain/multi_source/company_brain.py) | A relational database, a ticket export and meeting notes linked by a custom graph model, served in the UI, queried from Claude Code or Codex over MCP ([guide](demos/company_brain/multi_source/README.md)) |
 
 ### [`comprehensive_example/`](demos/comprehensive_example/) — everything at once
 | Script | Demonstrates |
@@ -184,6 +189,7 @@ Every demo lives in a topic folder.
 |---|---|
 | [`README.md`](integrations/README.md) | Data-source connectors (Gmail, Slack, Notion, Drive, Confluence, …) — shipped as `cognee-community` packages on the DLT ingestion path |
 | [`docker-sandbox-kit/`](integrations/docker-sandbox-kit/) | Supervisor ↔ worker memory handover across containers, two cognee users under ACL ([`demo/supervisor_worker_handover.py`](integrations/docker-sandbox-kit/demo/supervisor_worker_handover.py)) |
+| [`daytona/`](integrations/daytona/) | The same handover on Daytona cloud sandboxes as a fork chain — host-scoped Secret, domain allow list, cognee baked into a snapshot ([`handover.py`](integrations/daytona/handover.py)) |
 
 ## ⚙️ Running an example
 

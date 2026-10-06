@@ -117,6 +117,24 @@ def test_single_mid_document_edit_touches_one_region():
     assert len(plan.deleted_ids) == 1
 
 
+def test_fresh_region_chunks_carry_the_document_external_metadata():
+    """Content-only incremental updates stamp the document's stored metadata on new chunks.
+
+    The assembler re-mints fresh chunks field by field; the model derives the
+    metadata from ``is_part_of`` so that re-minting cannot drop it.
+    """
+    texts = ["First para.\n\n", "Second para.\n\n", "Third para.\n"]
+    old = "".join(texts)
+    new = "First para.\n\nSecond para EDITED.\n\nThird para.\n"
+    request = _request(old, _stored(texts), new)
+    request.document.external_metadata = '{"created_at": "2024-01-15"}'
+
+    plan = asyncio.run(diff_region_policy(request))
+
+    assert plan.fresh
+    assert all(chunk.external_metadata == '{"created_at": "2024-01-15"}' for chunk in plan.fresh)
+
+
 def test_three_disjoint_edits_are_three_regions():
     texts = ["Alpha.\n\n", "Beta.\n\n", "Gamma.\n\n", "Delta.\n\n", "Epsilon.\n"]
     old = "".join(texts)
