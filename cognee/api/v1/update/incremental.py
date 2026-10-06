@@ -350,6 +350,9 @@ async def _extraction_step(
     pipeline places before chunking (``prepare_gliner_schema`` resolves the
     schema from the configured ontology or a sketch of the new text, and
     stores it on the document the chunks point to). No LLM call on that path.
+    With ``COGNEE_GLINER_TRANSPORT`` set, both model calls go to the remote
+    GLiNER worker, exactly as in cognify (``ensure_extractor_runtime`` installs
+    no local runtime then, so a local fallback would fail).
     """
     config = _resolve_extraction_config()
     if extractor == LLM_EXTRACTOR:
@@ -368,6 +371,7 @@ async def _extraction_step(
     if extractor != GLINER_DEMO_EXTRACTOR:
         raise ValueError(f"Unknown extractor {extractor!r}")
 
+    from cognee.tasks.graph.gliner_demo.remote import create_remote_adapter
     from cognee.tasks.graph.gliner_demo.schema import resolve_schema
     from cognee.tasks.graph.gliner_demo.tasks import (
         GlinerOptions,
@@ -379,14 +383,21 @@ async def _extraction_step(
     schema = resolve_schema(
         ontology_resolver=(config.get("ontology_config") or {}).get("ontology_resolver")
     )
+    remote = create_remote_adapter()
+    if remote is not None:
+        await remote.ensure_ready()
     await prepare_gliner_schema(
-        [document], schema, max_chunk_size=await get_max_chunk_tokens(), chunker=chunker
+        [document],
+        schema,
+        max_chunk_size=await get_max_chunk_tokens(),
+        chunker=chunker,
+        remote=remote,
     )
     stats, options = GlinerRunStats(), GlinerOptions()
 
     async def extract_with_gliner(batch, ctx):
         return await extract_graph_and_summarize_with_gliner(
-            batch, stats=stats, options=options, config=config, ctx=ctx
+            batch, stats=stats, options=options, config=config, ctx=ctx, remote=remote
         )
 
     return extract_with_gliner
