@@ -538,7 +538,10 @@ def _selected_column_values(dlt_row: DltRowData, selection: dict | None) -> dict
     """
     if not selection:
         return {}
-    columns = selection.get(dlt_row.table_name) or selection.get("*")
+    # A table named in the selection gets exactly its list — an empty list means
+    # none for that table — and only an unnamed table takes the wildcard.
+    table = dlt_row.table_name
+    columns = selection[table] if table in selection else selection.get("*", [])
     if not columns:
         return {}
     take_all = "*" in columns
