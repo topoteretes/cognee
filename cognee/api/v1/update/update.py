@@ -1,5 +1,5 @@
 from time import perf_counter
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, Literal
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -16,6 +16,11 @@ from cognee.api.v1.update.incremental import (
 from cognee.api.v1.update.result import Fallback, UpdateError, UpdateResult
 from cognee.modules.chunking.chunk_policy import DEFAULT_CHUNK_POLICY, ChunkPolicy
 from cognee.modules.chunking.TextChunker import TextChunker
+from cognee.modules.cognify.config import (
+    ensure_extractor_runtime,
+    get_cognify_config,
+    resolve_extractor,
+)
 from cognee.modules.pipelines.models.PipelineRunInfo import get_errored_run_info
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
@@ -41,6 +46,7 @@ async def update(
     custom_prompt: str | None = None,
     chunker: type = TextChunker,
     policy: ChunkPolicy = DEFAULT_CHUNK_POLICY,
+    extractor: Literal["llm", "gliner_demo", "gliner"] | None = None,
 ) -> dict:
     """
     Update existing data in Cognee.
@@ -112,6 +118,13 @@ async def update(
         policy: Decides which chunks exist after the edit and what happens to the old
                  ones. Replaceable without touching storage or update orchestration.
                  Chunk-level path only; not exposed on the HTTP route.
+        extractor: Which implementation extracts the graph for the replaced chunks,
+                 resolved exactly as ``cognify()`` resolves it: "llm", "gliner_demo"
+                 (no LLM call), or None for the ``GRAPH_EXTRACTOR`` setting, whose
+                 default ``auto`` picks the LLM when a usable key is configured and
+                 the GLiNER demo otherwise. Applies to both the chunk-level path and
+                 the full rebuild. Use the extractor the document was ingested with;
+                 the baseline does not record it.
 
     Returns:
         One dict on every path (schema: ``UpdateResult``), a superset of the
@@ -151,6 +164,7 @@ async def update(
                 ("custom_prompt", custom_prompt, None),
                 ("chunker", chunker, TextChunker),
                 ("policy", policy, DEFAULT_CHUNK_POLICY),
+                ("extractor", extractor, None),
             )
             if value is not default
         ]
@@ -213,6 +227,12 @@ async def update(
     if fallback is not None:
         logger.warning("%s; running full update", fallback[1])
 
+    # One extractor decision for both paths, made the way cognify() makes it,
+    # and the runtime it needs made importable before either path starts.
+    cognify_config = get_cognify_config()
+    resolved_extractor = resolve_extractor(extractor, cognify_config)
+    await ensure_extractor_runtime(resolved_extractor, cognify_config)
+
     if fallback is None:
         # Chunk-level incremental path: diff the new text against the stored
         # processed text, replace only the affected chunks — the Data row is
@@ -232,6 +252,7 @@ async def update(
                 custom_prompt=custom_prompt,
                 chunker=chunker,
                 policy=policy,
+                extractor=resolved_extractor,
             )
         except IncrementalUpdateNotPossible as refusal:
             # The reason is a structured field, not just prose: an unsupported
@@ -317,6 +338,7 @@ async def update(
         data_cache=data_cache,
         graph_model=graph_model,
         custom_prompt=custom_prompt,
+        extractor=resolved_extractor,
         chunk_size=fallback_chunk_size,
         # An errored run is reported as a failed result, not raised: the
         # caller gets the document id and the error to retry this one update.

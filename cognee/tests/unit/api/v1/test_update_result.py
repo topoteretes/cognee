@@ -86,6 +86,8 @@ class _Stack:
             patch.object(update_module, "add", self.add),
             patch.object(update_module, "cognify", self.cognify),
             patch.object(update_module, "recorded_chunk_budget", self.recorded_budget),
+            patch.object(update_module, "resolve_extractor", lambda value, config: "llm"),
+            patch.object(update_module, "ensure_extractor_runtime", AsyncMock()),
         )
 
     def __enter__(self):

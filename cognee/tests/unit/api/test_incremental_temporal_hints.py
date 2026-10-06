@@ -17,6 +17,7 @@ import pytest
 
 from cognee.modules.chunking.chunk_policy import ChunkPlan
 from cognee.modules.chunking.models import DocumentChunk
+from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.data.processing.document_types.TextDocument import TextDocument
 
 incremental = importlib.import_module("cognee.api.v1.update.incremental")
@@ -216,3 +217,119 @@ async def test_writer_leaves_untouched_dates_alone(monkeypatch):
 
     assert deletes == [[second["id"]]]  # only the plan's replacement; nothing re-dated
     assert result["redated_chunks"] == 0 and result["kept_chunks"] == 1
+
+
+# --- the writer under the GLiNER extractor -------------------------------------------
+
+
+def _writer_stubs(monkeypatch, events):
+    """The writer's storage collaborators, recording deletes; the LLM step forbidden."""
+
+    async def delete(chunk_ids, dataset_id, data_id):
+        events.append(("delete", list(chunk_ids)))
+
+    config = SimpleNamespace(
+        chunks_per_batch=10,
+        triplet_embedding=False,
+        contradiction_detection=False,
+        summary_method="llm",
+    )
+    monkeypatch.setattr(incremental, "get_cognify_config", lambda: config)
+    monkeypatch.setattr(
+        incremental,
+        "extract_graph_and_summarize",
+        AsyncMock(side_effect=AssertionError("the LLM step must not run under GLiNER")),
+    )
+    monkeypatch.setattr(incremental, "add_data_points", AsyncMock())
+    monkeypatch.setattr(incremental, "delete_chunks_incremental", delete)
+    monkeypatch.setattr(incremental, "publish_updated_data", AsyncMock())
+    monkeypatch.setattr(incremental, "get_max_chunk_tokens", AsyncMock(return_value=512))
+
+
+@pytest.mark.asyncio
+async def test_gliner_extracts_fresh_chunks_without_the_llm_and_redates_nothing(monkeypatch):
+    """The same edit as above, extracted by GLiNER: no LLM call, and no re-dating.
+
+    GLiNER never reads the date hints — only the LLM prompt does — so the
+    later chunk whose hints the year edit changed is extracted identically
+    either way, and retiring it would be a pointless delete and re-extract.
+    """
+    document = _document()
+    first, second = _stored(VISIT_1947, 0), _stored(RETURN, 1)
+    fresh = _fresh(document, VISIT_1948, 0)
+    plan = ChunkPlan(fresh=[fresh], deleted_ids=[first["id"]], regions=1)
+
+    events = []
+    resolver = object()
+    schema = object()
+    gliner_schema = importlib.import_module("cognee.tasks.graph.gliner_demo.schema")
+    gliner_tasks = importlib.import_module("cognee.tasks.graph.gliner_demo.tasks")
+
+    async def prepare(documents, prepared_schema, max_chunk_size, chunker=None, **_):
+        events.append(("schema", [doc.id for doc in documents], prepared_schema, chunker))
+        return documents
+
+    async def extract(batch, **kwargs):
+        events.append(("gliner", [(chunk.text, chunk.chunk_index) for chunk in batch]))
+        return []
+
+    _writer_stubs(monkeypatch, events)
+    monkeypatch.setattr(
+        incremental,
+        "_resolve_extraction_config",
+        lambda: {"ontology_config": {"ontology_resolver": resolver}},
+    )
+    monkeypatch.setattr(
+        gliner_schema,
+        "resolve_schema",
+        lambda **kwargs: schema if kwargs == {"ontology_resolver": resolver} else None,
+    )
+    monkeypatch.setattr(gliner_tasks, "prepare_gliner_schema", prepare)
+    monkeypatch.setattr(gliner_tasks, "extract_graph_and_summarize_with_gliner", extract)
+
+    result = await incremental._write_and_publish(
+        {"staged": object(), "document": document, "stored_chunks": [first, second], "plan": plan},
+        document.id,
+        SimpleNamespace(id=uuid4()),
+        SimpleNamespace(id=uuid4()),
+        None,
+        object,
+        None,
+        uuid4(),
+        chunker=TextChunker,
+        extractor="gliner_demo",
+    )
+
+    # Schema once for the document (from the configured ontology resolver, with
+    # the update's chunker), then one GLiNER extraction of the fresh chunk only;
+    # the plan's own deletion is the only delete — nothing was re-dated.
+    assert [event[0] for event in events] == ["schema", "gliner", "delete"]
+    assert events[0][1:] == ([document.id], schema, TextChunker)
+    assert events[1][1] == [(VISIT_1948, 0)]
+    assert events[2][1] == [first["id"]]
+    assert result["redated_chunks"] == 0
+    assert result["added_chunks"] == 1 and result["kept_chunks"] == 1
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_extractor_is_refused_before_anything_is_written(monkeypatch):
+    document = _document()
+    first = _stored(VISIT_1947, 0)
+    plan = ChunkPlan(fresh=[_fresh(document, VISIT_1948, 0)], deleted_ids=[first["id"]], regions=1)
+    events = []
+    _writer_stubs(monkeypatch, events)
+    monkeypatch.setattr(incremental, "_resolve_extraction_config", lambda: None)
+
+    with pytest.raises(ValueError, match="Unknown extractor"):
+        await incremental._write_and_publish(
+            {"staged": object(), "document": document, "stored_chunks": [first], "plan": plan},
+            document.id,
+            SimpleNamespace(id=uuid4()),
+            SimpleNamespace(id=uuid4()),
+            None,
+            object,
+            None,
+            uuid4(),
+            extractor="spacy",
+        )
+    assert events == []
