@@ -78,7 +78,7 @@ class DataPoint(BaseModel):
     version: int = 1  # Default version
     topological_rank: int | None = 0
     # Bi-temporal validity: ms epoch when this fact was superseded (via close_node);
-    # None = still current. Not the same as Event/Interval time_to (when an event occurred).
+    # None = still current. Not the same as a Timestamp node (when something happened).
     valid_to: int | None = None
     metadata: MetaData = {"index_fields": []}
     type: str = Field(default_factory=lambda: DataPoint.__name__)

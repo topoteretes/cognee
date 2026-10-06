@@ -27,11 +27,13 @@ narrow it; that is also faster.
 
 1. An explicit `query_type=SearchType.X` always wins.
 2. Otherwise, with no usable LLM key, `CHUNKS` (plain vector search).
-3. Otherwise the router (`auto_route=True`, the default). It is two regex
+3. Otherwise the router (`auto_route=True`, the default). It is three regex
    rules, first match wins, no LLM call:
    - the whole query is one `"quoted phrase"` → `CHUNKS_LEXICAL`
    - mentions coding rules/standards/conventions or code-review guidelines
      → `CODING_RULES`
+   - an absolute date behind a time preposition (`in 2019`, `before 1900`,
+     `on 7 November 1867`) → `TEMPORAL`
 4. Everything else → `HYBRID_COMPLETION`.
 
 A routed type (never a pinned one) that the backend rejects, or a routed

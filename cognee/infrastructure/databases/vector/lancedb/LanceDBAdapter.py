@@ -808,7 +808,7 @@ class LanceDBAdapter(VectorDBInterface):
         try:
             target_schema = to_arrow_schema()
         except TypeError:
-            # Models with complex Union types (e.g. List[Union[Entity, Event,
+            # Models with complex Union types (e.g. List[Union[Entity, Timestamp,
             # tuple[Edge, Entity]]]) can't be converted to Arrow. Fall back to
             # field-name comparison in _is_payload_schema_compatible.
             return None

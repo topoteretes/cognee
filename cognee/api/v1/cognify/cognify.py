@@ -1,4 +1,5 @@
 import asyncio
+import warnings
 from collections.abc import Collection
 from typing import Literal
 from uuid import UUID
@@ -54,6 +55,27 @@ from cognee.tasks.provenance import record_provenance
 from cognee.tasks.storage import add_data_points
 
 logger = get_logger("cognify")
+
+TEMPORAL_COGNIFY_REMOVED = (
+    "temporal_cognify was removed: cognify() now extracts dates as Timestamp nodes by "
+    "default, and SearchType.TEMPORAL reranks by them. Drop the argument. A dataset "
+    "built with temporal_cognify=True holds Event nodes the TEMPORAL search does not "
+    "read; rebuild it with forget(dataset=..., memory_only=True) and then cognify()."
+)
+
+
+def reject_removed_temporal_cognify(kwargs: dict) -> None:
+    """Strip the removed ``temporal_cognify`` flag from ``kwargs``, raising when it is set.
+
+    Unknown cognify kwargs are forwarded into the extraction LLM call, so the flag
+    must never travel on. ``True`` asked for the deleted event pipeline and raises;
+    a falsy value was always a no-op, so it is dropped with a deprecation warning.
+    """
+    if "temporal_cognify" not in kwargs:
+        return
+    if kwargs.pop("temporal_cognify"):
+        raise TypeError(TEMPORAL_COGNIFY_REMOVED)
+    warnings.warn(TEMPORAL_COGNIFY_REMOVED, DeprecationWarning, stacklevel=3)
 
 
 def _wrap_cognify_exception(error: BaseException, datasets) -> "Exception":
@@ -324,13 +346,7 @@ async def cognify(
     resolved_extractor = resolve_extractor(extractor, cognify_config)
     resolved_summary_method = resolve_summary_method(summary_method, cognify_config)
 
-    if "temporal_cognify" in kwargs:
-        # Unknown kwargs are forwarded into the extraction LLM call, so the removed
-        # flag has to raise here rather than travel on as a model parameter.
-        raise TypeError(
-            "temporal_cognify was removed: the default cognify() now extracts dates as "
-            "Timestamp nodes, and SearchType.TEMPORAL searches them. Drop the argument."
-        )
+    reject_removed_temporal_cognify(kwargs)
     if dry_run and resolved_extractor == GLINER_DEMO_EXTRACTOR:
         raise ValueError(
             "dry_run estimates the LLM extraction pipeline only; it has no cost model "
