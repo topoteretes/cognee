@@ -708,6 +708,13 @@ class TursoAdapter(GraphDBInterface):
 
             return nodes, edges
 
+    async def get_graph_counts(self) -> tuple[int, int]:
+        """Count nodes and edges with two aggregation queries."""
+        async with self._session() as session:
+            num_nodes = (await session.execute(text("SELECT count(*) FROM graph_node"))).scalar()
+            num_edges = (await session.execute(text("SELECT count(*) FROM graph_edge"))).scalar()
+        return num_nodes or 0, num_edges or 0
+
     async def get_graph_metrics(self, include_optional: bool = False) -> dict[str, Any]:
         """Compute graph metrics matching the PostgresDemoAdapter output schema."""
         async with self._session() as session:
