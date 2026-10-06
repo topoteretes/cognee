@@ -59,8 +59,11 @@ logger = get_logger("cognify")
 TEMPORAL_COGNIFY_REMOVED = (
     "temporal_cognify was removed: cognify() now extracts dates as Timestamp nodes by "
     "default, and SearchType.TEMPORAL reranks by them. Drop the argument. A dataset "
-    "built with temporal_cognify=True holds Event nodes the TEMPORAL search does not "
-    "read; rebuild it with forget(dataset=..., memory_only=True) and then cognify()."
+    "built with temporal_cognify=True holds Event nodes that current code no longer "
+    "indexes: TEMPORAL search ignores them, graph completion no longer searches their "
+    "names, and the next triplet enrichment re-embeds their triplets without the event "
+    "name. Rebuild such a dataset with forget(dataset=..., memory_only=True) and then "
+    "cognify()."
 )
 
 
@@ -70,12 +73,15 @@ def reject_removed_temporal_cognify(kwargs: dict) -> None:
     Unknown cognify kwargs are forwarded into the extraction LLM call, so the flag
     must never travel on. ``True`` asked for the deleted event pipeline and raises;
     a falsy value was always a no-op, so it is dropped with a deprecation warning.
+    The warning is also logged: when the caller runs ``asyncio.run(cognify(...))``
+    directly, Python attributes the warning to asyncio and the default filters hide it.
     """
     if "temporal_cognify" not in kwargs:
         return
     if kwargs.pop("temporal_cognify"):
         raise TypeError(TEMPORAL_COGNIFY_REMOVED)
     warnings.warn(TEMPORAL_COGNIFY_REMOVED, DeprecationWarning, stacklevel=3)
+    logger.warning(TEMPORAL_COGNIFY_REMOVED)
 
 
 def _wrap_cognify_exception(error: BaseException, datasets) -> "Exception":

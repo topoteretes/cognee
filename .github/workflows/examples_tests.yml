@@ -74,7 +74,7 @@ jobs:
           LLM_API_KEY: "mock-not-used"
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_API_KEY: "mock-not-used"
-        run: uv run python cognee/tests/utils/run_mocked.py ./examples/guides/temporal_recall.py
+        run: uv run python cognee/tests/utils/run_mocked.py --replay cognee/tests/utils/mock_ingestion/replays/temporal_recall.json ./examples/guides/temporal_recall.py
 
   test-ontology-example:
     name: Run Ontology Tests

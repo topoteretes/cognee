@@ -33,16 +33,23 @@ def test_a_true_flag_raises_and_names_the_rebuild_path():
         reject_removed_temporal_cognify({"temporal_cognify": True})
 
     assert "memory_only=True" in str(raised.value)
+    assert "triplet enrichment" in str(raised.value)
 
 
 @pytest.mark.parametrize("value", [False, None])
 def test_a_falsy_flag_is_dropped_with_a_deprecation_warning(value):
     kwargs = {"temporal_cognify": value, "graph_model": None}
 
-    with pytest.warns(DeprecationWarning, match="temporal_cognify was removed"):
+    with (
+        patch.object(cognify_module, "logger") as logger,
+        pytest.warns(DeprecationWarning, match="temporal_cognify was removed"),
+    ):
         reject_removed_temporal_cognify(kwargs)
 
     assert kwargs == {"graph_model": None}
+    # Logged too: asyncio.run(cognify(...)) attributes the warning to asyncio, where
+    # the default filters hide it.
+    logger.warning.assert_called_once_with(TEMPORAL_COGNIFY_REMOVED)
 
 
 @pytest.mark.asyncio

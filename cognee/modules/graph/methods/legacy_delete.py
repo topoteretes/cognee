@@ -13,9 +13,6 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
-# Vector collections of DataPoint models that no longer exist in code.
-_REMOVED_MODEL_COLLECTIONS = ("Event_name",)
-
 
 def _is_contains_edge(edge: dict) -> bool:
     relationship_name = str(edge.get("relationship_name", ""))
@@ -58,10 +55,6 @@ async def legacy_delete(data: Data, mode: str = "soft"):
             "TextDocument_name",
             "TextSummary_text",
         ]
-
-    # Event was removed with the temporal_cognify pipeline (SDK-981), so it no longer
-    # appears among the subclasses, but stores built by that pipeline still hold its vectors.
-    vector_collections.extend(_REMOVED_MODEL_COLLECTIONS)
 
     # Delete records from each vector collection that exists
     for collection in vector_collections:

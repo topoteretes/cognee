@@ -38,7 +38,7 @@ async def main():
             top_k=15,
         )
         print(f"\nQ: {query}")
-        print(f"A: {results[0].text if results else '(nothing found)'}")
+        print(f"A: {results[0].text}")
 
 
 if __name__ == "__main__":
