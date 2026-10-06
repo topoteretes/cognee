@@ -22,6 +22,12 @@ export default function getBrainGraph(
   instance: CogneeInstance,
   datasetId: string,
 ): Promise<VisualizationPayload> {
-  const params = new URLSearchParams({ dataset_id: datasetId, max_nodes: String(MAX_NODES) });
+  // Session events come from getLiveEvents/the websocket, not this fetch, so
+  // this skips collecting them server-side (SDK-972).
+  const params = new URLSearchParams({
+    dataset_id: datasetId,
+    max_nodes: String(MAX_NODES),
+    include_session_events: "false",
+  });
   return instance.fetch(`/v1/visualize/json?${params.toString()}`).then((response) => response.json());
 }

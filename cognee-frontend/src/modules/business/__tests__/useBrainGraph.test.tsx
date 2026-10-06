@@ -73,7 +73,9 @@ describe("useBrainGraph", () => {
 
     await settle();
     expect(result.current.data).toBe(payload);
-    expect(mockFetch).toHaveBeenCalledWith("/v1/visualize/json?dataset_id=ds-1&max_nodes=500");
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/v1/visualize/json?dataset_id=ds-1&max_nodes=500&include_session_events=false",
+    );
   });
 
   it("stays idle while no dataset is focused", async () => {
