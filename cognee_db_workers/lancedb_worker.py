@@ -20,7 +20,9 @@ from .lancedb_protocol import (
     OP_OPEN_TABLE,
     OP_TABLE_ADD,
     OP_TABLE_COUNT_ROWS,
+    OP_TABLE_CREATE_INDEX,
     OP_TABLE_DELETE,
+    OP_TABLE_LIST_INDICES,
     OP_TABLE_MERGE_INSERT_EXECUTE,
     OP_TABLE_NAMES,
     OP_TABLE_OPTIMIZE,
@@ -170,6 +172,30 @@ async def _op_table_optimize(registry: HandleRegistry, req: Request):
     await table.optimize()
 
 
+async def _op_table_list_indices(registry: HandleRegistry, req: Request):
+    table = registry.get(req.handle_id)
+    return [
+        {"name": index.name, "index_type": index.index_type, "columns": list(index.columns)}
+        for index in await table.list_indices()
+    ]
+
+
+# Index configs the worker builds from a name sent over the RPC. A fixed list,
+# so a request cannot make the worker instantiate anything else.
+_INDEX_CONFIGS = ("IvfPq", "IvfFlat", "HnswPq", "HnswSq")
+
+
+async def _op_table_create_index(registry: HandleRegistry, req: Request):
+    import lancedb.index
+
+    table = registry.get(req.handle_id)
+    column, config_name, config_fields = req.args
+    if config_name not in _INDEX_CONFIGS:
+        raise ValueError(f"Unsupported index config {config_name!r}")
+    config = getattr(lancedb.index, config_name)(**config_fields)
+    await table.create_index(column, config=config)
+
+
 def _apply_chain(builder, chain_steps):
     for method_name, args, kwargs in chain_steps:
         builder = getattr(builder, method_name)(*args, **kwargs)
@@ -241,6 +267,8 @@ DISPATCH = {
     OP_TABLE_ADD: _op_table_add,
     OP_TABLE_DELETE: _op_table_delete,
     OP_TABLE_OPTIMIZE: _op_table_optimize,
+    OP_TABLE_LIST_INDICES: _op_table_list_indices,
+    OP_TABLE_CREATE_INDEX: _op_table_create_index,
     OP_TABLE_QUERY_EXECUTE: _op_query_execute,
     OP_TABLE_VECTOR_SEARCH_EXECUTE: _op_vector_search_execute,
     OP_TABLE_MERGE_INSERT_EXECUTE: _op_merge_insert_execute,

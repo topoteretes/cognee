@@ -32,6 +32,13 @@ OP_TABLE_OPTIMIZE = 125  # handle_id; compact the table (lancedb AsyncTable.opti
 # Arrow table to merge_insert need the stored schema: plain dicts make
 # merge_insert re-infer types and choke on the fixed-size-list vector column.
 OP_TABLE_SCHEMA = 126
+# handle_id; returns list[dict] with name, index_type and columns per index.
+# lancedb's IndexConfig is a Rust-backed object that does not pickle.
+OP_TABLE_LIST_INDICES = 127
+# handle_id; args: (column, config_class_name, config_fields). The config is a
+# ``lancedb.index`` dataclass, sent as its class name and fields and built
+# again in the worker.
+OP_TABLE_CREATE_INDEX = 128
 
 # Builder ops. args: (root_args, chain_steps, terminal_name, terminal_args,
 # terminal_kwargs) where root_args is the tuple passed to the root call
