@@ -11,7 +11,11 @@ relative phrases and bare years are never read from a cell (any four-digit
 number would match a year). Foreign-key columns are skipped — they are edges
 to other rows already — but the primary key is not: a time series is keyed
 by its date (``dlt`` falls back to the first column), and that date is what
-the row is about.
+the row is about. Which columns count is a selection in the shape
+``dlt_column_value_columns`` uses (``{table: [column, ...]}``, "*" wildcards);
+the default takes every date cell, and a table with a bookkeeping date such as
+``updated_at`` can be narrowed so its rows anchor only to the time they are
+about.
 
 The Timestamp is built by ``timestamp_from_text`` from the normalized string,
 so its id is the one every other mention of that instant resolves to: a row
@@ -23,6 +27,7 @@ import re
 from dlt.common.time import ensure_pendulum_datetime_utc
 
 from cognee.tasks.ingestion.dlt_row_data import DltRowData
+from cognee.tasks.ingestion.dlt_utils import column_selected
 
 # A month, or a date optionally followed by a time with fractional seconds and
 # a zone. The fraction is dropped (second precision); a zone is applied, not
@@ -57,12 +62,12 @@ def timestamp_str_for_cell(value) -> str | None:
     return f"{date} {time}" if time else date
 
 
-def temporal_cells(row: DltRowData) -> dict[str, str]:
-    """``{column: normalized timestamp string}`` for the row's ISO-shaped cells."""
+def temporal_cells(row: DltRowData, selection: dict | None) -> dict[str, str]:
+    """``{column: normalized timestamp string}`` for the row's selected ISO-shaped cells."""
     fk_columns = {fk.get("column", "") for fk in row.foreign_keys}
     cells = {}
     for column, value in row.row_data.items():
-        if column in fk_columns:
+        if column in fk_columns or not column_selected(selection, row.table_name, column):
             continue
         normalized = timestamp_str_for_cell(value)
         if normalized is not None:
