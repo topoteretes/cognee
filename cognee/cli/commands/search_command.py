@@ -52,6 +52,10 @@ Search Types & Use Cases:
     Pre-generated summaries of content.
     Best for: Quick overviews, document abstracts, topic summaries.
 
+**TEMPORAL**:
+    HYBRID_COMPLETION's candidates reranked by the time window in the question.
+    Best for: Questions scoped to an absolute date ("what happened in 1898?").
+
 **CODE**:
     Deterministic name resolution and graph exploration over an indexed code graph.
     Best for: Inspecting a function, class, route, module, or dependency without an LLM.
