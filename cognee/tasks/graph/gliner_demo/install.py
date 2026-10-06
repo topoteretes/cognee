@@ -178,11 +178,7 @@ def installer_command() -> tuple[str, list[str]]:
     uv = find_uv()
     if uv is not None:
         return "uv", [uv, "pip", "install", "--python", sys.executable]
-    raise GlinerInstallError(
-        "this environment has no pip and no uv executable was found. In a uv "
-        'environment run: uv pip install "cognee[gliner]"',
-        "installer",
-    )
+    raise GlinerInstallError("this environment has neither pip nor uv.", "installer")
 
 
 def _run(command: list[str], step: str, failed_step: str, installer: str) -> None:

@@ -64,7 +64,9 @@ def test_installer_prefers_pip_then_uv_then_raises():
     with (
         patch("importlib.util.find_spec", return_value=None),
         patch.object(install, "find_uv", return_value=None),
-        pytest.raises(install.GlinerInstallError, match=r"no pip and no uv(.|\n)*uv pip install"),
+        pytest.raises(
+            install.GlinerInstallError, match=r"neither pip nor uv(.|\n)*cognee\[gliner\]"
+        ),
     ):
         install.installer_command()
 
