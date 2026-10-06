@@ -29,7 +29,10 @@ from uuid import UUID
 
 from cognee.infrastructure.locks import session_lock
 from cognee.infrastructure.session.get_session_manager import get_session_manager
-from cognee.infrastructure.session.session_persist_watermark import SESSION_PERSIST_WATERMARK
+from cognee.infrastructure.session.session_persist_watermark import (
+    get_persisted_qa_count,
+    save_persisted_qa_count,
+)
 from cognee.shared.logging_utils import get_logger
 
 from .metrics import list_sessions_for_dataset, list_unattributed_sessions
@@ -224,12 +227,8 @@ async def _invalidate_session_entries(
         async with session_lock(session_id, "update_qa"):
             surviving = await session_manager.get_session(user_id=user_id, session_id=session_id)
             remaining = len(surviving) if surviving else 0
-            watermark = await SESSION_PERSIST_WATERMARK.read_count(
-                session_manager, user_id, session_id
-            )
+            watermark = await get_persisted_qa_count(session_manager, user_id, session_id)
             if watermark > remaining:
-                await SESSION_PERSIST_WATERMARK.write_count(
-                    session_manager, user_id, session_id, remaining
-                )
+                await save_persisted_qa_count(session_manager, user_id, session_id, remaining)
 
     return (qa_deleted, context_deleted)

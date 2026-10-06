@@ -68,7 +68,7 @@ from cognee.context_global_variables import set_database_global_context_variable
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.session.get_session_manager import get_session_manager
-from cognee.infrastructure.session.session_persist_watermark import SESSION_PERSIST_WATERMARK
+from cognee.infrastructure.session.session_persist_watermark import get_persisted_qa_count
 from cognee.modules.data.methods import get_dataset_data, get_datasets_by_name
 from cognee.modules.data.methods.get_dataset_databases import get_dataset_databases
 from cognee.modules.data.models import Data as _ScopedData
@@ -472,9 +472,7 @@ async def _verify_session_takeover(stage: str) -> None:
             f"[{stage}] improve() re-ingested an unchanged legacy session "
             f"({len(new_items)} new document(s)) — expected content-hash dedup no-op."
         )
-    watermark = await SESSION_PERSIST_WATERMARK.read_count(
-        session_manager, user_id, COMPAT_SESSION_ID
-    )
+    watermark = await get_persisted_qa_count(session_manager, user_id, COMPAT_SESSION_ID)
     if watermark != 2:
         _fail(f"[{stage}] persist watermark should heal to 2, got {watermark}.")
     print("  [session] unchanged legacy session: 0 new documents, watermark healed to 2 — OK")
@@ -491,9 +489,7 @@ async def _verify_session_takeover(stage: str) -> None:
         _fail(f"[{stage}] new session window is missing the new entry: {window_text!r}")
     if SESSION_FACT_1_MARKER in window_text or SESSION_FACT_2_MARKER in window_text:
         _fail(f"[{stage}] new session window re-ingested legacy entries: {window_text!r}")
-    watermark = await SESSION_PERSIST_WATERMARK.read_count(
-        session_manager, user_id, COMPAT_SESSION_ID
-    )
+    watermark = await get_persisted_qa_count(session_manager, user_id, COMPAT_SESSION_ID)
     if watermark != 3:
         _fail(f"[{stage}] persist watermark should advance to 3, got {watermark}.")
 

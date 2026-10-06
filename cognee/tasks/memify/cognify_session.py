@@ -10,8 +10,8 @@ from cognee.infrastructure.llm.exceptions import (
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.infrastructure.session.session_node_set import bridge_node_set
 from cognee.infrastructure.session.session_persist_watermark import (
-    SESSION_PERSIST_WATERMARK,
     SessionPersistWindow,
+    save_persisted_qa_count,
 )
 from cognee.modules.improve.constants import USER_SESSIONS_NODE_SET
 from cognee.modules.pipelines.models.PipelineRunInfo import get_errored_run_info
@@ -102,11 +102,11 @@ async def cognify_session(
                 continue
             logger.info("Session data successfully cognified")
 
-            await SESSION_PERSIST_WATERMARK.write_count(
+            await save_persisted_qa_count(
                 get_session_manager(),
-                window.user_id,
-                window.session_id,
-                window.persisted_qa_count,
+                user_id=window.user_id,
+                session_id=window.session_id,
+                persisted_qa_count=window.persisted_qa_count,
             )
             logger.info(
                 "Session %s persist watermark advanced to %d",

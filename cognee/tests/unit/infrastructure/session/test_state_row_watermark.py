@@ -25,7 +25,9 @@ from cognee.infrastructure.session.session_persist_watermark import (
     StateRowWatermark,
     distill_watermark,
     get_distilled_entry_ids,
+    get_persisted_qa_count,
     save_distilled_entry_ids,
+    save_persisted_qa_count,
 )
 
 USER = "u"
@@ -150,13 +152,13 @@ def test_resolve_effective_applies_the_stale_policy():
 @pytest.mark.asyncio
 async def test_qa_persist_wrappers_use_the_legacy_row_shape():
     manager = FakeSessionManager()
-    await SESSION_PERSIST_WATERMARK.write_count(manager, USER, SESSION, 5)
+    await save_persisted_qa_count(manager, USER, SESSION, 5)
 
     row = manager.store[0]
     assert row["id"] == SESSION_PERSIST_STATE_ID == "session_persist_watermark"
     assert row["kind"] == SESSION_PERSIST_STATE_KIND
     assert row["persisted_qa_count"] == 5
-    assert await SESSION_PERSIST_WATERMARK.read_count(manager, USER, SESSION) == 5
+    assert await get_persisted_qa_count(manager, USER, SESSION) == 5
 
 
 @pytest.mark.asyncio
@@ -169,16 +171,16 @@ async def test_qa_persist_reads_rows_written_before_the_shared_helper():
             "persisted_qa_count": 6,
         }
     )
-    assert await SESSION_PERSIST_WATERMARK.read_count(manager, USER, SESSION) == 6
+    assert await get_persisted_qa_count(manager, USER, SESSION) == 6
 
 
 @pytest.mark.asyncio
 async def test_trace_persist_watermark_has_its_own_row():
     manager = FakeSessionManager()
-    await SESSION_PERSIST_WATERMARK.write_count(manager, USER, SESSION, 2)
+    await save_persisted_qa_count(manager, USER, SESSION, 2)
     await TRACE_PERSIST_WATERMARK.write_count(manager, USER, SESSION, 9)
 
-    assert await SESSION_PERSIST_WATERMARK.read_count(manager, USER, SESSION) == 2
+    assert await get_persisted_qa_count(manager, USER, SESSION) == 2
     assert await TRACE_PERSIST_WATERMARK.read_count(manager, USER, SESSION) == 9
     ids = {row["id"] for row in manager.store}
     assert ids == {SESSION_PERSIST_STATE_ID, TRACE_PERSIST_STATE_ID}

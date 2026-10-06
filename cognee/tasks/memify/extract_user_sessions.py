@@ -8,6 +8,7 @@ from cognee.infrastructure.session.session_node_set import (
 from cognee.infrastructure.session.session_persist_watermark import (
     SESSION_PERSIST_WATERMARK,
     SessionPersistWindow,
+    get_persisted_qa_count,
 )
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -142,9 +143,7 @@ async def has_new_session_qa(session_manager, user_id: str, session_ids: list[st
         )
         if not qa_data:
             continue
-        persisted_count = await SESSION_PERSIST_WATERMARK.read_count(
-            session_manager, user_id, session_id
-        )
+        persisted_count = await get_persisted_qa_count(session_manager, user_id, session_id)
         if persisted_count != len(qa_data):
             return True
     return False

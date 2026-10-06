@@ -22,7 +22,7 @@ import pytest
 import cognee
 from cognee.infrastructure.databases.cache.models import SessionQAEntry
 from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
-from cognee.infrastructure.session.session_persist_watermark import SESSION_PERSIST_WATERMARK
+from cognee.infrastructure.session.session_persist_watermark import get_persisted_qa_count
 from cognee.modules.improve import (
     REASON_ABORTED_BY_FATAL_STAGE,
     REASON_BUDGET_EXHAUSTED,
@@ -631,11 +631,7 @@ async def test_budget_failure_in_cognify_session_stops_the_improve_run(
     assert all(call["raise_on_error"] is False for call in cognify_calls)
     # The session persisted before the failure keeps its advanced watermark;
     # the one that failed stays put, so the next improve picks it up.
-    assert (
-        await SESSION_PERSIST_WATERMARK.read_count(session_bridge.sessions, user_id, "chat_1") == 1
-    )
-    assert (
-        await SESSION_PERSIST_WATERMARK.read_count(session_bridge.sessions, user_id, "chat_2") == 0
-    )
+    assert await get_persisted_qa_count(session_bridge.sessions, user_id, "chat_1") == 1
+    assert await get_persisted_qa_count(session_bridge.sessions, user_id, "chat_2") == 0
     keys = session_lock.improve_lock_keys(["chat_1", "chat_2"], harness.dataset.id, harness.user.id)
     await _assert_claim_is_free(keys)

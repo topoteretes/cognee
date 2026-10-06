@@ -45,10 +45,10 @@ clamp every dataset's row, and a migration story for existing session-scoped
 rows — follow-up work, not a suffix on the id. The distill watermark differs
 deliberately: it is id-set-based, so per-dataset rows cost nothing there.
 
-Callers use the watermark objects directly (``read_count`` / ``write_count``,
-or ``count_from_rows`` on a snapshot they already hold) and apply the
-stale-watermark policy through ``resolve_effective``; there is no second way
-to read or reset a watermark.
+The legacy ``get_persisted_qa_count`` / ``save_persisted_qa_count`` functions
+are kept as thin wrappers over ``SESSION_PERSIST_WATERMARK`` because their
+call sites predate this module; the trace watermark's call sites are all new
+and use ``TRACE_PERSIST_WATERMARK.read_count`` / ``.write_count`` directly.
 """
 
 from collections.abc import Iterable
@@ -212,6 +212,20 @@ class SessionPersistWindow:
     # The session's pinned node set (``session_node_set``); appended to the
     # node set the window is added under.
     node_set: tuple[str, ...] = ()
+
+
+async def get_persisted_qa_count(session_manager, user_id: str, session_id: str) -> int:
+    """Read the Q&A persist watermark. Missing or malformed state means nothing persisted yet."""
+    return await SESSION_PERSIST_WATERMARK.read_count(session_manager, user_id, session_id)
+
+
+async def save_persisted_qa_count(
+    session_manager, user_id: str, session_id: str, persisted_qa_count: int
+) -> None:
+    """Persist the Q&A watermark as an internal non-rendered session-context row."""
+    await SESSION_PERSIST_WATERMARK.write_count(
+        session_manager, user_id, session_id, persisted_qa_count
+    )
 
 
 # -- Stage 3: persisted agent trace steps ------------------------------------

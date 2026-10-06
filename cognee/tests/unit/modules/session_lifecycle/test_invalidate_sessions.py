@@ -10,7 +10,10 @@ from uuid import uuid4
 
 import pytest
 
-from cognee.infrastructure.session.session_persist_watermark import SESSION_PERSIST_WATERMARK
+from cognee.infrastructure.session.session_persist_watermark import (
+    get_persisted_qa_count,
+    save_persisted_qa_count,
+)
 from cognee.modules.session_lifecycle.invalidate_sessions import (
     _invalidate_session_entries,
     invalidate_sessions_for_dataset,
@@ -154,7 +157,7 @@ async def test_watermark_clamped_after_targeted_delete(session_manager):
     await _seed_qa(session_manager, "qa_1", used_node_ids=["node_deleted"])
     await _seed_qa(session_manager, "qa_2", used_node_ids=["node_deleted"])
     await _seed_qa(session_manager, "qa_3", used_node_ids=["node_other"])
-    await SESSION_PERSIST_WATERMARK.write_count(session_manager, USER_ID, SESSION_ID, 3)
+    await save_persisted_qa_count(session_manager, USER_ID, SESSION_ID, 3)
 
     await _invalidate_session_entries(
         session_manager,
@@ -164,7 +167,7 @@ async def test_watermark_clamped_after_targeted_delete(session_manager):
         deleted_edge_ids=set(),
     )
 
-    assert await SESSION_PERSIST_WATERMARK.read_count(session_manager, USER_ID, SESSION_ID) == 1
+    assert await get_persisted_qa_count(session_manager, USER_ID, SESSION_ID) == 1
 
 
 @pytest.mark.asyncio
@@ -175,7 +178,7 @@ async def test_watermark_clamp_recounts_after_external_delete(session_manager):
     await _seed_qa(session_manager, "qa_1", used_node_ids=["node_deleted"])
     await _seed_qa(session_manager, "qa_2", used_node_ids=["node_other"])
     await _seed_qa(session_manager, "qa_3", used_node_ids=["node_other"])
-    await SESSION_PERSIST_WATERMARK.write_count(session_manager, USER_ID, SESSION_ID, 3)
+    await save_persisted_qa_count(session_manager, USER_ID, SESSION_ID, 3)
 
     original_delete_qa = session_manager.delete_qa
 
@@ -195,7 +198,7 @@ async def test_watermark_clamp_recounts_after_external_delete(session_manager):
         )
 
     # Snapshot math would write 3 - 1 = 2; the fresh recount sees only qa_2.
-    assert await SESSION_PERSIST_WATERMARK.read_count(session_manager, USER_ID, SESSION_ID) == 1
+    assert await get_persisted_qa_count(session_manager, USER_ID, SESSION_ID) == 1
 
 
 @pytest.mark.asyncio
