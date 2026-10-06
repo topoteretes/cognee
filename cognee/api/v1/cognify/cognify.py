@@ -540,6 +540,7 @@ async def cognify(
                 llm_config=llm_config,
                 embedding_config=embedding_config,
                 data_cache=data_cache,
+                extras={"graph_extractor": resolved_extractor},
             )
         except Exception as error:
             # Run-level failures (e.g. an AuthenticationError escaping a task)

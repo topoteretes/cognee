@@ -804,6 +804,10 @@ class NeptuneGraphDB(GraphDBInterface):
             logger.error(f"Failed to check if graph is empty: {error_msg}")
             raise RuntimeError(f"Failed to check if graph is empty: {error_msg}") from e
 
+    async def get_graph_counts(self) -> tuple[int, int]:
+        """Count nodes and edges with one aggregation query."""
+        return await self._get_model_independent_graph_data()
+
     async def get_graph_metrics(self, include_optional: bool = False) -> dict[str, Any]:
         """
         Fetch metrics and statistics of the graph, possibly including optional details.

@@ -133,10 +133,7 @@ async def lifespan(app: FastAPI):
         await get_default_user()
         await set_default_user_password_if_unset()
     report_default_user_login_posture()
-    from cognee.modules.cognify.recovery import recover_stale_pipeline_runs_on_startup
-
-    await recover_stale_pipeline_runs_on_startup()
-
+    from cognee.modules.cognify.recovery import pipeline_recovery_service
     from cognee.modules.users.authentication.get_auth_secret import resolve_auth_secrets
 
     # Warns at startup, not on the first login, when a token secret was generated.
@@ -151,7 +148,8 @@ async def lifespan(app: FastAPI):
     # Emit a clear startup message for docker logs
     logger.info("Backend server has started")
 
-    yield
+    async with pipeline_recovery_service():
+        yield
 
     # Let in-flight background work (background remember runs, the session
     # improve bridge) finish before the engines below are torn down under it.
@@ -209,10 +207,10 @@ async def _report_unhandled_exceptions(request, call_next):
 async def _stamp_operation_origin(request, call_next):
     # Operations executed for this request record origin="api" in
     # pipeline_runs. ContextVars set here propagate into the handler task.
-    from cognee.modules.operations import ORIGIN_API, set_operation_origin
+    from cognee.modules.operations import ORIGIN_API, operation_origin_scope
 
-    set_operation_origin(ORIGIN_API)
-    return await call_next(request)
+    with operation_origin_scope(ORIGIN_API):
+        return await call_next(request)
 
 
 # Read allowed origins from environment variable (comma-separated)
