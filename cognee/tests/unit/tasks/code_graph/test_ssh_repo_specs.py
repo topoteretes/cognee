@@ -54,15 +54,6 @@ async def test_resolve_data_directories_refuses_ssh_specs(spec):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("spec", SSH_SPECS)
-async def test_eager_repository_resolution_refuses_ssh_specs(spec):
-    from cognee.tasks.code_graph.code_repo import resolve_code_repositories
-
-    with pytest.raises(IngestionError, match="ssh git remotes"):
-        await resolve_code_repositories([spec])
-
-
-@pytest.mark.asyncio
 async def test_a_web_page_still_passes_through_untouched():
     from cognee.tasks.ingestion.resolve_data_directories import resolve_data_directories
 

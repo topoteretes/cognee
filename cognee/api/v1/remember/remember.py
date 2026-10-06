@@ -42,7 +42,11 @@ from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
 )
 from cognee.shared.logging_utils import get_logger
-from cognee.tasks.code_graph.config import CodeGraphConfig, validate_codegraph_config
+from cognee.tasks.code_graph.config import (
+    CodeGraphConfig,
+    validate_codegraph_config,
+    with_legacy_code_content_type,
+)
 from cognee.tasks.ingestion.data_item import DataItem
 
 logger = get_logger("remember")
@@ -180,67 +184,6 @@ def _fold_codegraph_kwargs(kwargs: dict) -> None:
     legacy = {key: value for key, value in legacy.items() if value is not None}
     if legacy:
         kwargs["codegraph_config"] = {**legacy, **(kwargs.get("codegraph_config") or {})}
-
-
-async def _attach_item_identity(result: "RememberResult") -> None:
-    """Name each result item by what it is, from the stored row's system_metadata.
-
-    The pipeline reports an item as its ``data_id`` and nothing else: the row
-    does not exist yet when the per-item result is built (ingestion mints it
-    during the run), so the identity has to be read back afterwards. One
-    indexed lookup over the ids already on the result.
-
-    Adds ``kind`` (the row's ``system_metadata["source"]`` -- ``code_repo`` for a
-    repository manifest, ``code`` for a code file), ``source`` (the repository's
-    credential-free URL, or its path for a local project) and ``path``. Items
-    whose row carries no such metadata -- ordinary documents -- are untouched,
-    and any failure here leaves the items exactly as the pipeline reported them:
-    this names what was stored, it never decides whether the remember succeeded.
-    """
-    from uuid import UUID
-
-    items = [item for item in (result.items or []) if item.get("id")]
-    if not items:
-        return
-    try:
-        from sqlalchemy import select
-
-        from cognee.infrastructure.databases.relational import get_relational_engine
-        from cognee.modules.data.models.Data import Data
-
-        by_id = {}
-        for item in items:
-            try:
-                by_id.setdefault(UUID(str(item["id"])), []).append(item)
-            except (TypeError, ValueError):
-                continue
-        if not by_id:
-            return
-
-        db_engine = get_relational_engine()
-        async with db_engine.get_async_session() as session:
-            rows = (
-                (await session.execute(select(Data).filter(Data.id.in_(list(by_id)))))
-                .scalars()
-                .all()
-            )
-            metadata_by_id = {row.id: dict(row.system_metadata or {}) for row in rows}
-
-        for data_id, matching_items in by_id.items():
-            metadata = metadata_by_id.get(data_id) or {}
-            kind = metadata.get("source")
-            if not kind:
-                continue
-            for item in matching_items:
-                item["kind"] = kind
-                repo_url = metadata.get("repo_url")
-                repo_path = metadata.get("repo_path")
-                if repo_url or repo_path:
-                    item["source"] = repo_url or repo_path
-                if repo_path:
-                    item["path"] = repo_path
-    except Exception:
-        logger.debug("Could not attach item identity to the remember result", exc_info=True)
 
 
 PRESORT_FOLDERS_ENV = "PRESORT_FOLDERS_ENABLED"
@@ -1111,22 +1054,13 @@ async def remember(
 
     # content_type="code" was removed (SDK-793): a repository is ordinary data
     # and builds through add() + cognify(). Callers still passing it keep
-    # working -- and keep the behaviour they had, which is why the value is
-    # translated rather than dropped. It said two things, and both have to
-    # survive the translation or the deprecation changes results silently:
-    # the removed route indexed the code graph only (include_documents=False),
-    # and it took every item as a repository spec, cloning any git remote
-    # (treat_as_repository=True). Without the second, a Bitbucket or
-    # self-hosted forge URL -- which add()'s own detection deliberately does
-    # not claim -- would be scraped as a web page instead of cloned. An
-    # explicit codegraph_config still wins over both. Translated here, before
-    # any path reads content_type.
+    # working -- and keep the behaviour they had, so the value is translated
+    # (with_legacy_code_content_type, shared with the HTTP route) rather than
+    # dropped. An explicit codegraph_config key wins over the translation.
+    # Translated here, before any path reads content_type.
     if kwargs.get("content_type") == "code":
         kwargs.pop("content_type")
-        codegraph_config = dict(kwargs.get("codegraph_config") or {})
-        codegraph_config.setdefault("include_documents", False)
-        codegraph_config.setdefault("treat_as_repository", True)
-        kwargs["codegraph_config"] = codegraph_config
+        kwargs["codegraph_config"] = with_legacy_code_content_type(kwargs.get("codegraph_config"))
         logger.warning(
             "remember(content_type='code') is deprecated: pass the repository path or URL "
             'as data with codegraph_config={"include_documents": False, '
@@ -1936,7 +1870,6 @@ async def _remember_inner(
             )
 
             result._resolve(cognify_result)
-            await _attach_item_identity(result)
 
             if auto_improve:
                 from cognee.api.v1.improve import improve
