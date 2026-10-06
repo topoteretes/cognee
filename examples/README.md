@@ -20,7 +20,7 @@ They double as the smoke-test corpus the team uses to verify behaviour across th
 
 | Folder | What lives there | Count |
 |---|---|---|
-| [`guides/`](guides/) | One feature per script: concise, self-contained how-tos | 38 |
+| [`guides/`](guides/) | One feature per script: concise, self-contained how-tos | 42 |
 | [`advanced_guides/`](advanced_guides/) | Deeper takes on topics a guide already covers | 8 |
 | [`demos/`](demos/) | Multiple features stitched into use cases, grouped by topic | 28 |
 | [`cookbooks/`](cookbooks/) | Applications you build and keep running: ingest, graph model, UI, live sync, an agent | 5 |
@@ -44,6 +44,7 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 | Script | Demonstrates |
 |---|---|
 | [`sessions.py`](guides/sessions.py) | Session-scoped memory via `session_id` |
+| [`session_node_sets.py`](guides/session_node_sets.py) | Per-project session memory: pin a `node_set` on a session, bridge it with `improve()`, recall with `node_name` |
 | [`session_distillation.py`](guides/session_distillation.py) | Distilling a session into durable preferences |
 | [`global_context_index.py`](guides/global_context_index.py) | Building the index with `improve(build_global_context_index=True)` and updating it incrementally |
 | [`global_context_index_recall.py`](guides/global_context_index_recall.py) | What `include_global_context_index` adds to `GRAPH_COMPLETION` retrieval |

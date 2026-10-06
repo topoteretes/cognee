@@ -31,7 +31,10 @@ from cognee.infrastructure.session.session_context_models import (
     MIN_GATE_CONFIDENCE,
     SessionContextEntry,
 )
-from cognee.infrastructure.session.session_node_set import get_session_node_set
+from cognee.infrastructure.session.session_node_set import (
+    bridge_node_set,
+    get_session_node_set,
+)
 from cognee.infrastructure.session.session_persist_watermark import (
     get_distilled_entry_ids,
     save_distilled_entry_ids,
@@ -438,10 +441,8 @@ async def publish_distilled_lessons(
     session_node_set = await get_session_node_set(
         get_session_manager(), scope.user_id, scope.session_id
     )
-    node_set = list(
-        dict.fromkeys(
-            [*DISTILLATE_NODE_SET, truth_session_node_set(scope.session_id), *session_node_set]
-        )
+    node_set = bridge_node_set(
+        [*DISTILLATE_NODE_SET, truth_session_node_set(scope.session_id)], session_node_set
     )
     await add(documents, dataset_id=scope.dataset.id, user=scope.user, node_set=node_set)
     await cognify(datasets=[scope.dataset.id], user=scope.user)

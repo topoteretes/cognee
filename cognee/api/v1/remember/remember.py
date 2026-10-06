@@ -279,10 +279,16 @@ async def _add_to_session(session_id: str, data, user, node_set: list[str] | Non
     ``node_set`` is the call-level ``remember(..., node_set=[...])``: it pins the
     session's node set before the entry is written, exactly as the field on a
     typed entry does, and raises ``SessionNodeSetConflictError`` when the
-    session already carries a different set.
+    session already carries a different set. It is validated first, by the same
+    rule as the field, so an invalid value fails even when nothing is written.
     """
     from cognee.infrastructure.session.get_session_manager import get_session_manager
+    from cognee.infrastructure.session.session_node_set import (
+        normalize_node_set,
+        pin_session_node_set,
+    )
 
+    node_set = normalize_node_set(node_set)
     sm = get_session_manager()
     if not sm.is_available:
         logger.warning("remember: session cache not available (enable CACHING=true)")
@@ -308,9 +314,7 @@ async def _add_to_session(session_id: str, data, user, node_set: list[str] | Non
         return
 
     if node_set:
-        from cognee.infrastructure.session.session_node_set import pin_session_node_set
-
-        await pin_session_node_set(sm, user_id, session_id, list(node_set))
+        await pin_session_node_set(sm, user_id, session_id, node_set)
 
     await sm.add_qa(
         user_id=user_id,
@@ -322,23 +326,29 @@ async def _add_to_session(session_id: str, data, user, node_set: list[str] | Non
     logger.info("remember: added entry to session '%s'", session_id)
 
 
-def _entry_with_node_set(entry: "MemoryEntry", node_set: list[str]) -> "MemoryEntry":
+def _entry_with_node_set(entry: "MemoryEntry", node_set) -> "MemoryEntry":
     """Apply the call-level ``node_set`` kwarg to a typed entry.
 
-    The field on the entry and the kwarg are two spellings of one thing: the
-    kwarg fills an empty field, agrees with an equal one, and is an error
-    against a different one or on an entry type that cannot carry a node set.
-    Both are checked here so the kwarg is never silently ignored.
+    The field on the entry and the kwarg are two spellings of one thing, and
+    both go through ``normalize_node_set``: the kwarg fills an empty field,
+    agrees with an equal one, and is an error against a different one or on an
+    entry type that cannot carry a node set. An empty kwarg means "no node set"
+    and changes nothing. The filled entry is rebuilt through validation, never
+    copied around it, so the field's rule always runs.
     """
+    from cognee.infrastructure.session.session_node_set import normalize_node_set
+
+    requested = normalize_node_set(node_set)
+    if not requested:
+        return entry
     if not isinstance(entry, (QAEntry, TraceEntry)):
         raise TypeError(
             f"node_set is not supported for {type(entry).__name__}; only QAEntry and "
             "TraceEntry carry a session node_set"
         )
-    requested = list(node_set)
     if not entry.node_set:
-        return entry.model_copy(update={"node_set": requested})
-    if sorted(set(entry.node_set)) != sorted(set(requested)):
+        return type(entry).model_validate({**entry.model_dump(), "node_set": requested})
+    if entry.node_set != requested:
         raise ValueError(
             f"node_set given twice with different values: entry.node_set={entry.node_set}, "
             f"node_set={requested}; pass one of them"

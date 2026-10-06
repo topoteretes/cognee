@@ -11,7 +11,7 @@ Raw data (str / bytes / file-like / list of the above) continues to
 flow through the permanent add+cognify path unchanged.
 """
 
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator
@@ -29,17 +29,30 @@ class SessionNodeSetEntry(BaseModel):
     (``SessionNodeSetConflictError``). ``improve()`` appends the pinned set to
     the node set of everything it bridges from the session into the graph, so a
     ``node_name``-scoped recall sees it. Like the call-level ``node_set`` on
-    ``remember()``, ``add()`` and ``update()``, the list is not size-limited;
-    only an empty name is refused, since it would pin a node set with no name.
+    ``remember()``, ``add()`` and ``update()``, the list is not size-limited.
+
+    Validation and normalization are ``normalize_node_set``'s, the rule every
+    session node-set input shares: a list of non-blank names, stored sorted
+    and deduplicated; a bare string or a blank name is refused.
     """
 
-    node_set: list[Annotated[str, Field(min_length=1)]] | None = Field(
+    node_set: list[str] | None = Field(
         default=None,
         description=(
             "Optional node set pinned on the session; kept on the graph nodes "
-            "improve() builds from it. Immutable once set for a session."
+            "improve() builds from it. Immutable once set for a session. A list of "
+            "non-empty names, stored sorted and deduplicated."
         ),
     )
+
+    @field_validator("node_set", mode="before")
+    @classmethod
+    def _normalize_node_set(cls, value):
+        # Imported here: entries.py is loaded by ``import cognee`` before the
+        # session infrastructure, and the rule must stay in one place.
+        from cognee.infrastructure.session.session_node_set import normalize_node_set
+
+        return normalize_node_set(value)
 
 
 class QAEntry(SessionNodeSetEntry):

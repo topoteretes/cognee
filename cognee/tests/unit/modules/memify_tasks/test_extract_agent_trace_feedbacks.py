@@ -56,6 +56,7 @@ class FakeSessionManager:
         self.session_last_n_calls: list = []
         self.failing_sessions: set[str] = set()
         self.unreadable_context_sessions: set[str] = set()
+        self.strict_context_reads = 0
 
     def add_step(self, session_id: str, feedback: str = "", return_value=None):
         self.traces.setdefault(session_id, []).append(
@@ -81,6 +82,8 @@ class FakeSessionManager:
         return [entry.session_feedback for entry in entries]
 
     async def get_session_context_entries(self, *, user_id, session_id=None, raise_on_error=False):
+        if raise_on_error:
+            self.strict_context_reads += 1
         if session_id in self.unreadable_context_sessions:
             # The real manager fails open unless asked to raise.
             if raise_on_error:
@@ -497,3 +500,39 @@ async def test_an_unreadable_pin_skips_the_session_this_run_instead_of_bridging_
     assert [window.session_id for window in windows] == ["other"]
     manager.unreadable_context_sessions.clear()
     assert await TRACE_PERSIST_WATERMARK.read_count(manager, USER_ID, "s") == 0
+
+
+@pytest.mark.asyncio
+async def test_one_strict_snapshot_serves_the_watermark_and_the_pin(manager):
+    """The watermark and the pin come from one read of the session's context rows."""
+    manager.add_step("s", feedback="edit succeeded.")
+    _pin(manager, "s", ["project-a"])
+
+    windows = await _extract(["s"])
+
+    assert [window.node_set for window in windows] == [("project-a",)]
+    assert manager.strict_context_reads == 1
+
+
+@pytest.mark.asyncio
+async def test_a_pin_written_with_a_step_after_the_snapshot_is_still_carried(manager):
+    """Race: a first pin and its step land between the count and the fetch.
+
+    The fetched step count no longer matches the counted one, so the pin is
+    read again rather than taken from the earlier snapshot.
+    """
+    manager.add_step("s", feedback="first step.")
+    real_fetch = manager.get_agent_trace_session
+
+    async def fetch_after_a_pinned_write(*, user_id, session_id=None, last_n=None):
+        _pin(manager, session_id, ["project-a"])
+        manager.add_step(session_id, feedback="pinned step.")
+        manager.get_agent_trace_session = real_fetch
+        return await real_fetch(user_id=user_id, session_id=session_id, last_n=last_n)
+
+    manager.get_agent_trace_session = fetch_after_a_pinned_write
+
+    windows = await _extract(["s"])
+
+    assert [window.node_set for window in windows] == [("project-a",)]
+    assert manager.strict_context_reads == 2

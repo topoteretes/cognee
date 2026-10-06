@@ -146,7 +146,7 @@ def test_node_set_is_not_size_limited_like_the_call_level_node_set():
     many = [f"project-{i}" for i in range(40)]
     long_name = "p" * 1000
 
-    assert QAEntry(question="q", answer="a", node_set=many).node_set == many
+    assert QAEntry(question="q", answer="a", node_set=many).node_set == sorted(many)
     assert TraceEntry(origin_function="f", node_set=[long_name]).node_set == [long_name]
 
 
@@ -156,6 +156,31 @@ def test_an_empty_node_set_name_is_refused():
 
     with pytest.raises(ValidationError):
         QAEntry(question="q", answer="a", node_set=["project-a", ""])
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        pytest.param("project-a", id="bare-string"),
+        pytest.param([""], id="empty-name"),
+        pytest.param(["   "], id="blank-name"),
+        pytest.param(["project-a", 7], id="non-string-name"),
+        pytest.param({"project-a"}, id="set-not-list"),
+    ],
+)
+def test_the_field_refuses_what_the_shared_rule_refuses(bad):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        QAEntry(question="q", answer="a", node_set=bad)
+
+
+def test_the_field_stores_the_set_sorted_and_deduplicated():
+    entry = TraceEntry(origin_function="f", node_set=["b", "a", "b"])
+
+    assert entry.node_set == ["a", "b"]
+    assert TraceEntry(origin_function="f", node_set=[]).node_set == []
+    assert TraceEntry(origin_function="f").node_set is None
 
 
 def test_the_conflict_error_is_exported_from_the_package():
@@ -198,6 +223,51 @@ def test_kwarg_on_an_entry_that_cannot_carry_a_node_set_is_an_error():
         )
 
 
+@pytest.mark.parametrize(
+    "bad",
+    [
+        pytest.param("project-a", id="bare-string"),
+        pytest.param([""], id="empty-name"),
+        pytest.param(["  "], id="blank-name"),
+    ],
+)
+def test_kwarg_is_validated_by_the_same_rule_as_the_field(bad):
+    """The kwarg used to skip validation: [""] was stored and a string was split."""
+    with pytest.raises(ValueError, match="node_set"):
+        remember_module._entry_with_node_set(QAEntry(question="q", answer="a"), bad)
+
+
+def test_kwarg_fill_is_normalized_like_the_field():
+    applied = remember_module._entry_with_node_set(
+        QAEntry(question="q", answer="a"), ["b", "a", "b"]
+    )
+
+    assert applied.node_set == ["a", "b"]
+
+
+def test_an_empty_kwarg_means_no_node_set_and_changes_nothing():
+    from cognee.memory.entries import FeedbackEntry
+
+    entry = QAEntry(question="q", answer="a", node_set=["project-a"])
+    feedback = FeedbackEntry(qa_id="qa-1", feedback_score=5)
+
+    assert remember_module._entry_with_node_set(entry, []) is entry
+    assert remember_module._entry_with_node_set(feedback, []) is feedback
+
+
+@pytest.mark.asyncio
+async def test_remember_refuses_an_invalid_kwarg_before_dispatching(monkeypatch):
+    dispatched = AsyncMock()
+    monkeypatch.setattr(remember_module, "_remember_entry", dispatched)
+
+    with pytest.raises(ValueError, match="not a single string"):
+        await remember_module.remember(
+            QAEntry(question="q", answer="a"), session_id="s", node_set="project-a"
+        )
+
+    dispatched.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 async def test_remember_applies_the_kwarg_before_dispatching_a_typed_entry(monkeypatch):
     """``remember(entry, session_id=..., node_set=[...])`` must not drop the kwarg."""
@@ -216,15 +286,11 @@ async def test_remember_applies_the_kwarg_before_dispatching_a_typed_entry(monke
     assert seen["entry"].node_set == ["project-a"]
 
 
-def _plain_text_session_manager(pinned: list[str] | None = None) -> MagicMock:
-    return _session_manager(pinned)
-
-
 @pytest.mark.asyncio
 async def test_plain_text_with_a_node_set_pins_the_session_before_the_write(monkeypatch):
     gsm = sys.modules["cognee.infrastructure.session.get_session_manager"]
 
-    manager = _plain_text_session_manager()
+    manager = _session_manager()
     monkeypatch.setattr(gsm, "get_session_manager", lambda: manager)
     calls = []
     manager.create_session_context_entry.side_effect = lambda **kw: calls.append("pin") or True
@@ -245,7 +311,7 @@ async def test_plain_text_with_a_node_set_pins_the_session_before_the_write(monk
 async def test_plain_text_with_a_conflicting_node_set_writes_nothing(monkeypatch):
     gsm = sys.modules["cognee.infrastructure.session.get_session_manager"]
 
-    manager = _plain_text_session_manager(pinned=["project-a"])
+    manager = _session_manager(pinned=["project-a"])
     monkeypatch.setattr(gsm, "get_session_manager", lambda: manager)
 
     with pytest.raises(SessionNodeSetConflictError):
@@ -260,10 +326,30 @@ async def test_plain_text_with_a_conflicting_node_set_writes_nothing(monkeypatch
 async def test_plain_text_without_a_node_set_never_touches_the_pin(monkeypatch):
     gsm = sys.modules["cognee.infrastructure.session.get_session_manager"]
 
-    manager = _plain_text_session_manager()
+    manager = _session_manager()
     monkeypatch.setattr(gsm, "get_session_manager", lambda: manager)
 
     await remember_module._add_to_session("s", "a fact", SimpleNamespace(id=uuid4()))
 
     manager.get_session_context_entries.assert_not_awaited()
     manager.add_qa.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "bad",
+    [pytest.param("project-a", id="bare-string"), pytest.param([""], id="empty-name")],
+)
+async def test_plain_text_refuses_an_invalid_node_set_and_writes_nothing(monkeypatch, bad):
+    """A bare string used to pin one node set per letter of the name."""
+    gsm = sys.modules["cognee.infrastructure.session.get_session_manager"]
+    manager = _session_manager()
+    monkeypatch.setattr(gsm, "get_session_manager", lambda: manager)
+
+    with pytest.raises(ValueError, match="node_set"):
+        await remember_module._add_to_session(
+            "s", "a fact", SimpleNamespace(id=uuid4()), node_set=bad
+        )
+
+    manager.create_session_context_entry.assert_not_awaited()
+    manager.add_qa.assert_not_awaited()

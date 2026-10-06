@@ -19,9 +19,8 @@ from cognee.exceptions import CogneeSystemError
 from cognee.infrastructure.databases.cache.models import SessionQAEntry
 from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
 from cognee.infrastructure.session.session_persist_watermark import (
+    SESSION_PERSIST_WATERMARK,
     SessionPersistWindow,
-    get_persisted_qa_count,
-    save_persisted_qa_count,
 )
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunErrored
 from cognee.tasks.memify.cognify_session import cognify_session
@@ -115,7 +114,7 @@ async def test_watermark_skips_already_persisted_entries(user, manager):
     user_id = str(user.id)
     for index in range(5):
         manager.add_entry(user_id, SESSION, f"q{index}", f"a{index}")
-    await save_persisted_qa_count(manager, user_id, SESSION, 3)
+    await SESSION_PERSIST_WATERMARK.write_count(manager, user_id, SESSION, 3)
 
     windows = await _extract_windows([SESSION])
 
@@ -130,7 +129,7 @@ async def test_watermark_skips_already_persisted_entries(user, manager):
 async def test_fully_persisted_session_yields_nothing(user, manager):
     user_id = str(user.id)
     manager.add_entry(user_id, SESSION, "q1", "a1")
-    await save_persisted_qa_count(manager, user_id, SESSION, 1)
+    await SESSION_PERSIST_WATERMARK.write_count(manager, user_id, SESSION, 1)
 
     assert await _extract_windows([SESSION]) == []
 
@@ -140,7 +139,7 @@ async def test_stale_watermark_resets_and_extracts_everything(user, manager):
     """A watermark above the entry count (cleared + rebuilt session) restarts from zero."""
     user_id = str(user.id)
     manager.add_entry(user_id, SESSION, "rebuilt-q", "rebuilt-a")
-    await save_persisted_qa_count(manager, user_id, SESSION, 10)
+    await SESSION_PERSIST_WATERMARK.write_count(manager, user_id, SESSION, 10)
 
     windows = await _extract_windows([SESSION])
 
@@ -152,11 +151,11 @@ async def test_stale_watermark_resets_and_extracts_everything(user, manager):
 @pytest.mark.asyncio
 async def test_watermark_roundtrip_and_update(user, manager):
     user_id = str(user.id)
-    assert await get_persisted_qa_count(manager, user_id, SESSION) == 0
-    await save_persisted_qa_count(manager, user_id, SESSION, 4)
-    assert await get_persisted_qa_count(manager, user_id, SESSION) == 4
-    await save_persisted_qa_count(manager, user_id, SESSION, 7)
-    assert await get_persisted_qa_count(manager, user_id, SESSION) == 7
+    assert await SESSION_PERSIST_WATERMARK.read_count(manager, user_id, SESSION) == 0
+    await SESSION_PERSIST_WATERMARK.write_count(manager, user_id, SESSION, 4)
+    assert await SESSION_PERSIST_WATERMARK.read_count(manager, user_id, SESSION) == 4
+    await SESSION_PERSIST_WATERMARK.write_count(manager, user_id, SESSION, 7)
+    assert await SESSION_PERSIST_WATERMARK.read_count(manager, user_id, SESSION) == 7
     # One row per session, updated in place — not one row per save.
     assert len(manager.context[(user_id, SESSION)]) == 1
 
@@ -182,7 +181,7 @@ async def test_cognify_session_advances_watermark_on_success(user, manager, monk
     )
     await cognify_session(window, dataset_id=uuid.uuid4(), user=user)
 
-    assert await get_persisted_qa_count(manager, user_id, SESSION) == 3
+    assert await SESSION_PERSIST_WATERMARK.read_count(manager, user_id, SESSION) == 3
 
 
 @pytest.mark.asyncio
@@ -207,7 +206,7 @@ async def test_cognify_session_keeps_watermark_on_failure(user, manager, monkeyp
     with pytest.raises(CogneeSystemError):
         await cognify_session(window, dataset_id=uuid.uuid4(), user=user)
 
-    assert await get_persisted_qa_count(manager, user_id, SESSION) == 0
+    assert await SESSION_PERSIST_WATERMARK.read_count(manager, user_id, SESSION) == 0
 
 
 @pytest.mark.asyncio
@@ -257,9 +256,9 @@ async def test_budget_failure_keeps_every_unpersisted_watermark_and_stops(
 
     assert len(builds) == 2  # the third window was never built
     assert len(ingested_texts) == 2
-    assert await get_persisted_qa_count(manager, user_id, "budget_session_a") == 1
-    assert await get_persisted_qa_count(manager, user_id, "budget_session_b") == 0
-    assert await get_persisted_qa_count(manager, user_id, "budget_session_c") == 0
+    assert await SESSION_PERSIST_WATERMARK.read_count(manager, user_id, "budget_session_a") == 1
+    assert await SESSION_PERSIST_WATERMARK.read_count(manager, user_id, "budget_session_b") == 0
+    assert await SESSION_PERSIST_WATERMARK.read_count(manager, user_id, "budget_session_c") == 0
 
     # The budget is back: the next run re-extracts only what is still pending.
     async def fake_cognify(*args, **kwargs):
@@ -271,7 +270,7 @@ async def test_budget_failure_keeps_every_unpersisted_watermark_and_stops(
     await cognify_session(pending, dataset_id=dataset_id, user=user)
 
     for session_id in sessions:
-        assert await get_persisted_qa_count(manager, user_id, session_id) == 1
+        assert await SESSION_PERSIST_WATERMARK.read_count(manager, user_id, session_id) == 1
     assert await _extract_windows(sessions) == []
 
 
@@ -335,4 +334,4 @@ async def test_multi_run_completeness_without_reingestion(user, manager, monkeyp
     # what matters is the successful window covered it and the watermark
     # now marks it done.
     assert "unique-question-6" in combined
-    assert await get_persisted_qa_count(manager, user_id, SESSION) == 7
+    assert await SESSION_PERSIST_WATERMARK.read_count(manager, user_id, SESSION) == 7

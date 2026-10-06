@@ -141,7 +141,9 @@ There is no debounce timer: held-back entries wait for the next
 - **A session's node set is pinned once.** The first write carrying
   `node_set` fixes it for the session; a different set is a 409, start a
   new session instead. Bridged Q&A, traces and lessons carry the set, user
-  preferences never do.
+  preferences never do. The guarantee holds within one worker process (an
+  in-process lock); with several workers, send a session's writes to one.
+  Example: `examples/guides/session_node_sets.py`.
 - **Typed entries do not auto-improve.** `remember(QAEntry/TraceEntry/
   FeedbackEntry, session_id=...)` stores the entry but never starts an
   improve. Call `improve(session_ids=[...])` yourself.

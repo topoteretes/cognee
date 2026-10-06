@@ -3,6 +3,7 @@ from uuid import UUID
 import cognee
 from cognee.exceptions import CogneeSystemError, CogneeValidationError
 from cognee.infrastructure.session.get_session_manager import get_session_manager
+from cognee.infrastructure.session.session_node_set import bridge_node_set
 from cognee.infrastructure.session.session_persist_watermark import (
     TRACE_PERSIST_WATERMARK,
     TracePersistWindow,
@@ -76,10 +77,8 @@ async def cognify_agent_trace_feedback(
             text = window.text if window is not None else item
 
             logger.info("Processing agent trace content for cognification")
-            # The stage's node set first, then the session's pinned node set
-            # (plain-text callers carry none).
-            session_node_set = window.node_set if window is not None else ()
-            node_set = list(dict.fromkeys([node_set_name, *session_node_set]))
+            # Plain-text callers carry no session, so no pinned node set.
+            node_set = bridge_node_set([node_set_name], window.node_set if window else ())
             await cognee.add(text, dataset_id=dataset_id, node_set=node_set, user=user)
             logger.debug("Agent trace content added to cognee with node_set: %s", node_set)
             # raise_on_error=False: one trace session's failed build must not kill

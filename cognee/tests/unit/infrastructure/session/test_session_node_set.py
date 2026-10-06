@@ -6,7 +6,9 @@ from cognee.infrastructure.session.session_node_set import (
     SESSION_NODE_SET_STATE_ID,
     SESSION_NODE_SET_STATE_KIND,
     SessionNodeSetConflictError,
+    bridge_node_set,
     get_session_node_set,
+    normalize_node_set,
     pin_session_node_set,
 )
 
@@ -122,3 +124,49 @@ async def test_reading_the_pinned_set_raises_on_a_failed_read():
 
     with pytest.raises(ConnectionError):
         await get_session_node_set(manager, "u", "s")
+
+
+# ------------------------------------------------- the one rule every path shares
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (None, None),
+        ([], []),
+        (["b", "a", "b"], ["a", "b"]),
+        (("a",), ["a"]),
+    ],
+    ids=["none", "empty-list", "sorted-deduplicated", "tuple"],
+)
+def test_normalize_node_set_accepts(value, expected):
+    assert normalize_node_set(value) == expected
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["project-a", b"project-a", [""], ["  "], ["a", None], {"a"}, 5],
+    ids=["bare-string", "bytes", "empty-name", "blank-name", "non-string", "set", "int"],
+)
+def test_normalize_node_set_refuses(value):
+    with pytest.raises(ValueError, match="node_set"):
+        normalize_node_set(value)
+
+
+@pytest.mark.asyncio
+async def test_a_bare_string_is_refused_at_pin_time_and_pins_nothing():
+    manager = FakeSessionManager()
+
+    with pytest.raises(ValueError, match="not a single string"):
+        await pin_session_node_set(manager, "u", "s", "project-a")
+
+    assert manager.rows == []
+
+
+def test_bridge_node_set_keeps_stage_sets_first_and_drops_duplicates():
+    assert bridge_node_set(["stage", "stage:s1"], ("project-a", "stage")) == [
+        "stage",
+        "stage:s1",
+        "project-a",
+    ]
+    assert bridge_node_set(["stage"], ()) == ["stage"]
