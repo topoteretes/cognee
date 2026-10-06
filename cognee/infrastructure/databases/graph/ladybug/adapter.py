@@ -22,6 +22,7 @@ from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.cache.config import get_cache_config
 from cognee.infrastructure.databases.graph.graph_db_interface import (
     GraphDBInterface,
+    temporal_anchors_from_rows,
 )
 from cognee.infrastructure.databases.provenance import (
     EdgeDeleteData,
@@ -201,6 +202,14 @@ def _parse_properties_blob(raw: Any) -> dict[str, Any]:
 cache_config = get_cache_config()
 if cache_config.shared_ladybug_lock:
     from cognee.infrastructure.databases.cache.get_cache_engine import get_cache_engine
+
+
+def _json_string(value: Any) -> str:
+    """A string field read back through json_extract, unquoted."""
+    if value is None:
+        return ""
+    text = str(value)
+    return text[1:-1] if len(text) >= 2 and text[0] == text[-1] == '"' else text
 
 
 class LadybugAdapter(GraphDBInterface):
@@ -3360,6 +3369,14 @@ class LadybugAdapter(GraphDBInterface):
             logger.error(f"Error during ID-filtered graph data retrieval: {e!s}")
             raise
 
+    async def get_graph_counts(self) -> tuple[int, int]:
+        """Count nodes and edges with two aggregation queries."""
+        node_count_result = await self.query("MATCH (n:Node) RETURN COUNT(n)")
+        edge_count_result = await self.query("MATCH ()-[r:EDGE]->() RETURN COUNT(r)")
+        num_nodes = node_count_result[0][0] if node_count_result else 0
+        num_edges = edge_count_result[0][0] if edge_count_result else 0
+        return num_nodes, num_edges
+
     async def get_graph_metrics(self, include_optional=False) -> dict[str, Any]:
         """
         Get metrics on graph structure and connectivity.
@@ -3381,10 +3398,7 @@ class LadybugAdapter(GraphDBInterface):
         """
 
         try:
-            node_count_result = await self.query("MATCH (n:Node) RETURN COUNT(n)")
-            edge_count_result = await self.query("MATCH ()-[r:EDGE]->() RETURN COUNT(r)")
-            num_nodes = node_count_result[0][0] if node_count_result else 0
-            num_edges = edge_count_result[0][0] if edge_count_result else 0
+            num_nodes, num_edges = await self.get_graph_counts()
 
             # Calculate mandatory metrics
             mandatory_metrics = {
@@ -3834,6 +3848,108 @@ class LadybugAdapter(GraphDBInterface):
         time_ids_list = [item[0] for item in time_nodes]
 
         return time_ids_list
+
+    async def get_timestamps_in_range(
+        self, start: int | None, end: int | None
+    ) -> list[dict[str, Any]]:
+        """Timestamp nodes whose ``[time_at, time_until)`` overlaps ``[start, end)``."""
+        conditions = ["time_at IS NOT NULL"]
+        params: dict[str, Any] = {}
+        if end is not None:
+            conditions.append("time_at < $window_end")
+            params["window_end"] = int(end)
+        if start is not None:
+            conditions.append("time_until > $window_start")
+            params["window_start"] = int(start)
+        # Properties live in a JSON string column; the casts run only on Timestamp
+        # nodes (filtered first). A node written before ``time_until`` existed
+        # yields '' from json_extract and a stored null yields 'null'; both must
+        # become NULL *before* the cast — Kuzu casts a whole batch at once, so a
+        # CASE guard around the CAST does not stop it from raising on them.
+        query_str = f"""
+        MATCH (n:Node)
+        WHERE n.type = 'Timestamp'
+        WITH n,
+             json_extract(n.properties, '$.time_at') AS at_str,
+             json_extract(n.properties, '$.time_until') AS until_str
+        WITH n,
+             CAST(nullif(nullif(at_str, ''), 'null') AS INT64) AS time_at,
+             CAST(nullif(nullif(until_str, ''), 'null') AS INT64) AS until_raw
+        WITH n, time_at, COALESCE(until_raw, time_at + 1000) AS time_until
+        WHERE {" AND ".join(conditions)}
+        RETURN n.id, json_extract(n.properties, '$.timestamp_str'), time_at, time_until
+        ORDER BY time_at, n.id
+        """
+        rows = await self.query(query_str, params)
+        return [
+            {
+                "id": row[0],
+                "type": "Timestamp",
+                "timestamp_str": _json_string(row[1]),
+                "time_at": row[2],
+                "time_until": row[3],
+            }
+            for row in rows
+        ]
+
+    async def get_temporal_anchors(
+        self,
+        chunk_ids,
+        entity_ids,
+        start: int | None,
+        end: int | None,
+    ) -> dict[str, set[str]]:
+        """Candidates attached to a Timestamp overlapping ``[start, end)``: directly,
+        or (for chunks) through an entity they ``contains``. See the interface."""
+        chunk_list = sorted({str(node_id) for node_id in chunk_ids})
+        entity_list = sorted({str(node_id) for node_id in entity_ids})
+        if not chunk_list and not entity_list:
+            return temporal_anchors_from_rows([], [])
+        conditions = ["time_at IS NOT NULL"]
+        params: dict[str, Any] = {}
+        if end is not None:
+            conditions.append("time_at < $window_end")
+            params["window_end"] = int(end)
+        if start is not None:
+            conditions.append("time_until > $window_start")
+            params["window_start"] = int(start)
+        # The same JSON casts as get_timestamps_in_range, applied only to the
+        # Timestamp nodes the candidates' edges reach.
+        window = f"""
+        WITH {{carry}}, t,
+             json_extract(t.properties, '$.time_at') AS at_str,
+             json_extract(t.properties, '$.time_until') AS until_str
+        WITH {{carry}}, t,
+             CAST(nullif(nullif(at_str, ''), 'null') AS INT64) AS time_at,
+             CAST(nullif(nullif(until_str, ''), 'null') AS INT64) AS until_raw
+        WITH {{carry}}, t, time_at, COALESCE(until_raw, time_at + 1000) AS time_until
+        WHERE {" AND ".join(conditions)}
+        """
+        direct_rows = await self.query(
+            f"""
+            MATCH (c:Node)-[r:EDGE]->(t:Node)
+            WHERE c.id IN $candidate_ids AND t.type = 'Timestamp'
+            {window.format(carry="c")}
+            RETURN DISTINCT c.id, c.type, t.id
+            """,
+            {**params, "candidate_ids": chunk_list + entity_list},
+        )
+        via_rows = []
+        if chunk_list:
+            via_rows = await self.query(
+                f"""
+                MATCH (c:Node)-[r1:EDGE]->(e:Node)-[r2:EDGE]->(t:Node)
+                WHERE c.id IN $chunk_ids AND r1.relationship_name = 'contains'
+                  AND e.type = 'Entity' AND t.type = 'Timestamp'
+                {window.format(carry="c, e")}
+                RETURN DISTINCT c.id, e.id, t.id
+                """,
+                {**params, "chunk_ids": chunk_list},
+            )
+        return temporal_anchors_from_rows(
+            [(row[0], row[1], row[2]) for row in direct_rows],
+            [(row[0], row[1], row[2]) for row in via_rows],
+        )
 
     async def get_triplets_batch(self, offset: int, limit: int) -> list[dict[str, Any]]:
         """
