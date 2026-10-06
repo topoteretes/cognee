@@ -4,6 +4,7 @@ from .visualize import (
     visualize_graph_json,
     visualize_semantic_json,
     stream_dataset_graph,
+    fetch_visualization_data_for_dataset,
     build_brains_payload,
     build_brains_summary_payload,
     get_live_events,
