@@ -1515,7 +1515,13 @@ def preprocess(graph_data, schema_data: dict[str, Any] | None = None) -> Preproc
 # Properties the store is asked for when streaming. Every key the compact
 # fields below are derived from, including the name fallbacks: dropping `text`
 # here would name every chunk "Unnamed DocumentChunk".
-COMPACT_PROPERTY_KEYS = ("name", *_NAME_FALLBACK_KEYS, "belongs_to_set", "source_node_set")
+COMPACT_PROPERTY_KEYS = (
+    "name",
+    *_NAME_FALLBACK_KEYS,
+    "belongs_to_set",
+    "source_node_set",
+    "category",
+)
 
 
 def compact_node(node_id, node_info) -> dict[str, Any]:
@@ -1536,6 +1542,10 @@ def compact_node(node_id, node_info) -> dict[str, Any]:
     for key in ("belongs_to_set", "source_node_set"):
         if node_info.get(key) is not None:
             node[key] = node_info[key]
+    # Only an EntityType's category is the taxonomy: a custom graph model's node may
+    # carry a field of the same name that means something else.
+    if node_info.get("type") == "EntityType" and node_info.get("category") is not None:
+        node["category"] = node_info["category"]
     return node
 
 

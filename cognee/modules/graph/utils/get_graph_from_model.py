@@ -237,15 +237,19 @@ async def get_graph_from_model(
     )
 
 
-async def collect_stored_data_points(root: DataPoint) -> list[DataPoint]:
-    """The original DataPoints that storing ``root`` would persist.
+async def collect_stored_data_points(*roots: DataPoint) -> list[DataPoint]:
+    """The original DataPoints that storing ``roots`` would persist.
 
     Drives the real storage walk with throwaway accumulators, so this cannot drift from
     what ``add_data_points`` writes. See ``_walk_data_point`` for why the walk's own
-    ``nodes`` output cannot be used in their place.
+    ``nodes`` output cannot be used in their place. The roots share one walk, as
+    ``add_data_points`` shares one across a batch, so a node several roots link to is
+    visited once.
 
     Order follows the walk; treat the result as a set.
     """
     stored: list[DataPoint] = []
-    _walk_data_point(root, _WalkState(claimed_datapoints=stored))
+    state = _WalkState(claimed_datapoints=stored)
+    for root in roots:
+        _walk_data_point(root, state)
     return stored

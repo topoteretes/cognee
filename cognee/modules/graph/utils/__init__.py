@@ -6,6 +6,7 @@ from .get_graph_from_model import collect_stored_data_points, get_graph_from_mod
 from .prepare_edges_for_storage import ensure_default_edge_properties
 from .get_model_instance_from_graph import get_model_instance_from_graph
 from .retrieve_existing_edges import find_existing_edge_identities
+from .restore_entity_type_categories import restore_entity_type_categories
 from .convert_node_to_data_point import convert_node_to_data_point
 from .deduplicate_nodes_and_edges import deduplicate_nodes_and_edges
 from .temporal_conflict_resolver import tag_superseded_edges

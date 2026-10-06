@@ -1,4 +1,5 @@
 import importlib
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -36,6 +37,27 @@ def _two_node_graph():
         ],
         edges=[KGEdge(source_node_id="n1", target_node_id="n2", relationship_name="knows")],
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("enabled", [True, False])
+@patch.object(egd_module, "find_existing_edge_identities", new_callable=AsyncMock)
+async def test_stored_categories_are_read_only_when_classification_is_on(
+    mock_find_existing, enabled, monkeypatch
+):
+    """A user who never turns classification on must not pay a graph read for it."""
+    mock_find_existing.return_value = set()
+    monkeypatch.setattr(
+        egd_module,
+        "get_cognify_config",
+        lambda: SimpleNamespace(entity_type_classification=enabled),
+    )
+
+    await integrate_chunk_graphs(
+        [_make_chunk()], [_two_node_graph()], KnowledgeGraph, _mock_resolver()
+    )
+
+    assert egd_module.restore_entity_type_categories.await_count == (1 if enabled else 0)
 
 
 @pytest.mark.asyncio

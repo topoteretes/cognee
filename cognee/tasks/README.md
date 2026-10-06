@@ -16,6 +16,7 @@ task's output, `enriches`, `ctx` injection, `Drop`) are documented in
 | 2 | `documents.extract_chunks_from_documents` | `Document` → `DocumentChunk`s (uses `cognee.modules.chunking`) |
 | 3 | `graph.extract_graph_from_data` | chunks → chunks with `Entity`/`EntityType` nodes and edges attached (LLM, or GLiNER with `extractor="gliner_demo"`) |
 | 4 | `summarization.summarize_text` | chunks → `TextSummary` nodes (LLM) |
+| 4b | `graph.classify_entity_types` | new `EntityType`s → filed under a category, when `ENTITY_TYPE_CLASSIFICATION=true` (runs inside steps 3–4, before the write) |
 | 5 | `storage.add_data_points` | data points → written to graph + vector DB (+ edge evidence) |
 | 6 | `provenance.record_provenance` | audit-ledger rows, when `PROVENANCE_TRACKING=true` |
 | 7 | `graph.detect_contradictions` | `contradicts` edges, when `CONTRADICTION_DETECTION=true` |

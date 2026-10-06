@@ -7,6 +7,7 @@ from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.ontology.ontology_config import Config
 from cognee.tasks.graph import extract_graph_from_data
+from cognee.tasks.graph.classify_entity_types import classify_chunk_entity_types
 from cognee.tasks.summarization import summarize_text
 from cognee.tasks.summarization.build_summary_from_extraction import build_summary_from_extraction
 from cognee.tasks.summarization.models import TextSummary
@@ -23,8 +24,9 @@ async def extract_graph_and_summarize(
     summary_method: Literal["llm", "from_extraction"] | None = None,
     **kwargs,
 ) -> list[TextSummary | DocumentChunk]:
+    cognify_config = get_cognify_config()
     if summary_method is None:
-        summary_method = get_cognify_config().summary_method
+        summary_method = cognify_config.summary_method
     if summary_method == "from_extraction":
         # These summaries are built from what extraction returns, so extraction runs first.
         extracted_chunks = await extract_graph_from_data(
@@ -36,6 +38,8 @@ async def extract_graph_and_summarize(
             chunk_attachment=chunk_attachment,
             **kwargs,
         )
+        if cognify_config.entity_type_classification:
+            await classify_chunk_entity_types(extracted_chunks)
         # A chunk with no relations has no summary. It is returned as itself so
         # add_data_points still stores it.
         return [
@@ -58,6 +62,9 @@ async def extract_graph_and_summarize(
             summarization_model=summarization_model,
         ),
     )
+
+    if cognify_config.entity_type_classification:
+        await classify_chunk_entity_types(result_chunks[0])
 
     # Return only TextSummary objects, keeping the same logic as sequential execution of these tasks
     return result_chunks[1]
