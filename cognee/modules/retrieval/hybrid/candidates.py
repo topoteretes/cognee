@@ -38,6 +38,18 @@ class HybridCandidates:
             entities=self._first(self.entities, entity_ids),
         )
 
+    def extend(self, chunks: list) -> "HybridCandidates":
+        """The same candidates with new chunks appended.
+
+        A chunk whose id is already a candidate is not added again; order is
+        kept, so the fetch's ranking stays ahead of what is appended.
+        """
+        known = {result_id(chunk) for chunk in self.chunks}
+        return replace(
+            self,
+            chunks=list(self.chunks) + [chunk for chunk in chunks if result_id(chunk) not in known],
+        )
+
     def finalize(
         self, *, chunks_limit: int, entities_limit: int, entity_edge_budget: int | None = None
     ) -> dict:

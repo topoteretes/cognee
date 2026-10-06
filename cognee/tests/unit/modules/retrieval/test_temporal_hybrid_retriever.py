@@ -182,10 +182,25 @@ def test_finalize_can_size_the_fallback_fact_budget_for_the_entities_it_shows():
 # --- retriever flow ------------------------------------------------------------
 
 
-def _retriever(monkeypatch, *, anchors, interval, candidates, timestamps=(), empty=False):
+def _retriever(
+    monkeypatch,
+    *,
+    anchors,
+    interval,
+    candidates,
+    timestamps=(),
+    empty=False,
+    neighborhood=None,
+    vector_rows=None,
+):
+    """``neighborhood`` is what get_neighborhood returns for the in-window timestamps
+    (nodes, edges); ``vector_rows`` maps a collection name to the rows retrieve()
+    can return, so the expansion has something to resolve attached ids against."""
+
     class FakeGraphEngine:
         anchor_calls: list = []
         range_calls: list = []
+        neighborhood_calls: list = []
 
         async def get_temporal_anchors(self, chunk_ids, entity_ids, start, end):
             FakeGraphEngine.anchor_calls.append((set(chunk_ids), set(entity_ids), start, end))
@@ -195,12 +210,30 @@ def _retriever(monkeypatch, *, anchors, interval, candidates, timestamps=(), emp
             FakeGraphEngine.range_calls.append((start, end))
             return list(timestamps)
 
+        async def get_neighborhood(self, node_ids, depth=1, edge_types=None):
+            FakeGraphEngine.neighborhood_calls.append(list(node_ids))
+            if neighborhood is None:
+                return [], []
+            nodes, edges = neighborhood
+            seeds = set(node_ids)
+            # Serve both the expansion (timestamp seeds) and build_entities (entity seeds).
+            return nodes, [edge for edge in edges if edge[0] in seeds or edge[1] in seeds]
+
     class FakeGraph:
         async def is_empty(self):
             return empty
 
+    class FakeVector:
+        async def has_collection(self, name):
+            return name in (vector_rows or {})
+
+        async def retrieve(self, collection, ids):
+            wanted = set(ids)
+            return [row for row in (vector_rows or {}).get(collection, []) if row["id"] in wanted]
+
     class FakeUnified:
         graph = FakeGraph()
+        vector = FakeVector()
 
     async def fake_graph_engine():
         return FakeGraphEngine()
@@ -210,6 +243,7 @@ def _retriever(monkeypatch, *, anchors, interval, candidates, timestamps=(), emp
 
     FakeGraphEngine.anchor_calls = []
     FakeGraphEngine.range_calls = []
+    FakeGraphEngine.neighborhood_calls = []
     retriever = TemporalHybridRetriever(candidate_top_k=20, top_k=2)
     hybrid_fetch = AsyncMock(return_value=candidates)
     extract = AsyncMock(return_value=interval)
@@ -267,7 +301,10 @@ async def test_temporal_retriever_reranks_by_the_candidates_anchors(monkeypatch)
     result = await retriever.get_retrieved_objects(query="in 1950")
 
     assert retriever.last_reason is None
-    # The adapter is asked about the candidates, never about the whole window.
+    # The window is read once; with no timestamp in it nothing is added and the
+    # anchors are asked about hybrid's own candidates.
+    assert engine.range_calls == [(to_epoch_ms(_utc(1950, 1, 1)), to_epoch_ms(_utc(1951, 1, 1)))]
+    assert engine.neighborhood_calls == []
     assert engine.anchor_calls == [
         (
             {"c1", "c2", "c3"},
@@ -276,7 +313,6 @@ async def test_temporal_retriever_reranks_by_the_candidates_anchors(monkeypatch)
             to_epoch_ms(_utc(1951, 1, 1)),
         )
     ]
-    assert engine.range_calls == []
     assert retriever.last_anchors["chunk_ids"] == {"c2", "c3"}
     assert retriever.last_anchors["entity_ids"] == {"e2"}
     assert [chunk["id"] for chunk in result["chunks"]] == ["c2", "c3"]
@@ -394,3 +430,155 @@ async def test_temporal_retriever_propagates_hybrid_errors(monkeypatch):
     hybrid_fetch.side_effect = RuntimeError("hybrid down")
     with pytest.raises(RuntimeError, match="hybrid down"):
         await retriever.get_retrieved_objects(query="in 1950")
+
+
+# --- window expansion ------------------------------------------------------------
+
+TS_1950 = {"id": "ts_1950", "timestamp_str": "1950", "time_at": 0, "time_until": 1}
+TS_1950_06 = {"id": "ts_1950_06", "timestamp_str": "1950-06", "time_at": 2, "time_until": 3}
+WINDOW_1950 = (_utc(1950, 1, 1), _utc(1951, 1, 1), None)
+
+
+def _dated_graph():
+    """Rows r1..r3 and entity atlas hang off the two 1950 timestamps; c1 is a candidate
+    already; a schema table also points at a timestamp but is in no collection."""
+    nodes = [(node_id, {"id": node_id}) for node_id in ("r1", "r2", "r3", "atlas", "tbl", "c1")]
+    edges = [
+        ("r2", "ts_1950_06", "order_date", {}),
+        ("r1", "ts_1950", "order_date", {}),
+        ("r3", "ts_1950", "order_date", {}),
+        ("c1", "ts_1950", "contains", {}),
+        ("atlas", "ts_1950", "founded_at", {}),
+        ("tbl", "ts_1950", "whatever", {}),
+        ("atlas", "helios", "works_with", {"relationship_name": "works_with"}),
+    ]
+    return nodes, edges
+
+
+def _rows():
+    return {
+        "DltRow_text": [
+            {"id": "r1", "text": "row 1"},
+            {"id": "r2", "text": "row 2"},
+            {"id": "r3", "text": "row 3", "belongs_to_set": ["other"]},
+        ],
+        "DocumentChunk_text": [{"id": "c1", "text": "unrelated"}],
+        "Entity_name": [{"id": "atlas", "name": "Atlas", "description": "a company"}],
+    }
+
+
+@pytest.mark.asyncio
+async def test_window_expansion_adds_the_rows_the_window_points_at(monkeypatch):
+    """Nine rows approved on one day, one in the candidates: the other eight join.
+    Entities attached to the window do not: they stay with the entity lane."""
+    retriever, engine, _fetch, _extract = _retriever(
+        monkeypatch,
+        anchors=_anchors(chunks=("c1", "r1", "r2", "r3"), entities=("atlas",)),
+        interval=WINDOW_1950,
+        candidates=_candidates(),
+        timestamps=[TS_1950, TS_1950_06],
+        neighborhood=_dated_graph(),
+        vector_rows=_rows(),
+    )
+    retriever.top_k = 4
+    result = await retriever.get_retrieved_objects(query="in 1950")
+
+    assert retriever.last_reason is None
+    # expansion: attached ids in timestamp order, the table (no collection) dropped,
+    # c1 already a candidate; the anchors are then asked about the widened set
+    assert retriever.last_expansion == {"r1", "r2", "r3"}
+    assert engine.anchor_calls[0][0] == {"c1", "c2", "c3", "r1", "r2", "r3"}
+    # entities are never expanded: the anchored entity "atlas" stays out
+    assert engine.anchor_calls[0][1] == {"e1", "e2"}
+    # hybrid's own anchored candidate first, then the window's rows in time order
+    assert [chunk["id"] for chunk in result["chunks"]] == ["c1", "r1", "r3", "r2"]
+    assert [entity["id"] for entity in result["entities"]] == ["e1", "e2"]
+    assert [chunk["id"] for chunk in retriever.last_baseline["chunks"]] == ["c1", "c2", "c3"]
+
+
+@pytest.mark.asyncio
+async def test_window_expansion_is_capped_at_candidate_top_k(monkeypatch):
+    nodes = [(f"r{i}", {}) for i in range(50)]
+    edges = [(f"r{i}", "ts_1950", "order_date", {}) for i in range(50)]
+    rows = {"DltRow_text": [{"id": f"r{i}", "text": str(i)} for i in range(50)]}
+    retriever, engine, _fetch, _extract = _retriever(
+        monkeypatch,
+        anchors=_anchors(chunks=tuple(f"r{i}" for i in range(50))),
+        interval=WINDOW_1950,
+        candidates=_candidates(),
+        timestamps=[TS_1950],
+        neighborhood=(nodes, edges),
+        vector_rows=rows,
+    )
+    await retriever.get_retrieved_objects(query="in 1950")
+    assert len(retriever.last_expansion) == retriever.chunks_top_k == 20
+
+
+@pytest.mark.asyncio
+async def test_window_expansion_respects_the_node_set_filter(monkeypatch):
+    retriever, _engine, _fetch, _extract = _retriever(
+        monkeypatch,
+        anchors=_anchors(chunks=("r3",)),
+        interval=WINDOW_1950,
+        candidates=_candidates(),
+        timestamps=[TS_1950, TS_1950_06],
+        neighborhood=_dated_graph(),
+        vector_rows=_rows(),
+    )
+    retriever.node_name = ["other"]
+    await retriever.get_retrieved_objects(query="in 1950")
+    assert retriever.last_expansion == {"r3"}
+
+
+@pytest.mark.asyncio
+async def test_window_expansion_without_attached_nodes_keeps_the_fallback(monkeypatch):
+    """A window whose timestamps have nothing retrievable attached is still a
+    no_candidate_overlap fallback, not an error."""
+    retriever, _engine, _fetch, _extract = _retriever(
+        monkeypatch,
+        anchors=_anchors(timestamps=()),
+        interval=WINDOW_1950,
+        candidates=_candidates(),
+        timestamps=[TS_1950],
+        neighborhood=([("tbl", {})], [("tbl", "ts_1950", "x", {})]),
+        vector_rows={},
+    )
+    result = await retriever.get_retrieved_objects(query="in 1950")
+    assert retriever.last_reason == "no_candidate_overlap"
+    assert result == retriever.last_baseline
+
+
+def test_attached_node_ids_orders_by_timestamp_and_skips_timestamps():
+    from cognee.modules.retrieval.temporal_hybrid.expansion import attached_node_ids
+
+    nodes, edges = _dated_graph()
+    edges.append(
+        ("ts_1950_06", "ts_1950", "follows", {})
+    )  # timestamp to timestamp: never a candidate
+    assert attached_node_ids([TS_1950, TS_1950_06], (nodes, edges)) == [
+        "atlas",
+        "c1",
+        "r1",
+        "r3",
+        "tbl",
+        "r2",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_retrieve_in_collections_keeps_id_order_and_first_collection_wins():
+    from cognee.modules.retrieval.temporal_hybrid.expansion import retrieve_in_collections
+
+    class Vector:
+        async def retrieve(self, collection, ids):
+            rows = {
+                "A": [{"id": "x", "text": "from A"}, {"id": "y", "text": "y"}],
+                "B": [{"id": "x", "text": "from B"}, {"id": "z", "text": "z"}],
+            }[collection]
+            return [row for row in rows if row["id"] in set(ids)]
+
+    hits = await retrieve_in_collections(
+        Vector(), ("A", "B"), ["z", "x", "missing", "y"], None, "OR"
+    )
+    assert [(hit["id"], hit["text"]) for hit in hits] == [("z", "z"), ("x", "from A"), ("y", "y")]
+    assert await retrieve_in_collections(Vector(), ("A",), [], None, "OR") == []
