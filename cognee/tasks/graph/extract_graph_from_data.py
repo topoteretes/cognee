@@ -9,6 +9,7 @@ from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.llm.extraction import extract_content_graph
 from cognee.infrastructure.llm.pipeline_stage import pipeline_stage
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
+from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.graph.utils import (
     attach_new_edges_to_data_points,
     collect_stored_data_points,
@@ -160,7 +161,10 @@ async def integrate_chunk_graphs(
             ontology_mode=ontology_mode,
         )
 
-    await restore_entity_type_categories(data_points_by_id)
+    # Only with classification on: nothing else writes a category yet, so the read
+    # would always come back empty.
+    if get_cognify_config().entity_type_classification:
+        await restore_entity_type_categories(data_points_by_id)
 
     # What each chunk's own extraction yielded, recorded during construction —
     # the same record chunk ownership is derived from. These relationships get

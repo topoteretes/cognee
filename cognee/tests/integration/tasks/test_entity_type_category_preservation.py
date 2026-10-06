@@ -10,7 +10,7 @@ import pytest_asyncio
 
 import cognee
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.low_level import setup
+from cognee.low_level import setup as cognee_setup
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.cognify.config import CognifyConfig
 from cognee.modules.data.processing.document_types import TextDocument
@@ -23,6 +23,16 @@ from cognee.tasks.storage.add_data_points import add_data_points
 
 classify_module = importlib.import_module("cognee.tasks.graph.classify_entity_types")
 task_module = importlib.import_module("cognee.tasks.graph.extract_graph_and_summarize")
+extract_module = importlib.import_module("cognee.tasks.graph.extract_graph_from_data")
+
+
+@pytest.fixture
+def classification_on(monkeypatch):
+    """Both the task and the preservation read check this flag in their own module."""
+    for module in (task_module, extract_module):
+        monkeypatch.setattr(
+            module, "get_cognify_config", lambda: CognifyConfig(entity_type_classification=True)
+        )
 
 
 @pytest_asyncio.fixture
@@ -44,7 +54,7 @@ async def clean_test_environment(request):
 
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
-    await setup()
+    await cognee_setup()
 
     yield
 
@@ -82,7 +92,7 @@ async def _write_document(person_name: str) -> None:
     chunk, graph = _chunk_and_graph(person_name)
 
     await integrate_chunk_graphs([chunk], [graph], KnowledgeGraph, None)
-    await add_data_points([chunk])
+    await add_data_points([chunk], graph_only=True)
 
 
 async def _stored_category(entity_type_name: str) -> str | None:
@@ -92,12 +102,16 @@ async def _stored_category(entity_type_name: str) -> str | None:
 
 
 @pytest.mark.asyncio
-async def test_a_second_document_keeps_the_category_of_a_type_it_mentions(clean_test_environment):
+async def test_a_second_document_keeps_the_category_of_a_type_it_mentions(
+    clean_test_environment, classification_on
+):
     """A re-run over the same data is skipped by incremental loading, so only a new
     document that mentions an existing type rebuilds it, and the graph adapter then
     replaces the stored properties with the freshly built, unclassified ones."""
     await _write_document("alice")
-    await add_data_points([EntityType(name="person", description="person", category="person")])
+    await add_data_points(
+        [EntityType(name="person", description="person", category="person")], graph_only=True
+    )
     assert await _stored_category("person") == "person"
 
     await _write_document("bob")
@@ -107,13 +121,10 @@ async def test_a_second_document_keeps_the_category_of_a_type_it_mentions(clean_
 
 @pytest.mark.asyncio
 async def test_cognify_files_a_new_type_once_and_the_next_document_keeps_it(
-    clean_test_environment, monkeypatch
+    clean_test_environment, classification_on
 ):
     """The classifier runs inside the task cognify runs, with only its LLM call faked,
     and a later document that mentions the type neither asks again nor loses the answer."""
-    monkeypatch.setattr(
-        task_module, "get_cognify_config", lambda: CognifyConfig(entity_type_classification=True)
-    )
     answers = EntityTypeCategories.model_validate(
         {"answers": [{"name": "person", "category": "person"}]}
     )
@@ -126,7 +137,7 @@ async def test_cognify_files_a_new_type_once_and_the_next_document_keeps_it(
             summary_method="from_extraction",
             calculate_chunk_graphs=lambda *_args, **_kwargs: [graph],
         )
-        await add_data_points(summaries)
+        await add_data_points(summaries, graph_only=True)
 
     with patch.object(
         classify_module.LLMGateway, "acreate_structured_output", AsyncMock(return_value=answers)
