@@ -26,6 +26,7 @@ from __future__ import annotations
 import importlib
 import importlib.metadata
 import importlib.util
+import os
 import shutil
 import subprocess
 import sys
@@ -136,15 +137,52 @@ def installed_pins() -> list[str]:
     return sorted(pins.values())
 
 
+def find_uv() -> str | None:
+    """The uv executable, or None when there is none.
+
+    A process started outside a shell (an IDE, an MCP client, a service, a venv's
+    python run directly) often lacks uv on PATH, so this also looks where uv puts
+    itself: the ``UV`` variable ``uv run`` sets, this environment's scripts directory
+    (the ``uv`` package), and the directories of uv's installer, Homebrew and winget.
+    """
+    if os.environ.get("UV") and Path(os.environ["UV"]).is_file():
+        return os.environ["UV"]
+    on_path = shutil.which("uv")
+    if on_path is not None:
+        return on_path
+    home = Path.home()
+    directories = [
+        Path(sys.executable).parent,
+        os.environ.get("XDG_BIN_HOME"),
+        home / ".local" / "bin",
+        home / ".cargo" / "bin",
+    ]
+    if os.name == "nt":
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if local_app_data:
+            directories.append(Path(local_app_data) / "Microsoft" / "WinGet" / "Links")
+    else:
+        directories += ["/opt/homebrew/bin", "/usr/local/bin"]
+    executable = "uv.exe" if os.name == "nt" else "uv"
+    for directory in directories:
+        if directory and (Path(directory) / executable).is_file():
+            return str(Path(directory) / executable)
+    return None
+
+
 def installer_command() -> tuple[str, list[str]]:
     """The installer for this interpreter and its install command: pip when present, else
     uv (uv venvs have no pip)."""
     if _installed("pip"):
         return "pip", [sys.executable, "-m", "pip", "install"]
-    uv = shutil.which("uv")
+    uv = find_uv()
     if uv is not None:
         return "uv", [uv, "pip", "install", "--python", sys.executable]
-    raise GlinerInstallError("this environment has neither pip nor uv.", "installer")
+    raise GlinerInstallError(
+        "this environment has no pip and no uv executable was found. In a uv "
+        'environment run: uv pip install "cognee[gliner]"',
+        "installer",
+    )
 
 
 def _run(command: list[str], step: str, failed_step: str, installer: str) -> None:
