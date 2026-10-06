@@ -12,11 +12,13 @@ import os
 os.environ.setdefault("LOG_LEVEL", "ERROR")  # quiet cognee's logs; set before importing it
 
 import cognee
+from cognee.modules.engine.operations.setup import setup
 
 DATASET = "personalized_email"  # the same in every script
 
 
 async def clear() -> None:
+    await setup()  # a fresh install has no database yet
     if DATASET not in {dataset.name for dataset in await cognee.datasets.list_datasets()}:
         print(f"[clear] Nothing to forget: the dataset {DATASET} does not exist yet.")
         return
