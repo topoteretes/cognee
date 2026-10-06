@@ -90,7 +90,7 @@ script also runs alone with the same options.
 | 0 | `personalized_email.py --check` | Reports what is missing. Does no work | nothing |
 | 1 | `scripts/ingest_granola.py [--days N] [--sample]` | Remembers Granola meeting notes from the last 30 days by default (node set `meetings`) | cognee dataset |
 | 2 | `scripts/ingest_email.py [--emails N] [--sample]` | Remembers the newest 50 inbox and 50 sent emails by default, through cognee's Gmail connector `gmail_source` (node sets `inbox`, `sent_mail`) | cognee dataset |
-| 3 | `scripts/draft.py [--sample]` | Drafts a reply to the newest inbox email: facts from a `GRAPH_COMPLETION` recall over the graph, tone from a `CHUNKS` recall over `sent_mail` | nothing |
+| 3 | `scripts/draft.py [--sample]` | Drafts a reply to the newest inbox email: facts from a `HYBRID_COMPLETION` recall over the graph, tone from a `CHUNKS` recall over `sent_mail` | nothing |
 
 All scripts use the cognee dataset `personalized_email`, named once in each script.
 

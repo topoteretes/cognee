@@ -82,7 +82,7 @@ script also runs alone with the same options.
 | 1 | `scripts/ingest_granola.py [--days N] [--sample]` | Remembers Granola calls from the last 30 days by default (node set `calls`) | cognee dataset |
 | 2 | `scripts/ingest_linear.py [--days N] [--sample]` | Remembers Linear issues changed in the last 30 days by default (node set `linear`) | cognee dataset |
 | 3 | `scripts/ingest_email.py [--emails N] [--sample]` | Remembers the newest 50 inbox emails by default, through cognee's Gmail connector `gmail_source` (node set `email`) | cognee dataset |
-| 4 | `scripts/follow_up.py [--days N] [--sample]` | Fetches the latest call and the emails about it (a `CHUNKS` recall over `email`), asks a `GRAPH_COMPLETION` recall over the whole graph for its next steps, and posts them to Slack with `chat.postMessage` (or prints them) | a Slack message, when set up |
+| 4 | `scripts/follow_up.py [--days N] [--sample]` | Fetches the latest call and the emails about it (a `CHUNKS` recall over `email`), asks a `HYBRID_COMPLETION` recall over the whole graph for its next steps, and posts them to Slack with `chat.postMessage` (or prints them) | a Slack message, when set up |
 | 5 | `scripts/ui.py` (or `--ui`) | Starts cognee's API server in this process and the UI at http://localhost:3000. Ctrl+C stops both | nothing |
 
 All scripts use the cognee dataset `company_brain`, named once in each script.

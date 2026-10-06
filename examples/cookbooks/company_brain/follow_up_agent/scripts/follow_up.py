@@ -69,7 +69,7 @@ def latest_call(days: int, sample: bool = False) -> tuple[str, str]:
 async def follow_up(days: int = 30, sample: bool = False) -> None:
     title, call = latest_call(days, sample)
     print(f"[follow_up] Call: {title}")
-    # A graph search for the whole call finds the call and its issues, but an email that
+    # A search for the whole call finds the call and its issues, but an email that
     # sets a deadline rarely ranks, so fetch the emails about the call directly.
     emails = await cognee.recall(
         call, query_type=SearchType.CHUNKS, datasets=[DATASET], node_name=["email"], top_k=3
@@ -81,7 +81,7 @@ async def follow_up(days: int = 30, sample: bool = False) -> None:
         f"issue that tracks each one. When neither the call nor the issue gives a due date, "
         f"use a deadline from an email.\n\nThe call:\n{call}\n\nEmails about it:\n"
         + "\n---\n".join(str(email.text) for email in emails),
-        query_type=SearchType.GRAPH_COMPLETION,
+        query_type=SearchType.HYBRID_COMPLETION,
         datasets=[DATASET],
         system_prompt=NEXT_STEPS_PROMPT,
     )

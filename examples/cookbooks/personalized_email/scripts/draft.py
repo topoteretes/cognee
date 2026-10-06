@@ -68,7 +68,7 @@ async def draft(sample: bool = False) -> None:
     reply = await cognee.recall(
         f"Write {ME}'s reply to this email:\n{email['text']}\n\nExamples of {ME}'s own emails:\n"
         + "\n---\n".join(str(chunk.text) for chunk in own_emails),
-        query_type=SearchType.GRAPH_COMPLETION,
+        query_type=SearchType.HYBRID_COMPLETION,
         datasets=[DATASET],
         system_prompt=DRAFT_PROMPT,
     )

@@ -27,7 +27,7 @@ say so when you don't know something."""
 async def reply(message: str, session_id: str) -> str:
     results = await cognee.recall(
         message,
-        query_type=SearchType.GRAPH_COMPLETION,
+        query_type=SearchType.HYBRID_COMPLETION,
         datasets=[DATASET],
         session_id=session_id,  # each answer sees the turns before it
         system_prompt=PROMPT,

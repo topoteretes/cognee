@@ -62,7 +62,7 @@ script also runs alone with the same options.
 |---|---|---|---|
 | 0 | `self_hosted_companion.py --check [folder]` | Reports what is missing. Does no work | nothing |
 | 1 | `scripts/ingest_notes.py <folder>` | Remembers every note in the folder | cognee dataset |
-| 2 | `scripts/chat.py [--ask "message"]` | Chats in one session: each message is a `GRAPH_COMPLETION` recall that sees the turns before it. `/bye` ends it, and `improve(session_ids=[...])` writes the chat into memory. `--ask` answers one message and saves it the same way | cognee dataset |
+| 2 | `scripts/chat.py [--ask "message"]` | Chats in one session: each message is a `HYBRID_COMPLETION` recall that sees the turns before it. `/bye` ends it, and `improve(session_ids=[...])` writes the chat into memory. `--ask` answers one message and saves it the same way | cognee dataset |
 | 3 | `scripts/ui.py` (or `--ui`) | Starts cognee's API server in this process and the UI at http://localhost:3000. Ctrl+C stops both | nothing |
 
 All scripts use the cognee dataset `companion`, named once in each script.
