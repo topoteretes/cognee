@@ -1,6 +1,8 @@
 """The only description of the improve stages (plan Part 5.5).
 
-``DEFAULT_STAGES`` lists the nine stages in the order of plan Part 2. The order
+``DEFAULT_STAGES`` lists the ten stages in the order of plan Part 2 (the tenth,
+``ontology_proposals``, drafts governed-model proposals and reads what the rest
+produced, so it runs last). The order
 is load-bearing — stage 4's lessons are what stage 5 gates on, stage 5's
 accepted lessons are stage 7's anchors, and stage 7 runs before enrichment —
 and ``test_registry_order`` pins it; this list is the single place it is
@@ -18,6 +20,7 @@ from .stages import (
     ExtractAgentContextStage,
     FeedbackWeightsStage,
     GlobalContextIndexStage,
+    OntologyProposalsStage,
     PersistAgentTracesStage,
     PersistSessionQAStage,
     TripletEnrichmentStage,
@@ -34,6 +37,7 @@ DEFAULT_STAGES: list[BaseStage] = [
     BuildTruthSubspaceStage(),
     TripletEnrichmentStage(),
     GlobalContextIndexStage(),
+    OntologyProposalsStage(),
 ]
 
 

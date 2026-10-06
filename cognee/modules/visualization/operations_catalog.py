@@ -217,6 +217,14 @@ _IMPROVE_STAGE_DESCRIPTORS: dict[str, dict[str, Any]] = {
             {"effect": "enriches", "target_type": "TextSummary"},
         ],
     },
+    "ontology_proposals": {
+        "label": "ontology proposals",
+        "summary": "Drafts mapping, definition-conflict and ontology-extension proposals for review.",
+        "pipeline_name": "ontology_proposals_pipeline",
+        "effects": [
+            {"effect": "produces", "target_type": "OntologyProposal"},
+        ],
+    },
 }
 
 

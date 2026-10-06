@@ -237,6 +237,7 @@ async def brute_force_triplet_search(
     neighborhood_depth: int | None = None,
     neighborhood_seed_top_k: int | None = 10,
     personal_weights: dict[str, float] | None = None,
+    pinned_node_ids: dict[str, list[str]] | None = None,
 ) -> list[Edge] | list[list[Edge]]:
     """
     Performs a brute force search to retrieve the top triplets from the graph.
@@ -256,6 +257,10 @@ async def brute_force_triplet_search(
         feedback_influence (float): Weight of feedback influence in range [0, 1]
         personal_weights (Optional[Dict[str, float]]): Per-node prefers weights
             (node id -> weight in [0, 1]) that nudge triplet ranking for the active user.
+        pinned_node_ids (Optional[Dict[str, List[str]]]): Node ids to treat as exact
+            vector hits, keyed by collection name (e.g. ontology concepts the query
+            resolved to). They join the projection seeds and rank ahead of embedding
+            hits. Single-query mode only; ignored in batch mode.
 
     Returns:
         List[Edge]: The top triplet results for single query mode (flat list).
@@ -328,6 +333,12 @@ async def brute_force_triplet_search(
 
             if query_batch is not None:
                 otel_span.set_attribute("cognee.retrieval.batch_size", len(query_batch))
+            elif pinned_node_ids:
+                vector_search.pin_node_ids(pinned_node_ids)
+                otel_span.set_attribute(
+                    "cognee.retrieval.pinned_node_count",
+                    sum(len(ids) for ids in pinned_node_ids.values()),
+                )
 
             if not vector_search.has_results():
                 otel_span.set_attribute(COGNEE_VECTOR_RESULT_COUNT, 0)

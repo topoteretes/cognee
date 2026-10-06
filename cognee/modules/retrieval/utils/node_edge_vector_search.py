@@ -1,9 +1,11 @@
 import asyncio
 import time
 from typing import Any
+from uuid import UUID
 
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
 from cognee.modules.observability import COGNEE_VECTOR_COLLECTION, new_span
 from cognee.shared.logging_utils import ERROR, get_logger
 
@@ -98,6 +100,30 @@ class NodeEdgeVectorSearch:
             any(results_per_query for results_per_query in collection_results)
             for collection_results in self.node_distances.values()
         )
+
+    def pin_node_ids(self, pinned_node_ids: dict[str, list[str]], score: float = 0.0) -> None:
+        """Treat the given node ids as exact vector hits in their collections.
+
+        ``pinned_node_ids`` maps a node collection name to graph node ids. Each id is
+        appended to that collection's results with ``score`` (0.0 = perfect cosine
+        match), so it is projected with the vector seeds and outranks them in the
+        triplet scorer; an id the search already returned is re-scored, since the
+        later entry wins when distances are mapped. Single-query mode only — batch
+        results are per-query lists and are left untouched.
+        """
+        if self.query_list_length is not None or not pinned_node_ids:
+            return
+
+        for collection_name, node_ids in pinned_node_ids.items():
+            if collection_name == self.edge_collection or not node_ids:
+                continue
+            results = self.node_distances.setdefault(collection_name, [])
+            for node_id in node_ids:
+                try:
+                    pinned_id = UUID(str(node_id))
+                except ValueError:
+                    continue
+                results.append(ScoredResult(id=pinned_id, score=score, payload={}))
 
     def extract_relevant_node_ids(self) -> list[str]:
         """Extracts unique node IDs from search results."""

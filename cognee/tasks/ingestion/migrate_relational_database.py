@@ -8,7 +8,19 @@ from cognee.infrastructure.databases.relational.get_migration_relational_engine 
     get_migration_relational_engine,
 )
 from cognee.modules.engine.models import ColumnValue, TableRow, TableType
+from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
+from cognee.modules.ontology.get_default_ontology_resolver import (
+    get_configured_authoritative_sources,
+    get_configured_ontology_resolver,
+)
+from cognee.modules.ontology.ontology_config import Config
+from cognee.modules.ontology.schema_alignment import (
+    SchemaTableSpec,
+    align_tables_with_ontology,
+    column_specs_from,
+)
 from cognee.tasks.schema.ingest_database_schema import ingest_database_schema
+from cognee.tasks.schema.models import SchemaTable
 from cognee.tasks.storage.index_data_points import index_data_points
 from cognee.tasks.storage.index_graph_edges import index_graph_edges
 
@@ -16,7 +28,12 @@ logger = logging.getLogger(__name__)
 
 
 async def migrate_relational_database(
-    graph_db, schema, migrate_column_data=True, schema_only=False
+    graph_db,
+    schema,
+    migrate_column_data=True,
+    schema_only=False,
+    ontology_resolver: BaseOntologyResolver | None = None,
+    ontology_config: Config | None = None,
 ):
     """
     Migrates data from a relational database into a graph database.
@@ -28,6 +45,15 @@ async def migrate_relational_database(
     Then, for every foreign key defined in the schema:
       - Establishes relationships between TableRow nodes based on foreign key relationships
 
+    When an ontology is configured (``ONTOLOGY_FILE_PATH``, or ``ontology_resolver``
+    passed explicitly), each table node also gets a ``realizes`` edge to the ontology
+    class its name resolves to, plus that class's ``is_a`` chain — the link between
+    the technical schema and the business model. Columns whose names resolve to an
+    ontology property get a ``SchemaColumn`` node realizing it. ``ontology_config`` is
+    the same dict ``cognify()`` accepts: ``ontology_resolver``, ``ontology_mode`` and
+    ``authoritative_sources`` (which tables are the system of record — stamped on the
+    ``realizes`` edge as ``authoritative`` / ``owner``).
+
     Both TableType and TableRow inherit from DataPoint to maintain consistency with Cognee data model.
     """
     # Create a mapping of node_id to node objects for referencing in edge creation
@@ -36,6 +62,29 @@ async def migrate_relational_database(
 
     else:
         node_mapping, edge_mapping = await complete_database_ingestion(schema, migrate_column_data)
+
+    if ontology_resolver is None:
+        try:
+            ontology_resolver = get_configured_ontology_resolver(ontology_config)
+        except Exception as error:  # an ontology misconfiguration must not block migration
+            logger.warning("Skipping ontology alignment of schema tables: %s", error, exc_info=True)
+            ontology_resolver = None
+    alignment = align_tables_with_ontology(
+        [
+            SchemaTableSpec(
+                node.id,
+                node.name,
+                column_specs_from((schema.get(node.name) or {}).get("columns")),
+            )
+            for node in node_mapping.values()
+            if isinstance(node, (SchemaTable, TableType))
+        ],
+        ontology_resolver,
+        authoritative_sources=get_configured_authoritative_sources(ontology_config),
+    )
+    for node in alignment.nodes:
+        node_mapping.setdefault(str(node.id), node)
+    edge_mapping.extend(alignment.edges)
 
     def _remove_duplicate_edges(edge_mapping):
         seen = set()

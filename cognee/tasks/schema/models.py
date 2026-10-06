@@ -38,3 +38,18 @@ class SchemaRelationship(DataPoint):
     target_column: str
     description: str
     metadata: dict = {"index_fields": ["description", "name"]}
+
+
+class SchemaColumn(DataPoint):
+    """One column of a source table, written only when it realizes an ontology property.
+
+    Columns are not materialised wholesale (a wide schema would drown the graph in
+    them); schema alignment creates a node for a column exactly when it can say what
+    business property the column carries (``cust_id`` realizes ``hasCustomerId``).
+    """
+
+    name: str
+    table_name: str
+    data_type: str = ""
+    description: str
+    metadata: dict = {"index_fields": ["description", "name"]}

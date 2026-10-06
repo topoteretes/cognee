@@ -3,7 +3,7 @@ import os
 from collections import deque
 from typing import IO
 
-from rdflib import OWL, RDF, RDFS, Graph, URIRef
+from rdflib import OWL, RDF, RDFS, Graph, Literal, URIRef
 from rdflib.util import guess_format
 
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
@@ -216,11 +216,13 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
         try:
             classes: dict[str, URIRef] = {}
             individuals: dict[str, URIRef] = {}
+            properties: dict[str, URIRef] = {}
 
             if not self.graph:
                 self.lookup: dict[str, dict[str, URIRef]] = {
                     "classes": classes,
                     "individuals": individuals,
+                    "properties": properties,
                 }
 
                 return
@@ -234,14 +236,23 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
                     key = self._uri_to_key(subj)
                     individuals[key] = subj
 
+            # Object *and* datatype properties: a schema column (``cust_id``) realizes a
+            # datatype property (``hasCustomerId``) as naturally as a foreign key
+            # realizes an object property, and both carry a domain/range.
+            for property_type in (OWL.ObjectProperty, OWL.DatatypeProperty):
+                for prop in self.graph.subjects(RDF.type, property_type):
+                    properties[self._uri_to_key(prop)] = prop
+
             self.lookup = {
                 "classes": classes,
                 "individuals": individuals,
+                "properties": properties,
             }
             logger.info(
-                "Lookup built: %d classes, %d individuals",
+                "Lookup built: %d classes, %d individuals, %d properties",
                 len(classes),
                 len(individuals),
+                len(properties),
             )
 
             return
@@ -268,6 +279,8 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
             return "classes"
         if uri in self.lookup.get("individuals", {}).values():
             return "individuals"
+        if uri in self.lookup.get("properties", {}).values():
+            return "properties"
         return "unknown"
 
     def get_subgraph(
@@ -317,6 +330,27 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
                         visited.add(parent)
                         queue.append(parent)
                     nodes_set.add(parent)
+
+                if current in self.lookup.get("properties", {}).values():
+                    # A property's neighbourhood is its domain and range classes (whose
+                    # ``is_a`` chains the loop then follows) and its super-properties.
+                    for predicate, relationship_name in (
+                        (RDFS.domain, "domain"),
+                        (RDFS.range, "range"),
+                        (RDFS.subPropertyOf, "is_a"),
+                    ):
+                        for target in self.graph.objects(current, predicate):
+                            if isinstance(target, Literal) or (
+                                relationship_name == "range"
+                                and target not in self.lookup["classes"].values()
+                            ):
+                                continue  # datatype ranges (xsd:string) are not nodes
+                            target_label = self._uri_to_key(target)
+                            edges.append((current_label, relationship_name, target_label))
+                            if target not in visited:
+                                visited.add(target)
+                                queue.append(target)
+                            nodes_set.add(target)
 
                 for prop in obj_props:
                     prop_label = self._uri_to_key(prop)

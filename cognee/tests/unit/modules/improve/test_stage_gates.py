@@ -24,6 +24,7 @@ from cognee.modules.improve.stages import (
     BuildTruthSubspaceStage,
     FeedbackWeightsStage,
     GlobalContextIndexStage,
+    OntologyProposalsStage,
     PersistSessionQAStage,
     TripletEnrichmentStage,
     UpdateUserPreferencesStage,
@@ -348,6 +349,68 @@ def test_global_context_index_skipped_unless_opted_in():
     stage = GlobalContextIndexStage()
     assert stage.gate(_inputs()) == REASON_OPT_IN_DISABLED
     assert stage.gate(_inputs(build_global_context_index=True)) is None
+
+
+# --- stage 10 --------------------------------------------------------------
+
+
+def test_ontology_proposals_gate_follows_its_config_switch():
+    stage = OntologyProposalsStage()
+    assert stage.needs_sessions is False and stage.fatal is False
+    assert stage.gate(_inputs()) is None
+    disabled = ImproveConfig(ontology_proposals_enabled=False)
+    assert stage.gate(_inputs(config=disabled)) == REASON_OPT_IN_DISABLED
+    assert (
+        evaluate_gate(stage, _inputs(config=ImproveConfig(stages_disabled=["ontology_proposals"])))
+        == REASON_DISABLED_BY_CONFIG
+    )
+
+
+@pytest.mark.asyncio
+async def test_ontology_proposals_run_reports_counts_and_already_completed(monkeypatch):
+    import contextlib
+
+    import cognee.modules.improve.stages as stages_module
+
+    saved = []
+
+    async def fake_load(dataset_id, **_):
+        return []
+
+    async def fake_generate(dataset_id, **kwargs):
+        kind = kwargs.get("min_occurrences") and "mapping"
+        return (
+            [types.SimpleNamespace(kind=kind, proposal_id="p1")] if fake_generate.yield_one else []
+        )
+
+    async def fake_save(proposals, *, user, dataset):
+        saved.extend(proposals)
+
+    fake_generate.yield_one = True
+    proposals_pkg = types.SimpleNamespace(
+        generate_ontology_proposals=fake_generate,
+        load_proposals=fake_load,
+        save_proposals=fake_save,
+    )
+    monkeypatch.setitem(importlib.sys.modules, "cognee.modules.proposals", proposals_pkg)
+    monkeypatch.setattr(
+        "cognee.context_global_variables.set_database_global_context_variables",
+        lambda *a, **k: contextlib.nullcontext(),
+    )
+    monkeypatch.setattr(
+        "cognee.modules.ontology.get_default_ontology_resolver.get_configured_ontology_resolver",
+        lambda: None,
+    )
+    monkeypatch.setattr(stages_module, "llm_available", lambda: False)
+
+    result = await OntologyProposalsStage().run(_inputs())
+    assert result.status == "completed"
+    assert result.counts["proposals"] == 1 and result.counts["mapping"] == 1
+    assert len(saved) == 1
+
+    fake_generate.yield_one = False
+    result = await OntologyProposalsStage().run(_inputs())
+    assert result.status == "already_completed" and result.reason == "no_new_findings"
 
 
 # --- inputs ----------------------------------------------------------------
