@@ -19,6 +19,9 @@ from cognee.modules.users.methods import (
     get_user,
 )
 from cognee.modules.users.models import User
+from cognee.modules.visualization.cognee_network_visualization import (
+    build_visualization_payload,
+)
 from cognee.modules.visualization.graph_stream import begin_graph_stream
 from cognee.modules.visualization.subgraph_data import (
     DEFAULT_MAX_NODES,
@@ -214,6 +217,14 @@ def get_visualize_router() -> APIRouter:
                 "negotiation on `Accept`; true or false decides outright."
             ),
         ),
+        include_session_events: bool = Query(
+            True,
+            description=(
+                "Include the dataset's search/improve history as `search_events`. "
+                "Defaults to true; a client that reads that history elsewhere "
+                "(e.g. `/visualize/live-events`) can pass false to skip collecting it."
+            ),
+        ),
         user: User = Depends(get_authenticated_user),
     ):
         """
@@ -229,13 +240,13 @@ def get_visualize_router() -> APIRouter:
         ## Query Parameters
         Same as `GET /visualize` (dataset_id, full, query, seed_node_ids,
         neighborhood_depth, neighborhood_seed_top_k, max_nodes), plus
-        `stream`.
+        `stream` and `include_session_events`.
 
         ## Response
         A JSON object with `nodes`, `links`, `color_maps`, `schema_graph`,
         `schema_data`, `pipeline_stages`, `edge_classes`, `bundles`,
         `provenance_index`, `has_meaningful_topological_rank`, `memory_map`
-        and `search_events`.
+        and `search_events` (empty when `include_session_events=false`).
 
         ## Streaming
         Sent when the request has `Accept: text/event-stream` or
@@ -248,7 +259,9 @@ def get_visualize_router() -> APIRouter:
         most one chunk's size, the first also carrying `color_maps.node_set`);
         `done` (totals). A failure after the response started is one
         `error` event with `message` and `status`. The heavy side payloads
-        are not streamed, and `full=true` cannot be streamed.
+        are not streamed, and `full=true` cannot be streamed. A stream never
+        carries `search_events` regardless of `include_session_events`; the
+        Memory tab gets that history from `/visualize/live-events` instead.
 
         ## Error Codes
         - **409 Conflict**: Dataset not found, permission denied, or the
@@ -274,7 +287,10 @@ def get_visualize_router() -> APIRouter:
             },
         )
 
-        from cognee.api.v1.visualize import stream_dataset_graph, visualize_graph_json
+        from cognee.api.v1.visualize import (
+            fetch_visualization_data_for_dataset,
+            stream_dataset_graph,
+        )
 
         streaming = wants_event_stream(request.headers.get("accept"), stream)
         # Raised as request validation errors, so they reach the app's own
@@ -329,16 +345,21 @@ def get_visualize_router() -> APIRouter:
                     background=BackgroundTask(graph_stream.close),
                 )
 
-            payload = await visualize_graph_json(
-                dataset=dataset[0].id,
-                user=user,
+            # dataset[0] was already authorized above; fetch_visualization_data_for_dataset
+            # takes it as given rather than re-running get_authorized_existing_datasets
+            # a second time (SDK-972).
+            graph_data, search_events = await fetch_visualization_data_for_dataset(
+                dataset[0],
+                user,
                 full=full,
                 query=query,
                 seed_node_ids=seed_node_ids,
                 neighborhood_depth=neighborhood_depth,
                 neighborhood_seed_top_k=neighborhood_seed_top_k,
                 max_nodes=max_nodes,
+                include_session_events=include_session_events,
             )
+            payload = build_visualization_payload(graph_data, search_events=search_events)
             return JSONResponse(status_code=200, content=payload)
 
         except CogneeApiError:
