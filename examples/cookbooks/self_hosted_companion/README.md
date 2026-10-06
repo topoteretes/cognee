@@ -7,7 +7,8 @@ files) in one dataset (`companion`), then you chat with it. When the chat ends, 
 writes the chat into memory, so the next chat knows what you said.
 
 cognee's databases are local files on your machine. The LLM and the embeddings are the ones
-your `.env` configures (OpenAI by default, so set `LLM_API_KEY`).
+your `.env` configures (OpenAI by default, so set `LLM_API_KEY`). To run them on your
+machine too, see [Run fully local](#run-fully-local).
 
 Agents run this cookbook through the `self-hosted-companion` skill,
 [`.agents/skills/self-hosted-companion/SKILL.md`](../../../.agents/skills/self-hosted-companion/SKILL.md).
@@ -87,6 +88,35 @@ you> /bye
 Running it again remembers the folder again: new notes are added and unchanged notes are
 skipped. An edited note is remembered as a new document, and its old version stays in
 memory.
+
+## Run fully local
+
+To keep your notes on your machine, point the LLM and the embeddings at
+[Ollama](https://ollama.com) in `.env`. The scripts need no change.
+
+```bash
+ollama pull llama3.1:8b
+ollama pull nomic-embed-text
+ollama serve
+```
+
+```bash
+LLM_PROVIDER=ollama
+LLM_MODEL=llama3.1:8b
+LLM_ENDPOINT=http://localhost:11434      # the bare address; with /v1, calls return 404
+LLM_API_KEY=ollama                       # any value; Ollama ignores it
+EMBEDDING_PROVIDER=ollama
+EMBEDDING_MODEL=nomic-embed-text
+EMBEDDING_ENDPOINT=http://localhost:11434/api/embed
+EMBEDDING_DIMENSIONS=768
+HUGGINGFACE_TOKENIZER=nomic-ai/nomic-embed-text-v1.5
+AUTO_FEEDBACK=false                      # skips a second LLM call per chat turn, slow on a local model
+TELEMETRY_DISABLED=1
+```
+
+Larger models extract a better graph. If you change the embedding model, set
+`EMBEDDING_DIMENSIONS` to its size and run `forget` (below) first, because the stored vectors
+have the old size.
 
 ## Clean up
 
