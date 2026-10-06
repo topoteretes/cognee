@@ -1,14 +1,17 @@
 """Temporal rerank on top of HybridRetriever: the TEMPORAL search type (SDK-828).
 
 The candidate fetch and the query-interval extraction run concurrently. The
-graph adapter is then asked which of the candidate chunks and entities are
-attached to a Timestamp inside the window (``get_temporal_anchors``, a native
-query on Ladybug, Neo4j and the Postgres demo, a neighbourhood walk elsewhere),
-the oversized candidate set is reordered so the anchored candidates come first
-(``HybridCandidates.prioritize``), and ``finalize`` — the same step plain hybrid
-uses — cuts it to ``top_k`` and selects the facts against the entities that
-survive the cut. Context formatting
-and completion are inherited unchanged.
+``Timestamp`` nodes inside the window are looked up (``get_timestamps_in_range``)
+and the chunks attached to them (document chunks, DLT rows) join the candidates
+after hybrid's own (``temporal_hybrid.expansion``): similarity barely sees dates,
+so the rows a window names are mostly outside the fetched set. The graph adapter is then asked
+which candidates are attached to a Timestamp inside the window
+(``get_temporal_anchors``, a native query on Ladybug, Neo4j and the Postgres
+demo, a neighbourhood walk elsewhere), the oversized candidate set is reordered
+so the anchored candidates come first (``HybridCandidates.prioritize``), and
+``finalize`` — the same step plain hybrid uses — cuts it to ``top_k`` and selects
+the facts against the entities that survive the cut. Context formatting and
+completion are inherited unchanged.
 
 get_retrieved_objects returns the plain hybrid result shape — the reranked
 view, or the baseline slice on fallback. Diagnostics for the last query live
@@ -20,8 +23,13 @@ import asyncio
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.modules.retrieval.hybrid.candidates import HybridCandidates
+from cognee.modules.retrieval.hybrid.chunks import chunk_collections, dlt_rows_indexed
 from cognee.modules.retrieval.hybrid.results import empty_hybrid_result, result_id
 from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
+from cognee.modules.retrieval.temporal_hybrid.expansion import (
+    attached_node_ids,
+    retrieve_in_collections,
+)
 from cognee.modules.retrieval.temporal_hybrid.matching import (
     empty_anchors,
     extract_query_interval,
@@ -62,6 +70,7 @@ class TemporalHybridRetriever(HybridRetriever):
         self.last_interval = (None, None)
         self.last_reason = None
         self.last_anchors = empty_anchors()
+        self.last_expansion: set[str] = set()
         self.last_baseline = empty_hybrid_result()
 
     def _finalize(self, candidates: HybridCandidates) -> dict:
@@ -93,6 +102,38 @@ class TemporalHybridRetriever(HybridRetriever):
             "entity_ids": set(anchors.get("entity_ids") or ()),
         }
 
+    async def _expand_from_window(
+        self, graph, timestamps: list[dict], candidates: HybridCandidates
+    ) -> HybridCandidates:
+        """Add the chunks (document chunks, DLT rows) attached to the in-window timestamps.
+
+        Hybrid chose its candidates by similarity, which barely sees dates; the
+        window's own timestamps name the rest. At most ``candidate_top_k`` attached
+        chunks are added, in timestamp order, after hybrid's candidates so the
+        fetch's ranking stays ahead within the anchored set. Entities are left to
+        the entity lane: an entity attached to a window is usually a hub with
+        edges into many times ("the space race"), not an answer to the question.
+        """
+        known = {result_id(chunk) for chunk in candidates.chunks}
+        neighborhood = await graph.get_neighborhood([str(ts["id"]) for ts in timestamps], depth=1)
+        attached = [
+            node_id
+            for node_id in attached_node_ids(timestamps, neighborhood)
+            if node_id not in known
+        ][: self.chunks_top_k]
+        if not attached:
+            return candidates
+        vector = self._unified_engine.vector
+        chunks = await retrieve_in_collections(
+            vector,
+            chunk_collections(await dlt_rows_indexed(vector)),
+            attached,
+            self.node_name,
+            self.node_name_filter_operator,
+        )
+        self.last_expansion = {result_id(chunk) for chunk in chunks}
+        return candidates.extend(chunks)
+
     async def get_retrieved_objects(self, query=None, query_batch=None) -> dict:
         if query_batch:
             raise NotImplementedError("TemporalHybridRetriever answers one query at a time")
@@ -120,13 +161,18 @@ class TemporalHybridRetriever(HybridRetriever):
             logger.warning(FALLBACK_WARNING)
             return self.last_baseline
 
+        # The window's own timestamps widen the candidate pool before the anchors
+        # are read: similarity alone misses most rows dated inside a window.
+        graph = await get_graph_engine()
+        in_window = await graph.get_timestamps_in_range(to_epoch_ms(start), to_epoch_ms(end))
+        if in_window:
+            candidates = await self._expand_from_window(graph, in_window, candidates)
+
         self.last_anchors = await self._anchors(start, end, candidates)
         if not self.last_anchors["timestamp_ids"]:
             # Nothing in the candidate set is dated inside the window. Tell the
             # two cases apart for the diagnostics: a window the graph has no
-            # time in at all, or one whose matches lie outside the candidates.
-            graph = await get_graph_engine()
-            in_window = await graph.get_timestamps_in_range(to_epoch_ms(start), to_epoch_ms(end))
+            # time in at all, or one whose matches could not be retrieved.
             self.last_reason = "no_candidate_overlap" if in_window else "no_temporal_match"
             logger.warning(FALLBACK_WARNING)
             return self.last_baseline
