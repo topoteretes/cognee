@@ -40,61 +40,9 @@ from cognee.shared.logging_utils import ERROR, get_logger, setup_logging
 logger = get_logger()
 
 
-async def fetch_visualization_data_for_dataset(
-    dataset: Dataset | None,
-    user: User,
-    *,
-    full: bool = False,
-    query: str | None = None,
-    seed_node_ids: list[str] | None = None,
-    recall_result: Any | None = None,
-    neighborhood_depth: int = DEFAULT_NEIGHBORHOOD_DEPTH,
-    neighborhood_seed_top_k: int = DEFAULT_SEED_TOP_K,
-    max_nodes: int = DEFAULT_MAX_NODES,
-    include_session_events: bool = True,
-    session_ids: list[str] | None = None,
-) -> tuple[Any, list | None]:
-    """Fetch and bound the graph data behind a visualization for one already-authorized dataset.
-
-    The authorization-free half of ``fetch_visualization_data``, split out so
-    a caller that already holds a ``Dataset`` it authorized itself (the
-    ``/visualize/json`` router checks permission once per request) can reuse
-    that result here instead of paying for a second
-    ``get_authorized_existing_datasets`` round trip. ``fetch_visualization_data``
-    still does that check before delegating to this function.
-
-    ``dataset=None`` means a datasetless render of the current context, not a
-    denied request. A caller that asked for a dataset and had it denied must
-    not collect events through this with ``dataset=None``: the listing would
-    then be unscoped across every dataset the caller has queried rather than
-    scoped to nothing. ``fetch_visualization_data`` turns collection off for
-    that case and returns an empty listing itself.
-    """
-    graph_data = await fetch_dataset_graph_data(
-        dataset,
-        full=full,
-        query=query,
-        seed_node_ids=seed_node_ids,
-        recall_result=recall_result,
-        neighborhood_depth=neighborhood_depth,
-        neighborhood_seed_top_k=neighborhood_seed_top_k,
-        max_nodes=max_nodes,
-    )
-
-    search_events = None
-    if include_session_events:
-        search_events = await collect_session_events(
-            user=user,
-            session_ids=session_ids,
-            dataset_id=dataset.id if dataset else None,
-        )
-
-    return graph_data, search_events
-
-
 async def fetch_visualization_data(
     user: User | None = None,
-    dataset: str | UUID | None = DEFAULT_DATASET_NAME,
+    dataset: str | UUID | Dataset | None = DEFAULT_DATASET_NAME,
     *,
     full: bool = False,
     query: str | None = None,
@@ -104,7 +52,7 @@ async def fetch_visualization_data(
     neighborhood_seed_top_k: int = DEFAULT_SEED_TOP_K,
     max_nodes: int = DEFAULT_MAX_NODES,
     include_session_events: bool = True,
-    session_ids: list[str] | None = None,
+    session_ids: list | None = None,
 ) -> tuple[Any, list | None]:
     """Authorize, fetch and bound the graph data behind a visualization.
 
@@ -127,20 +75,16 @@ async def fetch_visualization_data(
     # is set with None: a no-op when access control is off, and an (expected)
     # error in multi-user mode where a dataset is required.
     resolved_dataset = None
-    if dataset:
+    if isinstance(dataset, Dataset):
+        # The caller authorized this dataset itself, e.g. a router that
+        # already checked read permission, so it is not checked again.
+        resolved_dataset = dataset
+    elif dataset:
         authorized = await get_authorized_existing_datasets([dataset], "read", user)
         resolved_dataset = authorized[0] if authorized else None
 
-    # A named dataset that did not resolve: missing, or the caller cannot
-    # read it. get_authorized_existing_datasets reports that by returning []
-    # rather than raising, so collecting here would run with dataset_id=None
-    # and widen the listing to every dataset the caller has queried. Failing
-    # a scope check must scope to nothing, not to everything.
-    denied = bool(dataset) and resolved_dataset is None
-
-    graph_data, search_events = await fetch_visualization_data_for_dataset(
+    graph_data = await fetch_dataset_graph_data(
         resolved_dataset,
-        user,
         full=full,
         query=query,
         seed_node_ids=seed_node_ids,
@@ -148,11 +92,28 @@ async def fetch_visualization_data(
         neighborhood_depth=neighborhood_depth,
         neighborhood_seed_top_k=neighborhood_seed_top_k,
         max_nodes=max_nodes,
-        include_session_events=include_session_events and not denied,
-        session_ids=session_ids,
     )
-    if denied:
-        search_events = [] if include_session_events else None
+
+    search_events = None
+    if include_session_events:
+        if dataset and resolved_dataset is None:
+            # A named dataset that did not resolve: missing, or the caller
+            # cannot read it. get_authorized_existing_datasets reports that by
+            # returning [] rather than raising, so falling through here would
+            # collect with dataset_id=None and widen the listing to every
+            # dataset the caller has queried. Failing a scope check must scope
+            # to nothing, not to everything.
+            search_events = []
+        else:
+            # Scope to the dataset authorized above, so this page's timeline
+            # shows this dataset's activity rather than every dataset the
+            # caller has queried. No dataset asked for at all leaves the
+            # listing unscoped, which is all a datasetless render can show.
+            search_events = await collect_session_events(
+                user=user,
+                session_ids=session_ids,
+                dataset_id=resolved_dataset.id if resolved_dataset else None,
+            )
 
     return graph_data, search_events
 
@@ -238,7 +199,7 @@ async def visualize_graph(
     include_session_events: bool = True,
     session_ids: list | None = None,
     user: User | None = None,
-    dataset: str | UUID | None = DEFAULT_DATASET_NAME,
+    dataset: str | UUID | Dataset | None = DEFAULT_DATASET_NAME,
     *,
     full: bool = False,
     query: str | None = None,
@@ -272,7 +233,9 @@ async def visualize_graph(
             first authorized match selects which user+dataset database is
             visualized. Defaults to "main_dataset" (the same default used by
             add/cognify/remember). Pass None to skip dataset resolution and
-            render the current context's graph.
+            render the current context's graph. A ``Dataset`` instance is
+            taken as already authorized and used as is, with no permission
+            check: only pass one you got from get_authorized_existing_datasets.
         full: When True, render the entire graph (legacy behavior).
         query: Optional query string; its nearest vector hits seed the subgraph.
         seed_node_ids: Explicit seed node ids for neighborhood expansion.
@@ -315,7 +278,7 @@ async def visualize_graph_json(
     include_session_events: bool = True,
     session_ids: list | None = None,
     user: User | None = None,
-    dataset: str | UUID | None = DEFAULT_DATASET_NAME,
+    dataset: str | UUID | Dataset | None = DEFAULT_DATASET_NAME,
     *,
     full: bool = False,
     query: str | None = None,
@@ -359,7 +322,7 @@ async def visualize_graph_json(
 
 async def visualize_semantic_json(
     user: User | None = None,
-    dataset: str | UUID | None = DEFAULT_DATASET_NAME,
+    dataset: str | UUID | Dataset | None = DEFAULT_DATASET_NAME,
     *,
     full: bool = False,
     query: str | None = None,

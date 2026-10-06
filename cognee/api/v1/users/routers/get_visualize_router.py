@@ -19,11 +19,6 @@ from cognee.modules.users.methods import (
     get_user,
 )
 from cognee.modules.users.models import User
-from cognee.modules.visualization.cognee_network_visualization import (
-    build_semantic_payload,
-    build_visualization_payload,
-    cognee_network_visualization,
-)
 from cognee.modules.visualization.graph_stream import begin_graph_stream
 from cognee.modules.visualization.subgraph_data import (
     DEFAULT_MAX_NODES,
@@ -142,25 +137,23 @@ def get_visualize_router() -> APIRouter:
             },
         )
 
-        from cognee.api.v1.visualize import fetch_visualization_data_for_dataset
+        from cognee.api.v1.visualize import visualize_graph
 
         try:
             # Verify user has permission to read dataset
             dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
 
-            # dataset[0] is authorized above, so the helper skips its own check.
-            graph_data, search_events = await fetch_visualization_data_for_dataset(
-                dataset[0],
-                user,
+            # The authorized Dataset itself, not its id: visualize_graph then
+            # does not check permission a second time.
+            html_visualization = await visualize_graph(
+                dataset=dataset[0],
+                user=user,
                 full=full,
                 query=query,
                 seed_node_ids=seed_node_ids,
                 neighborhood_depth=neighborhood_depth,
                 neighborhood_seed_top_k=neighborhood_seed_top_k,
                 max_nodes=max_nodes,
-            )
-            html_visualization = await cognee_network_visualization(
-                graph_data, search_events=search_events
             )
             return HTMLResponse(html_visualization)
 
@@ -293,10 +286,7 @@ def get_visualize_router() -> APIRouter:
             },
         )
 
-        from cognee.api.v1.visualize import (
-            fetch_visualization_data_for_dataset,
-            stream_dataset_graph,
-        )
+        from cognee.api.v1.visualize import stream_dataset_graph, visualize_graph_json
 
         streaming = wants_event_stream(request.headers.get("accept"), stream)
         # Raised as request validation errors, so they reach the app's own
@@ -351,10 +341,9 @@ def get_visualize_router() -> APIRouter:
                     background=BackgroundTask(graph_stream.close),
                 )
 
-            # dataset[0] is authorized above, so the helper skips its own check.
-            graph_data, search_events = await fetch_visualization_data_for_dataset(
-                dataset[0],
-                user,
+            payload = await visualize_graph_json(
+                dataset=dataset[0],
+                user=user,
                 full=full,
                 query=query,
                 seed_node_ids=seed_node_ids,
@@ -363,7 +352,6 @@ def get_visualize_router() -> APIRouter:
                 max_nodes=max_nodes,
                 include_session_events=include_session_events,
             )
-            payload = build_visualization_payload(graph_data, search_events=search_events)
             return JSONResponse(status_code=200, content=payload)
 
         except CogneeApiError:
@@ -461,24 +449,21 @@ def get_visualize_router() -> APIRouter:
             },
         )
 
-        from cognee.api.v1.visualize import fetch_visualization_data_for_dataset
+        from cognee.api.v1.visualize import visualize_semantic_json
 
         try:
             dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
 
-            # dataset[0] is authorized above, so the helper skips its own check.
-            graph_data, _ = await fetch_visualization_data_for_dataset(
-                dataset[0],
-                user,
+            payload = await visualize_semantic_json(
+                dataset=dataset[0],
+                user=user,
                 full=full,
                 query=query,
                 seed_node_ids=seed_node_ids,
                 neighborhood_depth=neighborhood_depth,
                 neighborhood_seed_top_k=neighborhood_seed_top_k,
                 max_nodes=max_nodes,
-                include_session_events=False,
             )
-            payload = await build_semantic_payload(graph_data)
             return JSONResponse(status_code=200, content=payload)
 
         except CogneeApiError:
