@@ -22,8 +22,15 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-import weakref
-from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence
+from collections.abc import (
+    AsyncGenerator,
+    Awaitable,
+    Callable,
+    Coroutine,
+    Iterable,
+    Mapping,
+    Sequence,
+)
 from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
@@ -70,11 +77,19 @@ class _SharedWorker:
     ready_until: float = 0.0
 
 
-# Transports and semaphores belong to one event loop, so the cache is per loop;
-# a loop that is gone drops its entries.
-_shared: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, dict[tuple, _SharedWorker]] = (
-    weakref.WeakKeyDictionary()
-)
+@dataclass
+class _LoopWorkers:
+    """One event loop's workers, and the parked generator that closes them."""
+
+    workers: dict[tuple, _SharedWorker]
+    closer: AsyncGenerator[None, None]
+
+
+# Transports and semaphores belong to one event loop, so the cache is per loop.
+# The values reference their loop (channels, connections, a lock that was
+# waited on), so weak keys would never be released; the cache holds the loops
+# strongly and lets go of them itself, see _loop_workers.
+_shared: dict[asyncio.AbstractEventLoop, _LoopWorkers] = {}
 
 
 def build_transport(settings: RemoteGlinerSettings) -> WorkerTransport:
@@ -127,24 +142,71 @@ def _shared_key(settings: RemoteGlinerSettings) -> tuple:
     )
 
 
-def _shared_worker(settings: RemoteGlinerSettings) -> _SharedWorker:
-    per_loop = _shared.setdefault(asyncio.get_running_loop(), {})
+async def _close_workers(workers: Iterable[_SharedWorker]) -> None:
+    for worker in list(workers):
+        try:
+            await worker.transport.aclose()
+        except Exception:  # closing is best effort; it must not mask the caller's outcome
+            logger.debug("Closing a GLiNER worker transport failed", exc_info=True)
+
+
+async def _close_at_loop_end(
+    loop: asyncio.AbstractEventLoop, workers: dict[tuple, _SharedWorker]
+) -> AsyncGenerator[None, None]:
+    """Parked on its loop until the loop shuts down.
+
+    ``asyncio.run`` (and every runner built on it, uvicorn included) finalizes the
+    loop's async generators with ``shutdown_asyncgens`` while the loop still runs,
+    which lands in this ``finally``: the transports close cleanly instead of
+    outliving the loop as open sockets and broker connections.
+    """
+    try:
+        yield
+    finally:
+        _shared.pop(loop, None)
+        await _close_workers(workers.values())
+        workers.clear()
+
+
+async def _loop_workers() -> dict[tuple, _SharedWorker]:
+    loop = asyncio.get_running_loop()
+    # A loop closed without finalizing its generators (a hand-rolled
+    # new_event_loop / close) never ran its closer: drop it here, so its
+    # transports are at least released instead of piling up per loop.
+    for stale in [other for other in _shared if other.is_closed()]:
+        del _shared[stale]
+    entry = _shared.get(loop)
+    if entry is None:
+        workers: dict[tuple, _SharedWorker] = {}
+        closer = _close_at_loop_end(loop, workers)
+        await closer.asend(None)  # registers it with the loop's shutdown_asyncgens
+        entry = _shared[loop] = _LoopWorkers(workers, closer)
+    return entry.workers
+
+
+async def _shared_worker(settings: RemoteGlinerSettings) -> _SharedWorker:
+    workers = await _loop_workers()
     key = _shared_key(settings)
-    worker = per_loop.get(key)
+    worker = workers.get(key)
     if worker is None:
         worker = _SharedWorker(
             transport=build_transport(settings),
             budget=asyncio.Semaphore(settings.max_concurrent_requests),
         )
-        per_loop[key] = worker
+        workers[key] = worker
     return worker
 
 
 async def close_shared_workers() -> None:
-    """Close the transports this event loop opened (tests, orderly shutdown)."""
-    workers = _shared.pop(asyncio.get_running_loop(), {})
-    for worker in workers.values():
-        await worker.transport.aclose()
+    """Close the transports this event loop opened now (tests, orderly shutdown).
+
+    Not required for correctness: they also close when the loop shuts down.
+    """
+    entry = _shared.pop(asyncio.get_running_loop(), None)
+    if entry is not None:
+        await _close_workers(entry.workers.values())
+        entry.workers.clear()
+        await entry.closer.aclose()
 
 
 async def _gather_or_cancel(coroutines: Sequence[Coroutine[Any, Any, None]]) -> None:
@@ -301,8 +363,8 @@ class RemoteGlinerAdapter:
 
     # ------------------------------------------------------------- internals
 
-    def _worker(self) -> _SharedWorker:
-        return self._own_worker or _shared_worker(self.settings)
+    async def _worker(self) -> _SharedWorker:
+        return self._own_worker or await _shared_worker(self.settings)
 
     def _raise_if_failed(self) -> None:
         if self._failure is not None:
@@ -318,7 +380,7 @@ class RemoteGlinerAdapter:
             )
 
     async def _ready(self) -> WorkerReadiness:
-        worker = self._worker()
+        worker = await self._worker()
         if worker.readiness is None or self._clock() >= worker.ready_until:
             async with worker.ready_lock:
                 if worker.readiness is None or self._clock() >= worker.ready_until:
@@ -386,7 +448,7 @@ class RemoteGlinerAdapter:
         *,
         windowed: bool,
     ) -> list[Mapping[str, Any]]:
-        worker = self._worker()
+        worker = await self._worker()
         ids = [str(index) for index in range(len(texts))]
         payload = {
             "inputs": [{"id": id_, "text": text} for id_, text in zip(ids, texts)],

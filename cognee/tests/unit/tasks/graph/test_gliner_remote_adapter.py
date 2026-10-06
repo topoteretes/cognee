@@ -528,3 +528,96 @@ async def test_windows_at_the_caps_are_sent():
     adapter = make_adapter(transport)
     await extract(adapter, ["Alice works."], window_words=1024, window_overlap_words=512)
     assert transport.payloads[0]["options"]["window_overlap_words"] == 512
+
+
+# --------------------------------------------------------------------------- #
+# Shared transports and event loops
+# --------------------------------------------------------------------------- #
+
+
+class ClosingTransport(FakeTransport):
+    def __init__(self):
+        super().__init__()
+        self.closed = False
+        self.loop = None
+
+    async def readiness(self):
+        self.loop = asyncio.get_running_loop()
+        return await super().readiness()
+
+    async def aclose(self):
+        # Closing must happen while the transport's own loop still runs.
+        assert asyncio.get_running_loop() is self.loop
+        self.closed = True
+
+
+@pytest.fixture
+def built_transports(monkeypatch):
+    from cognee.tasks.graph.gliner_demo.remote import adapter as adapter_module
+
+    built: list[ClosingTransport] = []
+
+    def build(_settings):
+        built.append(ClosingTransport())
+        return built[-1]
+
+    monkeypatch.setattr(adapter_module, "build_transport", build)
+    monkeypatch.setattr(adapter_module, "_shared", {})
+    return built, adapter_module
+
+
+def _shared_adapter():
+    return RemoteGlinerAdapter(RemoteGlinerSettings(transport="http", endpoint="http://w:8080"))
+
+
+def test_adapters_on_one_loop_share_one_transport(built_transports):
+    built, _ = built_transports
+
+    async def run():
+        await _shared_adapter().ensure_ready()
+        await _shared_adapter().ensure_ready()
+
+    asyncio.run(run())
+    assert len(built) == 1
+
+
+def test_each_loops_transports_close_when_the_loop_ends(built_transports):
+    built, adapter_module = built_transports
+
+    for _ in range(3):  # e.g. a script calling asyncio.run(cognify(...)) repeatedly
+        asyncio.run(_shared_adapter().ensure_ready())
+
+    assert len(built) == 3
+    assert all(transport.closed for transport in built)
+    # Nothing keeps a finished loop (or its transports) alive.
+    assert adapter_module._shared == {}
+
+
+def test_a_loop_closed_without_finalizing_is_evicted_on_next_use(built_transports):
+    built, adapter_module = built_transports
+
+    loop = asyncio.new_event_loop()
+    loop.run_until_complete(_shared_adapter().ensure_ready())
+    loop.close()  # no shutdown_asyncgens: the closer never ran
+    assert loop in adapter_module._shared
+
+    async def next_run():
+        await _shared_adapter().ensure_ready()
+        assert loop not in adapter_module._shared
+
+    asyncio.run(next_run())
+    assert len(built) == 2 and adapter_module._shared == {}
+
+
+def test_close_shared_workers_closes_now(built_transports):
+    built, adapter_module = built_transports
+
+    async def run():
+        await _shared_adapter().ensure_ready()
+        await adapter_module.close_shared_workers()
+        assert built[0].closed and adapter_module._shared == {}
+        # A later use on the same loop starts afresh.
+        await _shared_adapter().ensure_ready()
+
+    asyncio.run(run())
+    assert len(built) == 2 and all(transport.closed for transport in built)
