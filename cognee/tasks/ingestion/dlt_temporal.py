@@ -20,13 +20,15 @@ dated 2024-03-01 and a document that says "1 March 2024" share one node.
 
 import re
 
+from dlt.common.time import ensure_pendulum_datetime_utc
+
 from cognee.tasks.ingestion.dlt_row_data import DltRowData
 
 # A month, or a date optionally followed by a time with fractional seconds and
-# a zone; the fraction and the zone are dropped, the time is kept at second
-# precision.
+# a zone. The fraction is dropped (second precision); a zone is applied, not
+# dropped — see ``timestamp_str_for_cell``.
 _ISO_CELL = re.compile(
-    r"^(\d{4}-\d{2}(?:-\d{2})?)(?:[ T](\d{2}:\d{2}:\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?$"
+    r"^(\d{4}-\d{2}(?:-\d{2})?)(?:[ T](\d{2}:\d{2}:\d{2})(?:\.\d+)?(Z|[+-]\d{2}:?\d{2})?)?$"
 )
 
 
@@ -36,15 +38,22 @@ def timestamp_str_for_cell(value) -> str | None:
     The result is one of the normalized forms ``timestamp_from_text`` accepts
     without inference; a cell in the right shape that is not a real date
     (``2024-02-30``) is rejected there, not here. A time needs a full date.
+
+    dlt already stores the timestamps it types in UTC; a zoned time reaches
+    this function only from a column dlt left as text, and is shifted to UTC
+    by dlt's own normalizer so the instant, not the wall-clock digits, is kept.
     """
     if value is None:
         return None
-    match = _ISO_CELL.match(str(value).strip())
+    text = str(value).strip()
+    match = _ISO_CELL.match(text)
     if match is None:
         return None
-    date, time = match.groups()
+    date, time, zone = match.groups()
     if time and len(date) != 10:
         return None
+    if zone:
+        return ensure_pendulum_datetime_utc(text).strftime("%Y-%m-%d %H:%M:%S")
     return f"{date} {time}" if time else date
 
 

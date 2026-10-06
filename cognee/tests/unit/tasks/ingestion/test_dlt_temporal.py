@@ -8,6 +8,7 @@ every other mention of that instant resolves to.
 """
 
 import importlib
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
@@ -34,6 +35,10 @@ graph_engine_module = importlib.import_module(
         ("2024-03-02 10:15:00.000000", "2024-03-02 10:15:00"),  # dlt's sqlite DATETIME
         ("2024-03-02T10:15:00+00:00", "2024-03-02 10:15:00"),  # Postgres timestamptz as str
         ("2024-03-02T10:15:00.250Z", "2024-03-02 10:15:00"),
+        ("2024-03-02 23:30:00-05:00", "2024-03-03 04:30:00"),  # a zone is applied: next day in UTC
+        ("2024-03-16T08:00:00+02:00", "2024-03-16 06:00:00"),
+        (datetime(2024, 3, 2, 23, 30, tzinfo=timezone(timedelta(hours=-5))), "2024-03-03 04:30:00"),
+        (datetime(2024, 3, 2, 10, 15), "2024-03-02 10:15:00"),  # naive stays as stated
         (" 2024-03-01 ", "2024-03-01"),
         ("2024-03", "2024-03"),  # monthly series (Datahub gold prices)
     ],
