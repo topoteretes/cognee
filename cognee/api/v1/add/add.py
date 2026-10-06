@@ -323,22 +323,22 @@ async def add(
         ),
     ]
 
-    # The pipeline resolves repositories itself, but always without credentials,
-    # always with their documents, and only for the shapes it can recognise on
-    # its own. A call that answers any of those differently has to resolve them
-    # here, before the pipeline runs.
+    # The pipeline runner resolves directories and repository URLs itself, but
+    # with the defaults: no credentials, documents included, only detected
+    # shapes. A call that sets any codegraph_config option runs the same
+    # resolver here first, with the options; the runner and the task above
+    # then see already-resolved items and pass them through.
     include_documents = codegraph_config.get("include_documents", True)
     treat_as_repository = bool(codegraph_config.get("treat_as_repository"))
     if codegraph_config.get("repo_credentials") or not include_documents or treat_as_repository:
-        from cognee.tasks.code_graph.code_repo import resolve_code_repositories
-
-        data = await resolve_code_repositories(
+        data = await resolve_data_directories(
             data,
+            include_subdirectories=True,
+            user=user,
+            dataset_id=authorized_dataset.id,
             credentials=codegraph_config.get("repo_credentials"),
             include_documents=include_documents,
             treat_as_repository=treat_as_repository,
-            user=user,
-            dataset_id=authorized_dataset.id,
         )
 
     # Expand DLT resources (and auto-detected CSV/connection strings) into

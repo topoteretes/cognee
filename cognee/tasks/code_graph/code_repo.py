@@ -378,7 +378,8 @@ async def resolve_declared_repositories(
     (:func:`code_repo_clone_url`, :func:`detect_code_project`) is bypassed and
     every spec goes through :func:`resolve_repo_source` — a local directory is
     used in place, any git remote (including ssh, Bitbucket, and self-hosted
-    forges with no ``.git`` suffix) is shallow-cloned.
+    forges with no ``.git`` suffix) is shallow-cloned. Reached through
+    ``resolve_data_directories(treat_as_repository=True)``.
 
     That breadth is the point: detection has to stay narrow because most
     http(s) URLs are web pages, so without an explicit declaration a Bitbucket
@@ -434,113 +435,6 @@ async def resolve_declared_repositories(
         resolved.extend(
             RepoCloneFile(Path(path)) if remote else str(path) for path in document_paths
         )
-    return resolved
-
-
-async def resolve_code_repositories(
-    data,
-    credentials: str | None = None,
-    include_documents: bool = True,
-    treat_as_repository: bool = False,
-    user=None,
-    dataset_id=None,
-):
-    """Resolve the code repositories in ``data`` ahead of the add pipeline.
-
-    ``resolve_data_directories`` resolves repositories itself, inside the
-    pipeline, but it is generic plumbing with no access to this call's
-    ``codegraph_config``: it always clones without credentials and always
-    emits the repository's documents. A call that needs either option
-    answered differently has to resolve its repositories here, before the
-    pipeline runs — both ``resolve_data_directories`` call sites then see
-    items that are already resolved and pass them through untouched.
-
-    Intercepts hosted repository URLs (``code_repo_clone_url``) and local
-    code-project directories (``detect_code_project``); every other item is
-    returned unchanged and in order, and ``data`` is returned as-is when it
-    holds no repository at all. A local directory is refused when
-    ``ACCEPT_LOCAL_FILE_PATH=false``, the same gate (and message) the
-    in-pipeline path applies.
-
-    ``treat_as_repository`` hands the whole input to
-    :func:`resolve_declared_repositories` instead: the caller has declared what
-    these are, so nothing is sniffed and nothing falls through to text.
-    """
-    from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
-    from cognee.tasks.code_graph.resolve_repo import SSH_REPO_SPEC_MESSAGE, is_ssh_repo_spec
-    from cognee.tasks.ingestion.save_data_item_to_storage import settings as save_data_settings
-
-    if treat_as_repository:
-        return await resolve_declared_repositories(
-            data,
-            credentials=credentials,
-            include_documents=include_documents,
-            user=user,
-            dataset_id=dataset_id,
-        )
-
-    def _local_project(item) -> Path | None:
-        """``item`` as a local code-project directory, or None for anything else."""
-        if not isinstance(item, str) or code_repo_clone_url(item) is not None:
-            return None
-        try:
-            path = resolve_local_path(item, must_exist=True)
-        except (FileNotFoundError, OSError, ValueError):
-            return None
-        return path if path.is_dir() and detect_code_project(path) else None
-
-    items = data if isinstance(data, list) else [data]
-    # Refused here as well as in resolve_data_directories: this hook runs first
-    # and would otherwise pass the spec on to be stored as text. An explicit
-    # treat_as_repository returned above, so an ssh remote the caller declared
-    # is cloned rather than refused.
-    for item in items:
-        if is_ssh_repo_spec(item):
-            from cognee.modules.ingestion.exceptions import IngestionError
-
-            raise IngestionError(message=SSH_REPO_SPEC_MESSAGE)
-
-    if not any(
-        (isinstance(item, str) and code_repo_clone_url(item)) or _local_project(item) is not None
-        for item in items
-    ):
-        return data
-
-    resolved = []
-    for item in items:
-        if isinstance(item, str) and code_repo_clone_url(item) is not None:
-            manifest_item, documents, _skipped = await resolve_code_repository_url(
-                item,
-                user=user,
-                dataset_id=dataset_id,
-                credentials=credentials,
-                include_documents=include_documents,
-            )
-            resolved.append(manifest_item)
-            resolved.extend(documents)
-            continue
-
-        project_path = _local_project(item)
-        if project_path is not None:
-            if not save_data_settings.accept_local_file_path:
-                from cognee.modules.ingestion.exceptions import IngestionError
-
-                raise IngestionError(
-                    message="Local directories are not accepted "
-                    "(ACCEPT_LOCAL_FILE_PATH=false). Pass a repository URL "
-                    "or upload the files instead."
-                )
-            manifest_item, document_paths, _skipped = await resolve_code_repository(
-                project_path,
-                user=user,
-                dataset_id=dataset_id,
-                include_documents=include_documents,
-            )
-            resolved.append(manifest_item)
-            resolved.extend(str(path) for path in document_paths)
-            continue
-
-        resolved.append(item)
     return resolved
 
 

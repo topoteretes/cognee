@@ -27,6 +27,9 @@ async def resolve_data_directories(
     include_subdirectories: bool = True,
     user=None,
     dataset_id=None,
+    credentials: str | None = None,
+    include_documents: bool = True,
+    treat_as_repository: bool = False,
 ):
     """
     Resolves directories by replacing them with their contained files.
@@ -35,6 +38,15 @@ async def resolve_data_directories(
     and then resolved exactly like a local code project directory, below.
     Other http(s) URLs pass through untouched and are fetched as web pages by
     ``save_data_item_to_storage``.
+
+    The three repository options are ``add()``'s ``codegraph_config``:
+    ``credentials`` authenticates the clone of a private repository URL,
+    ``include_documents=False`` emits a repository's manifest without its
+    README/docs, and ``treat_as_repository`` takes EVERY item as a repository
+    spec (``resolve_declared_repositories``) instead of detecting them. The
+    pipeline runner calls this with the defaults; ``add()`` calls it ahead of
+    the run when any option is set, and this function is idempotent on its
+    own output, so the later calls pass the resolved items through.
 
     A local directory that IS a code project (see
     ``cognee.tasks.code_graph.code_repo.PROJECT_MARKERS``) is not flattened:
@@ -50,10 +62,27 @@ async def resolve_data_directories(
         include_subdirectories: Whether to include files in subdirectories recursively.
         user: Owner used to pin repo-manifest data ids (optional).
         dataset_id: Dataset used to pin repo-manifest data ids (optional).
+        credentials: Token for cloning private repository URLs (optional).
+        include_documents: Also emit a repository's document files (default True).
+        treat_as_repository: Resolve every item as a declared repository spec.
 
     Returns:
         A list of resolved files, DataItems, and binary streams.
     """
+    if treat_as_repository:
+        # The caller has declared what these are: nothing is detected, every
+        # item is cloned or used in place. Deferred import: code_repo reaches
+        # back into this package (dlt_utils).
+        from cognee.tasks.code_graph.code_repo import resolve_declared_repositories
+
+        return await resolve_declared_repositories(
+            data,
+            credentials=credentials,
+            include_documents=include_documents,
+            user=user,
+            dataset_id=dataset_id,
+        )
+
     # Ensure `data` is a list
     if not isinstance(data, list):
         data = [data]
@@ -119,7 +148,11 @@ async def resolve_data_directories(
                 from cognee.tasks.code_graph.code_repo import resolve_code_repository_url
 
                 manifest_item, documents, _skipped = await resolve_code_repository_url(
-                    item, user=user, dataset_id=dataset_id
+                    item,
+                    user=user,
+                    dataset_id=dataset_id,
+                    credentials=credentials,
+                    include_documents=include_documents,
                 )
                 resolved_data.append(manifest_item)
                 resolved_data.extend(documents)
@@ -152,7 +185,10 @@ async def resolve_data_directories(
 
                     if detect_code_project(local_path):
                         manifest_item, document_paths, _skipped = await resolve_code_repository(
-                            local_path, user=user, dataset_id=dataset_id
+                            local_path,
+                            user=user,
+                            dataset_id=dataset_id,
+                            include_documents=include_documents,
                         )
                         resolved_data.append(manifest_item)
                         resolved_data.extend(str(path) for path in document_paths)
