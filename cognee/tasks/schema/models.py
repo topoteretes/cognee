@@ -38,3 +38,7 @@ class SchemaRelationship(DataPoint):
     target_column: str
     description: str
     metadata: dict = {"index_fields": ["description", "name"]}
+
+
+SCHEMA_TABLE_NAME_COLLECTION = SchemaTable.vector_collection("name")
+SCHEMA_RELATIONSHIP_NAME_COLLECTION = SchemaRelationship.vector_collection("name")

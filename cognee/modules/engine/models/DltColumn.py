@@ -10,3 +10,6 @@ class DltColumn(ColumnValue):
     alongside DltRow and the schema nodes. Ids stay uuid5-seeded from
     (table, column, value), so identity is unchanged.
     """
+
+
+DLT_COLUMN_PROPERTIES_COLLECTION = DltColumn.vector_collection()

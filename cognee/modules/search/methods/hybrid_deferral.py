@@ -1,11 +1,10 @@
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.modules.engine.models.node_set import NodeSet
+from cognee.modules.retrieval.hybrid.chunks import DLT_ROW_COLLECTION, DOCUMENT_CHUNK_COLLECTION
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
-
-_DOCUMENT_CHUNK_COLLECTION = "DocumentChunk_text"
 
 
 _GRAPH_ONLY_KNOBS = ("wide_search_top_k", "triplet_distance_penalty")
@@ -55,10 +54,11 @@ def request_deferral_reason(kwargs: dict) -> str | None:
 async def hybrid_deferral_reason(kwargs: dict, *, graph_is_empty: bool) -> str | None:
     """Deferral reason for a hybrid request, including the chunk-collection check.
 
-    ``Entity_name`` is not required: hybrid spends the entity-edge budget on
-    EdgeType texts when that lane is empty. Collection checks are skipped on an
-    empty graph and fail open if the vector backend cannot answer
-    ``has_collection``.
+    Hybrid's chunk lane reads document chunks and DLT rows, so it can serve a
+    dataset that has either table. ``Entity_name`` is not required: hybrid
+    spends the entity-edge budget on EdgeType texts when that lane is empty.
+    Collection checks are skipped on an empty graph and fail open if the
+    vector backend cannot answer ``has_collection``.
     """
     reason = request_deferral_reason(kwargs)
     if reason or graph_is_empty:
@@ -66,8 +66,11 @@ async def hybrid_deferral_reason(kwargs: dict, *, graph_is_empty: bool) -> str |
 
     try:
         vector_engine = await get_vector_engine_async()
-        if not await vector_engine.has_collection(_DOCUMENT_CHUNK_COLLECTION):
-            return f"{_DOCUMENT_CHUNK_COLLECTION} collection missing"
+        if not (
+            await vector_engine.has_collection(DOCUMENT_CHUNK_COLLECTION)
+            or await vector_engine.has_collection(DLT_ROW_COLLECTION)
+        ):
+            return f"{DOCUMENT_CHUNK_COLLECTION} and {DLT_ROW_COLLECTION} collections missing"
     except Exception as error:
         logger.debug("Hybrid collection check failed; running hybrid: %s", error, exc_info=True)
 

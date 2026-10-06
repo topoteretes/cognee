@@ -4,6 +4,7 @@ from itertools import chain
 from typing import Any
 
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.retrieval.hybrid.pairs import (
     attach_source_chunks,
     chunk_summary_pairs,
@@ -19,8 +20,29 @@ from cognee.modules.retrieval.hybrid.results import (
     result_id,
 )
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.ingestion.dlt_utils import DLT_ROW_COLLECTION
 
 logger = get_logger("HybridRetriever")
+
+# The chunk lane's text collections. Document chunks always; DLT rows (one
+# ``DltRow`` per relational row, a chunk of its own graph type that CHUNKS
+# search leaves out on purpose) when the dataset has any — ``dlt_rows_indexed``
+# decides per search, so a dataset without relational data searches exactly
+# the document collections and pays nothing for the DLT ones. Rows are
+# candidates so hybrid answers cover relational data and temporal search can
+# anchor rows on the Timestamps their date cells point to.
+DOCUMENT_CHUNK_COLLECTION = DocumentChunk.vector_collection()
+CHUNK_COLLECTIONS = (DOCUMENT_CHUNK_COLLECTION,)
+DLT_CHUNK_COLLECTIONS = (DLT_ROW_COLLECTION,)
+
+
+async def dlt_rows_indexed(vector_engine: Any) -> bool:
+    """Whether the dataset holds DLT rows: its row collection exists.
+
+    One existence check per search, shared by the chunk and entity lanes; not
+    cached, so rows ingested after an earlier search are seen by the next one.
+    """
+    return await vector_engine.has_collection(DLT_ROW_COLLECTION)
 
 
 async def retrieve_hybrid_chunks(
@@ -38,13 +60,14 @@ async def retrieve_hybrid_chunks(
     current_truth_epoch: int | None = None,
     personal_weights: dict | None = None,
     personal_influence: float = 0.0,
+    collections: tuple[str, ...] = CHUNK_COLLECTIONS,
 ) -> dict[str, Any]:
     candidate_limit = chunk_candidate_limit(chunks_top_k)
     summary_limit = summary_candidate_limit(chunks_top_k, text_summaries_top_k)
     vector_chunks, summary_hits = await asyncio.gather(
         search_collections(
             vector_engine,
-            CHUNK_COLLECTIONS,
+            collections,
             query,
             candidate_limit,
             node_name,
@@ -111,14 +134,6 @@ def summary_candidate_limit(chunks_top_k: int, text_summaries_top_k: int | None)
     if text_summaries_top_k is None:
         return max(0, chunks_top_k)
     return text_summaries_top_k
-
-
-# The chunk lane's text collections: document chunks and DLT rows (one
-# ``DltRow`` per relational row, a chunk of its own graph type that CHUNKS
-# search leaves out on purpose). Rows are candidates here so hybrid answers
-# cover relational data and temporal search can anchor rows on the
-# Timestamps their date cells point to.
-CHUNK_COLLECTIONS = ("DocumentChunk_text", "DltRow_text")
 
 
 def _score(result: Any) -> float:

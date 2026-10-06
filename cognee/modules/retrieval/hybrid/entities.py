@@ -10,18 +10,16 @@ from cognee.modules.retrieval.hybrid.results import (
     result_id,
 )
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.ingestion.dlt_utils import DLT_NODE_COLLECTIONS
 
 logger = get_logger("HybridRetriever")
 
-# The entity lane's collections: LLM-extracted entities and the DLT graph's
-# own node types — shared cell values, tables and foreign-key relationships —
-# which carry their row edges into the entity section the same way.
-ENTITY_COLLECTIONS = (
-    "Entity_name",
-    "DltColumn_properties",
-    "SchemaTable_name",
-    "SchemaRelationship_name",
-)
+# The entity lane's collections: LLM-extracted entities always; the DLT
+# graph's own node types — shared cell values, tables and foreign-key
+# relationships, which carry their row edges into the entity section the same
+# way — when the dataset holds DLT rows (``dlt_rows_indexed``).
+ENTITY_COLLECTIONS = ("Entity_name",)
+DLT_ENTITY_COLLECTIONS = DLT_NODE_COLLECTIONS
 
 
 async def search_entities(
@@ -31,13 +29,14 @@ async def search_entities(
     node_name: list[str] | None,
     node_name_filter_operator: str,
     query_vector: list[float],
+    collections: tuple[str, ...] = ENTITY_COLLECTIONS,
 ) -> list[Any]:
-    """Hits over ``ENTITY_COLLECTIONS``, or empty if the search fails (a missing
+    """Hits over ``collections``, or empty if the search fails (a missing
     collection is an empty channel)."""
     try:
         return await search_collections(
             vector_engine,
-            ENTITY_COLLECTIONS,
+            collections,
             query,
             top_k,
             node_name,

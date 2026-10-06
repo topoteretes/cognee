@@ -19,6 +19,7 @@ from cognee.modules.observability import OtelStatusCode as StatusCode
 from cognee.modules.retrieval.utils.node_edge_vector_search import NodeEdgeVectorSearch
 from cognee.modules.retrieval.utils.validate_queries import validate_queries
 from cognee.shared.logging_utils import ERROR, get_logger
+from cognee.tasks.ingestion.dlt_utils import DLT_ROW_COLLECTION
 
 if TYPE_CHECKING:
     from cognee.infrastructure.databases.unified import UnifiedStoreEngine
@@ -296,7 +297,7 @@ async def brute_force_triplet_search(
                 "DocumentChunk_text",
                 # DLT rows live in their own collection — chunk search
                 # is documents-only, but graph completion covers row text too.
-                "DltRow_text",
+                DLT_ROW_COLLECTION,
             ]
         else:
             # Copy so the caller's list is never mutated. Callers such as
