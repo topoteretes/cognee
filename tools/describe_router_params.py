@@ -20,12 +20,15 @@ from __future__ import annotations
 
 import ast
 import json
+import logging
 import os
 import re
 import sys
 import textwrap
 from dataclasses import dataclass
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 PLACEHOLDER = "No description provided in code yet."
 BULLET_RE = re.compile(
@@ -120,9 +123,8 @@ def enclosing_source(path: Path, line_index: int, max_chars: int = 6000) -> str:
     for node in ast.walk(tree):
         if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef, ast.ClassDef)):
             start = min([node.lineno] + [d.lineno for d in getattr(node, "decorator_list", [])])
-            if start <= lineno <= (node.end_lineno or start):
-                if best is None or start > best[0]:
-                    best = (start, node.end_lineno)
+            if start <= lineno <= (node.end_lineno or start) and (best is None or start > best[0]):
+                best = (start, node.end_lineno)
     if best is None:
         return ""
     lines = source.splitlines()[best[0] - 1 : best[1]]
@@ -238,6 +240,7 @@ def main() -> int:
     try:
         descriptions = generate_descriptions(placeholders)
     except Exception as exc:
+        logger.debug("Exiting with status 1 after error in main", exc_info=True)
         print(f"Description generation failed: {exc}", file=sys.stderr)
         return 1
 

@@ -5,10 +5,8 @@ What it shows:
     - Querying the resulting graph deterministically with SearchType.CODE
 
 Requirements:
-    - The enola binary — installed automatically on first run (pinned release,
-      checksum-verified, placed in ~/.cognee/bin; opt out with
-      ENOLA_AUTO_INSTALL=false), or install it yourself
-      (https://github.com/enola-labs/enola#installation) / set ENOLA_PATH
+    - The enola binary included with cognee, or an explicit binary set through
+      ENOLA_PATH
 
 SearchType.CODE does not require an LLM API key or embedding model.
 

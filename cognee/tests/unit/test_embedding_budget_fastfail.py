@@ -22,23 +22,24 @@ the transient cases below are pinned just as tightly.
 """
 
 import asyncio
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import aiohttp
 import httpx
 import litellm
 import openai
 import pytest
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from typing_extensions import Self
 
+from cognee.infrastructure.databases.exceptions import (
+    EmbeddingCredentialsError,
+    EmbeddingException,
+)
 from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
     LiteLLMEmbeddingEngine,
 )
 from cognee.infrastructure.databases.vector.embeddings.OpenAICompatibleEmbeddingEngine import (
     OpenAICompatibleEmbeddingEngine,
-)
-from cognee.infrastructure.databases.exceptions import (
-    EmbeddingCredentialsError,
-    EmbeddingException,
 )
 from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
 
@@ -365,7 +366,7 @@ class _FakeAiohttpResponse:
     async def json(self) -> dict:
         return self._payload
 
-    async def __aenter__(self) -> "_FakeAiohttpResponse":
+    async def __aenter__(self) -> Self:
         return self
 
     async def __aexit__(self, *exc_info) -> bool:

@@ -97,10 +97,11 @@ def main():
         f"{env.get('STATUS_EMOJI', '')} *Nightly Tests* — `{branch}` — "
         f"{env.get('STATUS_SUMMARY', '')}\n"
         f"*Ran at:* `{env.get('STATUS_RAN_AT', '')}`  •  "
-        f"*Branch:* `{branch}` (`{cadence}`)  •  *Commit:* `{sha}`\n"
+        f"*Branch:* `{branch}` (`{cadence}`)  •  *Commit:* `{sha}`"
     )
 
     blocks = [header]
+    skipped = 0
     for line in env.get("ARMS", "").splitlines():
         if not line.strip():
             continue
@@ -109,8 +110,23 @@ def main():
             raise SystemExit(
                 f"ARMS line must have 5 pipe-separated fields, got {len(fields)}: {line!r}"
             )
-        blocks.append(arm_block(*(f.strip() for f in fields)))
+        emoji, title, result, metrics_json, url = (f.strip() for f in fields)
+        # A cadence-gated arm reports `skipped` and carries no numbers, no
+        # report and no link, so rendering it costs dead lines in a report
+        # that is meant to stay scannable. A FAILED arm still renders: a
+        # missing failure reads as "this suite does not exist", which is worse.
+        if result == "skipped":
+            skipped += 1
+            continue
+        blocks.append(arm_block(emoji, title, result, metrics_json, url))
 
+    # Deliberately worded "not run this cadence", not "weekly arms": a future
+    # `needs:` could skip an arm for a different reason and this line must not
+    # then lie about why.
+    blocks[0] = section(
+        blocks[0]["text"]["text"]
+        + (f"  •  `{skipped}` arms not run this cadence\n" if skipped else "\n")
+    )
     blocks.append(section(f"<{env.get('RUN_URL', '')}|View run>\n"))
 
     payload = f"blocks={json.dumps(blocks, ensure_ascii=False, separators=(',', ':'))}"

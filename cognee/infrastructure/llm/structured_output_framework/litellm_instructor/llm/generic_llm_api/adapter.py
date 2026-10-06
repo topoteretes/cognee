@@ -1,6 +1,5 @@
 """Adapter for Generic API LLM provider API"""
 
-import asyncio
 import base64
 import logging
 import mimetypes
@@ -15,25 +14,23 @@ from pydantic import BaseModel
 from tenacity import (
     before_sleep_log,
     retry,
-    retry_if_not_exception_type,
     stop_after_attempt,
     wait_exponential_jitter,
 )
 
-from cognee.infrastructure.llm.streaming.stream_completion import stream_text_completion
-from cognee.infrastructure.llm.streaming.token_sink import TokenSink, get_active_token_sink
+from cognee.infrastructure.files.utils.open_data_file import open_data_file
+from cognee.infrastructure.llm.exceptions import (
+    ContentPolicyFilterError,
+    raise_if_budget_exhausted,
+)
 from cognee.infrastructure.llm.retry_config import (
     llm_retry_condition,
     llm_retry_stop_condition,
 )
-
-from cognee.infrastructure.files.utils.open_data_file import open_data_file
+from cognee.infrastructure.llm.streaming.stream_completion import stream_text_completion
+from cognee.infrastructure.llm.streaming.token_sink import TokenSink, get_active_token_sink
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
     get_instructor_mode,
-)
-from cognee.infrastructure.llm.exceptions import (
-    ContentPolicyFilterError,
-    raise_if_budget_exhausted,
 )
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
     LLMInterface,
@@ -74,7 +71,7 @@ def _enrich_llm_span(model: str, name: str) -> None:
             if stage:
                 current_span.set_attribute(COGNEE_PIPELINE_STAGE, stage)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in _enrich_llm_span", exc_info=True)
 
 
 class GenericAPIAdapter(LLMInterface):
@@ -279,7 +276,7 @@ class GenericAPIAdapter(LLMInterface):
                 isinstance(error, InstructorRetryException)
                 and "content management policy" not in str(error).lower()
             ):
-                raise error
+                raise
 
             if not (self.fallback_model and self.fallback_api_key and self.fallback_endpoint):
                 raise ContentPolicyFilterError(
@@ -320,7 +317,7 @@ class GenericAPIAdapter(LLMInterface):
                     isinstance(error, InstructorRetryException)
                     and "content management policy" not in str(error).lower()
                 ):
-                    raise error
+                    raise
                 else:
                     raise ContentPolicyFilterError(
                         f"The provided input contains content that is not aligned with our content policy: {text_input}"
@@ -334,13 +331,7 @@ class GenericAPIAdapter(LLMInterface):
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(2, 128),
-        retry=retry_if_not_exception_type(
-            (
-                litellm.exceptions.NotFoundError,
-                litellm.exceptions.AuthenticationError,
-                asyncio.CancelledError,
-            )
-        ),
+        retry=llm_retry_condition,
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
@@ -396,13 +387,7 @@ class GenericAPIAdapter(LLMInterface):
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(2, 128),
-        retry=retry_if_not_exception_type(
-            (
-                litellm.exceptions.NotFoundError,
-                litellm.exceptions.AuthenticationError,
-                asyncio.CancelledError,
-            )
-        ),
+        retry=llm_retry_condition,
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )

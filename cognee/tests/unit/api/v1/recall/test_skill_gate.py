@@ -10,7 +10,6 @@ from cognee.api.v1.recall.skill_gate import (
 )
 from cognee.modules.search.types import SearchType
 
-
 # ── gate classification: pure regex, no LLM ──────────────────────────────────
 
 
@@ -48,6 +47,25 @@ def test_gate_stays_closed_on_non_procedural_queries(query):
 def test_gate_negation_suppresses_match():
     result = should_search_skills("do not walk me through it")
     assert not result.fired
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "don't walk me through it",
+        "doesn't need a playbook",
+        "I can't set up the cluster",
+    ],
+)
+def test_gate_negation_suppresses_contractions(query):
+    """``n't`` is a suffix, not a word.
+
+    Spelled inside the alternation group as ``\bn't\b`` it never matches: there
+    is no word boundary between the "o" and the "n" of "don't", so every
+    contraction slipped past the suppression and fired the gate. It has to be
+    its own alternative outside the group, which is what _NEGATION does.
+    """
+    assert not should_search_skills(query).fired
 
 
 def test_gate_result_carries_score_and_matches():

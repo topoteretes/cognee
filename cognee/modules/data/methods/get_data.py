@@ -1,4 +1,3 @@
-from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import select
@@ -13,10 +12,10 @@ from .resolve_data_id import resolve_data_id
 async def get_data(
     user_id: UUID,
     data_id: UUID,
-    dataset_id: Optional[UUID] = None,
+    dataset_id: UUID | None = None,
     *,
     verify_owner: bool = True,
-) -> Optional[Data]:
+) -> Data | None:
     """Retrieve data by ID.
 
     Every id ever issued keeps resolving. With ``dataset_id`` the lookup is
@@ -88,7 +87,7 @@ async def get_data(
 
 
 def _check_owner(
-    data: Optional[Data], user_id: UUID, data_id: UUID, verify_owner: bool = True
+    data: Data | None, user_id: UUID, data_id: UUID, verify_owner: bool = True
 ) -> None:
     if verify_owner and data and data.owner_id != user_id:
         raise UnauthorizedDataAccessError(

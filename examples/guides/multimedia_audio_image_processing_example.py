@@ -1,3 +1,13 @@
+"""Remember a bundled MP3 and PNG, then recall their summaries with SearchType.SUMMARIES.
+
+The audio is transcribed and the image described before graph extraction; the recall prints the
+document summaries cognee produced for both files. IMAGE_EXTRACTION_ENABLED and IMAGE_OCR_ENABLED
+(needs cognee[rapidocr]) optionally enrich image ingestion.
+
+Requires: LLM_API_KEY.
+Run: uv run python examples/guides/multimedia_audio_image_processing_example.py
+"""
+
 import asyncio
 import os
 import pathlib

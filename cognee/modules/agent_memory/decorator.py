@@ -3,11 +3,10 @@ from __future__ import annotations
 import functools
 import inspect
 import uuid
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from cognee.exceptions import CogneeValidationError
-from cognee.modules.users.models import User
-
 from cognee.modules.agent_memory.runtime import (
     AgentMemoryContext,
     build_method_params,
@@ -24,27 +23,28 @@ from cognee.modules.agents.registry import (
     derive_memory_mode,
     register_agent_connection,
 )
+from cognee.modules.users.models import User
 
 
 def agent_memory(
     *,
-    agent_session_name: Optional[str] = None,
+    agent_session_name: str | None = None,
     with_memory: bool = True,
     with_session_memory: bool = False,
     save_session_traces: bool = False,
-    memory_query_fixed: Optional[str] = None,
-    memory_query_from_method: Optional[str] = None,
-    memory_system_prompt: Optional[str] = None,
+    memory_query_fixed: str | None = None,
+    memory_query_from_method: str | None = None,
+    memory_system_prompt: str | None = None,
     memory_top_k: int = 5,
     memory_only_context: bool = False,
     session_memory_last_n: int = 5,
-    session_id: Optional[str] = None,
-    user: Optional[User] = None,
-    dataset_name: Optional[str] = None,
-    session_trace_summary: bool = True,
-    persist_session_trace_after: Optional[int] = None,
+    session_id: str | None = None,
+    user: User | None = None,
+    dataset_name: str | None = None,
+    session_trace_summary: bool = False,
+    persist_session_trace_after: int | None = None,
     persist_session_trace_raw_content: bool = False,
-    persist_session_trace_node_set_name: Optional[str] = None,
+    persist_session_trace_node_set_name: str | None = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Decorate an async agent entrypoint with optional Cognee memory and trace persistence.
@@ -53,6 +53,15 @@ def agent_memory(
     ``session_id`` across different decorated entrypoints can mix unrelated trace history and
     make session-memory retrieval or periodic trace memify harder to reason about, especially
     when those decorators do not share the same trace-persistence settings.
+
+    ``session_trace_summary`` controls the per-call LLM summary stored as each trace step's
+    ``session_feedback``. It defaults to ``False`` (earlier releases defaulted to ``True``): the
+    summary is one extra LLM call per wrapped invocation, and both ``improve()`` readers cover
+    for its absence — agent-context extraction (stage 4) reads the stored return value
+    directly, and trace persistence (stage 3) substitutes the return value for any step whose
+    feedback is only the deterministic fallback line. When set to ``True`` the summary is
+    still generated only while automatic feedback analysis is enabled (``CACHING`` and
+    ``AUTO_FEEDBACK`` both on); otherwise the step records the fallback line.
     """
     config = validate_agent_memory_config(
         with_memory=with_memory,

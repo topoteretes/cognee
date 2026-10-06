@@ -1,36 +1,37 @@
-import json
 import inspect
+import json
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, BinaryIO
 from urllib.parse import urlparse
 from uuid import UUID, uuid4
-from typing import TYPE_CHECKING, Union, BinaryIO, Any, List, Optional
 
-import cognee.modules.ingestion as ingestion
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
+
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.ingestion.identify_many import identify_many
-from cognee.modules.data.models import Data
-from cognee.modules.ingestion.exceptions import IngestionError
-from cognee.modules.users.models import User
-from cognee.modules.users.methods import get_default_user
-from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
-from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
+from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.loaders.LoaderInterface import LoaderResult
+from cognee.modules import ingestion
 from cognee.modules.data.methods import (
     get_authorized_existing_datasets,
-    resolve_data_id,
     load_or_create_datasets,
+    resolve_data_id,
 )
-
+from cognee.modules.data.models import Data
+from cognee.modules.ingestion import save_data_to_file_detailed
+from cognee.modules.ingestion.exceptions import IngestionError
+from cognee.modules.ingestion.identify_many import identify_many
+from cognee.modules.users.methods import get_default_user
+from cognee.modules.users.models import User
+from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
 from cognee.shared.logging_utils import get_logger
 
-from .save_data_item_to_storage import save_data_item_to_storage_detailed
 from .carried_source import find_carried_source
-from .data_item_to_text_file import data_item_to_text_file
 from .data_item import DataItem
+from .data_item_to_text_file import data_item_to_text_file
+from .save_data_item_to_storage import save_data_item_to_storage_detailed
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle: pipelines imports this package
     from cognee.modules.pipelines.models import PipelineContext
@@ -38,7 +39,7 @@ if TYPE_CHECKING:  # pragma: no cover - import cycle: pipelines imports this pac
 logger = get_logger(__name__)
 
 
-def _display_file_name(file_metadata: Optional[dict], actual_file_path: str) -> str:
+def _display_file_name(file_metadata: dict | None, actual_file_path: str) -> str:
     """The filename to show loaders for a payload, as the user would name it.
 
     ``FileMetadata`` splits a name into an extension-less ``name`` plus a
@@ -53,7 +54,7 @@ def _display_file_name(file_metadata: Optional[dict], actual_file_path: str) -> 
     return f"{name}.{extension}" if extension else name
 
 
-def _pipeline_dataset_for(ctx, dataset_name: Optional[str], dataset_id: Optional[UUID], user: User):
+def _pipeline_dataset_for(ctx, dataset_name: str | None, dataset_id: UUID | None, user: User):
     """The run's dataset from ``ctx`` when it is the one this call targets, else None.
 
     The pipeline sets ``ctx.dataset`` to the dataset it resolved (with write
@@ -77,22 +78,24 @@ def _pipeline_dataset_for(ctx, dataset_name: Optional[str], dataset_id: Optional
     return None
 
 
-def _source_uri_from_input(data_item: Any) -> Optional[str]:
+def _source_uri_from_input(data_item: Any) -> str | None:
     """Return an origin locator without ever treating raw text as a URI.
 
     HTTP content is materialized into Cognee storage before metadata is read, so
     its original URL would otherwise be lost. File and object-storage locators
     are preserved as well; ordinary text input deliberately returns ``None``.
     """
+    literal_text = False
     if isinstance(data_item, DataItem):
         metadata = data_item.external_metadata
         if isinstance(metadata, dict):
             explicit = metadata.get("source_uri")
             if isinstance(explicit, str) and explicit.strip():
                 return explicit.strip()
+        literal_text = data_item.literal_text
         data_item = data_item.data
 
-    if isinstance(data_item, str):
+    if isinstance(data_item, str) and not literal_text:
         parsed = urlparse(data_item)
         if parsed.scheme.lower() in {"http", "https", "s3", "file"}:
             return data_item
@@ -117,9 +120,9 @@ async def ingest_data(
     data: Any,
     dataset_name: str,
     user: User,
-    node_set: Optional[List[str]] = None,
-    dataset_id: UUID = None,
-    preferred_loaders: dict[str, dict[str, Any]] = None,
+    node_set: list[str] | None = None,
+    dataset_id: UUID | None = None,
+    preferred_loaders: dict[str, dict[str, Any]] | None = None,
     importance_weight: float = 0.5,
     ctx: "PipelineContext" = None,
 ):
@@ -134,8 +137,8 @@ async def ingest_data(
     if not user:
         user = await get_default_user()
 
-    def get_external_metadata_dict(data_item: Union[BinaryIO, str, Any]) -> dict[str, Any]:
-        if hasattr(data_item, "dict") and inspect.ismethod(getattr(data_item, "dict")):
+    def get_external_metadata_dict(data_item: BinaryIO | str | Any) -> dict[str, Any]:
+        if hasattr(data_item, "dict") and inspect.ismethod(data_item.dict):
             return {"metadata": data_item.dict(), "origin": str(type(data_item))}
         else:
             return {}
@@ -144,9 +147,9 @@ async def ingest_data(
         data: Any,
         dataset_name: str,
         user: User,
-        node_set: Optional[List[str]] = None,
-        dataset_id: UUID = None,
-        preferred_loaders: dict[str, dict[str, Any]] = None,
+        node_set: list[str] | None = None,
+        dataset_id: UUID | None = None,
+        preferred_loaders: dict[str, dict[str, Any]] | None = None,
     ):
         import time as _time
 
@@ -212,7 +215,12 @@ async def ingest_data(
             # its (I/O-free) save resolves to.
             carried = find_carried_source(ctx, data_item=data_item)
             if carried is None:
-                stored = await save_data_item_to_storage_detailed(underlying_data)
+                if isinstance(data_item, DataItem) and data_item.literal_text:
+                    # Store verbatim as text: never interpret this string as a
+                    # URL, s3 path, or local file path (see DataItem.literal_text).
+                    stored = await save_data_to_file_detailed(underlying_data)
+                else:
+                    stored = await save_data_item_to_storage_detailed(underlying_data)
                 carried = find_carried_source(ctx, file_path=stored.file_path) or stored
 
             original_file_path = carried.file_path
@@ -457,7 +465,13 @@ async def ingest_data(
                 data_point.raw_content_hash = storage_file_metadata["content_hash"]
                 data_point.data_size = original_file_metadata["file_size"]
                 data_point.external_metadata = ext_metadata
-                if item_system_metadata is not None:
+                # System metadata is the route stamp of the CONTENT (a DLT
+                # manifest, a code file), so it follows the content: new content
+                # gets the stamp its own item carries, including none. Keeping
+                # the old stamp on a replacement of another kind would route the
+                # new content down the old route — text read as a DLT manifest —
+                # and break every later cognify of the dataset.
+                if item_system_metadata is not None or content_changed:
                     data_point.system_metadata = item_system_metadata
                 data_point.node_set = json.dumps(node_set) if node_set else None
                 data_point.tenant_id = user.tenant_id if user.tenant_id else None

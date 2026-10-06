@@ -16,7 +16,6 @@ import asyncio
 import logging
 import math
 import os
-from typing import List, Optional
 
 import httpx
 import numpy as np
@@ -29,27 +28,35 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
-from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
-    EmbeddingEngine,
-)
-from cognee.infrastructure.databases.vector.embeddings.retry_config import (
-    embedding_retry_condition,
-)
-from cognee.infrastructure.llm.exceptions import raise_if_budget_exhausted
-from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
-from cognee.infrastructure.databases.vector.embeddings.utils import (
-    handle_embedding_response,
-    sanitize_embedding_text_inputs,
-)
 from cognee.infrastructure.databases.exceptions import (
     EmbeddingContextWindowTooSmallError,
     EmbeddingCredentialsError,
     EmbeddingException,
 )
-from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
+    EmbeddingEngine,
+)
+from cognee.infrastructure.databases.vector.embeddings.input_limit import (
+    init_input_limit,
+    litellm_input_limit,
+    sane_limit,
+)
+from cognee.infrastructure.databases.vector.embeddings.retry_config import (
+    embedding_retry_condition,
+)
+from cognee.infrastructure.databases.vector.embeddings.utils import (
+    handle_embedding_response,
+    sanitize_embedding_text_inputs,
+)
+from cognee.infrastructure.llm.exceptions import raise_if_budget_exhausted
+from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
+from cognee.modules.observability.get_observe import get_observe
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 
 logger = get_logger("OpenAICompatibleEmbeddingEngine")
+
+observe = get_observe()
 
 
 class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
@@ -83,17 +90,16 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
 
     def __init__(
         self,
-        model: Optional[str] = "default",
+        model: str | None = "default",
         dimensions: int = 3072,
-        max_completion_tokens: int = 8191,
-        endpoint: Optional[str] = "http://localhost:8080",
-        api_key: Optional[str] = "no-key-required",
+        max_completion_tokens: int | None = None,
+        endpoint: str | None = "http://localhost:8080",
+        api_key: str | None = "no-key-required",
         batch_size: int = 36,
-        input_type: Optional[str] = None,
+        input_type: str | None = None,
     ):
         self.model = model or "default"
         self.dimensions = dimensions
-        self.max_completion_tokens = max_completion_tokens
         self.endpoint = endpoint or "http://localhost:8080"
         self.api_key = api_key or "no-key-required"
         self.batch_size = batch_size
@@ -103,6 +109,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         # so it has no effect on servers that ignore unknown fields.
         self.input_type = input_type
         self.tokenizer = self.get_tokenizer()
+        init_input_limit(self, max_completion_tokens)
 
         enable_mocking = os.getenv("MOCK_EMBEDDING", "false").lower()
         self.mock = enable_mocking in ("true", "1", "yes")
@@ -116,6 +123,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
             base = base + "/v1"
         self._client = AsyncOpenAI(api_key=self.api_key, base_url=base, timeout=120)
 
+    @observe(as_type="embeddings")
     @retry(
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(2, 128),
@@ -131,7 +139,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    async def embed_text(self, text: List[str]) -> List[List[float]]:
+    async def embed_text(self, text: list[str]) -> list[list[float]]:
         """
         Embed a list of text strings into vector representations.
 
@@ -288,6 +296,13 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         """
         return self.batch_size
 
+    input_limit_source = "litellm model table or the model's tokenizer"
+
+    async def input_limit(self) -> int | None:
+        """A self-hosted server names no limit; the served model id is usually a
+        HuggingFace repo (its tokenizer knows) or a hosted model litellm knows."""
+        return litellm_input_limit(self.model) or sane_limit(self.tokenizer.model_input_limit)
+
     def get_tokenizer(self):
         """Load a tokenizer for chunk sizing against OpenAI-compatible embedding servers.
 
@@ -295,8 +310,4 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         model's own tokenizer and warns/falls back safely on mismatch (issue #3646).
         """
         logger.debug("Loading tokenizer for OpenAICompatibleEmbeddingEngine...")
-        return resolve_embedding_tokenizer(
-            provider="openai_compatible",
-            model=self.model,
-            max_completion_tokens=self.max_completion_tokens,
-        )
+        return resolve_embedding_tokenizer(provider="openai_compatible", model=self.model)

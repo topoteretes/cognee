@@ -13,6 +13,7 @@ Be clear about behavior, imports, and types.
 ```python
 from datetime import datetime, timedelta
 
+
 def get_future_date(days_ahead: int) -> datetime:
     return datetime.now() + timedelta(days=days_ahead)
 ```

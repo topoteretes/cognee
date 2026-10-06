@@ -17,6 +17,9 @@ Resolution, by embedding provider:
 * ``mistral``           -> ``MistralTokenizer`` for the model.
 * ``fastembed``         -> the model's own HuggingFace tokenizer (BGE/MiniLM are
   wordpiece), instead of the old hardcoded ``gpt-4o`` BPE tokenizer.
+  ``HuggingFaceTokenizer`` loads it with the ``tokenizers`` library (a core
+  dependency); transformers is optional and only used for repos with no
+  ``tokenizer.json``.
 * ollama / openai-compatible / custom / other -> an explicit
   ``HUGGINGFACE_TOKENIZER`` override if set, otherwise the embedding model's own
   HuggingFace repo.
@@ -26,13 +29,13 @@ warning. Resolution is advisory only and never raises: a wrong count is a
 degraded estimate, not a fatal error.
 """
 
-from typing import Callable, Optional
+from collections.abc import Callable
 
-from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.llm.tokenizer.HuggingFace import HuggingFaceTokenizer
 from cognee.infrastructure.llm.tokenizer.Mistral import MistralTokenizer
 from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
 from cognee.infrastructure.llm.tokenizer.tokenizer_interface import TokenizerInterface
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("tokenizer_resolver")
 
@@ -42,9 +45,13 @@ _MISMATCH_HINT = (
     "that does not match the embedding model will mis-size chunks. Set "
     "HUGGINGFACE_TOKENIZER to a tokenizer matching your embedding model to fix this."
 )
+# HUGGINGFACE_TOKENIZER cannot help when the library that loads it is missing.
+_TRANSFORMERS_HINT = (
+    'transformers is not installed. Install it with: pip install "cognee[huggingface]"'
+)
 
 
-def _bare_model(model: Optional[str]) -> Optional[str]:
+def _bare_model(model: str | None) -> str | None:
     """Drop a single leading ``provider/`` tag from a model id.
 
     Splits once, so a multi-segment repo after the tag survives
@@ -56,7 +63,7 @@ def _bare_model(model: Optional[str]) -> Optional[str]:
     return model.split("/", 1)[-1] if model and "/" in model else model
 
 
-def _fastembed_hf_repo(model: Optional[str]) -> Optional[str]:
+def _fastembed_hf_repo(model: str | None) -> str | None:
     """Return the HuggingFace repo whose tokenizer matches a fastembed model.
 
     fastembed model ids are the canonical HF repos (``BAAI/bge-small-en-v1.5``,
@@ -67,12 +74,13 @@ def _fastembed_hf_repo(model: Optional[str]) -> Optional[str]:
         return None
 
     try:
-        from fastembed import TextEmbedding  # ty:ignore[unresolved-import]
+        from fastembed import TextEmbedding
 
         supported = TextEmbedding.list_supported_models()
     except Exception:
         # fastembed not installed here (e.g. CI unit tests): best-effort treat a
         # namespaced id as an HF repo, otherwise give up so the caller warns.
+        logger.debug("Falling back after error in _fastembed_hf_repo", exc_info=True)
         return model if "/" in model else None
 
     bare = _bare_model(model)
@@ -102,12 +110,14 @@ def _load_or_tiktoken_fallback(
     try:
         return build()
     except Exception as error:
+        missing = isinstance(error, ImportError) and (error.name or "").startswith("transformers")
         logger.warning(
             "Could not load a matching tokenizer for %s (%s). Falling back to "
             "TikToken, so token counts are approximate. %s",
             context,
             error,
-            _MISMATCH_HINT,
+            _TRANSFORMERS_HINT if missing else _MISMATCH_HINT,
+            exc_info=True,
         )
         return TikTokenTokenizer(model=None, max_completion_tokens=max_completion_tokens)
 
@@ -128,10 +138,10 @@ def _huggingface_or_fallback(
 
 def resolve_embedding_tokenizer(
     *,
-    provider: Optional[str],
-    model: Optional[str],
+    provider: str | None,
+    model: str | None,
     max_completion_tokens: int = 512,
-    huggingface_tokenizer: Optional[str] = None,
+    huggingface_tokenizer: str | None = None,
 ) -> TokenizerInterface:
     """Resolve the tokenizer that best matches an embedding provider and model.
 

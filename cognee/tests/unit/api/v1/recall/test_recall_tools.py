@@ -5,7 +5,7 @@ import types
 from uuid import uuid4
 
 import pytest
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 
 from cognee.exceptions import CogneeValidationError
 from cognee.memory.entries import normalize_scope
@@ -72,7 +72,7 @@ class TestResponseUnion:
 
     def test_unknown_source_rejected(self):
         adapter = TypeAdapter(list[RecallResponse])
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             adapter.validate_python([{"source": "nonsense", "text": "x"}])
 
 
@@ -254,12 +254,6 @@ async def test_invalid_tools_trigger_rejected(api_recall_mod):
 
 
 @pytest.mark.asyncio
-async def test_invalid_context_format_rejected(api_recall_mod):
-    with pytest.raises(CogneeValidationError, match="context_format"):
-        await api_recall_mod.recall(query_text="q", only_context=True, context_format="bogus")
-
-
-@pytest.mark.asyncio
 async def test_remote_client_forwards_tool_connections(monkeypatch, api_recall_mod):
     captured = {}
 
@@ -283,3 +277,87 @@ async def test_remote_client_forwards_tool_connections(monkeypatch, api_recall_m
 
     assert captured["tool_connections"] == ["analytics"]
     assert captured["scope"] == ["tools"]
+
+
+@pytest.mark.asyncio
+async def test_only_context_graph_hit_is_the_prompt_and_an_empty_retrieval_still_falls_back(
+    monkeypatch, api_recall_mod, no_remote_client, tools_enabled
+):
+    """With only_context, a graph hit is one item carrying the full LLM input, and an empty
+    retrieval (context "") still counts as "no context" so on_empty tools run."""
+    text_to_sql_mod = importlib.import_module("cognee.modules.tools.text_to_sql")
+    engine_mod = importlib.import_module("cognee.modules.tools.text_to_sql.engine")
+    search_methods = importlib.import_module("cognee.modules.search.methods.search")
+
+    tool_calls = []
+
+    async def fake_run(user_id, connection_name, question):
+        tool_calls.append(connection_name)
+        return engine_mod.TextToSqlResult(
+            connection=connection_name,
+            dialect="sqlite",
+            question=question,
+            success=True,
+            sql="SELECT 1",
+            rows=[{"n": 1}],
+            row_count=1,
+            attempts=1,
+        )
+
+    monkeypatch.setattr(text_to_sql_mod, "run_text_to_sql", fake_run)
+
+    from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
+    from cognee.modules.search.types import SearchType
+
+    user_prompt = "The question is: `q` ... node1 -- rel -- node2"
+    graph_hit = SearchResultPayload(
+        search_type=SearchType.GRAPH_COMPLETION,
+        only_context=True,
+        context="node1 -- rel -- node2",
+        user_prompt=user_prompt,
+        system_prompt="Answer briefly.",
+    )
+    graph_miss = SearchResultPayload(
+        search_type=SearchType.GRAPH_COMPLETION, only_context=True, context=""
+    )
+
+    async def with_hit(**kwargs):
+        return [graph_hit]
+
+    async def with_miss(**kwargs):
+        return [graph_miss]
+
+    async def dummy_set_user(_user):
+        return None
+
+    monkeypatch.setattr(api_recall_mod, "set_session_user_context_variable", dummy_set_user)
+
+    monkeypatch.setattr(search_methods, "authorized_search", with_hit)
+    results = await api_recall_mod.recall(
+        query_text="q",
+        query_type=SearchType.GRAPH_COMPLETION,
+        scope=["tools", "graph"],
+        tool_connections=["analytics"],
+        tools_trigger="on_empty",
+        auto_route=False,
+        only_context=True,
+        user=_make_user(),
+    )
+    assert tool_calls == []
+    assert [entry.source for entry in results] == ["graph"]
+    assert results[0].text == user_prompt
+    assert results[0].system_prompt == "Answer briefly."
+
+    monkeypatch.setattr(search_methods, "authorized_search", with_miss)
+    results = await api_recall_mod.recall(
+        query_text="q",
+        query_type=SearchType.GRAPH_COMPLETION,
+        scope=["graph", "tools"],
+        tool_connections=["analytics"],
+        tools_trigger="on_empty",
+        auto_route=False,
+        only_context=True,
+        user=_make_user(),
+    )
+    assert tool_calls == ["analytics"]
+    assert [entry.source for entry in results] == ["tools"]

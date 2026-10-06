@@ -1,40 +1,47 @@
 import asyncio
 import logging
-
-from cognee.shared.logging_utils import get_logger
-from typing import List, Optional
-import numpy as np
 import math
+import os
 import re
+from urllib.parse import urlparse
+
+import httpx
+import litellm
+import numpy as np
 from tenacity import (
+    before_sleep_log,
     retry,
     stop_after_delay,
     wait_exponential_jitter,
-    before_sleep_log,
 )
-import litellm
-import os
-from urllib.parse import urlparse
-import httpx
-from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
+
 from cognee.infrastructure.databases.exceptions import (
     EmbeddingContextWindowTooSmallError,
     EmbeddingException,
 )
-
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
+from cognee.infrastructure.databases.vector.embeddings.input_limit import (
+    init_input_limit,
+    litellm_input_limit,
+    sane_limit,
+)
 from cognee.infrastructure.databases.vector.embeddings.retry_config import (
     embedding_retry_condition,
 )
+from cognee.infrastructure.databases.vector.embeddings.utils import (
+    handle_embedding_response,
+    sanitize_embedding_text_inputs,
+)
 from cognee.infrastructure.llm.exceptions import raise_if_budget_exhausted
 from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
+from cognee.modules.observability.get_observe import get_observe
+from cognee.shared.logging_utils import get_logger
 from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
-from cognee.infrastructure.databases.vector.embeddings.utils import (
-    sanitize_embedding_text_inputs,
-    handle_embedding_response,
-)
 
 litellm.set_verbose = False
 logger = get_logger("LiteLLMEmbeddingEngine")
+
+observe = get_observe()
 
 # Over-length embedding input: litellm maps chat "context length" 400s to
 # ContextWindowExceededError, but the embeddings API returns a plain
@@ -62,7 +69,7 @@ _EMBED_LENGTH_ERROR_RE = re.compile(
 _PROVIDERS_WITHOUT_DIMENSIONS_SUPPORT = {"nvidia_nim"}
 
 
-def _uses_nvidia_nim(provider: Optional[str], model: Optional[str]) -> bool:
+def _uses_nvidia_nim(provider: str | None, model: str | None) -> bool:
     """Whether this engine is actually talking to NVIDIA NIM.
 
     Note: Cognee's `provider` attribute is metadata used locally (e.g. for
@@ -74,13 +81,11 @@ def _uses_nvidia_nim(provider: Optional[str], model: Optional[str]) -> bool:
     """
     if provider and provider.lower() in _PROVIDERS_WITHOUT_DIMENSIONS_SUPPORT:
         return True
-    if (
+    return bool(
         model
         and "/" in model
         and model.split("/", 1)[0].lower() in _PROVIDERS_WITHOUT_DIMENSIONS_SUPPORT
-    ):
-        return True
-    return False
+    )
 
 
 class LiteLLMEmbeddingEngine(EmbeddingEngine):
@@ -102,19 +107,17 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
     dimensions: int
     mock: bool
 
-    MAX_RETRIES = 5
-
     def __init__(
         self,
-        model: Optional[str] = "openai/text-embedding-3-large",
+        model: str | None = "openai/text-embedding-3-large",
         provider: str = "openai",
-        dimensions: Optional[int] = 3072,
-        api_key: str = None,
-        endpoint: str = None,
-        api_version: str = None,
-        max_completion_tokens: int = 512,
+        dimensions: int | None = 3072,
+        api_key: str | None = None,
+        endpoint: str | None = None,
+        api_version: str | None = None,
+        max_completion_tokens: int | None = None,
         batch_size: int = 100,
-        input_type: Optional[str] = None,
+        input_type: str | None = None,
     ):
         self.api_key = api_key
         self.endpoint = endpoint
@@ -122,8 +125,8 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         self.provider = provider
         self.model = model
         self.dimensions = dimensions
-        self.max_completion_tokens = max_completion_tokens
         self.tokenizer = self.get_tokenizer()
+        init_input_limit(self, max_completion_tokens)
         self.retry_count = 0
         self.batch_size = batch_size
         # Required by some providers (e.g. NVIDIA NIM's nv-embed family) to
@@ -142,6 +145,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             try:
                 parsed = urlparse(self.endpoint)
             except Exception:
+                logger.debug("Ignoring exception in LiteLLMEmbeddingEngine.__init__", exc_info=True)
                 parsed = None
             if not parsed or parsed.scheme not in ("http", "https") or not parsed.netloc:
                 logger.error(
@@ -153,20 +157,28 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                     "via environment variable EMBEDDING_ENDPOINT."
                 )
 
+    @observe(as_type="embeddings")
     @retry(
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(2, 128),
         # Skip the retry chain for terminal error classes. Authentication /
-        # authorization / not-found errors will never succeed on a retry, so
-        # the previous behaviour of running the full backoff ladder wasted
-        # ~2 minutes of user wall clock on a mis-typed API key. Superset of
-        # the LLM adapter exclusion set (adds PermissionDeniedError); see
+        # authorization / not-found / bad-request / unprocessable errors will
+        # never succeed on a retry, so the previous
+        # behaviour of running the full backoff ladder wasted ~2 minutes of
+        # user wall clock on a mis-typed API key or EMBEDDING_MODEL. The
+        # handlers below re-raise these unwrapped, which is what lets this list
+        # match them. BadRequestError is safe to list: the recoverable
+        # over-length 400s are recovered in place (split + pool) and never
+        # reach tenacity. Superset of the LLM adapter exclusion set; see
         # cognee/infrastructure/llm/structured_output_framework/litellm_instructor/llm/openai/adapter.py.
-        # Budget exhaustion is terminal as well, but it is classified by
-        # predicate rather than by class: see embeddings/retry_config.py.
+        # Budget exhaustion and a missing provider SDK are terminal as well, but
+        # they are classified by predicate rather than by class, because the
+        # wrapping hides the class: see embeddings/retry_config.py.
         retry=embedding_retry_condition(
             EmbeddingContextWindowTooSmallError,
+            litellm.exceptions.BadRequestError,
             litellm.exceptions.NotFoundError,
+            litellm.exceptions.UnprocessableEntityError,
             litellm.exceptions.AuthenticationError,
             litellm.exceptions.PermissionDeniedError,
             asyncio.CancelledError,
@@ -174,7 +186,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    async def embed_text(self, text: List[str]) -> List[List[float]]:
+    async def embed_text(self, text: list[str]) -> list[list[float]]:
         """
         Embed a list of text strings into vector representations.
 
@@ -313,7 +325,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 return [pooled.tolist()]
 
             logger.error("Embedding input exceeds the model's max length: %s", str(error))
-            raise error
+            raise
 
         except asyncio.TimeoutError as e:
             # Per-attempt timeout – likely an unreachable endpoint
@@ -350,11 +362,20 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             raise
 
         except (
-            litellm.exceptions.BadRequestError,
             litellm.exceptions.NotFoundError,
-        ) as e:
-            logger.error(f"Embedding error with model {self.model}: {str(e)}")
-            raise EmbeddingException(f"Failed to index data points using model {self.model}") from e
+            litellm.exceptions.UnprocessableEntityError,
+        ) as error:
+            # Terminal like the auth branch above: a model or route the
+            # provider does not serve (404), or input it rejects (422). Wrapping
+            # these in EmbeddingException hid the class from the exclusion list,
+            # so a mis-typed EMBEDDING_MODEL ran the full backoff ladder.
+            logger.error(
+                "Embedding request rejected (model='%s'): %s. "
+                "Check EMBEDDING_MODEL and EMBEDDING_ENDPOINT.",
+                str(self.model),
+                str(error),
+            )
+            raise
 
         except Exception as error:
             # A proxy spend cap lands here, either as litellm's own
@@ -364,14 +385,17 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             # message below, which points at the wrong problem entirely.
             raise_if_budget_exhausted(error)
 
-            # Fall back to a clear, actionable message for connectivity/misconfiguration issues
+            # Fall back to a clear, actionable message for connectivity/misconfiguration
+            # issues. The provider's error is part of the message: the generic text
+            # alone, next to the 422 status, read like a provider response.
             logger.error(
                 "Error embedding text: %s. EMBEDDING_ENDPOINT='%s'.",
                 str(error),
                 str(self.endpoint),
             )
             raise EmbeddingException(
-                "Embedding failed due to an unexpected error. Verify EMBEDDING_ENDPOINT and provider settings."
+                f"Embedding failed ({type(error).__name__}: {error}). "
+                "Verify EMBEDDING_ENDPOINT and provider settings."
             ) from error
 
     def get_vector_size(self) -> int:
@@ -394,6 +418,15 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         """
         return self.batch_size
 
+    input_limit_source = "litellm model table or the model's tokenizer"
+
+    async def input_limit(self) -> int | None:
+        """litellm's model table knows the hosted models; a HuggingFace-repo model
+        served elsewhere (vLLM, TEI, ...) at least carries its limit on its tokenizer."""
+        return litellm_input_limit(self.model, self.provider) or sane_limit(
+            self.tokenizer.model_input_limit
+        )
+
     def get_tokenizer(self):
         """
         Load and return the appropriate tokenizer for the specified model based on the provider.
@@ -409,10 +442,6 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         logger.debug(f"Loading tokenizer for model {self.model}...")
         # Strip the vLLM routing prefix so the bare HuggingFace repo is resolvable.
         model = self.model.replace("hosted_vllm/", "")
-        tokenizer = resolve_embedding_tokenizer(
-            provider=self.provider,
-            model=model,
-            max_completion_tokens=self.max_completion_tokens,
-        )
+        tokenizer = resolve_embedding_tokenizer(provider=self.provider, model=model)
         logger.debug(f"Tokenizer loaded for model: {self.model}")
         return tokenizer

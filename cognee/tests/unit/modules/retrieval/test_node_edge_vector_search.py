@@ -1,8 +1,9 @@
-import pytest
 from unittest.mock import AsyncMock
 
-from cognee.modules.retrieval.utils.node_edge_vector_search import NodeEdgeVectorSearch
+import pytest
+
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.modules.retrieval.utils.node_edge_vector_search import NodeEdgeVectorSearch
 
 
 class MockScoredResult:
@@ -271,3 +272,34 @@ async def test_node_edge_vector_search_has_results_batch_edges_only():
     vector_search.node_distances = {}
 
     assert vector_search.has_results() is True
+
+
+@pytest.mark.asyncio
+async def test_node_set_filter_skips_edge_type_collection():
+    """Node collections keep the node-set filter; edge types never get it, since they only
+    score edges the graph projection already scoped (gh #4822)."""
+    mock_vector_engine = AsyncMock()
+    mock_vector_engine.embedding_engine = AsyncMock()
+    mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
+    mock_vector_engine.search = AsyncMock(return_value=[MockScoredResult("hit", 0.5)])
+
+    vector_search = NodeEdgeVectorSearch(vector_engine=mock_vector_engine)
+    await vector_search.embed_and_retrieve_distances(
+        query="test query",
+        collections=["Entity_name", "EdgeType_relationship_name"],
+        node_name=["A"],
+        node_name_filter_operator="AND",
+    )
+
+    filters = {
+        call.kwargs["collection_name"]: (
+            call.kwargs["node_name"],
+            call.kwargs["node_name_filter_operator"],
+        )
+        for call in mock_vector_engine.search.await_args_list
+    }
+    assert filters == {
+        "Entity_name": (["A"], "AND"),
+        "EdgeType_relationship_name": (None, "AND"),
+    }
+    assert vector_search.edge_distances

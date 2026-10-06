@@ -1,8 +1,9 @@
-from cognee.exceptions import (
-    CogneeValidationError,
-    CogneeConfigurationError,
-)
 from fastapi import status
+
+from cognee.exceptions import (
+    CogneeConfigurationError,
+    CogneeValidationError,
+)
 
 
 class UnstructuredLibraryImportError(CogneeConfigurationError):

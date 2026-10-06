@@ -9,7 +9,7 @@ import pytest
 if "langchain_aws" not in sys.modules:
     sys.modules["langchain_aws"] = MagicMock()
 try:
-    import botocore  # noqa: F401
+    import botocore
 except ImportError:
     mock_botocore = MagicMock()
     sys.modules["botocore"] = mock_botocore

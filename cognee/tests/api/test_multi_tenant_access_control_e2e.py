@@ -16,9 +16,9 @@ Note from issue: REQUIRE_AUTHENTICATION=false is ignored when access control is 
 
 import os
 import uuid
+from unittest.mock import AsyncMock, patch
 
 import pytest
-from unittest.mock import AsyncMock, patch
 
 # ---------------------------------------------------------------------------
 # Environment setup — follows the established pattern in test_backend_auth.py.

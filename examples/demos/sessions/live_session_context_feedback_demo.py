@@ -40,36 +40,66 @@ SESSION_ID = "northstar_live_session"
 DEMO_ROOT = Path(__file__).resolve().parents[2] / "temp" / "live_session_context_feedback_demo"
 
 DOCUMENTS = [
-    "Northstar Labs runs the Berlin office, the Lisbon office, the Toronto office, "
-    "and the Singapore office; each office owns one logistics intelligence project.",
-    "The Berlin office owns RoutePulse, a project that predicts delivery delays for "
-    "European freight operators.",
-    "The Lisbon office owns HarborLens, a project that monitors port congestion and "
-    "recommends alternate unloading windows.",
-    "The Toronto office owns FrostLine, a project that helps cold-chain teams track "
-    "temperature risk during winter shipments.",
-    "The Singapore office owns SkyBridge, a project that coordinates air-cargo handoffs "
-    "between regional carriers.",
-    "RoutePulse uses traffic feeds, weather alerts, and customs delay reports to estimate "
-    "arrival risk.",
-    "HarborLens uses vessel schedules, berth availability, and labor notices to forecast "
-    "port bottlenecks.",
-    "FrostLine uses sensor readings, weather forecasts, and route duration to warn about "
-    "spoiled-goods risk.",
-    "SkyBridge uses flight status, warehouse capacity, and customs clearance events to "
-    "recommend cargo transfer plans.",
-    "Northstar Labs asks customer-facing teams to explain project details in concise "
-    "operational language.",
-    "The Berlin office audit window is Monday morning, and the Berlin office audit should "
-    "review RoutePulse traffic feeds, weather alerts, and customs delay reports.",
-    "The Lisbon office audit window is Tuesday afternoon, and the Lisbon office audit should "
-    "review HarborLens vessel schedules, berth availability, and labor notices.",
-    "The Singapore office audit lead is Priya Tan, and Priya Tan is available Wednesday "
-    "morning for the Singapore office SkyBridge audit.",
-    "The Toronto office audit lead is Mateo Reed, and Mateo Reed is available Thursday "
-    "afternoon for the Toronto office FrostLine audit.",
-    "Northstar Labs audit trips should avoid unnecessary backtracking while still respecting "
-    "local office availability windows.",
+    (
+        "Northstar Labs runs the Berlin office, the Lisbon office, the Toronto office, "
+        "and the Singapore office; each office owns one logistics intelligence project."
+    ),
+    (
+        "The Berlin office owns RoutePulse, a project that predicts delivery delays for "
+        "European freight operators."
+    ),
+    (
+        "The Lisbon office owns HarborLens, a project that monitors port congestion and "
+        "recommends alternate unloading windows."
+    ),
+    (
+        "The Toronto office owns FrostLine, a project that helps cold-chain teams track "
+        "temperature risk during winter shipments."
+    ),
+    (
+        "The Singapore office owns SkyBridge, a project that coordinates air-cargo handoffs "
+        "between regional carriers."
+    ),
+    (
+        "RoutePulse uses traffic feeds, weather alerts, and customs delay reports to estimate "
+        "arrival risk."
+    ),
+    (
+        "HarborLens uses vessel schedules, berth availability, and labor notices to forecast "
+        "port bottlenecks."
+    ),
+    (
+        "FrostLine uses sensor readings, weather forecasts, and route duration to warn about "
+        "spoiled-goods risk."
+    ),
+    (
+        "SkyBridge uses flight status, warehouse capacity, and customs clearance events to "
+        "recommend cargo transfer plans."
+    ),
+    (
+        "Northstar Labs asks customer-facing teams to explain project details in concise "
+        "operational language."
+    ),
+    (
+        "The Berlin office audit window is Monday morning, and the Berlin office audit should "
+        "review RoutePulse traffic feeds, weather alerts, and customs delay reports."
+    ),
+    (
+        "The Lisbon office audit window is Tuesday afternoon, and the Lisbon office audit should "
+        "review HarborLens vessel schedules, berth availability, and labor notices."
+    ),
+    (
+        "The Singapore office audit lead is Priya Tan, and Priya Tan is available Wednesday "
+        "morning for the Singapore office SkyBridge audit."
+    ),
+    (
+        "The Toronto office audit lead is Mateo Reed, and Mateo Reed is available Thursday "
+        "afternoon for the Toronto office FrostLine audit."
+    ),
+    (
+        "Northstar Labs audit trips should avoid unnecessary backtracking while still respecting "
+        "local office availability windows."
+    ),
 ]
 
 TURNS = [
@@ -238,15 +268,15 @@ async def setup_existing_demo_data():
 
 
 async def configure_demo_storage(*, reset_storage: bool):
-    from cognee.infrastructure.databases.relational.create_db_and_tables import (
-        create_db_and_tables,
-    )
     from cognee.base_config import get_base_config
     from cognee.infrastructure.databases.cache.config import get_cache_config
     from cognee.infrastructure.databases.cache.get_cache_engine import create_cache_engine
     from cognee.infrastructure.databases.graph.config import get_graph_config
     from cognee.infrastructure.databases.graph.get_graph_engine import create_graph_engine
     from cognee.infrastructure.databases.relational import get_relational_config
+    from cognee.infrastructure.databases.relational.create_db_and_tables import (
+        create_db_and_tables,
+    )
     from cognee.infrastructure.databases.vector import get_vectordb_config
     from cognee.infrastructure.databases.vector.get_vector_engine import create_vector_engine
 
@@ -313,7 +343,7 @@ def print_turn_snapshot(
     response: Any,
     evidence: dict,
 ):
-    print("", file=sys.stderr)
+    print(file=sys.stderr)
     print(f"--- Turn {turn_number}: {label} ---", file=sys.stderr)
     print(f"user: {preview_text(user_message, max_chars=700)}", file=sys.stderr)
     for text in response_texts(response):
