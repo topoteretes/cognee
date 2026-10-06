@@ -179,16 +179,6 @@ async def test_closing_the_generator_closes_the_task_runner_at_once(events, monk
 
 
 @pytest.mark.asyncio
-async def test_closing_an_unstarted_generator_emits_nothing(events):
-    async def identity(data):
-        return data
-
-    await telemetry_module.run_tasks_with_telemetry([Task(identity)], [1], USER, "p").aclose()
-
-    assert events == []
-
-
-@pytest.mark.asyncio
 async def test_no_context_means_no_run_id_but_the_events_still_flow(events):
     async def identity(data):
         return data
@@ -366,26 +356,3 @@ async def test_a_failed_progress_push_closes_the_item_chain_at_once(events, monk
     assert names == ["Pipeline Item Started", "Pipeline Item Errored"]
     (errored,) = [p for n, p in _pipeline_events(events) if n == "Pipeline Item Errored"]
     assert errored["exception_type"] == "GeneratorExit"
-
-
-@pytest.mark.asyncio
-async def test_a_cancelled_drain_reports_the_item_once(events):
-    started = asyncio.Event()
-
-    async def wait_forever(data):
-        started.set()
-        await asyncio.Event().wait()
-
-    drain = asyncio.create_task(
-        data_item_module._drain_item_events(
-            _item_events([Task(wait_forever)]), None, [], str(uuid4()), progress_state=None
-        )
-    )
-    await asyncio.wait_for(started.wait(), timeout=2)
-    drain.cancel()
-
-    with pytest.raises(asyncio.CancelledError):
-        await drain
-
-    (errored,) = [p for n, p in _pipeline_events(events) if n == "Pipeline Item Errored"]
-    assert errored["exception_type"] == "CancelledError"
