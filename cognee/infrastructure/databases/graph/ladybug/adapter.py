@@ -3360,6 +3360,14 @@ class LadybugAdapter(GraphDBInterface):
             logger.error(f"Error during ID-filtered graph data retrieval: {e!s}")
             raise
 
+    async def get_graph_counts(self) -> tuple[int, int]:
+        """Count nodes and edges with two aggregation queries."""
+        node_count_result = await self.query("MATCH (n:Node) RETURN COUNT(n)")
+        edge_count_result = await self.query("MATCH ()-[r:EDGE]->() RETURN COUNT(r)")
+        num_nodes = node_count_result[0][0] if node_count_result else 0
+        num_edges = edge_count_result[0][0] if edge_count_result else 0
+        return num_nodes, num_edges
+
     async def get_graph_metrics(self, include_optional=False) -> dict[str, Any]:
         """
         Get metrics on graph structure and connectivity.
@@ -3381,10 +3389,7 @@ class LadybugAdapter(GraphDBInterface):
         """
 
         try:
-            node_count_result = await self.query("MATCH (n:Node) RETURN COUNT(n)")
-            edge_count_result = await self.query("MATCH ()-[r:EDGE]->() RETURN COUNT(r)")
-            num_nodes = node_count_result[0][0] if node_count_result else 0
-            num_edges = edge_count_result[0][0] if edge_count_result else 0
+            num_nodes, num_edges = await self.get_graph_counts()
 
             # Calculate mandatory metrics
             mandatory_metrics = {
