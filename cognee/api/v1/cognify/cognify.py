@@ -541,6 +541,7 @@ async def cognify(
                 llm_config=llm_config,
                 embedding_config=embedding_config,
                 data_cache=data_cache,
+                extras={"graph_extractor": resolved_extractor},
                 # Fold the vector fragments this run wrote, once per dataset,
                 # after the run is recorded complete; bounded per run, so a
                 # bloated store drains over several cognify runs.

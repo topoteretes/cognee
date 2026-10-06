@@ -47,6 +47,7 @@ from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.users.exceptions.exceptions import UserNotFoundError
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.utils import telemetry_on_error
 
 logger = get_logger("recall")
 
@@ -344,6 +345,7 @@ def _scope_should_forward_resolved(scope: str | list[str] | None) -> bool:
     return bool(scope and {"all", "graph_context"}.intersection(scope))
 
 
+@telemetry_on_error("cognee.recall ERRORED")
 async def recall(
     query_text: str,
     query_type: SearchType | None = None,

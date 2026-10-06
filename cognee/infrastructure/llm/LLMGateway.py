@@ -4,7 +4,10 @@ from typing import Any, TypeVar
 from pydantic import BaseModel
 
 from cognee.infrastructure.llm import get_llm_config
-from cognee.infrastructure.llm.config import get_llm_context_config
+from cognee.infrastructure.llm.config import (
+    get_llm_context_config,
+    resolve_structured_output_framework,
+)
 from cognee.infrastructure.llm.exceptions import raise_if_budget_exhausted
 from cognee.infrastructure.llm.retry_config import raise_if_quota_error
 from cognee.infrastructure.llm.types import TranscriptionReturnType
@@ -118,7 +121,8 @@ class LLMGateway:
     ) -> Coroutine[Any, Any, T]:
         text_input = _inject_agent_memory(text_input)
         llm_config = get_llm_config()
-        if llm_config.structured_output_framework.upper() == "BAML":
+        framework = resolve_structured_output_framework(llm_config)
+        if framework == "baml":
             from cognee.infrastructure.llm.structured_output_framework.baml.baml_src.extraction import (
                 acreate_structured_output,
             )
@@ -128,7 +132,7 @@ class LLMGateway:
                 system_prompt=system_prompt,
                 response_model=response_model,
             )
-        elif llm_config.structured_output_framework.upper() == "LITELLM_NATIVE":
+        elif framework == "litellm_native":
             from cognee.infrastructure.llm.structured_output_framework.litellm_native.get_native_client import (
                 get_native_client,
             )
