@@ -169,7 +169,7 @@ that silently ran on SQLite would fail.
 | `VACUUM` requires an experimental engine flag | none (cognee never runs `VACUUM`) | – |
 | MVCC files are unreadable by stock SQLite | external tooling on a live `mvcc` database | switch the file to `wal` first |
 | One synchronous connection used from two threads at once aborts the process (Rust panic) | the vector adapter shares one connection | every call runs under `_connection_lock`; keep it that way |
-| A database file can be open in one process at a time: a second process fails with `Locking error: Failed locking file ... File is locked by another process` (both journal modes) | the API server and a separate SDK/CLI process, or several server workers, cannot share one Turso deployment; the stock SQLite backends allow this | run one cognee process per set of Turso files (the server's default `gunicorn -w 1` is fine) |
+| A database file can be open in one process at a time, in both journal modes. The engine holds the file lock until that process exits (closing its connections does not release it), and it also blocks stock `sqlite3` | the API server and a separate SDK/CLI process, or several server workers, cannot share one Turso deployment; the stock SQLite backends allow this. cognee raises `TursoDatabaseInUseError`, naming the file, instead of the engine's `Locking error` | run one cognee process per set of Turso files (the server's default `gunicorn -w 1` is fine), or give each process its own `SYSTEM_ROOT_DIRECTORY` |
 
 ## Upstream findings
 

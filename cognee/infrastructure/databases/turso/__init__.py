@@ -6,7 +6,12 @@ package: one SQLAlchemy dialect (``sqlite+cognee_turso://``), one settings class
 """
 
 from .config import TursoConfig, get_turso_config
-from .runtime import INSTALL_HINT, require_turso
+from .runtime import (
+    INSTALL_HINT,
+    explain_file_in_use,
+    is_locked_by_another_process,
+    require_turso,
+)
 from .files import (
     DATABASE_COMPANION_SUFFIXES,
     database_file_paths,
@@ -67,9 +72,11 @@ __all__ = [
     "connect_pragmas",
     "database_file_paths",
     "exclusive_transaction",
+    "explain_file_in_use",
     "get_turso_config",
     "install_connect_pragmas",
     "install_transaction_hook",
+    "is_locked_by_another_process",
     "is_retryable_conflict",
     "register_dialect",
     "remove_database_files",

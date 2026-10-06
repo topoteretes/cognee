@@ -28,7 +28,7 @@ from sqlalchemy.dialects import registry
 from sqlalchemy.dialects.sqlite.aiosqlite import SQLiteDialect_aiosqlite
 
 from .compiler import CogneeTursoCompiler
-from .runtime import INSTALL_HINT
+from .runtime import INSTALL_HINT, explain_file_in_use
 
 DIALECT_NAME = "sqlite"
 DRIVER_NAME = "cognee_turso"
@@ -82,7 +82,11 @@ class CogneeTursoDialect(AioTursoDialect):
     def connect(self, *cargs, **cparams):
         for key in _UNSUPPORTED_CONNECT_ARGS:
             cparams.pop(key, None)
-        return super().connect(*cargs, **cparams)
+        # The engine locks a file to one process; say so in cognee's terms. A
+        # non-DBAPI error is not re-wrapped by SQLAlchemy, so callers see it as is.
+        database_path = cargs[0] if cargs else cparams.get("database", "")
+        with explain_file_in_use(database_path):
+            return super().connect(*cargs, **cparams)
 
 
 _registered = False

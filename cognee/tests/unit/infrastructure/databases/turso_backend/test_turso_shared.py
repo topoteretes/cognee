@@ -25,6 +25,8 @@ from cognee.infrastructure.databases.turso import (
     connect_pragmas,
     database_file_paths,
     exclusive_transaction,
+    explain_file_in_use,
+    is_locked_by_another_process,
     is_retryable_conflict,
     remove_database_files,
     retry_on_conflict,
@@ -628,3 +630,90 @@ class TestFiles:
             open(path, "w").close()
         remove_database_files(str(database))  # tolerates the missing -log
         assert not any(tmp_path.iterdir())
+
+
+# --------------------------------------------------------------------------- #
+# A database file open in another process
+# --------------------------------------------------------------------------- #
+class TestFileInUse:
+    LOCK_MESSAGE = (
+        "Locking error: Failed locking file '/data/graph.db'. File is locked by another process"
+    )
+
+    def test_lock_message_is_recognised_also_when_wrapped(self):
+        assert is_locked_by_another_process(RuntimeError(self.LOCK_MESSAGE))
+        wrapped = DBAPIError("SELECT 1", (), RuntimeError(self.LOCK_MESSAGE))
+        assert is_locked_by_another_process(wrapped)
+        assert not is_locked_by_another_process(RuntimeError("database is locked"))
+        assert not is_locked_by_another_process(RuntimeError("no such table: t"))
+
+    def test_explain_file_in_use_only_translates_the_lock_error(self):
+        from cognee.infrastructure.databases.exceptions import TursoDatabaseInUseError
+
+        with (
+            pytest.raises(TursoDatabaseInUseError, match="already open in another process"),
+            explain_file_in_use("/data/graph.db"),
+        ):
+            raise RuntimeError(self.LOCK_MESSAGE)
+        with pytest.raises(RuntimeError, match="no such table"), explain_file_in_use("/data/x.db"):
+            raise RuntimeError("no such table: t")
+
+    def test_second_process_gets_a_cognee_error(self, tmp_path):
+        """A file held by another process fails with TursoDatabaseInUseError, not a driver error.
+
+        Covers both ways cognee opens pyturso: the SQLAlchemy dialect (relational,
+        graph, cache engines) and the vector adapter's own connection.
+        """
+        import subprocess
+        import sys
+
+        from cognee.infrastructure.databases.exceptions import TursoDatabaseInUseError
+        from cognee.infrastructure.databases.vector.turso.TursoVectorAdapter import (
+            TursoVectorAdapter,
+        )
+
+        engine_file, vector_file = str(tmp_path / "engine.db"), str(tmp_path / "vector.db")
+        hold_files = (
+            "import sys, time, turso\n"
+            "held = [turso.connect(path) for path in sys.argv[1:]]\n"
+            "print('held', flush=True)\n"
+            "time.sleep(60)"
+        )
+        holder = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                hold_files,
+                engine_file,
+                vector_file,
+            ],
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            assert holder.stdout.readline().strip() == "held"
+
+            async def open_engine():
+                engine = create_async_engine(turso_url(engine_file), poolclass=NullPool)
+                try:
+                    async with engine.connect() as connection:
+                        await connection.execute(text("SELECT 1"))
+                finally:
+                    await engine.dispose()
+
+            with pytest.raises(TursoDatabaseInUseError, match="engine.db"):
+                _run(open_engine())
+
+            class _Embedding:
+                def get_vector_size(self):
+                    return 3
+
+            vector = TursoVectorAdapter(
+                url=vector_file, api_key=None, embedding_engine=_Embedding()
+            )
+            with pytest.raises(TursoDatabaseInUseError, match="vector.db"):
+                _run(vector.has_collection("Doc_text"))
+            _run(vector.close())
+        finally:
+            holder.kill()
+            holder.wait()

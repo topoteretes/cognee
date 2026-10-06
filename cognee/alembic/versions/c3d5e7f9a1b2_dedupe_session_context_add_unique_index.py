@@ -29,6 +29,7 @@ import sqlite3
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 logger = logging.getLogger(__name__)
@@ -153,7 +154,10 @@ def _connect_cache(path: str, driver: str):
         # Without the turso extra there is no way to heal a Turso cache, and the
         # runtime cache engine would fail to start anyway; fail here with the
         # install hint rather than a bare ModuleNotFoundError.
-        from cognee.infrastructure.databases.turso.runtime import INSTALL_HINT
+        from cognee.infrastructure.databases.turso.runtime import (
+            INSTALL_HINT,
+            explain_file_in_use,
+        )
 
         try:
             import turso
@@ -164,8 +168,9 @@ def _connect_cache(path: str, driver: str):
                 f"{INSTALL_HINT}"
             ) from error
 
-        connection = turso.connect(path)
-        connection.execute("PRAGMA busy_timeout=30000").fetchall()
+        with explain_file_in_use(path):
+            connection = turso.connect(path)
+            connection.execute("PRAGMA busy_timeout=30000").fetchall()
         return connection
     return sqlite3.connect(path, timeout=30)
 
