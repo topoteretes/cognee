@@ -32,6 +32,7 @@ from .create_dlt_source import (
 )
 from .data_item import DataItem
 from .dlt_row_data import DltRowData
+from .dlt_temporal import temporal_cells
 from .dlt_utils import document_source_tag
 from .ingest_dlt_source import ingest_dlt_source
 
@@ -440,6 +441,9 @@ async def _build_source_manifest_item(
         column_values = _selected_column_values(row, column_value_columns)
         if column_values:
             manifest_row["column_values"] = column_values
+        timestamps = temporal_cells(row)
+        if timestamps:
+            manifest_row["timestamps"] = timestamps
         manifest_rows.append(manifest_row)
 
     if missing_fk_targets:

@@ -53,17 +53,21 @@ def empty_temporal_anchors() -> dict[str, set[str]]:
 
 
 def temporal_anchors_from_rows(
-    direct_rows: Iterable[tuple[str, str, str]],
+    direct_rows: Iterable[tuple[str, str]],
     via_rows: Iterable[tuple[str, str, str]],
+    chunk_ids: Iterable[str],
 ) -> dict[str, set[str]]:
     """Assemble ``get_temporal_anchors``' result from the two row shapes the
-    adapters produce: ``(candidate_id, candidate_type, timestamp_id)`` for an edge
-    straight into a matching timestamp, and ``(chunk_id, entity_id, timestamp_id)``
-    for a candidate chunk that ``contains`` an entity with such an edge."""
+    adapters produce: ``(candidate_id, timestamp_id)`` for an edge straight into a
+    matching timestamp, and ``(chunk_id, entity_id, timestamp_id)`` for a candidate
+    chunk that ``contains`` an entity with such an edge. A directly anchored
+    candidate is a chunk when the caller passed it as one (``chunk_ids``), not by
+    its node type: DLT rows are chunks of their own graph type (``DltRow``)."""
+    chunk_set = {str(node_id) for node_id in chunk_ids}
     anchors = empty_temporal_anchors()
-    for candidate_id, candidate_type, timestamp_id in direct_rows:
+    for candidate_id, timestamp_id in direct_rows:
         anchors["timestamp_ids"].add(str(timestamp_id))
-        bucket = "chunk_ids" if candidate_type == "DocumentChunk" else "entity_ids"
+        bucket = "chunk_ids" if str(candidate_id) in chunk_set else "entity_ids"
         anchors[bucket].add(str(candidate_id))
     for chunk_id, entity_id, timestamp_id in via_rows:
         anchors["timestamp_ids"].add(str(timestamp_id))
@@ -931,7 +935,7 @@ class GraphDBInterface(ABC):
                 and timestamp_overlaps({**props, "id": node_id}, start, end)
             )
 
-        direct_rows: list[tuple[str, str, str]] = []
+        direct_rows: list[tuple[str, str]] = []
         contained: dict[str, set[str]] = {}  # candidate chunk -> entities it contains
         for source, target, relationship, _props in edges:
             source_id, target_id = str(source), str(target)
@@ -942,8 +946,7 @@ class GraphDBInterface(ABC):
             ):
                 contained.setdefault(source_id, set()).add(target_id)
             if _in_window(target_id) and (source_id in chunk_set or source_id in entity_set):
-                source_type = "DocumentChunk" if source_id in chunk_set else "Entity"
-                direct_rows.append((source_id, source_type, target_id))
+                direct_rows.append((source_id, target_id))
 
         via_rows: list[tuple[str, str, str]] = []
         reached = set().union(*contained.values()) if contained else set()
@@ -959,7 +962,7 @@ class GraphDBInterface(ABC):
                     for chunk_id, entities in contained.items():
                         if source_id in entities:
                             via_rows.append((chunk_id, source_id, target_id))
-        return temporal_anchors_from_rows(direct_rows, via_rows)
+        return temporal_anchors_from_rows(direct_rows, via_rows, chunk_set)
 
     @abstractmethod
     async def get_neighborhood(

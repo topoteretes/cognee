@@ -1,6 +1,6 @@
 from typing import Any
 
-from cognee.modules.retrieval.hybrid.chunks import search_collection
+from cognee.modules.retrieval.hybrid.chunks import search_collections
 from cognee.modules.retrieval.hybrid.facts import connection_edge_type_id
 from cognee.modules.retrieval.hybrid.results import (
     display_value,
@@ -13,6 +13,16 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("HybridRetriever")
 
+# The entity lane's collections: LLM-extracted entities and the DLT graph's
+# own node types — shared cell values, tables and foreign-key relationships —
+# which carry their row edges into the entity section the same way.
+ENTITY_COLLECTIONS = (
+    "Entity_name",
+    "DltColumn_properties",
+    "SchemaTable_name",
+    "SchemaRelationship_name",
+)
+
 
 async def search_entities(
     vector_engine: Any,
@@ -22,11 +32,12 @@ async def search_entities(
     node_name_filter_operator: str,
     query_vector: list[float],
 ) -> list[Any]:
-    """Entity_name hits, or empty if the collection is missing or search fails."""
+    """Hits over ``ENTITY_COLLECTIONS``, or empty if the search fails (a missing
+    collection is an empty channel)."""
     try:
-        return await search_collection(
+        return await search_collections(
             vector_engine,
-            "Entity_name",
+            ENTITY_COLLECTIONS,
             query,
             top_k,
             node_name,
@@ -35,7 +46,7 @@ async def search_entities(
         )
     except Exception as error:
         logger.warning(
-            "Entity_name search failed; continuing without entities: %s", error, exc_info=True
+            "Entity search failed; continuing without entities: %s", error, exc_info=True
         )
         return []
 

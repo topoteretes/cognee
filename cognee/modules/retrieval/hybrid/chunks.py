@@ -1,4 +1,6 @@
 import asyncio
+from collections.abc import Iterable
+from itertools import chain
 from typing import Any
 
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
@@ -40,9 +42,9 @@ async def retrieve_hybrid_chunks(
     candidate_limit = chunk_candidate_limit(chunks_top_k)
     summary_limit = summary_candidate_limit(chunks_top_k, text_summaries_top_k)
     vector_chunks, summary_hits = await asyncio.gather(
-        search_collection(
+        search_collections(
             vector_engine,
-            "DocumentChunk_text",
+            CHUNK_COLLECTIONS,
             query,
             candidate_limit,
             node_name,
@@ -109,6 +111,66 @@ def summary_candidate_limit(chunks_top_k: int, text_summaries_top_k: int | None)
     if text_summaries_top_k is None:
         return max(0, chunks_top_k)
     return text_summaries_top_k
+
+
+# The chunk lane's text collections: document chunks and DLT rows (one
+# ``DltRow`` per relational row, a chunk of its own graph type that CHUNKS
+# search leaves out on purpose). Rows are candidates here so hybrid answers
+# cover relational data and temporal search can anchor rows on the
+# Timestamps their date cells point to.
+CHUNK_COLLECTIONS = ("DocumentChunk_text", "DltRow_text")
+
+
+def _score(result: Any) -> float:
+    score = getattr(result, "score", None)
+    return float(score) if isinstance(score, (int, float)) else float("inf")
+
+
+def merge_scored(results: Iterable[Any], limit: int) -> list[Any]:
+    """One ranked list from hits of several collections in the same embedding space:
+    lower score first (a stable sort, so hits without a numeric score keep their
+    channel order at the end), one hit per node, cut to ``limit``."""
+    merged = []
+    seen = set()
+    for result in sorted(results, key=_score):
+        key = result_id(result) or id(result)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(result)
+        if len(merged) >= limit:
+            break
+    return merged
+
+
+async def search_collections(
+    vector_engine: Any,
+    collection_names: Iterable[str],
+    query: str,
+    limit: int,
+    node_name: list[str] | None,
+    node_name_filter_operator: str,
+    *,
+    apply_node_filter: bool = True,
+    query_vector: list[float] | None = None,
+) -> list[Any]:
+    """``search_collection`` over several collections, merged into one ranked list."""
+    hits = await asyncio.gather(
+        *(
+            search_collection(
+                vector_engine,
+                collection_name,
+                query,
+                limit,
+                node_name,
+                node_name_filter_operator,
+                apply_node_filter=apply_node_filter,
+                query_vector=query_vector,
+            )
+            for collection_name in collection_names
+        )
+    )
+    return merge_scored(chain.from_iterable(hits), limit)
 
 
 async def search_collection(

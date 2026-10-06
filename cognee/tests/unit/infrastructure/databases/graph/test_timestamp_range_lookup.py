@@ -161,3 +161,37 @@ async def test_default_anchors_cover_candidate_entities_and_empty_input():
         "entity_ids": set(),
     }
     assert adapter.calls[-1][0] != []  # the empty call never touched the graph
+
+
+@pytest.mark.asyncio
+async def test_default_anchors_bucket_a_dlt_row_as_the_chunk_it_was_asked_about():
+    """A DLT row is a chunk of its own graph type; its date edge anchors it as a chunk."""
+    nodes = _GRAPH_NODES + [_node("row_1", "DltRow"), _node("row_2", "DltRow")]
+    edges = _GRAPH_EDGES + [
+        _edge("row_1", "ts_1969", "order_date"),
+        _edge("row_2", "ts_1867", "order_date"),
+    ]
+    adapter = _NeighborhoodAdapter(nodes, edges)
+
+    anchors = await adapter.get_temporal_anchors(["row_1", "row_2", "c_curie"], [], *YEAR_1969)
+
+    assert anchors["timestamp_ids"] == {"ts_1969"}
+    assert anchors["chunk_ids"] == {"row_1"}
+    assert anchors["entity_ids"] == set()
+
+
+def test_anchors_from_rows_bucket_by_the_requested_chunk_set():
+    from cognee.infrastructure.databases.graph.graph_db_interface import (
+        temporal_anchors_from_rows,
+    )
+
+    anchors = temporal_anchors_from_rows(
+        [("row_1", "ts_a"), ("eagle", "ts_a")],
+        [("c_1", "curie", "ts_b")],
+        chunk_ids={"row_1", "c_1"},
+    )
+    assert anchors == {
+        "timestamp_ids": {"ts_a", "ts_b"},
+        "chunk_ids": {"row_1", "c_1"},
+        "entity_ids": {"eagle", "curie"},
+    }
