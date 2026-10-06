@@ -21,14 +21,17 @@ Flow (only runs from the update endpoint):
    now — staging and validation done — is a pipeline run record created;
    refused updates leave no run-record noise.
 5. Write: extract ONLY the fresh chunks, in bounded batches, through the
-   standard graph-extraction and storage tasks (attributed to the same
-   ``data_id``), retire replaced chunk ownership through the shared deletion
-   planner, and renumber moved survivors. Date context is part of "fresh":
-   the graph prompt's date hints are a function of the whole document in
-   chunk order (``document_temporal_hints``), so they are recomputed for the
-   old and the new text, fresh chunks get the new document's hints, and a
-   surviving chunk whose hints changed — it inferred a date from text that
-   the edit touched — is retired and re-extracted like a fresh one.
+   same extract-and-summarize step cognify runs for the selected extractor
+   (the LLM, or the GLiNER demo with no LLM call) and the standard storage
+   task (attributed to the same ``data_id``), retire replaced chunk ownership
+   through the shared deletion planner, and renumber moved survivors. On the
+   LLM extractor, date context is part of "fresh": the graph prompt's date
+   hints are a function of the whole document in chunk order
+   (``document_temporal_hints``), so they are recomputed for the old and the
+   new text, fresh chunks get the new document's hints, and a surviving chunk
+   whose hints changed — it inferred a date from text that the edit touched —
+   is retired and re-extracted like a fresh one. GLiNER never reads the hints,
+   so under it nothing is re-dated.
 6. PUBLISH in one relational transaction: content location, hashes, size,
    token count, and the processed stamp flip together. A crash anywhere
    before the publish leaves the row on the old content; the stored chunks
@@ -72,7 +75,7 @@ from cognee.modules.chunking.chunk_policy import (
 from cognee.modules.chunking.external_metadata import normalize_external_metadata
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.chunking.TextChunker import TextChunker
-from cognee.modules.cognify.config import get_cognify_config
+from cognee.modules.cognify.config import GLINER_DEMO_EXTRACTOR, LLM_EXTRACTOR, get_cognify_config
 from cognee.modules.cognify.routing import CognifyRoute, cognify_route_for
 from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
 from cognee.modules.data.methods import (
@@ -331,6 +334,64 @@ def _resolve_extraction_config() -> Config:
     return {"ontology_config": {"ontology_resolver": get_default_ontology_resolver()}}
 
 
+async def _extraction_step(
+    extractor: str,
+    document: Document,
+    chunker: type,
+    graph_model: type[BaseModel],
+    custom_prompt: str | None,
+    cognify_config,
+):
+    """The ``(batch, ctx) -> summaries`` call cognify's pipeline makes for ``extractor``.
+
+    ``llm`` is ``extract_graph_and_summarize`` as ``get_default_tasks`` runs
+    it. ``gliner_demo`` is ``extract_graph_and_summarize_with_gliner`` as
+    ``get_gliner_demo_tasks`` runs it, after the per-document schema step that
+    pipeline places before chunking (``prepare_gliner_schema`` resolves the
+    schema from the configured ontology or a sketch of the new text, and
+    stores it on the document the chunks point to). No LLM call on that path.
+    """
+    config = _resolve_extraction_config()
+    if extractor == LLM_EXTRACTOR:
+
+        async def extract_with_llm(batch, ctx):
+            return await extract_graph_and_summarize(
+                batch,
+                graph_model=graph_model,
+                config=config,
+                custom_prompt=custom_prompt,
+                ctx=ctx,
+                summary_method=cognify_config.summary_method,
+            )
+
+        return extract_with_llm
+    if extractor != GLINER_DEMO_EXTRACTOR:
+        raise ValueError(f"Unknown extractor {extractor!r}")
+
+    from cognee.tasks.graph.gliner_demo.schema import resolve_schema
+    from cognee.tasks.graph.gliner_demo.tasks import (
+        GlinerOptions,
+        GlinerRunStats,
+        extract_graph_and_summarize_with_gliner,
+        prepare_gliner_schema,
+    )
+
+    schema = resolve_schema(
+        ontology_resolver=(config.get("ontology_config") or {}).get("ontology_resolver")
+    )
+    await prepare_gliner_schema(
+        [document], schema, max_chunk_size=await get_max_chunk_tokens(), chunker=chunker
+    )
+    stats, options = GlinerRunStats(), GlinerOptions()
+
+    async def extract_with_gliner(batch, ctx):
+        return await extract_graph_and_summarize_with_gliner(
+            batch, stats=stats, options=options, config=config, ctx=ctx
+        )
+
+    return extract_with_gliner
+
+
 def _rehydrate_chunk(document: Document, node: dict, chunk_index: int) -> DocumentChunk:
     """Rebuild a stored chunk at a new position, preserving every model field.
 
@@ -540,6 +601,7 @@ async def incremental_update(
     custom_prompt: str | None = None,
     chunker: type = TextChunker,
     policy: ChunkPolicy = DEFAULT_CHUNK_POLICY,
+    extractor: str = LLM_EXTRACTOR,
 ) -> dict:
     """Perform a chunk-level incremental update of one document.
 
@@ -547,6 +609,8 @@ async def incremental_update(
     old ones; it is replaceable without touching storage or this orchestration.
     ``chunker`` must match the one that built the document's stored chunks —
     a mismatch is refused rather than discovered as a tiling failure.
+    ``extractor`` is the resolved cognify extractor (``resolve_extractor``)
+    that fills the extract-and-summarize step for the fresh chunks.
     """
     graph_engine = await get_graph_engine()
     if not getattr(graph_engine, "supports_incremental_chunk_updates", False):
@@ -645,6 +709,7 @@ async def incremental_update(
             custom_prompt,
             chunker,
             policy,
+            extractor,
         )
 
 
@@ -660,6 +725,7 @@ async def _run_incremental_update(
     custom_prompt: str | None,
     chunker: type,
     policy: ChunkPolicy,
+    extractor: str,
 ) -> dict:
     """Stage → validate → (record) → write → publish.
 
@@ -701,6 +767,8 @@ async def _run_incremental_update(
                 graph_model,
                 custom_prompt,
                 pipeline_run.pipeline_run_id,
+                chunker=chunker,
+                extractor=extractor,
             )
     except Exception as error:
         await log_pipeline_run_error(
@@ -934,6 +1002,8 @@ async def _write_and_publish(
     graph_model: type[BaseModel],
     custom_prompt: str | None,
     pipeline_run_id: UUID,
+    chunker: type = TextChunker,
+    extractor: str = LLM_EXTRACTOR,
 ) -> dict:
     """The write phase, ending in the one-transaction publish.
 
@@ -971,7 +1041,12 @@ async def _write_and_publish(
     # chunks inferred a date from text this edit changed. Those are retired
     # and written again like fresh content, at their final position and under
     # their own id (identity is content-derived, and the text is unchanged).
-    new_hints, redated_ids = _replan_temporal_hints(plan, stored_chunks)
+    # Only the LLM prompt reads the hints; GLiNER extracts a chunk the same
+    # way whatever surrounds it, so there is nothing to re-date under it.
+    if extractor == LLM_EXTRACTOR:
+        new_hints, redated_ids = _replan_temporal_hints(plan, stored_chunks)
+    else:
+        new_hints, redated_ids = {}, []
     redated = set(redated_ids)
     final_positions = _final_positions(plan, stored_chunks)
     redated_chunks = [
@@ -988,13 +1063,16 @@ async def _write_and_publish(
     ]
 
     cognify_config = get_cognify_config()
-    # Same extraction + summarization the cognify pipeline runs, with the same
-    # ontology resolution, model, and prompt plumbing — and the same batch
-    # bound. Cognify gets its batching from the pipeline task machinery
-    # (task_config={"batch_size": ...}), which this path does not run through,
-    # so the slicing is explicit here. Unbounded, a rewrite of most of a large
-    # document becomes one oversized extraction step with no intermediate
-    # progress and a single all-or-nothing failure.
+    # Same extraction + summarization the cognify pipeline runs for this
+    # extractor, with the same ontology resolution, model, and prompt plumbing
+    # — and the same batch bound. Cognify gets its batching from the pipeline
+    # task machinery (task_config={"batch_size": ...}), which this path does
+    # not run through, so the slicing is explicit here. Unbounded, a rewrite
+    # of most of a large document becomes one oversized extraction step with
+    # no intermediate progress and a single all-or-nothing failure.
+    extract = await _extraction_step(
+        extractor, document, chunker, graph_model, custom_prompt, cognify_config
+    )
     batch_size = cognify_config.chunks_per_batch or DEFAULT_CHUNKS_PER_BATCH
     # A re-dated chunk keeps its id, so its old subgraph must go BEFORE the new
     # extraction lands — deleting afterwards would take the new one with it.
@@ -1010,14 +1088,7 @@ async def _write_and_publish(
         for chunk in batch:
             chunk.belongs_to_set = document.belongs_to_set
             chunk.source_node_set = document.source_node_set
-        summaries = await extract_graph_and_summarize(
-            batch,
-            graph_model=graph_model,
-            config=_resolve_extraction_config(),
-            custom_prompt=custom_prompt,
-            ctx=context,
-            summary_method=cognify_config.summary_method,
-        )
+        summaries = await extract(batch, context)
         await add_data_points(
             summaries, ctx=context, embed_triplets=cognify_config.triplet_embedding
         )
