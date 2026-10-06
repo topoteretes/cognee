@@ -270,6 +270,32 @@ class SharedLadybugLockRequiresRedisError(CogneeConfigurationError):
 SharedKuzuLockRequiresRedisError = SharedLadybugLockRequiresRedisError
 
 
+class TursoDatabaseInUseError(CogneeConfigurationError):
+    """
+    Raised when a Turso database file is already open in another process.
+
+    The Turso engine (pyturso 0.7.x) locks a database file to the one process that
+    opened it, until that process exits, so a second cognee process on the same
+    files cannot open them. Stock SQLite allows this; the Turso backend does not.
+    """
+
+    def __init__(
+        self,
+        database_path: str = "",
+        name: str = "TursoDatabaseInUseError",
+        status_code: int = status.HTTP_409_CONFLICT,
+    ):
+        where = f" '{database_path}'" if database_path else ""
+        message = (
+            f"The Turso database file{where} is already open in another process. "
+            "The Turso backend allows one process per database file, and the lock is held "
+            "until that process exits. Stop the other cognee process using these files (an "
+            "API server, CLI command, or script), or give each process its own "
+            "SYSTEM_ROOT_DIRECTORY. See docs/turso-local.md."
+        )
+        super().__init__(message, name, status_code)
+
+
 class DatabaseCredentialsError(CogneeConfigurationError):
     """
     Raised when database credentials are incomplete or invalid.

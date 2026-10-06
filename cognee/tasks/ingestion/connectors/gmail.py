@@ -491,8 +491,9 @@ def incremental_fetch(
             )
         except Exception as exc:
             # A 404 means the cursor expired — recover with a full backfill.
-            status = getattr(getattr(exc, "resp", None), "status", None)
-            if status == 404 or "404" in str(exc):
+            # Trust only the structured HTTP status: str(exc) embeds the request
+            # URL, and a numeric startHistoryId can spuriously contain "404".
+            if getattr(getattr(exc, "resp", None), "status", None) == 404:
                 logger.warning(
                     "History id %s expired; loading every message in the label again.",
                     start_history_id,

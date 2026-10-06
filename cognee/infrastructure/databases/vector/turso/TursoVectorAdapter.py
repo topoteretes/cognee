@@ -28,6 +28,7 @@ from cognee.infrastructure.databases.exceptions import MissingQueryParameterErro
 from cognee.infrastructure.databases.turso import (
     begin_statement,
     connect_pragmas,
+    explain_file_in_use,
     get_turso_config,
     retry_on_conflict,
 )
@@ -148,10 +149,11 @@ class TursoVectorAdapter(VectorDBInterface):
         # and _transaction() opens its own BEGIN (CONCURRENT in mvcc, IMMEDIATE in
         # wal). The driver's implicit BEGIN would only start at the first write,
         # leaving a read-modify-write's read outside the transaction.
-        connection = turso.connect(self.url, isolation_level=None)
-        for statement in connect_pragmas(config):
-            # Step the PRAGMA: pyturso runs a statement when its cursor is read.
-            connection.execute(statement).fetchall()
+        with explain_file_in_use(self.url):
+            connection = turso.connect(self.url, isolation_level=None)
+            for statement in connect_pragmas(config):
+                # Step the PRAGMA: pyturso runs a statement when its cursor is read.
+                connection.execute(statement).fetchall()
         self._connection = connection
         return self._connection
 
