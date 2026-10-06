@@ -190,7 +190,9 @@ def _gliner_install_properties(config: CognifyConfig) -> dict:
 async def ensure_extractor_runtime(extractor: str, config: CognifyConfig) -> None:
     """Make the GLiNER runtime importable before a pipeline that uses it starts.
 
-    A no-op for the LLM extractor and when the runtime is present. Otherwise the
+    A no-op for the LLM extractor, when the runtime is present, and when a remote
+    GLiNER worker is configured (``COGNEE_GLINER_TRANSPORT``): then the model runs
+    there and this process needs neither torch nor gliner2. Otherwise the
     blocking install runs in a worker thread and is awaited, so the event loop keeps
     serving other work while this caller waits for it. Raises
     ``KeylessExtractorNotInstalledError`` when ``GLINER_AUTO_INSTALL`` is off and
@@ -205,8 +207,11 @@ async def ensure_extractor_runtime(extractor: str, config: CognifyConfig) -> Non
         gliner_runtime_installed,
         install_gliner_runtime,
     )
+    from cognee.tasks.graph.gliner_demo.remote.settings import remote_gliner_configured
 
     if extractor != GLINER_DEMO_EXTRACTOR or gliner_runtime_installed():
+        return
+    if remote_gliner_configured():
         return
     if not config.gliner_auto_install:
         raise KeylessExtractorNotInstalledError()

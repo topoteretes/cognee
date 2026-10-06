@@ -291,9 +291,18 @@ def schema_from_label_bank(
     if not sketch:
         return EMPTY_SCHEMA
 
-    probe_schema = GlinerSchema(dict(LABEL_BANK), dict(RELATION_BANK), source="label_bank")
-    results = [extract_once(extractor, sketch, probe_schema, threshold=threshold)]
+    return schema_from_probe_result(
+        extract_once(extractor, sketch, LABEL_BANK_PROBE_SCHEMA, threshold=threshold)
+    )
 
+
+# Every bank label at once; what the label-bank probe extracts a sketch with.
+LABEL_BANK_PROBE_SCHEMA = GlinerSchema(dict(LABEL_BANK), dict(RELATION_BANK), source="label_bank")
+
+
+def schema_from_probe_result(result: Mapping[str, Any]) -> GlinerSchema:
+    """Keep the bank labels that fired in one probe result (local or remote)."""
+    results = [result]
     entity_hits = {
         n: c for n, c in _count_hits(results, "entities").items() if c and n in LABEL_BANK
     }

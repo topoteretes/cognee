@@ -1,0 +1,93 @@
+// gRPC contract for the GLiNER worker, copied from topoteretes/gliner_worker
+// (src/gliner_worker/transports/grpc_api/gliner_worker.proto). Mirrors POST /v1/extract.
+//
+// After editing, regenerate the serialized descriptors in ../grpc_descriptors.py
+// (the command is in that module's docstring).
+
+syntax = "proto3";
+
+package gliner_worker.v1;
+
+service GlinerWorker {
+  // Batched extraction of many inputs under one schema.
+  rpc Extract(ExtractRequest) returns (ExtractResponse);
+}
+
+message ExtractRequest {
+  repeated Input inputs = 1;
+  Schema schema = 2;
+  Options options = 3;
+}
+
+message Input {
+  // Non-empty and unique within the request.
+  string id = 1;
+  string text = 2;
+}
+
+message Schema {
+  // Label names must be unique within each list.
+  repeated Label entities = 1;
+  repeated Label relations = 2;
+}
+
+message Label {
+  string name = 1;
+  // Natural-language description; improves zero-shot accuracy.
+  optional string description = 2;
+}
+
+// Unset fields take the same defaults as the HTTP API.
+message Options {
+  optional double threshold = 1;
+  optional int32 batch_size = 2;
+  optional bool include_confidence = 3;
+  optional bool include_spans = 4;
+  // "flat", "nested" or "longest"; unset keeps the model's default.
+  optional string overlap_policy = 5;
+  // Scan each input in overlapping word windows and merge the results;
+  // offsets then refer to the whole input. Unset, the encoder truncates
+  // long inputs. window_overlap_words requires window_words.
+  optional int32 window_words = 6;
+  optional int32 window_overlap_words = 7;
+}
+
+message ExtractResponse {
+  // In input order.
+  repeated ItemResult items = 1;
+  string model = 2;
+  double elapsed_ms = 3;
+  // True when Options.window_words was applied. A worker that predates
+  // windowing ignores the option and leaves this false.
+  bool windowed = 4;
+}
+
+message ItemResult {
+  string id = 1;
+  // Keyed by entity label.
+  map<string, MentionList> entities = 2;
+  // Keyed by relation label.
+  map<string, RelationList> relations = 3;
+}
+
+message MentionList {
+  repeated Mention mentions = 1;
+}
+
+message RelationList {
+  repeated Relation relations = 1;
+}
+
+message Mention {
+  string text = 1;
+  // Set only with Options.include_confidence.
+  optional double confidence = 2;
+  // Character offsets, set only with Options.include_spans.
+  optional int32 start = 3;
+  optional int32 end = 4;
+}
+
+message Relation {
+  Mention head = 1;
+  Mention tail = 2;
+}
