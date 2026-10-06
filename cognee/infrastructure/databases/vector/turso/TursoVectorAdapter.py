@@ -6,8 +6,9 @@ engine has no ``libsql_vector_idx`` / ``vector_top_k`` approximate index.
 
 Engine constraints that shape the SQL here: no scalar subquery inside
 ``ON CONFLICT DO UPDATE SET`` (so ``belongs_to_set`` merges happen in Python before
-a plain upsert), and an outer ``json_each`` over an unaliased column is misresolved
-inside UPDATE/DELETE (so tag removal aliases the table and stays pure SQL).
+a plain upsert), and ``json_each().value`` returns a string element's raw JSON text,
+escapes included (so node-set names are compared on ``payload ->> je.fullkey``, and
+tag removal filters names in Python inside one write transaction).
 
 Concurrency: one synchronous driver connection per adapter, used only inside
 ``asyncio.to_thread`` under ``self._connection_lock``. That lock is load-bearing —
