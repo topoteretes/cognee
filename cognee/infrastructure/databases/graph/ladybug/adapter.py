@@ -198,7 +198,7 @@ def _parse_properties_blob(raw: Any) -> dict[str, Any]:
         return {}
     try:
         parsed = json.loads(raw)
-    except (json.JSONDecodeError, TypeError):
+    except json.JSONDecodeError:
         return {}
     return parsed if isinstance(parsed, dict) else {}
 
