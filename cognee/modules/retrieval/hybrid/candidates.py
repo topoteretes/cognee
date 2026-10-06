@@ -38,15 +38,26 @@ class HybridCandidates:
             entities=self._first(self.entities, entity_ids),
         )
 
-    def finalize(self, *, chunks_limit: int, entities_limit: int) -> dict:
-        """Cut to the limits and select facts against the entities kept."""
+    def finalize(
+        self, *, chunks_limit: int, entities_limit: int, entity_edge_budget: int | None = None
+    ) -> dict:
+        """Cut to the limits and select facts against the entities kept.
+
+        ``entity_edge_budget`` is the fact budget spent when no entity is kept
+        (``resolve_facts_top_k``). The fetch sizes it for its own entity limit;
+        a caller that cuts to a smaller limit passes the budget that matches
+        what it shows, so facts cannot outgrow the entity lane they replace.
+        """
         chunks = list(self.chunks)[:chunks_limit]
         entities = list(self.entities)[:entities_limit]
+        fact_candidates = self.fact_candidates
+        if entity_edge_budget is not None:
+            fact_candidates = replace(fact_candidates, entity_edge_budget=entity_edge_budget)
         return {
             "chunks": chunks,
             "chunk_summaries": self._summaries_for(self.chunk_summaries, chunks),
             "entities": entities,
-            "facts": select_facts_from_candidates(self.fact_candidates, entities),
+            "facts": select_facts_from_candidates(fact_candidates, entities),
         }
 
     @staticmethod

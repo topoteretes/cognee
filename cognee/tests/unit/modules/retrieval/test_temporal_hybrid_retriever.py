@@ -165,6 +165,20 @@ def test_finalize_selects_facts_against_the_entities_it_keeps():
     assert [fact["id"] for fact in one["facts"]] == ["f_helios", "f_other"]
 
 
+def test_finalize_can_size_the_fallback_fact_budget_for_the_entities_it_shows():
+    """With no entity kept, facts get the entity lane's edge budget. The fetch sized
+    it for its own limit; a caller cutting to fewer entities passes its own."""
+    hits = [{"id": f"f{i}", "text": f"fact number {i} happened"} for i in range(100)]
+    candidates = HybridCandidates(
+        chunks=[{"id": "c1"}],
+        fact_candidates=FactCandidates(edge_hits=hits, facts_top_k=2, entity_edge_budget=60),
+    )
+    as_fetched = candidates.finalize(chunks_limit=2, entities_limit=2)
+    assert len(as_fetched["facts"]) == 60  # the fetch's budget, unchanged by default
+    shown_two = candidates.finalize(chunks_limit=2, entities_limit=2, entity_edge_budget=6)
+    assert len(shown_two["facts"]) == 6
+
+
 # --- retriever flow ------------------------------------------------------------
 
 
@@ -295,6 +309,30 @@ async def test_temporal_retriever_selects_facts_against_the_entities_it_shows(mo
     assert [entity["id"] for entity in result["entities"]] == ["atlas"]  # helios cut
     assert [fact["id"] for fact in result["facts"]] == ["f_helios", "f_other"]
     assert [fact["id"] for fact in retriever.last_baseline["facts"]] == ["f_helios", "f_other"]
+
+
+@pytest.mark.asyncio
+async def test_temporal_retriever_caps_facts_by_top_k_when_no_entity_is_shown(monkeypatch):
+    """The no-entity fact budget follows top_k, not the 4x candidate fetch."""
+    hits = [{"id": f"f{i}", "text": f"fact number {i} happened"} for i in range(100)]
+    candidates = HybridCandidates(
+        chunks=[{"id": "c1"}],
+        # what HybridRetriever._retrieve_entities_and_facts sets: candidate_top_k (20) x 3
+        fact_candidates=FactCandidates(edge_hits=hits, facts_top_k=2, entity_edge_budget=60),
+    )
+    retriever, _engine, _fetch, _extract = _retriever(
+        monkeypatch,
+        anchors=_anchors(chunks=("c1",)),
+        interval=(_utc(1950, 1, 1), _utc(1951, 1, 1), None),
+        candidates=candidates,
+    )
+    retriever.max_edges_per_entity = 3
+
+    result = await retriever.get_retrieved_objects(query="in 1950")
+
+    assert result["entities"] == []
+    assert len(result["facts"]) == retriever.top_k * 3  # 6, not 60
+    assert len(retriever.last_baseline["facts"]) == retriever.top_k * 3
 
 
 @pytest.mark.asyncio
