@@ -5,6 +5,7 @@ from typing import Any
 from cognee.modules.data.methods.get_authorized_existing_datasets import (
     get_authorized_existing_datasets,
 )
+from cognee.modules.pipelines.layers.hook_for_dataset import hook_for_dataset
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted, PipelineRunErrored
 from cognee.modules.pipelines.queues.pipeline_run_info_queues import push_to_queue
 from cognee.modules.users.methods.get_default_user import get_default_user
@@ -113,10 +114,17 @@ async def run_pipeline_as_background_process(
     # Every primed generator owns a run and must be closed if a later setup fails.
     pipeline_list = []
     try:
-        for dataset in datasets:
+        for index, dataset in enumerate(datasets):
             call_params = dict(params)
             if "datasets" in call_params:
                 call_params["datasets"] = dataset
+            # One run_pipeline call per dataset here, so mark the multi-dataset
+            # position on the hook before each call sees itself as the last.
+            # Only when one was passed: other pipelines take no such parameter.
+            if call_params.get("after_run_completed") is not None:
+                call_params["after_run_completed"] = hook_for_dataset(
+                    call_params["after_run_completed"], index, len(datasets)
+                )
             pipeline_run = pipeline(**call_params) if callable(pipeline) else pipeline
             pipeline_list.append(pipeline_run)
             run_info = await anext(pipeline_run)

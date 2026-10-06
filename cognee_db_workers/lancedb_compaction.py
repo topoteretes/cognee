@@ -40,20 +40,18 @@ exposes its bundled core only inside its native binary, so
 ``LANCE_CORE_BY_LANCEDB`` records it per lancedb release line, and
 ``lance_core_mismatch`` turns compaction off when the installed pair is not a
 known match (pyproject keeps the two on matching lines; this catches an
-override).
+override). Any other failure to open or compact a table is that table's
+failure for that pass, not a reason to stop compacting.
 """
 
 from __future__ import annotations
 
+import asyncio
 import time
 from datetime import datetime
 from itertools import pairwise
 from typing import Any
 
-DEFAULT_TARGET_ROWS_PER_FRAGMENT = 20_000
-DEFAULT_RETENTION_SECONDS = 300
-DEFAULT_MAX_TASKS_PER_RUN = 4
-DEFAULT_MAX_VERSIONS_PER_RUN = 1_000
 #: Fragments with at least this share of deleted rows are rewritten even when
 #: already at target size, so the dead rows that re-upserts leave in cold data
 #: are reclaimed once they reach a fifth of a fragment.
@@ -91,20 +89,45 @@ def lance_core_mismatch() -> str | None:
     return None
 
 
-class PylanceIncompatibleError(RuntimeError):
-    """pylance cannot open a table lancedb wrote: the two are built on
-    different Lance cores. Not specific to one table, so callers stop
-    compacting altogether instead of retrying every table."""
-
-
 async def open_as_lance(table):
-    """``table`` (a ``lancedb.AsyncTable``) as a pylance dataset at its latest version."""
-    try:
-        dataset = await table.to_lance()
-        dataset.versions()
-    except Exception as exc:
-        raise PylanceIncompatibleError(f"{type(exc).__name__}: {exc}") from exc
-    return dataset
+    """``table`` (a ``lancedb.AsyncTable``) as a pylance dataset at its latest version.
+
+    The handle is moved to the latest version first: lancedb handles do not
+    refresh on their own, and planning a rewrite against a version a write has
+    since superseded makes the rewrite's commit conflict and fail.
+    """
+    await table.checkout_latest()
+    return await table.to_lance()
+
+
+async def compact_table(table, *, target_rows_per_fragment: int, max_tasks: int) -> dict:
+    """Merge ``table``'s small fragments (``compact_fragments``) and move the
+    handle to the version that committed. The I/O runs off the event loop.
+
+    The one sequence both the in-process adapter and the subprocess worker run;
+    the caller holds its write lock around it.
+    """
+    dataset = await open_as_lance(table)
+    stats = await asyncio.to_thread(
+        compact_fragments,
+        dataset,
+        target_rows_per_fragment=target_rows_per_fragment,
+        max_tasks=max_tasks,
+    )
+    await table.checkout_latest()
+    return stats
+
+
+async def prune_table(table, *, retention_seconds: int, max_versions: int) -> dict:
+    """Delete ``table``'s versions whose successor has aged past the window
+    (``prune_superseded_versions``), off the event loop. Needs no write lock."""
+    dataset = await open_as_lance(table)
+    return await asyncio.to_thread(
+        prune_superseded_versions,
+        dataset,
+        retention_seconds=retention_seconds,
+        max_versions=max_versions,
+    )
 
 
 def _bounded(items: list, limit: int) -> list:
@@ -118,8 +141,8 @@ def _bounded(items: list, limit: int) -> list:
 def compact_fragments(
     dataset,
     *,
-    target_rows_per_fragment: int = DEFAULT_TARGET_ROWS_PER_FRAGMENT,
-    max_tasks: int = DEFAULT_MAX_TASKS_PER_RUN,
+    target_rows_per_fragment: int,
+    max_tasks: int,
 ) -> dict[str, Any]:
     """Merge the small fragments of ``dataset`` (a ``lance.LanceDataset``).
 
@@ -192,8 +215,8 @@ def _epoch_seconds(stamp: datetime) -> float:
 def prune_superseded_versions(
     dataset,
     *,
-    retention_seconds: int = DEFAULT_RETENTION_SECONDS,
-    max_versions: int = DEFAULT_MAX_VERSIONS_PER_RUN,
+    retention_seconds: int,
+    max_versions: int,
 ) -> dict[str, Any]:
     """Delete the versions of ``dataset`` whose successor has aged past the window.
 

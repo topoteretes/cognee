@@ -142,8 +142,12 @@ async def lifespan(app: FastAPI):
     # IMPROVE_STAGES_DISABLED typo, an out-of-range alpha) raises here with the
     # full message instead of surfacing as a generic 409 per improve call.
     from cognee.modules.improve import get_improve_config
+    from cognee.modules.maintenance import get_maintenance_config
 
     get_improve_config()
+    # Same for MAINTENANCE_JOBS_DISABLED: a typo would otherwise switch every
+    # maintenance job off with one warning per cognify.
+    get_maintenance_config()
 
     # Emit a clear startup message for docker logs
     logger.info("Backend server has started")

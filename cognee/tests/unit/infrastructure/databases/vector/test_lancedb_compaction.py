@@ -426,26 +426,22 @@ async def test_fragment_rewrite_holds_the_write_lock_and_version_pruning_does_no
     lock_held = {}
 
     def recording(name, real):
-        def wrapper(*args, **kwargs):
+        async def wrapper(*args, **kwargs):
             lock_held[name] = adapter.VECTOR_DB_LOCK.locked()
-            return real(*args, **kwargs)
+            return await real(*args, **kwargs)
 
         return wrapper
 
     monkeypatch.setattr(
-        adapter_module,
-        "compact_fragments",
-        recording("compact_fragments", adapter_module.compact_fragments),
+        adapter_module, "compact_table", recording("compact_table", adapter_module.compact_table)
     )
     monkeypatch.setattr(
-        adapter_module,
-        "prune_superseded_versions",
-        recording("prune_superseded_versions", adapter_module.prune_superseded_versions),
+        adapter_module, "prune_table", recording("prune_table", adapter_module.prune_table)
     )
 
     await adapter.compact()
 
-    assert lock_held == {"compact_fragments": True, "prune_superseded_versions": False}
+    assert lock_held == {"compact_table": True, "prune_table": False}
 
 
 @pytest.mark.asyncio
@@ -529,33 +525,39 @@ async def test_compact_is_fail_open_per_collection(tmp_path, compaction_settings
 
 
 @pytest.mark.asyncio
-async def test_an_incompatible_pylance_turns_compaction_off(
+async def test_a_table_that_cannot_be_opened_fails_only_itself(
     tmp_path, compaction_settings, monkeypatch
 ):
-    """lancedb and pylance on different Lance cores: stop, warn once, never fail writes."""
-    from cognee_db_workers.lancedb_compaction import PylanceIncompatibleError
-
-    adapter_module = importlib.import_module(
-        "cognee.infrastructure.databases.vector.lancedb.LanceDBAdapter"
-    )
+    """A transient I/O error or one damaged table is that table's failure in
+    that pass -- it does not turn compaction off for the store. (A real
+    pylance/lancedb mismatch is caught by the Lance-core version check.)"""
     compaction_settings(retention_seconds=0)
     adapter, _ = _adapter(tmp_path)
-    await _write_n_points(adapter, "PylanceA_label", 2)
-    await _write_n_points(adapter, "PylanceB_label", 2)
-    attempts = []
+    await _write_n_points(adapter, "Unreadable_label", 2)
+    await _write_n_points(adapter, "Readable_label", 2)
+    real_get_collection = adapter.get_collection
+    broken_once = ["Unreadable_label"]
 
-    async def incompatible(table):
-        attempts.append(table)
-        raise PylanceIncompatibleError("unsupported manifest version")
+    async def get_collection(name):
+        table = await real_get_collection(name)
+        if name in broken_once:
+            broken_once.remove(name)
 
-    monkeypatch.setattr(adapter_module, "open_as_lance", incompatible)
+            async def unreadable():
+                raise OSError("transient read failure")
+
+            table.to_lance = unreadable
+        return table
+
+    monkeypatch.setattr(adapter, "get_collection", get_collection)
 
     first = await adapter.compact()
 
-    assert len(attempts) == 1, "kept trying other tables after an incompatibility"
-    assert [value for value in first.values() if "error" in value]
-    assert await adapter.compact() == {"skipped": "pylance_incompatible"}
-    await _write_n_points(adapter, "PylanceA_label", 1, start=2)  # writes still work
+    assert "error" in first["Unreadable_label"]
+    assert first["Readable_label"]["executed_tasks"] == 1
+    assert adapter._compaction_unsupported is None
+    second = await adapter.compact()
+    assert second["Unreadable_label"]["executed_tasks"] == 1, "the next pass recovered"
 
 
 @pytest.mark.asyncio
@@ -698,58 +700,6 @@ async def test_pylance_reads_the_tables_lancedb_writes(tmp_path, compaction_sett
     assert dataset.to_table().num_rows == 3
 
 
-def _engine_getter(engine):
-    async def get_vector_engine_async():
-        return engine
-
-    return get_vector_engine_async
-
-
-@pytest.mark.asyncio
-async def test_compact_vector_store_never_fails_the_pipeline(monkeypatch):
-    module = importlib.import_module("cognee.infrastructure.databases.vector.compact_vector_store")
-
-    class Exploding:
-        async def compact(self):
-            raise RuntimeError("disk on fire")
-
-    class Quiet:
-        async def compact(self):
-            return {"Entity_name": {"planned_tasks": 1, "executed_tasks": 1}}
-
-    async def unavailable():
-        raise RuntimeError("no vector engine")
-
-    monkeypatch.setattr(module, "get_vector_engine_async", _engine_getter(Exploding()))
-    assert await module.compact_vector_store() is None
-
-    monkeypatch.setattr(module, "get_vector_engine_async", unavailable)
-    assert await module.compact_vector_store() is None
-
-    monkeypatch.setattr(module, "get_vector_engine_async", _engine_getter(Quiet()))
-    assert await module.compact_vector_store() == {
-        "Entity_name": {"planned_tasks": 1, "executed_tasks": 1}
-    }
-
-
-@pytest.mark.asyncio
-async def test_compact_vector_store_uses_the_async_engine_getter(monkeypatch):
-    """The deprecated sync getter warns on every run and fails under -W error."""
-    import warnings
-
-    module = importlib.import_module("cognee.infrastructure.databases.vector.compact_vector_store")
-    assert not hasattr(module, "get_vector_engine")
-
-    class Quiet:
-        async def compact(self):
-            return {}
-
-    monkeypatch.setattr(module, "get_vector_engine_async", _engine_getter(Quiet()))
-    with warnings.catch_warnings():
-        warnings.simplefilter("error", DeprecationWarning)
-        assert await module.compact_vector_store() == {}
-
-
 @pytest.mark.asyncio
 async def test_compact_runs_end_to_end_inside_the_subprocess_worker(
     tmp_path, monkeypatch, compaction_settings
@@ -784,35 +734,6 @@ async def test_compact_runs_end_to_end_inside_the_subprocess_worker(
         assert len(await adapter.retrieve(collection, [str(i) for i in ids])) == 5
     finally:
         await adapter.close()
-
-
-@pytest.mark.asyncio
-async def test_compact_vector_store_lets_a_running_pass_finish_before_cancelling(monkeypatch):
-    """A cancel -- even a repeated one -- must not leave the pass running against
-    the adapter teardown that follows it."""
-    module = importlib.import_module("cognee.infrastructure.databases.vector.compact_vector_store")
-    started = asyncio.Event()
-    finished = False
-
-    class Slow:
-        async def compact(self):
-            nonlocal finished
-            started.set()
-            await asyncio.sleep(0.3)
-            finished = True
-            return {}
-
-    monkeypatch.setattr(module, "get_vector_engine_async", _engine_getter(Slow()))
-    task = asyncio.ensure_future(module.compact_vector_store())
-    await started.wait()
-    task.cancel()
-    await asyncio.sleep(0.05)
-    task.cancel()  # e.g. shutdown cancelling again while the first cancel waits
-    await asyncio.sleep(0.05)
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
-    assert finished, "cancellation propagated while the compaction pass was still running"
 
 
 @pytest.mark.asyncio
@@ -1177,3 +1098,77 @@ async def test_prune_cancels_a_pending_followup(tmp_path, compaction_settings):
     assert handle.cancelled()
     assert adapter._followup_prune_handle is None
     await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_a_failed_prune_keeps_the_rewrite_and_charges_its_budget(
+    tmp_path, compaction_settings, monkeypatch
+):
+    """A rewrite that committed is reported and counted even when the prune after
+    it fails -- otherwise the per-pass task cap is exceeded and the work hidden."""
+    compaction_settings(retention_seconds=0, max_tasks_per_run=1)
+    adapter, _ = _adapter(tmp_path)
+    for name in ("PruneFailsA_label", "PruneFailsB_label"):
+        await _write_n_points(adapter, name, 3)
+
+    async def failing_prune(collection, retention_seconds, max_versions):
+        raise OSError("prune failed")
+
+    monkeypatch.setattr(adapter, "_prune_collection", failing_prune)
+
+    stats = await adapter.compact()
+
+    executed = {name: value.get("executed_tasks", 0) for name, value in stats.items()}
+    assert sum(executed.values()) == 1, f"task cap of 1 exceeded: {stats}"
+    rewritten = [name for name, count in executed.items() if count == 1]
+    assert stats[rewritten[0]]["prune_error"] == "prune failed"
+    assert stats[rewritten[0]]["fragments_removed"] == 3
+
+
+@pytest.mark.asyncio
+async def test_prune_only_passes_rotate_across_tables(tmp_path, compaction_settings):
+    """A table with a large version backlog must not take every prune-only pass's
+    budget while the tables after it wait."""
+    compaction_settings(retention_seconds=0, max_versions_per_run=1)
+    adapter, _ = _adapter(tmp_path)
+    tables = ["RotatePruneA_label", "RotatePruneB_label", "RotatePruneC_label"]
+    for name in tables:
+        await _write_n_points(adapter, name, 3)
+
+    pruned_first = []
+    for _ in range(len(tables)):
+        results = await adapter._prune_pass(adapter._compaction_options())
+        pruned_first.append(
+            next(name for name, value in results.items() if value.get("old_versions_removed"))
+        )
+
+    assert set(pruned_first) == set(tables), pruned_first
+
+
+@pytest.mark.parametrize(
+    "setting, value",
+    [
+        ("vector_db_compaction_max_tasks_per_run", -1),
+        ("vector_db_compaction_max_versions_per_run", -1),
+        ("vector_db_compaction_retention_seconds", -1),
+        ("vector_db_compaction_target_rows_per_fragment", 0),
+    ],
+)
+def test_invalid_compaction_settings_are_rejected(setting, value):
+    """-1 would otherwise mean 'no limit' for a budget, and a negative retention
+    would silently remove the window that protects readers."""
+    from cognee.infrastructure.databases.vector.config import VectorConfig
+
+    with pytest.raises(ValueError, match=setting.upper()):
+        VectorConfig(**{setting: value})
+
+
+def test_zero_keeps_its_documented_meaning():
+    from cognee.infrastructure.databases.vector.config import VectorConfig
+
+    config = VectorConfig(
+        vector_db_compaction_max_tasks_per_run=0,
+        vector_db_compaction_max_versions_per_run=0,
+        vector_db_compaction_retention_seconds=0,
+    )
+    assert config.vector_db_compaction_max_tasks_per_run == 0

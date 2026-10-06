@@ -1,3 +1,4 @@
+import importlib
 import inspect
 import os
 from numbers import Number
@@ -49,6 +50,49 @@ def _normalize_optional_create_vector_engine_params(params: dict) -> dict:
         )
 
     return normalized
+
+
+# The adapter class behind each built-in provider (module, class), imported only
+# when asked for: each lives behind its own optional extra.
+_BUILT_IN_ADAPTER_CLASSES = {
+    "lancedb": ("cognee.infrastructure.databases.vector.lancedb.LanceDBAdapter", "LanceDBAdapter"),
+    "pgvector": (
+        "cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter",
+        "PGVectorAdapter",
+    ),
+    "neptune_analytics": (
+        "cognee.infrastructure.databases.hybrid.neptune_analytics.NeptuneAnalyticsAdapter",
+        "NeptuneAnalyticsAdapter",
+    ),
+    "turso": (
+        "cognee.infrastructure.databases.vector.turso.TursoVectorAdapter",
+        "TursoVectorAdapter",
+    ),
+}
+
+
+def resolve_vector_adapter_class(vector_db_provider: str) -> type | None:
+    """The adapter class ``create_vector_engine`` builds for this provider, without
+    building it (no connection, no embedding engine).
+
+    Same resolution order as the factory: an adapter registered with
+    ``use_vector_adapter`` wins, then the built-in providers (case-insensitive).
+    ``None`` for an unknown provider, or a built-in one whose extra is not
+    installed. For decisions that depend on what an adapter can do (for
+    example whether it implements ``compact``) without creating the engine.
+    """
+    registered = supported_databases.get(vector_db_provider)
+    if registered is not None:
+        return registered
+    target = _BUILT_IN_ADAPTER_CLASSES.get(str(vector_db_provider).lower())
+    if target is None:
+        return None
+    module_path, class_name = target
+    try:
+        module = importlib.import_module(module_path)
+    except ImportError:
+        return None
+    return getattr(module, class_name, None)
 
 
 def create_vector_engine(

@@ -1,8 +1,8 @@
 """``run_tasks(after_run_completed=...)``: a hook for work after a run is done.
 
-Cognify uses it to compact the vector store (``compact_vector_store``). The
-hook must run only for a completed run, only once the run is recorded and
-reported complete, and it must never be able to turn a completed run into a
+Cognify passes the maintenance runner (``run_maintenance``). The hook must
+run only for a completed run, only once the run is recorded and reported
+complete, and it must never be able to turn a completed run into a
 failed or rolled-back one.
 """
 
@@ -18,7 +18,7 @@ import pytest
 import cognee
 import cognee.api.v1.cognify.cognify  # registers the module in sys.modules
 import cognee.modules.pipelines.operations.run_tasks as run_tasks_module
-from cognee.infrastructure.databases.vector.compact_vector_store import compact_vector_store
+from cognee.modules.maintenance import run_maintenance
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted
 
 cognify_module = sys.modules["cognee.api.v1.cognify.cognify"]
@@ -57,7 +57,10 @@ async def test_hook_runs_once_after_the_run_is_reported_complete(monkeypatch, ru
     order = []
     logs.complete.side_effect = lambda *a, **k: order.append("logged_complete")
 
-    async def hook():
+    received = {}
+
+    async def hook(**kwargs):
+        received.update(kwargs)
         order.append("hook")
 
     events = []
@@ -75,6 +78,11 @@ async def test_hook_runs_once_after_the_run_is_reported_complete(monkeypatch, ru
 
     assert order == ["logged_complete", "yielded_complete", "hook"]
     assert logs.error.await_count == 0
+    # The same keyword arguments rollback_handler gets.
+    assert received["pipeline_name"] == "cognify_pipeline"
+    assert received["dataset"] is dataset
+    assert received["pipeline_run_id"] == logs.start.return_value.pipeline_run_id
+    assert set(received) >= {"pipeline_id", "user", "data", "data_ingestion_info"}
 
 
 @pytest.mark.asyncio
@@ -97,7 +105,7 @@ async def test_failing_hook_cannot_fail_or_roll_back_a_completed_run(monkeypatch
     dataset, logs = _setup(monkeypatch, runner_plumbing, _ok_item)
     rollback = AsyncMock()
 
-    async def hook():
+    async def hook(**kwargs):
         raise RuntimeError("compaction exploded")
 
     events = await _drive(dataset, rollback_handler=rollback, after_run_completed=hook)
@@ -109,7 +117,7 @@ async def test_failing_hook_cannot_fail_or_roll_back_a_completed_run(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_cognify_compacts_the_vector_store_after_its_run():
+async def test_cognify_runs_maintenance_after_its_run():
     calls = []
 
     async def fake_executor(**kwargs):
@@ -132,23 +140,25 @@ async def test_cognify_compacts_the_vector_store_after_its_run():
         )
 
     (call,) = calls
-    assert call["after_run_completed"] is compact_vector_store
+    assert call["after_run_completed"] is run_maintenance
 
 
-def test_only_cognify_compacts():
-    """add, memify, improve and custom pipelines do not compact: cognify is the
-    pipeline that writes vectors in bulk, and every remember() runs it."""
+def test_only_cognify_runs_maintenance():
+    """add, memify, improve and custom pipelines do not opt in: cognify is the
+    pipeline that writes vectors in bulk, and every remember() runs it. Each
+    job's ``pipelines`` then picks which jobs follow it."""
     package_root = Path(cognee.__file__).parent
     referencing = set()
     for source_file in package_root.rglob("*.py"):
-        if "tests" in source_file.relative_to(package_root).parts:
+        relative = source_file.relative_to(package_root)
+        if "tests" in relative.parts or relative.parts[:2] == ("modules", "maintenance"):
             continue
         source = source_file.read_text(encoding="utf-8")
-        if "compact_vector_store" not in source:
+        if "run_maintenance" not in source:
             continue
         for node in ast.walk(ast.parse(source)):
-            if isinstance(node, ast.Name) and node.id == "compact_vector_store":
-                referencing.add(source_file.relative_to(package_root).as_posix())
+            if isinstance(node, ast.Name) and node.id == "run_maintenance":
+                referencing.add(relative.as_posix())
                 break
 
     assert referencing == {"api/v1/cognify/cognify.py"}

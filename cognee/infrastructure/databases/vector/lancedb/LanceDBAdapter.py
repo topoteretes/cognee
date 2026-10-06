@@ -36,13 +36,7 @@ from cognee.modules.observability.tracing import (
 )
 from cognee.modules.storage.utils import copy_model
 from cognee.shared.logging_utils import get_logger
-from cognee_db_workers.lancedb_compaction import (
-    PylanceIncompatibleError,
-    compact_fragments,
-    lance_core_mismatch,
-    open_as_lance,
-    prune_superseded_versions,
-)
+from cognee_db_workers.lancedb_compaction import compact_table, lance_core_mismatch, prune_table
 
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..models.ScoredResult import ScoredResult
@@ -51,9 +45,6 @@ from ..vector_db_interface import VectorDBInterface
 
 logger = get_logger("LanceDBAdapter")
 _NO_DEFAULT = object()
-# Anchors the background version prune each adapter starts when it first opens
-# its store (asyncio keeps only weak references to tasks).
-_OPEN_PRUNE_TASKS: set[asyncio.Task] = set()
 _SIMPLE_TYPE_DEFAULTS = {
     str: "",
     int: 0,
@@ -745,25 +736,15 @@ class LanceDBAdapter(VectorDBInterface):
                 )
         return self._compaction_unsupported
 
-    def _turn_off_compaction(self, exc: Exception) -> None:
-        # Called from the handlers that caught ``exc``; its message names the
-        # underlying error, which is all a version mismatch needs.
-        self._compaction_unsupported = "pylance_incompatible"
-        logger.warning(
-            "LanceDB compaction turned off: pylance cannot open the tables lancedb "
-            "wrote (%s). Install the pylance release line matching lancedb's "
-            "bundled Lance core.",
-            exc,
-        )
-
     async def compact(self, collection_name: str | None = None) -> dict:
         """Fold the fragments cognee's upserts leave behind and prune old versions.
 
         Every ``merge_insert`` appends a new fragment and leaves the superseded
         rows on disk; LanceDB never reclaims either on its own, so a store in
         daily use grows without bound (issue #4684: 136 GB on disk for ~6 GB of
-        live vectors). Called once at the end of every cognify run (see
-        ``compact_vector_store``); a no-op on a compact table.
+        live vectors). Called once at the end of every cognify run by the
+        ``vector_compaction`` maintenance job (``cognee.modules.maintenance``);
+        a no-op on a compact table.
 
         Bounded, not whole-store: a pass executes at most
         ``vector_db_compaction_max_tasks_per_run`` compaction tasks and deletes
@@ -794,9 +775,9 @@ class LanceDBAdapter(VectorDBInterface):
         Skipped for remote stores (``s3://`` and friends), where every rewrite
         is network transfer and cleanup is thousands of object deletes, and
         turned off for the adapter's lifetime when the installed pylance is not
-        on the Lance core lancedb bundles, or cannot open the tables lancedb
-        wrote. Fail-open per collection: a failure is logged and reported in
-        the returned stats, never raised.
+        on the Lance core lancedb bundles. Fail-open per collection: a failure
+        is logged and reported in the returned stats, never raised, and only
+        affects that collection in that pass.
         """
         options = self._compaction_options()
         if options is None:
@@ -839,10 +820,6 @@ class LanceDBAdapter(VectorDBInterface):
                     self._compaction_dirty.discard(name)
                 try:
                     stats = await self._compact_collection(name, options, max_tasks, max_versions)
-                except PylanceIncompatibleError as exc:
-                    self._turn_off_compaction(exc)
-                    results[name] = {"error": str(exc)[:200]}
-                    break
                 except Exception as exc:
                     logger.warning(
                         "Compaction skipped for collection '%s': %s",
@@ -863,6 +840,13 @@ class LanceDBAdapter(VectorDBInterface):
     async def _compact_collection(
         self, collection_name: str, options: dict, max_tasks: int, max_versions: int
     ) -> dict:
+        """Rewrite then prune one table; each step's outcome is kept separately.
+
+        A rewrite that fails raises (the caller records the table as failed). A
+        prune that fails after a successful rewrite does not discard the
+        rewrite: its stats are returned with ``prune_error``, so the work it
+        did is still reported and charged against the pass's budgets.
+        """
         collection = await self.get_collection(collection_name)
         target_rows = options["target_rows_per_fragment"]
 
@@ -872,37 +856,33 @@ class LanceDBAdapter(VectorDBInterface):
                     target_rows_per_fragment=target_rows, max_tasks=max_tasks
                 )
             else:
-                # Plan against the version current under the lock: a write that
-                # committed after the handle was opened would otherwise make
-                # the rewrite conflict and fail. Hand the table to pylance, do
-                # the I/O off the event loop, then move the handle to the
-                # version the compaction committed.
-                await collection.checkout_latest()
-                dataset = await open_as_lance(collection)
-                stats = await asyncio.to_thread(
-                    compact_fragments,
-                    dataset,
-                    target_rows_per_fragment=target_rows,
-                    max_tasks=max_tasks,
+                stats = await compact_table(
+                    collection, target_rows_per_fragment=target_rows, max_tasks=max_tasks
                 )
-                await collection.checkout_latest()
+        stats = dict(stats or {})
 
-        pruned = await self._prune_collection(
-            collection, options["retention_seconds"], max_versions
-        )
-        return {**(stats or {}), **(pruned or {})}
+        try:
+            pruned = await self._prune_collection(
+                collection, options["retention_seconds"], max_versions
+            )
+        except Exception as exc:
+            logger.warning(
+                "Version prune failed for collection '%s' after its rewrite: %s",
+                collection_name,
+                exc,
+                exc_info=True,
+            )
+            stats["prune_error"] = str(exc)[:200]
+            return stats
+        return {**stats, **(pruned or {})}
 
     async def _prune_collection(self, collection, retention_seconds: int, max_versions: int):
         if self._subprocess_mode:
             return await collection.prune_versions(
                 retention_seconds=retention_seconds, max_versions=max_versions
             )
-        dataset = await open_as_lance(collection)
-        return await asyncio.to_thread(
-            prune_superseded_versions,
-            dataset,
-            retention_seconds=retention_seconds,
-            max_versions=max_versions,
+        return await prune_table(
+            collection, retention_seconds=retention_seconds, max_versions=max_versions
         )
 
     # ------------------------------------------------------------------
@@ -968,8 +948,7 @@ class LanceDBAdapter(VectorDBInterface):
         """
         task = asyncio.ensure_future(self._prune_on_open(options))
         self._open_prune_task = task
-        _OPEN_PRUNE_TASKS.add(task)
-        task.add_done_callback(_OPEN_PRUNE_TASKS.discard)
+        # The background-task registry keeps it alive and lets shutdown drain it.
         register_background_task(task)
         return task
 
@@ -978,7 +957,7 @@ class LanceDBAdapter(VectorDBInterface):
             async with self._compaction_lock:
                 return await self._prune_pass(options)
         except Exception as exc:
-            logger.warning("Version prune on open skipped: %s", exc, exc_info=True)
+            logger.warning("LanceDB version prune skipped: %s", exc, exc_info=True)
             return {"error": str(exc)[:200]}
 
     async def _wait_for_open_prune(self) -> None:
@@ -1003,7 +982,10 @@ class LanceDBAdapter(VectorDBInterface):
         budget = int(options["max_versions"])  # 0 = unlimited
         left = budget
         results: dict = {}
-        for name in list(await connection.table_names()):
+        # Same rotation as a compaction pass (called under ``_compaction_lock``),
+        # so a table with a large version backlog cannot take the budget of
+        # every pass while the tables after it wait.
+        for name in self._compaction_order(list(await connection.table_names())):
             if budget > 0 and left <= 0:
                 break
             try:
@@ -1011,10 +993,6 @@ class LanceDBAdapter(VectorDBInterface):
                 stats = await self._prune_collection(
                     collection, options["retention_seconds"], left if budget > 0 else 0
                 )
-            except PylanceIncompatibleError as exc:
-                self._turn_off_compaction(exc)
-                results[name] = {"error": str(exc)[:200]}
-                break
             except Exception as exc:
                 logger.warning(
                     "Version prune skipped for collection '%s': %s", name, exc, exc_info=True
@@ -1030,7 +1008,7 @@ class LanceDBAdapter(VectorDBInterface):
             if isinstance(value, dict)
         )
         if removed:
-            logger.info("LanceDB version prune on open: %d old version(s) removed", removed)
+            logger.info("LanceDB version prune: %d old version(s) removed", removed)
         return results
 
     async def _migrate_collection_schema(
