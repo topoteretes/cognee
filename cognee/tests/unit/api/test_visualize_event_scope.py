@@ -99,7 +99,6 @@ async def _fetch_for_dataset(collect, *, dataset, include_session_events=True):
         patch.object(
             visualize_module, "fetch_dataset_graph_data", AsyncMock(return_value=([], []))
         ),
-        patch.object(visualize_module, "set_database_global_context_variables", _noop_db_context),
         patch.object(visualize_module, "collect_session_events", collect),
     ):
         return await visualize_module.fetch_visualization_data_for_dataset(
@@ -155,7 +154,6 @@ async def test_visualize_graph_json_still_authorizes_the_dataset():
         patch.object(
             visualize_module, "fetch_dataset_graph_data", AsyncMock(return_value=([], []))
         ),
-        patch.object(visualize_module, "set_database_global_context_variables", _noop_db_context),
         patch.object(visualize_module, "collect_session_events", AsyncMock(return_value=[])),
     ):
         payload = await visualize_module.visualize_graph_json(user=USER, dataset="some-dataset")
@@ -176,7 +174,6 @@ async def test_visualize_graph_json_denied_dataset_still_scopes_to_nothing():
         patch.object(
             visualize_module, "fetch_dataset_graph_data", AsyncMock(return_value=([], []))
         ),
-        patch.object(visualize_module, "set_database_global_context_variables", _noop_db_context),
         patch.object(
             visualize_module,
             "collect_session_events",

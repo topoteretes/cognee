@@ -10,13 +10,13 @@ inside visualize_graph_json (SDK-972); it now calls
 fetch_visualization_data_for_dataset with the dataset this route already
 authorized, so the duplicate permission round trip is gone. The HTML route,
 GET /visualize, had the same double check through visualize_graph and now
-does the same.
+does the same, and so does GET /visualize/semantic.
 """
 
 import json
 from importlib import import_module
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import ANY, AsyncMock, Mock
 from uuid import UUID, uuid4
 
 import pytest
@@ -31,6 +31,8 @@ visualize_pkg = import_module("cognee.api.v1.visualize")
 
 DATASET_ID = "11111111-1111-1111-1111-111111111111"
 JSON_PAYLOAD = {"nodes": [{"id": "a"}], "links": [], "color_maps": {}}
+SEMANTIC_PAYLOAD = {"semantic_positions": None, "semantic_clusters": None}
+SEARCH_EVENTS = [{"kind": "search", "qa_id": "q1"}]
 
 
 def _events(*, fail_with=None):
@@ -57,14 +59,14 @@ def client(monkeypatch):
     # The router calls this directly with its own already-authorized dataset
     # (SDK-972), so the JSON path no longer goes through visualize_graph_json
     # (and no longer authorizes a second time inside it).
-    fetch_dataset = AsyncMock(return_value=(["graph-data"], None))
+    fetch_dataset = AsyncMock(return_value=(["graph-data"], SEARCH_EVENTS))
     monkeypatch.setattr(visualize_pkg, "fetch_visualization_data_for_dataset", fetch_dataset)
-    monkeypatch.setattr(
-        router_module, "build_visualization_payload", lambda *_args, **_kwargs: JSON_PAYLOAD
-    )
-    monkeypatch.setattr(
-        router_module, "cognee_network_visualization", AsyncMock(return_value="<html></html>")
-    )
+    build_payload = Mock(return_value=JSON_PAYLOAD)
+    monkeypatch.setattr(router_module, "build_visualization_payload", build_payload)
+    render_html = AsyncMock(return_value="<html></html>")
+    monkeypatch.setattr(router_module, "cognee_network_visualization", render_html)
+    build_semantic = AsyncMock(return_value=SEMANTIC_PAYLOAD)
+    monkeypatch.setattr(router_module, "build_semantic_payload", build_semantic)
     stream, calls = _events()
     monkeypatch.setattr(visualize_pkg, "stream_dataset_graph", stream)
 
@@ -75,6 +77,9 @@ def client(monkeypatch):
         test_client.authorize = authorize
         test_client.authorized_dataset = authorized_dataset
         test_client.fetch_dataset = fetch_dataset
+        test_client.build_payload = build_payload
+        test_client.render_html = render_html
+        test_client.build_semantic = build_semantic
         test_client.stream_calls = calls
         yield test_client
 
@@ -225,8 +230,14 @@ def test_the_json_path_authorizes_the_dataset_exactly_once(client):
     to fetch_visualization_data_for_dataset, which does not authorize at all."""
     _get(client)
 
-    client.authorize.assert_awaited_once()
+    client.authorize.assert_awaited_once_with([UUID(DATASET_ID)], "read", ANY)
     assert client.fetch_dataset.await_args.args[0] is client.authorized_dataset
+
+
+def test_the_json_payload_carries_the_events_the_fetch_returned(client):
+    _get(client)
+
+    client.build_payload.assert_called_once_with(["graph-data"], search_events=SEARCH_EVENTS)
 
 
 def test_include_session_events_defaults_to_true(client):
@@ -248,5 +259,24 @@ def test_the_html_path_authorizes_the_dataset_exactly_once(client):
 
     assert response.status_code == 200
     assert response.text == "<html></html>"
-    client.authorize.assert_awaited_once()
+    client.authorize.assert_awaited_once_with([UUID(DATASET_ID)], "read", ANY)
     assert client.fetch_dataset.await_args.args[0] is client.authorized_dataset
+
+
+def test_the_html_page_carries_the_events_the_fetch_returned(client):
+    client.get(f"/api/v1/visualize?dataset_id={DATASET_ID}")
+
+    client.render_html.assert_awaited_once_with(["graph-data"], search_events=SEARCH_EVENTS)
+
+
+def test_the_semantic_path_authorizes_the_dataset_exactly_once(client):
+    """GET /visualize/semantic had the same double check through
+    visualize_semantic_json (SDK-972). It collects no events either way."""
+    response = client.get(f"/api/v1/visualize/semantic?dataset_id={DATASET_ID}")
+
+    assert response.status_code == 200
+    assert response.json() == SEMANTIC_PAYLOAD
+    client.authorize.assert_awaited_once_with([UUID(DATASET_ID)], "read", ANY)
+    assert client.fetch_dataset.await_args.args[0] is client.authorized_dataset
+    assert client.fetch_dataset.await_args.kwargs["include_session_events"] is False
+    client.build_semantic.assert_awaited_once_with(["graph-data"])

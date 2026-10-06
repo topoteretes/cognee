@@ -14,7 +14,7 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.data.methods import get_authorized_existing_datasets, get_datasets_graph_counts
-from cognee.modules.data.models import Data
+from cognee.modules.data.models import Data, Dataset
 from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models.User import User
@@ -41,7 +41,7 @@ logger = get_logger()
 
 
 async def fetch_visualization_data_for_dataset(
-    dataset: Any | None,
+    dataset: Dataset | None,
     user: User,
     *,
     full: bool = False,
@@ -52,7 +52,7 @@ async def fetch_visualization_data_for_dataset(
     neighborhood_seed_top_k: int = DEFAULT_SEED_TOP_K,
     max_nodes: int = DEFAULT_MAX_NODES,
     include_session_events: bool = True,
-    session_ids: list | None = None,
+    session_ids: list[str] | None = None,
 ) -> tuple[Any, list | None]:
     """Fetch and bound the graph data behind a visualization for one already-authorized dataset.
 
@@ -104,7 +104,7 @@ async def fetch_visualization_data(
     neighborhood_seed_top_k: int = DEFAULT_SEED_TOP_K,
     max_nodes: int = DEFAULT_MAX_NODES,
     include_session_events: bool = True,
-    session_ids: list | None = None,
+    session_ids: list[str] | None = None,
 ) -> tuple[Any, list | None]:
     """Authorize, fetch and bound the graph data behind a visualization.
 
@@ -151,8 +151,8 @@ async def fetch_visualization_data(
         include_session_events=include_session_events and not denied,
         session_ids=session_ids,
     )
-    if denied and include_session_events:
-        search_events = []
+    if denied:
+        search_events = [] if include_session_events else None
 
     return graph_data, search_events
 

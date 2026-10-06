@@ -20,6 +20,7 @@ from cognee.modules.users.methods import (
 )
 from cognee.modules.users.models import User
 from cognee.modules.visualization.cognee_network_visualization import (
+    build_semantic_payload,
     build_visualization_payload,
     cognee_network_visualization,
 )
@@ -147,8 +148,7 @@ def get_visualize_router() -> APIRouter:
             # Verify user has permission to read dataset
             dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
 
-            # dataset[0] is already authorized, so this skips the second
-            # permission check visualize_graph would run (SDK-972).
+            # dataset[0] is authorized above, so the helper skips its own check.
             graph_data, search_events = await fetch_visualization_data_for_dataset(
                 dataset[0],
                 user,
@@ -351,9 +351,7 @@ def get_visualize_router() -> APIRouter:
                     background=BackgroundTask(graph_stream.close),
                 )
 
-            # dataset[0] was already authorized above; fetch_visualization_data_for_dataset
-            # takes it as given rather than re-running get_authorized_existing_datasets
-            # a second time (SDK-972).
+            # dataset[0] is authorized above, so the helper skips its own check.
             graph_data, search_events = await fetch_visualization_data_for_dataset(
                 dataset[0],
                 user,
@@ -463,21 +461,24 @@ def get_visualize_router() -> APIRouter:
             },
         )
 
-        from cognee.api.v1.visualize import visualize_semantic_json
+        from cognee.api.v1.visualize import fetch_visualization_data_for_dataset
 
         try:
             dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
 
-            payload = await visualize_semantic_json(
-                dataset=dataset[0].id,
-                user=user,
+            # dataset[0] is authorized above, so the helper skips its own check.
+            graph_data, _ = await fetch_visualization_data_for_dataset(
+                dataset[0],
+                user,
                 full=full,
                 query=query,
                 seed_node_ids=seed_node_ids,
                 neighborhood_depth=neighborhood_depth,
                 neighborhood_seed_top_k=neighborhood_seed_top_k,
                 max_nodes=max_nodes,
+                include_session_events=False,
             )
+            payload = await build_semantic_payload(graph_data)
             return JSONResponse(status_code=200, content=payload)
 
         except CogneeApiError:

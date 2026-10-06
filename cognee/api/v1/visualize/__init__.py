@@ -14,7 +14,9 @@ from .get_schema_inventory import get_schema_inventory
 
 # build_provenance_graph is an internal assembly helper (it operates on records
 # already gathered by get_memory_provenance_graph), so it is intentionally not
-# re-exported here — only the user-facing entry points are public.
+# re-exported here. The user-facing entry points are public, plus the
+# already-authorized fetch helpers the routers import (stream_dataset_graph,
+# fetch_visualization_data_for_dataset).
 from .memory_provenance import (
     get_memory_provenance_graph,
     get_memory_provenance_payload,
