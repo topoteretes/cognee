@@ -20,4 +20,5 @@ from .exceptions import (
     SessionParameterValidationError,
     DatabaseCredentialsError,
     Neo4jMultiDatabaseSupportError,
+    TursoDatabaseInUseError,
 )

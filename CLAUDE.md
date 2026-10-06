@@ -32,7 +32,7 @@ pre-commit install
 - **postgres** / **postgres-binary** - PostgreSQL + PGVector support (also enables the Postgres session-cache backend, `CACHE_BACKEND=postgres`)
 - **neo4j** - Neo4j graph database support
 - **neptune** - AWS Neptune support
-- **turso** - Turso vector database support
+- **turso** - Turso (Rust rewrite of SQLite, `pyturso`) as relational, graph-as-tables and/or vector store; local files only
 - **docs** - Document processing (unstructured library)
 - **scraping** - Web scraping (Tavily, BeautifulSoup, Playwright; Keenable needs no extra — it uses the built-in httpx)
 - **langchain** - LangChain integration
@@ -190,11 +190,11 @@ User → Dataset → Data hierarchy with permission-based filtering. Enable with
 | Graph | Ladybug/Kuzu (default) | ✅ | embedded, one database per dataset |
 | Graph | Neo4j | ✅ | default handler `neo4j`: one Neo4j database per dataset inside the DBMS — requires an edition with multi-database support (Enterprise/Aura). Two alternates: `neo4j_community` runs one Docker container per dataset, because Community edition serves exactly one database per server (needs Docker); `neo4j_aura_dev` provisions a whole Aura instance per dataset — dev/PoC only, not production-ready |
 | Graph | Postgres | ✅ | default handler `postgres_graph`: one Postgres database per dataset. `postgres_graph_shared` instead gives each dataset a schema (`ds_<dataset_id>`) in cognee's main database, so no `CREATE DATABASE` privilege is needed. graph-on-Postgres is itself a demo feature (see warning above) |
-| Graph | Turso | ✅ | |
+| Graph | Turso | ✅ | one Turso database file per dataset; local only (no remote sync in this version) |
 | Graph | Neptune, ladybug-remote | ❌ | requires `ENABLE_BACKEND_ACCESS_CONTROL=false` |
 | Vector | LanceDB (default) | ✅ | |
 | Vector | PGVector | ✅ | default handler `pgvector`: one Postgres database per dataset. `pgvector_shared` uses a schema (`ds_<dataset_id>`) in cognee's main database instead — no `CREATE DATABASE` privilege needed |
-| Vector | Turso | ✅ | |
+| Vector | Turso | ✅ | one Turso database file per dataset; exact cosine scan, no approximate index |
 | Vector | Neptune Analytics | ❌ | requires `ENABLE_BACKEND_ACCESS_CONTROL=false` |
 | Vector | Community adapters (ChromaDB, Qdrant, …) | ❌ | unless the adapter registers a handler via `use_dataset_database_handler()` |
 | Relational | SQLite / Postgres | n/a — always shared | one relational DB holds users, ACLs, and the dataset-database registry; it is never isolated per dataset |
@@ -377,7 +377,7 @@ VECTOR_DB_URL=postgresql://cognee:cognee@localhost:5432/cognee_db
 ```
 
 #### Graph Databases
-Supported: ladybug (default), neo4j, neptune, ladybug-remote, postgres_demo (demo; `postgres` is an accepted alias)
+Supported: ladybug (default), neo4j, neptune, ladybug-remote, turso (local file, requires the turso extra), postgres_demo (demo; `postgres` is an accepted alias)
 ```bash
 # Neo4j (requires neo4j extra: pip install cognee[neo4j])
 GRAPH_DATABASE_PROVIDER=neo4j
@@ -408,11 +408,29 @@ GRAPH_DATABASE_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
 > Interested in further development or production use of Postgres as a graph database? Write to
 > us at social@cognee.ai to explore the options.
 
+#### Turso (all three layers)
+`DB_PROVIDER=turso`, `GRAPH_DATABASE_PROVIDER=turso`, `VECTOR_DB_PROVIDER=turso` and
+`CACHE_BACKEND=turso` (the session cache's `cache.db`, same layout as the sqlite backend) — all four
+layers — run on the Turso rewrite engine (`pyturso`, `pip install cognee"[turso]"`) through one shared dialect,
+`sqlite+cognee_turso://` (`cognee/infrastructure/databases/turso/`). Local database files only:
+remote Turso settings (`DB_TURSO_URL`, `GRAPH_DATABASE_KEY`, a `libsql://` vector URL) are a hard
+error. Shared knobs (`TursoConfig`, env prefix `TURSO_`): `TURSO_JOURNAL_MODE=wal|mvcc` (default
+`wal`; `mvcc` turns graph and vector writes into `BEGIN CONCURRENT` transactions that commit in
+parallel and are retried on `Write-write conflict`, at the cost of files that stock SQLite can no
+longer read; the relational DB and session cache always stay on `wal`, because their transactions
+cannot be retried), `TURSO_BUSY_TIMEOUT_MS`, `TURSO_CONFLICT_RETRIES`. A Turso database file can be
+open in only one process at a time (pyturso 0.7.x), so the API server and a separate SDK/CLI process
+cannot share one Turso deployment. Engine limits that shaped the adapters (no
+recursive CTEs, no parenthesized joins in a FROM clause — the dialect's compiler flattens them —
+no scalar subquery in an upsert `SET`, primitive-only bind parameters, no approximate vector
+index) are listed with reproductions in `docs/turso-local.md`; setup and a runnable
+add → cognify → search example live there too.
+
 #### Session Cache
 ```bash
-# Session/conversation cache backend: sqlite (default), postgres, redis, fs, tapes
+# Session/conversation cache backend: sqlite (default), turso, postgres, redis, fs, tapes
 CACHE_BACKEND=sqlite
-# Optional explicit SQLAlchemy URL for sqlite/postgres cache backends (overrides defaults)
+# Optional explicit SQLAlchemy URL for sqlite/turso/postgres cache backends (overrides defaults)
 CACHE_DB_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
 # Session-search execution mode: concurrent (default) or sequential
 SESSION_SEARCH_MODE=concurrent

@@ -7,6 +7,7 @@ within pipeline operations, supporting both incremental and regular processing m
 
 import os
 from collections.abc import AsyncGenerator
+from contextlib import aclosing
 from typing import Any
 
 from sqlalchemy import select
@@ -97,13 +98,18 @@ async def _drain_item_events(
     Every intermediate ``PipelineRunYield`` is forwarded to stage-progress
     tracking; the one non-yield item — a ``{"run_info": ..., "data_id": ...}``
     dict — is the item's final result, returned once the generator is exhausted.
+
+    If progress tracking raises mid-item, ``aclosing`` closes the generator
+    right away, so the item's telemetry reports a terminal event now rather than
+    whenever the abandoned generator is garbage-collected.
     """
     result = None
-    async for item in events:
-        if isinstance(item, PipelineRunYield):
-            _push_stage_progress(item, ctx, tasks, pipeline_run_id, progress_state)
-        else:
-            result = item
+    async with aclosing(events) as stream:
+        async for item in stream:
+            if isinstance(item, PipelineRunYield):
+                _push_stage_progress(item, ctx, tasks, pipeline_run_id, progress_state)
+            else:
+                result = item
     return result
 
 
@@ -209,20 +215,24 @@ async def run_tasks_data_item_incremental(
             return
 
     try:
-        # Process data based on data_item and list of tasks
-        async for result in run_tasks_with_telemetry(
-            tasks=tasks,
-            data=[data_item],
-            user=user,
-            pipeline_name=pipeline_id,
-            ctx=ctx,
-        ):
-            yield PipelineRunYield(
-                pipeline_run_id=pipeline_run_id,
-                dataset_id=dataset.id,
-                dataset_name=dataset.name,
-                payload=result,
+        # Process data based on data_item and list of tasks. aclosing closes
+        # the telemetry generator as soon as this one is closed early.
+        async with aclosing(
+            run_tasks_with_telemetry(
+                tasks=tasks,
+                data=[data_item],
+                user=user,
+                pipeline_name=pipeline_id,
+                ctx=ctx,
             )
+        ) as results:
+            async for result in results:
+                yield PipelineRunYield(
+                    pipeline_run_id=pipeline_run_id,
+                    dataset_id=dataset.id,
+                    dataset_name=dataset.name,
+                    payload=result,
+                )
 
         # Update pipeline status for Data element. Fresh content had no row at
         # the pre-check (data_id None); ingestion has created it since — resolve
@@ -309,20 +319,24 @@ async def run_tasks_data_item_regular(
     Yields:
         Dict containing run_info for each processing step
     """
-    # Process data based on data_item and list of tasks
-    async for result in run_tasks_with_telemetry(
-        tasks=tasks,
-        data=[data_item],
-        user=user,
-        pipeline_name=pipeline_id,
-        ctx=ctx,
-    ):
-        yield PipelineRunYield(
-            pipeline_run_id=pipeline_run_id,
-            dataset_id=dataset.id,
-            dataset_name=dataset.name,
-            payload=result,
+    # Process data based on data_item and list of tasks. aclosing closes the
+    # telemetry generator as soon as this one is closed early.
+    async with aclosing(
+        run_tasks_with_telemetry(
+            tasks=tasks,
+            data=[data_item],
+            user=user,
+            pipeline_name=pipeline_id,
+            ctx=ctx,
         )
+    ) as results:
+        async for result in results:
+            yield PipelineRunYield(
+                pipeline_run_id=pipeline_run_id,
+                dataset_id=dataset.id,
+                dataset_name=dataset.name,
+                payload=result,
+            )
 
     yield {
         "run_info": PipelineRunCompleted(

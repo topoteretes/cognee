@@ -188,13 +188,18 @@ def _encode_provenance_row(row: dict) -> dict:
 
 
 def _parse_properties_blob(raw: Any) -> dict[str, Any]:
-    """Decode a node/edge JSON ``properties`` blob, tolerating empty/invalid input."""
+    """Decode a node/edge JSON ``properties`` blob, tolerating empty/invalid input.
+
+    Anything that does not decode to a JSON object (``None``, ``""``, malformed
+    JSON, or a non-object value such as ``"null"`` or a list) yields ``{}``.
+    """
     if not raw:
         return {}
     try:
-        return json.loads(raw)
+        parsed = json.loads(raw)
     except json.JSONDecodeError:
         return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 cache_config = get_cache_config()

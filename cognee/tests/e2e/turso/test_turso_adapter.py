@@ -1,21 +1,34 @@
-"""Unit tests for TursoAdapter using an in-memory SQLite database."""
+"""Tests for the Turso graph adapter against a real Turso (rewrite engine) database file."""
 
 import json
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import text
+
+pytest.importorskip("turso", reason="pyturso not installed")
 
 from cognee.infrastructure.databases.graph.turso.adapter import TursoAdapter
+from cognee.infrastructure.databases.turso import turso_url
 
 
 @pytest_asyncio.fixture
-async def adapter():
-    """In-memory SQLite adapter — fast, no disk I/O, isolated per test."""
-    a = TursoAdapter(connection_string="sqlite+aiosqlite:///:memory:")
+async def adapter(tmp_path):
+    """File-backed adapter on the rewrite engine — isolated per test."""
+    a = TursoAdapter(database_path=str(tmp_path / "graph.db"))
     await a.initialize()
     yield a
     await a.delete_graph()
     await a.close()
+
+
+@pytest.mark.asyncio
+async def test_runs_on_the_turso_rewrite_engine(adapter):
+    """``turso_version()`` exists only on the rewrite engine; SQLite has no such function."""
+    assert adapter.engine.dialect.driver == "cognee_turso"
+    async with adapter.engine.connect() as connection:
+        version = (await connection.execute(text("SELECT turso_version()"))).scalar()
+    assert version
 
 
 @pytest.mark.asyncio
@@ -322,15 +335,84 @@ async def test_factory_returns_turso_adapter_and_rejects_remote(tmp_path):
     engine = create_graph_engine(**kwargs)
     try:
         assert isinstance(engine, TursoAdapter)
-        assert engine.db_uri == f"sqlite+aiosqlite:///{db_path}"
+        assert engine.db_uri == turso_url(db_path)
+        assert engine.database_path == db_path
     finally:
         graph_engine_cache.evict(**kwargs)
 
-    # A set auth token (remote) is rejected: remote sync is not supported yet.
-    with pytest.raises(EnvironmentError):
+    # A set auth token (remote) is rejected: remote Turso is not supported in this version.
+    with pytest.raises(OSError):
         create_graph_engine(
             graph_database_provider="turso",
             graph_file_path="",
             graph_database_url=db_path,
             graph_database_key="token",
         )
+
+
+@pytest.mark.asyncio
+async def test_get_graph_metrics_counts_components_with_isolated_nodes(adapter):
+    await adapter.add_nodes(
+        [
+            ("a", {"name": "A", "type": "T"}),
+            ("b", {"name": "B", "type": "T"}),
+            ("c", {"name": "C", "type": "T"}),
+            ("lonely", {"name": "L", "type": "T"}),
+        ]
+    )
+    await adapter.add_edges([("a", "b", "KNOWS", {}), ("b", "c", "KNOWS", {})])
+
+    metrics = await adapter.get_graph_metrics()
+
+    assert metrics["num_nodes"] == 4
+    assert metrics["num_edges"] == 2
+    assert metrics["num_connected_components"] == 2
+    assert metrics["sizes_of_connected_components"] == [3, 1]
+
+
+@pytest.mark.asyncio
+async def test_get_neighborhood_is_bounded_by_depth(adapter):
+    ids = [f"n{i}" for i in range(5)]
+    await adapter.add_nodes([(i, {"name": i, "type": "T"}) for i in ids])
+    await adapter.add_edges([(ids[i], ids[i + 1], "NEXT", {}) for i in range(4)])
+
+    for depth in range(4):
+        nodes, edges = await adapter.get_neighborhood(["n0"], depth=depth)
+        assert {n[0] for n in nodes} == set(ids[: depth + 1])
+        assert len(edges) == depth
+
+
+@pytest.mark.asyncio
+async def test_get_nodeset_subgraph_with_data(adapter):
+    node_set_type = type("NodeSet", (), {})
+    await adapter.add_nodes(
+        [
+            ("ns", {"name": "Set", "type": "NodeSet"}),
+            ("x", {"name": "X", "type": "Entity", "belongs_to_set": ["Set"]}),
+            ("y", {"name": "Y", "type": "Entity"}),
+        ]
+    )
+    await adapter.add_edges([("x", "ns", "belongs_to_set", {}), ("x", "y", "RELATES", {})])
+
+    nodes, edges = await adapter.get_nodeset_subgraph(node_type=node_set_type, node_name=["Set"])
+
+    node_ids = {n[0] for n in nodes}
+    assert {"ns", "x"} <= node_ids
+    assert ("x", "ns", "belongs_to_set") in {(e[0], e[1], e[2]) for e in edges}
+
+
+@pytest.mark.asyncio
+async def test_data_persists_across_reopen(tmp_path):
+    path = str(tmp_path / "persist.db")
+    first = TursoAdapter(database_path=path)
+    await first.initialize()
+    await first.add_node("keep", {"name": "Keep", "type": "T"})
+    await first.close()
+
+    second = TursoAdapter(database_path=path)
+    await second.initialize()
+    try:
+        node = await second.get_node("keep")
+        assert node is not None and node["name"] == "Keep"
+    finally:
+        await second.close()
