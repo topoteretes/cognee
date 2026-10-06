@@ -115,6 +115,13 @@ def test_cache_config_to_dict():
         "tapes_agent_name": "cognee",
         "tapes_model": "cognee-session",
         "tapes_request_timeout": 5.0,
+        "headroom_db_path": None,
+        "headroom_embedder": "onnx",
+        "headroom_embedder_model": None,
+        "headroom_embedder_api_key": None,
+        "headroom_ollama_base_url": "http://localhost:11434",
+        "headroom_vector_dimension": 384,
+        "headroom_agent_name": "cognee",
     }
 
 

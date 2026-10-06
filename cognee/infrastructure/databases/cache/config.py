@@ -10,9 +10,22 @@ class CacheConfig(BaseSettings):
     Configuration for distributed cache systems (e.g., Redis), used for locking or coordination.
 
     Attributes:
-    - cache_backend: Session cache backend; one of "redis", "fs", "tapes", "sqlite", "postgres"
-      (default "sqlite"). "sqlite" and "postgres" use the SQL cache adapter, differing only in
-      default connection URL resolution.
+    - cache_backend: Session cache backend; one of "redis", "fs", "tapes", "headroom", "sqlite",
+      "postgres" (default "sqlite"). "sqlite" and "postgres" use the SQL cache adapter, differing
+      only in default connection URL resolution. "tapes" and "headroom" keep the filesystem
+      cache as the source of truth and mirror each QA turn to an external memory system.
+    - headroom_db_path: SQLite file for Headroom's memory store (env HEADROOM_DB_PATH). Unset
+      uses Headroom's own workspace store (~/.headroom/memory.db, or HEADROOM_WORKSPACE_DIR),
+      i.e. the one shared with every agent Headroom wraps.
+    - headroom_embedder: Embedder Headroom uses for its memory index -- "onnx" (default, local
+      all-MiniLM-L6-v2, no torch), "local" (sentence-transformers), "openai", or "ollama".
+    - headroom_embedder_model: Model name for the "local"/"openai"/"ollama" embedders; unset
+      leaves Headroom's default. Required for "openai" (e.g. text-embedding-3-small).
+    - headroom_embedder_api_key: API key for the "openai" embedder.
+    - headroom_ollama_base_url: Ollama server for the "ollama" embedder.
+    - headroom_vector_dimension: Dimension of the embedder's vectors (default 384, which fits
+      "onnx"/"local" MiniLM; text-embedding-3-small is 1536). Must match the embedder.
+    - headroom_agent_name: Tag stored on every mirrored memory's metadata (default "cognee").
     - cache_db_url: SQLAlchemy async URL for the SQL cache backends (env CACHE_DB_URL, e.g.
       postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db). When unset, "sqlite" uses a
       cache.db file next to the relational SQLite database and "postgres" falls back to the
@@ -48,7 +61,7 @@ class CacheConfig(BaseSettings):
       its context updates reach this turn's answer -- at the cost of two calls in a row.
     """
 
-    cache_backend: Literal["redis", "fs", "tapes", "sqlite", "postgres"] = "sqlite"
+    cache_backend: Literal["redis", "fs", "tapes", "headroom", "sqlite", "postgres"] = "sqlite"
     cache_db_url: str | None = None
     cache_purge_interval_seconds: int = 900
     caching: bool = True
@@ -73,6 +86,13 @@ class CacheConfig(BaseSettings):
     tapes_agent_name: str = "cognee"
     tapes_model: str = "cognee-session"
     tapes_request_timeout: float = 5.0
+    headroom_db_path: str | None = None
+    headroom_embedder: Literal["onnx", "local", "openai", "ollama"] = "onnx"
+    headroom_embedder_model: str | None = None
+    headroom_embedder_api_key: str | None = None
+    headroom_ollama_base_url: str = "http://localhost:11434"
+    headroom_vector_dimension: int = 384
+    headroom_agent_name: str = "cognee"
 
     model_config = SettingsConfigDict(extra="allow")
 
@@ -109,6 +129,13 @@ class CacheConfig(BaseSettings):
             "tapes_agent_name": self.tapes_agent_name,
             "tapes_model": self.tapes_model,
             "tapes_request_timeout": self.tapes_request_timeout,
+            "headroom_db_path": self.headroom_db_path,
+            "headroom_embedder": self.headroom_embedder,
+            "headroom_embedder_model": self.headroom_embedder_model,
+            "headroom_embedder_api_key": self.headroom_embedder_api_key,
+            "headroom_ollama_base_url": self.headroom_ollama_base_url,
+            "headroom_vector_dimension": self.headroom_vector_dimension,
+            "headroom_agent_name": self.headroom_agent_name,
         }
 
 

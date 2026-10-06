@@ -408,13 +408,15 @@ GRAPH_DATABASE_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
 
 #### Session Cache
 ```bash
-# Session/conversation cache backend: sqlite (default), postgres, redis, fs, tapes
+# Session/conversation cache backend: sqlite (default), postgres, redis, fs, tapes, headroom
 CACHE_BACKEND=sqlite
 # Optional explicit SQLAlchemy URL for sqlite/postgres cache backends (overrides defaults)
 CACHE_DB_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
 # Session-search execution mode: concurrent (default) or sequential
 SESSION_SEARCH_MODE=concurrent
 ```
+
+`tapes` and `headroom` are mirror backends: the filesystem cache stays the source of truth and every QA turn is additionally pushed to an external memory system. `headroom` (`cognee/infrastructure/databases/cache/headroom/`) saves each turn into a [Headroom](https://github.com/headroomlabs-ai/headroom) memory store — by default Headroom's own workspace store (`~/.headroom/memory.db`), so cognee sessions join the cross-agent memory Headroom shares with the agents it wraps (Claude Code, Codex, Gemini, Grok). Memories are scoped by cognee's user and session id, embedded locally (ONNX MiniLM, no torch; `HEADROOM_EMBEDDER=openai|ollama|local` to change, with `HEADROOM_VECTOR_DIMENSION` matching), and kept in sync: QA deletes, session deletes, and question/answer updates propagate; feedback-only updates, agent traces, session context, and usage logs stay local; `prune()` removes only the memories cognee wrote. Mirror failures are logged and never fail the local write. `headroom-ai` is not a cognee extra (its `click` floor conflicts with the `deepeval` extra) — install it next to cognee: `pip install headroom-ai sqlite-vec`; a missing package raises `HeadroomNotInstalledError` at backend construction.
 
 #### Session Search Modes
 

@@ -78,6 +78,13 @@ def create_cache_engine(
     tapes_request_timeout: float = 5.0,
     cache_db_url: str | None = None,
     cache_purge_interval_seconds: int = 900,
+    headroom_db_path: str | None = None,
+    headroom_embedder: str = "onnx",
+    headroom_embedder_model: str | None = None,
+    headroom_embedder_api_key: str | None = None,
+    headroom_ollama_base_url: str = "http://localhost:11434",
+    headroom_vector_dimension: int = 384,
+    headroom_agent_name: str = "cognee",
 ):
     """
     Factory function to instantiate a cache coordination backend.
@@ -94,6 +101,7 @@ def create_cache_engine(
     - agentic_lock_timeout: Max time to wait for the lock before failing.
     - cache_db_url: SQLAlchemy async URL for the SQL cache backends.
     - cache_purge_interval_seconds: Minimum interval between global TTL purge sweeps.
+    - headroom_*: Headroom memory store settings for the "headroom" backend (see CacheConfig).
 
     Returns:
     --------
@@ -132,6 +140,21 @@ def create_cache_engine(
                 tapes_model=tapes_model,
                 tapes_request_timeout=tapes_request_timeout,
             )
+        elif config.cache_backend == "headroom":
+            from cognee.infrastructure.databases.cache.headroom.HeadroomCacheAdapter import (
+                HeadroomCacheAdapter,
+            )
+
+            return HeadroomCacheAdapter(
+                session_ttl_seconds=session_ttl_seconds,
+                headroom_db_path=headroom_db_path,
+                headroom_embedder=headroom_embedder,
+                headroom_embedder_model=headroom_embedder_model,
+                headroom_embedder_api_key=headroom_embedder_api_key,
+                headroom_ollama_base_url=headroom_ollama_base_url,
+                headroom_vector_dimension=headroom_vector_dimension,
+                headroom_agent_name=headroom_agent_name,
+            )
         elif config.cache_backend in ("sqlite", "postgres"):
             from cognee.infrastructure.databases.cache.sql.SqlCacheAdapter import (
                 SqlCacheAdapter,
@@ -166,7 +189,7 @@ def create_cache_engine(
         else:
             raise ValueError(
                 f"Unsupported cache backend: '{config.cache_backend}'. "
-                f"Supported backends are: 'redis', 'fs', 'tapes', 'sqlite', 'postgres'"
+                f"Supported backends are: 'redis', 'fs', 'tapes', 'headroom', 'sqlite', 'postgres'"
             )
     else:
         return None
@@ -200,6 +223,13 @@ def get_cache_engine(
         tapes_request_timeout=config.tapes_request_timeout,
         cache_db_url=config.cache_db_url,
         cache_purge_interval_seconds=config.cache_purge_interval_seconds,
+        headroom_db_path=config.headroom_db_path,
+        headroom_embedder=config.headroom_embedder,
+        headroom_embedder_model=config.headroom_embedder_model,
+        headroom_embedder_api_key=config.headroom_embedder_api_key,
+        headroom_ollama_base_url=config.headroom_ollama_base_url,
+        headroom_vector_dimension=config.headroom_vector_dimension,
+        headroom_agent_name=config.headroom_agent_name,
     )
 
 
