@@ -178,9 +178,12 @@ async def _op_table_optimize(registry: HandleRegistry, req: Request):
 
 
 async def _op_table_compact_fragments(registry: HandleRegistry, req: Request):
-    # Hand the table to pylance, do the I/O off the event loop so other
-    # requests keep flowing, then move this handle to the committed version.
+    # Plan against the latest version (the caller holds its write lock), so a
+    # write committed after this handle was opened cannot make the rewrite
+    # conflict. Hand the table to pylance, do the I/O off the event loop so
+    # other requests keep flowing, then move this handle to the committed version.
     table = registry.get(req.handle_id)
+    await table.checkout_latest()
     dataset = await open_as_lance(table)
     stats = await asyncio.to_thread(compact_fragments, dataset, **req.kwargs)
     await table.checkout_latest()

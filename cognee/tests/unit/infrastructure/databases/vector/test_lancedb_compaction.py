@@ -475,6 +475,38 @@ async def test_deletes_take_the_write_lock(tmp_path, monkeypatch):
     assert lock_held == [True]
 
 
+def _delete_right_after_open(adapter, db_path, collection, point_id, monkeypatch):
+    """Commit a delete through another handle the first time the adapter opens ``collection``."""
+    import lancedb
+
+    real_get_collection = adapter.get_collection
+    pending = [point_id]
+
+    async def get_collection(name):
+        table = await real_get_collection(name)
+        if name == collection and pending:
+            other = await (await lancedb.connect_async(db_path)).open_table(name)
+            await other.delete(f"id = '{pending.pop()}'")
+        return table
+
+    monkeypatch.setattr(adapter, "get_collection", get_collection)
+
+
+@pytest.mark.asyncio
+async def test_a_delete_before_the_rewrite_takes_the_lock_does_not_fail_it(tmp_path, monkeypatch):
+    """The rewrite plans against the version current under VECTOR_DB_LOCK, not the one
+    the table handle was opened at."""
+    adapter, db_path = _adapter(tmp_path)
+    collection = "StaleHandle_label"
+    ids = await _write_n_points(adapter, collection, 4)
+    _delete_right_after_open(adapter, db_path, collection, ids[1], monkeypatch)
+
+    stats = await adapter.compact()
+
+    assert stats[collection]["executed_tasks"] == 1, stats
+    assert len(await adapter.retrieve(collection, [str(i) for i in ids])) == 3
+
+
 @pytest.mark.asyncio
 async def test_compact_is_fail_open_per_collection(tmp_path, compaction_settings, monkeypatch):
     compaction_settings(retention_seconds=0)
@@ -1050,4 +1082,98 @@ async def test_prune_waits_for_a_running_compaction_pass(tmp_path, compaction_se
     events.append("pruned")
 
     assert events == ["pass_done", "pruned"]
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_versions_a_pass_left_pending_are_pruned_once_aged(tmp_path, compaction_settings):
+    """An adapter that stays open (a server) reclaims them without another cognify."""
+    compaction_settings(retention_seconds=1)
+    adapter, db_path = _adapter(tmp_path)
+    collection = "Followup_label"
+    await _write_n_points(adapter, collection, 4)
+
+    await adapter.compact()
+    assert _version_count(db_path, collection) > 1  # still inside the retention window
+    assert adapter._followup_prune_handle is not None
+
+    await asyncio.sleep(2.3)
+    await adapter._wait_for_open_prune()
+    assert _version_count(db_path, collection) == 1
+    assert _data_files(db_path, collection) == _referenced_files(db_path, collection)
+
+    await adapter.compact()
+    assert adapter._followup_prune_handle is not None
+    await adapter.close()
+    assert adapter._followup_prune_handle is None
+
+
+@pytest.mark.asyncio
+async def test_a_followup_prune_waits_for_a_running_prune(
+    tmp_path, compaction_settings, monkeypatch
+):
+    """The follow-up takes the prune slot; whoever waits on the slot must still
+    wait for the prune it replaced (both hold the compaction lock in turn)."""
+    compaction_settings(retention_seconds=0)
+    adapter, _ = _adapter(tmp_path)
+    started, events = asyncio.Event(), []
+
+    async def slow_prune_pass(options):
+        started.set()
+        await asyncio.sleep(0.2)
+        events.append("prune_done")
+        return {}
+
+    monkeypatch.setattr(adapter, "_prune_pass", slow_prune_pass)
+    await adapter.get_connection()  # first-open prune starts
+    await started.wait()
+    first = adapter._open_prune_task
+
+    adapter._start_followup_prune(adapter._compaction_options())
+    assert adapter._open_prune_task is not first
+
+    await adapter._wait_for_open_prune()
+
+    assert first.done()
+    assert events == ["prune_done", "prune_done"]
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_prunes_are_drained_by_wait_for_background_tasks(
+    tmp_path, compaction_settings, monkeypatch
+):
+    """The server's shutdown drain (and scripts) must not cut a prune off."""
+    from cognee.infrastructure.background_tasks import wait_for_background_tasks
+
+    compaction_settings(retention_seconds=0)
+    adapter, _ = _adapter(tmp_path)
+    finished = []
+
+    async def slow_prune_pass(options):
+        await asyncio.sleep(0.2)
+        finished.append(True)
+        return {}
+
+    monkeypatch.setattr(adapter, "_prune_pass", slow_prune_pass)
+    await adapter.get_connection()
+
+    assert await wait_for_background_tasks(timeout=5)
+    assert finished == [True]
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_prune_cancels_a_pending_followup(tmp_path, compaction_settings):
+    compaction_settings(retention_seconds=60)
+    adapter, _ = _adapter(tmp_path)
+    await _write_n_points(adapter, "FollowupPrune_label", 2)
+    await adapter.compact()
+    handle = adapter._followup_prune_handle
+    assert handle is not None
+
+    await adapter.prune()
+
+    assert handle.cancelled()
+    assert adapter._followup_prune_handle is None
     await adapter.close()
