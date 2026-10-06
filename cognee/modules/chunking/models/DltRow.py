@@ -3,7 +3,7 @@ from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 
 class DltRow(DocumentChunk):
     """One row of a DLT source manifest — its own graph type AND its own
-    vector collection (``DLT_ROW_TEXT_COLLECTION``).
+    vector collection (``DltRow.vector_collection()``).
 
     Chunk search (DocumentChunk_text) is for document ingestion only, so rows
     deliberately do NOT appear there. Row text is searchable through the
@@ -13,7 +13,3 @@ class DltRow(DocumentChunk):
     edges, column-value edges). Subclassing DocumentChunk reuses the chunk
     field shape; filter by type NAME, not isinstance.
     """
-
-
-# The collection hybrid and graph completion read rows from.
-DLT_ROW_TEXT_COLLECTION = DltRow.vector_collection()

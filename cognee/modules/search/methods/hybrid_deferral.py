@@ -1,7 +1,8 @@
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.vector import get_vector_engine_async
+from cognee.modules.chunking.models.DltRow import DltRow
+from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.engine.models.node_set import NodeSet
-from cognee.modules.retrieval.hybrid.chunks import DLT_ROW_COLLECTION, DOCUMENT_CHUNK_COLLECTION
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
@@ -66,11 +67,11 @@ async def hybrid_deferral_reason(kwargs: dict, *, graph_is_empty: bool) -> str |
 
     try:
         vector_engine = await get_vector_engine_async()
+        chunks, rows = DocumentChunk.vector_collection(), DltRow.vector_collection()
         if not (
-            await vector_engine.has_collection(DOCUMENT_CHUNK_COLLECTION)
-            or await vector_engine.has_collection(DLT_ROW_COLLECTION)
+            await vector_engine.has_collection(chunks) or await vector_engine.has_collection(rows)
         ):
-            return f"{DOCUMENT_CHUNK_COLLECTION} and {DLT_ROW_COLLECTION} collections missing"
+            return f"{chunks} and {rows} collections missing"
     except Exception as error:
         logger.debug("Hybrid collection check failed; running hybrid: %s", error, exc_info=True)
 

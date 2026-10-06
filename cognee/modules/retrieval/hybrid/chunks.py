@@ -4,6 +4,7 @@ from itertools import chain
 from typing import Any
 
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.modules.chunking.models.DltRow import DltRow
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.retrieval.hybrid.pairs import (
     attach_source_chunks,
@@ -20,29 +21,19 @@ from cognee.modules.retrieval.hybrid.results import (
     result_id,
 )
 from cognee.shared.logging_utils import get_logger
-from cognee.tasks.ingestion.dlt_utils import DLT_ROW_COLLECTION
 
 logger = get_logger("HybridRetriever")
 
-# The chunk lane's text collections. Document chunks always; DLT rows (one
-# ``DltRow`` per relational row, a chunk of its own graph type that CHUNKS
-# search leaves out on purpose) when the dataset has any — ``dlt_rows_indexed``
-# decides per search, so a dataset without relational data searches exactly
-# the document collections and pays nothing for the DLT ones. Rows are
-# candidates so hybrid answers cover relational data and temporal search can
-# anchor rows on the Timestamps their date cells point to.
-DOCUMENT_CHUNK_COLLECTION = DocumentChunk.vector_collection()
-CHUNK_COLLECTIONS = (DOCUMENT_CHUNK_COLLECTION,)
-DLT_CHUNK_COLLECTIONS = (DLT_ROW_COLLECTION,)
+
+def chunk_collections(include_dlt_rows: bool) -> tuple[str, ...]:
+    """The chunk lane's collections: document chunks, plus DLT rows when the dataset has any."""
+    collections = (DocumentChunk.vector_collection(),)
+    return collections + (DltRow.vector_collection(),) if include_dlt_rows else collections
 
 
 async def dlt_rows_indexed(vector_engine: Any) -> bool:
-    """Whether the dataset holds DLT rows: its row collection exists.
-
-    One existence check per search, shared by the chunk and entity lanes; not
-    cached, so rows ingested after an earlier search are seen by the next one.
-    """
-    return await vector_engine.has_collection(DLT_ROW_COLLECTION)
+    """Whether the dataset holds DLT rows: their collection exists. Checked once per search."""
+    return await vector_engine.has_collection(DltRow.vector_collection())
 
 
 async def retrieve_hybrid_chunks(
@@ -60,7 +51,7 @@ async def retrieve_hybrid_chunks(
     current_truth_epoch: int | None = None,
     personal_weights: dict | None = None,
     personal_influence: float = 0.0,
-    collections: tuple[str, ...] = CHUNK_COLLECTIONS,
+    collections: tuple[str, ...] = chunk_collections(include_dlt_rows=False),
 ) -> dict[str, Any]:
     candidate_limit = chunk_candidate_limit(chunks_top_k)
     summary_limit = summary_candidate_limit(chunks_top_k, text_summaries_top_k)

@@ -10,16 +10,11 @@ import pytest
 
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.modules.retrieval.hybrid.chunks import (
-    CHUNK_COLLECTIONS,
-    DLT_CHUNK_COLLECTIONS,
+    chunk_collections,
     merge_scored,
     retrieve_hybrid_chunks,
 )
-from cognee.modules.retrieval.hybrid.entities import (
-    DLT_ENTITY_COLLECTIONS,
-    ENTITY_COLLECTIONS,
-    search_entities,
-)
+from cognee.modules.retrieval.hybrid.entities import entity_collections, search_entities
 from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
 
 
@@ -90,7 +85,7 @@ async def test_chunk_lane_merges_dlt_rows_with_document_chunks_by_score():
         None,
         "OR",
         False,
-        collections=CHUNK_COLLECTIONS + DLT_CHUNK_COLLECTIONS,
+        collections=chunk_collections(include_dlt_rows=True),
     )
 
     assert [hit.payload["id"] for hit in result["chunks"]] == ["chunk_near", "row_mid", "chunk_far"]
@@ -114,11 +109,16 @@ async def test_entity_lane_covers_the_dlt_node_types():
         None,
         "OR",
         [0.0],
-        collections=ENTITY_COLLECTIONS + DLT_ENTITY_COLLECTIONS,
+        collections=entity_collections(include_dlt_rows=True),
     )
 
     assert [hit.payload["id"] for hit in hits] == ["orders:status:active", "orders"]
-    assert _searched(engine) == set(ENTITY_COLLECTIONS) | set(DLT_ENTITY_COLLECTIONS)
+    assert _searched(engine) == {
+        "Entity_name",
+        "DltColumn_properties",
+        "SchemaTable_name",
+        "SchemaRelationship_name",
+    }
 
 
 async def _fetch(engine):
@@ -172,4 +172,9 @@ async def test_a_dataset_with_dlt_rows_searches_the_dlt_collections_in_both_lane
 
     assert [hit.payload["id"] for hit in result["chunks"]] == ["row", "chunk"]
     engine.has_collection.assert_awaited_once_with("DltRow_text")
-    assert _searched(engine) >= {"DltRow_text", *DLT_ENTITY_COLLECTIONS}
+    assert _searched(engine) >= {
+        "DltRow_text",
+        "DltColumn_properties",
+        "SchemaTable_name",
+        "SchemaRelationship_name",
+    }

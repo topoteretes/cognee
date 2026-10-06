@@ -3,13 +3,9 @@
 import pytest
 
 from cognee.infrastructure.engine import DataPoint
-from cognee.modules.chunking.models.DltRow import DLT_ROW_TEXT_COLLECTION
-from cognee.modules.engine.models.DltColumn import DLT_COLUMN_PROPERTIES_COLLECTION
-from cognee.tasks.schema.models import (
-    SCHEMA_RELATIONSHIP_NAME_COLLECTION,
-    SCHEMA_TABLE_NAME_COLLECTION,
-    SchemaTable,
-)
+from cognee.modules.chunking.models.DltRow import DltRow
+from cognee.modules.engine.models.DltColumn import DltColumn
+from cognee.tasks.schema.models import SchemaRelationship, SchemaTable
 
 
 class OneField(DataPoint):
@@ -47,9 +43,9 @@ def test_a_field_the_type_does_not_index_is_an_error():
 
 
 def test_the_dlt_types_name_the_collections_the_pipeline_writes():
-    assert DLT_ROW_TEXT_COLLECTION == "DltRow_text"
-    assert DLT_COLUMN_PROPERTIES_COLLECTION == "DltColumn_properties"
-    assert SCHEMA_TABLE_NAME_COLLECTION == "SchemaTable_name"
-    assert SCHEMA_RELATIONSHIP_NAME_COLLECTION == "SchemaRelationship_name"
+    assert DltRow.vector_collection() == "DltRow_text"
+    assert DltColumn.vector_collection() == "DltColumn_properties"
+    assert SchemaTable.vector_collection("name") == "SchemaTable_name"
+    assert SchemaRelationship.vector_collection("name") == "SchemaRelationship_name"
     with pytest.raises(ValueError):
         SchemaTable.vector_collection()  # two index fields: name or description

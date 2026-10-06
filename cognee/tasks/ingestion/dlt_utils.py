@@ -2,23 +2,6 @@
 
 import json
 
-from cognee.modules.chunking.models.DltRow import DLT_ROW_TEXT_COLLECTION
-from cognee.modules.engine.models.DltColumn import DLT_COLUMN_PROPERTIES_COLLECTION
-from cognee.tasks.schema.models import (
-    SCHEMA_RELATIONSHIP_NAME_COLLECTION,
-    SCHEMA_TABLE_NAME_COLLECTION,
-)
-
-# The vector collections the DLT route writes that search reads: rows join the
-# hybrid chunk lane (and graph completion), the schema and cell-value nodes join
-# the entity lane. Named here, by the DLT code, from the models themselves.
-DLT_ROW_COLLECTION = DLT_ROW_TEXT_COLLECTION
-DLT_NODE_COLLECTIONS = (
-    DLT_COLUMN_PROPERTIES_COLLECTION,
-    SCHEMA_TABLE_NAME_COLLECTION,
-    SCHEMA_RELATIONSHIP_NAME_COLLECTION,
-)
-
 # A dlt source sets this attribute to opt into the "document" ingestion path:
 # each row becomes a text document that flows through normal cognify (LLM entity
 # extraction), instead of the default relational schema-context path. The value
