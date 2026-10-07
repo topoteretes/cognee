@@ -18,13 +18,13 @@ import re
 import pytest
 
 from cognee.infrastructure.databases.graph.ladybug.adapter import (
-    LadybugAdapter,
     _EDGE_CREATE_QUERY,
     _EDGE_PROBE_QUERY,
     _EDGE_UPDATE_QUERY,
     _NODE_CREATE_QUERY,
     _NODE_PROBE_QUERY,
     _NODE_UPDATE_QUERY,
+    LadybugAdapter,
 )
 
 NOW = "2026-01-01 00:00:00.000000"
