@@ -10,19 +10,17 @@ normal cognify — by declaring a document-source tag (see
 dlt_utils.document_source_tag)."""
 
 import json
-import math
 import os
 import shutil
 import tempfile
-import unicodedata
 from collections.abc import Callable
-from typing import Any
+from typing import Any, NoReturn
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 from uuid import UUID
 
-from cognee.infrastructure.engine.utils.generate_node_id import generate_node_id
 from cognee.modules.data.methods.get_unique_data_id import get_unique_data_id
+from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 
@@ -35,16 +33,7 @@ from .create_dlt_source import (
 )
 from .data_item import DataItem
 from .dlt_row_data import DltRowData
-from .dlt_utils import (
-    NODE_SET_COLUMN,
-    NODE_SET_MAX_NAME_LENGTH,
-    NODE_SET_MAX_NAMES_PER_ROW,
-    STRUCTURE_COLUMN,
-    STRUCTURE_MAX_KEYS,
-    STRUCTURE_MAX_SERIALIZED_BYTES,
-    STRUCTURE_MAX_VALUE_LENGTH,
-    document_source_tag,
-)
+from .dlt_utils import NODE_SET_COLUMN, document_source_tag
 from .ingest_dlt_source import ingest_dlt_source
 
 logger = get_logger("resolve_dlt_sources")
@@ -229,38 +218,14 @@ async def resolve_dlt_sources(
         )
         loaded_tables = getattr(rows, "loaded_tables", {row.table_name for row in rows})
         document_scopes.update((source_tag, table) for table in loaded_tables)
-        # Retired child tables yield no fresh rows, so cleanup forgets the empty
-        # documents an older core built from them.
-        document_scopes.update((source_tag, table) for table in getattr(rows, "retired_tables", ()))
         # Dataset-scoped ids with the pre-scoping adoption probe: rows are
         # dataset-scoped with id as primary key, so a dataset-free
         # derivation would pin the same id when one source loads into two
         # datasets — a hard collision on the foreign-pin guard.
         row_ids = await _stable_row_ids(rows, user, dataset_id)
-        row_issues: dict[tuple[str, str], int] = {}
         for row, data_id in zip(rows, row_ids):
             document_fresh_ids.add(data_id)
-            node_set, node_set_issue = _validate_row_node_set(
-                row.row_data.get(NODE_SET_COLUMN), source_tag
-            )
-            structure, structure_issue = _validate_row_structure(row.row_data.get(STRUCTURE_COLUMN))
-            for issue in (node_set_issue, structure_issue):
-                if issue is not None:
-                    key = (row.table_name, issue)
-                    row_issues[key] = row_issues.get(key, 0) + 1
-            document_data_items.append(
-                _build_document_data_item(
-                    row, data_id, source_tag, node_set=node_set, structure=structure
-                )
-            )
-        for (table, issue), count in row_issues.items():
-            logger.warning(
-                "Source '%s' table '%s': dropped invalid %s on %d row(s).",
-                source_tag,
-                table,
-                issue,
-                count,
-            )
+            document_data_items.append(_build_document_data_item(row, data_id, source_tag))
 
     # --- Relational sources: one manifest DataItem per source -----------
     expanded_items: list[DataItem] = []
@@ -639,26 +604,16 @@ async def _stable_row_ids(rows: list[DltRowData], user: User, dataset_id: UUID) 
     return [old_id if old_id in adopted else new_id for old_id, new_id in zip(old_ids, new_ids)]
 
 
-def _build_document_data_item(
-    row: DltRowData,
-    data_id: UUID,
-    source_tag: str,
-    node_set: list[str] | None = None,
-    structure: dict | None = None,
-) -> DataItem:
+def _build_document_data_item(row: DltRowData, data_id: UUID, source_tag: str) -> DataItem:
     """Build a text-document DataItem from a document-source dlt row.
 
     The row is expected to carry ``title``/``content`` columns (and optionally
     ``url``/``id``). Tagging ``system_metadata["source"] = source_tag``
     routes the document through normal cognify entity extraction rather
-    than the deterministic manifest path.
+    than the deterministic manifest path. A ``cognee_node_set`` column names
+    the row's own node sets (``_row_node_set``); they ride on the DataItem and
+    ingest_data unions them with the call-level node_set.
 
-    ``node_set``/``structure`` are the already-validated values of the row's
-    reserved ``cognee_node_set``/``cognee_structure`` columns (see
-    ``_validate_row_node_set``/``_validate_row_structure``); this function
-    does no validation of its own. ``structure`` is nested under
-    ``system_metadata["structure"]`` so it can never collide with the fixed
-    keys set below.
     ``literal_text=True`` because ``content`` is provider data cognee did not
     write: an untitled row (no "# title" prefix) whose content happens to be
     just a URL or an existing local path must still be stored as that text,
@@ -678,159 +633,101 @@ def _build_document_data_item(
         system_metadata["url"] = row_data["url"]
     if row_data.get("id"):
         system_metadata["external_id"] = str(row_data["id"])
-    if structure:
-        system_metadata["structure"] = structure
 
     return DataItem(
         data=text,
         label=title or str(row_data.get("id")),
         system_metadata=system_metadata,
         data_id=data_id,
-        node_set=node_set or None,
         literal_text=True,
+        node_set=_row_node_set(row, source_tag),
+    )
+
+
+def _row_node_set(row: DltRowData, source_tag: str) -> list[str] | None:
+    """The node sets a document row names in its ``cognee_node_set`` column.
+
+    The column must hold a JSON list of names. It comes back as that list (a
+    json column) or as its JSON text (SQLite). Any other shape raises: the
+    column is loaded with a json type hint, so dlt moves a value that is not a
+    list or object (a bare string, a number) into a variant column such as
+    ``cognee_node_set__v_text`` and leaves this one NULL. Reading only this
+    column would then ingest the row with none of its node sets and no sign
+    of it, so the sync stops instead and names the source, table and row.
+
+    Every name is namespaced under ``source_tag`` unless it already is, so
+    provider data can never name one of cognee's own node sets (``skills``,
+    ``user_context``, ...), and deduplicated by node-set identity, so two
+    spellings of one node set (``Project A``, ``project_a``) keep the first.
+    Entries that are not non-empty strings are ignored and counted in one
+    debug line per row (never the values).
+    """
+    variants = sorted(
+        column
+        for column, value in row.row_data.items()
+        if column.startswith(f"{NODE_SET_COLUMN}__v_") and value is not None
+    )
+    if variants:
+        _raise_node_set_shape(row, source_tag, f"a value dlt stored in {', '.join(variants)}")
+    raw = row.row_data.get(NODE_SET_COLUMN)
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            # ValueError only, no RecursionError guard: this column is loaded with a
+            # json type hint (NODE_SET_COLUMN_HINT) and dlt refuses a list nested
+            # deep enough to break json.loads, failing at extract before the row is
+            # stored (checked on dlt 1.28.2: 200 levels load, 1000 fail). On Postgres
+            # the value comes back already parsed. There is no input to guard against.
+            _raise_node_set_shape(row, source_tag, "text that is not JSON")
+    if not isinstance(raw, list):
+        _raise_node_set_shape(row, source_tag, f"a JSON {type(raw).__name__}")
+    # No cap on the number or length of names, on purpose. A cap would cut a
+    # row's group memberships silently: the document lands with only some of
+    # its node sets and nobody is told. If a source ever floods the graph with
+    # node sets, fail the sync loudly, naming the source, table and count.
+    # Never truncate.
+    prefix = f"{source_tag}:"
+    names = [
+        name if name.startswith(prefix) else prefix + name
+        for name in (_clean(value) for value in raw if isinstance(value, str))
+        if name
+    ]
+    if len(names) < len(raw):
+        logger.debug(
+            "Source '%s' table '%s': ignored %d non-string or blank %s value(s).",
+            source_tag,
+            row.table_name,
+            len(raw) - len(names),
+            NODE_SET_COLUMN,
+        )
+    # One entry per node set: spellings that normalize to the same id keep the first.
+    unique: dict = {}
+    for name in names:
+        unique.setdefault(NodeSet.id_for(name), name)
+    return list(unique.values()) or None
+
+
+def _raise_node_set_shape(row: DltRowData, source_tag: str, found: str) -> NoReturn:
+    """Stop the sync: a row's ``cognee_node_set`` is not a JSON list of names."""
+    from cognee.exceptions import CogneeValidationError
+
+    raise CogneeValidationError(
+        message=(
+            f"Source '{source_tag}' table '{row.table_name}' row '{row.primary_key_value}': "
+            f"{NODE_SET_COLUMN} must be a JSON list of names, but it holds {found}. "
+            'Emit a list, even for one name (["name"]), and re-sync the affected rows. '
+            "No document from this sync was stored."
+        ),
+        name="DltNodeSetColumnNotAList",
     )
 
 
 def _clean(value: Any) -> str:
     """Coerce a possibly-None cell value to a stripped string."""
     return str(value).strip() if value is not None else ""
-
-
-# Control, format (zero-width, bidi), surrogate and line/paragraph separators:
-# invisible or unencodable characters that make look-alike or crashing names.
-_REJECTED_NAME_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp"})
-
-
-# ZWNJ/ZWJ are ordinary orthography (Persian, Arabic) and emoji glue when they
-# join two visible characters; anywhere else they are just invisible.
-_JOINERS = frozenset({"\u200c", "\u200d"})
-
-
-def _is_joinable(char: str) -> bool:
-    # Letters, marks, numbers and symbols (emoji are So); not punctuation or space.
-    return unicodedata.category(char)[0] in "LMNS"
-
-
-def _has_rejected_character(name: str) -> bool:
-    for index, char in enumerate(name):
-        if unicodedata.category(char) not in _REJECTED_NAME_CATEGORIES:
-            continue
-        if (
-            char in _JOINERS
-            and 0 < index < len(name) - 1
-            and _is_joinable(name[index - 1])
-            and _is_joinable(name[index + 1])
-        ):
-            continue
-        return True
-    return False
-
-
-def _validate_row_node_set(raw: Any, source_tag: str) -> tuple[list[str] | None, str | None]:
-    """Validate a row's ``cognee_node_set`` column value.
-
-    Accepts both read-back shapes: a Postgres jsonb column comes back already
-    parsed (a list); a SQLite text column comes back as a JSON string, or as a
-    single bare name (the "text column with one name" form). Bad individual
-    names are dropped and the surviving ones kept — a row is never dropped for
-    a bad node_set value. Returns ``(names, issue)`` where ``issue`` is a
-    short reason string set only when something was actually dropped, for the
-    caller to aggregate into one warning per (table, reason).
-    """
-    if raw is None:
-        return None, None
-
-    if isinstance(raw, list):
-        candidates = raw
-    elif isinstance(raw, str):
-        try:
-            parsed = json.loads(raw)
-        except (ValueError, RecursionError):
-            candidates = [raw]
-        else:
-            candidates = parsed if isinstance(parsed, list) else [raw]
-    else:
-        return None, "node_set_column_invalid"
-
-    prefix = f"{source_tag}:"
-    seen_keys: set = set()
-    names: list[str] = []
-    dropped = False
-    for candidate in candidates:
-        if not isinstance(candidate, str):
-            dropped = True
-            continue
-        name = candidate.strip()
-        if (
-            not name
-            or "," in name
-            or not name.startswith(prefix)
-            or not name[len(prefix) :].strip()
-            or _has_rejected_character(name)
-        ):
-            dropped = True
-            continue
-        if len(name) > NODE_SET_MAX_NAME_LENGTH:
-            dropped = True
-            continue
-        key = generate_node_id(f"NodeSet:{name}")
-        if key in seen_keys:
-            dropped = True
-            continue
-        seen_keys.add(key)
-        names.append(name)
-
-    if len(names) > NODE_SET_MAX_NAMES_PER_ROW:
-        names = names[:NODE_SET_MAX_NAMES_PER_ROW]
-        dropped = True
-
-    if not names:
-        return None, "node_set_value" if dropped else None
-    return names, "node_set_value" if dropped else None
-
-
-_STRUCTURE_SCALAR_TYPES = (str, int, float, bool, type(None))
-
-
-def _validate_row_structure(raw: Any) -> tuple[dict | None, str | None]:
-    """Validate a row's ``cognee_structure`` column value.
-
-    Accepts both read-back shapes: a Postgres jsonb column comes back already
-    parsed (a dict); a SQLite text column comes back as a JSON string. Unlike
-    node_set, an invalid structure is dropped as a whole rather than filtered
-    key by key — there is no sensible "partial" structure. Returns
-    ``(structure, issue)``, mirroring ``_validate_row_node_set``.
-    """
-    if raw is None:
-        return None, None
-
-    if isinstance(raw, dict):
-        candidate = raw
-    elif isinstance(raw, str):
-        try:
-            candidate = json.loads(raw)
-        except (ValueError, RecursionError):
-            return None, "structure_value"
-        if not isinstance(candidate, dict):
-            return None, "structure_value"
-    else:
-        return None, "structure_value"
-
-    if not candidate:
-        return None, None
-    if len(candidate) > STRUCTURE_MAX_KEYS:
-        return None, "structure_value"
-    for value in candidate.values():
-        if not isinstance(value, _STRUCTURE_SCALAR_TYPES):
-            return None, "structure_value"
-        if isinstance(value, str) and len(value) > STRUCTURE_MAX_VALUE_LENGTH:
-            return None, "structure_value"
-        if isinstance(value, float) and not math.isfinite(value):
-            return None, "structure_value"
-    if len(json.dumps(candidate, default=str).encode("utf-8")) > STRUCTURE_MAX_SERIALIZED_BYTES:
-        return None, "structure_value"
-
-    return candidate, None
 
 
 def _build_schema_context_text(dlt_row: DltRowData) -> str:

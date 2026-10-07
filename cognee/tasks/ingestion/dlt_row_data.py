@@ -26,16 +26,6 @@ class DltRows(list[DltRowData]):
     emptied by a successful hard-delete merge.
     """
 
-    def __init__(
-        self,
-        rows: Iterable[DltRowData],
-        *,
-        loaded_tables: Iterable[str],
-        retired_tables: Iterable[str] = (),
-    ):
+    def __init__(self, rows: Iterable[DltRowData], *, loaded_tables: Iterable[str]):
         super().__init__(rows)
         self.loaded_tables = frozenset(loaded_tables)
-        # Tables loaded this run but no longer read as documents (dlt child
-        # tables in document mode). Documents an older core built from them are
-        # swept by cleanup instead of lingering forever.
-        self.retired_tables = frozenset(retired_tables)
