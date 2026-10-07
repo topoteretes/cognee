@@ -40,13 +40,12 @@ class InvalidNodeSetError(CogneeValidationError):
         super().__init__(message, name, status_code)
 
 
-def validate_node_set_names(value: Any, source: str) -> list[str] | None:
+def validate_node_set_names(value: Any) -> list[str] | None:
     """Return ``value`` unchanged when it is a list of node-set names, else raise.
 
     ``None`` means no node set. Anything else must be a list whose entries are
     non-empty strings with a NodeSet id. A bare string is rejected rather than
-    read as one name, so there is one accepted shape. ``source`` names where the
-    value came from, for the error message.
+    read as one name, so there is one accepted shape.
 
     Raises:
         InvalidNodeSetError: If ``value`` is not ``None`` or a list of names.
@@ -55,15 +54,15 @@ def validate_node_set_names(value: Any, source: str) -> list[str] | None:
         return None
     if not isinstance(value, list):
         raise InvalidNodeSetError(
-            f"{source} must be a list of node-set names, got {type(value).__name__}: {value!r}"
+            f"node_set must be a list of names, got {type(value).__name__}: {value!r}"
         )
     for name in value:
         if not isinstance(name, str) or not name.strip():
             raise InvalidNodeSetError(
-                f"{source} entries must be non-empty strings, got {name!r} in {value!r}"
+                f"node_set entries must be non-empty strings, got {name!r} in {value!r}"
             )
         try:
             NodeSet.id_for(name)
         except UnicodeEncodeError:
-            raise InvalidNodeSetError(f"{source} entry {name!r} cannot be encoded as a name")
+            raise InvalidNodeSetError(f"node_set entry {name!r} cannot be encoded as a name")
     return value

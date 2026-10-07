@@ -163,14 +163,11 @@ async def ingest_data(
             ``node_set`` key in a DataItem's external_metadata is not a list of
             names. Checked before anything is stored.
     """
-    validate_node_set_names(node_set, "node_set")
+    validate_node_set_names(node_set)
     for data_item in data if isinstance(data, list) else [data]:
         if isinstance(data_item, DataItem):
-            validate_node_set_names(data_item.node_set, "DataItem.node_set")
-            validate_node_set_names(
-                (data_item.external_metadata or {}).get("node_set"),
-                "DataItem.external_metadata['node_set']",
-            )
+            validate_node_set_names(data_item.node_set)
+            validate_node_set_names((data_item.external_metadata or {}).get("node_set"))
 
     if not user:
         user = await get_default_user()

@@ -93,9 +93,7 @@ def update_node_set(document):
     if "node_set" not in external_metadata:
         return
 
-    node_set = validate_node_set_names(
-        external_metadata["node_set"], "external_metadata['node_set']"
-    )
+    node_set = validate_node_set_names(external_metadata["node_set"])
     if node_set is None:
         return
 
