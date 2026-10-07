@@ -47,6 +47,10 @@ logger = get_logger("TemporalHybridRetriever")
 FALLBACK_WARNING = (
     "No time-anchored data found for this question; answering with HYBRID search instead."
 )
+# The question yielded no time window, so the graph's dates were never consulted.
+NO_WINDOW_WARNING = (
+    "Could not extract a time window from this question (%s); answering with HYBRID search instead."
+)
 
 
 class TemporalHybridRetriever(HybridRetriever):
@@ -170,7 +174,7 @@ class TemporalHybridRetriever(HybridRetriever):
         self.last_baseline = self._finalize(candidates)
         if reason is not None:
             self.last_reason = reason
-            logger.warning(FALLBACK_WARNING)
+            logger.warning(NO_WINDOW_WARNING, reason)
             return self.last_baseline
 
         # The window's own timestamps widen the candidate pool before the anchors
