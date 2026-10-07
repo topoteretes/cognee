@@ -11,11 +11,16 @@ Pass ``full=True`` to render the entire graph (legacy behavior).
 """
 
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, NamedTuple
 
+from sqlalchemy import select
+
+from cognee.context_global_variables import backend_access_control_enabled
 from cognee.infrastructure.databases.graph.bounded_neighborhood import hop_distances
 from cognee.infrastructure.databases.graph.graph_db_interface import EdgeData, Node
-from cognee.modules.graph.dataset_scope import DatasetScope
+from cognee.infrastructure.databases.provenance.markers import stores_provenance_in_graph
+from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.graph.models import Node as LedgerNode
 from cognee.modules.retrieval.utils.node_edge_vector_search import NodeEdgeVectorSearch
 from cognee.modules.visualization.preprocessor import SEMANTIC_TYPE_KEY
 from cognee.shared.logging_utils import get_logger
@@ -41,6 +46,62 @@ _SEED_VECTOR_COLLECTIONS = [
 
 # (nodes, edges) in the shape get_graph_data()/get_neighborhood() already return.
 GraphData = tuple[list[Node], list[EdgeData]]
+
+
+class OwnedGraph(NamedTuple):
+    """What one dataset owns in the graph every dataset shares when access control is off.
+
+    ``edges`` holds (source, target, relationship) keys, or None when only node
+    ownership is recorded; an edge then counts when both its ends do.
+    """
+
+    nodes: set[str]
+    edges: set[tuple[str, str, str]] | None
+
+
+async def get_owned_graph(graph_engine: Any, dataset_id: Any) -> OwnedGraph | None:
+    """What ``dataset_id`` owns, or None with access control on, where it has its own graph."""
+    if backend_access_control_enabled():
+        return None
+    # Community registration permits duck-typed adapters, which may not know provenance.
+    if hasattr(graph_engine, "get_graph_metadata") and await stores_provenance_in_graph(
+        graph_engine
+    ):
+        nodes = await graph_engine.find_node_source_refs_by_dataset(str(dataset_id))
+        edges = await graph_engine.find_edge_source_refs_by_dataset(str(dataset_id))
+        return OwnedGraph(
+            nodes={str(node_id) for node_id in nodes},
+            edges={(str(e.source_id), str(e.target_id), e.relationship_name) for e in edges},
+        )
+    # Graphs written before provenance moved into the graph keep it in the relational
+    # ledger, whose edge names do not always match the graph's, so only nodes are used.
+    async with get_relational_engine().get_async_session() as session:
+        slugs = await session.scalars(
+            select(LedgerNode.slug).where(LedgerNode.dataset_id == dataset_id)
+        )
+        return OwnedGraph(nodes={str(slug) for slug in slugs}, edges=None)
+
+
+def keep_owned(nodes: list[Node], edges: list[EdgeData], owned: OwnedGraph) -> GraphData:
+    """Drop the nodes and edges another dataset owns."""
+    kept_edges = [
+        edge
+        for edge in edges
+        if str(edge[0]) in owned.nodes
+        and str(edge[1]) in owned.nodes
+        and (owned.edges is None or (str(edge[0]), str(edge[1]), edge[2]) in owned.edges)
+    ]
+    return [node for node in nodes if str(node[0]) in owned.nodes], kept_edges
+
+
+def own_nodes_first(seeds: list[str], owned: OwnedGraph, max_nodes: int) -> list[str]:
+    """The dataset's own seeds, then its other nodes, as seeds for a bounded read.
+
+    A bounded read admits its seeds before any neighbour, so its whole budget
+    goes to the dataset's own nodes.
+    """
+    own_seeds = [seed for seed in seeds if seed in owned.nodes]
+    return (own_seeds + sorted(owned.nodes.difference(own_seeds)))[:max_nodes]
 
 
 def _unique_preserve_order(node_ids: list[str]) -> list[str]:
@@ -318,11 +379,11 @@ async def fetch_visualization_graph_data(
     neighborhood_depth: int = DEFAULT_NEIGHBORHOOD_DEPTH,
     seed_top_k: int = DEFAULT_SEED_TOP_K,
     max_nodes: int = DEFAULT_MAX_NODES,
-    scope: DatasetScope | None = None,
+    owned: OwnedGraph | None = None,
 ) -> GraphData:
     """Return graph data for visualization: a bounded subgraph by default, or
     the whole graph when ``full`` is True. Output is the ``(nodes, edges)``
-    format the renderer already consumes. With a ``scope``, only what that
+    format the renderer already consumes. With ``owned``, only what one
     dataset owns in a shared graph is returned."""
     if neighborhood_depth < 1:
         raise ValueError("neighborhood_depth must be >= 1")
@@ -333,7 +394,7 @@ async def fetch_visualization_graph_data(
 
     if full:
         nodes_data, edges_data = await graph_engine.get_graph_data()
-        return scope.keep(nodes_data, edges_data) if scope else (nodes_data, edges_data)
+        return keep_owned(nodes_data, edges_data, owned) if owned else (nodes_data, edges_data)
 
     seeds, source = await resolve_seed_node_ids(
         graph_engine,
@@ -342,8 +403,8 @@ async def fetch_visualization_graph_data(
         query=query,
         seed_top_k=seed_top_k,
     )
-    if scope:
-        seeds = scope.read_order(seeds, max_nodes)
+    if owned:
+        seeds = own_nodes_first(seeds, owned, max_nodes)
     if not seeds:
         logger.info("Subgraph visualization: no seeds resolved; rendering empty graph.")
         return ([], [])
@@ -351,8 +412,8 @@ async def fetch_visualization_graph_data(
     nodes_data, edges_data = await expand_seed_neighborhood(
         graph_engine, seeds, neighborhood_depth, max_nodes
     )
-    if scope:
-        nodes_data, edges_data = scope.keep(nodes_data, edges_data)
+    if owned:
+        nodes_data, edges_data = keep_owned(nodes_data, edges_data, owned)
     logger.info(
         "Subgraph visualization: seeds=%d source=%s depth=%d max_nodes=%d nodes=%d edges=%d",
         len(seeds),

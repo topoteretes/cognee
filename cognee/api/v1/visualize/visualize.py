@@ -15,7 +15,6 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.data.methods import get_authorized_existing_datasets, get_datasets_graph_counts
 from cognee.modules.data.models import Data
-from cognee.modules.graph.dataset_scope import get_shared_graph_scope
 from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models.User import User
@@ -35,6 +34,7 @@ from cognee.modules.visualization.subgraph_data import (
     DEFAULT_NEIGHBORHOOD_DEPTH,
     DEFAULT_SEED_TOP_K,
     fetch_visualization_graph_data,
+    get_owned_graph,
 )
 from cognee.shared.logging_utils import ERROR, get_logger, setup_logging
 
@@ -145,7 +145,7 @@ async def fetch_dataset_graph_data(
         graph_engine = await get_graph_engine()
         return await fetch_visualization_graph_data(
             graph_engine,
-            scope=await get_shared_graph_scope(graph_engine, dataset.id) if dataset else None,
+            owned=await get_owned_graph(graph_engine, dataset.id) if dataset else None,
             full=full,
             query=query,
             seed_node_ids=seed_node_ids,
@@ -180,7 +180,7 @@ async def stream_dataset_graph(
         async with aclosing(
             stream_graph_events(
                 graph_engine,
-                scope=await get_shared_graph_scope(graph_engine, dataset.id) if dataset else None,
+                owned=await get_owned_graph(graph_engine, dataset.id) if dataset else None,
                 query=query,
                 seed_node_ids=seed_node_ids,
                 neighborhood_depth=neighborhood_depth,

@@ -472,7 +472,7 @@ async def test_the_dataset_context_is_left_when_the_read_ends_not_when_the_clien
         visualize_module, "set_database_global_context_variables", _recording_context(log)
     )
     monkeypatch.setattr(visualize_module, "get_graph_engine", engine)
-    monkeypatch.setattr(visualize_module, "get_shared_graph_scope", _own_graph_per_dataset)
+    monkeypatch.setattr(visualize_module, "get_owned_graph", _own_graph_per_dataset)
 
     dataset = SimpleNamespace(id="d", owner_id="o")
     stream = await begin_graph_stream(
@@ -516,7 +516,7 @@ async def test_slow_clients_do_not_hold_dataset_slots(monkeypatch):
 
     monkeypatch.setattr(visualize_module, "set_database_global_context_variables", queued_context)
     monkeypatch.setattr(visualize_module, "get_graph_engine", engine)
-    monkeypatch.setattr(visualize_module, "get_shared_graph_scope", _own_graph_per_dataset)
+    monkeypatch.setattr(visualize_module, "get_owned_graph", _own_graph_per_dataset)
 
     dataset = SimpleNamespace(id="same", owner_id="o")
     streams = [

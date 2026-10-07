@@ -46,7 +46,6 @@ from typing import Any
 
 from cognee.api.sse import KEEPALIVE_COMMENT, encode_sse
 from cognee.exceptions import CogneeApiError
-from cognee.modules.graph.dataset_scope import DatasetScope
 from cognee.shared.logging_utils import get_logger
 
 from .exceptions import GraphStreamCapacityError
@@ -55,7 +54,13 @@ from .preprocessor import (
     CompactGraphAccumulator,
     compact_chunk,
 )
-from .subgraph_data import iter_seed_neighborhood, resolve_seed_node_ids
+from .subgraph_data import (
+    OwnedGraph,
+    iter_seed_neighborhood,
+    keep_owned,
+    own_nodes_first,
+    resolve_seed_node_ids,
+)
 
 logger = get_logger("visualization.graph_stream")
 
@@ -99,19 +104,19 @@ async def stream_graph_events(
     seed_top_k: int,
     max_nodes: int,
     chunk_size: int = STREAM_CHUNK_SIZE,
-    scope: DatasetScope | None = None,
+    owned: OwnedGraph | None = None,
 ) -> AsyncGenerator[tuple[str, dict[str, Any]], None]:
     """The streamed graph as ``(event, data)`` pairs, read chunk by chunk.
 
-    With a ``scope``, only what that dataset owns in a shared graph is sent.
+    With ``owned``, only what one dataset owns in a shared graph is sent.
     """
     seeds, source = await resolve_seed_node_ids(
         graph_engine, seed_node_ids=seed_node_ids, query=query, seed_top_k=seed_top_k
     )
     read_from = seeds
-    if scope:
-        seeds = [seed for seed in seeds if seed in scope.node_ids]
-        read_from = scope.read_order(seeds, max_nodes)
+    if owned:
+        seeds = [seed for seed in seeds if seed in owned.nodes]
+        read_from = own_nodes_first(seeds, owned, max_nodes)
     yield (
         "meta",
         {
@@ -134,8 +139,8 @@ async def stream_graph_events(
             chunk_size=chunk_size,
             property_keys=COMPACT_PROPERTY_KEYS,
         ):
-            if scope:
-                nodes_data, edges_data = scope.keep(nodes_data, edges_data)
+            if owned:
+                nodes_data, edges_data = keep_owned(nodes_data, edges_data, owned)
                 if not nodes_data:
                     continue
             nodes, links = compact_chunk(nodes_data, edges_data)
