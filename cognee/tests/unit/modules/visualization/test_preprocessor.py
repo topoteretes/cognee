@@ -158,7 +158,9 @@ def test_custom_graph_model_node_without_identity_stays_other():
     assert result.nodes[0]["stage"] == "other"
 
 
-@pytest.mark.parametrize("node_type", ["EdgeType", "Skill", "SkillRun", "SkillImprovementProposal"])
+@pytest.mark.parametrize(
+    "node_type", ["EdgeType", "NodeSet", "Skill", "SkillRun", "SkillImprovementProposal"]
+)
 def test_builtin_types_with_identity_keep_their_stage(node_type):
     nodes_data = [("n", {"type": node_type, "name": "n", "metadata": _IDENTITY})]
     result = preprocess((nodes_data, []))

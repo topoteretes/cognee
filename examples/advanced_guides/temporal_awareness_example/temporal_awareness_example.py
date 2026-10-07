@@ -3,9 +3,9 @@ Temporal search over real biography documents.
 
 The advanced companion to ``examples/guides/temporal_recall.py``. That guide inlines a
 four-sentence timeline; this one ingests two bundled real biographies
-(``data/biography_1.txt``, ``data/biography_2.txt``) with ``temporal_cognify=True`` and runs
-``SearchType.TEMPORAL`` queries — before / after / between ranges plus person-centric
-questions — over the extracted event timeline.
+(``data/biography_1.txt``, ``data/biography_2.txt``) and runs ``SearchType.TEMPORAL``
+queries — before / after / between ranges plus person-centric questions — over the
+dates the default pipeline extracts as Timestamp nodes.
 
 Usage:
     uv run python examples/advanced_guides/temporal_awareness_example/temporal_awareness_example.py
@@ -33,10 +33,9 @@ async def main():
     # Step 1: Reset data and system state
     await cognee.forget(everything=True)
 
-    # Step 2: Remember text and create temporal knowledge graph memory
+    # Step 2: Remember the text; dates become Timestamp nodes in the graph
     await cognee.remember(
         [biography_1, biography_2],
-        temporal_cognify=True,
         self_improvement=False,
     )
 

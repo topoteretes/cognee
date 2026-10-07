@@ -1,7 +1,7 @@
 """Ordinary extraction plus timestamp promotion on the bundled biographies.
 
 Builds on ``examples/guides/temporal_recall.py``. That guide uses
-``temporal_cognify=True`` and ``SearchType.TEMPORAL``. This example inserts one
+``SearchType.TEMPORAL`` over the default pipeline's Timestamp nodes. This example inserts one
 promotion task into the default cognify tasks and later calls a temporal hybrid
 retriever directly.
 
