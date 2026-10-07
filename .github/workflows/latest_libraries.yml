@@ -1,0 +1,115 @@
+name: Latest Libraries
+
+# uv.lock is the only set of dependency versions CI ever tests: every job runs
+# `uv sync` against it, and it is rebuilt only when someone edits pyproject.
+# On top of that, `exclude-newer = "2 days"` hides any release younger than two
+# days from a rebuild. So a release that breaks cognee stays invisible until a
+# rebuild happens to pick it up, and then every suite fails at once. This job
+# meets it first: it resolves every dependency to its newest release, ignoring
+# both uv.lock and the exclude-newer window, and runs the keyless core flow
+# (add -> cognify with GLiNER -> CHUNKS search -> remember/recall) on that.
+#
+# No secrets, by design. The libraries are whatever PyPI serves today, so this
+# is the one job that must never hold a credential a compromised release could
+# read: nothing is passed from `secrets`, GITHUB_TOKEN is read-only and not
+# persisted into the checkout, and the flow under test needs no provider key
+# (GLiNER + fastembed). It runs on a bare runner, not the ci-image, which
+# carries pre-installed extras and configured settings.
+#
+# Informational, not a required check: a red run here means a new release broke
+# cognee (or exposed a latent bug), which is a dependency ticket, not a reason
+# to block the PR that happened to run it.
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [dev, main]
+    paths:
+      - pyproject.toml
+      - uv.lock
+      - .github/workflows/latest_libraries.yml
+      - cognee/tests/e2e/keyless/**
+  schedule:
+    # `schedule` only fires on the default branch (main). dev is covered by the
+    # push trigger above, on every merge.
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  keyless-on-latest:
+    name: Keyless e2e on the newest release of every dependency
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    env:
+      # The workflow-level skip other suites set disables the keyless rerouting
+      # as well (keyless_local_defaults_apply), so it must be off here.
+      COGNEE_SKIP_CONNECTION_TEST: 'false'
+      HF_HOME: ${{ github.workspace }}/.model-cache/huggingface
+      FASTEMBED_CACHE_PATH: ${{ github.workspace }}/.model-cache/fastembed
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          # The cache is keyed on uv.lock, which this job rewrites every run.
+          enable-cache: false
+
+      - name: Lift the exclude-newer window
+        # pyproject's `exclude-newer = "2 days"` applies to every uv command in
+        # the project. A date in the future admits everything PyPI has
+        # published, for the lock, the sync, and the GLiNER runtime install
+        # that cognify runs through `uv pip` later in the flow.
+        run: echo "UV_EXCLUDE_NEWER=$(date -u -d '+1 day' +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+      - name: Resolve every dependency to its newest release
+        # `uv lock` alone keeps the versions already locked; `--upgrade` drops
+        # them, so the resolution is what a fresh install would get today. The
+        # upgrade list lands in the job summary, so a red run names its suspects.
+        run: |
+          uv lock --upgrade 2>&1 | tee lock-upgrade.log
+          {
+            echo "## Releases newer than uv.lock"
+            echo
+            echo '```'
+            grep -E '^(Updated|Added|Removed) ' lock-upgrade.log \
+              || echo "none: uv.lock already holds the newest release of every dependency"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install cognee (core dependencies only)
+        run: uv sync --frozen
+
+      - name: Cache the local models
+        # GLiNER (~750 MB) and bge-small (~67 MB); the key names the models the
+        # flow downloads, so a model change gets a fresh cache.
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: .model-cache
+          key: keyless-models-${{ runner.os }}-gliner2.5-base-v1-bge-small-en-v1.5
+
+      # No LLM_API_KEY, no EMBEDDING_*: GRAPH_EXTRACTOR=auto resolves to GLiNER
+      # and embeddings to fastembed. The first cognify installs the GLiNER
+      # runtime (CPU torch + the gliner extra) at its newest releases too.
+      - name: Run the keyless core flow on the newest releases
+        run: uv run --no-sync python ./cognee/tests/e2e/keyless/keyless_ingest_check.py
