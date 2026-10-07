@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+from cognee.infrastructure.databases.provenance.delete_data import EdgeIdentity
 from cognee.infrastructure.databases.turso import (
     configure_engine,
     connect_args_for_mode,
@@ -1077,3 +1078,38 @@ class TursoAdapter(GraphDBInterface):
                     await session.commit()
 
         await self._write(strip_tags)
+
+    async def delete_edge_triples(self, edges: list[EdgeIdentity]) -> None:
+        """Delete edges by (source, target, relationship); keep the endpoint nodes.
+
+        Mirrors the Postgres adapter's identity-based delete. Used by the code
+        graph's node_set retag to drop stale ``belongs_to_set`` edges without
+        touching the nodes they connect.
+        """
+        if not edges:
+            return
+        identities = sorted(
+            {
+                (str(edge.source_id), str(edge.target_id), str(edge.relationship_name))
+                for edge in edges
+            }
+        )
+
+        async def delete_rows() -> None:
+            async with self._session() as session:
+                for source_id, target_id, relationship_name in identities:
+                    await session.execute(
+                        text(
+                            "DELETE FROM graph_edge "
+                            "WHERE source_id = :source_id AND target_id = :target_id "
+                            "AND relationship_name = :relationship_name"
+                        ),
+                        {
+                            "source_id": source_id,
+                            "target_id": target_id,
+                            "relationship_name": relationship_name,
+                        },
+                    )
+                await session.commit()
+
+        await self._write(delete_rows)

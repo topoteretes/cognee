@@ -122,7 +122,6 @@ async def cognify(
     run_in_background: bool = False,
     incremental_loading: bool = True,
     custom_prompt: str | None = None,
-    temporal_cognify: bool = False,
     functional_relationships: Collection[str] | None = None,
     data_per_batch: int = 20,
     llm_config: LLMConfig | None = None,
@@ -224,8 +223,8 @@ async def cognify(
                  Applies to standard-routed items only, exactly like graph_model - DLT-source
                  manifests and code files run their own task lists and ignore both.
                  Orthogonal to metadata["transparent"], which is a property of the model.
-                 SDK-only: not exposed over the REST API. Raises with temporal_cognify=True
-                 or while connected to a remote instance; permitted with dry_run=True.
+                 SDK-only: not exposed over the REST API. Raises while connected to a
+                 remote instance; permitted with dry_run=True.
                  Cost of "all": index_graph_edges embeds one EdgeType per distinct edge text,
                  and contains edge text is "<chunk label> contains <node label>." - so a model
                  yielding N nodes per chunk means roughly N extra embedded rows per chunk.
@@ -238,8 +237,8 @@ async def cognify(
                  `gliner` extra) — a demo of cognee's enterprise GLiNER extraction, no LLM call for
                  extraction or summaries; embeddings still run. It produces the
                  generic KnowledgeGraph, so a custom graph_model raises. Raises with
-                 temporal_cognify=True, with dry_run=True, or while connected to a
-                 remote instance — none of those paths can honour it yet.
+                 dry_run=True or while connected to a remote instance — neither path
+                 can honour it yet.
         summary_method: How the standard pipeline writes each chunk's summary. "llm"
                  makes one LLM call per chunk; "from_extraction" joins the chunk's
                  extracted types and relation texts with no LLM call, and a chunk
@@ -330,11 +329,10 @@ async def cognify(
     resolved_extractor = resolve_extractor(extractor, cognify_config)
     resolved_summary_method = resolve_summary_method(summary_method, cognify_config)
 
-    if temporal_cognify and resolved_extractor == GLINER_DEMO_EXTRACTOR:
-        raise ValueError(
-            "extractor='gliner_demo' is not supported with temporal_cognify=True; the "
-            "temporal pipeline extracts events with the LLM."
-        )
+    # Removed option, accepted and ignored: the default pipeline extracts dates as
+    # Timestamp nodes, which SearchType.TEMPORAL reads. Dropped here because unknown
+    # kwargs are forwarded into the extraction LLM call.
+    kwargs.pop("temporal_cognify", None)
     if dry_run and resolved_extractor == GLINER_DEMO_EXTRACTOR:
         raise ValueError(
             "dry_run estimates the LLM extraction pipeline only; it has no cost model "
@@ -352,11 +350,6 @@ async def cognify(
             raise ValueError(
                 "chunk_attachment requires a custom DataPoint graph_model; "
                 f"{getattr(graph_model, '__name__', graph_model)!r} is not a DataPoint subclass."
-            )
-        if temporal_cognify:
-            raise ValueError(
-                "chunk_attachment is not supported with temporal_cognify=True; the temporal "
-                "pipeline does not attach extracted graphs to chunks."
             )
 
     # Route to remote instance if connected via serve()
@@ -427,8 +420,6 @@ async def cognify(
         }
 
         if dry_run:
-            if temporal_cognify:
-                raise ValueError("dry_run is supported for the default cognify pipeline only.")
             from cognee.modules.cognify.estimator import estimate_cognify_dry_run
 
             return await estimate_cognify_dry_run(
@@ -441,14 +432,7 @@ async def cognify(
                 summary_method=resolved_summary_method,
             )
 
-        if temporal_cognify:
-            tasks = await get_temporal_tasks(
-                user=user,
-                chunker=chunker,
-                chunk_size=chunk_size,
-                chunks_per_batch=chunks_per_batch,
-            )
-        elif resolved_extractor == GLINER_DEMO_EXTRACTOR:
+        if resolved_extractor == GLINER_DEMO_EXTRACTOR:
             if graph_model is not KnowledgeGraph:
                 raise ValueError(
                     "extractor='gliner_demo' builds the generic KnowledgeGraph; "

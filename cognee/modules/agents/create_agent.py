@@ -2,11 +2,16 @@ from sqlalchemy import update
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.users.api_key.create_api_key import create_api_key
+from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import create_user
 from cognee.modules.users.models.User import User
 
 
 async def create_agent(name: str, parent_user: User) -> tuple[User, str]:
+    # Agents are one level deep: an agent cannot create agents of its own.
+    if parent_user.parent_user_id is not None:
+        raise PermissionDeniedError("An agent cannot create agents.")
+
     sanitized_name = name.lower().replace(" ", "-")
     internal_email = f"{sanitized_name}+{parent_user.id}@cognee.agent"
 
