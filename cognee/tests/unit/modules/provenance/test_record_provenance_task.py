@@ -3,7 +3,7 @@
 import os
 import sys
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
@@ -14,7 +14,8 @@ from cognee.infrastructure.engine import DataPoint
 from cognee.modules.cognify.config import CognifyConfig, get_cognify_config
 from cognee.modules.pipelines.models.PipelineContext import PipelineContext
 from cognee.modules.provenance import storage
-from cognee.tasks.provenance import record_provenance
+from cognee.tasks.provenance import record_provenance, record_provenance_at_storage
+from cognee.tasks.provenance.record_provenance import record_edges_provenance
 
 # Grab the actual module object for patching (the package __init__ re-exports
 # the record_provenance FUNCTION, shadowing the submodule for dotted patching).
@@ -305,6 +306,41 @@ async def _task_names(provenance_flag, contradiction_flag=False):
     return [task.executable.__name__ for task in tasks]
 
 
+class TestSnapshotsAtTheWriter:
+    """Real DataPoints get a mutation snapshot; identical re-records are no-ops."""
+
+    @pytest.mark.asyncio
+    async def test_snapshot_recorded_and_duplicate_batch_is_noop(self, manager):
+        from cognee.infrastructure.engine import DataPoint
+
+        class City(DataPoint):
+            name: str
+            description: str | None = None
+            metadata: dict = {"index_fields": ["name"]}
+
+        dataset_id, data_id = uuid4(), uuid4()
+        ctx = _ctx(dataset_id=dataset_id)
+        ctx.data_item = SimpleNamespace(id=data_id)
+        city = City(name="Paris", description="capital")
+
+        await record_provenance([city], ctx)
+        entry = await manager.get_provenance(f"{dataset_id}:{city.id}")
+        assert entry["metadata"]["snapshot"]["fields"]["description"] == "capital"
+        total = (await manager.get_statistics())["total_entries"]
+
+        # Same content, same document (another chunk batch of the same run).
+        await record_provenance([City(name="Paris", description="capital", id=city.id)], ctx)
+        assert (await manager.get_statistics())["total_entries"] == total
+
+        # Edited content: one new version carrying the delta.
+        await record_provenance(
+            [City(name="Paris", description="capital of France", id=city.id)], ctx
+        )
+        history = await manager.revision_history(f"{dataset_id}:{city.id}")
+        assert len(history) == 2
+        assert history[1]["delta"] == {"description": ["capital", "capital of France"]}
+
+
 class TestPipelineWiring:
     def test_flag_defaults_off_and_lands_in_to_dict(self):
         with patch.dict(os.environ, {}, clear=True):
@@ -319,12 +355,125 @@ class TestPipelineWiring:
         get_cognify_config.cache_clear()
 
     @pytest.mark.asyncio
-    async def test_flag_off_pipeline_unchanged(self):
-        names = await _task_names(provenance_flag=False)
+    @pytest.mark.parametrize("flag", [False, True])
+    async def test_ledger_is_never_a_pipeline_task(self, flag):
+        # Recording lives in add_data_points (storage seam); the task list is
+        # the same with the flag on or off.
+        names = await _task_names(provenance_flag=flag, contradiction_flag=True)
         assert "record_provenance" not in names
+        assert names.index("add_data_points") < names.index("detect_contradictions")
+
+
+class TestStorageSeamHook:
+    @pytest.mark.asyncio
+    async def test_records_when_flag_on_and_scoped(self, manager, monkeypatch):
+        monkeypatch.setattr(record_provenance_module, "provenance_tracking_enabled", lambda: True)
+        _, _, _, _, data_points = _pipeline_data()
+        result = await record_provenance_at_storage(data_points, ctx=_ctx())
+        assert result is data_points
+        assert (await manager.get_statistics())["total_entries"] == 6
 
     @pytest.mark.asyncio
-    async def test_flag_on_splices_after_add_data_points_before_contradictions(self):
-        names = await _task_names(provenance_flag=True, contradiction_flag=True)
-        assert names.index("record_provenance") == names.index("add_data_points") + 1
-        assert names.index("record_provenance") < names.index("detect_contradictions")
+    async def test_skips_when_flag_off(self, manager, monkeypatch):
+        monkeypatch.setattr(record_provenance_module, "provenance_tracking_enabled", lambda: False)
+        _, _, _, _, data_points = _pipeline_data()
+        await record_provenance_at_storage(data_points, ctx=_ctx())
+        assert (await manager.get_statistics())["total_entries"] == 0
+
+    @pytest.mark.asyncio
+    async def test_skips_unscoped_batches(self, manager, monkeypatch):
+        # No dataset in ctx -> unprefixed keys would merge tenants' chains.
+        monkeypatch.setattr(record_provenance_module, "provenance_tracking_enabled", lambda: True)
+        _, _, _, _, data_points = _pipeline_data()
+        await record_provenance_at_storage(data_points, ctx=None)
+        await record_provenance_at_storage(data_points, ctx=PipelineContext())
+        assert (await manager.get_statistics())["total_entries"] == 0
+
+    @pytest.mark.asyncio
+    async def test_gate_failure_never_raises(self, monkeypatch):
+        def explode():
+            raise RuntimeError("settings unreadable")
+
+        monkeypatch.setattr(record_provenance_module, "provenance_tracking_enabled", explode)
+        _, _, _, _, data_points = _pipeline_data()
+        assert await record_provenance_at_storage(data_points, ctx=_ctx()) is data_points
+
+    @pytest.mark.asyncio
+    async def test_record_edges_provenance_writes_relationships(self, manager, monkeypatch):
+        monkeypatch.setattr(record_provenance_module, "provenance_tracking_enabled", lambda: True)
+        ctx = _ctx()
+        scope = str(ctx.dataset.id)
+        edges = [
+            (
+                "n1",
+                "n2",
+                "contradicts",
+                {
+                    "relationship_name": "contradicts",
+                    "source_node_id": "n1",
+                    "target_node_id": "n2",
+                    "first_fact": "A born 1985",
+                    "second_fact": "A born 1990",
+                    "reason": "one birth year",
+                    "confidence": 0.9,
+                },
+            ),
+            ("bad",),  # malformed: skipped, never raises
+        ]
+        queued = await record_edges_provenance(edges, ctx, activity="detect_contradictions")
+        assert queued == 1
+
+        entry = await manager.get_provenance(f"rel:{scope}:n1:contradicts:{scope}:n2")
+        assert entry["entity_type"] == "relationship"
+        assert entry["confidence"] == 0.9
+        assert entry["activity_id"] == f"detect_contradictions:{ctx.pipeline_run_id}"
+        assert entry["bundle_id"] == str(ctx.pipeline_run_id)
+        assert entry["agent_id"] == "user@example.com"
+        assert entry["used_entities"] == [f"{scope}:n1", f"{scope}:n2"]
+        assert entry["metadata"] == {
+            "first_fact": "A born 1985",
+            "second_fact": "A born 1990",
+            "reason": "one birth year",
+            "relationship_name": "contradicts",
+        }
+        assert (await manager.verify_chain())["valid"] is True
+
+    @pytest.mark.asyncio
+    async def test_record_edges_provenance_gates(self, manager, monkeypatch):
+        edges = [("n1", "n2", "contradicts", {})]
+        monkeypatch.setattr(record_provenance_module, "provenance_tracking_enabled", lambda: False)
+        assert await record_edges_provenance(edges, _ctx()) == 0
+        monkeypatch.setattr(record_provenance_module, "provenance_tracking_enabled", lambda: True)
+        assert await record_edges_provenance(edges, None) == 0  # unscoped
+        assert await record_edges_provenance([], _ctx()) == 0
+        assert (await manager.get_statistics())["total_entries"] == 0
+
+    @pytest.mark.asyncio
+    async def test_add_data_points_calls_the_hook(self):
+        adp_module = sys.modules["cognee.tasks.storage.add_data_points"]
+        from cognee.tasks.storage.add_data_points import add_data_points
+
+        class Point(DataPoint):
+            name: str
+            metadata: dict = {"index_fields": ["name"]}
+
+        point = Point(name="p")
+        unified = SimpleNamespace(
+            graph=SimpleNamespace(add_nodes=AsyncMock(), add_edges=AsyncMock()),
+            vector=object(),
+            has_capability=lambda *_: False,
+        )
+        with (
+            patch.object(adp_module, "get_unified_engine", AsyncMock(return_value=unified)),
+            # Graph-provenance path: no relational upserts, no real user needed.
+            patch.object(
+                adp_module, "mark_graph_provenance_if_empty", AsyncMock(return_value=True)
+            ),
+            patch.object(adp_module, "index_data_points", AsyncMock()),
+            patch.object(adp_module, "index_graph_edges", AsyncMock()),
+            patch.object(adp_module, "capture_graph_provenance", AsyncMock(return_value=0)),
+            patch.object(adp_module, "record_provenance_at_storage", AsyncMock()) as hook,
+        ):
+            ctx = _ctx()
+            await add_data_points([point], ctx=ctx)
+        hook.assert_awaited_once_with([point], ctx)

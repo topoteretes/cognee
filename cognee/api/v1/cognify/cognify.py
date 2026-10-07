@@ -51,7 +51,6 @@ from cognee.tasks.documents import (
 from cognee.tasks.graph import detect_contradictions
 from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
 from cognee.tasks.graph.resolve_temporal_contradictions import resolve_temporal_contradictions
-from cognee.tasks.provenance import record_provenance
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.temporal_graph.extract_events_and_entities import extract_events_and_timestamps
 from cognee.tasks.temporal_graph.extract_knowledge_graph_from_events import (
@@ -461,7 +460,6 @@ async def cognify(
                 config=config,
                 chunk_attachment=chunk_attachment,
                 embed_triplets=cognify_config.triplet_embedding,
-                track_provenance=cognify_config.provenance_tracking,
                 check_contradictions=cognify_config.contradiction_detection,
                 functional_relationships=functional_relationships,
             )
@@ -592,7 +590,6 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     embed_triplets = cognify_config.triplet_embedding
     summary_method = summary_method or cognify_config.summary_method
     check_contradictions = cognify_config.contradiction_detection
-    track_provenance = cognify_config.provenance_tracking
 
     if chunks_per_batch is None:
         chunks_per_batch = (
@@ -633,11 +630,8 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             needs_llm=False,
         ),
     ]
-
-    if track_provenance:
-        tasks.append(
-            Task(record_provenance, task_config={"batch_size": chunks_per_batch}, needs_llm=False)
-        )
+    # The audit ledger (PROVENANCE_TRACKING) is not a task here: add_data_points
+    # records it at the storage seam, so every writer is covered, not just cognify.
 
     if check_contradictions:
         tasks.append(Task(detect_contradictions, task_config={"batch_size": chunks_per_batch}))

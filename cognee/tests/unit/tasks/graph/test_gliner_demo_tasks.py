@@ -783,11 +783,10 @@ async def test_get_gliner_demo_tasks_appends_optional_graph_tasks_in_order():
             chunk_size=512,
         )
 
-    assert [task.executable.__name__ for task in tasks][-3:] == [
-        "record_provenance",
-        "detect_contradictions",
-        "resolve_temporal_contradictions",
-    ]
+    names = [task.executable.__name__ for task in tasks]
+    assert names[-2:] == ["detect_contradictions", "resolve_temporal_contradictions"]
+    # The ledger is written by add_data_points itself, never as a task.
+    assert "record_provenance" not in names
 
 
 @pytest.mark.asyncio
