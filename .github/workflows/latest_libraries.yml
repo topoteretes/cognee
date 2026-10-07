@@ -5,9 +5,10 @@ name: Latest Libraries
 # On top of that, `exclude-newer = "2 days"` hides any release younger than two
 # days from a rebuild. So a release that breaks cognee stays invisible until a
 # rebuild happens to pick it up, and then every suite fails at once. This job
-# meets it first: it resolves every dependency to its newest release, ignoring
-# both uv.lock and the exclude-newer window, and runs the keyless core flow
-# (add -> cognify with GLiNER -> CHUNKS search -> remember/recall) on that.
+# meets it first: it installs cognee the way a PyPI user does, from `[project]`
+# metadata alone, so every dependency resolves to its newest release with
+# neither uv.lock nor any `[tool.uv]` setting in the way, and runs the keyless
+# core flow (add -> cognify with GLiNER -> CHUNKS search -> remember/recall).
 #
 # No secrets, by design. The libraries are whatever PyPI serves today, so this
 # is the one job that must never hold a credential a compromised release could
@@ -68,30 +69,44 @@ jobs:
           # The cache is keyed on uv.lock, which this job rewrites every run.
           enable-cache: false
 
-      - name: Lift the exclude-newer window
-        # pyproject's `exclude-newer = "2 days"` applies to every uv command in
-        # the project. A date in the future admits everything PyPI has
-        # published, for the lock, the sync, and the GLiNER runtime install
-        # that cognify runs through `uv pip` later in the flow.
-        run: echo "UV_EXCLUDE_NEWER=$(date -u -d '+1 day' +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
-
-      - name: Resolve every dependency to its newest release
-        # `uv lock` alone keeps the versions already locked; `--upgrade` drops
-        # them, so the resolution is what a fresh install would get today. The
-        # upgrade list lands in the job summary, so a red run names its suspects.
+      - name: Resolve like a PyPI user
+        # A `pip install cognee` sees only the wheel's metadata, i.e.
+        # `[project]`. The `[tool.uv]` table (exclude-newer, the
+        # constraint-dependencies that pin protobuf and friends) is not
+        # published and never reaches a user, so it must not shape this
+        # resolution either: UV_NO_CONFIG makes every uv command here,
+        # including the GLiNER runtime install cognify runs through `uv pip`,
+        # ignore it. UV_EXCLUDE_NEWER one day ahead then admits everything
+        # PyPI has published. uv.lock is not read at all: `uv pip` resolves
+        # from the metadata, like pip.
         run: |
-          uv lock --upgrade 2>&1 | tee lock-upgrade.log
-          {
-            echo "## Releases newer than uv.lock"
-            echo
-            echo '```'
-            grep -E '^(Updated|Added|Removed) ' lock-upgrade.log \
-              || echo "none: uv.lock already holds the newest release of every dependency"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          echo "UV_NO_CONFIG=1" >> "$GITHUB_ENV"
+          echo "UV_EXCLUDE_NEWER=$(date -u -d '+1 day' +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
 
-      - name: Install cognee (core dependencies only)
-        run: uv sync --frozen
+      - name: Install cognee at the newest release of every dependency
+        run: |
+          uv venv .venv --python 3.12
+          uv pip install --python .venv/bin/python .
+
+      - name: Summarize the releases that differ from uv.lock
+        # So a red run names its suspects.
+        run: |
+          .venv/bin/python - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          import json, subprocess, tomllib
+          locked = {p["name"].lower(): p["version"] for p in tomllib.load(open("uv.lock", "rb"))["package"] if "version" in p}
+          installed = json.loads(subprocess.check_output(["uv", "pip", "list", "--python", ".venv/bin/python", "--format", "json"]))
+          print("## Installed releases that differ from uv.lock\n")
+          print("| package | uv.lock | installed |\n|---|---|---|")
+          rows = 0
+          for p in sorted(installed, key=lambda p: p["name"].lower()):
+              name = p["name"].lower()
+              if name == "cognee":
+                  continue
+              if locked.get(name) != p["version"]:
+                  print(f"| {name} | {locked.get(name, 'not locked')} | {p['version']} |")
+                  rows += 1
+          print(f"\n{rows} of {len(installed) - 1} installed packages differ from uv.lock.")
+          EOF
 
       - name: Restore the local models
         # GLiNER (~750 MB) and bge-small (~67 MB); the key names the models the
@@ -106,7 +121,7 @@ jobs:
       # and embeddings to fastembed. The first cognify installs the GLiNER
       # runtime (CPU torch + the gliner extra) at its newest releases too.
       - name: Run the keyless core flow on the newest releases
-        run: uv run --no-sync python ./cognee/tests/e2e/keyless/keyless_ingest_check.py
+        run: .venv/bin/python ./cognee/tests/e2e/keyless/keyless_ingest_check.py
 
       - name: Save the local models
         # Saved on a red run as well (`actions/cache` alone saves only on
