@@ -2,7 +2,7 @@ from sqlalchemy import select
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.models.Dataset import Dataset
-from cognee.modules.users.methods.get_agent_user_ids import get_agent_user_ids
+from cognee.modules.users.methods.get_visible_user_ids import get_visible_user_ids
 from cognee.modules.users.permissions.methods import get_principal_datasets
 from cognee.shared.logging_utils import get_logger
 
@@ -59,9 +59,9 @@ async def get_all_user_permission_datasets(user: User, permission_type: str) -> 
 
 
 async def _get_agents(user: User) -> list[User]:
-    """The agents ``user`` created, and the agents those created in turn."""
+    """The agents ``user`` created."""
+    agent_ids = [user_id for user_id in await get_visible_user_ids(user.id) if user_id != user.id]
+    if not agent_ids:
+        return []
     async with get_relational_engine().get_async_session() as session:
-        agent_ids = await get_agent_user_ids(session, user.id)
-        if not agent_ids:
-            return []
         return list((await session.execute(select(User).where(User.id.in_(agent_ids)))).scalars())

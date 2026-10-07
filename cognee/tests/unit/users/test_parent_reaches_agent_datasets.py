@@ -3,7 +3,7 @@
 The user holds their agents' keys, so this grants nothing new; it makes the
 access usable without the key. Runs against a real database with agents created
 the way production creates them. Each agent's dataset is granted to the agent
-only, never to the parent, so a pass proves the agent tree was consulted rather
+only, never to the parent, so a pass proves the user's agents were consulted rather
 than the creation-time grant create_authorized_dataset hands the direct parent.
 """
 
@@ -75,19 +75,10 @@ async def _user(tenant_id=None):
 
 
 async def _agent(parent):
-    """An agent of ``parent``. create_agent refuses an agent as the parent, so an
-    agent of an agent is built the way one created before that rule still exists."""
     from cognee.modules.agents.create_agent import create_agent
-    from cognee.modules.users.methods import create_user, get_user
+    from cognee.modules.users.methods import get_user
 
-    if parent.parent_user_id is None:
-        agent, _ = await create_agent(f"agent-{uuid4()}", parent)
-    else:
-        agent = await create_user(
-            email=f"agent-{uuid4()}+{parent.id}@cognee.agent",
-            password="!",
-            parent_user_id=parent.id,
-        )
+    agent, _ = await create_agent(f"agent-{uuid4()}", parent)
     return await get_user(agent.id)
 
 
@@ -113,20 +104,16 @@ async def _readable_ids(user):
 
 
 @pytest.mark.asyncio
-async def test_parent_reaches_its_agents_and_their_agents_datasets():
+async def test_parent_reaches_its_agents_datasets():
     from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
 
     parent = await _user()
     agent = await _agent(parent)
-    sub_agent = await _agent(agent)
     agent_dataset = await _dataset_of(agent, f"a-{uuid4()}")
-    sub_agent_dataset = await _dataset_of(sub_agent, f"s-{uuid4()}")
 
-    assert {agent_dataset, sub_agent_dataset} <= await _readable_ids(parent)
+    assert agent_dataset in await _readable_ids(parent)
     for permission in ("read", "write", "delete", "share"):
-        assert await get_specific_user_permission_datasets(
-            parent.id, permission, [agent_dataset, sub_agent_dataset]
-        )
+        assert await get_specific_user_permission_datasets(parent.id, permission, [agent_dataset])
 
 
 @pytest.mark.asyncio

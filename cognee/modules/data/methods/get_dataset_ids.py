@@ -1,13 +1,12 @@
 from uuid import UUID
 
-from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.exceptions import (
     AmbiguousDatasetNameError,
     DatasetNotFoundError,
     DatasetTypeError,
 )
 from cognee.modules.data.methods import get_datasets
-from cognee.modules.users.methods.get_agent_user_ids import get_agent_user_ids
+from cognee.modules.users.methods.get_visible_user_ids import get_visible_user_ids
 
 
 async def get_dataset_ids(datasets: list[str] | list[UUID], user, strict: bool = False):
@@ -71,8 +70,7 @@ async def _owned_datasets_named(owner_id: UUID, names: list[str], tenant_id) -> 
 
 async def _agent_datasets_named(user, names: list[str]) -> list:
     """One dataset per name among the user's agents' datasets; several raise."""
-    async with get_relational_engine().get_async_session() as session:
-        agent_ids = await get_agent_user_ids(session, user.id)
+    agent_ids = [user_id for user_id in await get_visible_user_ids(user.id) if user_id != user.id]
     candidates = []
     for agent_id in agent_ids:
         candidates.extend(await _owned_datasets_named(agent_id, names, user.tenant_id))
