@@ -15,6 +15,7 @@ from typing import Any
 
 from cognee.infrastructure.databases.graph.bounded_neighborhood import hop_distances
 from cognee.infrastructure.databases.graph.graph_db_interface import EdgeData, Node
+from cognee.modules.graph.dataset_scope import DatasetScope
 from cognee.modules.retrieval.utils.node_edge_vector_search import NodeEdgeVectorSearch
 from cognee.modules.visualization.preprocessor import SEMANTIC_TYPE_KEY
 from cognee.shared.logging_utils import get_logger
@@ -317,10 +318,12 @@ async def fetch_visualization_graph_data(
     neighborhood_depth: int = DEFAULT_NEIGHBORHOOD_DEPTH,
     seed_top_k: int = DEFAULT_SEED_TOP_K,
     max_nodes: int = DEFAULT_MAX_NODES,
+    scope: DatasetScope | None = None,
 ) -> GraphData:
     """Return graph data for visualization: a bounded subgraph by default, or
     the whole graph when ``full`` is True. Output is the ``(nodes, edges)``
-    format the renderer already consumes."""
+    format the renderer already consumes. With a ``scope``, only what that
+    dataset owns in a shared graph is returned."""
     if neighborhood_depth < 1:
         raise ValueError("neighborhood_depth must be >= 1")
     if seed_top_k < 1:
@@ -329,7 +332,8 @@ async def fetch_visualization_graph_data(
         raise ValueError("max_nodes must be >= 1")
 
     if full:
-        return await graph_engine.get_graph_data()
+        nodes_data, edges_data = await graph_engine.get_graph_data()
+        return scope.keep(nodes_data, edges_data) if scope else (nodes_data, edges_data)
 
     seeds, source = await resolve_seed_node_ids(
         graph_engine,
@@ -338,6 +342,8 @@ async def fetch_visualization_graph_data(
         query=query,
         seed_top_k=seed_top_k,
     )
+    if scope:
+        seeds = scope.read_order(seeds, max_nodes)
     if not seeds:
         logger.info("Subgraph visualization: no seeds resolved; rendering empty graph.")
         return ([], [])
@@ -345,6 +351,8 @@ async def fetch_visualization_graph_data(
     nodes_data, edges_data = await expand_seed_neighborhood(
         graph_engine, seeds, neighborhood_depth, max_nodes
     )
+    if scope:
+        nodes_data, edges_data = scope.keep(nodes_data, edges_data)
     logger.info(
         "Subgraph visualization: seeds=%d source=%s depth=%d max_nodes=%d nodes=%d edges=%d",
         len(seeds),

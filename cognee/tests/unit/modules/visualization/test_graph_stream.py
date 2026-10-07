@@ -445,6 +445,11 @@ def _recording_context(log):
     return recording_context
 
 
+async def _own_graph_per_dataset(graph_engine, dataset_id):
+    """These tests model a dataset context that opens the dataset's own graph,
+    so no read is cut down to a share of a graph all datasets write into."""
+
+
 @pytest.mark.asyncio
 async def test_the_dataset_context_is_left_when_the_read_ends_not_when_the_client_does(
     monkeypatch,
@@ -467,6 +472,7 @@ async def test_the_dataset_context_is_left_when_the_read_ends_not_when_the_clien
         visualize_module, "set_database_global_context_variables", _recording_context(log)
     )
     monkeypatch.setattr(visualize_module, "get_graph_engine", engine)
+    monkeypatch.setattr(visualize_module, "get_shared_graph_scope", _own_graph_per_dataset)
 
     dataset = SimpleNamespace(id="d", owner_id="o")
     stream = await begin_graph_stream(
@@ -510,6 +516,7 @@ async def test_slow_clients_do_not_hold_dataset_slots(monkeypatch):
 
     monkeypatch.setattr(visualize_module, "set_database_global_context_variables", queued_context)
     monkeypatch.setattr(visualize_module, "get_graph_engine", engine)
+    monkeypatch.setattr(visualize_module, "get_shared_graph_scope", _own_graph_per_dataset)
 
     dataset = SimpleNamespace(id="same", owner_id="o")
     streams = [

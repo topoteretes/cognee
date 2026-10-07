@@ -4,6 +4,7 @@ from cognee.context_global_variables import set_database_global_context_variable
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.data.exceptions.exceptions import DatasetNotFoundError
 from cognee.modules.data.methods import get_authorized_dataset
+from cognee.modules.graph.dataset_scope import get_shared_graph_scope
 from cognee.modules.users.models import User
 
 
@@ -15,6 +16,9 @@ async def get_formatted_graph_data(dataset_id: UUID, user: User):
     async with set_database_global_context_variables(dataset_id, dataset.owner_id):
         graph_client = await get_graph_engine()
         (nodes, edges) = await graph_client.get_graph_data()
+        scope = await get_shared_graph_scope(graph_client, dataset_id)
+        if scope:
+            nodes, edges = scope.keep(nodes, edges)
 
     return {
         "nodes": [

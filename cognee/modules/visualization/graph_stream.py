@@ -46,6 +46,7 @@ from typing import Any
 
 from cognee.api.sse import KEEPALIVE_COMMENT, encode_sse
 from cognee.exceptions import CogneeApiError
+from cognee.modules.graph.dataset_scope import DatasetScope
 from cognee.shared.logging_utils import get_logger
 
 from .exceptions import GraphStreamCapacityError
@@ -98,11 +99,19 @@ async def stream_graph_events(
     seed_top_k: int,
     max_nodes: int,
     chunk_size: int = STREAM_CHUNK_SIZE,
+    scope: DatasetScope | None = None,
 ) -> AsyncGenerator[tuple[str, dict[str, Any]], None]:
-    """The streamed graph as ``(event, data)`` pairs, read chunk by chunk."""
+    """The streamed graph as ``(event, data)`` pairs, read chunk by chunk.
+
+    With a ``scope``, only what that dataset owns in a shared graph is sent.
+    """
     seeds, source = await resolve_seed_node_ids(
         graph_engine, seed_node_ids=seed_node_ids, query=query, seed_top_k=seed_top_k
     )
+    read_from = seeds
+    if scope:
+        seeds = [seed for seed in seeds if seed in scope.node_ids]
+        read_from = scope.read_order(seeds, max_nodes)
     yield (
         "meta",
         {
@@ -116,15 +125,19 @@ async def stream_graph_events(
 
     accumulator = CompactGraphAccumulator()
     chunks = 0
-    if seeds:
+    if read_from:
         async for nodes_data, edges_data in iter_seed_neighborhood(
             graph_engine,
-            seeds,
+            read_from,
             neighborhood_depth,
             max_nodes,
             chunk_size=chunk_size,
             property_keys=COMPACT_PROPERTY_KEYS,
         ):
+            if scope:
+                nodes_data, edges_data = scope.keep(nodes_data, edges_data)
+                if not nodes_data:
+                    continue
             nodes, links = compact_chunk(nodes_data, edges_data)
             accumulator.add(nodes, links)
             yield "chunk", {"index": chunks, "nodes": nodes, "links": links}
