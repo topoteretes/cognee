@@ -1,6 +1,8 @@
 import os
 from functools import lru_cache
+from typing import Literal
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from cognee.exceptions import CogneeConfigurationError
@@ -10,6 +12,11 @@ from cognee.shared.data_models import DefaultContentPrediction, SummarizedConten
 class CognifyConfig(BaseSettings):
     classification_model: object = DefaultContentPrediction
     summarization_model: object = SummarizedContent
+    # How each chunk's TextSummary is written (env: SUMMARY_METHOD, or
+    # cognify(summary_method=...)). "llm" (default): one LLM call per chunk.
+    # "from_extraction": one "Type: name, name" line per extracted type, then
+    # the chunk's relation texts, one per line, no LLM call.
+    summary_method: Literal["llm", "from_extraction"] = "llm"
     triplet_embedding: bool = False
     chunks_per_batch: int | None = None
     # Opt-in contradiction detection (issue #3699). Default OFF so the standard
@@ -33,7 +40,12 @@ class CognifyConfig(BaseSettings):
     # for environments installed at build time.
     gliner_auto_install: bool = True
     gliner_torch_index_url: str = "https://download.pytorch.org/whl/cpu"
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    # How many GLiNER model batches run at once, sharing one loaded model
+    # (env: GLINER_INFERENCE_THREADS). 0 (default) sizes it to the machine:
+    # half of torch's thread count, capped by free memory. 1 keeps the
+    # single-threaded behaviour. Output is identical at every setting.
+    gliner_inference_threads: int = Field(default=0, ge=0)
+    model_config = SettingsConfigDict(extra="allow")
 
     def to_dict(self) -> dict:
         return {
@@ -48,12 +60,24 @@ class CognifyConfig(BaseSettings):
             "graph_extractor": self.graph_extractor,
             "gliner_auto_install": self.gliner_auto_install,
             "gliner_torch_index_url": self.gliner_torch_index_url,
+            "gliner_inference_threads": self.gliner_inference_threads,
+            "summary_method": self.summary_method,
         }
 
 
 @lru_cache
 def get_cognify_config():
     return CognifyConfig()
+
+
+def resolve_summary_method(value: str | None, config: CognifyConfig) -> str:
+    """The summary method for a run: the explicit argument wins over SUMMARY_METHOD."""
+    summary_method = value or config.summary_method
+    if summary_method not in ("llm", "from_extraction"):
+        raise ValueError(
+            f"Unknown summary_method {summary_method!r}; expected 'llm' or 'from_extraction'"
+        )
+    return summary_method
 
 
 LLM_EXTRACTOR = "llm"
@@ -114,9 +138,9 @@ def resolve_extractor(
     per process. It never installs anything: the pipeline entry point awaits
     ``ensure_extractor_runtime`` for that, after its own argument checks.
 
-    This is the ONLY place the extractor setting is read. Callers resolve once,
-    up front, and pass the resolved value (or values derived from it) onward —
-    no downstream code re-reads the config.
+    This is the only place the extractor setting is read for a run. Callers
+    resolve once, up front, and pass the resolved value (or values derived from it)
+    onward — no downstream code re-reads the config.
     """
     extractor = (value or config.graph_extractor or AUTO_EXTRACTOR).strip().lower()
     extractor = EXTRACTOR_ALIASES.get(extractor, extractor)

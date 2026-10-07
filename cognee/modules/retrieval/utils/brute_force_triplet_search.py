@@ -6,6 +6,7 @@ from cognee.base_config import get_base_config
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.modules.chunking.models.DltRow import DltRow
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.graph.exceptions.exceptions import EntityNotFoundError
@@ -296,7 +297,7 @@ async def brute_force_triplet_search(
                 "DocumentChunk_text",
                 # DLT rows live in their own collection — chunk search
                 # is documents-only, but graph completion covers row text too.
-                "DltRow_text",
+                DltRow.vector_collection(),
             ]
         else:
             # Copy so the caller's list is never mutated. Callers such as

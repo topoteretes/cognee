@@ -4,6 +4,7 @@ import hashlib
 import json
 import posixpath
 from collections import Counter
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
@@ -12,8 +13,7 @@ from uuid import NAMESPACE_OID, UUID, uuid5
 from pydantic import ValidationError
 
 from cognee.infrastructure.engine.models.DataPoint import DataPoint
-from cognee.infrastructure.engine.utils.generate_node_id import generate_node_id
-from cognee.modules.engine.models.node_set import node_sets_from_names
+from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.code_graph.enola import (
@@ -155,7 +155,7 @@ def map_facts_to_data_points(
     """
     fallback_repo = _resolve_fallback_repo(facts, repo_path)
 
-    node_sets = node_sets_from_names(node_set) if node_set else None
+    node_sets = [NodeSet(name=name) for name in node_set] if node_set else None
     source_node_set = ", ".join(node_set) if node_set else None
     # Sorted so re-tagging with the same names in a different order does not
     # spuriously flip every fact's hash.
@@ -299,6 +299,70 @@ def _short_target_names(name: str) -> set:
     return forms
 
 
+def _add_client_route_edges(
+    valid_facts: list[tuple[dict, str]],
+    enola_id_index: dict[str, tuple[str, str, str]],
+    fact_index: dict[tuple[str, str, str], dict],
+    add_edge: Callable[..., None],
+) -> int:
+    """Edges from a client route's caller and matched_routes props; returns skips.
+
+    A client route names the symbol that makes the call (caller) and, in a
+    multi-repo snapshot, the server routes it reaches (matched_routes). Both
+    are props rather than relations because a call and the route it reaches
+    usually share a name; each carries the writer's fact id, which resolves
+    first. The name fallback stays inside the repo the prop names.
+    """
+
+    def _resolve_ref(fact_id: Any, repo: Any, kind: str, ref_name: Any):
+        if is_enola_id(fact_id) and fact_id in enola_id_index:
+            return enola_id_index[fact_id]
+        if isinstance(repo, str) and isinstance(ref_name, str):
+            key = (repo, kind, ref_name)
+            if key in fact_index:
+                return key
+        return None
+
+    skipped = 0
+    for fact, source_repo in valid_facts:
+        if fact["kind"] != "route":
+            continue
+        props = fact.get("props")
+        if not isinstance(props, dict) or props.get("role") != "client":
+            continue
+        route = (source_repo, "route", fact["name"])
+
+        caller = props.get("caller")
+        if caller is not None or props.get("caller_id") is not None:
+            resolved = _resolve_ref(props.get("caller_id"), source_repo, "symbol", caller)
+            if resolved is None:
+                skipped += 1
+            else:
+                add_edge(resolved, route, "makes_request")
+
+        matches = props.get("matched_routes")
+        for match in matches if isinstance(matches, list) else []:
+            if not isinstance(match, dict):
+                skipped += 1
+                continue
+            resolved = _resolve_ref(match.get("id"), match.get("repo"), "route", match.get("name"))
+            if resolved is None:
+                skipped += 1
+                continue
+            if resolved == route:
+                # A call its own repo serves under the same path collapses
+                # onto the served route's node; a self-loop says nothing.
+                continue
+            confidence = match.get("confidence")
+            add_edge(
+                route,
+                resolved,
+                "reaches_route",
+                {"confidence": confidence} if isinstance(confidence, str) else None,
+            )
+    return skipped
+
+
 def build_code_graph_edges(
     facts: list[dict],
     repo_path: str | Path | None = None,
@@ -372,6 +436,7 @@ def build_code_graph_edges(
         source: tuple[str, str, str],
         target: tuple[str, str, str],
         relationship_name: str,
+        properties: dict[str, Any] | None = None,
     ) -> None:
         source_repo, source_kind, source_name = source
         target_repo, target_kind, target_name = target
@@ -387,6 +452,7 @@ def build_code_graph_edges(
                 target_id,
                 relationship_name,
                 {
+                    **(properties or {}),
                     "source_node_id": source_id,
                     "target_node_id": target_id,
                     "relationship_name": relationship_name,
@@ -456,6 +522,8 @@ def build_code_graph_edges(
                 (target_repo, target_kind, resolved_target_name),
                 relationship_name,
             )
+
+    skipped += _add_client_route_edges(valid_facts, enola_id_index, fact_index, _add_edge)
 
     # Enola's query graph connects a dependency import to the modules which
     # contain each side. Materialize the same bridge so Cognee traversals can
@@ -1077,7 +1145,7 @@ async def _detag_stale_code_graph(
     stale by DIFFERENT comparisons, because they fail in opposite directions
     otherwise:
 
-    - Edges are compared by NodeSet id (``generate_node_id``, which
+    - Edges are compared by NodeSet id (``NodeSet.id_for``, which
       lowercases, turns spaces into underscores and strips apostrophes), so
       "Team-A" and "team-a" (or "team a" and "team_a") name the SAME
       NodeSet under different spellings. A raw-string comparison here would
@@ -1155,11 +1223,9 @@ async def _detag_stale_code_graph(
 
     # Edges: stale by NORMALIZED id -- never delete an edge whose id matches
     # a current name (a same-id retag is a respelling, not a removal).
-    current_name_ids = {str(generate_node_id(f"NodeSet:{name}")) for name in (node_set or [])}
+    current_name_ids = {str(NodeSet.id_for(name)) for name in (node_set or [])}
     stale_edge_names = sorted(
-        name
-        for name in candidate_names
-        if str(generate_node_id(f"NodeSet:{name}")) not in current_name_ids
+        name for name in candidate_names if str(NodeSet.id_for(name)) not in current_name_ids
     )
 
     # Property: stale by EXACT STRING -- an old spelling that shares its
@@ -1175,7 +1241,7 @@ async def _detag_stale_code_graph(
         stale_edges = [
             EdgeIdentity(
                 source_id=node_id,
-                target_id=str(generate_node_id(f"NodeSet:{name}")),
+                target_id=str(NodeSet.id_for(name)),
                 relationship_name="belongs_to_set",
             )
             for node_id in code_node_ids

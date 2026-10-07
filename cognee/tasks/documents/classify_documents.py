@@ -14,7 +14,7 @@ from cognee.modules.data.processing.document_types import (
     TextDocument,
     UnstructuredDocument,
 )
-from cognee.modules.engine.models.node_set import node_sets_from_names
+from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.tasks.code_graph.code_files import is_code_sourced
 from cognee.tasks.code_graph.code_repo import is_code_repo_sourced
@@ -86,7 +86,7 @@ def update_node_set(document):
     if node_set is None:
         return
 
-    document.belongs_to_set = node_sets_from_names(node_set)
+    document.belongs_to_set = [NodeSet(name=node_set_name) for node_set_name in node_set]
     document.source_node_set = ", ".join(node_set)
 
 

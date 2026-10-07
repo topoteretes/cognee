@@ -16,6 +16,10 @@ LABEL_BANK = MappingProxyType(
         "location": "City, country, region, address, or other named place",
         "event": "Named happening such as a conference, election, war, or launch",
         "date": "Calendar date or specific point in time",
+        # Bare years ("in 1891") do not fire the date label; this one catches most of
+        # them (SDK-827). Spans under date / year / time_period that parse become
+        # Timestamp nodes — see gliner_demo/mapping.py.
+        "year": "A four-digit calendar year",
         "time_period": "Span of time such as a year, quarter, decade, or era",
         "product": "Commercial product or service",
         "technology": "Technology, system, platform, or technical standard",

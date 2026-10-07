@@ -33,7 +33,7 @@ from cognee.modules.search.types import (
 )
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
-from cognee.shared.utils import send_telemetry
+from cognee.shared.utils import send_telemetry, telemetry_on_error
 
 logger = get_logger()
 
@@ -52,6 +52,7 @@ def _single_dataset_id(dataset_ids: list[UUID] | UUID | None) -> UUID | None:
     return dataset_ids[0] if len(dataset_ids) == 1 else None
 
 
+@telemetry_on_error("cognee.search EXECUTION ERRORED")
 async def search(
     query_text: str,
     query_type: SearchType,
@@ -147,7 +148,9 @@ async def search(
 
     Notes:
         Scoping to specific datasets requires ``ENABLE_BACKEND_ACCESS_CONTROL``
-        (the default). Permission failures yield an empty list, not an error.
+        (the default). With ``dataset_ids=None``, datasets the user cannot read
+        are skipped (no grants -> ``[]``); an explicit id the user cannot read
+        raises ``PermissionDeniedError``.
     """
     send_telemetry(
         "cognee.search EXECUTION STARTED",

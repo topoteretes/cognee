@@ -1,8 +1,10 @@
 """CI lockstep guard: every model change and its migration must land together.
 
-The fresh-database bootstrap runs ``create_all()`` from ``Base.metadata`` and
-then STAMPS Alembic head — asserting, without checking, that the models and the
-chain describe the same schema. When that assertion silently broke (a chain
+The fresh-database bootstrap used to run ``create_all()`` from ``Base.metadata``
+and then STAMP Alembic head — asserting, without checking, that the models and
+the chain describe the same schema. (It now runs the whole chain and writes no
+stamp — ``cognee/modules/migrations/startup.py:apply_all_migrations`` — but the
+guard still protects the models/chain pairing.) When that assertion silently broke (a chain
 carrying a ``pipeline_runs`` extension paired with models that predate it),
 fresh databases were provisioned with a schema that disagreed with the revision
 they were stamped at, and nothing noticed until the missing columns failed at

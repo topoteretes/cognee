@@ -6,6 +6,7 @@ from cognee.infrastructure.llm.openai_type_cache import install as _install_open
 from cognee.infrastructure.llm.utils import (
     determine_embedding_dimensions,
     get_max_chunk_tokens,
+    resolve_chunk_size,
     test_embedding_connection,
     test_llm_connection,
 )

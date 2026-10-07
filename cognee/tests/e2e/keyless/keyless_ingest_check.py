@@ -92,6 +92,13 @@ async def main() -> None:
     await cognee.prune.prune_system(metadata=True)
 
     await cognee.add(TEXT, dataset_name="keyless")
+    # The embedding tokenizer must not import transformers: it caches "no torch" at
+    # import, and cognify's GLiNER auto-installer adds torch only after add() (#5258).
+    assert "transformers" not in sys.modules, (
+        "transformers was imported before cognify; the GLiNER runtime install would then "
+        "fail with 'PyTorch not found' in this process"
+    )
+
     await cognee.cognify(["keyless"])
 
     chunks = await cognee.search(
@@ -101,6 +108,18 @@ async def main() -> None:
 
     graph = await get_graph_engine()
     nodes, edges = await graph.get_graph_data()
+    # The default fastembed model reads 512 tokens (2 of them the [CLS]/[SEP] it
+    # adds itself) and truncates the rest without an error (SDK-868), so the
+    # engine's limit must be the model's own and every chunk must fit inside it.
+    from cognee.infrastructure.databases.vector.embeddings.input_limit import (
+        resolve_input_limit,
+    )
+
+    assert await resolve_input_limit(engine) == 510
+    assert engine.model_input_limit == 510, engine.model_input_limit
+    chunk_sizes = [n[1]["chunk_size"] for n in nodes if n[1].get("type") == "DocumentChunk"]
+    assert chunk_sizes and max(chunk_sizes) <= engine.max_completion_tokens, chunk_sizes
+    print(f"chunks: {len(chunk_sizes)}, largest {max(chunk_sizes)} tokens (limit 510)")
     entities = sorted(
         {n[1].get("name") for n in nodes if n[1].get("type") == "Entity" and n[1].get("name")}
     )
@@ -115,6 +134,28 @@ async def main() -> None:
     html_path = ROOT / "graph.html"
     await cognee.visualize_graph(str(html_path), dataset="keyless", full=True)
     assert html_path.stat().st_size > 0, "visualization is empty"
+
+    # update() takes the same extractor decision as cognify(): the chunk-level
+    # path extracts the replaced chunk with GLiNER, so an edit stays keyless.
+    from cognee.modules.data.methods import get_datasets_by_name
+    from cognee.modules.data.methods.get_dataset_data import get_dataset_data
+    from cognee.modules.users.methods import get_default_user
+
+    [dataset] = await get_datasets_by_name("keyless", (await get_default_user()).id)
+    [row] = await get_dataset_data(dataset.id)
+    updated = await cognee.update(
+        row.id, TEXT + " In 1911 she won a second Nobel Prize, in Chemistry.", dataset.id
+    )
+    assert updated["status"] == "incremental", updated
+    assert updated["added_chunks"] >= 1 and updated["data_id"] == row.id, updated
+    edited = await cognee.search(
+        "Which second prize did Marie Curie win?",
+        query_type=SearchType.CHUNKS,
+        datasets=["keyless"],
+        top_k=3,
+    )
+    assert any("Chemistry" in str(getattr(r, "result", r)) for r in edited), edited
+    print(f"update: {updated['status']}, added {updated['added_chunks']} chunk(s) with GLiNER")
 
     # remember() is the primary API: same routing, then improve() with no
     # session ids, which runs no LLM stage.

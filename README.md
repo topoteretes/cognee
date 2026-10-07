@@ -41,7 +41,8 @@
 
   <p>Cognee is a free open-source AI memory platform that gives AI agents persistent long-term memory across sessions. Turn documents, code, and conversations into a self-hosted knowledge graph your agents can search and reuse.</p>
 
-  <p><strong>Start locally for free without an OpenAI or Anthropic API key.</strong> Build memory from text with local extraction and embedding models. Add a local or hosted LLM when you want more functionality or reach out to us for a production-ready small model pipeline.</p>
+  <p><strong>Runs locally for free — no API key required.</strong><br />
+  We rely on free small models that use your CPU.</p>
 
   <p align="center">
   🌐 This README is also available in:<br />
@@ -84,31 +85,15 @@
 
 Requires **Python 3.10–3.14**.
 
-
-You can install Cognee with **pip**, **uv**, or your preferred Python package manager.
+**1. Install Cognee** with **pip**, **uv**, or your preferred Python package manager. The `gliner` extra brings the local extraction model used when no LLM key is configured:
 
 ```bash
 uv pip install "cognee[gliner]"
 ```
 
-### Optional: Configure the LLM
-```python
-import os
-
-os.environ["LLM_API_KEY"] = "YOUR OPENAI_API_KEY"
-```
-Alternatively, create a `.env` file using our [template](https://github.com/topoteretes/cognee/blob/main/.env.template).
-
-The default uses OpenAI for language models and embeddings. Processing and generated answers make provider calls. See [installation](https://docs.cognee.ai/getting-started/installation), [other providers](https://docs.cognee.ai/setup-configuration/llm-providers), or [local Ollama models](https://docs.cognee.ai/guides/local-ollama) for other setups.
-
-
-
-
-
 ### Run locally without an LLM
 
-
-In step 1, you did "cognee[gliner]" install.
+**2. Build and query memory.** With no LLM key configured, Cognee extracts the graph with the local GLiNER model and embeds with a local embedding model; both download on first use.
 
 Save this as `quickstart.py` and run `python quickstart.py` if you are feeling old school, or tell your LLM to do it:
 
@@ -148,6 +133,21 @@ cognee-cli recall "Where was Marie Curie born?" -d local_quickstart
 Text ingestion, retrieval, and session storage work without an LLM. LLM-dependent improvement stages skip automatically.
 
 Generated answers and media processing that requires a vision or transcription model need additional LLM configuration.
+
+The bundled GLiNER extractor is a demo of Cognee's small-model pipeline. For a production-ready version with higher accuracy and broader label coverage, [reach out to us](mailto:social@cognee.ai).
+
+### Optional: Configure the LLM
+
+**3. Add an LLM** to get generated answers instead of retrieved passages:
+
+```python
+import os
+
+os.environ["LLM_API_KEY"] = "YOUR OPENAI_API_KEY"
+```
+Alternatively, create a `.env` file using our [template](https://github.com/topoteretes/cognee/blob/main/.env.template).
+
+Once a key is set, Cognee uses OpenAI for language models and embeddings, and processing and generated answers make provider calls. See [installation](https://docs.cognee.ai/getting-started/installation), [other providers](https://docs.cognee.ai/setup-configuration/llm-providers), or [local Ollama models](https://docs.cognee.ai/guides/local-ollama) for other setups.
 
 
 
@@ -195,14 +195,20 @@ claude plugin marketplace add topoteretes/cognee-integrations
 claude plugin install cognee-memory@cognee
 ```
 
-or Codex plugin
+Or install the Codex plugin. Enable hooks first, either with the CLI:
 
-Make sure to enable hooks:
 ```bash
-# ~/.codex/config.toml
+codex features enable hooks
+```
+
+or in `~/.codex/config.toml`:
+
+```toml
 [features]
 hooks = true
 ```
+
+Then add the marketplace and the plugin:
 
 ```bash
 codex plugin marketplace add topoteretes/cognee-integrations --ref main
@@ -233,8 +239,8 @@ The UI launcher requires Node.js/npm; Docker is needed for its MCP service. See 
 
 ## Explore examples
 
-- [Build a small Company Brain from text, code, and session lessons](examples/demos/company_brain/docs_code_conversations/company_brain_demo.py).
-- [Build a Company Brain from a database, a ticket export, and meeting notes](examples/demos/company_brain/multi_source/), then browse it in the UI and query it from Claude Code or Codex.
+- [Build a small Company Brain from text, code, and session lessons](examples/cookbooks/company_brain/docs_code_conversations/company_brain_demo.py).
+- [Build a Company Brain from your database, ticket export, and docs](examples/cookbooks/company_brain/company_qa/) (or a sample company), then browse it in the UI and query it from Claude Code or Codex.
 - [Import memory from Mem0, Letta, Zep, or Graphiti](https://docs.cognee.ai/examples/migrate-memory-systems) using the COGX exchange format.
 - [Run with local Ollama models](https://docs.cognee.ai/guides/local-ollama), including a local embedding model.
 - [Visualize your knowledge graph](https://docs.cognee.ai/guides/graph-visualization) and inspect its connections.
@@ -266,13 +272,13 @@ docker compose --profile ui --profile mcp up
 
 The default ports are API **8000**, UI **3000**, and MCP **8001**. For deployment beyond a local demo, configure authentication, persistent storage, and compatible backends using the [permissions guide](https://docs.cognee.ai/setup-configuration/permissions) and [deployment templates](distributed/deploy/README.md). [Cognee Cloud](https://docs.cognee.ai/cognee-cloud/overview) provides the managed option.
 
-The default Docker image does not include GLiNER. To ingest text without an LLM in Docker, add the `gliner` extra to your image; the local quickstart installs it explicitly.
+The `cognee/cognee` image ships with the GLiNER runtime baked in, so text ingestion and retrieval work in Docker without an LLM key; the local extraction and embedding models download on first use. Set `LLM_API_KEY` (as above) when you want generated answers.
 
 ## Run the Whole Memory Layer on Postgres
 
-Graph memory traditionally means operating a stack — a graph database for relationships, a vector database for embeddings, Redis for sessions, and a relational database for metadata — all deployed, secured, and paid for before an agent remembers anything. In cognee 1.0 you can run the entire memory layer on a single Postgres instance.
+Graph memory traditionally means operating a stack — a graph database for relationships, a vector database for embeddings, Redis for sessions, and a relational database for metadata — all deployed, secured, and paid for before an agent remembers anything. Since cognee 1.0 you can run the entire memory layer on a single Postgres instance.
 
-> **⚠️ Warning:** Using Postgres as a graph store is currently a released as a demo feature. The production ready feature is available as a licenced product. Use it to demo keeping relational metadata, PGVector, and graph working together
+> **⚠️ Warning:** Using Postgres as a graph store is currently released as a demo feature. The production-ready version is available as a licensed product. Use the demo to keep relational metadata, PGVector, and graph state working together in one Postgres service.
 
 <a id="benchmarks"></a>
 
@@ -293,9 +299,9 @@ For the research behind Cognee's graph/LLM interface, see [Optimizing the Interf
 
 [![Watch Demo](https://img.youtube.com/vi/8hmqS2Y5RVQ/maxresdefault.jpg)](https://www.youtube.com/watch?v=8hmqS2Y5RVQ&t=13s)
 
-- **[v1.6.0 — Keyless workflows & pipeline reliability](https://github.com/topoteretes/cognee/releases/tag/v1.6.0)** (September 18, 2026): build and search text memory with local models and no cloud LLM key.
-- Local model downloads are announced on first use, and LLM-dependent improvement stages skip when no LLM is configured.
-- Pipeline recovery preserves completed documents after crashes, and datasets track their embedding model to prevent mismatches.
+- **[v1.6.1 — Google Sync & Visualization](https://github.com/topoteretes/cognee/releases/tag/v1.6.1)** (September 24, 2026): Google Drive and Gmail OAuth connectors bundled in the SDK, `/visualize/json` streamed in chunks for large graphs, and the GLiNER installer moved off the event loop with CPU torch installed on first use.
+- Document `external_metadata` is stamped on every chunk and surfaced in hybrid retrieval. **Breaking:** `dlt` is now a core dependency — make sure it is installed if you manage dependencies by hand.
+- **[v1.6.0 — Keyless workflows & pipeline reliability](https://github.com/topoteretes/cognee/releases/tag/v1.6.0)** (September 18, 2026): build and search text memory with local models and no cloud LLM key; LLM-dependent improvement stages skip when no LLM is configured, and pipeline recovery preserves completed documents after crashes.
 
 
 ## Community & Support

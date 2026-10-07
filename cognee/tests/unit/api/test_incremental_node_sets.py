@@ -49,13 +49,17 @@ async def test_fresh_chunks_reach_extraction_with_document_membership(monkeypatc
 
     async def extract(batch, **kwargs):
         observed.extend(batch)
+        assert kwargs["summary_method"] == config.summary_method
         for chunk in batch:
             assert chunk.belongs_to_set == document.belongs_to_set
             assert chunk.source_node_set == document.source_node_set
         return []
 
     config = SimpleNamespace(
-        chunks_per_batch=1, triplet_embedding=False, contradiction_detection=False
+        chunks_per_batch=1,
+        triplet_embedding=False,
+        contradiction_detection=False,
+        summary_method="llm",
     )
     publish = AsyncMock()
     monkeypatch.setattr(incremental, "get_cognify_config", lambda: config)
