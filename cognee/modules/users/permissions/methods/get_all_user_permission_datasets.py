@@ -1,8 +1,5 @@
-from sqlalchemy import select
-
-from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.models.Dataset import Dataset
-from cognee.modules.users.methods.get_visible_user_ids import get_visible_user_ids
+from cognee.modules.users.methods.get_user_agents import get_user_agents
 from cognee.modules.users.permissions.methods import get_principal_datasets
 from cognee.shared.logging_utils import get_logger
 
@@ -29,7 +26,7 @@ async def get_all_user_permission_datasets(user: User, permission_type: str) -> 
     # A user reaches what the agents they created reach: the user holds the
     # agents' keys, so this grants nothing the user could not already do. Only
     # the agents' own grants count; their tenants and roles are the user's.
-    for agent in await _get_agents(user):
+    for agent in await get_user_agents(user.id):
         datasets.extend(await get_principal_datasets(agent, permission_type))
 
     # Get all tenants user is a part of
@@ -56,12 +53,3 @@ async def get_all_user_permission_datasets(user: User, permission_type: str) -> 
             filtered_datasets.append(dataset)
 
     return filtered_datasets
-
-
-async def _get_agents(user: User) -> list[User]:
-    """The agents ``user`` created."""
-    agent_ids = [user_id for user_id in await get_visible_user_ids(user.id) if user_id != user.id]
-    if not agent_ids:
-        return []
-    async with get_relational_engine().get_async_session() as session:
-        return list((await session.execute(select(User).where(User.id.in_(agent_ids)))).scalars())

@@ -155,3 +155,16 @@ async def test_parent_reaches_an_agent_dataset_by_id_not_by_name():
     assert [dataset.id for dataset in by_id] == [agent_dataset]
     with pytest.raises(DatasetNotFoundError):
         await get_authorized_existing_datasets([name], "read", parent, strict=True)
+
+
+@pytest.mark.asyncio
+async def test_get_user_agents_returns_only_the_users_own_agents():
+    from cognee.modules.users.methods import get_user_agents
+
+    parent = await _user()
+    first = await _agent(parent)
+    second = await _agent(parent)
+    await _agent(await _user())
+
+    assert {agent.id for agent in await get_user_agents(parent.id)} == {first.id, second.id}
+    assert await get_user_agents(first.id) == []
