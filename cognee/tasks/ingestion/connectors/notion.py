@@ -43,7 +43,7 @@ Design
   changed since the last run. A synced block that duplicates another page's
   original is not searched: its sub-pages live under the original, so they
   are only synced when the original's page is under a selected root. Trees of any
-  depth are walked in full; nothing below a nesting level is dropped.
+  depth are walked and rendered in full; nothing below a nesting level is dropped.
   Pages that disappeared (unshared, trashed, moved out of the selected roots)
   are emitted as ``_deleted`` tombstones. A transient API error aborts the
   run before any tombstone is emitted, so a partial walk can never look like
@@ -585,6 +585,9 @@ def _render_simple_block(block_type: str, payload: dict, text: str) -> str:
 
 _PAGE_BLOCK_TYPES = frozenset({"child_page", "child_database"})
 
+# Ends a block walk, so a stray None in a block list fails loudly instead of ending it.
+_END = object()
+
 
 def _is_synced_copy(block: dict) -> bool:
     return block.get("type") == "synced_block" and bool(
@@ -606,8 +609,8 @@ def _collect_nested_children(
     found = []
     stack = [iter(blocks)]
     while stack:
-        block = next(stack[-1], None)
-        if block is None:
+        block = next(stack[-1], _END)
+        if block is _END:
             stack.pop()
             continue
         block_type = block.get("type")
@@ -622,9 +625,8 @@ def _collect_nested_children(
     return found
 
 
-def _render_block(
-    client: _NotionClient, block: dict, cache: dict[str, list[dict]] | None = None
-) -> str:
+def _render_block(client: _NotionClient, block: dict) -> str:
+    """Render one block's own text, without its children."""
     block_type = block.get("type")
     if not block_type:
         return ""
@@ -637,29 +639,33 @@ def _render_block(
 
     payload = block.get(block_type) or {}
     text = _rich_text(payload.get("rich_text"))
-    rendered = _render_simple_block(block_type, payload, text)
+    return _render_simple_block(block_type, payload, text)
 
-    if block.get("has_children"):
-        if cache is not None and block["id"] in cache:
-            nested = _render_blocks_list(client, cache[block["id"]], cache)
-        elif _is_synced_copy(block):
-            # The original may sit on a page this integration cannot read; the
-            # copy (or any block inside it) then renders empty instead of
-            # failing the whole page.
-            try:
-                children = list(_list_block_children(client, block["id"]))
-                nested = _render_blocks_list(client, children, cache)
-            except NotionAPIError as exc:
-                if not _is_gone(exc):
-                    raise
-                nested = ""
-        else:
-            children = list(_list_block_children(client, block["id"]))
-            nested = _render_blocks_list(client, children, cache)
-        if nested:
-            rendered = f"{rendered}\n{nested}" if rendered else nested
 
-    return rendered
+def _children_to_render(
+    client: _NotionClient, block: dict, cache: dict[str, list[dict]] | None
+) -> list[dict] | str:
+    """Return the blocks to render under ``block``, or already rendered text for a synced copy."""
+    if not block.get("has_children") or block.get("type") in (
+        "child_page",
+        "child_database",
+        "table",
+    ):
+        return []
+    if cache is not None and block["id"] in cache:
+        return cache[block["id"]]
+    if not _is_synced_copy(block):
+        return list(_list_block_children(client, block["id"]))
+    # The original may sit on a page this integration cannot read; the copy
+    # (or any block inside it) then renders empty instead of failing the whole
+    # page. A copy's own tree is rendered in a nested call so the guard covers it;
+    # Notion does not nest synced blocks, so that recursion is one level deep.
+    try:
+        return _render_blocks_list(client, list(_list_block_children(client, block["id"])), cache)
+    except NotionAPIError as exc:
+        if not _is_gone(exc):
+            raise
+        return ""
 
 
 def _render_blocks_list(
@@ -667,8 +673,28 @@ def _render_blocks_list(
     blocks: list[dict],
     cache: dict[str, list[dict]] | None = None,
 ) -> str:
-    lines = [_render_block(client, block, cache) for block in blocks]
-    return "\n".join(line for line in lines if line)
+    """Render ``blocks`` and everything nested under them, one line group per block.
+
+    Depth-first in document order with an explicit stack, so nesting depth is
+    bounded by memory, not by the interpreter's recursion limit.
+    """
+    lines = []
+    stack = [iter(blocks)]
+    while stack:
+        block = next(stack[-1], _END)
+        if block is _END:
+            stack.pop()
+            continue
+        own = _render_block(client, block)
+        if own:
+            lines.append(own)
+        children = _children_to_render(client, block, cache)
+        if isinstance(children, str):
+            if children:
+                lines.append(children)
+        elif children:
+            stack.append(iter(children))
+    return "\n".join(lines)
 
 
 def _render_page_content(

@@ -853,6 +853,17 @@ def test_deeply_nested_text_is_rendered_in_full():
     assert "bottom of the tree" in rows[0]["content"]
 
 
+def test_text_below_more_levels_than_the_recursion_limit_is_rendered():
+    fake = FakeNotion()
+    fake.pages[ROOT_PAGE_ID] = _page_object(
+        ROOT_PAGE_ID, "Root", parent={"type": "workspace", "workspace": True}
+    )
+    levels = sys.getrecursionlimit() + 100
+    _nested_toggles(fake, levels, _rich_text_block("deep", "paragraph", "bottom of the tree"))
+    rows = list(_iter_rows(_client(fake), [ROOT_PAGE_ID], [], WORKSPACE_ID, {}, {}, {}))
+    assert "bottom of the tree" in rows[0]["content"]
+
+
 def test_a_synced_copy_of_an_unreadable_original_neither_aborts_nor_is_searched():
     fake = FakeNotion()
     fake.pages[ROOT_PAGE_ID] = _page_object(
