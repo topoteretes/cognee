@@ -65,8 +65,8 @@ async def compact_vector_store() -> dict | None:
     close the adapter (and its worker) under a rewrite that is still
     committing. So the pass is shielded and, on cancel, waited out -- through
     any further cancels -- before the cancellation propagates. That wait is
-    short because a pass is bounded (``vector_db_compaction_max_tasks_per_run``,
-    ``vector_db_compaction_max_versions_per_run``).
+    short because a pass is bounded (``DEFAULT_MAX_TASKS_PER_RUN``,
+    ``DEFAULT_MAX_VERSIONS_PER_RUN`` in ``cognee_db_workers.lancedb_compaction``).
     """
     try:
         vector_engine = await get_vector_engine_async()

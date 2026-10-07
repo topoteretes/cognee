@@ -22,7 +22,6 @@ from pydantic import BaseModel
 
 from cognee.infrastructure.background_tasks import register_background_task
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
-from cognee.infrastructure.databases.vector.config import get_vectordb_config
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.infrastructure.databases.vector.pgvector.serialize_data import serialize_data
 from cognee.infrastructure.engine import DataPoint
@@ -37,6 +36,10 @@ from cognee.modules.observability.tracing import (
 from cognee.modules.storage.utils import copy_model
 from cognee.shared.logging_utils import get_logger
 from cognee_db_workers.lancedb_compaction import (
+    DEFAULT_MAX_TASKS_PER_RUN,
+    DEFAULT_MAX_VERSIONS_PER_RUN,
+    DEFAULT_RETENTION_SECONDS,
+    DEFAULT_TARGET_ROWS_PER_FRAGMENT,
     PylanceIncompatibleError,
     compact_fragments,
     lance_core_mismatch,
@@ -698,15 +701,12 @@ class LanceDBAdapter(VectorDBInterface):
         """Record a write so the next compaction pass serves this table first."""
         self._compaction_dirty.add(collection_name)
 
-    def _compaction_options(self) -> dict | None:
-        config = get_vectordb_config()
-        if not config.vector_db_compaction_enabled:
-            return None
+    def _compaction_options(self) -> dict:
         return {
-            "target_rows_per_fragment": config.vector_db_compaction_target_rows_per_fragment,
-            "retention_seconds": config.vector_db_compaction_retention_seconds,
-            "max_tasks": config.vector_db_compaction_max_tasks_per_run,
-            "max_versions": config.vector_db_compaction_max_versions_per_run,
+            "target_rows_per_fragment": DEFAULT_TARGET_ROWS_PER_FRAGMENT,
+            "retention_seconds": DEFAULT_RETENTION_SECONDS,
+            "max_tasks": DEFAULT_MAX_TASKS_PER_RUN,
+            "max_versions": DEFAULT_MAX_VERSIONS_PER_RUN,
         }
 
     def _compaction_order(self, names: list[str]) -> list[str]:
@@ -766,8 +766,8 @@ class LanceDBAdapter(VectorDBInterface):
         ``compact_vector_store``); a no-op on a compact table.
 
         Bounded, not whole-store: a pass executes at most
-        ``vector_db_compaction_max_tasks_per_run`` compaction tasks and deletes
-        at most ``vector_db_compaction_max_versions_per_run`` old versions IN
+        ``DEFAULT_MAX_TASKS_PER_RUN`` compaction tasks and deletes
+        at most ``DEFAULT_MAX_VERSIONS_PER_RUN`` old versions IN
         TOTAL across the store's tables (``0`` = no limit). A task rewrites one
         group of small fragments into one of at most
         ``target_rows_per_fragment`` rows; a version is deleted only once its
@@ -799,8 +799,6 @@ class LanceDBAdapter(VectorDBInterface):
         the returned stats, never raised.
         """
         options = self._compaction_options()
-        if options is None:
-            return {"skipped": "disabled"}
         reason = self._compaction_skip_reason()
         if reason:
             return {"skipped": reason}
@@ -925,7 +923,7 @@ class LanceDBAdapter(VectorDBInterface):
             return
         self._open_prune_started = True
         options = self._compaction_options()
-        if options is None or self._compaction_skip_reason():
+        if self._compaction_skip_reason():
             return
         try:
             asyncio.get_running_loop()

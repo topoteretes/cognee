@@ -36,29 +36,6 @@ class VectorConfig(BaseSettings):
     vector_db_host: str = ""
     vector_db_subprocess_enabled: bool = True
     vector_pool_args: str | None = None
-    # LanceDB compaction (ignored by other backends). Every upsert appends a
-    # new fragment and leaves the superseded rows on disk, and LanceDB never
-    # reclaims them on its own -- one store reached 136 GB for ~6 GB of live
-    # vectors (https://github.com/topoteretes/cognee/issues/4684).
-    # `LanceDBAdapter.compact` runs once at the end of every cognify run.
-    # `enabled = False` restores the uncompacted behaviour exactly.
-    vector_db_compaction_enabled: bool = True
-    # Fragments with fewer rows than this are merged; larger ones are left
-    # alone. 20k rows is ~250 MB at 3072 dims: seconds even on a slow disk.
-    vector_db_compaction_target_rows_per_fragment: int = 20_000
-    # Compaction tasks executed per pass, shared across all tables of the
-    # store (a task rewrites one group of fragments into one fragment of at
-    # most `target_rows_per_fragment` rows). An existing backlog drains over
-    # several cognify runs instead of stalling one. `0` = no limit.
-    vector_db_compaction_max_tasks_per_run: int = 4
-    # Old table versions deleted per pass, shared across all tables (each one
-    # is a manifest plus the files only it referenced). Same idea: the issue
-    # #4684 store carried tens of thousands, worked off a slice per run.
-    # `0` = no limit.
-    vector_db_compaction_max_versions_per_run: int = 1_000
-    # A version is deleted only once its successor is older than this, so a
-    # reader that opened the table shortly before a compaction keeps working.
-    vector_db_compaction_retention_seconds: int = 300
 
     model_config = SettingsConfigDict(extra="allow")
 

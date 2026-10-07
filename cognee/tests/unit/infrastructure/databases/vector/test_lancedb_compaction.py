@@ -20,7 +20,7 @@ import pytest
 from pydantic import BaseModel
 
 try:
-    from cognee.infrastructure.databases.vector.config import get_vectordb_config
+    from cognee.infrastructure.databases.vector.lancedb import LanceDBAdapter as adapter_module
     from cognee.infrastructure.databases.vector.lancedb.LanceDBAdapter import LanceDBAdapter
 
     HAS_LANCEDB = True
@@ -87,16 +87,13 @@ async def _write_n_points(adapter: LanceDBAdapter, collection: str, n: int, star
 
 @pytest.fixture
 def compaction_settings(monkeypatch):
-    """Override VECTOR_DB_COMPACTION_* for one test; the config cache is cleared both ways."""
+    """Override the adapter's compaction constants (``DEFAULT_*``) for one test."""
 
     def configure(**settings):
         for key, value in settings.items():
-            monkeypatch.setenv(f"VECTOR_DB_COMPACTION_{key.upper()}", str(value))
-        get_vectordb_config.cache_clear()
+            monkeypatch.setattr(adapter_module, f"DEFAULT_{key.upper()}", value)
 
-    get_vectordb_config.cache_clear()
-    yield configure
-    get_vectordb_config.cache_clear()
+    return configure
 
 
 def _version_count(db_path: str, collection_name: str) -> int:
@@ -232,19 +229,6 @@ async def test_zero_budgets_drain_everything_in_one_pass(tmp_path, compaction_se
     assert stats[collection]["versions_pending"] == 0
     assert await _fragment_count(adapter, collection) == 3
     assert _version_count(db_path, collection) == 1
-
-
-@pytest.mark.asyncio
-async def test_compaction_disabled_preserves_the_uncompacted_behaviour(
-    tmp_path, compaction_settings
-):
-    compaction_settings(enabled="false")
-    adapter, db_path = _adapter(tmp_path)
-    collection = "DisabledTarget_label"
-    await _write_n_points(adapter, collection, 4)
-
-    assert await adapter.compact() == {"skipped": "disabled"}
-    assert len(_data_files(db_path, collection)) == 4
 
 
 @pytest.mark.asyncio
@@ -815,31 +799,6 @@ async def test_compact_vector_store_lets_a_running_pass_finish_before_cancelling
     assert finished, "cancellation propagated while the compaction pass was still running"
 
 
-@pytest.mark.asyncio
-async def test_compaction_settings_keep_the_vector_factory_usable(tmp_path, monkeypatch):
-    """The settings are read by the adapter, not passed through the factory."""
-    from cognee.infrastructure.databases.vector.config import VectorConfig
-
-    factory = importlib.import_module("cognee.infrastructure.databases.vector.create_vector_engine")
-    monkeypatch.setattr(factory, "get_embedding_engine", _FakeEmbeddingEngine)
-    config = VectorConfig(
-        vector_db_provider="lancedb",
-        vector_db_url=str(tmp_path / "db"),
-        vector_db_name="factory_compaction",
-        vector_db_subprocess_enabled=False,
-        vector_db_compaction_target_rows_per_fragment=2,
-        vector_db_compaction_max_tasks_per_run=2,
-    )
-
-    adapter = factory.create_vector_engine(**config.to_dict())
-    try:
-        await _write_n_points(adapter, "FactoryTarget_label", 1)
-        table = await adapter.get_collection("FactoryTarget_label")
-        assert await table.count_rows() == 1
-    finally:
-        await adapter.close()
-
-
 class _FakeVersions:
     def __init__(self, stamps):
         self._stamps = stamps
@@ -976,14 +935,6 @@ async def test_the_open_prune_is_bounded_like_a_pass(tmp_path, compaction_settin
 
     assert _version_count(db_path, collection) == before - 2
     await reader.close()
-
-
-@pytest.mark.asyncio
-async def test_no_open_prune_when_compaction_is_disabled(tmp_path, compaction_settings):
-    compaction_settings(enabled="false")
-    adapter, _ = _adapter(tmp_path)
-    await adapter.get_connection()
-    assert adapter._open_prune_task is None
 
 
 @pytest.mark.asyncio
