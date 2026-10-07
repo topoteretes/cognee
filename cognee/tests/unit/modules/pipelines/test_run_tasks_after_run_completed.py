@@ -93,16 +93,18 @@ async def test_hook_is_not_called_for_a_failed_run(monkeypatch, runner_plumbing)
 
 
 @pytest.mark.asyncio
-async def test_failing_hook_cannot_fail_or_roll_back_a_completed_run(monkeypatch, runner_plumbing):
+async def test_failing_hook_raises_without_failing_or_rolling_back_the_run(
+    monkeypatch, runner_plumbing
+):
     dataset, logs = _setup(monkeypatch, runner_plumbing, _ok_item)
     rollback = AsyncMock()
 
     async def hook():
         raise RuntimeError("compaction exploded")
 
-    events = await _drive(dataset, rollback_handler=rollback, after_run_completed=hook)
+    with pytest.raises(RuntimeError, match="compaction exploded"):
+        await _drive(dataset, rollback_handler=rollback, after_run_completed=hook)
 
-    assert isinstance(events[-1], PipelineRunCompleted)
     assert logs.complete.await_count == 1
     assert logs.error.await_count == 0
     rollback.assert_not_awaited()

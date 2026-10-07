@@ -73,8 +73,8 @@ async def run_tasks(
     complete, still inside this dataset's database context (cognify uses it
     to compact the vector store, see ``compact_vector_store``). It sits
     outside the run's error handling: it cannot fail, roll back, or re-mark a
-    run that already completed. An exception it raises is logged and
-    swallowed; a cancellation propagates.
+    run that already completed. An exception it raises propagates to the
+    caller; the run stays recorded as completed.
     """
     task_resolver = tasks if callable(tasks) else None
     if not user:
@@ -407,7 +407,4 @@ async def run_tasks(
             # close at that yield re-raises above (``run_finished``), and the
             # swallowed per-item failure path leaves ``run_finished`` unset.
             if run_finished and after_run_completed is not None:
-                try:
-                    await after_run_completed()
-                except Exception:
-                    logger.warning("after_run_completed hook failed", exc_info=True)
+                await after_run_completed()
