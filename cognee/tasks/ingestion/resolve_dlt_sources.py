@@ -667,8 +667,8 @@ def _row_node_set(row: DltRowData, source_tag: str) -> list[str] | None:
     provider data can never name one of cognee's own node sets (``skills``,
     ``user_context``, ...), and deduplicated by node-set identity, so two
     spellings of one node set (``Project A``, ``project_a``) keep the first.
-    Entries that are not non-empty strings are ignored and counted in one
-    debug line per row (never the values).
+    An entry that is not a non-empty string raises too, matching what
+    ingest_data does for a node_set passed to add().
     """
     variants = sorted(
         column
@@ -697,24 +697,19 @@ def _row_node_set(row: DltRowData, source_tag: str) -> list[str] | None:
     # its node sets and nobody is told. If a source ever floods the graph with
     # node sets, fail the sync loudly, naming the source, table and count.
     # Never truncate.
+    if not all(isinstance(value, str) and value.strip() for value in raw):
+        _raise_node_set_shape(row, source_tag, "an entry that is not a non-empty string")
     prefix = f"{source_tag}:"
-    names = [
-        name if name.startswith(prefix) else prefix + name
-        for name in (_clean(value) for value in raw if isinstance(value, str))
-        if name
-    ]
-    if len(names) < len(raw):
-        logger.debug(
-            "Source '%s' table '%s': ignored %d non-string or blank %s value(s).",
-            source_tag,
-            row.table_name,
-            len(raw) - len(names),
-            NODE_SET_COLUMN,
-        )
     # One entry per node set: spellings that normalize to the same id keep the first.
     unique: dict = {}
-    for name in names:
-        unique.setdefault(NodeSet.id_for(name), name)
+    for value in raw:
+        name = value.strip()
+        name = name if name.startswith(prefix) else prefix + name
+        try:
+            key = NodeSet.id_for(name)
+        except UnicodeEncodeError:
+            _raise_node_set_shape(row, source_tag, "an entry that cannot be encoded as a name")
+        unique.setdefault(key, name)
     return list(unique.values()) or None
 
 
