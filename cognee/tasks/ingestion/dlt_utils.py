@@ -28,7 +28,8 @@ def pipeline_name_for_source(source, dataset_name: str) -> str:
 # Community/cloud hosts can refuse unsafe older cores before ingestion starts.
 # Version 1 scopes cleanup by staging table and handles a confirmed empty table.
 # Version 2 reads the per-row node_set column (NODE_SET_COLUMN).
-DOCUMENT_SYNC_VERSION = 2
+# Version 3 reads the per-row structure column (STRUCTURE_COLUMN).
+DOCUMENT_SYNC_VERSION = 3
 
 # A document-mode row may carry its own node sets in this column, as a JSON
 # list of names (see resolve_dlt_sources._row_node_set). Every name is
@@ -37,6 +38,22 @@ DOCUMENT_SYNC_VERSION = 2
 # on the row as json instead of normalizing it into a child table.
 NODE_SET_COLUMN = "cognee_node_set"
 NODE_SET_COLUMN_HINT = {NODE_SET_COLUMN: {"data_type": "json", "nullable": True}}
+
+# A document-mode row may say where it sits in its source's tree in this column,
+# as a JSON object ``{"ancestors": [...]}``. ``ancestors`` runs from the row's
+# parent up to the top of what the source knows, and each entry is
+# ``{"kind": str, "id": str, "name"?: str, "document"?: bool}``. An entry with
+# ``"document": true`` is itself a row of this source (its ``id`` is that row's
+# ``id`` column); any other entry is a container with no content of its own (a
+# database, a folder) that the structure pass (document_structure.py) turns
+# into a lightweight node. An empty list marks a row at the top of the tree. A
+# row without the column says nothing about structure. The column is never part
+# of the row's content hash, so moving a row changes its structure but not its
+# data_id, and sources that never emit it keep their ids. Loaded as json for
+# the same reason as the node set column.
+STRUCTURE_COLUMN = "cognee_structure"
+STRUCTURE_COLUMN_HINT = {STRUCTURE_COLUMN: {"data_type": "json", "nullable": True}}
+DOCUMENT_COLUMN_HINTS = {**NODE_SET_COLUMN_HINT, **STRUCTURE_COLUMN_HINT}
 
 
 def guarded_rows(rows, check_active=None):

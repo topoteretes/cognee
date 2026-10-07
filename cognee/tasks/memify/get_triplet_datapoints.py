@@ -3,7 +3,7 @@ from typing import Any
 
 from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 from cognee.infrastructure.engine import DataPoint, is_internal_node
-from cognee.modules.engine.models import Triplet
+from cognee.modules.engine.models import CHILD_OF, Triplet
 from cognee.modules.engine.utils import generate_node_id
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.shared.logging_utils import get_logger
@@ -121,6 +121,11 @@ def _process_single_triplet(
     start_node = triplet_datapoint.get("start_node", {})
     end_node = triplet_datapoint.get("end_node", {})
     relationship = triplet_datapoint.get("relationship_properties", {})
+
+    if triplet_datapoint.get("relationship_properties", {}).get("relationship_name") == CHILD_OF:
+        return None, (
+            f"Skipping triplet at offset {offset + idx}: child_of is structure, not a fact"
+        )
 
     if is_internal_node(start_node) or is_internal_node(end_node):
         return None, (

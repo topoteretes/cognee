@@ -96,7 +96,32 @@ titles. Cognee keeps the name as is, since it already starts with the `notion:` 
 the page's document and chunks belong to that node set. When a page
 is reachable from two selected roots, the root nearest to it wins.
 
-The position inside the tree (parent page, database, block) is not recorded yet.
+## Structure
+
+Each row also carries `cognee_structure`: `{"ancestors": [...]}`, where the page sits in the tree,
+nearest parent first. A sub-page lists its parent page (`{"kind": "page", "id": ..., "document":
+true}`), also when it sits inside a column or toggle: the parent is the page that holds it, not
+the block. A database row lists its data source, its database and the page the database sits on;
+the database and the data source have no content of their own, so they are listed with their
+title (`{"kind": "data_source" | "database", "id": ..., "name": ...}`). A root has an empty list.
+A root passed as a database or data source id keeps the database it belongs to.
+
+After each cognify, cognee turns this into `child_of` edges (child to parent, no LLM): a page's
+document to its parent page's document, a database row's document to its data source, the data
+source to its database, the database to its page. Databases and data sources become
+`StructureContainer` nodes, one per dataset. A parent that is not synced (outside the selected
+roots, or forgotten) gets no edge. The edges follow the pages: moving a page leaves exactly one
+parent edge, deleting one removes its node and edges and leaves its children where they are, and a
+database disappears with its last row.
+
+Where a page sits is not part of its identity. Moving it inside its root keeps its document id
+and does not run extraction again; renaming a database re-reads its rows once, because the title
+is part of what they list.
+
+The first sync after upgrading to a Cognee that reads `cognee_structure`
+(`DOCUMENT_SYNC_VERSION >= 3`) re-reads every page once, because the position is new to what is
+remembered about it. That costs Notion API requests, not extraction, except for pages whose
+rendered text changed in the meantime (see the limitation on text from other objects).
 
 Database row pages also get their properties (title, rich_text, select, multi_select, status,
 date, people, number, checkbox, url, email, relation ids) rendered as `Name: value` lines at the top

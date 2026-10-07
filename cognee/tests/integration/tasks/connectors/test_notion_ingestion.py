@@ -5,7 +5,9 @@ Covers what the unit tests cannot: Notion's real dlt resource (its hard-delete
 tombstones, and the node_set column under the json hint core adds) through a
 real sqlite staging pipeline, the row's node set landing on Data records once
 namespaced, forget-on-delete through orphan cleanup, and state isolation
-between sources. No cognify(), so no LLM.
+between sources. Most of it stops at add(), so no LLM; the structure tests run cognify()
+over the deterministic mock LLM and embeddings of the journeys tier and read the page tree
+back from the graph.
 """
 
 import httpx
@@ -13,6 +15,8 @@ import pytest
 import pytest_asyncio
 
 import cognee
+from cognee.context_global_variables import set_database_global_context_variables
+from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.users.methods import get_default_user
@@ -24,6 +28,11 @@ WORKSPACE_B = "bbbbbbbb-0000-0000-0000-000000000002"
 ROOT = "11111111-1111-1111-1111-111111111111"
 CHILD = "22222222-2222-2222-2222-222222222222"
 OTHER = "33333333-3333-3333-3333-333333333333"
+DATABASE = "44444444-4444-4444-4444-444444444444"
+DATA_SOURCE = "55555555-5555-5555-5555-555555555555"
+ROW = "66666666-6666-6666-6666-666666666666"
+SUB = "77777777-7777-7777-7777-777777777777"
+MID = "88888888-8888-8888-8888-888888888888"
 
 
 def _page(page_id, title, parent, edited="2026-01-01T00:00:00.000Z"):
@@ -53,11 +62,28 @@ class FakeNotion:
         self.workspace_id = workspace_id
         self.pages: dict[str, dict] = {}
         self.blocks: dict[str, list[dict]] = {}
+        self.databases: dict[str, dict] = {}
+        self.data_source_rows: dict[str, list[str]] = {}
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path.removeprefix("/v1/")
         if path == "users/me":
             return httpx.Response(200, json={"bot": {"workspace_id": self.workspace_id}})
+        if path.startswith("databases/"):
+            database = self.databases.get(path[len("databases/") :])
+            if database is None:
+                return httpx.Response(404, json={"message": "not found"})
+            return httpx.Response(200, json=database)
+        if path.startswith("data_sources/") and path.endswith("/query"):
+            rows = self.data_source_rows.get(path[len("data_sources/") : -len("/query")], [])
+            return httpx.Response(
+                200,
+                json={
+                    "results": [self.pages[row] for row in rows if row in self.pages],
+                    "has_more": False,
+                    "next_cursor": None,
+                },
+            )
         if path.startswith("blocks/") and path.endswith("/children"):
             block_id = path[len("blocks/") : -len("/children")]
             if block_id not in self.blocks:
@@ -211,3 +237,168 @@ async def test_a_second_workspace_under_the_same_name_is_refused(clean_environme
     with pytest.raises(Exception, match="another workspace"):
         await _sync(fake_b, roots=(OTHER,))
     assert set(await _notion_data()) == {ROOT, CHILD}
+
+
+@pytest.fixture
+def mock_ai(monkeypatch):
+    """Cognify over the journeys tier's deterministic LLM and embeddings."""
+    from cognee.tests.journeys import mock_ai as mocks
+
+    for name, value in {
+        "LLM_API_KEY": "mock-key",
+        "LLM_PROVIDER": "openai",
+        "LLM_MODEL": "openai/gpt-5-mini",
+        "EMBEDDING_PROVIDER": "openai",
+        "EMBEDDING_MODEL": "openai/text-embedding-3-small",
+        "EMBEDDING_DIMENSIONS": "256",
+        "EMBEDDING_API_KEY": "mock-key",
+        "COGNEE_SKIP_PREFLIGHT": "1",
+    }.items():
+        monkeypatch.setenv(name, value)
+    mocks.install_all({})
+    yield
+    mocks.uninstall_all()
+
+
+def _structured_tree():
+    """Two roots in one workspace: ROOT holds a sub-page and a database with one
+    row, OTHER holds a sub-page."""
+    fake = _tree()
+    fake.blocks[ROOT].append(
+        {"id": DATABASE, "type": "child_database", "has_children": False, "child_database": {}}
+    )
+    fake.databases[DATABASE] = {
+        "title": [{"plain_text": "Tasks db"}],
+        "data_sources": [{"id": DATA_SOURCE, "name": "Tasks"}],
+    }
+    fake.data_source_rows[DATA_SOURCE] = [ROW]
+    fake.pages[ROW] = _page(
+        ROW,
+        "Ship it",
+        {"type": "data_source_id", "data_source_id": DATA_SOURCE, "database_id": DATABASE},
+    )
+    fake.blocks[ROW] = [_paragraph("b4", "Ana ships the Postgres migration.")]
+    fake.pages[OTHER] = _page(OTHER, "Notes", {"type": "workspace", "workspace": True})
+    fake.blocks[OTHER] = [
+        _paragraph("b5", "Weekly notes."),
+        {"id": SUB, "type": "child_page", "has_children": False, "child_page": {}},
+    ]
+    fake.pages[SUB] = _page(SUB, "Standup", {"type": "page_id", "page_id": OTHER})
+    fake.blocks[SUB] = [_paragraph("b6", "Standup moved to 10am.")]
+    return fake
+
+
+async def _page_tree():
+    """The graph's ``child_of`` edges as (child, parent) labels: a page is labelled by
+    its Notion id, a container by ``kind:id``."""
+    user = await get_default_user()
+    (dataset,) = await get_authorized_existing_datasets(
+        user=user, permission_type="read", datasets=[DATASET_NAME]
+    )
+    page_ids = {str(record.id): ext for ext, record in (await _notion_data()).items()}
+    async with set_database_global_context_variables(dataset.id, user.id):
+        nodes, edges = await (await get_graph_engine()).get_graph_data()
+
+    def label(node_id):
+        node_id = str(node_id)
+        if node_id in page_ids:
+            return page_ids[node_id]
+        properties = dict(nodes)[node_id]
+        assert properties["type"] == "StructureContainer", properties
+        return f"{properties['kind']}:{properties['external_id']}"
+
+    return {(label(edge[0]), label(edge[1])) for edge in edges if edge[2] == "child_of"}
+
+
+async def _sync_and_cognify(fake, roots=(ROOT, OTHER)):
+    await _sync(fake, roots=roots)
+    await cognee.cognify(datasets=[DATASET_NAME])
+
+
+@pytest.mark.asyncio
+async def test_two_roots_give_every_page_its_real_parent(clean_environment, mock_ai):
+    await _sync_and_cognify(_structured_tree())
+
+    assert await _page_tree() == {
+        (CHILD, ROOT),
+        (ROW, f"data_source:{DATA_SOURCE}"),
+        (f"data_source:{DATA_SOURCE}", f"database:{DATABASE}"),
+        (f"database:{DATABASE}", ROOT),
+        (SUB, OTHER),
+    }
+
+
+def _move_child_under(fake, old_parent, new_parent):
+    """CHILD moves between two pages; Notion does not touch its last_edited_time."""
+    fake.blocks[old_parent] = [b for b in fake.blocks[old_parent] if b["id"] != CHILD]
+    fake.blocks[new_parent].append(
+        {"id": CHILD, "type": "child_page", "has_children": False, "child_page": {}}
+    )
+    fake.pages[CHILD]["parent"] = {"type": "page_id", "page_id": new_parent}
+
+
+@pytest.mark.asyncio
+async def test_moving_a_page_within_its_root_leaves_one_parent_edge_and_no_reprocessing(
+    clean_environment, mock_ai
+):
+    fake = _structured_tree()
+    fake.pages[MID] = _page(MID, "Middle", {"type": "page_id", "page_id": ROOT})
+    fake.blocks[MID] = [_paragraph("b7", "A page between.")]
+    fake.blocks[ROOT].append(
+        {"id": MID, "type": "child_page", "has_children": False, "child_page": {}}
+    )
+    await _sync_and_cognify(fake)
+    before = await _notion_data()
+
+    _move_child_under(fake, ROOT, MID)
+    await _sync_and_cognify(fake)
+
+    tree = await _page_tree()
+    assert {edge for edge in tree if edge[0] == CHILD} == {(CHILD, MID)}
+    # Same root, same text: the page keeps its id, so cognify never reprocessed it.
+    assert (await _notion_data())[CHILD].id == before[CHILD].id
+
+
+@pytest.mark.asyncio
+async def test_moving_a_page_to_another_root_leaves_one_parent_edge(clean_environment, mock_ai):
+    fake = _structured_tree()
+    await _sync_and_cognify(fake)
+
+    _move_child_under(fake, ROOT, OTHER)
+    await _sync_and_cognify(fake)
+
+    tree = await _page_tree()
+    assert {edge for edge in tree if edge[0] == CHILD} == {(CHILD, OTHER)}
+
+
+@pytest.mark.asyncio
+async def test_a_deleted_page_loses_its_node_and_edges_and_its_children_stay(
+    clean_environment, mock_ai
+):
+    fake = _structured_tree()
+    await _sync_and_cognify(fake)
+    data = await _notion_data()
+
+    await cognee.forget(data_id=data[ROOT].id, dataset=DATASET_NAME)
+    await cognee.cognify(datasets=[DATASET_NAME])
+
+    # The page and every edge it had are gone; the pages that sat under it are not.
+    assert await _page_tree() == {
+        (ROW, f"data_source:{DATA_SOURCE}"),
+        (f"data_source:{DATA_SOURCE}", f"database:{DATABASE}"),
+        (SUB, OTHER),
+    }
+    assert set(await _notion_data()) == {CHILD, ROW, OTHER, SUB}
+
+
+@pytest.mark.asyncio
+async def test_forgetting_the_last_row_of_a_database_removes_its_containers(
+    clean_environment, mock_ai
+):
+    await _sync_and_cognify(_structured_tree())
+    data = await _notion_data()
+
+    # No cognify afterwards: the containers go with the row that owned them.
+    await cognee.forget(data_id=data[ROW].id, dataset=DATASET_NAME)
+
+    assert await _page_tree() == {(CHILD, ROOT), (SUB, OTHER)}

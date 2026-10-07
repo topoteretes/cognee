@@ -134,7 +134,26 @@ async def test_cognify_compacts_the_vector_store_after_its_run():
         )
 
     (call,) = calls
-    assert call["after_run_completed"] is compact_vector_store
+    assert call["after_run_completed"] is cognify_module.after_cognify_run
+
+
+@pytest.mark.asyncio
+async def test_after_cognify_run_reconciles_structure_then_compacts():
+    order = []
+
+    async def structure():
+        order.append("structure")
+
+    async def compact():
+        order.append("compact")
+
+    with (
+        patch.object(cognify_module, "reconcile_document_structure", structure),
+        patch.object(cognify_module, "compact_vector_store", compact),
+    ):
+        await cognify_module.after_cognify_run()
+
+    assert order == ["structure", "compact"]
 
 
 def test_only_cognify_compacts():

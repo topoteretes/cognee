@@ -34,7 +34,7 @@ from .create_dlt_source import (
 from .data_item import DataItem
 from .dlt_row_data import DltRowData
 from .dlt_temporal import temporal_cells
-from .dlt_utils import NODE_SET_COLUMN, column_selected, document_source_tag
+from .dlt_utils import NODE_SET_COLUMN, STRUCTURE_COLUMN, column_selected, document_source_tag
 from .ingest_dlt_source import ingest_dlt_source
 
 logger = get_logger("resolve_dlt_sources")
@@ -226,9 +226,12 @@ async def resolve_dlt_sources(
         # derivation would pin the same id when one source loads into two
         # datasets — a hard collision on the foreign-pin guard.
         row_ids = await _stable_row_ids(rows, user, dataset_id)
+        source_items = []
         for row, data_id in zip(rows, row_ids):
             document_fresh_ids.add(data_id)
-            document_data_items.append(_build_document_data_item(row, data_id, source_tag))
+            source_items.append(_build_document_data_item(row, data_id, source_tag))
+        await _refresh_row_structure(source_items, dataset_id)
+        document_data_items.extend(source_items)
 
     # --- Relational sources: one manifest DataItem per source -----------
     expanded_items: list[DataItem] = []
@@ -612,6 +615,49 @@ async def _stable_row_ids(rows: list[DltRowData], user: User, dataset_id: UUID) 
     return [old_id if old_id in adopted else new_id for old_id, new_id in zip(old_ids, new_ids)]
 
 
+# Rows are looked up in batches this size, to stay within SQLite's bind-parameter limit.
+_STRUCTURE_REFRESH_BATCH = 500
+
+
+async def _refresh_row_structure(items: list[DataItem], dataset_id: UUID | None) -> None:
+    """Store the tree position of rows that are already ingested.
+
+    A row whose content did not change keeps its data_id, and add() skips an
+    item whose record is already processed, so ingestion never rewrites its
+    ``system_metadata``. The tree position is not part of the content, so a row
+    that moved would keep its old parent: this writes the new one onto the
+    existing record before add() runs. Only the ``structure`` key is touched,
+    and only when it differs.
+    """
+    wanted = {
+        item.data_id: item.system_metadata["structure"]
+        for item in items
+        if dataset_id is not None and "structure" in (item.system_metadata or {})
+    }
+    if not wanted:
+        return
+
+    from sqlalchemy import select
+
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.data.models import Data
+
+    ids = list(wanted)
+    async with get_relational_engine().get_async_session() as session:
+        for start in range(0, len(ids), _STRUCTURE_REFRESH_BATCH):
+            rows = await session.execute(
+                select(Data).filter(
+                    Data.id.in_(ids[start : start + _STRUCTURE_REFRESH_BATCH]),
+                    Data.dataset_id == dataset_id,
+                )
+            )
+            for data in rows.scalars():
+                metadata = data.system_metadata or {}
+                if metadata.get("structure") != wanted[data.id]:
+                    data.system_metadata = {**metadata, "structure": wanted[data.id]}
+        await session.commit()
+
+
 def _build_document_data_item(row: DltRowData, data_id: UUID, source_tag: str) -> DataItem:
     """Build a text-document DataItem from a document-source dlt row.
 
@@ -620,7 +666,9 @@ def _build_document_data_item(row: DltRowData, data_id: UUID, source_tag: str) -
     routes the document through normal cognify entity extraction rather
     than the deterministic manifest path. A ``cognee_node_set`` column names
     the row's own node sets (``_row_node_set``); they ride on the DataItem and
-    ingest_data unions them with the call-level node_set.
+    ingest_data unions them with the call-level node_set. A ``cognee_structure``
+    column says where the row sits in its source's tree (``_row_structure``);
+    it is kept in ``system_metadata["structure"]`` for the structure pass.
 
     ``literal_text=True`` because ``content`` is provider data cognee did not
     write: an untitled row (no "# title" prefix) whose content happens to be
@@ -641,6 +689,9 @@ def _build_document_data_item(row: DltRowData, data_id: UUID, source_tag: str) -
         system_metadata["url"] = row_data["url"]
     if row_data.get("id"):
         system_metadata["external_id"] = str(row_data["id"])
+    structure = _row_structure(row, source_tag)
+    if structure is not None:
+        system_metadata["structure"] = structure
 
     return DataItem(
         data=text,
@@ -650,6 +701,38 @@ def _build_document_data_item(row: DltRowData, data_id: UUID, source_tag: str) -
         literal_text=True,
         node_set=_row_node_set(row, source_tag),
     )
+
+
+def _reserved_json_column(row: DltRowData, source_tag: str, column: str, raise_shape) -> Any:
+    """The parsed value of a json-hinted reserved column, ``None`` when unset.
+
+    The column is loaded with a json type hint, so dlt moves a value that is
+    not a list or object (a bare string, a number) into a variant column such
+    as ``<column>__v_text`` and leaves the column itself NULL. Reading only the
+    column would then ingest the row without it and no sign of it, so a
+    variant raises through ``raise_shape``. The value comes back as parsed json
+    or, on SQLite, as its JSON text, which text that is not JSON also raises
+    for.
+    """
+    variants = sorted(
+        name
+        for name, value in row.row_data.items()
+        if name.startswith(f"{column}__v_") and value is not None
+    )
+    if variants:
+        raise_shape(row, source_tag, f"a value dlt stored in {', '.join(variants)}")
+    raw = row.row_data.get(column)
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            # ValueError only, no RecursionError guard: the column is loaded with a
+            # json type hint (DOCUMENT_COLUMN_HINTS) and dlt refuses a value nested
+            # deep enough to break json.loads, failing at extract before the row is
+            # stored (checked on dlt 1.28.2: 200 levels load, 1000 fail). On Postgres
+            # the value comes back already parsed. There is no input to guard against.
+            raise_shape(row, source_tag, "text that is not JSON")
+    return raw
 
 
 def _row_node_set(row: DltRowData, source_tag: str) -> list[str] | None:
@@ -670,26 +753,9 @@ def _row_node_set(row: DltRowData, source_tag: str) -> list[str] | None:
     An entry that is not a non-empty string raises too, matching what
     ingest_data does for a node_set passed to add().
     """
-    variants = sorted(
-        column
-        for column, value in row.row_data.items()
-        if column.startswith(f"{NODE_SET_COLUMN}__v_") and value is not None
-    )
-    if variants:
-        _raise_node_set_shape(row, source_tag, f"a value dlt stored in {', '.join(variants)}")
-    raw = row.row_data.get(NODE_SET_COLUMN)
+    raw = _reserved_json_column(row, source_tag, NODE_SET_COLUMN, _raise_node_set_shape)
     if raw is None:
         return None
-    if isinstance(raw, str):
-        try:
-            raw = json.loads(raw)
-        except ValueError:
-            # ValueError only, no RecursionError guard: this column is loaded with a
-            # json type hint (NODE_SET_COLUMN_HINT) and dlt refuses a list nested
-            # deep enough to break json.loads, failing at extract before the row is
-            # stored (checked on dlt 1.28.2: 200 levels load, 1000 fail). On Postgres
-            # the value comes back already parsed. There is no input to guard against.
-            _raise_node_set_shape(row, source_tag, "text that is not JSON")
     if not isinstance(raw, list):
         _raise_node_set_shape(row, source_tag, f"a JSON {type(raw).__name__}")
     # No cap on the number or length of names, on purpose. A cap would cut a
@@ -711,6 +777,54 @@ def _row_node_set(row: DltRowData, source_tag: str) -> list[str] | None:
             _raise_node_set_shape(row, source_tag, "an entry that cannot be encoded as a name")
         unique.setdefault(key, name)
     return list(unique.values()) or None
+
+
+def _row_structure(row: DltRowData, source_tag: str) -> dict | None:
+    """The tree position a document row names in its ``cognee_structure`` column.
+
+    The column must hold ``{"ancestors": [entry, ...]}``, each entry an object
+    with a non-empty string ``kind`` and ``id``, an optional string ``name`` and
+    an optional boolean ``document`` (see ``dlt_utils.STRUCTURE_COLUMN``). An
+    unset column returns ``None``: the row says nothing about structure, which
+    is not the same as the empty list of a row at the top of its tree. Any other
+    shape raises, naming the source, table and row, for the same reason a bad
+    node set does: dropping it quietly would leave the row looking placed when
+    it is not.
+    """
+    raw = _reserved_json_column(row, source_tag, STRUCTURE_COLUMN, _raise_structure_shape)
+    if raw is None:
+        return None
+    if not isinstance(raw, dict) or not isinstance(raw.get("ancestors"), list):
+        _raise_structure_shape(row, source_tag, "a value without an ancestors list")
+    ancestors = []
+    for entry in raw["ancestors"]:
+        if (
+            not isinstance(entry, dict)
+            or not all(isinstance(entry.get(key), str) and entry[key] for key in ("kind", "id"))
+            or not isinstance(entry.get("name", ""), str)
+            or not isinstance(entry.get("document", False), bool)
+        ):
+            _raise_structure_shape(row, source_tag, "an ancestor that is not a valid entry")
+        ancestors.append(
+            {key: entry[key] for key in ("kind", "id", "name", "document") if key in entry}
+        )
+    return {"ancestors": ancestors}
+
+
+def _raise_structure_shape(row: DltRowData, source_tag: str, found: str) -> NoReturn:
+    """Stop the sync: a row's ``cognee_structure`` is not a valid tree position."""
+    from cognee.exceptions import CogneeValidationError
+
+    raise CogneeValidationError(
+        message=(
+            f"Source '{source_tag}' table '{row.table_name}' row '{row.primary_key_value}': "
+            f"{STRUCTURE_COLUMN} must be an object with an ancestors list of "
+            '{"kind", "id", "name"?, "document"?} entries, but it holds '
+            f"{found}. Fix the source and re-sync the affected rows. "
+            "No document from this sync was stored."
+        ),
+        name="DltStructureColumnInvalid",
+    )
 
 
 def _raise_node_set_shape(row: DltRowData, source_tag: str, found: str) -> NoReturn:

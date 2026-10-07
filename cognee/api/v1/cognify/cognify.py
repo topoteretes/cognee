@@ -51,6 +51,7 @@ from cognee.tasks.documents import (
 from cognee.tasks.graph import detect_contradictions
 from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
 from cognee.tasks.graph.resolve_temporal_contradictions import resolve_temporal_contradictions
+from cognee.tasks.ingestion.document_structure import reconcile_document_structure
 from cognee.tasks.provenance import record_provenance
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.temporal_graph.extract_events_and_entities import extract_events_and_timestamps
@@ -532,10 +533,7 @@ async def cognify(
                 embedding_config=embedding_config,
                 data_cache=data_cache,
                 extras={"graph_extractor": resolved_extractor},
-                # Fold the vector fragments this run wrote, once per dataset,
-                # after the run is recorded complete; bounded per run, so a
-                # bloated store drains over several cognify runs.
-                after_run_completed=compact_vector_store,
+                after_run_completed=after_cognify_run,
             )
         except Exception as error:
             # Run-level failures (e.g. an AuthenticationError escaping a task)
@@ -573,6 +571,18 @@ async def cognify(
         record_operation_duration(_duration_ms, _attrs)
 
         return result
+
+
+async def after_cognify_run() -> None:
+    """What cognify does once per dataset, after the run is recorded complete.
+
+    Reconciles the structure document sources describe (``child_of`` edges), then
+    folds the vector fragments this run wrote; the compaction is bounded per
+    run, so a bloated store drains over several cognify runs. Both swallow their
+    own failures, because neither may fail a run that already completed.
+    """
+    await reconcile_document_structure()
+    await compact_vector_store()
 
 
 async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's comment)
