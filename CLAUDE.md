@@ -32,7 +32,7 @@ pre-commit install
 - **postgres** / **postgres-binary** - PostgreSQL + PGVector support (also enables the Postgres session-cache backend, `CACHE_BACKEND=postgres`)
 - **neo4j** - Neo4j graph database support
 - **neptune** - AWS Neptune support
-- **turso** - Turso vector database support
+- **turso** - Turso (Rust rewrite of SQLite, `pyturso`) as relational, graph-as-tables and/or vector store; local files only
 - **docs** - Document processing (unstructured library)
 - **scraping** - Web scraping (Tavily, BeautifulSoup, Playwright; Keenable needs no extra — it uses the built-in httpx)
 - **langchain** - LangChain integration
@@ -150,12 +150,25 @@ Improve & Memify are virtually the same, though. So no reason not to use improve
 
 #### recall() vs search()
 
-`recall()` wraps `search()` — its graph path calls the same authorized search — and adds three things: rule-based query routing when `query_type` is omitted (an ordered first-match rule table in `cognee/api/v1/recall/query_router.py`, no LLM call, so auto-routing is free; it only ever picks CHUNKS_LEXICAL for a fully quoted phrase, CODING_RULES for an explicit phrase, or the HYBRID_COMPLETION default — never CYPHER, which stays behind an explicit `query_type`, and retries as HYBRID_COMPLETION if a routed type comes up empty), session memory as a searchable source (`scope` = `graph` / `session` / `trace` / `session_context` / `session_first`; with a bare `session_id` a session hit short-circuits the graph search, and `scope="session_first"` asks for that short-circuit explicitly), and normalized results tagged with a `source` key. Use `recall()` for ordinary retrieval. Drop to `search()` when you need the agentic extras as first-class parameters (`skills`, `tools`, `max_iter`, `code_query`, `node_type`), raw `SearchResult` objects instead of tagged entries, or a pinned `query_type` with no router in the path. Note `search(session_id=...)` only adds session history to the retrieval context — it never searches the session cache as a source; that is `recall()`-only. Full guide: `docs/recall-vs-search.md`.
+`recall()` wraps `search()` — its graph path calls the same authorized search — and adds three things: rule-based query routing when `query_type` is omitted (an ordered first-match rule table in `cognee/api/v1/recall/query_router.py`, no LLM call, so auto-routing is free; it only ever picks CHUNKS_LEXICAL for a fully quoted phrase, CODING_RULES for an explicit phrase, TEMPORAL for a question scoped to an absolute date behind a time preposition (`in 2019`, `before 1900`, `on 7 November 1867`), or the HYBRID_COMPLETION default — never CYPHER, which stays behind an explicit `query_type`, and retries as HYBRID_COMPLETION if a routed type comes up empty), session memory as a searchable source (`scope` = `graph` / `session` / `trace` / `session_context` / `session_first`; with a bare `session_id` a session hit short-circuits the graph search, and `scope="session_first"` asks for that short-circuit explicitly), and normalized results tagged with a `source` key. Use `recall()` for ordinary retrieval. Drop to `search()` when you need the agentic extras as first-class parameters (`skills`, `tools`, `max_iter`, `code_query`, `node_type`), raw `SearchResult` objects instead of tagged entries, or a pinned `query_type` with no router in the path. Note `search(session_id=...)` only adds session history to the retrieval context — it never searches the session cache as a source; that is `recall()`-only. Full guide: `docs/recall-vs-search.md`.
 
 ### Key Architectural Patterns
 
 #### 1. Pipeline-Based Processing
 All data flows through task-based pipelines (`cognee/modules/pipelines/`). Tasks are composable units that can run sequentially or in parallel. Example pipeline tasks: `classify_documents`, `extract_graph_from_data`, `add_data_points`. The runner semantics (a task's `batch_size` batches the *previous* task's output, `enriches`, `ctx` injection, and which of the two `run_pipeline` functions to import) are in the `cognee/modules/pipelines/__init__.py` docstring; the index of all task implementations is `cognee/tasks/README.md`.
+
+Abandoned-run recovery checks at API startup and every 60 seconds. The
+`COGNEE_STALE_RUN_RECOVERY_MIN_AGE_SECONDS` setting (default 3600, nonnegative)
+is an eligibility floor, not proof of inactivity. Each new pipeline run holds
+an OS lock under `SYSTEM_ROOT_DIRECTORY/pipeline_run_locks` from its persisted
+start through its terminal record, including the background handoff. Recovery
+must acquire the existing ownership marker and re-read the latest run status
+before rolling back. Active dataset locks defer recovery too. Completed runs
+remove their markers; a crashed writer leaves its marker for recovery.
+Legacy rows and markers unavailable on this filesystem are skipped, so workers
+need the same persistent system directory with working OS file locks to recover
+each other's runs. Missing ownership is never inferred from run age alone.
+
 
 #### 2. Interface-Based Database Adapters
 Multiple backends are supported through adapter interfaces:
@@ -177,11 +190,11 @@ User → Dataset → Data hierarchy with permission-based filtering. Enable with
 | Graph | Ladybug/Kuzu (default) | ✅ | embedded, one database per dataset |
 | Graph | Neo4j | ✅ | default handler `neo4j`: one Neo4j database per dataset inside the DBMS — requires an edition with multi-database support (Enterprise/Aura). Two alternates: `neo4j_community` runs one Docker container per dataset, because Community edition serves exactly one database per server (needs Docker); `neo4j_aura_dev` provisions a whole Aura instance per dataset — dev/PoC only, not production-ready |
 | Graph | Postgres | ✅ | default handler `postgres_graph`: one Postgres database per dataset. `postgres_graph_shared` instead gives each dataset a schema (`ds_<dataset_id>`) in cognee's main database, so no `CREATE DATABASE` privilege is needed. graph-on-Postgres is itself a demo feature (see warning above) |
-| Graph | Turso | ✅ | |
+| Graph | Turso | ✅ | one Turso database file per dataset; local only (no remote sync in this version) |
 | Graph | Neptune, ladybug-remote | ❌ | requires `ENABLE_BACKEND_ACCESS_CONTROL=false` |
 | Vector | LanceDB (default) | ✅ | |
 | Vector | PGVector | ✅ | default handler `pgvector`: one Postgres database per dataset. `pgvector_shared` uses a schema (`ds_<dataset_id>`) in cognee's main database instead — no `CREATE DATABASE` privilege needed |
-| Vector | Turso | ✅ | |
+| Vector | Turso | ✅ | one Turso database file per dataset; exact cosine scan, no approximate index |
 | Vector | Neptune Analytics | ❌ | requires `ENABLE_BACKEND_ACCESS_CONTROL=false` |
 | Vector | Community adapters (ChromaDB, Qdrant, …) | ❌ | unless the adapter registers a handler via `use_dataset_database_handler()` |
 | Relational | SQLite / Postgres | n/a — always shared | one relational DB holds users, ACLs, and the dataset-database registry; it is never isolated per dataset |
@@ -240,7 +253,9 @@ The stages below are the Low level operations these call underneath.
 Key files: `cognee/api/v1/add/add.py`, `cognee/tasks/ingestion/ingest_data.py`
 
 #### COGNIFY: Knowledge Graph Construction
-`cognify()` → `classify_documents` → `extract_chunks_from_documents` → `extract_graph_from_data` (LLM extracts entities/relationships using Instructor) → `summarize_text` → `add_data_points` (store in graph + vector DBs)
+`cognify()` → `classify_documents` → `extract_chunks_from_documents` → `extract_graph_from_data` (LLM extracts entities/relationships using Instructor) → `summarize_text` → `add_data_points` (store in graph + vector DBs). With SUMMARY_METHOD=from_extraction or `cognify(summary_method="from_extraction")` (opt-in), summarize_text is replaced by build_summary_from_extraction, which joins one line per extracted type, then the chunk's extracted relation texts, with no LLM call.
+
+Times are first-class in the default path: the graph prompt asks for points in time as nodes of type `Timestamp` named by their normalized string (`YYYY`, `YYYY-MM`, `YYYY-MM-DD`, `YYYY-MM-DD HH:MM:SS`) and linked by `{verb}_at` edges (`born_at`, `founded_at`, `begins_at`, …). Graph construction (`construct_data_points_and_edges`) turns such a node into a real `Timestamp` datapoint (`precision` records how much was stated; the id derives from the string, so one time is one node) in the same LLM call — no extra pass. Before that call, deterministic `dateparser` hints resolve year-less expressions ("the following 27 April") against the last stated date earlier in the same document and are rendered into the prompt's TEMPORAL_NORMALIZATION_HINTS block (`cognee/modules/engine/utils/temporal_hints.py`; a `custom_prompt` gets no hints); a date the LLM leaves in prose ("23 March 1947") is normalized at construction. A "Timestamp" node whose name still does not parse, or that has outgoing edges, stays an ordinary `Entity`. `update()` shares this extraction, so edits get the same handling.
 
 Key files:
 - `cognee/api/v1/cognify/cognify.py`
@@ -273,7 +288,7 @@ Available search types (from `cognee/modules/search/types/SearchType.py`), passe
 - **SUMMARIES** - Search pre-computed document summaries
 - **CYPHER** - Direct Cypher query execution (enabled by default; `ALLOW_CYPHER_QUERY=false` disables it)
 - **NATURAL_LANGUAGE** - Natural language to structured query
-- **TEMPORAL** - Time-aware graph search
+- **TEMPORAL** - Hybrid retrieval reranked by time: the `Timestamp` nodes overlapping the window the LLM extracts from the question ("what happened in 1969?") are looked up natively (`get_timestamps_in_range` on Ladybug, Neo4j, Postgres demo; a scan elsewhere), the chunks attached to them join the hybrid candidates (similarity alone misses most rows dated inside a window), and the anchored candidates move to the front, ranked by how tightly their matched timestamp fits the window (a chunk dated to the day before one that only names the year); nothing is dropped, and a question with no time or no overlap gets plain hybrid
 - **FEELING_LUCKY** - Automatic search type selection
 - **CODING_RULES** - Code-specific search rules
 - **SKILLS** - Semantic discovery of skill playbooks (metadata-only, no LLM; requires exactly one dataset)
@@ -362,7 +377,7 @@ VECTOR_DB_URL=postgresql://cognee:cognee@localhost:5432/cognee_db
 ```
 
 #### Graph Databases
-Supported: ladybug (default), neo4j, neptune, ladybug-remote, postgres_demo (demo; `postgres` is an accepted alias)
+Supported: ladybug (default), neo4j, neptune, ladybug-remote, turso (local file, requires the turso extra), postgres_demo (demo; `postgres` is an accepted alias)
 ```bash
 # Neo4j (requires neo4j extra: pip install cognee[neo4j])
 GRAPH_DATABASE_PROVIDER=neo4j
@@ -393,11 +408,29 @@ GRAPH_DATABASE_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
 > Interested in further development or production use of Postgres as a graph database? Write to
 > us at social@cognee.ai to explore the options.
 
+#### Turso (all three layers)
+`DB_PROVIDER=turso`, `GRAPH_DATABASE_PROVIDER=turso`, `VECTOR_DB_PROVIDER=turso` and
+`CACHE_BACKEND=turso` (the session cache's `cache.db`, same layout as the sqlite backend) — all four
+layers — run on the Turso rewrite engine (`pyturso`, `pip install cognee"[turso]"`) through one shared dialect,
+`sqlite+cognee_turso://` (`cognee/infrastructure/databases/turso/`). Local database files only:
+remote Turso settings (`DB_TURSO_URL`, `GRAPH_DATABASE_KEY`, a `libsql://` vector URL) are a hard
+error. Shared knobs (`TursoConfig`, env prefix `TURSO_`): `TURSO_JOURNAL_MODE=wal|mvcc` (default
+`wal`; `mvcc` turns graph and vector writes into `BEGIN CONCURRENT` transactions that commit in
+parallel and are retried on `Write-write conflict`, at the cost of files that stock SQLite can no
+longer read; the relational DB and session cache always stay on `wal`, because their transactions
+cannot be retried), `TURSO_BUSY_TIMEOUT_MS`, `TURSO_CONFLICT_RETRIES`. A Turso database file can be
+open in only one process at a time (pyturso 0.7.x), so the API server and a separate SDK/CLI process
+cannot share one Turso deployment. Engine limits that shaped the adapters (no
+recursive CTEs, no parenthesized joins in a FROM clause — the dialect's compiler flattens them —
+no scalar subquery in an upsert `SET`, primitive-only bind parameters, no approximate vector
+index) are listed with reproductions in `docs/turso-local.md`; setup and a runnable
+add → cognify → search example live there too.
+
 #### Session Cache
 ```bash
-# Session/conversation cache backend: sqlite (default), postgres, redis, fs, tapes
+# Session/conversation cache backend: sqlite (default), turso, postgres, redis, fs, tapes
 CACHE_BACKEND=sqlite
-# Optional explicit SQLAlchemy URL for sqlite/postgres cache backends (overrides defaults)
+# Optional explicit SQLAlchemy URL for sqlite/turso/postgres cache backends (overrides defaults)
 CACHE_DB_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
 # Session-search execution mode: concurrent (default) or sequential
 SESSION_SEARCH_MODE=concurrent
@@ -843,8 +876,9 @@ Replacement for the LLM extract-and-summarize step of the default `cognify()` ta
 
 - **Install**: recommended `pip install "cognee[gliner]"` (torch from PyPI: the CUDA build on Linux, for GPU hosts). Without it GLiNER still works: torch is not a cognee dependency (PyPI's Linux torch bundles several GB of CUDA libraries), so LLM-key users never download it, and when a cognify resolves to `gliner_demo` with the runtime missing, `cognify()` awaits `ensure_extractor_runtime()` (`cognee/modules/cognify/config.py`; `resolve_extractor()` itself never installs), which runs `cognee/tasks/graph/gliner_demo/install.py` in a worker thread — the event loop stays free and the pipeline starts only once the runtime imports; concurrent callers in one process or several wait on one install — and it installs the `gliner` extra itself (read from cognee's metadata, so `pyproject.toml` is the only list), with progress logged (step, installer lines, elapsed time): its torch requirement only when no torch build (CPU or GPU) is importable, from `GLINER_TORCH_INDEX_URL` (default `https://download.pytorch.org/whl/cpu`, the only package taken from that index); then the rest, when `gliner2` is missing, from the default index with every installed distribution pinned — a package replaced under a live import would break the running process, so an install that needs to change one fails instead (core pins `huggingface-hub<1` and `tokenizers<=0.23.0`, the ranges transformers 4.x needs, for this). It uses pip, or `uv pip` in uv venvs, under a file lock in `sys.prefix`, and logs a one-line tip to install the extra afterwards. The install thread imports torch and gliner2 before returning (verification, and it keeps the slow first import off the loop). Telemetry: `GLiNER Runtime Install Started` / `Completed` / `Failed`, sent only by the call that installs, with versions, OS/arch, installer, installed packages, duration, and on failure the step and exception class — never paths, URLs, installer output or messages (a custom index is reported as `custom`). Every failure raises `GlinerInstallError` (a `CogneeConfigurationError`) whose remediation is the extra; `GLINER_AUTO_INSTALL=false` raises `KeylessExtractorNotInstalledError` with the same fix. The Docker image runs the installer at build time (`python -m cognee.tasks.graph.gliner_demo.install`, after the exact `uv sync`). A later exact `uv sync` removes the runtime-installed packages (they are not in the lockfile); the next GLiNER cognify installs them again. The model (`fastino/gliner2.5-base-v1`, about 750 MB) downloads on first use; the installer's "about 200 MB to download, 800 MB on disk" is the runtime (CPU PyTorch plus gliner2), not the model.
 - **Schema** (closed, resolved per document before chunk extraction): caller `entity_types`/`relation_types` → else OWL classes / object properties of `ONTOLOGY_FILE_PATH` (snake_case of `rdfs:label` or local name, `rdfs:comment` as description) → else the frozen `LABEL_BANK`/`RELATION_BANK`, filtered by one GLiNER pass over a bounded document sketch. Capped at 20 per kind. Explicit labels are only reachable through `get_gliner_demo_tasks(...)` + `run_custom_pipeline(pipeline_name="cognify_pipeline")`.
+- **Timestamps on the keyless path**: a span GLiNER labels `date`, `year` or `time_period` that parses as a time (`timestamp_from_text`, prose dates included) is emitted as a `Timestamp` node and becomes a real `Timestamp` datapoint in graph construction, exactly like the LLM prompt's Timestamp nodes; anchored to its chunk by `contains`, with entity edges only where a bank relation (`occurred_on`) fires. A span that does not parse ("the 1960s") keeps its GLiNER label. No hints on this path (no prompt to put them in).
 - **LLM-free mode side effects**: a pipeline with no LLM task (the gliner_demo extractor with contradiction detection off) skips the first-run LLM connection probe but still probes embeddings, per capability — an LLM-free run never marks the LLM check done for later LLM runs. In `improve()`, the text-drafting stages `extract_agent_context`, `distill_sessions`, and `global_context_index` skip with `no_llm_configured`; session and trace persistence still run. Separately, `recall()` with no `query_type` defaults to `CHUNKS` when no usable LLM key is configured (keyed on LLM availability, not on the extractor; explicit `query_type` is always honoured). `COGNEE_SKIP_CONNECTION_TEST` stays `false` by default.
-- **Constraints**: generic `KnowledgeGraph` only (custom `graph_model` raises), `custom_prompt` ignored, no CLI/HTTP flag (set the env var); `extractor="gliner_demo"` raises with `temporal_cognify=True`, with `dry_run=True`, and while connected to a remote instance. Long chunks are scanned with overlapping 384-word windows (`batch_extract_long`); schema discovery instead uses one plain pass over a sketch capped at 12,000 characters and 3,000 whitespace tokens. Relation endpoints are matched to entity spans by exact normalized name, then unambiguous containment; unresolved pairs are dropped and counted (`GlinerRunStats`).
+- **Constraints**: generic `KnowledgeGraph` only (custom `graph_model` raises), `custom_prompt` ignored, no CLI/HTTP flag (set the env var); `extractor="gliner_demo"` raises with `dry_run=True` and while connected to a remote instance. Long chunks are scanned with overlapping 384-word windows (`batch_extract_long`); schema discovery instead uses one plain pass over a sketch capped at 12,000 characters and 3,000 whitespace tokens. Relation endpoints are matched to entity spans by exact normalized name, then unambiguous containment; unresolved pairs are dropped and counted (`GlinerRunStats`).
 - **Demo**: `examples/guides/gliner_demo_llm_free_cognify.py`. Unit tests: `cognee/tests/unit/tasks/graph/test_gliner_demo_tasks.py`.
 
 ### Skills (Procedural Memory)
@@ -903,6 +937,9 @@ shutdown = visualization_server(port=8080)  # synchronous; returns a shutdown ca
 - Set `LITELLM_LOG="DEBUG"` for verbose LLM logs (default: "ERROR")
 - Enable debug mode: `ENV="development"` or `ENV="debug"`
 - Disable telemetry: `TELEMETRY_DISABLED=1`
+- Telemetry events use the existing operation-origin context: `sdk`, `cli`, `mcp`, `api`, or `background`. An explicit `TELEMETRY_ORIGIN` (e.g. `cloud`) overrides it.
+- `Pipeline Run` events follow the dataset lifecycle in `run_tasks`; completion is emitted only after durable storage and the run record succeed. They carry `pipeline_event_scope=run`. `Pipeline Item` events follow individual items and add their loader, extension, size and token buckets (`data_item_telemetry_properties`). Both carry `pipeline_run_id` and the provider stack from `get_current_settings()`, including structured-output settings and cognify's already-resolved extractor. Historical item-scoped `Pipeline Run` events cannot establish whole-run completion; the aggregate reports keep them separate.
+- Failed `search()`/`recall()` calls emit `ERRORED`. Pipeline, item and task failures use `telemetry_exception_properties` (`cognee/shared/utils.py`): exception class (unwrapping `first_error`), cause chain (at most four links), and the innermost HTTP status, never the message. Model settings that are filesystem paths are reported as `local_path`.
 - Check logs in structured format (uses structlog)
 - Use `debugpy` optional dependency for debugging: `pip install cognee[debug]`
 

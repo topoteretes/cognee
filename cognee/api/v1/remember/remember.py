@@ -92,6 +92,7 @@ class RememberKwargs(TypedDict, total=False):
 
     graph_model: Any
     extractor: Literal["llm", "gliner_demo", "gliner"]
+    summary_method: Literal["llm", "from_extraction"]
     node_set: list[str]
     preferred_loaders: list
     incremental_loading: bool
@@ -107,6 +108,9 @@ class RememberKwargs(TypedDict, total=False):
     repo_credentials: str
     skills_text: str
     skill_name: str
+    # DLT options: grouped in dlt_config (preferred), or the four bare spellings
+    # below kept for compatibility — see cognee.tasks.ingestion.dlt_config.
+    dlt_config: dict
     primary_key: str
     write_disposition: str
     query: str
@@ -138,6 +142,7 @@ _ADD_ONLY = frozenset(
         "node_set",
         "preferred_loaders",
         "importance_weight",
+        "dlt_config",
         "primary_key",
         "write_disposition",
         "query",
@@ -145,7 +150,7 @@ _ADD_ONLY = frozenset(
     }
 )
 _COGNIFY_ONLY = frozenset(
-    {"graph_model", "extractor", "chunks_per_batch", "config", "temporal_cognify"}
+    {"graph_model", "extractor", "summary_method", "chunks_per_batch", "config", "temporal_cognify"}
 )
 _SHARED = frozenset(
     {
@@ -1247,6 +1252,7 @@ async def remember(
             GLINER_DEMO_EXTRACTOR,
             get_cognify_config,
             resolve_extractor,
+            resolve_summary_method,
         )
 
         if (
@@ -1277,10 +1283,15 @@ async def remember(
             chunk_size=await resolve_chunk_size(chunk_size),
             graph_model=kwargs.get("graph_model") or KnowledgeGraph,
             custom_prompt=custom_prompt,
+            summary_method=resolve_summary_method(
+                kwargs.get("summary_method"), get_cognify_config()
+            ),
         )
 
     if session_id is not None and kwargs.get("extractor") is not None:
         raise ValueError("extractor is not supported when session_id is provided.")
+    if session_id is not None and kwargs.get("summary_method") is not None:
+        raise ValueError("summary_method is not supported when session_id is provided.")
 
     data_size = _estimate_data_size(data)
     item_count = len(data) if isinstance(data, list) else 1
@@ -1396,6 +1407,12 @@ async def _remember_inner(
                 "extractor is not supported while connected to a remote Cognee "
                 "instance. Call cognee.disconnect() to choose the extractor locally."
             )
+        if kwargs.get("summary_method") is not None:
+            # Same as extractor: client.remember() would drop it.
+            raise ValueError(
+                "summary_method is not supported while connected to a remote Cognee "
+                "instance. Call cognee.disconnect() to choose the summary method locally."
+            )
         if session_ids:
             # Same discipline as extractor: POST /remember carries no
             # session_ids field, so forwarding would silently drop them.
@@ -1426,6 +1443,7 @@ async def _remember_inner(
         default_pipeline_needs_llm,
         get_cognify_config,
         resolve_extractor,
+        resolve_summary_method,
     )
     from cognee.modules.preflight import validate_provider_config
 
@@ -1436,6 +1454,9 @@ async def _remember_inner(
         validate_provider_config(needs_llm=False)
     else:
         cognify_config = get_cognify_config()
+        # Like the extractor below, a misspelled summary_method raises before
+        # add() stores anything, not in cognify() after it.
+        resolve_summary_method(kwargs.get("summary_method"), cognify_config)
         validate_provider_config(
             needs_llm=default_pipeline_needs_llm(
                 resolve_extractor(kwargs.get("extractor"), cognify_config), cognify_config

@@ -17,7 +17,7 @@ from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
 )
 from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
-from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
+from cognee.modules.retrieval.temporal_hybrid_retriever import TemporalHybridRetriever
 from cognee.modules.search.exceptions import UnsupportedSearchTypeError
 from cognee.modules.search.types import SearchType
 
@@ -429,7 +429,6 @@ async def test_coding_rules_uses_node_name_as_rules_nodeset_name():
             GraphCompletionContextExtensionRetriever,
         ),
         (SearchType.GRAPH_SUMMARY_COMPLETION, GraphSummaryCompletionRetriever),
-        (SearchType.TEMPORAL, TemporalRetriever),
     ],
 )
 async def test_graph_search_retrievers_receive_feedback_influence(search_type, expected_class):
@@ -455,7 +454,6 @@ async def test_graph_search_retrievers_default_triplet_penalty_is_updated():
         SearchType.GRAPH_COMPLETION_COT,
         SearchType.GRAPH_COMPLETION_CONTEXT_EXTENSION,
         SearchType.GRAPH_SUMMARY_COMPLETION,
-        SearchType.TEMPORAL,
     ]:
         retriever_instance = await mod.get_search_type_retriever_instance(
             search_type, query_text="q"
@@ -488,3 +486,49 @@ async def test_graph_completion_decomposition_defaults_to_answer_per_subquery():
 
     assert isinstance(retriever_instance, GraphCompletionDecompositionRetriever)
     assert retriever_instance.decomposition_mode is DecompositionMode.ANSWER_PER_SUBQUERY
+
+
+@pytest.mark.asyncio
+async def test_temporal_forwards_include_references_like_hybrid():
+    """SDK-828: TEMPORAL is a HybridRetriever; evidence must reach it the same way."""
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+
+    retriever_instance = await mod.get_search_type_retriever_instance(
+        SearchType.TEMPORAL, query_text="q", top_k=3, include_references=True
+    )
+
+    assert isinstance(retriever_instance, TemporalHybridRetriever)
+    assert retriever_instance.include_references is True
+    assert retriever_instance.top_k == 3
+    assert retriever_instance.chunks_top_k == 12  # candidate budget: 4x top_k unless configured
+
+
+@pytest.mark.asyncio
+async def test_temporal_resolves_a_null_top_k_instead_of_crashing():
+    """The REST models accept ``top_k: null``; TEMPORAL must default it like HYBRID does."""
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+
+    retriever_instance = await mod.get_search_type_retriever_instance(
+        SearchType.TEMPORAL, query_text="q", top_k=None
+    )
+
+    assert isinstance(retriever_instance, TemporalHybridRetriever)
+    assert retriever_instance.top_k == 5
+    assert retriever_instance.chunks_top_k == 20
+
+
+@pytest.mark.asyncio
+async def test_temporal_forwards_external_metadata_keys_like_hybrid():
+    """Adding a date to a question must not strip the source metadata the caller asked for."""
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+
+    config = {"include_external_metadata": True, "external_metadata_keys": ["source_id"]}
+    temporal = await mod.get_search_type_retriever_instance(
+        SearchType.TEMPORAL, query_text="q", top_k=3, retriever_specific_config=config
+    )
+    hybrid = await mod.get_search_type_retriever_instance(
+        SearchType.HYBRID_COMPLETION, query_text="q", top_k=3, retriever_specific_config=config
+    )
+
+    assert temporal.include_external_metadata is True
+    assert temporal.external_metadata_keys == hybrid.external_metadata_keys == ["source_id"]

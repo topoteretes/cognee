@@ -59,13 +59,27 @@ def offline_estimator(monkeypatch):
     monkeypatch.setattr(
         estimator,
         "get_cognify_config",
-        lambda: SimpleNamespace(summarization_model=_TinySummary),
+        lambda: SimpleNamespace(summarization_model=_TinySummary, summary_method="llm"),
     )
 
 
 # --------------------------------------------------------------------------- #
 # Stage math
 # --------------------------------------------------------------------------- #
+def test_summaries_from_extraction_report_zero_chunk_summarization(offline_estimator):
+    estimate = estimator.estimate_chunks(
+        [SimpleNamespace(text="alpha beta gamma")],
+        operation="cognify",
+        graph_model=_TinyGraph,
+        summary_method="from_extraction",
+    )
+
+    summary = next(stage for stage in estimate.stages if stage.name == "chunk_summarization")
+    assert summary.calls == 0
+    assert summary.input_tokens == 0
+    assert summary.output_tokens == 0
+
+
 def test_estimate_chunks_reports_stage_tokens_and_cost(offline_estimator, monkeypatch):
     monkeypatch.setattr(
         estimator,
