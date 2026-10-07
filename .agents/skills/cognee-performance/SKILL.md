@@ -21,7 +21,7 @@ print(estimate)  # per-stage token counts and approximate cost; no LLM calls
 
 The estimate covers graph extraction and summarization only, not
 `improve()`, embeddings, or contradiction detection. Not available with
-GLiNER, `temporal_cognify`, or a remote instance.
+GLiNER or a remote instance.
 
 ### 2. Ingestion knobs
 
@@ -30,7 +30,7 @@ All are `remember()` arguments (and `cognify()` ones):
 | Knob | Default | What it controls |
 |---|---|---|
 | `data_per_batch` | 20 | How many documents are processed **at the same time** (a concurrency limit, not a batch). Lower it to reduce load; raise it for many small files. |
-| `chunks_per_batch` | 2000 (env `CHUNKS_PER_BATCH`) | How many chunks each extraction/storage call receives. Lower it to spread load and fail smaller. The DLT pipeline defaults to 100, temporal to 10. |
+| `chunks_per_batch` | 2000 (env `CHUNKS_PER_BATCH`) | How many chunks each extraction/storage call receives. Lower it to spread load and fail smaller. The DLT pipeline defaults to 100. |
 | `chunk_size` | min(embedding max tokens, LLM max tokens / 2); about 8191 tokens with default OpenAI models | Max tokens per chunk. Fewer, bigger chunks mean fewer LLM calls; smaller chunks mean finer-grained graphs. |
 | `run_in_background` | `False` | Return immediately (`status="running"`); `await result` later. |
 | `self_improvement` | `True` | `improve()` after the graph is built. `False` (or `IMPROVE_AUTO_ENABLED=false`) skips that extra work. |

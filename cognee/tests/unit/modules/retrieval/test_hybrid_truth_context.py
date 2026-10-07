@@ -18,6 +18,7 @@ def _result(result_id="chunk-1", payload=None):
 def _unified_engine():
     engine = MagicMock()
     engine.vector = MagicMock()
+    engine.vector.has_collection = AsyncMock(return_value=False)
     engine.vector.embedding_engine.embed_text = AsyncMock(return_value=[[1.0, 0.0, 0.0]])
     engine.vector.search = AsyncMock(return_value=[_result()])
     engine.graph = MagicMock()

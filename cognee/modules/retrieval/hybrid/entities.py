@@ -1,6 +1,8 @@
 from typing import Any
 
-from cognee.modules.retrieval.hybrid.chunks import search_collection
+from cognee.modules.engine.models.DltColumn import DltColumn
+from cognee.modules.engine.models.Entity import Entity
+from cognee.modules.retrieval.hybrid.chunks import search_collections
 from cognee.modules.retrieval.hybrid.facts import connection_edge_type_id
 from cognee.modules.retrieval.hybrid.results import (
     display_value,
@@ -10,8 +12,22 @@ from cognee.modules.retrieval.hybrid.results import (
     result_id,
 )
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.schema.models import SchemaRelationship, SchemaTable
 
 logger = get_logger("HybridRetriever")
+
+
+def entity_collections(include_dlt_rows: bool) -> tuple[str, ...]:
+    """The entity lane's collections: entities, plus the DLT table, relationship and
+    cell-value nodes when the dataset has DLT rows."""
+    collections = (Entity.vector_collection(),)
+    if include_dlt_rows:
+        collections += (
+            DltColumn.vector_collection(),
+            SchemaTable.vector_collection("name"),
+            SchemaRelationship.vector_collection("name"),
+        )
+    return collections
 
 
 async def search_entities(
@@ -21,12 +37,14 @@ async def search_entities(
     node_name: list[str] | None,
     node_name_filter_operator: str,
     query_vector: list[float],
+    collections: tuple[str, ...] = entity_collections(include_dlt_rows=False),
 ) -> list[Any]:
-    """Entity_name hits, or empty if the collection is missing or search fails."""
+    """Hits over ``collections``, or empty if the search fails (a missing
+    collection is an empty channel)."""
     try:
-        return await search_collection(
+        return await search_collections(
             vector_engine,
-            "Entity_name",
+            collections,
             query,
             top_k,
             node_name,
@@ -35,7 +53,7 @@ async def search_entities(
         )
     except Exception as error:
         logger.warning(
-            "Entity_name search failed; continuing without entities: %s", error, exc_info=True
+            "Entity search failed; continuing without entities: %s", error, exc_info=True
         )
         return []
 

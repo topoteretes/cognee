@@ -2,11 +2,11 @@
 
 A document synced from an external source (e.g. an untitled Notion page) can
 have content that is just a URL or a path that happens to exist on the host.
-``save_data_item_to_storage_detailed`` would fetch such a URL or read such a
-path instead of storing the string; ``literal_text=True`` routes the item
-straight to ``save_data_to_file_detailed`` instead, which always stores its
-argument as text. These tests drive real ``ingest_data`` against a real
-sqlite engine and assert on which storage function actually ran.
+``ingest_data`` hands the whole ``DataItem`` to
+``save_data_item_to_storage_detailed``, which stores a ``literal_text`` item
+verbatim (``test_save_data_item_literal_text.py``). These tests drive real
+``ingest_data`` against a real sqlite engine and assert that the flag reaches
+the storage function instead of being unwrapped away.
 """
 
 import importlib
@@ -52,7 +52,7 @@ async def _make_engine():
     return engine, db_path
 
 
-async def _run_ingest(data_item, item_save_mock, text_save_mock):
+async def _run_ingest(data_item, item_save_mock):
     engine, db_path = await _make_engine()
     dataset = Dataset(id=DATASET_ID, name="ds", owner_id=USER.id)
     ctx = SimpleNamespace(dataset=dataset, user=USER, extras={})
@@ -63,9 +63,6 @@ async def _run_ingest(data_item, item_save_mock, text_save_mock):
             )
             stack.enter_context(
                 patch.object(ingest_module, "save_data_item_to_storage_detailed", item_save_mock)
-            )
-            stack.enter_context(
-                patch.object(ingest_module, "save_data_to_file_detailed", text_save_mock)
             )
             stack.enter_context(patch.object(ingest_module, "get_data_file_path", lambda p: p))
             stack.enter_context(
@@ -95,78 +92,41 @@ async def _run_ingest(data_item, item_save_mock, text_save_mock):
         os.unlink(db_path)
 
 
-@pytest.mark.asyncio
-async def test_literal_text_url_content_is_stored_as_text_not_fetched():
-    content = "https://example.com/x"
-    item_save_mock = AsyncMock(side_effect=AssertionError("URL was fetched"))
-    text_save_mock = AsyncMock(
-        return_value=StoredFile(file_path="/tmp/doc.txt", metadata=_metadata())
-    )
-
-    await _run_ingest(DataItem(data=content, literal_text=True), item_save_mock, text_save_mock)
-
-    item_save_mock.assert_not_called()
-    text_save_mock.assert_awaited_once_with(content)
+def _stored():
+    return AsyncMock(return_value=StoredFile(file_path="/tmp/doc.txt", metadata=_metadata()))
 
 
 @pytest.mark.asyncio
-async def test_literal_text_existing_path_content_is_stored_as_text_not_read(tmp_path):
+@pytest.mark.parametrize(
+    "content",
+    ["https://example.com/x", "s3://some-bucket/some-key", "file:///etc/passwd"],
+)
+async def test_literal_text_item_reaches_storage_with_its_flag(content):
+    item = DataItem(data=content, literal_text=True)
+    item_save_mock = _stored()
+
+    await _run_ingest(item, item_save_mock)
+
+    item_save_mock.assert_awaited_once_with(item)
+
+
+@pytest.mark.asyncio
+async def test_literal_text_existing_path_reaches_storage_with_its_flag(tmp_path):
     existing_file = tmp_path / "secret.txt"
     existing_file.write_text("do not leak this", encoding="utf-8")
-    content = str(existing_file)
+    item = DataItem(data=str(existing_file), literal_text=True)
+    item_save_mock = _stored()
 
-    item_save_mock = AsyncMock(side_effect=AssertionError("local file was read"))
-    text_save_mock = AsyncMock(
-        return_value=StoredFile(file_path="/tmp/doc.txt", metadata=_metadata())
-    )
+    await _run_ingest(item, item_save_mock)
 
-    await _run_ingest(DataItem(data=content, literal_text=True), item_save_mock, text_save_mock)
-
-    item_save_mock.assert_not_called()
-    text_save_mock.assert_awaited_once_with(content)
+    item_save_mock.assert_awaited_once_with(item)
 
 
 @pytest.mark.asyncio
-async def test_literal_text_s3_content_is_stored_as_text_not_treated_as_s3_path():
-    content = "s3://some-bucket/some-key"
-    item_save_mock = AsyncMock(side_effect=AssertionError("s3 path was handed through"))
-    text_save_mock = AsyncMock(
-        return_value=StoredFile(file_path="/tmp/doc.txt", metadata=_metadata())
-    )
+async def test_item_without_literal_text_takes_the_same_storage_entry_point():
+    item = DataItem(data="# My Page\n\nbody text")
+    item_save_mock = _stored()
 
-    await _run_ingest(DataItem(data=content, literal_text=True), item_save_mock, text_save_mock)
+    await _run_ingest(item, item_save_mock)
 
-    item_save_mock.assert_not_called()
-    text_save_mock.assert_awaited_once_with(content)
-
-
-@pytest.mark.asyncio
-async def test_literal_text_file_uri_content_is_stored_as_text_not_read():
-    content = "file:///etc/passwd"
-    item_save_mock = AsyncMock(side_effect=AssertionError("file:// URI was resolved"))
-    text_save_mock = AsyncMock(
-        return_value=StoredFile(file_path="/tmp/doc.txt", metadata=_metadata())
-    )
-
-    await _run_ingest(DataItem(data=content, literal_text=True), item_save_mock, text_save_mock)
-
-    item_save_mock.assert_not_called()
-    text_save_mock.assert_awaited_once_with(content)
-
-
-@pytest.mark.asyncio
-async def test_titled_row_without_literal_text_takes_the_normal_storage_path():
-    # A titled row's rendered text ("# Title\n\n...") never looks like a URL or
-    # path, so it already fell through to save_data_to_file_detailed before
-    # this fix. Default literal_text=False must keep routing through the
-    # ordinary save_data_item_to_storage_detailed entry point unchanged.
-    content = "# My Page\n\nbody text"
-    item_save_mock = AsyncMock(
-        return_value=StoredFile(file_path="/tmp/doc.txt", metadata=_metadata())
-    )
-    text_save_mock = AsyncMock(side_effect=AssertionError("literal text path was used"))
-
-    await _run_ingest(DataItem(data=content), item_save_mock, text_save_mock)
-
-    text_save_mock.assert_not_called()
-    item_save_mock.assert_awaited_once_with(content)
+    item_save_mock.assert_awaited_once_with(item)
