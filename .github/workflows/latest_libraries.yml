@@ -24,19 +24,11 @@ permissions:
   contents: read
 
 on:
-  push:
-    branches: [dev]
+  # Every PR, not only those touching pyproject: the releases that break
+  # cognee arrive on PyPI's schedule, not ours, and this is the only job that
+  # sees them.
   pull_request:
     branches: [dev, main]
-    paths:
-      - pyproject.toml
-      - uv.lock
-      - .github/workflows/latest_libraries.yml
-      - cognee/tests/e2e/keyless/**
-  schedule:
-    # `schedule` only fires on the default branch (main). dev is covered by the
-    # push trigger above, on every merge.
-    - cron: "0 5 * * *"
   workflow_dispatch:
 
 concurrency:
@@ -51,7 +43,8 @@ jobs:
   keyless-on-latest:
     name: Keyless e2e on the newest release of every dependency
     runs-on: ubuntu-22.04
-    timeout-minutes: 45
+    # The same flow on the lockfile takes about 4 minutes, model download included.
+    timeout-minutes: 20
     env:
       # The workflow-level skip other suites set disables the keyless rerouting
       # as well (keyless_local_defaults_apply), so it must be off here.
@@ -100,10 +93,11 @@ jobs:
       - name: Install cognee (core dependencies only)
         run: uv sync --frozen
 
-      - name: Cache the local models
+      - name: Restore the local models
         # GLiNER (~750 MB) and bge-small (~67 MB); the key names the models the
         # flow downloads, so a model change gets a fresh cache.
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        id: models
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: .model-cache
           key: keyless-models-${{ runner.os }}-gliner2.5-base-v1-bge-small-en-v1.5
@@ -113,3 +107,13 @@ jobs:
       # runtime (CPU torch + the gliner extra) at its newest releases too.
       - name: Run the keyless core flow on the newest releases
         run: uv run --no-sync python ./cognee/tests/e2e/keyless/keyless_ingest_check.py
+
+      - name: Save the local models
+        # Saved on a red run as well (`actions/cache` alone saves only on
+        # success): a release that breaks search still downloaded the models,
+        # and the next run should not fetch 800 MB again to hit the same error.
+        if: always() && steps.models.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: .model-cache
+          key: keyless-models-${{ runner.os }}-gliner2.5-base-v1-bge-small-en-v1.5
