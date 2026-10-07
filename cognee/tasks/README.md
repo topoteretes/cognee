@@ -20,8 +20,8 @@ task's output, `enriches`, `ctx` injection, `Drop`) are documented in
 | 6 | `provenance.record_provenance` | audit-ledger rows, when `PROVENANCE_TRACKING=true` |
 | 7 | `graph.detect_contradictions` | `contradicts` edges, when `CONTRADICTION_DETECTION=true` |
 
-`cognify(temporal_cognify=True)` swaps steps 3–4 for `temporal_graph.extract_events_and_timestamps`
-→ `temporal_graph.extract_knowledge_graph_from_events`. The dlt route adds
+Dates are extracted in step 3 as `Timestamp` nodes; the event pipeline under `temporal_graph/` is
+no longer a cognify option. The dlt route adds
 `ingestion.purge_stale_dlt_source_artifacts` and `ingestion.extract_dlt_source_edges`.
 `improve()` / `memify()` run the pre-assembled lists in `cognee/memify_pipelines/`.
 
