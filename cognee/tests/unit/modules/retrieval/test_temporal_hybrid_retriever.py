@@ -492,12 +492,11 @@ async def test_temporal_retriever_fallbacks_return_the_baseline(
     assert retriever.last_reason == reason
     assert result == retriever.last_baseline
     assert [chunk["id"] for chunk in result["chunks"]] == ["c1", "c2"]
-    # No window names its reason; a rerank that ran but moved nothing is not a
-    # fallback; the rest warn that no dated data matched.
+    # No window gets its own warning (the reason stays on last_reason); a rerank that
+    # ran but moved nothing is not a fallback; the rest warn that no dated data matched.
     no_window = interval[2] is not None
-    assert (f"Could not extract a time window from this question ({reason})" in caplog.text) is (
-        no_window
-    )
+    assert ("Could not extract a time window from this question" in caplog.text) is no_window
+    assert reason not in caplog.text
     assert ("No time-anchored data found for this question" in caplog.text) is (
         not no_window and not anchors["chunk_ids"]
     )
