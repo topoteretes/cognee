@@ -23,12 +23,6 @@ class CodeRepository(DataPoint):
     # the snapshot id, so SearchType.CODE's delta operation can report how the
     # graph was produced and how complete the extraction was.
     last_receipt: dict | None = None
-    # The node_set names applied to this repo's code nodes by the last fully
-    # completed load (sorted, None when the repo is untagged). Compared
-    # against the current call's node_set both to decide the snapshot-skip
-    # (a node_set change forces a reload even on an unchanged snapshot) and
-    # to know which tag names to strip from surviving nodes on a re-tag.
-    last_node_set: list[str] | None = None
     metadata: dict = {"index_fields": ["name"]}
 
 

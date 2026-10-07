@@ -145,13 +145,6 @@ def map_facts_to_data_points(
     An untagged call (node_set=None, the per-file CODE route and the legacy
     remember(content_type="code") path) produces byte-identical fact_hash
     values to before this parameter existed.
-
-    The returned CodeRepository's ``last_node_set`` is left at its model
-    default (``None``) here -- ``add_code_graph_data_points`` overrides it
-    from its own pre-write graph read right before storing, which is the
-    only read guaranteed to run immediately before the write. See that
-    function's docstring for why the marker is never set at construction
-    time.
     """
     fallback_repo = _resolve_fallback_repo(facts, repo_path)
 
@@ -622,9 +615,9 @@ async def extract_code_graph(
     The returned list composes with the add_data_points task downstream. Typed
     relations are persisted separately by add_code_graph_edges, which re-reads
     the same snapshot after the nodes exist in the graph. ``node_set`` tags
-    every returned node (see ``map_facts_to_data_points``); a snapshot whose id
-    is unchanged is still reloaded in full when node_set changed, so a re-tag
-    is never skipped as "already loaded".
+    every returned node (see ``map_facts_to_data_points``). An unchanged
+    snapshot is skipped only for an untagged repo: a tagged one always reloads,
+    so a tag change (or a run that crashed mid-retag) is never skipped.
     """
     # When used as the first pipeline task, the pipeline payload arrives as the
     # first positional argument; accept a repo path there, ignore anything else.
@@ -651,20 +644,16 @@ async def extract_code_graph(
     if snapshot_id is not None:
         fallback_repo = _resolve_fallback_repo(facts, repo_path)
         try:
-            stored_id, stored_node_set = await _stored_repository_state(fallback_repo)
+            stored_id, stored_tagged = await _stored_repository_state(fallback_repo)
         except Exception as error:
             # The skip check is an optimization; never let it break ingestion.
             logger.warning(
                 "Could not read the stored snapshot id (%s); loading fully.", error, exc_info=True
             )
-            stored_id, stored_node_set = None, None
-        current_node_set = sorted(node_set) if node_set else None
-        if stored_id == snapshot_id and (
-            (sorted(stored_node_set) if stored_node_set else None) == current_node_set
-        ):
+            stored_id, stored_tagged = None, False
+        if stored_id == snapshot_id and not node_set and not stored_tagged:
             logger.info(
-                "Code graph for '%s' already matches snapshot %s (node_set unchanged); "
-                "skipping load.",
+                "Code graph for '%s' already matches snapshot %s; skipping load.",
                 fallback_repo,
                 snapshot_id,
             )
@@ -699,32 +688,22 @@ def _read_repo_node_property(node: Any, key: str) -> Any:
     return None
 
 
-async def _stored_repository_state(repo: str) -> tuple[str | None, list[str] | None]:
-    """(last_snapshot_id, last_node_set) recorded on the repository node by the
-    last full load.
+async def _stored_repository_state(repo: str) -> tuple[str | None, bool]:
+    """(last_snapshot_id, whether it carries a node_set) off the repository node.
 
-    Both live on the CodeRepository node in the graph itself — not in the
-    relational metastore — because this pipeline persists no Data row to key
-    relational state on (the payload is a repo path), and because a marker
-    stored with the graph can never outlive it: forget(memory_only=True),
-    prune, and even manual deletion of the graph database files all take the
-    marker down with the data it describes. One read serves both the
-    snapshot-skip check and the node_set comparison; this read is a separate,
-    best-effort optimization from the one add_code_graph_data_points takes
-    right before writing, which is the one that actually carries
-    last_node_set forward (see that function's docstring) -- a failure here
-    only costs a full reload, never a wrong marker.
+    The snapshot id lives on the CodeRepository node in the graph itself, not
+    in the relational metastore: this pipeline persists no Data row to key it
+    on, and a marker stored with the graph can never outlive it.
     """
     from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 
     graph_engine = await get_graph_engine()
     node = await graph_engine.get_node(str(fact_node_id(repo, "repository", repo)))
     stored_id = _read_repo_node_property(node, "last_snapshot_id")
-    stored_node_set = _read_repo_node_property(node, "last_node_set")
-    return (
-        stored_id if isinstance(stored_id, str) and stored_id else None,
-        stored_node_set if isinstance(stored_node_set, list) else None,
-    )
+    tags = _read_repo_node_property(node, "belongs_to_set")
+    if isinstance(tags, str):
+        tags = json.loads(tags)
+    return stored_id if isinstance(stored_id, str) and stored_id else None, bool(tags)
 
 
 def _snapshot_repos(facts: list[dict], fallback_repo: str) -> set:
@@ -800,18 +779,6 @@ async def add_code_graph_data_points(
     The pre-read state rides on the returned list so add_code_graph_edges can
     diff edges and sweep without reading the graph again.
 
-    This is also the one place that carries the CodeRepository node's
-    ``last_node_set`` marker forward. This write is a full rewrite of the
-    node on Ladybug/postgres_demo, so whatever value the DataPoint carries
-    replaces the stored one outright; the marker is set here, from the read
-    this function already takes, rather than from a value computed earlier
-    in extract_code_graph -- that earlier read is a separate, independently
-    fallible optimization (the snapshot-skip check), and if it failed or
-    went stale between there and here, trusting it would wipe the real
-    previous tag to ``None``. This read either succeeds (and the marker
-    carries forward correctly) or raises (and nothing gets written at all),
-    so there is no path that writes a wrong marker.
-
     A custom-pipeline payload may be any value, but the storage rollback ledger
     requires a persisted data item id. Preserve the full context when one is
     available and otherwise store without ledger provenance. graph_only keeps
@@ -832,11 +799,6 @@ async def add_code_graph_data_points(
         for node_id, properties in existing_nodes
         if isinstance(properties, dict)
     }
-    existing_repo_last_node_set: dict[str, Any] = {
-        str(node_id): properties.get("last_node_set")
-        for node_id, properties in existing_nodes
-        if isinstance(properties, dict) and properties.get("type") == "CodeRepository"
-    }
 
     to_write: list[DataPoint] = []
     added: list[str] = []
@@ -845,12 +807,7 @@ async def add_code_graph_data_points(
     for point in data_points:
         if isinstance(point, CodeRepository):
             # Repository nodes are always rewritten (they carry the snapshot
-            # stamp) and are not counted as content changes. last_node_set
-            # carries forward from this read (see docstring above).
-            stored_last_node_set = existing_repo_last_node_set.get(str(point.id))
-            point.last_node_set = (
-                stored_last_node_set if isinstance(stored_last_node_set, list) else None
-            )
+            # stamp) and are not counted as content changes.
             to_write.append(point)
             continue
         point_id = str(getattr(point, "id", point))
@@ -1127,51 +1084,15 @@ async def _detag_stale_code_graph(
     existing_edge_keys: set,
     node_set: list[str] | None,
 ) -> list[str]:
-    """Strip node_set tag names this repo no longer carries after a re-tag.
+    """Strip node_set tags this repo's surviving code nodes carry but should not.
 
-    The repository's ``last_node_set`` marker (stamped only by a fully
-    completed load) is one signal, but not the only one: a run that writes a
-    tag and then crashes before its own stamp leaves that tag on the
-    belongs_to_set property and edges without ever advancing the marker, so
-    a marker-only comparison can never see it and the tag is stranded
-    forever. The set of names to strip is instead the union of:
-      - the marker (last_node_set on the repository node, if any),
-      - the belongs_to_set property actually stored on this repo's surviving
-        code nodes in this pre-write read, and
-      - the NodeSet names resolved from any belongs_to_set edge these nodes
-        currently hold (via the NodeSet nodes' own ``name`` property, read
-        from this same existing_nodes snapshot),
-    minus the current ``node_set`` -- but the two writes this produces are
-    stale by DIFFERENT comparisons, because they fail in opposite directions
-    otherwise:
+    Stale tags are read off the nodes themselves (their ``belongs_to_set``
+    edges and property), so a tag left behind by a crashed run is found too.
+    A node rewrite never removes edges, so stale edges are deleted on every
+    backend; the property is only stale on Neo4j, whose rewrite unions it.
 
-    - Edges are compared by NodeSet id (``NodeSet.id_for``, which
-      lowercases, turns spaces into underscores and strips apostrophes), so
-      "Team-A" and "team-a" (or "team a" and "team_a") name the SAME
-      NodeSet under different spellings. A raw-string comparison here would
-      treat a same-id retag as a real removal and delete the edge the
-      current write just added.
-    - The property is compared by EXACT string instead, because
-      ``remove_belongs_to_set_tags`` filters by literal string membership on
-      every backend (Neo4j, Ladybug, postgres_demo, Turso). An id-based
-      comparison here would never even propose stripping "Team-A" once
-      "team-a" is the current tag (same id, so not "stale"), and Neo4j's
-      node rewrite UNIONS ``belongs_to_set`` instead of replacing it -- so a
-      respelling-only retag would keep both spellings on the property
-      forever. Passing the id-equivalent old spelling to
-      remove_belongs_to_set_tags is safe: it matches by literal string, so
-      "Team-A" can never remove "team-a".
-
-    Names dropped are removed from every surviving code node of this repo
-    (post-sweep survivors only -- a node about to be deleted needs no
-    detagging): the belongs_to_set edges to the retired NodeSet(s) via
-    delete_edge_triples (needed on every backend, since a node rewrite only
-    adds edges, never removes them), and the belongs_to_set property array
-    via remove_belongs_to_set_tags (writes nothing on backends whose node
-    rewrite already replaced the property (one scoped read); load-bearing on
-    Neo4j, whose rewrite unions belongs_to_set instead of replacing it).
-    Returns the union of names touched by either write, or an empty list
-    when there was nothing to strip.
+    Edges are stale by NodeSet id, the property by exact name: a respelling
+    ("Team-A" -> "team-a") keeps the shared edge but drops the old spelling.
     """
     from cognee.infrastructure.databases.provenance.delete_data import EdgeIdentity
 
@@ -1190,66 +1111,47 @@ async def _detag_stale_code_graph(
         return []
     code_node_id_set = set(code_node_ids)
 
-    stored_node_set: list | None = None
-    property_tag_names: set = set()
-    nodeset_id_to_name: dict = {}
+    nodeset_names = {
+        str(node_id): properties.get("name")
+        for node_id, properties in existing_nodes
+        if isinstance(properties, dict) and properties.get("type") == "NodeSet"
+    }
+    property_names: set = set()
     for node_id, properties in existing_nodes:
-        if not isinstance(properties, dict):
-            continue
-        node_type = properties.get("type")
-        if node_type == "NodeSet":
-            name = properties.get("name")
-            if isinstance(name, str):
-                nodeset_id_to_name[str(node_id)] = name
-            continue
-        if node_type == "CodeRepository" and properties.get("name") in snapshot_repos:
-            candidate = properties.get("last_node_set")
-            if isinstance(candidate, list):
-                stored_node_set = candidate
-        if str(node_id) in code_node_id_set:
-            belongs_to_set = properties.get("belongs_to_set")
-            if isinstance(belongs_to_set, list):
-                property_tag_names.update(name for name in belongs_to_set if isinstance(name, str))
+        if str(node_id) in code_node_id_set and isinstance(properties, dict):
+            tags = properties.get("belongs_to_set")
+            if isinstance(tags, list):
+                property_names.update(tag for tag in tags if isinstance(tag, str))
+    edge_names = {
+        nodeset_names[target]
+        for source, target, relationship in existing_edge_keys or ()
+        if relationship == "belongs_to_set"
+        and source in code_node_id_set
+        and isinstance(nodeset_names.get(target), str)
+    }
 
-    edge_tag_names: set = set()
-    for source, target, relationship in existing_edge_keys or ():
-        if relationship != "belongs_to_set" or source not in code_node_id_set:
-            continue
-        name = nodeset_id_to_name.get(target)
-        if name:
-            edge_tag_names.add(name)
-
-    candidate_names = set(stored_node_set or []) | property_tag_names | edge_tag_names
-
-    # Edges: stale by NORMALIZED id -- never delete an edge whose id matches
-    # a current name (a same-id retag is a respelling, not a removal).
-    current_name_ids = {str(NodeSet.id_for(name)) for name in (node_set or [])}
+    current = set(node_set or [])
+    current_ids_by_name = {NodeSet.id_for(name) for name in current}
     stale_edge_names = sorted(
-        name for name in candidate_names if str(NodeSet.id_for(name)) not in current_name_ids
+        name
+        for name in edge_names | property_names
+        if NodeSet.id_for(name) not in current_ids_by_name
     )
-
-    # Property: stale by EXACT STRING -- an old spelling that shares its
-    # NodeSet id with the current tag must still be stripped from the
-    # property text itself (see docstring for why this is safe and why the
-    # id-based comparison above cannot be reused here).
-    stale_property_names = sorted(property_tag_names - set(node_set or []))
-
+    stale_property_names = sorted(property_names - current)
     if not stale_edge_names and not stale_property_names:
         return []
 
-    if stale_edge_names:
-        stale_edges = [
-            EdgeIdentity(
-                source_id=node_id,
-                target_id=str(NodeSet.id_for(name)),
-                relationship_name="belongs_to_set",
-            )
-            for node_id in code_node_ids
-            for name in stale_edge_names
-        ]
-        for start in range(0, len(stale_edges), _SWEEP_CHUNK_SIZE):
-            await graph_engine.delete_edge_triples(stale_edges[start : start + _SWEEP_CHUNK_SIZE])
-
+    stale_edges = [
+        EdgeIdentity(
+            source_id=node_id,
+            target_id=str(NodeSet.id_for(name)),
+            relationship_name="belongs_to_set",
+        )
+        for node_id in code_node_ids
+        for name in stale_edge_names
+    ]
+    for start in range(0, len(stale_edges), _SWEEP_CHUNK_SIZE):
+        await graph_engine.delete_edge_triples(stale_edges[start : start + _SWEEP_CHUNK_SIZE])
     if stale_property_names:
         for start in range(0, len(code_node_ids), _SWEEP_CHUNK_SIZE):
             await graph_engine.remove_belongs_to_set_tags(
@@ -1282,26 +1184,17 @@ async def _stamp_snapshot_identity(
     receipt: dict | None = None,
     node_set: list[str] | None = None,
 ) -> None:
-    """Record the loaded snapshot's identity, node_set tag, delta and receipt
-    on the repository nodes.
+    """Record the loaded snapshot's identity, delta, receipt and tag on the repository nodes.
 
-    This is a full rewrite of the CodeRepository node (``add_nodes``), so it
-    must carry belongs_to_set/source_node_set/last_node_set forward itself --
-    a rewrite that omitted them would erase the tag add_code_graph_data_points
-    just wrote (Ladybug/postgres_demo overwrite node properties wholesale;
-    Neo4j unions belongs_to_set, so re-sending the current tag here is a
-    no-op there, not a duplicate). This write goes through ``add_nodes``
-    directly, not ``get_graph_from_model``, so ``belongs_to_set`` must already
-    be the stored shape (tag names) rather than ``NodeSet`` DataPoints --
-    passing DataPoints here would serialize full NodeSet objects onto the
-    property instead of names.
+    This rewrites the CodeRepository node through ``add_nodes``, so it carries
+    the tag itself, as names (the stored shape): omitting it would erase the
+    tag on adapters that overwrite node properties wholesale.
     """
     if snapshot_id is None:
         return
     fallback_repo = _resolve_fallback_repo(facts, repo_path)
     last_receipt = receipt_projection(receipt)
     source_node_set = ", ".join(node_set) if node_set else None
-    last_node_set = sorted(node_set) if node_set else None
     repositories = [
         CodeRepository(
             id=fact_node_id(repo, "repository", repo),
@@ -1310,8 +1203,7 @@ async def _stamp_snapshot_identity(
             last_snapshot_id=snapshot_id,
             last_delta=delta,
             last_receipt=last_receipt,
-            last_node_set=last_node_set,
-            belongs_to_set=last_node_set,
+            belongs_to_set=list(node_set) if node_set else None,
             source_node_set=source_node_set,
         )
         for repo in sorted(_snapshot_repos(facts, fallback_repo))
