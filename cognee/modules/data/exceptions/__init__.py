@@ -8,6 +8,7 @@ from .exceptions import (
     UnstructuredLibraryImportError,
     UnauthorizedDataAccessError,
     AmbiguousDataIdError,
+    AmbiguousDatasetNameError,
     DatasetNotFoundError,
     DatasetTypeError,
 )
