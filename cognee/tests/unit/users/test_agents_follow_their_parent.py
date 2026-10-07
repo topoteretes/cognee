@@ -115,9 +115,34 @@ async def _agent_with_access(name, parent_id, dataset_id):
     from cognee.modules.users.methods import get_user
     from cognee.modules.users.permissions.methods import give_permission_on_dataset
 
-    agent, key = await create_agent(f"{name}-{uuid4()}", await get_user(parent_id))
+    parent = await get_user(parent_id)
+    if parent.parent_user_id is None:
+        agent, key = await create_agent(f"{name}-{uuid4()}", parent)
+    else:
+        agent, key = await _agent_of_an_agent(f"{name}-{uuid4()}", parent)
     await give_permission_on_dataset(agent, dataset_id, "read")
     return agent.id, key
+
+
+async def _agent_of_an_agent(name, parent):
+    """An agent whose parent is an agent, as one created before create_agent refused
+    agents as parents still exists: create_agent's own steps, without that check."""
+    from sqlalchemy import update
+
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.users.api_key.create_api_key import create_api_key
+    from cognee.modules.users.methods import create_user
+    from cognee.modules.users.models import User
+
+    agent = await create_user(
+        email=f"{name}+{parent.id}@cognee.agent", password="!", parent_user_id=parent.id
+    )
+    async with get_relational_engine().get_async_session() as session:
+        await session.execute(
+            update(User).where(User.id == agent.id).values(tenant_id=parent.tenant_id)
+        )
+        await session.commit()
+    return agent, (await create_api_key(agent, name)).api_key
 
 
 async def _resolve(key):
