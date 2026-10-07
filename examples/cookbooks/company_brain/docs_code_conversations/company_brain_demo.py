@@ -6,8 +6,8 @@
     python examples/cookbooks/company_brain/docs_code_conversations/company_brain_demo.py --recall-only
 
 Requires an LLM and embedding provider for text, session learning, and answers.
-Code extraction uses the Enola CLI included with cognee and embeds the
-extracted symbols, so it needs an embedding provider but makes no LLM calls. The
+Code extraction uses the Enola CLI included with cognee and makes no LLM or
+embedding calls; the code is queried through the CODE search type. The
 tiny code fixture and default storage live beside this script under
 .cognee-readme-demo.
 Existing storage environment variables take precedence. No memory is deleted.
@@ -30,9 +30,16 @@ LESSON = (
 )
 QUESTION = (
     "Who maintains the payments API, which database does it use, "
-    "what release rule did we learn, and which function guards against "
-    "duplicate charges?"
+    "and what release rule did we learn?"
 )
+# The CODE search type answers by graph operation, not by question text: this
+# one follows the replay test that the release rule names into the code.
+CODE_QUERY = {
+    "operation": "explore",
+    "name": "payments.replay_test",
+    "direction": "forward",
+    "node_types": ["CodeSymbol"],
+}
 CODE = '''"""Payments API: guard against duplicate webhook delivery."""
 
 
@@ -76,16 +83,28 @@ def prepare_demo():
 
 def print_answers(entries):
     for entry in entries:
-        print(entry.text)
+        if entry.source == "code":
+            # Code entries carry the CODE operation's JSON result as text.
+            result = json.loads(entry.text)
+            for fact in result.get("facts", []):
+                print(f"{fact['name']} ({fact['file']}:{fact['line']})")
+            for edge in result.get("edges", []):
+                print(f"{edge['source']} --{edge['type']}--> {edge['target']}")
+        else:
+            print(entry.text)
 
 
 async def recall_saved_memory(cognee):
     print("\nAnswer in a fresh session:", flush=True)
     print_answers(
+        # The graph lane answers from the document and the lesson; the code
+        # lane adds the code graph's facts about the replay test.
         await cognee.recall(
             QUESTION,
             query_type=cognee.SearchType.GRAPH_COMPLETION,
             datasets=[DATASET],
+            scope=["graph", "code"],
+            code_query=CODE_QUERY,
             session_id=f"readme-verification-{uuid4().hex}",
         )
     )
@@ -95,17 +114,18 @@ async def index_code(cognee, root):
     repo = root / "payments-example"
     repo.mkdir(parents=True, exist_ok=True)
     (repo / "payments.py").write_text(CODE)
+    # A project marker makes remember() store the folder as one code repository,
+    # which cognify builds into a code graph with no LLM or embedding calls.
+    (repo / "pyproject.toml").write_text('[project]\nname = "payments-example"\n')
     print("\nIndexing the sample code:", flush=True)
-    # index_vectors writes CodeSymbol embeddings too, so the final
-    # GRAPH_COMPLETION answer can reach the code alongside text and lessons.
-    await cognee.remember(str(repo), dataset_name=DATASET, content_type="code", index_vectors=True)
-    facts = await cognee.search(
-        query_type=cognee.SearchType.CODE,
-        query_text="",
+    await cognee.remember(str(repo), dataset_name=DATASET, self_improvement=False)
+    facts = await cognee.recall(
+        "",
         datasets=[DATASET],
+        scope=["code"],
         code_query={"operation": "query_facts", "kinds": ["symbol"], "limit": 10},
     )
-    print(json.dumps(facts, indent=2, default=str))
+    print_answers(facts)
 
 
 async def main(args):
@@ -151,7 +171,7 @@ async def main(args):
             "An existing equivalent lesson can also cause the curator to reject a duplicate."
         )
 
-    print("5. Recall the document and learned rule in a fresh session.", flush=True)
+    print("5. Recall the document, learned rule, and code in a fresh session.", flush=True)
     await recall_saved_memory(cognee)
 
 
