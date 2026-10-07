@@ -1,6 +1,6 @@
 # Cognee Examples
 
-Runnable example scripts demonstrating cognee end-to-end — 75 scripts across four folders.
+Runnable example scripts demonstrating cognee end-to-end — 78 scripts across five folders.
 They double as the smoke-test corpus the team uses to verify behaviour across the SDK.
 
 > **New here?** Start with [`guides/simple_cognee_example.py`](guides/simple_cognee_example.py)
@@ -23,10 +23,11 @@ They double as the smoke-test corpus the team uses to verify behaviour across th
 | [`guides/`](guides/) | One feature per script: concise, self-contained how-tos | 38 |
 | [`advanced_guides/`](advanced_guides/) | Deeper takes on topics a guide already covers | 8 |
 | [`demos/`](demos/) | Multiple features stitched into use cases, grouped by topic | 28 |
+| [`cookbooks/`](cookbooks/) | Applications you build and keep running: ingest, graph model, UI, live sync, an agent | 5 |
 | [`integrations/`](integrations/) | Connector packages and deployment kits that pair cognee with other systems | 2 |
 
 One line each: **guides teach a feature, advanced guides deepen a feature, demos combine
-features.** See [Contributing](#-contributing-a-new-example) for the precise category rules.
+features, cookbooks build an application.** See [Contributing](#-contributing-a-new-example) for the precise category rules.
 
 ## 📘 `guides/` — one feature per script
 
@@ -97,6 +98,7 @@ features.** See [Contributing](#-contributing-a-new-example) for the precise cat
 |---|---|
 | [`neptune_analytics_example.py`](guides/neptune_analytics_example.py) | AWS account + provisioned Neptune Analytics graph |
 | [`local_ollama_example.py`](guides/local_ollama_example.py) | `ollama serve` + two pulled models — fully local |
+| [`turso_local_example.py`](guides/turso_local_example.py) | Relational, graph, vector and session cache all on the Turso rewrite engine (`cognee[turso]`); `ingest` / `verify` / `cleanup` phases show persistence across a restart |
 | [`s3_storage.py`](guides/s3_storage.py) | Your S3 bucket + AWS credentials |
 
 ## 🎓 `advanced_guides/` — the same topic, deeper
@@ -115,15 +117,28 @@ Each script names the simpler guide it builds on and states what it adds.
 | [`simple_document_qa/`](advanced_guides/simple_document_qa/) | `guides/simple_cognee_example.py` | Q&A over a real 150 KB document |
 | [`truth_centroid_slots_demo.py`](advanced_guides/truth_centroid_slots_demo.py) | `guides/truth_subspace_reranking.py` | Centroid slots, epochs, and rebuilds behind truth-subspace reranking |
 
+## 🍳 `cookbooks/` — applications you build and keep running
+
+A cookbook is named after the application it builds, not the feature it uses. The newer
+cookbooks share one shape: one short script that remembers your real accounts or folders
+with `remember()`, then runs one agent over that memory with `recall()`.
+
+| Cookbook | What you get |
+|---|---|
+| [`personalized_email/`](cookbooks/personalized_email/) | Granola + Gmail memory and a draft agent that answers an email with what you discussed, what you promised, and in your own tone |
+| [`company_brain/follow_up_agent/`](cookbooks/company_brain/follow_up_agent/) | Granola + Gmail + Linear memory and an agent that turns your latest call into next steps (owner, team, deadline, tracked issue) and posts them to Slack |
+| [`self_hosted_companion/`](cookbooks/self_hosted_companion/) | A chat companion that remembers your notes folder and every earlier chat |
+
+### [`company_brain/`](cookbooks/company_brain/) — one memory for a whole company
+| Script | Demonstrates |
+|---|---|
+| [`follow_up_agent/follow_up_agent.py`](cookbooks/company_brain/follow_up_agent/follow_up_agent.py) | The follow-up agent above ([guide](cookbooks/company_brain/follow_up_agent/README.md)) |
+| [`docs_code_conversations/company_brain_demo.py`](cookbooks/company_brain/docs_code_conversations/company_brain_demo.py) | The README onboarding tour: a text fact, a code graph, and a rule stated in a session — distilled, then answered from a fresh session |
+| [`company_qa/company_qa.py`](cookbooks/company_brain/company_qa/company_qa.py) | Your SQL database, ticket export and docs folder linked into one graph by a custom graph model, answered across, served in the UI and queried from Claude Code or Codex over MCP; `setup.py` adds a sample company to try it on ([guide](cookbooks/company_brain/company_qa/README.md)) |
+
 ## 🎯 `demos/` — features combined into use cases
 
 Every demo lives in a topic folder.
-
-### [`company_brain/`](demos/company_brain/) — one memory for a whole company
-| Script | Demonstrates |
-|---|---|
-| [`docs_code_conversations/company_brain_demo.py`](demos/company_brain/docs_code_conversations/company_brain_demo.py) | The README onboarding tour: a text fact, a code graph, and a rule stated in a session — distilled, then answered from a fresh session |
-| [`multi_source/company_brain.py`](demos/company_brain/multi_source/company_brain.py) | A relational database, a ticket export and meeting notes linked by a custom graph model, served in the UI, queried from Claude Code or Codex over MCP ([guide](demos/company_brain/multi_source/README.md)) |
 
 ### [`comprehensive_example/`](demos/comprehensive_example/) — everything at once
 | Script | Demonstrates |
@@ -230,6 +245,12 @@ Lives in a topic subfolder (`agentic/`, `sessions/`, `feedback/`, `ingestion_and
 `custom_pipelines/`, `permissions/`) — never loose at the `demos/` root. Scenario folders keep
 their own `data/`. If your demo really demonstrates one feature and its length is padding,
 it's a guide that grew — trim it.
+
+**`cookbooks/`** — an application someone would keep running, named after what it builds
+("Personalized email", not "Sessions with preferences"). Each cookbook folder is
+self-contained, so it can be copied out as a starting point: a `README.md` and one script
+that runs on the reader's own data, using cognee's connectors where they exist. If it presents a feature rather than leaving the reader with a
+tool, it's a demo.
 
 Research-grade proofs of concept don't belong in `examples/` — keep experiment drivers on a
 branch or in the issue that tracks the research.

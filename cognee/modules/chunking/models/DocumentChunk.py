@@ -4,7 +4,7 @@ from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.models.Edge import Edge
 from cognee.modules.chunking.external_metadata import normalize_external_metadata
 from cognee.modules.data.processing.document_types import Document
-from cognee.modules.engine.models import Entity
+from cognee.modules.engine.models import Entity, Timestamp
 from cognee.tasks.temporal_graph.models import Event
 
 
@@ -51,7 +51,7 @@ class DocumentChunk(DataPoint):
     # falls through to the tiling check.
     chunker_id: str | None = None
     is_part_of: Document
-    contains: list[Entity | Event | tuple[Edge, Entity]] = None
+    contains: list[Entity | Event | Timestamp | tuple[Edge, Entity | Timestamp]] = None
     importance_weight: float | None = 0.5
     document_id: str | None = None
     document_name: str | None = None
@@ -80,6 +80,11 @@ class DocumentChunk(DataPoint):
     # Per-chunk semantic graph identities used by the provenance sidecar,
     # carrying the edge text and every occurrence rather than a unique set.
     _provenance_edges: list = PrivateAttr(default_factory=list)
+    # Date-normalization hints for graph extraction, computed over the whole
+    # document in chunk order by ``attach_temporal_hints`` (see
+    # engine/utils/temporal_hints.py). None until that pass has run; private so
+    # the prompt input never becomes a node property.
+    _temporal_hints: list[str] | None = PrivateAttr(default=None)
 
     @model_validator(mode="after")
     def _inherit_document_external_metadata(self):

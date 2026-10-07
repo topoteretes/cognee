@@ -58,6 +58,7 @@ async def run_tasks(
     llm_config: LLMConfig | None = None,
     embedding_config: EmbeddingConfig | None = None,
     data_cache: bool = False,
+    after_run_completed: Callable[[], Awaitable[Any]] | None = None,
 ):
     """Run a pipeline over a dataset as ONE logical run.
 
@@ -67,6 +68,13 @@ async def run_tasks(
     domain-blind). A constant list is just the degenerate resolver; items
     resolved to different lists still share this run's lifecycle — one run
     record, one database context, one rollback, one terminal status.
+
+    ``after_run_completed`` is awaited once the run is recorded and reported
+    complete, still inside this dataset's database context (cognify uses it
+    to compact the vector store, see ``compact_vector_store``). It sits
+    outside the run's error handling: it cannot fail, roll back, or re-mark a
+    run that already completed. An exception it raises propagates to the
+    caller; the run stays recorded as completed.
     """
     task_resolver = tasks if callable(tasks) else None
     if not user:
@@ -394,3 +402,9 @@ async def run_tasks(
                 # In case of error during incremental loading of data just let the user know the pipeline Errored, don't raise error
                 if not isinstance(error, PipelineRunFailedError):
                     raise
+
+            # Reached only once the completed run's event has been consumed: a
+            # close at that yield re-raises above (``run_finished``), and the
+            # swallowed per-item failure path leaves ``run_finished`` unset.
+            if run_finished and after_run_completed is not None:
+                await after_run_completed()

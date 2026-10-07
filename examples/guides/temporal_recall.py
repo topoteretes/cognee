@@ -1,6 +1,6 @@
 """Time-bounded recall over an ingested timeline.
 
-``remember(..., temporal_cognify=True)`` extracts events with their dates, so
+``remember()`` extracts the dates in the text as Timestamp nodes, so
 ``SearchType.TEMPORAL`` can answer questions that depend on ordering — before, after,
 and between a pair of dates — rather than on embedding similarity alone.
 """
@@ -25,11 +25,10 @@ QUERIES = [
 async def main():
     await cognee.forget(everything=True)
 
-    # temporal_cognify builds the event timeline alongside the usual graph.
+    # Dates in the text become Timestamp nodes alongside the usual graph.
     await cognee.remember(
         TEXT,
         dataset_name="timeline_demo",
-        temporal_cognify=True,
         self_improvement=False,
     )
 

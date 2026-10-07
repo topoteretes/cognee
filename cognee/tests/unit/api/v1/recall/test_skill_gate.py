@@ -292,3 +292,80 @@ async def test_gate_failure_never_fails_recall(monkeypatch, api_recall_mod):
 
     assert out == []
     assert SearchType.SKILLS in [call.get("query_type") for call in search_calls]
+
+
+# ── gate classification: Chinese (CJK) queries ───────────────────────────────
+# Chinese is written without spaces, so a sentence is one continuous \w run and
+# \b can never match inside it: the English-only rules scored every Chinese
+# query 0.0 (issue #5418). The CJK rules drop \b and tier their weights like
+# the English ones.
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "帮我配置一下本地开发环境",  # request + verb fires on its own
+        "怎么排查这个报错",  # question + verb fires on its own
+        "如何部署到生产环境",
+        "怎样迁移这个数据库",
+        "有没有部署指南",  # strong document noun; 有没有 is not a negation
+        "新服务的接入操作手册在哪",
+    ],
+)
+def test_gate_fires_on_chinese_procedural_queries(query):
+    assert should_search_skills(query).fired
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "今天天气怎么样",  # 怎么样 is weather smalltalk, not procedural
+        "讲个笑话",
+        "现在几点了",
+        "你是谁",
+        "这个默认配置文件在哪里",  # 配置 as a noun does not fire alone
+        "安装步骤是什么",  # parity: "installation steps" does not fire in English either
+        "",
+    ],
+)
+def test_gate_stays_closed_on_chinese_non_procedural_queries(query):
+    assert not should_search_skills(query).fired
+
+
+def test_gate_chinese_negation_suppresses_match():
+    result = should_search_skills("不用配置这个服务")
+    assert not result.fired
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "请别帮我部署这个服务",  # would fire at 3.0 without the negator
+        "别教我怎么配置这个集群",  # would fire at 3.0 without the negator
+    ],
+)
+def test_gate_chinese_negation_suppresses_matches(query):
+    assert not should_search_skills(query).fired
+
+
+def test_gate_mixed_language_stacks_scores():
+    # The question phrasing (3.0) stacks with the weak verbs (2.0 each), like
+    # English "how to install" stacking with the bare verb rule.
+    result = should_search_skills("怎么配置 SSL 证书并安装到服务器")
+    assert result.fired
+    assert result.score >= 3.0
+    assert result.matched
+
+
+def test_gate_chinese_bare_verb_alone_never_fires():
+    # Mirrors the English weak verb tier: one bare verb stays under threshold.
+    assert not should_search_skills("看一下配置").fired
+
+
+def test_gate_english_queries_unchanged_after_cjk_rules():
+    # The CJK additions must not change English classification or scores.
+    result = should_search_skills("how do I deploy to staging")
+    assert result.fired
+    assert result.score >= 3.0
+
+    assert not should_search_skills("what is our churn rate").fired
