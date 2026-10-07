@@ -44,7 +44,7 @@ class GraphConfig(BaseSettings):
 
     # Using Field we are able to dynamically load current GRAPH_DATABASE_PROVIDER value in the model validator part
     # and determine default graph db file and path based on this parameter if no values are provided
-    graph_database_provider: str = Field("ladybug", env="GRAPH_DATABASE_PROVIDER")
+    graph_database_provider: str = Field("ladybug")
 
     graph_database_url: str = ""
     graph_database_name: str = ""
@@ -62,9 +62,13 @@ class GraphConfig(BaseSettings):
     graph_database_subprocess_enabled: bool = True
 
     # Kuzu tuning. 0 means "use Kuzu's default" (one thread per CPU).
-    kuzu_num_threads: int = Field(0, env="KUZU_NUM_THREADS")
-    kuzu_buffer_pool_size: int = Field(DEFAULT_KUZU_BUFFER_POOL_SIZE, env="KUZU_BUFFER_POOL_SIZE")
-    kuzu_max_db_size: int = Field(DEFAULT_KUZU_MAX_DB_SIZE, env="KUZU_MAX_DB_SIZE")
+    # These bind from the environment through pydantic-settings, which reads
+    # "<field_name>.upper()". Passing env= to Field is deprecated in Pydantic V2
+    # and ignored there, so it only emitted a PydanticDeprecatedSince20 warning
+    # without changing how the value was read.
+    kuzu_num_threads: int = Field(0)
+    kuzu_buffer_pool_size: int = Field(DEFAULT_KUZU_BUFFER_POOL_SIZE)
+    kuzu_max_db_size: int = Field(DEFAULT_KUZU_MAX_DB_SIZE)
 
     model_config = SettingsConfigDict(extra="allow", populate_by_name=True)
 
