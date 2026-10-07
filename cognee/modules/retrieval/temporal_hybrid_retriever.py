@@ -11,7 +11,8 @@ demo, a neighbourhood walk elsewhere), the oversized candidate set is reordered
 so the anchored candidates come first (``HybridCandidates.prioritize``), ranked
 by how tightly their best matched timestamp fits the window
 (``tightness_rank``): for "18 March 1965" a chunk dated 1965-03-18 comes before
-one that only says "1965", whichever edge carried the date, and
+one that only says "1965", whichever edge carried the date, while dates at least
+as precise as the question rank alike and keep their similarity order, and
 ``finalize`` — the same step plain hybrid uses — cuts it to ``top_k`` and selects
 the facts against the entities that survive the cut. Context formatting and
 completion are inherited unchanged.
@@ -39,6 +40,7 @@ from cognee.modules.retrieval.temporal_hybrid.matching import (
     tightest_first,
     tightness_rank,
     to_epoch_ms,
+    window_span_ms,
 )
 from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
 from cognee.shared.logging_utils import get_logger
@@ -46,6 +48,12 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("TemporalHybridRetriever")
 FALLBACK_WARNING = (
     "No time-anchored data found for this question; answering with HYBRID search instead."
+)
+# The question yielded no time window, so the graph's dates were never consulted.
+# The reason (no_time_constraint / invalid_interval) stays on last_reason, not in the
+# log: it reflects what the extraction LLM made of the question, not the question.
+NO_WINDOW_WARNING = (
+    "Could not extract a time window from this question; answering with HYBRID search instead."
 )
 
 
@@ -170,7 +178,7 @@ class TemporalHybridRetriever(HybridRetriever):
         self.last_baseline = self._finalize(candidates)
         if reason is not None:
             self.last_reason = reason
-            logger.warning(FALLBACK_WARNING)
+            logger.warning(NO_WINDOW_WARNING)
             return self.last_baseline
 
         # The window's own timestamps widen the candidate pool before the anchors
@@ -193,7 +201,9 @@ class TemporalHybridRetriever(HybridRetriever):
             candidates.prioritize(
                 self.last_anchors["chunk_ids"],
                 self.last_anchors["entity_ids"],
-                chunk_rank=tightness_rank(self.last_anchors["chunk_timestamps"], in_window),
+                chunk_rank=tightness_rank(
+                    self.last_anchors["chunk_timestamps"], in_window, window_span_ms(start, end)
+                ),
             )
         )
         if reranked["chunks"] == self.last_baseline["chunks"] and (

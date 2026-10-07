@@ -20,7 +20,9 @@ Start is inclusive and end is exclusive:
 - An inclusive range includes the entire final named unit.
 - A precise second covers that second; end is the next second.
 - "Before X" leaves start null and sets end to X's lower bound.
+- "Until X", "through X", "up to X" include X: start null, end at X's upper bound.
 - "After X" sets start to X's upper bound and leaves end null.
+- "Since X" includes X: start at X's lower bound, end null.
 - No explicit time, relative time, or disjoint windows: both null.
 
 Every non-null boundary must include year, month, day, hour, minute, and second.
@@ -59,6 +61,13 @@ def to_epoch_ms(moment: datetime | None) -> int | None:
     return None if moment is None else int(moment.timestamp() * 1000)
 
 
+def window_span_ms(start: datetime | None, end: datetime | None) -> float:
+    """The window's length in ms; ``inf`` when either side is open."""
+    if start is None or end is None:
+        return float("inf")
+    return float(to_epoch_ms(end) - to_epoch_ms(start))
+
+
 def empty_anchors() -> dict:
     return {"timestamp_ids": set(), "chunk_ids": set(), "entity_ids": set(), "chunk_timestamps": {}}
 
@@ -90,18 +99,30 @@ def tightest_first(in_window: list[dict]) -> list[dict]:
     return sorted(in_window, key=key)
 
 
-def tightness_rank(chunk_timestamps: dict, in_window: list[dict]) -> dict[str, float]:
-    """Rank anchored chunks by the span of the tightest timestamp each reached.
+def tightness_rank(
+    chunk_timestamps: dict, in_window: list[dict], window_span_ms: float
+) -> dict[str, float]:
+    """Rank anchored chunks by how well the tightest timestamp each reached fits the window.
 
     ``in_window`` is ``get_timestamps_in_range``'s result (``id``, ``time_at``,
-    ``time_until``). A day-precision timestamp spans a day, a bare year a year;
-    the shorter the span, the more the chunk is about the time asked for. A chunk
-    whose timestamps are not in ``in_window`` ranks last.
+    ``time_until``). A day-precision timestamp spans a day, a bare year a year.
+    A timestamp at least as precise as the question fits it fully, so every span
+    up to ``window_span_ms`` ranks the same and the fetch's similarity order
+    decides among them: for "in 2020" a paragraph dated September 2020 is not
+    pushed below a row dated 2020-09-14. Only a timestamp coarser than the
+    window ranks lower, the wider the later: for "18 March 1965" a chunk that
+    only says "1965" comes after one dated that day. An open-ended window
+    (``inf``) names no unit, so all anchored chunks rank the same. A chunk whose
+    timestamps are not in ``in_window`` ranks last.
     """
     span_by_id = {str(node["id"]): timestamp_span_ms(node) for node in in_window if "id" in node}
     return {
-        chunk_id: min(
-            (span_by_id.get(str(ts), float("inf")) for ts in timestamp_ids), default=float("inf")
+        chunk_id: max(
+            min(
+                (span_by_id.get(str(ts), float("inf")) for ts in timestamp_ids),
+                default=float("inf"),
+            ),
+            window_span_ms,
         )
         for chunk_id, timestamp_ids in chunk_timestamps.items()
     }
