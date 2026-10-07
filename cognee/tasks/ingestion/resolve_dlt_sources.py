@@ -199,13 +199,14 @@ async def resolve_dlt_sources(
 
     # --- Document-tagged sources: one text document per row -----------------
     # Document sources honour the caller's write_disposition so both sync models
-    # work: "replace" for delete-feed-less snapshot sources (Notion/Slack — each
-    # run rewrites staging with exactly the rows currently visible) and "merge"
-    # (+ a hard_delete tombstone column) for incremental sources with a real
-    # delete feed (Google Drive's Changes API). Either way the whole set is read
-    # back (max_rows_per_table=0) so orphan cleanup can forget rows that dropped
-    # out of the current corpus. write_disposition/primary_key default to
-    # "replace"/"id" (see the kwargs resolution above).
+    # work: "replace" for snapshot sources (Slack, each run rewrites staging with
+    # exactly the rows currently visible) and "merge" (+ a hard_delete tombstone
+    # column) for incremental sources that emit their own deletions (Google
+    # Drive's Changes API, Notion's re-walk against the ids it saw last run).
+    # Either way the whole set is read back (max_rows_per_table=0) so orphan
+    # cleanup can forget rows that dropped out of the current corpus.
+    # write_disposition/primary_key default to "replace"/"id" (see the kwargs
+    # resolution above).
     document_data_items: list[DataItem] = []
     document_fresh_ids: set[UUID] = set()
     document_scopes: set[tuple[str, str]] = set()
