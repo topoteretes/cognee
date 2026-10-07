@@ -7,7 +7,9 @@
 
 Requires an LLM and embedding provider for text, session learning, and answers.
 Code extraction uses the Enola CLI included with cognee and makes no LLM or
-embedding calls; the code is queried through the CODE search type. The
+embedding calls. Ask questions about code with the CODE search type: it runs an
+exact graph operation (code_query) over the code graph, while completion search
+types such as GRAPH_COMPLETION answer from text and lessons, not code. The
 tiny code fixture and default storage live beside this script under
 .cognee-readme-demo.
 Existing storage environment variables take precedence. No memory is deleted.
@@ -16,7 +18,6 @@ Distillation is model-dependent; the script reports when no lesson is published.
 
 import argparse
 import asyncio
-import json
 import os
 from pathlib import Path
 from uuid import uuid4
@@ -32,8 +33,10 @@ QUESTION = (
     "Who maintains the payments API, which database does it use, "
     "and what release rule did we learn?"
 )
-# The CODE search type answers by graph operation, not by question text: this
-# one follows the replay test that the release rule names into the code.
+# Code questions go to the CODE search type. It answers with a graph operation
+# rather than by reading the question, so the code_query names where to start:
+# the replay test that the release rule refers to.
+CODE_QUESTION = "Which function does the replay test call?"
 CODE_QUERY = {
     "operation": "explore",
     "name": "payments.replay_test",
@@ -83,29 +86,34 @@ def prepare_demo():
 
 def print_answers(entries):
     for entry in entries:
-        if entry.source == "code":
-            # Code entries carry the CODE operation's JSON result as text.
-            result = json.loads(entry.text)
-            for fact in result.get("facts", []):
-                print(f"{fact['name']} ({fact['file']}:{fact['line']})")
-            for edge in result.get("edges", []):
-                print(f"{edge['source']} --{edge['type']}--> {edge['target']}")
-        else:
-            print(entry.text)
+        print(entry.text)
+
+
+def print_code_results(results):
+    for result in results:
+        for fact in result.get("facts", []):
+            print(f"{fact['name']} ({fact['file']}:{fact['line']})")
+        for edge in result.get("edges", []):
+            print(f"{edge['source']} --{edge['type']}--> {edge['target']}")
 
 
 async def recall_saved_memory(cognee):
     print("\nAnswer in a fresh session:", flush=True)
     print_answers(
-        # The graph lane answers from the document and the lesson; the code
-        # lane adds the code graph's facts about the replay test.
         await cognee.recall(
             QUESTION,
             query_type=cognee.SearchType.GRAPH_COMPLETION,
             datasets=[DATASET],
-            scope=["graph", "code"],
-            code_query=CODE_QUERY,
             session_id=f"readme-verification-{uuid4().hex}",
+        )
+    )
+    print(f"\n{CODE_QUESTION}", flush=True)
+    print_code_results(
+        await cognee.search(
+            query_type=cognee.SearchType.CODE,
+            query_text=CODE_QUESTION,
+            datasets=[DATASET],
+            code_query=CODE_QUERY,
         )
     )
 
@@ -114,18 +122,16 @@ async def index_code(cognee, root):
     repo = root / "payments-example"
     repo.mkdir(parents=True, exist_ok=True)
     (repo / "payments.py").write_text(CODE)
-    # A project marker makes remember() store the folder as one code repository,
-    # which cognify builds into a code graph with no LLM or embedding calls.
-    (repo / "pyproject.toml").write_text('[project]\nname = "payments-example"\n')
     print("\nIndexing the sample code:", flush=True)
+    # Code files are built into a code graph by cognify, with no LLM or embedding calls.
     await cognee.remember(str(repo), dataset_name=DATASET, self_improvement=False)
-    facts = await cognee.recall(
-        "",
+    facts = await cognee.search(
+        query_type=cognee.SearchType.CODE,
+        query_text="",
         datasets=[DATASET],
-        scope=["code"],
         code_query={"operation": "query_facts", "kinds": ["symbol"], "limit": 10},
     )
-    print_answers(facts)
+    print_code_results(facts)
 
 
 async def main(args):
