@@ -42,8 +42,8 @@ Design
   block content is only rendered when its ``last_edited_time`` or its root
   changed since the last run. A synced block that duplicates another page's
   original is not searched: its sub-pages live under the original, so they
-  are only synced when the original's page is under a selected root. A tree nested past the
-  depth caps aborts the run, and keeps aborting every run until it is edited.
+  are only synced when the original's page is under a selected root. Trees of any
+  depth are walked in full; nothing below a nesting level is dropped.
   Pages that disappeared (unshared, trashed, moved out of the selected roots)
   are emitted as ``_deleted`` tombstones. A transient API error aborts the
   run before any tombstone is emitted, so a partial walk can never look like
@@ -107,16 +107,6 @@ NOTION_API_VERSION = "2025-09-03"
 
 # Retry budget for rate-limited / transient Notion API responses.
 _MAX_RETRIES = 5
-# Caps how many page/database/data-source levels are walked below a root (a
-# page under a database uses three). Hitting it aborts the run, like the
-# discovery cap, because stopping would tombstone everything below it.
-_MAX_WALK_DEPTH = 100
-# Caps how deep the children of any block are rendered into a page's text;
-# deeper content is dropped from the text only. Table rows are not affected.
-_MAX_RENDER_DEPTH = 10
-# Caps how deep container blocks are searched for sub-pages. Hitting it aborts
-# the run: stopping silently would tombstone every page below the cap.
-_MAX_DISCOVERY_DEPTH = 50
 _PAGE_SIZE = 100
 
 _EXTRA_HINT = "Set token= or the NOTION_API_KEY environment variable."
@@ -282,7 +272,6 @@ class _WalkItem:
     kind: str  # "page" | "database" | "data_source"
     id: str
     root_id: str
-    depth: int = 0
     is_root: bool = False
     # Pages discovered via a data-source query already come back as full page
     # objects; carrying them forward here avoids a redundant GET per row.
@@ -365,12 +354,6 @@ def _iter_rows(
         if item.id in visited:
             continue
         visited.add(item.id)
-        if item.depth > _MAX_WALK_DEPTH:
-            raise NotionAPIError(
-                0,
-                f"Notion {item.kind} {item.id} is nested deeper than {_MAX_WALK_DEPTH} levels "
-                "below its root; aborting instead of forgetting the pages below it.",
-            )
 
         if item.kind == "database":
             stats["containers_scanned"] += 1
@@ -387,7 +370,6 @@ def _iter_rows(
                         "data_source",
                         _canonical_id(data_source["id"]),
                         item.root_id,
-                        item.depth + 1,
                     )
                 )
             continue
@@ -403,7 +385,6 @@ def _iter_rows(
                         "data_source" if is_data_source else "page",
                         _canonical_id(result["id"]),
                         item.root_id,
-                        item.depth + 1,
                         prefetched=None if is_data_source else result,
                     )
                 )
@@ -454,13 +435,9 @@ def _iter_rows(
         for block in discovered:
             block_type = block.get("type")
             if block_type == "child_page":
-                queue.append(
-                    _WalkItem("page", _canonical_id(block["id"]), item.root_id, item.depth + 1)
-                )
+                queue.append(_WalkItem("page", _canonical_id(block["id"]), item.root_id))
             elif block_type == "child_database":
-                queue.append(
-                    _WalkItem("database", _canonical_id(block["id"]), item.root_id, item.depth + 1)
-                )
+                queue.append(_WalkItem("database", _canonical_id(block["id"]), item.root_id))
 
     deleted_ids = sorted(set(previous_pages) - set(present_pages))
     for page_id in deleted_ids:
@@ -616,36 +593,37 @@ def _is_synced_copy(block: dict) -> bool:
 
 
 def _collect_nested_children(
-    client: _NotionClient, blocks: list[dict], cache: dict[str, list[dict]], depth: int = 0
+    client: _NotionClient, blocks: list[dict], cache: dict[str, list[dict]]
 ) -> list[dict]:
     """Return every child_page/child_database block at any depth under ``blocks``.
 
     Children of container blocks (columns, toggles, synced blocks, callouts) are
     listed once and kept in ``cache`` so rendering does not fetch them again.
     Tables only hold rows, and a child page's own content belongs to that page.
+    The walk is depth-first in document order and uses an explicit stack, so
+    nesting depth is bounded by memory, not by the interpreter's recursion limit.
     """
     found = []
-    for block in blocks:
+    stack = [iter(blocks)]
+    while stack:
+        block = next(stack[-1], None)
+        if block is None:
+            stack.pop()
+            continue
         block_type = block.get("type")
         if block_type in _PAGE_BLOCK_TYPES:
             found.append(block)
             continue
         if not block.get("has_children") or block_type == "table" or _is_synced_copy(block):
             continue
-        if depth >= _MAX_DISCOVERY_DEPTH:
-            raise NotionAPIError(
-                0,
-                f"Notion block {block['id']} is nested deeper than {_MAX_DISCOVERY_DEPTH} "
-                "levels; aborting instead of forgetting the pages below it.",
-            )
         children = list(_list_block_children(client, block["id"]))
         cache[block["id"]] = children
-        found.extend(_collect_nested_children(client, children, cache, depth + 1))
+        stack.append(iter(children))
     return found
 
 
 def _render_block(
-    client: _NotionClient, block: dict, depth: int, cache: dict[str, list[dict]] | None = None
+    client: _NotionClient, block: dict, cache: dict[str, list[dict]] | None = None
 ) -> str:
     block_type = block.get("type")
     if not block_type:
@@ -661,23 +639,23 @@ def _render_block(
     text = _rich_text(payload.get("rich_text"))
     rendered = _render_simple_block(block_type, payload, text)
 
-    if block.get("has_children") and depth < _MAX_RENDER_DEPTH:
+    if block.get("has_children"):
         if cache is not None and block["id"] in cache:
-            nested = _render_blocks_list(client, cache[block["id"]], depth + 1, cache)
+            nested = _render_blocks_list(client, cache[block["id"]], cache)
         elif _is_synced_copy(block):
             # The original may sit on a page this integration cannot read; the
             # copy (or any block inside it) then renders empty instead of
             # failing the whole page.
             try:
                 children = list(_list_block_children(client, block["id"]))
-                nested = _render_blocks_list(client, children, depth + 1, cache)
+                nested = _render_blocks_list(client, children, cache)
             except NotionAPIError as exc:
                 if not _is_gone(exc):
                     raise
                 nested = ""
         else:
             children = list(_list_block_children(client, block["id"]))
-            nested = _render_blocks_list(client, children, depth + 1, cache)
+            nested = _render_blocks_list(client, children, cache)
         if nested:
             rendered = f"{rendered}\n{nested}" if rendered else nested
 
@@ -687,12 +665,9 @@ def _render_block(
 def _render_blocks_list(
     client: _NotionClient,
     blocks: list[dict],
-    depth: int,
     cache: dict[str, list[dict]] | None = None,
 ) -> str:
-    if depth > _MAX_RENDER_DEPTH:
-        return ""
-    lines = [_render_block(client, block, depth, cache) for block in blocks]
+    lines = [_render_block(client, block, cache) for block in blocks]
     return "\n".join(line for line in lines if line)
 
 
@@ -708,7 +683,7 @@ def _render_page_content(
         property_lines = _render_properties(page.get("properties") or {})
         if property_lines:
             parts.append("\n".join(property_lines))
-    body = _render_blocks_list(client, blocks, 0, cache)
+    body = _render_blocks_list(client, blocks, cache)
     if body:
         parts.append(body)
     return "\n\n".join(parts)
