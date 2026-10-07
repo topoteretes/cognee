@@ -702,3 +702,20 @@ async def test_native_validation_error_routes_to_json_fallback(_clean_demotions)
     # fallback — NOT a tenacity re-send of the native request.
     assert mock_acompletion.call_count == 2
     assert mock_acompletion.call_args_list[1].kwargs["response_format"] == {"type": "json_object"}
+
+
+def test_inline_refs_removes_defs_and_refs():
+    from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
+        _inline_refs,
+    )
+    from cognee.tasks.temporal_graph.models import QueryInterval
+
+    schema = QueryInterval.model_json_schema()
+    result = _inline_refs(schema)
+    result_str = json.dumps(result)
+
+    assert "$defs" not in result_str
+    assert "$ref" not in result_str
+    assert "year" in result_str
+    assert "month" in result_str
+    assert "day" in result_str
