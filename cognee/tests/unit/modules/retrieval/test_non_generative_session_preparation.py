@@ -20,6 +20,7 @@ from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
 from cognee.modules.retrieval.completion_retriever import CompletionRetriever
 from cognee.modules.retrieval.jaccard_retrival import JaccardChunksRetriever
 from cognee.modules.retrieval.lexical_retriever import LexicalRetriever
+from cognee.modules.retrieval.natural_language_retriever import NaturalLanguageRetriever
 from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
 from cognee.modules.search.methods.get_retriever_output import get_retriever_output
 from cognee.modules.search.types import SearchType
@@ -37,6 +38,7 @@ NON_GENERATIVE_RETRIEVERS = [
     LexicalRetriever,
     BM25ChunksRetriever,
     JaccardChunksRetriever,
+    NaturalLanguageRetriever,
 ]
 
 
@@ -120,6 +122,14 @@ async def test_summaries_search_does_not_prepare_a_session_turn():
 @pytest.mark.asyncio
 async def test_lexical_chunks_search_does_not_prepare_a_session_turn():
     prepare = await _search_with(BM25ChunksRetriever(), SearchType.CHUNKS_LEXICAL)
+    prepare.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_natural_language_search_does_not_prepare_a_session_turn():
+    """The caller gets graph rows, so an analysis could only rewrite the question or
+    answer it with an acknowledgement in place of the rows."""
+    prepare = await _search_with(NaturalLanguageRetriever(), SearchType.NATURAL_LANGUAGE)
     prepare.assert_not_awaited()
 
 
