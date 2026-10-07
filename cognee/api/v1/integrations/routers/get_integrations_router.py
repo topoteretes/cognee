@@ -897,7 +897,8 @@ def get_integrations_router():
           /api/v1/integrations/status).
 
         ## Request Parameters
-        - **resourceIds** (Optional[List[str]]): No description provided in code yet.
+        - **resourceIds** (Optional[List[str]]): Provider resource identifiers to store as
+          the full selection, de-duplicated; omit or null to clear it.
         """
         integration = _integration_or_404(provider)
         selection_key = integration.resource_selection_key
@@ -963,7 +964,8 @@ def get_integrations_router():
           /api/v1/integrations/status).
 
         ## Query Parameters
-        - **delete_data** (bool): No description provided in code yet. Defaults to False.
+        - **delete_data** (bool): When true, also deletes the dataset created by this
+          integration after the connection is revoked. Defaults to False.
         """
         with new_span("cognee.integrations.disconnect") as span:
             span.set_attribute("cognee.integrations.provider", provider)
