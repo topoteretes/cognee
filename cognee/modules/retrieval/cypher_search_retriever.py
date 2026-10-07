@@ -24,6 +24,12 @@ class CypherSearchRetriever(BaseRetriever):
     # to an LLM, so an only_context preview must not render a prompt for it.
     supports_prompt_preview = False
 
+    # The query is a Cypher statement, not a conversational turn. Running it through
+    # the pre-retrieval turn analysis let the LLM rewrite it into prose (which the
+    # graph engine then failed to parse) or answer it with an acknowledgement instead
+    # of the rows.
+    supports_session_turn_preparation = False
+
     def __init__(
         self,
         user_prompt_path: str = "context_for_question.txt",

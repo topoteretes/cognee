@@ -18,6 +18,7 @@ from cognee.infrastructure.session.session_manager import SessionTurnPreparation
 from cognee.modules.retrieval.bm25_retriever import BM25ChunksRetriever
 from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
 from cognee.modules.retrieval.completion_retriever import CompletionRetriever
+from cognee.modules.retrieval.cypher_search_retriever import CypherSearchRetriever
 from cognee.modules.retrieval.jaccard_retrival import JaccardChunksRetriever
 from cognee.modules.retrieval.lexical_retriever import LexicalRetriever
 from cognee.modules.retrieval.natural_language_retriever import NaturalLanguageRetriever
@@ -39,6 +40,7 @@ NON_GENERATIVE_RETRIEVERS = [
     BM25ChunksRetriever,
     JaccardChunksRetriever,
     NaturalLanguageRetriever,
+    CypherSearchRetriever,
 ]
 
 
@@ -130,6 +132,11 @@ async def test_natural_language_search_does_not_prepare_a_session_turn():
     """The caller gets graph rows, so an analysis could only rewrite the question or
     answer it with an acknowledgement in place of the rows."""
     prepare = await _search_with(NaturalLanguageRetriever(), SearchType.NATURAL_LANGUAGE)
+    
+@pytest.mark.asyncio    
+async def test_cypher_search_does_not_prepare_a_session_turn():
+    """A Cypher statement is not a turn: analysing it rewrote the query or answered it."""
+    prepare = await _search_with(CypherSearchRetriever(), SearchType.CYPHER)
     prepare.assert_not_awaited()
 
 
