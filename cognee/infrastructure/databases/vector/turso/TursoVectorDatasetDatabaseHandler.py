@@ -3,6 +3,7 @@ from uuid import UUID
 
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.dataset_database_handler import DatasetDatabaseHandlerInterface
+from cognee.infrastructure.databases.turso import remove_database_files_from_storage
 from cognee.infrastructure.databases.vector import get_vectordb_config
 from cognee.infrastructure.databases.vector.create_vector_engine import (
     vector_engine_cache,
@@ -13,9 +14,9 @@ from cognee.modules.users.models import DatasetDatabase, User
 
 class TursoVectorDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     """
-    Handler for interacting with Turso / libSQL Dataset databases.
+    Handler for interacting with Turso dataset databases.
 
-    Embedded mode gives every dataset its own libSQL file under the user's
+    Embedded mode gives every dataset its own Turso database file under the user's
     databases directory (``{dataset_id}.turso.db``), mirroring the LanceDB
     handler. That per-dataset file is what isolates one user/dataset's
     vectors from another's when ``ENABLE_BACKEND_ACCESS_CONTROL=True``.
@@ -49,18 +50,20 @@ class TursoVectorDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
 
     @classmethod
     async def delete_dataset(cls, dataset_database: DatasetDatabase):
-        """Remove the dataset's dedicated libSQL file (its embedded store)."""
+        """Remove the dataset's dedicated Turso database file (its embedded store)."""
         # Never re-open the DB to drop it: create_vector_engine would spawn and
         # cache a fresh engine whose connection then leaks, and DROP TABLE never
         # removes the file. Evict every cached engine for this database, wait
         # for their in-flight closes to finish (a close deferred behind an idle
         # holder is not waited on; see vector_engine_cache.aevict_for_database), then
-        # delete the on-disk libSQL file. Turso's embedded store is a single
+        # delete the on-disk database file. Turso's embedded store is a single
         # file (unlike LanceDB's directory), so remove the file, not a tree.
         # Mirrors the LanceDB handler.
         await vector_engine_cache.aevict_for_database(dataset_database.vector_database_name)
 
         databases_directory_path = os.path.dirname(dataset_database.vector_database_url)
-        await get_file_storage(databases_directory_path).remove(
-            dataset_database.vector_database_name
+        # The engine's companions (-wal/-shm in WAL mode, -log in MVCC mode) go
+        # with the file, or a same-name recreate would inherit stale state.
+        await remove_database_files_from_storage(
+            get_file_storage(databases_directory_path), dataset_database.vector_database_name
         )

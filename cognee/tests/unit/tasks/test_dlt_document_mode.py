@@ -12,6 +12,9 @@ import json
 from types import SimpleNamespace
 from uuid import NAMESPACE_OID, uuid4, uuid5
 
+import pytest
+
+from cognee.exceptions import CogneeValidationError
 from cognee.tasks.ingestion.dlt_utils import (
     DOCUMENT_SOURCE_ATTR,
     NODE_SET_COLUMN,
@@ -100,7 +103,12 @@ def test_build_document_data_item_untitled_url_content_is_marked_literal():
 
 
 def _row(table_name: str, row_data: dict):
-    return SimpleNamespace(table_name=table_name, row_data=row_data, content_hash="h")
+    return SimpleNamespace(
+        table_name=table_name,
+        row_data=row_data,
+        content_hash="h",
+        primary_key_value=str(row_data.get("id")),
+    )
 
 
 def test_golden_drive_shaped_row_builds_the_same_item_as_before():
@@ -154,44 +162,59 @@ def test_row_node_set_rides_on_the_item_and_stays_out_of_the_text():
     assert NODE_SET_COLUMN not in item.system_metadata
 
 
+def _node_set(value=None, **variants):
+    """The node sets read from a row whose cognee_node_set column holds ``value``."""
+    row = _row("notion_pages", {"id": "p1", "title": "T", NODE_SET_COLUMN: value, **variants})
+    return _row_node_set(row, "notion")
+
+
 class TestRowNodeSet:
     def test_absent_column_means_no_node_set(self):
-        assert _row_node_set(None, "notion") is None
+        assert _node_set(None) is None
 
     def test_json_column_comes_back_as_a_list(self):
-        assert _row_node_set(["notion:a", "notion:b"], "notion") == ["notion:a", "notion:b"]
+        assert _node_set(["notion:a", "notion:b"]) == ["notion:a", "notion:b"]
 
     def test_text_column_comes_back_as_a_json_string(self):
-        assert _row_node_set(json.dumps(["notion:a"]), "notion") == ["notion:a"]
-
-    def test_text_column_with_one_bare_name(self):
-        assert _row_node_set("notion:solo", "notion") == ["notion:solo"]
+        assert _node_set(json.dumps(["notion:a"])) == ["notion:a"]
 
     def test_names_are_namespaced_under_the_source_tag(self):
         """Provider data can never name one of cognee's own node sets."""
-        assert _row_node_set(["skills", "user_context", "ws:root"], "notion") == [
+        assert _node_set(["skills", "user_context", "ws:root"]) == [
             "notion:skills",
             "notion:user_context",
             "notion:ws:root",
         ]
 
     def test_already_namespaced_names_are_kept_once(self):
-        assert _row_node_set(["notion:ws:root", "ws:root", " notion:ws:root "], "notion") == [
-            "notion:ws:root"
-        ]
+        assert _node_set(["notion:ws:root", "ws:root", " notion:ws:root "]) == ["notion:ws:root"]
 
-    def test_non_strings_and_blanks_are_ignored_and_the_row_survives(self):
-        assert _row_node_set([3, None, "", "   ", {"a": 1}, "ws:root"], "notion") == [
-            "notion:ws:root"
-        ]
-        assert _row_node_set([3, None], "notion") is None
+    def test_non_strings_and_blanks_inside_the_list_are_ignored(self):
+        assert _node_set([3, None, "", "   ", {"a": 1}, "ws:root"]) == ["notion:ws:root"]
+        assert _node_set([3, None]) is None
 
     def test_spellings_of_one_node_set_keep_the_first(self):
         """Dedupe is by node-set identity, the same normalization the graph uses."""
-        assert _row_node_set(["Project A", "project_a", "PROJECT A"], "notion") == [
-            "notion:Project A"
-        ]
+        assert _node_set(["Project A", "project_a", "PROJECT A"]) == ["notion:Project A"]
 
-    def test_wrong_column_type_means_no_node_set(self):
-        assert _row_node_set({"not": "a list"}, "notion") is None
-        assert _row_node_set(42, "notion") is None
+
+class TestRowNodeSetNotAList:
+    """Any shape but a JSON list stops the sync and names the row; nothing is dropped."""
+
+    @pytest.mark.parametrize(
+        ("value", "found"),
+        [({"not": "a list"}, "a JSON dict"), (42, "a JSON int"), ("notion:solo", "not JSON")],
+    )
+    def test_the_column_itself_holds_something_else(self, value, found):
+        with pytest.raises(CogneeValidationError, match=found) as error:
+            _node_set(value)
+        assert "row 'p1'" in str(error.value) and "notion_pages" in str(error.value)
+
+    def test_a_value_dlt_moved_to_a_variant_column(self):
+        """A bare string under the json hint lands in cognee_node_set__v_text, this one NULL."""
+        with pytest.raises(CogneeValidationError, match="cognee_node_set__v_text"):
+            _node_set(None, cognee_node_set__v_text="notion:solo")
+
+    def test_an_empty_variant_column_is_fine(self):
+        """Once the column exists every row has it; only a value in it is wrong."""
+        assert _node_set(["ws:root"], cognee_node_set__v_text=None) == ["notion:ws:root"]

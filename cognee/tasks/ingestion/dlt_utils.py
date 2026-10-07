@@ -108,3 +108,14 @@ async def load_dlt_manifest(raw_data_location: str) -> dict:
 
     async with open_data_file(raw_data_location, mode="r", encoding="utf-8") as file:
         return json.loads(file.read())
+
+
+def column_selected(selection: dict | None, table_name: str, column: str) -> bool:
+    """Whether ``selection`` ({table: [column, ...]}, "*" wildcards on either side)
+    names this cell. A table named in the selection gets exactly its list — an
+    empty list means none for that table — and only an unnamed table takes the
+    wildcard. An empty or missing selection names nothing."""
+    if not selection:
+        return False
+    columns = selection[table_name] if table_name in selection else selection.get("*", [])
+    return "*" in columns or column in columns

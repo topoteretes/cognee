@@ -18,6 +18,7 @@ def _result(result_id, payload):
 def _unified(vector=None):
     unified = MagicMock()
     unified.vector = vector or MagicMock()
+    unified.vector.has_collection = AsyncMock(return_value=False)
     unified.vector.embedding_engine.embed_text = AsyncMock(return_value=[QUERY_VECTOR])
     unified.graph = MagicMock()
     unified.graph.is_empty = AsyncMock(return_value=False)

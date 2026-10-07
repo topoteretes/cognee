@@ -6,6 +6,7 @@ from temporal_dateparser_hints import normalize_absolute_date
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.engine.models import Entity, Timestamp
+from cognee.modules.engine.utils import timestamp_from_text
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.summarization.models import TextSummary
 
@@ -98,20 +99,12 @@ def _has_outgoing_edge(entity: Entity, data_chunks: list[DocumentChunk]) -> bool
     )
 
 
-def _to_timestamp(entity: Entity, normalized: str, lower: datetime) -> Timestamp:
+def _to_timestamp(entity: Entity, normalized: str) -> Timestamp:
+    """Core's Timestamp for ``normalized``, keeping the entity's id and inherited fields."""
     inherited = {field: getattr(entity, field) for field in _INHERITED_FIELDS}
-    return Timestamp(
-        id=entity.id,
-        timestamp_str=normalized,
-        time_at=int(lower.timestamp() * 1000),
-        year=lower.year,
-        month=lower.month,
-        day=lower.day,
-        hour=lower.hour,
-        minute=lower.minute,
-        second=lower.second,
-        **inherited,
-    )
+    parsed = timestamp_from_text(normalized)
+    time_fields = parsed.model_dump(exclude={"id", "type", "metadata", *inherited})
+    return Timestamp(id=entity.id, **time_fields, **inherited)
 
 
 def promote_timestamps(data_chunks: list[DocumentChunk]) -> None:
@@ -141,8 +134,8 @@ def promote_timestamps(data_chunks: list[DocumentChunk]) -> None:
                 entity.name,
             )
             continue
-        normalized, lower, _upper = bounds
-        replacements[entity_id] = _to_timestamp(entity, normalized, lower)
+        normalized, _lower, _upper = bounds
+        replacements[entity_id] = _to_timestamp(entity, normalized)
 
     # DocumentChunk.contains does not declare Timestamp; the in-place list
     # assignment works because pydantic v2 skips validation on mutation.
