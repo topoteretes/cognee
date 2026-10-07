@@ -492,7 +492,7 @@ async def test_a_delete_before_the_rewrite_takes_the_lock_does_not_fail_it(tmp_p
 
 
 @pytest.mark.asyncio
-async def test_compact_is_fail_open_per_collection(tmp_path, compaction_settings, monkeypatch):
+async def test_a_failing_collection_raises(tmp_path, compaction_settings, monkeypatch):
     compaction_settings(retention_seconds=0)
     adapter, _ = _adapter(tmp_path)
     await _write_n_points(adapter, "Healthy_label", 2)
@@ -506,17 +506,37 @@ async def test_compact_is_fail_open_per_collection(tmp_path, compaction_settings
 
     monkeypatch.setattr(adapter, "_compact_collection", flaky)
 
-    stats = await adapter.compact()
-
-    assert "error" in stats["Broken_label"]
-    assert stats["Healthy_label"]["executed_tasks"] == 1
+    with pytest.raises(RuntimeError, match="boom"):
+        await adapter.compact()
 
 
 @pytest.mark.asyncio
-async def test_an_incompatible_pylance_turns_compaction_off(
+async def test_a_failed_background_prune_raises_from_close_after_releasing(
     tmp_path, compaction_settings, monkeypatch
 ):
-    """lancedb and pylance on different Lance cores: stop, warn once, never fail writes."""
+    """A background prune has no caller; ``close`` reports its failure, once the store is released."""
+    compaction_settings(retention_seconds=0)
+    adapter, _ = _adapter(tmp_path)
+
+    async def failing_prune_pass(options):
+        raise RuntimeError("prune failed")
+
+    monkeypatch.setattr(adapter, "_prune_pass", failing_prune_pass)
+    await adapter.get_connection()  # schedules the first-open prune
+    assert adapter._open_prune_task is not None
+
+    with pytest.raises(RuntimeError, match="prune failed"):
+        await adapter.close()
+
+    assert adapter._permanently_closed
+    await adapter.close()  # reported once; a second close is a no-op
+
+
+@pytest.mark.asyncio
+async def test_an_incompatible_pylance_raises_and_writes_still_work(
+    tmp_path, compaction_settings, monkeypatch
+):
+    """lancedb and pylance on different Lance cores: compaction raises, writes are unaffected."""
     from cognee_db_workers.lancedb_compaction import PylanceIncompatibleError
 
     adapter_module = importlib.import_module(
@@ -534,11 +554,10 @@ async def test_an_incompatible_pylance_turns_compaction_off(
 
     monkeypatch.setattr(adapter_module, "open_as_lance", incompatible)
 
-    first = await adapter.compact()
+    with pytest.raises(PylanceIncompatibleError, match="unsupported manifest version"):
+        await adapter.compact()
 
     assert len(attempts) == 1, "kept trying other tables after an incompatibility"
-    assert [value for value in first.values() if "error" in value]
-    assert await adapter.compact() == {"skipped": "pylance_incompatible"}
     await _write_n_points(adapter, "PylanceA_label", 1, start=2)  # writes still work
 
 
@@ -690,7 +709,7 @@ def _engine_getter(engine):
 
 
 @pytest.mark.asyncio
-async def test_compact_vector_store_never_fails_the_pipeline(monkeypatch):
+async def test_compact_vector_store_raises_compaction_failures(monkeypatch):
     module = importlib.import_module("cognee.infrastructure.databases.vector.compact_vector_store")
 
     class Exploding:
@@ -705,10 +724,12 @@ async def test_compact_vector_store_never_fails_the_pipeline(monkeypatch):
         raise RuntimeError("no vector engine")
 
     monkeypatch.setattr(module, "get_vector_engine_async", _engine_getter(Exploding()))
-    assert await module.compact_vector_store() is None
+    with pytest.raises(RuntimeError, match="disk on fire"):
+        await module.compact_vector_store()
 
     monkeypatch.setattr(module, "get_vector_engine_async", unavailable)
-    assert await module.compact_vector_store() is None
+    with pytest.raises(RuntimeError, match="no vector engine"):
+        await module.compact_vector_store()
 
     monkeypatch.setattr(module, "get_vector_engine_async", _engine_getter(Quiet()))
     assert await module.compact_vector_store() == {
