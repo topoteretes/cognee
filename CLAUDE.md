@@ -288,7 +288,7 @@ Available search types (from `cognee/modules/search/types/SearchType.py`), passe
 - **SUMMARIES** - Search pre-computed document summaries
 - **CYPHER** - Direct Cypher query execution (enabled by default; `ALLOW_CYPHER_QUERY=false` disables it)
 - **NATURAL_LANGUAGE** - Natural language to structured query
-- **TEMPORAL** - Hybrid retrieval reranked by time: the `Timestamp` nodes overlapping the window the LLM extracts from the question ("what happened in 1969?") are looked up natively (`get_timestamps_in_range` on Ladybug, Neo4j, Postgres demo; a scan elsewhere), and the chunks and entities anchored to them move to the front of the hybrid candidates; nothing is dropped, and a question with no time or no overlap gets plain hybrid
+- **TEMPORAL** - Hybrid retrieval reranked by time: the `Timestamp` nodes overlapping the window the LLM extracts from the question ("what happened in 1969?") are looked up natively (`get_timestamps_in_range` on Ladybug, Neo4j, Postgres demo; a scan elsewhere), the chunks attached to them join the hybrid candidates (similarity alone misses most rows dated inside a window), and the anchored candidates move to the front, ranked by how tightly their matched timestamp fits the window (a chunk dated to the day before one that only names the year); nothing is dropped, and a question with no time or no overlap gets plain hybrid
 - **FEELING_LUCKY** - Automatic search type selection
 - **CODING_RULES** - Code-specific search rules
 - **SKILLS** - Semantic discovery of skill playbooks (metadata-only, no LLM; requires exactly one dataset)
