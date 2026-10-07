@@ -187,7 +187,10 @@ async def detect_contradictions(data_points: list[DataPoint], **kwargs) -> list[
             response_model=ContradictionList,
         )
 
-        contradiction_edges = []
+        # Several detected conflicts can map onto the same (source, target) pair;
+        # keep one ``contradicts`` edge per pair, first occurrence kept (duplicate
+        # rows in one add_edges batch crash ladybug 0.19.0, issue #5221).
+        contradiction_edges: dict[tuple[str, str, str], tuple] = {}
         for contradiction in result.contradictions:
             if contradiction.confidence < cognify_config.contradiction_confidence_threshold:
                 continue
@@ -214,25 +217,26 @@ async def detect_contradictions(data_points: list[DataPoint], **kwargs) -> list[
                 continue
 
             source_id, target_id = endpoints
-            contradiction_edges.append(
-                (
-                    source_id,
-                    target_id,
-                    "contradicts",
-                    {
-                        "relationship_name": "contradicts",
-                        "source_node_id": source_id,
-                        "target_node_id": target_id,
-                        "first_fact": first_fact,
-                        "second_fact": second_fact,
-                        "reason": contradiction.reason,
-                        "confidence": contradiction.confidence,
-                    },
-                )
+            edge_key = (source_id, target_id, "contradicts")
+            if edge_key in contradiction_edges:
+                continue
+            contradiction_edges[edge_key] = (
+                source_id,
+                target_id,
+                "contradicts",
+                {
+                    "relationship_name": "contradicts",
+                    "source_node_id": source_id,
+                    "target_node_id": target_id,
+                    "first_fact": first_fact,
+                    "second_fact": second_fact,
+                    "reason": contradiction.reason,
+                    "confidence": contradiction.confidence,
+                },
             )
 
         if contradiction_edges:
-            await graph_engine.add_edges(contradiction_edges)
+            await graph_engine.add_edges(list(contradiction_edges.values()))
             logger.info("Flagged %s contradiction(s) in the graph.", len(contradiction_edges))
     except Exception as error:
         # Contradiction detection is auxiliary and must never break ingestion.
