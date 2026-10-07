@@ -97,10 +97,7 @@ def update_node_set(document):
     if not isinstance(node_set, list):
         return
 
-    document.belongs_to_set = [
-        NodeSet(id=generate_node_id(f"NodeSet:{node_set_name}"), name=node_set_name)
-        for node_set_name in node_set
-    ]
+    document.belongs_to_set = [NodeSet(name=node_set_name) for node_set_name in node_set]
     document.source_node_set = ", ".join(node_set)
 
 

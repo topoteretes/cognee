@@ -14,12 +14,13 @@ import os
 import shutil
 import tempfile
 from collections.abc import Callable
-from typing import Any
+from typing import Any, NoReturn
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 from uuid import UUID
 
 from cognee.modules.data.methods.get_unique_data_id import get_unique_data_id
+from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 
@@ -33,7 +34,7 @@ from .create_dlt_source import (
 from .data_item import DataItem
 from .dlt_row_data import DltRowData
 from .dlt_temporal import temporal_cells
-from .dlt_utils import column_selected, document_source_tag
+from .dlt_utils import NODE_SET_COLUMN, column_selected, document_source_tag
 from .ingest_dlt_source import ingest_dlt_source
 
 logger = get_logger("resolve_dlt_sources")
@@ -616,7 +617,9 @@ def _build_document_data_item(row: DltRowData, data_id: UUID, source_tag: str) -
     The row is expected to carry ``title``/``content`` columns (and optionally
     ``url``/``id``). Tagging ``system_metadata["source"] = source_tag``
     routes the document through normal cognify entity extraction rather
-    than the deterministic manifest path.
+    than the deterministic manifest path. A ``cognee_node_set`` column names
+    the row's own node sets (``_row_node_set``); they ride on the DataItem and
+    ingest_data unions them with the call-level node_set.
 
     ``literal_text=True`` because ``content`` is provider data cognee did not
     write: an untitled row (no "# title" prefix) whose content happens to be
@@ -644,6 +647,88 @@ def _build_document_data_item(row: DltRowData, data_id: UUID, source_tag: str) -
         system_metadata=system_metadata,
         data_id=data_id,
         literal_text=True,
+        node_set=_row_node_set(row, source_tag),
+    )
+
+
+def _row_node_set(row: DltRowData, source_tag: str) -> list[str] | None:
+    """The node sets a document row names in its ``cognee_node_set`` column.
+
+    The column must hold a JSON list of names. It comes back as that list (a
+    json column) or as its JSON text (SQLite). Any other shape raises: the
+    column is loaded with a json type hint, so dlt moves a value that is not a
+    list or object (a bare string, a number) into a variant column such as
+    ``cognee_node_set__v_text`` and leaves this one NULL. Reading only this
+    column would then ingest the row with none of its node sets and no sign
+    of it, so the sync stops instead and names the source, table and row.
+
+    Every name is namespaced under ``source_tag`` unless it already is, so
+    provider data can never name one of cognee's own node sets (``skills``,
+    ``user_context``, ...), and deduplicated by node-set identity, so two
+    spellings of one node set (``Project A``, ``project_a``) keep the first.
+    Entries that are not non-empty strings are ignored and counted in one
+    debug line per row (never the values).
+    """
+    variants = sorted(
+        column
+        for column, value in row.row_data.items()
+        if column.startswith(f"{NODE_SET_COLUMN}__v_") and value is not None
+    )
+    if variants:
+        _raise_node_set_shape(row, source_tag, f"a value dlt stored in {', '.join(variants)}")
+    raw = row.row_data.get(NODE_SET_COLUMN)
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            # ValueError only, no RecursionError guard: this column is loaded with a
+            # json type hint (NODE_SET_COLUMN_HINT) and dlt refuses a list nested
+            # deep enough to break json.loads, failing at extract before the row is
+            # stored (checked on dlt 1.28.2: 200 levels load, 1000 fail). On Postgres
+            # the value comes back already parsed. There is no input to guard against.
+            _raise_node_set_shape(row, source_tag, "text that is not JSON")
+    if not isinstance(raw, list):
+        _raise_node_set_shape(row, source_tag, f"a JSON {type(raw).__name__}")
+    # No cap on the number or length of names, on purpose. A cap would cut a
+    # row's group memberships silently: the document lands with only some of
+    # its node sets and nobody is told. If a source ever floods the graph with
+    # node sets, fail the sync loudly, naming the source, table and count.
+    # Never truncate.
+    prefix = f"{source_tag}:"
+    names = [
+        name if name.startswith(prefix) else prefix + name
+        for name in (_clean(value) for value in raw if isinstance(value, str))
+        if name
+    ]
+    if len(names) < len(raw):
+        logger.debug(
+            "Source '%s' table '%s': ignored %d non-string or blank %s value(s).",
+            source_tag,
+            row.table_name,
+            len(raw) - len(names),
+            NODE_SET_COLUMN,
+        )
+    # One entry per node set: spellings that normalize to the same id keep the first.
+    unique: dict = {}
+    for name in names:
+        unique.setdefault(NodeSet.id_for(name), name)
+    return list(unique.values()) or None
+
+
+def _raise_node_set_shape(row: DltRowData, source_tag: str, found: str) -> NoReturn:
+    """Stop the sync: a row's ``cognee_node_set`` is not a JSON list of names."""
+    from cognee.exceptions import CogneeValidationError
+
+    raise CogneeValidationError(
+        message=(
+            f"Source '{source_tag}' table '{row.table_name}' row '{row.primary_key_value}': "
+            f"{NODE_SET_COLUMN} must be a JSON list of names, but it holds {found}. "
+            'Emit a list, even for one name (["name"]), and re-sync the affected rows. '
+            "No document from this sync was stored."
+        ),
+        name="DltNodeSetColumnNotAList",
     )
 
 
