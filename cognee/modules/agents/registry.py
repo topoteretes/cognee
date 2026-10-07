@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from threading import RLock
 from uuid import UUID
 
+from pydantic import ValidationError
+
 from cognee.modules.agents.models import (
     AgentConnection,
     AgentConnectionType,
@@ -208,7 +210,19 @@ async def list_persisted_agent_connections(
             if config.get("name") == AGENT_CONFIG_NAME:
                 agents_dict = config.get("configuration", {}).get("agents", {})
                 for data in agents_dict.values():
-                    connection = AgentConnection(**data)
+                    # The blob is writable by its owner through the public
+                    # configuration endpoint, so an entry is only trusted for
+                    # the user whose configuration holds it. Otherwise anyone
+                    # could name another user here and read their sessions.
+                    try:
+                        connection = AgentConnection(**data)
+                    except ValidationError:
+                        logger.debug(
+                            "Skipping malformed agent connection of user %s", user_id, exc_info=True
+                        )
+                        continue
+                    if connection.user_id != user_id:
+                        continue
                     if not active_only or connection.status == "active":
                         agents.append(connection)
     return agents

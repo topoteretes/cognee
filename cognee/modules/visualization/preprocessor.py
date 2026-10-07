@@ -927,7 +927,9 @@ def _stage_for_node(node_info):
 
 
 # Built-in node types outside _STAGE_BY_TYPE that also declare identity_fields.
-_BUILTIN_IDENTITY_TYPES = frozenset({"EdgeType", "Skill", "SkillRun", "SkillImprovementProposal"})
+_BUILTIN_IDENTITY_TYPES = frozenset(
+    {"EdgeType", "NodeSet", "Skill", "SkillRun", "SkillImprovementProposal"}
+)
 
 
 def _declares_identity(node_info) -> bool:

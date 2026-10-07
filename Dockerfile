@@ -93,9 +93,13 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 FROM python:3.12-slim-bookworm@sha256:782412e85d0f0984994c290652577d4018aff08145c85b262bb63dc0c7522254
 
+# git: the code-graph route shallow-clones GitHub/GitLab repository URLs at
+# runtime (cognee/tasks/code_graph/resolve_repo.py); without it every remote
+# repo passed to add()/remember() fails with CodeRepositoryError.
 RUN apt-get update && apt-get install -y \
     libpq5 \
     curl \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

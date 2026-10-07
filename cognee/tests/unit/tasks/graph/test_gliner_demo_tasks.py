@@ -195,6 +195,39 @@ def _edges(result):
     )
 
 
+def test_mapping_time_labels_become_timestamp_nodes_when_they_parse():
+    """SDK-827: GLiNER dates take the same route as the LLM prompt's Timestamp nodes."""
+    graph = knowledge_graph_from_gliner_result(
+        {
+            "entities": {
+                "date": ["7 November 1867", "1867-11-07", "November 7"],
+                "year": ["1969"],
+                "time_period": ["1891", "the 1960s"],
+                "organization": ["1984"],
+            }
+        }
+    )
+    assert sorted((node.type, node.name, node.id) for node in graph.nodes) == [
+        ("Timestamp", "1867-11-07", "timestamp:1867-11-07"),  # both mentions, one node
+        ("Timestamp", "1891", "timestamp:1891"),
+        ("Timestamp", "1969", "timestamp:1969"),
+        ("date", "November 7", "date:november 7"),  # year-less: stays a date entity
+        ("organization", "1984", "organization:1984"),  # not a time label
+        ("time_period", "the 1960s", "time_period:the 1960s"),
+    ]
+
+
+def test_edge_to_a_timestamp_resolves_through_the_original_mention():
+    mapped, edges = _edges(
+        {
+            "entities": {"event": ["Curie's birth"], "date": ["7 November 1867"]},
+            "relation_extraction": {"occurred_on": [["Curie's birth", "7 November 1867"]]},
+        }
+    )
+    assert edges == [("event:curie's birth", "occurred_on", "timestamp:1867-11-07")]
+    assert (mapped.candidate_edges, mapped.kept_edges) == (1, 1)
+
+
 def test_edge_exact_match_is_case_and_punctuation_insensitive():
     mapped, edges = _edges(
         {
@@ -817,11 +850,20 @@ async def _cognify_standard_tasks(**kwargs):
     async def execute_pipeline(**pipeline_kwargs):
         data_item = SimpleNamespace(extension="txt", system_metadata=None)
         captured["tasks"] = pipeline_kwargs["tasks"](data_item)
+        # Telemetry must use the chosen task path, including explicit overrides.
+        expected = (
+            "gliner_demo"
+            if "extract_graph_and_summarize_with_gliner" in _task_names(captured["tasks"])
+            else "llm"
+        )
+        assert pipeline_kwargs["extras"]["graph_extractor"] == expected
         return {}
 
     with (
         patch.object(migrations, "run_migrations_and_block", AsyncMock()),
         patch.object(cognify_module, "get_pipeline_executor", return_value=execute_pipeline),
+        # These tests select task lists; runtime installation has its own suite.
+        patch.object(cognify_module, "ensure_extractor_runtime", AsyncMock()),
     ):
         await cognify_module.cognify(chunk_size=512, **kwargs)
 
@@ -910,17 +952,6 @@ async def test_cognify_extractor_conflicts_raise_before_any_work(monkeypatch):
 
     with pytest.raises(ValueError, match="Unknown extractor"):
         await cognify_module.cognify(extractor="spacy")
-    with pytest.raises(ValueError, match="temporal"):
-        await cognify_module.cognify(temporal_cognify=True, extractor="gliner_demo")
-    with (
-        patch.object(
-            cognify_module,
-            "get_cognify_config",
-            return_value=_config_with_extractor("gliner_demo"),
-        ),
-        pytest.raises(ValueError, match="temporal"),
-    ):
-        await cognify_module.cognify(temporal_cognify=True)
     with pytest.raises(ValueError, match="dry_run"):
         await cognify_module.cognify(dry_run=True, extractor="gliner_demo")
 
