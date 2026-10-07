@@ -106,6 +106,32 @@ class DataPoint(BaseModel):
                     object.__setattr__(self, "id", identity_id)
 
     @classmethod
+    def vector_collection(cls, field: str | None = None) -> str:
+        """Name of the vector collection ``index_data_points`` writes an index field
+        of this type to: ``<TypeName>_<field>``, the convention every vector adapter's
+        ``create_vector_index(type_name, field_name)`` composes. Readers name a
+        collection through this instead of spelling the string.
+
+        With no ``field`` the type's single declared index field is used, so the
+        name is derived from the model alone. A type that indexes several fields
+        must name one; a field the type does not index is an error either way.
+        """
+        metadata_field = cls.model_fields.get("metadata")
+        index_fields = list(
+            (metadata_field.default or {}).get("index_fields", []) if metadata_field else []
+        )
+        if field is None:
+            if len(index_fields) != 1:
+                raise ValueError(
+                    f"{cls.__name__} indexes {index_fields or 'no fields'}; "
+                    "pass the field whose collection you mean"
+                )
+            field = index_fields[0]
+        elif field not in index_fields:
+            raise ValueError(f"{cls.__name__} does not index {field!r}; it indexes {index_fields}")
+        return f"{cls.__name__}_{field}"
+
+    @classmethod
     def _get_identity_fields(cls) -> list[str] | None:
         """Get identity_fields from the class's metadata field default, if defined.
 

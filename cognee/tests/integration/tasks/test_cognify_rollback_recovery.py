@@ -27,6 +27,7 @@ from cognee.modules.data.models import Data
 from cognee.modules.engine.operations.setup import setup as engine_setup
 from cognee.modules.graph.models import Edge, Node
 from cognee.modules.pipelines.models import PipelineContext, PipelineRun, PipelineRunStatus
+from cognee.modules.pipelines.run_ownership import pipeline_run_ownership
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.methods import create_user, get_default_user
 from cognee.tasks.storage.add_data_points import add_data_points
@@ -34,6 +35,12 @@ from cognee.tests.utils.assert_graph_nodes_not_present import assert_graph_nodes
 from cognee.tests.utils.assert_graph_nodes_present import assert_graph_nodes_present
 
 logger = logging.getLogger(__name__)
+
+
+def _abandoned_run_info(info):
+    # Seed the ownership marker a killed writer would leave behind.
+    with pipeline_run_ownership() as owner:
+        return {**info, "recovery_lock": owner.token}
 
 
 class Person(DataPoint):
@@ -386,7 +393,7 @@ async def test_cognify_startup_recovery_rolls_back_stale_started_runs(clean_test
                 pipeline_id=uuid4(),
                 status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
                 dataset_id=dataset.id,
-                run_info={"data": [str(data_id)]},
+                run_info=_abandoned_run_info({"data": [str(data_id)]}),
                 created_at=datetime.now(timezone.utc) - timedelta(hours=2),
             )
         )
@@ -419,11 +426,18 @@ async def test_cognify_startup_recovery_rolls_back_stale_started_runs(clean_test
 
 
 @pytest.mark.asyncio
-async def test_startup_recovery_closes_stale_runs_of_every_pipeline(clean_test_environment):
-    """A non-cognify run left STARTED is closed as ERRORED too, carrying its own user."""
+@pytest.mark.parametrize(
+    "has_user,has_tenant", [(True, True), (True, False), (False, True), (False, False)]
+)
+async def test_startup_recovery_closes_stale_runs_of_every_pipeline(
+    clean_test_environment, has_user, has_tenant
+):
+    """Recovery preserves stored IDs even without a matching live user or tenant."""
     user = await get_default_user()
     dataset = await create_authorized_dataset("recovery_all_pipelines_dataset", user)
 
+    stored_user_id = uuid4() if has_user else None
+    stored_tenant_id = uuid4() if has_tenant else None
     stale_add_run_id = uuid4()
     started_at = datetime.now(timezone.utc) - timedelta(hours=2)
     db_engine = get_relational_engine()
@@ -435,8 +449,9 @@ async def test_startup_recovery_closes_stale_runs_of_every_pipeline(clean_test_e
                 pipeline_id=uuid4(),
                 status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
                 dataset_id=dataset.id,
-                run_info={"data": ["some-data-id"]},
-                user_id=user.id,
+                run_info=_abandoned_run_info({"data": ["some-data-id"]}),
+                user_id=stored_user_id,
+                tenant_id=stored_tenant_id,
                 created_at=started_at,
                 started_at=started_at,
             )
@@ -463,7 +478,8 @@ async def test_startup_recovery_closes_stale_runs_of_every_pipeline(clean_test_e
     ]
     closed = rows[0]
     assert closed.error_class == "AbandonedPipelineRunError"
-    assert closed.user_id == user.id
+    assert closed.user_id == stored_user_id
+    assert closed.tenant_id == stored_tenant_id
     assert closed.started_at is not None and closed.started_at.replace(
         tzinfo=None
     ) == started_at.replace(tzinfo=None)
@@ -507,7 +523,7 @@ async def test_startup_recovery_finds_a_run_buried_under_a_newer_completed_run(
                     pipeline_id=pipeline_id,
                     status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
                     dataset_id=dataset.id,
-                    run_info={},
+                    run_info=_abandoned_run_info({}),
                     user_id=user.id,
                     created_at=two_hours_ago,
                     started_at=two_hours_ago,
@@ -518,7 +534,7 @@ async def test_startup_recovery_finds_a_run_buried_under_a_newer_completed_run(
                     pipeline_id=pipeline_id,
                     status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
                     dataset_id=dataset.id,
-                    run_info={},
+                    run_info=_abandoned_run_info({}),
                     user_id=user.id,
                     created_at=two_hours_ago + timedelta(minutes=30),
                 ),
@@ -613,7 +629,7 @@ async def test_startup_recovery_keeps_documents_the_abandoned_run_completed(
                 pipeline_id=uuid4(),
                 status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
                 dataset_id=dataset.id,
-                run_info={"data": [str(done_id), str(unfinished_id)]},
+                run_info=_abandoned_run_info({"data": [str(done_id), str(unfinished_id)]}),
                 created_at=datetime.now(timezone.utc) - timedelta(hours=2),
             )
         )
@@ -699,7 +715,7 @@ async def test_startup_recovery_keeps_a_node_shared_by_completed_and_unfinished_
                 pipeline_id=uuid4(),
                 status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
                 dataset_id=dataset.id,
-                run_info={},
+                run_info=_abandoned_run_info({}),
                 created_at=datetime.now(timezone.utc) - timedelta(hours=2),
             )
         )

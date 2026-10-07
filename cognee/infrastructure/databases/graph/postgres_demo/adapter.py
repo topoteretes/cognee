@@ -24,7 +24,10 @@ from cognee.infrastructure.databases.graph.bounded_neighborhood import (
     unique_node_ids,
     validate_bounded_neighborhood_args,
 )
-from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+from cognee.infrastructure.databases.graph.graph_db_interface import (
+    GraphDBInterface,
+    temporal_anchors_from_rows,
+)
 from cognee.infrastructure.databases.provenance import (
     EdgeDeleteData,
     EdgeIdentity,
@@ -460,6 +463,98 @@ class PostgresDemoAdapter(GraphDBInterface):
                 }
                 for row in result.mappings().all()
             ]
+
+    async def get_timestamps_in_range(
+        self, start: int | None, end: int | None
+    ) -> list[dict[str, Any]]:
+        """Timestamp nodes whose ``[time_at, time_until)`` overlaps ``[start, end)``."""
+        conditions = ["type = 'Timestamp'"]
+        params: dict[str, Any] = {}
+        if end is not None:
+            conditions.append("(properties->>'time_at')::bigint < :window_end")
+            params["window_end"] = int(end)
+        if start is not None:
+            conditions.append(
+                "COALESCE((properties->>'time_until')::bigint, (properties->>'time_at')::bigint + 1000) > :window_start"
+            )
+            params["window_start"] = int(start)
+        async with self.sessionmaker() as session:
+            result = await session.execute(
+                text(
+                    "SELECT id, properties->>'timestamp_str' AS timestamp_str, "
+                    "(properties->>'time_at')::bigint AS time_at, "
+                    "COALESCE((properties->>'time_until')::bigint, (properties->>'time_at')::bigint + 1000) AS time_until "
+                    f"FROM graph_node WHERE {' AND '.join(conditions)} ORDER BY time_at, id"
+                ),
+                params,
+            )
+            return [
+                {
+                    "id": row["id"],
+                    "type": "Timestamp",
+                    "timestamp_str": row["timestamp_str"],
+                    "time_at": row["time_at"],
+                    "time_until": row["time_until"],
+                }
+                for row in result.mappings().all()
+            ]
+
+    async def get_temporal_anchors(
+        self,
+        chunk_ids,
+        entity_ids,
+        start: int | None,
+        end: int | None,
+    ) -> dict[str, set[str]]:
+        """Candidates attached to a Timestamp overlapping ``[start, end)``: directly,
+        or (for chunks) through an entity they ``contains``. See the interface."""
+        chunk_list = sorted({str(node_id) for node_id in chunk_ids})
+        entity_list = sorted({str(node_id) for node_id in entity_ids})
+        if not chunk_list and not entity_list:
+            return temporal_anchors_from_rows([], [], [])
+        conditions = ["t.type = 'Timestamp'"]
+        params: dict[str, Any] = {}
+        if end is not None:
+            conditions.append("(t.properties->>'time_at')::bigint < :window_end")
+            params["window_end"] = int(end)
+        if start is not None:
+            conditions.append(
+                "COALESCE((t.properties->>'time_until')::bigint, (t.properties->>'time_at')::bigint + 1000) > :window_start"
+            )
+            params["window_start"] = int(start)
+        where = " AND ".join(conditions)
+        async with self.sessionmaker() as session:
+            direct = await session.execute(
+                text(
+                    "SELECT DISTINCT e.source_id AS candidate_id, t.id AS timestamp_id "
+                    "FROM graph_edge e "
+                    "JOIN graph_node t ON t.id = e.target_id "
+                    f"WHERE e.source_id = ANY(:candidate_ids) AND {where}"
+                ),
+                {**params, "candidate_ids": chunk_list + entity_list},
+            )
+            direct_rows = [
+                (row["candidate_id"], row["timestamp_id"]) for row in direct.mappings().all()
+            ]
+            via_rows = []
+            if chunk_list:
+                via = await session.execute(
+                    text(
+                        "SELECT DISTINCT e1.source_id AS chunk_id, e2.source_id AS entity_id, t.id AS timestamp_id "
+                        "FROM graph_edge e1 "
+                        "JOIN graph_node en ON en.id = e1.target_id "
+                        "JOIN graph_edge e2 ON e2.source_id = e1.target_id "
+                        "JOIN graph_node t ON t.id = e2.target_id "
+                        "WHERE e1.source_id = ANY(:chunk_ids) AND e1.relationship_name = 'contains' "
+                        f"AND en.type = 'Entity' AND {where}"
+                    ),
+                    {**params, "chunk_ids": chunk_list},
+                )
+                via_rows = [
+                    (row["chunk_id"], row["entity_id"], row["timestamp_id"])
+                    for row in via.mappings().all()
+                ]
+        return temporal_anchors_from_rows(direct_rows, via_rows, chunk_list)
 
     async def add_edge(
         self,
@@ -900,6 +995,13 @@ class PostgresDemoAdapter(GraphDBInterface):
             nodes = await self._fetch_nodes_by_id(session, subgraph_ids)
             edges = await self._fetch_edges_within(session, subgraph_ids)
             return nodes, edges
+
+    async def get_graph_counts(self) -> tuple[int, int]:
+        """Count nodes and edges with two aggregation queries."""
+        async with self.sessionmaker() as session:
+            num_nodes = (await session.execute(text("SELECT count(*) FROM graph_node"))).scalar()
+            num_edges = (await session.execute(text("SELECT count(*) FROM graph_edge"))).scalar()
+        return num_nodes or 0, num_edges or 0
 
     async def get_graph_metrics(self, include_optional: bool = False) -> dict[str, Any]:
         """Compute the supported graph metrics in Python."""

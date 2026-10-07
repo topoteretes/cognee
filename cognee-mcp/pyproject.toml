@@ -23,6 +23,11 @@ dependencies = [
     # unstructured) so the [tool.uv.sources] CPU-index redirect below actually
     # binds — uv only applies source overrides to direct dependencies.
     "torch>=2.0.0",
+    # Core dependency of cognee since SDK-827 (temporal hints in graph extraction).
+    # docker-compose mounts the local ./cognee source over the released cognee this
+    # lock resolves, so a new core dependency must be declared here until a release
+    # that carries it is pinned above.
+    "dateparser>=1.2,<2",
 ]
 
 authors = [

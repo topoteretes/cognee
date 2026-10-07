@@ -21,7 +21,6 @@ from cognee.modules.data.methods import (
 )
 from cognee.modules.data.models import Data
 from cognee.modules.engine.models.node_set import NodeSet
-from cognee.modules.ingestion import save_data_to_file_detailed
 from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.modules.ingestion.identify_many import identify_many
 from cognee.modules.users.methods import get_default_user
@@ -243,7 +242,6 @@ async def ingest_data(
         )
         _loop1_start = _time.monotonic()
         for data_item in data:
-            underlying_data = data_item.data if isinstance(data_item, DataItem) else data_item
             item_data_id = data_item.data_id if isinstance(data_item, DataItem) else None
             source_uri = _source_uri_from_input(data_item)
 
@@ -253,12 +251,8 @@ async def ingest_data(
             # its (I/O-free) save resolves to.
             carried = find_carried_source(ctx, data_item=data_item)
             if carried is None:
-                if isinstance(data_item, DataItem) and data_item.literal_text:
-                    # Store verbatim as text: never interpret this string as a
-                    # URL, s3 path, or local file path (see DataItem.literal_text).
-                    stored = await save_data_to_file_detailed(underlying_data)
-                else:
-                    stored = await save_data_item_to_storage_detailed(underlying_data)
+                # The whole item, so DataItem.literal_text reaches the storage function.
+                stored = await save_data_item_to_storage_detailed(data_item)
                 carried = find_carried_source(ctx, file_path=stored.file_path) or stored
 
             original_file_path = carried.file_path
@@ -366,14 +360,12 @@ async def ingest_data(
         for data_item in data:
             # Support for DataItem (custom label + data + optional data_id / external_metadata)
             current_label = None
-            underlying_data = data_item
             item_data_id = None
             item_external_metadata = None
             item_system_metadata = None
             item_node_set = None
 
             if isinstance(data_item, DataItem):
-                underlying_data = data_item.data
                 current_label = data_item.label
                 item_data_id = data_item.data_id
                 item_external_metadata = data_item.external_metadata
