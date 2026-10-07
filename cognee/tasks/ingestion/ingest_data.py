@@ -20,7 +20,7 @@ from cognee.modules.data.methods import (
     resolve_data_id,
 )
 from cognee.modules.data.models import Data
-from cognee.modules.engine.models.node_set import NodeSet
+from cognee.modules.engine.models.node_set import NodeSet, validate_node_set_names
 from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.modules.ingestion.identify_many import identify_many
 from cognee.modules.users.methods import get_default_user
@@ -124,29 +124,16 @@ def _union_node_sets(
     Call-first, order-preserving, deduplicated on the NodeSet id key, so two
     spellings that map to one graph node keep only the first. With no
     item-level node_set this returns ``call_node_set`` untouched (not even
-    deduped), exactly as before this field existed. A bare string on either
-    side is one name, never iterated character by character.
+    deduped), exactly as before this field existed. Both sides are already
+    validated by ``ingest_data`` as lists of names.
     """
     if not item_node_set:
         return call_node_set
 
-    def as_names(node_set: list[str] | str | None) -> list[str]:
-        if node_set is None:
-            return []
-        if isinstance(node_set, str):
-            return [node_set]
-        return list(node_set)
-
     seen: set[UUID] = set()
     combined: list[str] = []
-    for name in as_names(call_node_set) + as_names(item_node_set):
-        if not isinstance(name, str) or not name.strip():
-            continue
-        try:
-            key = NodeSet.id_for(name)
-        except UnicodeEncodeError:
-            # A lone surrogate cannot become a NodeSet id; drop it, not the item.
-            continue
+    for name in (call_node_set or []) + item_node_set:
+        key = NodeSet.id_for(name)
         if key not in seen:
             seen.add(key)
             combined.append(name)
@@ -170,7 +157,18 @@ async def ingest_data(
     this task writes to, that dataset was already resolved and write-checked by
     ``run_pipeline`` — re-resolving it here would cost three more DB sessions
     per call, and the incremental pipeline calls this task once per item.
+
+    Raises:
+        InvalidNodeSetError: If the call's node_set, a DataItem's node_set, or a
+            ``node_set`` key in a DataItem's external_metadata is not a list of
+            names. Checked before anything is stored.
     """
+    validate_node_set_names(node_set)
+    for data_item in data if isinstance(data, list) else [data]:
+        if isinstance(data_item, DataItem):
+            validate_node_set_names(data_item.node_set)
+            validate_node_set_names((data_item.external_metadata or {}).get("node_set"))
+
     if not user:
         user = await get_default_user()
 

@@ -7,11 +7,18 @@ pre-existing call-level-only behavior, duplicates and all.
 """
 
 import json
+from types import SimpleNamespace
 from uuid import uuid4
 
+import pytest
+
 from cognee.modules.data.processing.document_types.TextDocument import TextDocument
+from cognee.modules.engine.models.node_set import InvalidNodeSetError
 from cognee.tasks.documents.classify_documents import update_node_set
-from cognee.tasks.ingestion.ingest_data import _union_node_sets
+from cognee.tasks.ingestion.data_item import DataItem
+from cognee.tasks.ingestion.ingest_data import _union_node_sets, ingest_data
+
+USER = SimpleNamespace(id=uuid4(), tenant_id=None)
 
 
 def test_no_call_and_no_item_node_set_is_none():
@@ -69,14 +76,44 @@ def test_union_dedupes_on_the_node_set_id_key():
     ]
 
 
-def test_a_string_node_set_is_one_name_not_characters():
-    assert _union_node_sets("notion:x", ["notion:y"]) == ["notion:x", "notion:y"]
-    assert _union_node_sets(None, "notion:x") == ["notion:x"]
+# A malformed node_set used to be ignored, or tagged depending on whether an
+# item had its own node_set. ingest_data now rejects it before storing anything.
+_MALFORMED = ["team", ["a", 5], ["x", ""], ["x", "  "], ["x\ud800"], {"a": 1}]
 
 
-def test_union_drops_empty_names():
-    assert _union_node_sets(["x"], ["", "  ", "y"]) == ["x", "y"]
+@pytest.mark.asyncio
+@pytest.mark.parametrize("node_set", _MALFORMED)
+async def test_ingest_data_rejects_a_malformed_call_node_set(node_set):
+    with pytest.raises(InvalidNodeSetError):
+        await ingest_data("text", "ds", USER, node_set=node_set)
 
 
-def test_union_skips_a_name_that_cannot_become_a_node_set_id():
-    assert _union_node_sets(["x\ud800", "x"], ["notion:y"]) == ["x", "notion:y"]
+@pytest.mark.asyncio
+@pytest.mark.parametrize("node_set", _MALFORMED)
+async def test_ingest_data_rejects_a_malformed_item_node_set(node_set):
+    with pytest.raises(InvalidNodeSetError):
+        await ingest_data([DataItem(data="text", node_set=node_set)], "ds", USER)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("node_set", _MALFORMED)
+async def test_ingest_data_rejects_a_malformed_node_set_in_external_metadata(node_set):
+    item = DataItem(data="text", external_metadata={"node_set": node_set})
+    with pytest.raises(InvalidNodeSetError):
+        await ingest_data([item], "ds", USER)
+
+
+@pytest.mark.parametrize("node_set", _MALFORMED)
+def test_a_stored_malformed_node_set_raises_instead_of_leaving_the_document_untagged(
+    node_set,
+):
+    document = TextDocument(
+        id=uuid4(),
+        title="doc.txt",
+        name="doc",
+        raw_data_location="/tmp/doc.txt",
+        external_metadata=json.dumps({"node_set": node_set}),
+        mime_type="text/plain",
+    )
+    with pytest.raises(InvalidNodeSetError):
+        update_node_set(document)
