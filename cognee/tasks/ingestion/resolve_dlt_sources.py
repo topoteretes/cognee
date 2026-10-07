@@ -20,6 +20,7 @@ from urllib.request import url2pathname
 from uuid import UUID
 
 from cognee.modules.data.methods.get_unique_data_id import get_unique_data_id
+from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 
@@ -656,8 +657,10 @@ def _row_node_set(row: DltRowData, source_tag: str) -> list[str] | None:
 
     Every name is namespaced under ``source_tag`` unless it already is, so
     provider data can never name one of cognee's own node sets (``skills``,
-    ``user_context``, ...). Entries that are not non-empty strings are
-    ignored and counted in one debug line per row (never the values).
+    ``user_context``, ...), and deduplicated by node-set identity, so two
+    spellings of one node set (``Project A``, ``project_a``) keep the first.
+    Entries that are not non-empty strings are ignored and counted in one
+    debug line per row (never the values).
     """
     variants = sorted(
         column
@@ -700,7 +703,11 @@ def _row_node_set(row: DltRowData, source_tag: str) -> list[str] | None:
             len(raw) - len(names),
             NODE_SET_COLUMN,
         )
-    return list(dict.fromkeys(names)) or None
+    # One entry per node set: spellings that normalize to the same id keep the first.
+    unique: dict = {}
+    for name in names:
+        unique.setdefault(NodeSet.id_for(name), name)
+    return list(unique.values()) or None
 
 
 def _raise_node_set_shape(row: DltRowData, source_tag: str, found: str) -> NoReturn:

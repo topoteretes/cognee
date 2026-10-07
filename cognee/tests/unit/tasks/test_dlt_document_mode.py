@@ -193,6 +193,10 @@ class TestRowNodeSet:
         assert _node_set([3, None, "", "   ", {"a": 1}, "ws:root"]) == ["notion:ws:root"]
         assert _node_set([3, None]) is None
 
+    def test_spellings_of_one_node_set_keep_the_first(self):
+        """Dedupe is by node-set identity, the same normalization the graph uses."""
+        assert _node_set(["Project A", "project_a", "PROJECT A"]) == ["notion:Project A"]
+
 
 class TestRowNodeSetNotAList:
     """Any shape but a JSON list stops the sync and names the row; nothing is dropped."""

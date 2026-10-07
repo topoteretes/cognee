@@ -146,7 +146,7 @@ async def add_skills(
         return []
 
     dataset_id = dataset.id
-    node_set_point = NodeSet(id=generate_node_id(f"NodeSet:{node_set}"), name=node_set)
+    node_set_point = NodeSet(name=node_set)
     scoped: list[Skill] = []
     for skill in parsed:
         skill.id = _scoped_skill_id(dataset_id, skill)
