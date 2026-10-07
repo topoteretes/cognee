@@ -65,9 +65,6 @@ SAMPLE_ARGUMENTS = {
     ],
     "data_id": "sample-data-id",
     "dataset_id": "sample-dataset-id",
-    # AmbiguousDatasetNameError: a name several of the caller's agents use.
-    "dataset_name": "sample_dataset",
-    "dataset_ids": ["sample-dataset-id", "other-dataset-id"],
     "detail": "sample detail",
     "dimension": 1,
     "field": "sample_field",

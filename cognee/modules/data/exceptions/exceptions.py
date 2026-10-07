@@ -66,25 +66,6 @@ class DatasetNotFoundError(CogneeValidationError):
         super().__init__(message, name, status_code)
 
 
-class AmbiguousDatasetNameError(CogneeValidationError):
-    """A dataset name the caller does not own matches datasets of several of their agents."""
-
-    def __init__(
-        self,
-        dataset_name: str,
-        dataset_ids: list,
-        name: str = "AmbiguousDatasetNameError",
-        status_code=status.HTTP_409_CONFLICT,
-    ):
-        self.dataset_ids = dataset_ids
-        super().__init__(
-            f"Dataset name {dataset_name!r} matches datasets of more than one of your agents: "
-            f"{', '.join(str(dataset_id) for dataset_id in dataset_ids)}. Pass the dataset id.",
-            name,
-            status_code,
-        )
-
-
 class DatasetTypeError(CogneeValidationError):
     def __init__(
         self,

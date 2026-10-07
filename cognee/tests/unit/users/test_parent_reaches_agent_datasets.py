@@ -1,4 +1,4 @@
-"""A user reaches the datasets their agents reach, by id and by name (SDK-925).
+"""A user reaches the datasets their agents reach, by id (SDK-925).
 
 The user holds their agents' keys, so this grants nothing new; it makes the
 access usable without the key. Runs against a real database with agents created
@@ -140,47 +140,18 @@ async def test_parent_does_not_reach_an_agent_dataset_in_another_tenant():
 
 
 @pytest.mark.asyncio
-async def test_a_name_resolves_to_an_agent_dataset_when_the_parent_has_none():
-    from cognee.modules.data.methods.get_dataset_ids import get_dataset_ids
-    from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
-        resolve_authorized_user_datasets,
-    )
+async def test_parent_reaches_an_agent_dataset_by_id_not_by_name():
+    """Names resolve among the user's own datasets only, as for any dataset another
+    user owns: the agent's dataset is reached by passing its id."""
+    from cognee.modules.data.exceptions import DatasetNotFoundError
+    from cognee.modules.data.methods import get_authorized_existing_datasets
 
     parent = await _user()
     agent = await _agent(parent)
     name = f"x-{uuid4()}"
     agent_dataset = await _dataset_of(agent, name)
 
-    assert await get_dataset_ids([name], parent, strict=True) == [agent_dataset]
-    # The write path remember() takes reuses the agent's dataset instead of
-    # creating a second one with the same name.
-    _, datasets = await resolve_authorized_user_datasets(name, parent)
-    assert [dataset.id for dataset in datasets] == [agent_dataset]
-
-
-@pytest.mark.asyncio
-async def test_the_parents_own_dataset_wins_a_name_it_shares_with_an_agent():
-    from cognee.modules.data.methods.get_dataset_ids import get_dataset_ids
-
-    parent = await _user()
-    agent = await _agent(parent)
-    name = f"x-{uuid4()}"
-    own = await _dataset_of(parent, name)
-    await _dataset_of(agent, name)
-
-    assert await get_dataset_ids([name], parent, strict=True) == [own]
-
-
-@pytest.mark.asyncio
-async def test_a_name_two_agents_use_is_ambiguous():
-    from cognee.modules.data.exceptions import AmbiguousDatasetNameError
-    from cognee.modules.data.methods.get_dataset_ids import get_dataset_ids
-
-    parent = await _user()
-    name = f"x-{uuid4()}"
-    first = await _dataset_of(await _agent(parent), name)
-    second = await _dataset_of(await _agent(parent), name)
-
-    with pytest.raises(AmbiguousDatasetNameError) as raised:
-        await get_dataset_ids([name], parent)
-    assert set(raised.value.dataset_ids) == {first, second}
+    by_id = await get_authorized_existing_datasets([agent_dataset], "read", parent)
+    assert [dataset.id for dataset in by_id] == [agent_dataset]
+    with pytest.raises(DatasetNotFoundError):
+        await get_authorized_existing_datasets([name], "read", parent, strict=True)
