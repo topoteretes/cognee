@@ -100,3 +100,25 @@ async def test_rows_that_never_set_the_column_keep_their_pre_contract_hash(stagi
     ).hexdigest()
     assert rows[0].content_hash == legacy_hash
     assert _build_document_data_item(rows[0], None, "google_drive").node_set is None
+
+
+@pytest.mark.asyncio
+async def test_a_bare_string_is_refused_not_dropped(staging):
+    """dlt puts a non-list value in a variant column, so reading only the real one would
+    ingest the row with no node sets. The sync stops and names the row instead."""
+    from cognee.exceptions import CogneeValidationError
+
+    rows = await staging(
+        "notion_pages",
+        [
+            {"id": "p1", "title": "T", "content": "C", NODE_SET_COLUMN: "ws:root"},
+            {"id": "p2", "title": "T", "content": "C", NODE_SET_COLUMN: ["ws:root"]},
+        ],
+    )
+    by_id = {row.primary_key_value: row for row in rows}
+
+    assert by_id["p1"].row_data[NODE_SET_COLUMN] is None
+    assert by_id["p1"].row_data[f"{NODE_SET_COLUMN}__v_text"] == "ws:root"
+    with pytest.raises(CogneeValidationError, match="row 'p1'.*cognee_node_set__v_text"):
+        _build_document_data_item(by_id["p1"], None, "notion")
+    assert _build_document_data_item(by_id["p2"], None, "notion").node_set == ["notion:ws:root"]
