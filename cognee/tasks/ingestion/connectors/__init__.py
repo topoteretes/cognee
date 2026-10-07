@@ -7,10 +7,13 @@ or start ingestion. Other connectors remain available in cognee-community.
 
 from .gmail import build_gmail_service_from_access_token, gmail_source
 from .google_drive import build_drive_service_from_access_token, google_drive_source
+from .google_tasks import build_tasks_service_from_access_token, google_tasks_source
 
 __all__ = [
     "build_drive_service_from_access_token",
     "build_gmail_service_from_access_token",
+    "build_tasks_service_from_access_token",
     "gmail_source",
     "google_drive_source",
+    "google_tasks_source",
 ]

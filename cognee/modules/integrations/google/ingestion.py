@@ -18,7 +18,14 @@ def resource_name(provider: str, credential: Any, scope: str = "") -> str:
     """
     identity = [str(credential.user_id), str(credential.provider_account_id), scope]
     digest = sha256(json.dumps(identity).encode()).hexdigest()[:24]
-    prefix = "gmail_messages" if provider == "gmail" else "google_drive_files"
+    
+    if provider == "gmail":
+        prefix = "gmail_messages"
+    elif provider == "google_tasks":
+        prefix = "google_tasks"
+    else:
+        prefix = "google_drive_files"
+        
     return f"{prefix}_{digest}"
 
 
@@ -107,6 +114,7 @@ def source_factory(provider: str) -> Callable[..., Any]:
             "google_drive_source",
         ),
         "gmail": ("cognee.tasks.ingestion.connectors.gmail", "gmail_source"),
+        "google_tasks": ("cognee.tasks.ingestion.connectors.google_tasks", "google_tasks_source"),
     }[provider]
     return getattr(import_module(module_name), factory_name)
 
@@ -116,7 +124,11 @@ def build_service(provider: str, access_token: str) -> Any:
     from google.oauth2.credentials import Credentials
     from googleapiclient.discovery import build
 
-    api, version = {"google_drive": ("drive", "v3"), "gmail": ("gmail", "v1")}[provider]
+    api, version = {
+        "google_drive": ("drive", "v3"),
+        "gmail": ("gmail", "v1"),
+        "google_tasks": ("tasks", "v1"),
+    }[provider]
     return build(api, version, credentials=Credentials(token=access_token), cache_discovery=False)
 
 

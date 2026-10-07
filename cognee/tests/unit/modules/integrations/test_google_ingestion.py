@@ -7,7 +7,7 @@ import pytest
 from cognee.modules.integrations.google.ingestion import source_factory
 
 
-@pytest.mark.parametrize("provider", ["gmail", "google_drive"])
+@pytest.mark.parametrize("provider", ["gmail", "google_drive", "google_tasks"])
 def test_source_factory_uses_bundled_connector(provider, monkeypatch):
     original_import = builtins.__import__
 
@@ -22,7 +22,7 @@ def test_source_factory_uses_bundled_connector(provider, monkeypatch):
     assert factory.__name__ == f"{provider}_source"
 
 
-@pytest.mark.parametrize("provider,extra", [("gmail", "gmail"), ("google_drive", "google-drive")])
+@pytest.mark.parametrize("provider,extra", [("gmail", "gmail"), ("google_drive", "google-drive"), ("google_tasks", "google-tasks")])
 def test_missing_dlt_points_to_sdk_extra(provider, extra, monkeypatch):
     factory = source_factory(provider)
     original_import = builtins.__import__
@@ -39,7 +39,8 @@ def test_missing_dlt_points_to_sdk_extra(provider, extra, monkeypatch):
 
 
 def test_public_sources_are_the_integration_sources():
-    from cognee.tasks.ingestion.connectors import gmail_source, google_drive_source
+    from cognee.tasks.ingestion.connectors import gmail_source, google_drive_source, google_tasks_source
 
     assert source_factory("gmail") is gmail_source
     assert source_factory("google_drive") is google_drive_source
+    assert source_factory("google_tasks") is google_tasks_source
