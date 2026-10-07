@@ -1,4 +1,10 @@
-"""Unit tests for SqlCacheAdapter CRUD operations (run on sqlite+aiosqlite, no server)."""
+"""Unit tests for SqlCacheAdapter CRUD operations (no server needed).
+
+The ``adapter`` fixture runs every test on both SQLite-family engines: stock SQLite
+through aiosqlite and the Turso rewrite engine through cognee's ``cognee_turso``
+dialect (skipped when pyturso is not installed). Tests that build their own adapter
+via ``_make_adapter`` stay on aiosqlite.
+"""
 
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -27,14 +33,25 @@ from cognee.tasks.memify.feedback_weights_constants import (
     MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY,
 )
 
-
-def _make_adapter(tmp_path, **kwargs) -> SqlCacheAdapter:
-    return SqlCacheAdapter(f"sqlite+aiosqlite:///{tmp_path}/cache.db", **kwargs)
+CACHE_BACKENDS = ["sqlite", "turso"]
 
 
-@pytest_asyncio.fixture
-async def adapter(tmp_path):
-    inst = _make_adapter(tmp_path)
+def _cache_url(tmp_path, backend: str = "sqlite") -> str:
+    if backend == "turso":
+        pytest.importorskip("turso", reason="pyturso not installed")
+        from cognee.infrastructure.databases.turso import turso_url
+
+        return turso_url(f"{tmp_path}/cache.db")
+    return f"sqlite+aiosqlite:///{tmp_path}/cache.db"
+
+
+def _make_adapter(tmp_path, backend: str = "sqlite", **kwargs) -> SqlCacheAdapter:
+    return SqlCacheAdapter(_cache_url(tmp_path, backend), **kwargs)
+
+
+@pytest_asyncio.fixture(params=CACHE_BACKENDS)
+async def adapter(request, tmp_path):
+    inst = _make_adapter(tmp_path, request.param)
     yield inst
     await inst.close()
 
@@ -423,7 +440,7 @@ async def test_append_agent_trace_step_sanitizes_non_json_safe_values(adapter):
         status="success",
         method_params={
             "trip_id": uuid4(),
-            "created_at": datetime(2026, 4, 14, 12, 0, 0),
+            "created_at": datetime(2026, 4, 14, 12, 0, 0, tzinfo=timezone.utc),
             "obj": _Obj(),
         },
         method_return_value={"result_id": uuid4(), "owner": _Obj()},
@@ -957,3 +974,23 @@ async def test_uuid_ids_across_trace_context_and_usage(adapter):
 
     assert await adapter.delete_session(user_uuid, session_uuid) is True
     assert await adapter.get_all_qa_entries(str(user_uuid), str(session_uuid)) == []
+
+
+@pytest.mark.asyncio
+async def test_delete_session_context_entry_removes_only_target(adapter):
+    """delete_session_context_entry removes one entry; others and other sessions survive."""
+    await adapter.create_session_context_entry("u1", "s1", _ctx("c1"))
+    await adapter.create_session_context_entry("u1", "s1", _ctx("c2"))
+    await adapter.create_session_context_entry("u1", "s2", _ctx("c1"))
+
+    assert await adapter.delete_session_context_entry("u1", "s1", "c1") is True
+
+    assert [e["id"] for e in await adapter.get_session_context_entries("u1", "s1")] == ["c2"]
+    assert [e["id"] for e in await adapter.get_session_context_entries("u1", "s2")] == ["c1"]
+
+
+@pytest.mark.asyncio
+async def test_delete_session_context_entry_missing_returns_false(adapter):
+    await adapter.create_session_context_entry("u1", "s1", _ctx("c1"))
+    assert await adapter.delete_session_context_entry("u1", "s1", "missing") is False
+    assert len(await adapter.get_session_context_entries("u1", "s1")) == 1

@@ -25,7 +25,7 @@ export function SkillCopyBlock({ path, content, card }: SkillCopyBlockProps): Re
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }} onClick={(e) => e.stopPropagation()}>
       {/* Destination path — purely informational. Mono grey to match InlineCodeBlock. */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, background: "var(--color-cognee-dark)", borderRadius: 8, padding: "10px 14px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, background: "var(--color-cognee-dark)", borderRadius: 0, padding: "10px 14px" }}>
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(237,236,234,0.45)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
           <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
           <polyline points="14 2 14 8 20 8" />
@@ -51,7 +51,7 @@ export function SkillCopyBlock({ path, content, card }: SkillCopyBlockProps): Re
           gap: 7,
           background: phase === "done" ? "rgba(34,197,94,0.15)" : phase === "copying" ? "var(--color-cognee-lavender-hover)" : "var(--color-cognee-lavender)",
           border: `1px solid ${phase === "done" ? "rgba(34,197,94,0.4)" : "transparent"}`,
-          borderRadius: 8,
+          borderRadius: 0,
           padding: "9px 16px",
           fontSize: 13,
           fontWeight: 500,
@@ -93,7 +93,7 @@ export function SkillCopyBlock({ path, content, card }: SkillCopyBlockProps): Re
       {phase === "done" && (
         <div style={{
           background: "var(--color-cognee-dark)",
-          borderRadius: 8,
+          borderRadius: 0,
           padding: "10px 14px",
           fontFamily: 'ui-monospace, Menlo, Monaco, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", monospace',
           fontSize: 11,

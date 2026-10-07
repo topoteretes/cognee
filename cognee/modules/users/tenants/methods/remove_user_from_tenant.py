@@ -1,18 +1,15 @@
 from uuid import UUID
 
 from fastapi import status
-from sqlalchemy import delete, select
+from sqlalchemy import select
 
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.data.models.Dataset import Dataset
 from cognee.modules.users.methods import get_user
-from cognee.modules.users.models.ACL import ACL
-from cognee.modules.users.models.Role import Role
-from cognee.modules.users.models.UserRole import UserRole
 from cognee.modules.users.models.UserTenant import UserTenant
 from cognee.modules.users.permissions.methods import get_tenant, has_user_management_permission
+from cognee.modules.users.tenants.methods.revoke_tenant_access import revoke_tenant_access
 
 
 async def remove_user_from_tenant(user_id: UUID, tenant_id: UUID, owner_id: UUID) -> None:
@@ -22,7 +19,10 @@ async def remove_user_from_tenant(user_id: UUID, tenant_id: UUID, owner_id: UUID
     The tenant owner or any user with user management permission in the tenant
     (e.g. users in the Admin role) can remove users. The tenant owner cannot
     be removed from their own tenant. Removes the user from all roles in the
-    tenant and revokes their permissions on datasets belonging to the tenant.
+    tenant, revokes their permissions on datasets belonging to the tenant, and
+    revokes the capabilities granted to them personally in the tenant. The API
+    keys and dataset permissions of the agents they created, and of those
+    agents' agents, are revoked too.
     Data owned by the removed user within the tenant (e.g. datasets they
     created) remains in the tenant; only their membership and direct
     permissions are removed.
@@ -64,32 +64,6 @@ async def remove_user_from_tenant(user_id: UUID, tenant_id: UUID, owner_id: UUID
         if user_tenant_result.scalars().first() is None:
             raise EntityNotFoundError(message="User not found in this tenant.")
 
-        # Subquery for role ids in this tenant
-        role_ids_in_tenant = select(Role.id).where(Role.tenant_id == tenant_id)
-        # Remove user from all roles in this tenant
-        await session.execute(
-            delete(UserRole).where(
-                UserRole.user_id == user_id,
-                UserRole.role_id.in_(role_ids_in_tenant),
-            )
-        )
-
-        # Subquery for dataset ids in this tenant
-        dataset_ids_in_tenant = select(Dataset.id).where(Dataset.tenant_id == tenant_id)
-        # Revoke user's permissions on datasets in this tenant
-        await session.execute(
-            delete(ACL).where(
-                ACL.principal_id == user_id,
-                ACL.dataset_id.in_(dataset_ids_in_tenant),
-            )
-        )
-
-        # Remove user–tenant association
-        await session.execute(
-            delete(UserTenant).where(
-                UserTenant.user_id == user_id,
-                UserTenant.tenant_id == tenant_id,
-            )
-        )
+        await revoke_tenant_access(session, user_id, tenant_id)
 
         await session.commit()

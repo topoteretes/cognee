@@ -12,6 +12,7 @@ Postgres relational backend (DB_PROVIDER=postgres), since the shared handlers
 anchor to the relational configuration; it skips otherwise.
 """
 
+import logging
 import os
 import uuid
 
@@ -22,19 +23,21 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from cognee.infrastructure.databases.postgres import (
     create_pg_schema_if_not_exists,
-    drop_pg_schema_if_exists,
     dataset_schema_name,
+    drop_pg_schema_if_exists,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _db() -> dict:
-    return dict(
-        host=os.environ.get("DB_HOST", "localhost"),
-        port=os.environ.get("DB_PORT", "5432"),
-        username=os.environ.get("DB_USERNAME", "cognee"),
-        password=os.environ.get("DB_PASSWORD", "cognee"),
-        name=os.environ.get("DB_NAME", "cognee_db"),
-    )
+    return {
+        "host": os.environ.get("DB_HOST", "localhost"),
+        "port": os.environ.get("DB_PORT", "5432"),
+        "username": os.environ.get("DB_USERNAME", "cognee"),
+        "password": os.environ.get("DB_PASSWORD", "cognee"),
+        "name": os.environ.get("DB_NAME", "cognee_db"),
+    }
 
 
 def _base_url() -> str:
@@ -69,6 +72,7 @@ async def _postgres_reachable() -> bool:
             await conn.execute(text("SELECT 1"))
         return True
     except Exception:
+        logger.debug("Falling back to False after error in _postgres_reachable", exc_info=True)
         return False
     finally:
         await engine.dispose()
@@ -141,8 +145,8 @@ def test_dataset_schema_name_is_valid_identifier():
 async def test_pgvector_schema_isolation(two_schemas):
     """Two PGVector adapters pinned to different schemas don't see each other."""
     from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import (
-        PGVectorAdapter,
         IndexSchema,
+        PGVectorAdapter,
     )
 
     d = _db()
@@ -199,7 +203,7 @@ async def test_pgvector_schema_isolation(two_schemas):
 @pytest.mark.asyncio
 async def test_postgres_graph_schema_isolation(two_schemas):
     """Two Postgres graph adapters pinned to different schemas stay isolated."""
-    from cognee.infrastructure.databases.graph.postgres.adapter import PostgresAdapter
+    from cognee.infrastructure.databases.graph.postgres_demo.adapter import PostgresDemoAdapter
 
     d = _db()
     s1, s2 = two_schemas
@@ -213,8 +217,8 @@ async def test_postgres_graph_schema_isolation(two_schemas):
             password=d["password"],
         )
 
-    a1 = PostgresAdapter(connection_string=_base_url(), schema=s1)
-    a2 = PostgresAdapter(connection_string=_base_url(), schema=s2)
+    a1 = PostgresDemoAdapter(connection_string=_base_url(), schema=s1)
+    a2 = PostgresDemoAdapter(connection_string=_base_url(), schema=s2)
     try:
         await a1.initialize()
         await a2.initialize()
@@ -258,16 +262,16 @@ async def test_shared_handlers_create_and_delete_lifecycle():
     Requires cognee to be configured with a Postgres relational backend, since
     the shared handlers anchor to the relational configuration.
     """
+    from cognee.infrastructure.databases.graph.config import get_graph_config
     from cognee.infrastructure.databases.relational import get_relational_config
     from cognee.infrastructure.databases.vector import get_vectordb_config
-    from cognee.infrastructure.databases.graph.config import get_graph_config
 
     if get_relational_config().db_provider != "postgres":
         pytest.skip("shared handler lifecycle requires DB_PROVIDER=postgres")
     if get_vectordb_config().vector_db_provider != "pgvector":
         pytest.skip("shared handler lifecycle requires VECTOR_DB_PROVIDER=pgvector")
-    if get_graph_config().graph_database_provider != "postgres":
-        pytest.skip("shared handler lifecycle requires GRAPH_DATABASE_PROVIDER=postgres")
+    if get_graph_config().graph_database_provider not in ("postgres", "postgres_demo"):
+        pytest.skip("shared handler lifecycle requires GRAPH_DATABASE_PROVIDER=postgres_demo")
     if not await _postgres_reachable():
         pytest.skip("Postgres not reachable")
 

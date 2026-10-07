@@ -6,6 +6,9 @@ import { trackEvent } from "@/modules/analytics";
 import { SEARCH_SESSION_PREFIX } from "@/modules/sessions/getSessions";
 import type { SessionRow } from "@/modules/sessions/getSessions";
 import Modal from "@/ui/elements/Modal/Modal";
+import { OsToggle } from "@/ui/elements/OsToggle";
+import { useOsPreference } from "@/ui/layout/OsPreferenceContext";
+import { exportEnvVar } from "@/utils/osCommands";
 import { CARDS_CFG, getSteps } from "./agentConnectionSteps";
 import type { AciAgentKey } from "./agentConnectionSteps";
 import { AciCard } from "./AciCard";
@@ -37,6 +40,7 @@ export function AgentConnectionSection({
   integrationConnected = {},
 }: AgentConnectionSectionProps): React.ReactElement {
   const router = useRouter();
+  const { os } = useOsPreference();
   const [activeKey, setActiveKey] = useState<AciAgentKey | null>(null);
   const [stepIndexMap, setStepIndexMap] = useState<Partial<Record<AciAgentKey, number>>>({});
   const [connectVerified, setConnectVerified] = useState(false);
@@ -44,8 +48,8 @@ export function AgentConnectionSection({
 
   const baseUrl = serviceUrl ?? "https://your-tenant.aws.cognee.ai";
   const resolvedKey = apiKey ?? "your-api-key";
-  const credsCode = `export COGNEE_BASE_URL="${baseUrl}"\nexport COGNEE_API_KEY="${resolvedKey}"`;
-  const stepOpts = { baseUrl, resolvedKey, credsCode, isInitializing, connectVerified };
+  const credsCode = `${exportEnvVar(os, "COGNEE_BASE_URL", baseUrl)}\n${exportEnvVar(os, "COGNEE_API_KEY", resolvedKey)}`;
+  const stepOpts = { baseUrl, resolvedKey, credsCode, isInitializing, connectVerified, os };
 
   // Detect a new Claude Code session while the modal is open. Derives connection
   // state from the `sessions` prop (circuit-breaker-protected, 15s poll) —
@@ -102,8 +106,6 @@ export function AgentConnectionSection({
       ? "/visuals/logos/claude.svg"
       : activeKey === "codex"
       ? "/visuals/logos/codex.svg"
-      : activeKey === "opencode"
-      ? "/visuals/logos/opencode.svg"
       : "/visuals/logos/openclaw.svg";
 
   const popupContent =
@@ -116,12 +118,13 @@ export function AgentConnectionSection({
         className="aci-popup"
         style={{
           background: "rgba(15,15,15,0.92)",
-          backdropFilter: "blur(16px)",
-          borderRadius: 14,
+          borderRadius: 0,
           width: 520,
           maxWidth: "calc(100vw - 32px)",
           boxShadow: "0 20px 60px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.1)",
           overflow: "hidden",
+          // no backdropFilter here: combined with a transform animation + fill-mode
+          // forwards it pins this layer on a stale sub-pixel raster until an unrelated repaint
           animation: "aci-popup 200ms cubic-bezier(0.22,1,0.36,1) forwards",
         }}
       >
@@ -143,13 +146,16 @@ export function AgentConnectionSection({
           <button
             onClick={() => setActiveKey(null)}
             aria-label="Close"
-            style={{ background: "none", border: "none", color: "rgba(237,236,234,0.65)", cursor: "pointer", padding: 4, borderRadius: 6, lineHeight: 1, flexShrink: 0 }}
+            style={{ background: "none", border: "none", color: "rgba(237,236,234,0.65)", cursor: "pointer", padding: 4, borderRadius: 0, lineHeight: 1, flexShrink: 0 }}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
               <line x1="18" y1="6" x2="6" y2="18" />
               <line x1="6" y1="6" x2="18" y2="18" />
             </svg>
           </button>
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", padding: "12px 20px 0" }}>
+          <OsToggle />
         </div>
         {activeSteps.map((step, i) => (
           <AciStepRow
@@ -174,20 +180,21 @@ export function AgentConnectionSection({
         @keyframes aci-spin   { to { transform: rotate(360deg); } }
         @keyframes aci-popup  { 0% { opacity: 0; transform: scale(0.97) translateY(6px); } 100% { opacity: 1; transform: scale(1) translateY(0); } }
         .aci-card-logo { transition: transform 300ms ease; }
-        .aci-card:hover .aci-card-logo { transform: scale(1.15); }
-        .aci-card:hover .aci-cta-chip { background: rgba(101,16,244,0.85) !important; }
+        .aci-card:hover { border-color: rgba(188,155,255,0.35) !important; }
+        .aci-card:hover .aci-card-logo { transform: scale(1.12); }
+        .aci-card:hover .aci-cta-chip { background: #BC9BFF !important; border-color: #BC9BFF !important; color: #14141C !important; }
         .aci-step-row:hover { background: rgba(255,255,255,0.04); }
         .aci-step-row[data-active="true"]:hover { background: transparent; }
-        .aci-card-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px; }
-        @media (max-width: 1100px) { .aci-card-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-        @media (max-width: 800px)  { .aci-card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-        @media (max-width: 480px)  { .aci-card-grid { grid-template-columns: 1fr; } }
+        /* Fixed-width cards in a horizontally scrollable row — cards keep their
+           content-based width and scroll rather than compressing on narrow screens. */
+        .aci-card-row { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+        .aci-card-row::-webkit-scrollbar { display: none; }
         @media (prefers-reduced-motion: reduce) {
           .aci-card-logo, .aci-step-body, .aci-popup { transition: none !important; animation: none !important; }
         }
       `}</style>
 
-      <div className="aci-card-grid">
+      <div className="aci-card-row">
         {CARDS_CFG.map((card) => (
           <AciCard
             key={card.key}

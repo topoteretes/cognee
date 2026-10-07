@@ -1,8 +1,9 @@
+from cognee.modules.data.models.Dataset import Dataset
+from cognee.modules.users.methods.get_user_agents import get_user_agents
+from cognee.modules.users.permissions.methods import get_principal_datasets
 from cognee.shared.logging_utils import get_logger
 
 from ...models.User import User
-from cognee.modules.data.models.Dataset import Dataset
-from cognee.modules.users.permissions.methods import get_principal_datasets
 
 logger = get_logger()
 
@@ -18,9 +19,15 @@ async def get_all_user_permission_datasets(user: User, permission_type: str) -> 
     Returns:
         list[Dataset]: List of datasets user has permission for
     """
-    datasets = list()
+    datasets = []
     # Get all datasets User has explicit access to
     datasets.extend(await get_principal_datasets(user, permission_type))
+
+    # A user reaches what the agents they created reach: the user holds the
+    # agents' keys, so this grants nothing the user could not already do. Only
+    # the agents' own grants count; their tenants and roles are the user's.
+    for agent in await get_user_agents(user.id):
+        datasets.extend(await get_principal_datasets(agent, permission_type))
 
     # Get all tenants user is a part of
     tenants = await user.awaitable_attrs.tenants

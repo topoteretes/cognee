@@ -3,9 +3,13 @@
 Minimal CLI entry point for cognee that avoids early initialization
 """
 
-import sys
 import os
-from typing import Any, Sequence
+import sys
+from collections.abc import Sequence
+
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 # CRITICAL: Prevent verbose logging initialization for CLI-only usage
 # This must be set before any cognee imports to be effective
@@ -32,6 +36,7 @@ def get_version() -> str:
 
         return importlib.metadata.version("cognee")
     except Exception:
+        logger.debug("Falling back after error in get_version", exc_info=True)
         return "unknown"
 
 

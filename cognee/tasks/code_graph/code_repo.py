@@ -20,18 +20,34 @@ tree:
   which may hold secrets) is skipped explicitly and counted.
 
 The repo item's raw data is a JSON manifest (repo path + covered files +
-combined content hash), so the stored record is small and re-adding a changed
-repo resets pipeline status through the normal content-change detection. The
+combined content hash), so the stored record is small. Its id is pinned, so
+``resolve_code_repository`` clears the stored row's add stamp before the
+pipeline's incremental check sees it; re-adding a changed repo then resets
+pipeline status through the normal content-change detection. The clear is
+unconditional, so an unchanged repo's small manifest is stored again on every
+add; its cognify stamps are kept and nothing is rebuilt. The
 repository itself is read from its original location at cognify time — like
 ``remember(content_type="code")``, the enola run happens in place.
+
+A GitHub/GitLab repository URL passed to ``add()`` takes the same path after a
+shallow clone (``resolve_code_repository_url``): the clone directory is the
+"original location" the manifest points at.
 """
 
 import hashlib
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Optional
 
+from cognee.modules.chunking.external_metadata import decode_external_metadata
+from cognee.modules.engine.models.node_set import validate_node_set_names
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.code_graph.resolve_repo import (
+    CodeRepositoryError,
+    code_repo_clone_url,
+    redact_repo_spec,
+    resolve_repo_source,
+)
 from cognee.tasks.ingestion.dlt_utils import metadata_source
 
 if TYPE_CHECKING:
@@ -148,7 +164,7 @@ def _document_extensions() -> frozenset:
     return frozenset(extensions - SUPPORTED_CODE_EXTENSIONS)
 
 
-def partition_repo_files(directory: Path) -> tuple[List[Path], List[Path], List[Path]]:
+def partition_repo_files(directory: Path) -> tuple[list[Path], list[Path], list[Path]]:
     """Partition a project tree into (covered, documents, skipped) files.
 
     covered: source files + project manifests — represented by the single
@@ -161,11 +177,19 @@ def partition_repo_files(directory: Path) -> tuple[List[Path], List[Path], List[
     from cognee.infrastructure.loaders.core.code_loader import SUPPORTED_CODE_EXTENSIONS
 
     document_extensions = _document_extensions()
-    covered: List[Path] = []
-    documents: List[Path] = []
-    skipped: List[Path] = []
+    covered: list[Path] = []
+    documents: list[Path] = []
+    skipped: list[Path] = []
 
     for file_path in sorted(directory.rglob("*")):
+        # is_file() follows symlinks, and read_bytes() below would then pull the
+        # TARGET's contents into the manifest. A repo (cloned or local) containing
+        # 'creds.py -> ~/.aws/credentials' would otherwise be indexed verbatim.
+        # Clones are written with core.symlinks=false, so this covers local paths
+        # and any pre-existing clone made before that landed.
+        if file_path.is_symlink():
+            skipped.append(file_path)
+            continue
         if not file_path.is_file():
             continue
         relative = file_path.relative_to(directory)
@@ -185,7 +209,7 @@ def partition_repo_files(directory: Path) -> tuple[List[Path], List[Path], List[
     return covered, documents, skipped
 
 
-def build_repo_manifest(directory: Path, covered: List[Path]) -> str:
+def build_repo_manifest(directory: Path, covered: list[Path]) -> str:
     """The repo item's raw data: covered files + a combined content hash.
 
     The hash covers every covered file's content, so the manifest text — and
@@ -212,33 +236,46 @@ def build_repo_manifest(directory: Path, covered: List[Path]) -> str:
     )
 
 
-async def resolve_code_repository(directory: Path, user=None, dataset_id=None):
+async def resolve_code_repository(
+    directory: Path,
+    user=None,
+    dataset_id=None,
+    source_url: str | None = None,
+    include_documents: bool = True,
+):
     """Build the repo-level DataItem (and the document file list) for a project.
 
     Returns (manifest_item, document_paths, skip_count). The data id is pinned
     to the stable identity (user, dataset, repo path) — mirroring DLT source
     manifests — so re-adding the same repo updates one record instead of
     accreting new ones; without a user context the id is left content-derived.
+    With a pinned id and a dataset, the stored row's add stamp is cleared so
+    the re-add reaches ingestion's content comparison (see the reset below).
+    ``source_url`` (credential-free) records where a cloned repository came
+    from as ``system_metadata["repo_url"]``.
 
     Without an LLM API key, the project's document files are excluded (logged)
     instead of emitted: their routes need an LLM (images transcribe at add
     time, text is LLM-chunked at cognify), so they would only fail later. The
     code graph itself never needs one — a key-less repo add still works fully.
+    ``include_documents=False`` returns no document paths at all, for callers
+    that index the code graph only (``remember(content_type="code")``).
     """
     from cognee.infrastructure.llm.config import get_llm_config
     from cognee.tasks.ingestion.data_item import DataItem
 
     covered, documents, skipped = partition_repo_files(directory)
 
-    if documents and not get_llm_config().llm_api_key:
+    if not include_documents:
+        documents = []
+    elif documents and not get_llm_config().llm_api_key:
         logger.warning(
             "No LLM API key configured (LLM_API_KEY): excluding %d document file(s) of "
-            "code project %s from processing — their pipelines need an LLM (image "
+            "the code project from processing — their pipelines need an LLM (image "
             "transcription at add time, text extraction at cognify). The code graph is "
             "unaffected (enola is LLM-free). Set LLM_API_KEY and re-add the repository "
             "to ingest its documents.",
             len(documents),
-            directory,
         )
         skipped = skipped + documents
         documents = []
@@ -251,25 +288,115 @@ async def resolve_code_repository(directory: Path, user=None, dataset_id=None):
 
         data_id = await get_unique_data_id(f"code_repo:{directory}", user, dataset_id)
 
+    if data_id is not None and dataset_id is not None:
+        from cognee.modules.data.methods import reset_data_pipeline_status
+
+        # The id is pinned, so add()'s incremental check would find the stored
+        # row already added and skip it before ingestion compares content: a
+        # changed repo would keep its old manifest and graph. Clearing only the
+        # add stamp lets the manifest through; ingestion then clears the other
+        # stamps when the content changed, and keeps them when it did not, so
+        # an unchanged repo whose later run fails is still marked as built.
+        # The clear is unconditional: an unchanged repo's manifest is stored
+        # again on every add, which costs one small write, not a rebuild.
+        await reset_data_pipeline_status(data_id, dataset_id, pipeline_names=("add_pipeline",))
+
+    system_metadata = {
+        "source": "code_repo",
+        "repo_path": str(directory),
+        "file_count": len(covered),
+    }
+    if source_url is not None:
+        system_metadata["repo_url"] = source_url
+
     manifest_item = DataItem(
         data=manifest_text,
         label=f"code_repo:{directory.name}",
-        system_metadata={
-            "source": "code_repo",
-            "repo_path": str(directory),
-            "file_count": len(covered),
-        },
+        system_metadata=system_metadata,
         data_id=data_id,
     )
 
     logger.info(
-        "Code project detected at %s: 1 repo item covering %d file(s), %d document(s), %d skipped.",
-        directory,
+        "Code project detected: 1 repo item covering %d file(s), %d document(s), %d skipped.",
         len(covered),
         len(documents),
         len(skipped),
     )
     return manifest_item, documents, len(skipped)
+
+
+async def resolve_code_repository_url(spec: str, user=None, dataset_id=None):
+    """Clone a hosted repository URL and build its repo-level DataItem.
+
+    ``add()``'s implicit counterpart of ``remember(content_type="code")``: a
+    GitHub/GitLab repository URL (see ``resolve_repo.code_repo_clone_url``) is
+    shallow-cloned into the shared clones directory and then partitioned
+    exactly like a local code project -- one ``code_repo`` manifest for the
+    CODE_REPO cognify route plus the repository's documents as individual
+    items. Returns ``(manifest_item, document_paths, skip_count)``; the
+    manifest carries the credential-free URL as ``repo_url``.
+    """
+    clone_url = code_repo_clone_url(spec)
+    if clone_url is None:
+        raise ValueError(
+            f"'{redact_repo_spec(spec)}' is not a repository URL add() can clone; "
+            "expected https://github.com/<owner>/<repo>, a gitlab.com project, or a .git URL."
+        )
+    repo_path = await resolve_repo_source(clone_url)
+    return await resolve_code_repository(
+        repo_path, user=user, dataset_id=dataset_id, source_url=redact_repo_spec(clone_url)
+    )
+
+
+async def add_code_repository(
+    repo_path: Path,
+    user,
+    dataset,
+    source_url: str | None = None,
+    skip_connection_test: bool = False,
+):
+    """Store a resolved repository as its one code_repo Data row, without cognifying it.
+
+    ``remember(content_type="code")`` builds the graph itself (the
+    code_graph_pipeline over this row) and needs the row only for its id and
+    its dataset listing. It is the same manifest item ``add(<repo>)`` ingests,
+    pinned to the same identity, so both routes keep one record per repository.
+    The repository's documents are not ingested. Returns the stored Data row.
+    """
+    from cognee.api.v1.add import add
+    from cognee.modules.data.methods import get_data
+    from cognee.modules.pipelines.models.PipelineRunInfo import get_errored_run_info
+
+    manifest_item, _documents, _skipped = await resolve_code_repository(
+        repo_path,
+        user=user,
+        dataset_id=dataset.id,
+        source_url=source_url,
+        include_documents=False,
+    )
+    add_result = await add(
+        manifest_item,
+        dataset_name=dataset.name,
+        dataset_id=dataset.id,
+        user=user,
+        skip_connection_test=skip_connection_test,
+    )
+    # With RAISE_INCREMENTAL_LOADING_ERRORS=false a failed ingest returns an
+    # errored run instead of raising; surface its cause, not a missing row.
+    errored = get_errored_run_info(add_result)
+    if errored is not None:
+        raise CodeRepositoryError(
+            message=f"Could not store code repository '{repo_path}': "
+            f"{errored.error_message or errored.error_class or 'ingestion failed'}"
+        )
+
+    data = await get_data(user.id, manifest_item.data_id, dataset.id)
+    if data is None:
+        raise ValueError(
+            f"Code repository '{repo_path}' was added but its data record "
+            f"{manifest_item.data_id} is missing from dataset {dataset.id}."
+        )
+    return data
 
 
 async def extract_code_repo_graph(
@@ -282,6 +409,14 @@ async def extract_code_repo_graph(
     graph tasks on the ORIGINAL directory (enola writes its .enola snapshot
     there, exactly like remember(content_type="code")). One repository node,
     cross-file edges, one graph read per repo. No LLM, no embeddings.
+
+    A call-level node_set (add()/remember()'s ``node_set`` argument) reaches
+    every document this manifest's repo carries, but not the code nodes
+    themselves -- add_data_points only tags the DataPoints it is given, and
+    the code graph tasks build their own DataPoints straight from the enola
+    snapshot. This reads the same tag back off the manifest row's
+    external_metadata (identical shape to classify_documents) and passes it
+    down so every code node -- CodeRepository included -- carries it too.
     """
     from cognee.infrastructure.files.utils.open_data_file import open_data_file
     from cognee.tasks.code_graph.extract_code_graph import (
@@ -308,17 +443,20 @@ async def extract_code_repo_graph(
                 "its current location."
             )
 
-        data_points = await extract_code_graph(repo_path=repo_path)
+        metadata = decode_external_metadata(data_item.external_metadata)
+        node_set = validate_node_set_names(metadata.get("node_set")) if metadata else None
+
+        data_points = await extract_code_graph(repo_path=repo_path, node_set=node_set)
         state = await add_code_graph_data_points(data_points, ctx=ctx, graph_only=True)
-        await add_code_graph_edges(state, repo_path=repo_path, ctx=ctx)
+        await add_code_graph_edges(state, repo_path=repo_path, ctx=ctx, node_set=node_set)
 
         logger.info("Code repo graph extracted for %s (%s).", repo_path, data_item.id)
 
     return data_documents
 
 
-def get_code_repo_tasks() -> List:
+def get_code_repo_tasks() -> list:
     """The cognify CODE_REPO-route task list: one adapter task, no LLM stages."""
     from cognee.modules.pipelines.tasks.task import Task
 
-    return [Task(extract_code_repo_graph)]
+    return [Task(extract_code_repo_graph, needs_llm=False)]

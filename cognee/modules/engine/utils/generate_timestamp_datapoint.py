@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
-from cognee.modules.engine.models import Interval, Timestamp, Event
+
+from cognee.modules.engine.models import Event, Interval, Timestamp
 from cognee.modules.engine.utils import generate_node_id
 
 
@@ -25,7 +26,9 @@ def generate_timestamp_datapoint(ts: Timestamp) -> Timestamp:
     )
     return Timestamp(
         id=generate_node_id(str(time_at)),
+        name=timestamp_str,
         time_at=time_at,
+        time_until=time_at + 1000,
         year=ts.year,
         month=ts.month,
         day=ts.day,

@@ -1,11 +1,11 @@
-from typing import Any, List, Optional
+from typing import Any
 from uuid import UUID
 
 from .log_query import log_query
 from .log_result import log_result
 
 
-def _completion_of(payload: Any) -> Optional[str]:
+def _completion_of(payload: Any) -> str | None:
     """The text a user saw, preferring the completion over raw context."""
     for attribute in ("completion", "context"):
         value = getattr(payload, attribute, None)
@@ -18,7 +18,7 @@ async def log_search_history(
     query_text: str,
     query_type: str,
     user_id: UUID,
-    search_results: List[Any],
+    search_results: list[Any],
 ) -> None:
     """Record a searched question and its answers, one row per dataset.
 

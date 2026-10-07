@@ -1,42 +1,50 @@
+// Public copy of the SaaS module of the same path. The directory is excluded
+// from the sync (it contains cloud-only billing/config actions), but this file
+// itself is portable and its consumers are shared UI — keep it compatible with
+// the SaaS original; the sync build gate fails if the signatures drift.
 import type { CogneeInstance } from "@/modules/instances/types";
 
 export interface PipelineSettings {
   chunkSize: number;
   chunksPerBatch: number;
   topK: number;
+  // When true, recall/search responses include source/provenance references
+  // attached to completions. Defaults to true so cited answers are the
+  // out-of-the-box experience; can be turned off in Extraction Settings.
   includeReferences: boolean;
 }
 
-const STORAGE_KEY = "cognee-pipeline-settings";
-const CONFIG_NAME = "pipeline-settings";
-
 export const DEFAULT_PIPELINE_SETTINGS: PipelineSettings = {
-  chunkSize: 1024,
-  chunksPerBatch: 10,
-  topK: 20,
+  chunkSize: 4096,
+  chunksPerBatch: 5000,
+  topK: 30,
   includeReferences: true,
 };
+
+const PIPELINE_SETTINGS_CONFIG_NAME = "pipeline-settings";
+const STORAGE_KEY = "cognee-pipeline-settings";
 
 export function getPipelineSettingsFromStorage(): PipelineSettings {
   if (typeof window === "undefined") {
     return { ...DEFAULT_PIPELINE_SETTINGS };
   }
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { ...DEFAULT_PIPELINE_SETTINGS };
-    const parsed = JSON.parse(raw);
-    return { ...DEFAULT_PIPELINE_SETTINGS, ...parsed };
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      return { ...DEFAULT_PIPELINE_SETTINGS, ...(JSON.parse(raw) as Partial<PipelineSettings>) };
+    }
   } catch {
-    return { ...DEFAULT_PIPELINE_SETTINGS };
+    // corrupted or unavailable — return defaults
   }
+  return { ...DEFAULT_PIPELINE_SETTINGS };
 }
 
 export function storePipelineSettingsLocally(settings: PipelineSettings): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
   } catch {
-    /* ignore */
+    // storage unavailable — ignore
   }
 }
 
@@ -48,9 +56,7 @@ export async function loadPipelineSettings(
     if (!response.ok) return null;
     const data = await response.json();
     if (!Array.isArray(data)) return null;
-    const entry = data.find(
-      (item: { name: string; configuration: object }) => item.name === CONFIG_NAME,
-    );
+    const entry = data.find((c: { name: string }) => c.name === PIPELINE_SETTINGS_CONFIG_NAME);
     if (!entry?.configuration) return null;
     return { ...DEFAULT_PIPELINE_SETTINGS, ...(entry.configuration as Partial<PipelineSettings>) };
   } catch {
@@ -62,15 +68,13 @@ export async function savePipelineSettings(
   instance: CogneeInstance,
   settings: PipelineSettings,
 ): Promise<void> {
-  const response = await instance.fetch("/configuration/store_user_configuration", {
+  const resp = await instance.fetch("/configuration/store_user_configuration", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: CONFIG_NAME, config: settings }),
+    body: JSON.stringify({ name: PIPELINE_SETTINGS_CONFIG_NAME, config: settings }),
   });
-
-  if (!response.ok) {
-    throw new Error(`Pipeline settings store failed: ${response.status}`);
+  if (!resp.ok) {
+    throw new Error(`Failed to save pipeline settings: ${resp.status}`);
   }
-
   storePipelineSettingsLocally(settings);
 }

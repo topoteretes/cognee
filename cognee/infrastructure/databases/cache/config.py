@@ -1,7 +1,8 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
-from typing import Literal, Optional
+from typing import Literal
+
 import pydantic
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class CacheConfig(BaseSettings):
@@ -9,13 +10,15 @@ class CacheConfig(BaseSettings):
     Configuration for distributed cache systems (e.g., Redis), used for locking or coordination.
 
     Attributes:
-    - cache_backend: Session cache backend; one of "redis", "fs", "tapes", "sqlite", "postgres"
-      (default "sqlite"). "sqlite" and "postgres" use the SQL cache adapter, differing only in
-      default connection URL resolution.
+    - cache_backend: Session cache backend; one of "redis", "fs", "tapes", "sqlite", "turso",
+      "postgres" (default "sqlite"). "sqlite", "turso" and "postgres" use the SQL cache adapter,
+      differing only in default connection URL resolution and driver: "turso" is the same
+      cache.db layout on the Turso rewrite engine (pyturso, ``pip install cognee"[turso]"``),
+      honouring the TURSO_* settings.
     - cache_db_url: SQLAlchemy async URL for the SQL cache backends (env CACHE_DB_URL, e.g.
-      postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db). When unset, "sqlite" uses a
-      cache.db file next to the relational SQLite database and "postgres" falls back to the
-      relational DB_* settings.
+      postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db). When unset, "sqlite" and
+      "turso" use a cache.db file next to the relational database and "postgres" falls back
+      to the relational DB_* settings.
     - cache_purge_interval_seconds: Minimum interval (in seconds) between global TTL purge
       sweeps in the SQL cache backends (default: 900).
     - shared_ladybug_lock: Shared Ladybug lock logic on/off.
@@ -47,8 +50,8 @@ class CacheConfig(BaseSettings):
       its context updates reach this turn's answer -- at the cost of two calls in a row.
     """
 
-    cache_backend: Literal["redis", "fs", "tapes", "sqlite", "postgres"] = "sqlite"
-    cache_db_url: Optional[str] = None
+    cache_backend: Literal["redis", "fs", "tapes", "sqlite", "turso", "postgres"] = "sqlite"
+    cache_db_url: str | None = None
     cache_purge_interval_seconds: int = 900
     caching: bool = True
     auto_feedback: bool = True
@@ -57,14 +60,14 @@ class CacheConfig(BaseSettings):
     shared_kuzu_lock: bool = False
     cache_host: str = "localhost"
     cache_port: int = 6379
-    cache_username: Optional[str] = None
-    cache_password: Optional[str] = None
+    cache_username: str | None = None
+    cache_password: str | None = None
     cache_ssl: bool = False
-    cache_ssl_cert_reqs: Optional[str] = "required"
+    cache_ssl_cert_reqs: str | None = "required"
     agentic_lock_expire: int = 240
     agentic_lock_timeout: int = 300
-    session_ttl_seconds: Optional[int] = 604800
-    max_session_context_chars: Optional[int] = None
+    session_ttl_seconds: int | None = 604800
+    max_session_context_chars: int | None = None
     usage_logging: bool = False
     usage_logging_ttl: int = 604800
     tapes_ingest_url: str = "http://localhost:8082"
@@ -73,7 +76,7 @@ class CacheConfig(BaseSettings):
     tapes_model: str = "cognee-session"
     tapes_request_timeout: float = 5.0
 
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    model_config = SettingsConfigDict(extra="allow")
 
     @pydantic.model_validator(mode="after")
     def sync_legacy_ladybug_lock(self):

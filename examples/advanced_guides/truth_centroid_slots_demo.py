@@ -1,10 +1,10 @@
-"""End-to-end demo of truth centroid slots changing HybridRetriever ranking.
+"""How truth-subspace reranking works underneath: centroid slots, epochs, and rebuilds.
 
-The advanced companion to ``examples/demos/truth_subspace_reranking_demo.py``: that demo
-shows what truth-subspace weighting does to ranking; this one shows how it works underneath —
-the deterministic centroid slots and their epochs, including rebuilds that keep anchors
-current across learning batches. Both are covered by the "Truth subspace re-ranking" guide
-in cognee-docs (``guides/truth-subspace-reranking.mdx``).
+Goes a level deeper than ``examples/guides/truth_subspace_reranking.py``, which
+shows what truth-subspace weighting does to ranking. This script shows the mechanism — the
+deterministic centroid slots and their epochs, including rebuilds that keep anchors current
+across learning batches. Both are covered by the "Truth subspace re-ranking" guide in
+cognee-docs (``guides/truth-subspace-reranking.mdx``).
 
 Caveat: ``load_centroids``, ``get_node_truth_state``, and ``align.cosine`` used here are
 internal APIs and may change without notice.
@@ -45,7 +45,6 @@ from cognee.modules.truth_subspace import align
 from cognee.modules.truth_subspace.build import build_truth_subspace
 from cognee.modules.truth_subspace.centroids import load_centroids
 from cognee.modules.users.methods import get_default_user
-
 
 DATASET = "truth_centroid_slots_demo"
 CORPUS_NODE_SET = ["truth_demo_corpus"]

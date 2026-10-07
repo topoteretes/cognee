@@ -1,8 +1,8 @@
 """
 Smoke demo for the global context index.
 
-The advanced companion to ``examples/guides/global_context_index.py``. That guide shows the
-flag on a five-turn conversation; this one runs a multi-day scheduling thread where meetings
+The advanced companion to ``examples/guides/global_context_index_recall.py``. That guide shows
+the flag on a ten-fact dataset; this one runs a multi-day scheduling thread where meetings
 are booked, moved, and cancelled, then asks three questions whose answers depend on the whole
 history — and reports a PASSED/FAILED verdict on the context prelude.
 

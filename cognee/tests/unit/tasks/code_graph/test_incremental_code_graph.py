@@ -149,7 +149,13 @@ async def test_sweep_removes_stale_nodes_and_edges_and_stamps_snapshot(tmp_path,
         code_retriever_module, "invalidate_code_graph_snapshot_cache", lambda **kwargs: None
     )
 
-    await add_code_graph_edges(["sentinel"], repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path)
+    # node_set matches the fixture's existing belongs_to_set edge/NodeSet
+    # ("code"), so the tag is current, not stale -- isolating this test's
+    # concern (does the stale-node/edge SWEEP leave a non-code-target edge
+    # alone) from the separate node_set detag pass that also runs here.
+    await add_code_graph_edges(
+        ["sentinel"], repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path, node_set=["code"]
+    )
 
     deleted_nodes = [
         node_id for call in engine.delete_nodes.await_args_list for node_id in call.args[0]

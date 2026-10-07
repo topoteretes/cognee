@@ -1,8 +1,10 @@
 from contextlib import contextmanager
 
 from cognee.context_global_variables import (
-    llm_config as llm_config_ctx,
     current_pipeline_stage,
+)
+from cognee.context_global_variables import (
+    llm_config as llm_config_ctx,
 )
 from cognee.infrastructure.llm.config import get_llm_context_config
 

@@ -9,6 +9,7 @@ mocked embeddings (the DLT route makes no LLM calls).
 """
 
 import json
+import logging
 import pathlib
 from unittest.mock import patch
 
@@ -25,6 +26,8 @@ from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.engine.operations.setup import setup as engine_setup
 from cognee.modules.users.methods import get_default_user
 from cognee.tasks.ingestion.dlt_utils import is_dlt_source_manifest
+
+logger = logging.getLogger(__name__)
 
 DATASET = "csv_loader_ds"
 CSV_CONTENT = "id,name,section\n1,anemometer,weather\n2,barometer,weather\n3,seismograph,geology\n"
@@ -75,7 +78,7 @@ async def clean_env(tmp_path, monkeypatch):
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in clean_env", exc_info=True)
 
 
 @pytest.mark.asyncio
@@ -159,3 +162,100 @@ async def test_two_csvs_in_one_add_stage_concurrently(clean_env, tmp_path):
         census[props.get("type", "?")] = census.get(props.get("type", "?"), 0) + 1
     assert census.get("DltRow") == 6, f"3 rows per CSV expected, census: {census}"
     assert census.get("SchemaTable") == 2, f"one schema table per CSV, census: {census}"
+
+
+DATED_CSV = (
+    "order_id,customer,order_date,shipped_at,amount\n"
+    "1,Acme,2024-03-01,2024-03-02 10:15:00,120.5\n"
+    "2,Globex,2024-03-15,2024-03-16 08:00:00,80.0\n"
+    "3,Initech,2024-06-20,,42.0\n"
+)
+
+
+def _ms(day: str) -> int:
+    from datetime import datetime, timezone
+
+    return int(datetime.fromisoformat(day).replace(tzinfo=timezone.utc).timestamp() * 1000)
+
+
+@pytest.mark.asyncio
+async def test_dated_csv_rows_anchor_to_shared_timestamps(clean_env, tmp_path):
+    """A CSV's date cells become edges into Timestamp nodes, which the temporal
+    range lookup and the candidate-side anchors read like LLM-extracted dates,
+    and hybrid retrieval sees the rows as chunk candidates. No LLM anywhere."""
+    from cognee.infrastructure.databases.graph import get_graph_engine
+    from cognee.modules.engine.utils.timestamp_from_text import timestamp_from_text
+    from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
+
+    csv_path = pathlib.Path(tmp_path) / "orders.csv"
+    csv_path.write_text(DATED_CSV)
+    await cognee.add([str(csv_path)], dataset_name="csv_dated_ds")
+    await cognee.cognify(datasets=["csv_dated_ds"])
+
+    graph = await get_graph_engine()
+    nodes, edges = await graph.get_graph_data()
+    rows = {str(node_id) for node_id, props in nodes if props.get("type") == "DltRow"}
+    timestamps = {
+        props["timestamp_str"]: str(node_id)
+        for node_id, props in nodes
+        if props.get("type") == "Timestamp"
+    }
+    assert len(rows) == 3
+    # dlt typed shipped_at as DATETIME and order_date as TEXT; both are read by shape.
+    assert set(timestamps) == {
+        "2024-03-01",
+        "2024-03-02 10:15:00",
+        "2024-03-15",
+        "2024-03-16 08:00:00",
+        "2024-06-20",
+    }
+    # The row's date is the node a document saying "1 March 2024" resolves to.
+    assert timestamps["2024-03-01"] == str(timestamp_from_text("1 March 2024").id)
+
+    date_edges = [(str(s), str(t)) for s, t, rel, _ in edges if rel == "order_date"]
+    shipped_edges = [(str(s), str(t)) for s, t, rel, _ in edges if rel == "shipped_at"]
+    assert len(date_edges) == 3 and len(shipped_edges) == 2  # the empty cell makes no edge
+    assert {s for s, _ in date_edges} == rows
+    assert {t for _, t in date_edges} <= set(timestamps.values())
+
+    march = (_ms("2024-03-01"), _ms("2024-04-01"))
+    in_march = sorted(node["timestamp_str"] for node in await graph.get_timestamps_in_range(*march))
+    assert in_march == ["2024-03-01", "2024-03-02 10:15:00", "2024-03-15", "2024-03-16 08:00:00"]
+
+    anchors = await graph.get_temporal_anchors(rows, [], *march)
+    june_row = next(s for s, t in date_edges if t == timestamps["2024-06-20"])
+    assert anchors["chunk_ids"] == rows - {june_row}, (
+        "rows are anchored as chunks, by their own edges"
+    )
+    assert anchors["entity_ids"] == set()
+    assert len(anchors["timestamp_ids"]) == 4
+
+    # Hybrid's chunk lane reads DltRow_text: with no documents in the dataset,
+    # every chunk candidate is a row.
+    retrieved = await HybridRetriever(chunks_top_k=3, entities_top_k=0).get_retrieved_objects(
+        "orders placed in March"
+    )
+    retrieved_ids = {str(chunk.payload["id"]) for chunk in retrieved["chunks"]}
+    assert retrieved_ids == rows
+
+
+@pytest.mark.asyncio
+async def test_dlt_config_narrows_the_csv_time_edges(clean_env, tmp_path):
+    """``add(csv, dlt_config={"temporal_columns": ...})`` reaches the CSV loader:
+    only the selected column anchors, so a bookkeeping date stays out."""
+    from cognee.infrastructure.databases.graph import get_graph_engine
+
+    csv_path = pathlib.Path(tmp_path) / "orders.csv"
+    csv_path.write_text(DATED_CSV)
+    await cognee.add(
+        [str(csv_path)],
+        dataset_name="csv_narrowed_ds",
+        dlt_config={"temporal_columns": {"orders": ["order_date"]}},
+    )
+    await cognee.cognify(datasets=["csv_narrowed_ds"])
+
+    graph = await get_graph_engine()
+    nodes, edges = await graph.get_graph_data()
+    timestamps = {props["timestamp_str"] for _, props in nodes if props.get("type") == "Timestamp"}
+    assert timestamps == {"2024-03-01", "2024-03-15", "2024-06-20"}
+    assert not [rel for _, _, rel, _ in edges if rel == "shipped_at"]

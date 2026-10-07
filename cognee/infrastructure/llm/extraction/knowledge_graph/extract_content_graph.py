@@ -9,12 +9,25 @@ from cognee.infrastructure.llm.config import (
 )
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import render_prompt
-from cognee.shared.graph_model_utils import datapoint_model_to_basemodel
+from cognee.shared.llm_graph_model import (
+    content_graph_to_data_point,
+    datapoint_model_to_basemodel,
+)
 
 
 async def extract_content_graph(
-    content: str, response_model: type[BaseModel], custom_prompt: str | None = None, **kwargs: Any
+    content: str,
+    response_model: type[BaseModel],
+    custom_prompt: str | None = None,
+    temporal_hints: list[str] | None = None,
+    **kwargs: Any,
 ) -> BaseModel:
+    """Extract a graph from ``content`` with one structured-output LLM call.
+
+    ``temporal_hints`` are rendered into the default graph prompt's
+    TEMPORAL_NORMALIZATION_HINTS block (see ``engine/utils/temporal_hints.py``).
+    A ``custom_prompt`` is sent verbatim and receives no hints.
+    """
     if custom_prompt:
         system_prompt = custom_prompt
     else:
@@ -30,7 +43,9 @@ async def extract_content_graph(
         else:
             base_directory = None
 
-        system_prompt = render_prompt(prompt_path, {}, base_directory=base_directory)
+        system_prompt = render_prompt(
+            prompt_path, {"temporal_hints": temporal_hints or []}, base_directory=base_directory
+        )
 
     simplified_response_model = response_model
     if isinstance(response_model, type) and issubclass(response_model, DataPoint):
@@ -42,6 +57,6 @@ async def extract_content_graph(
         content, system_prompt, simplified_response_model, **kwargs
     )
 
-    if simplified_response_model is not response_model:
-        return response_model.model_validate(content_graph.model_dump())
+    if isinstance(response_model, type) and issubclass(response_model, DataPoint):
+        return await content_graph_to_data_point(content_graph, response_model)
     return content_graph
