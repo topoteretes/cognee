@@ -11,7 +11,8 @@ demo, a neighbourhood walk elsewhere), the oversized candidate set is reordered
 so the anchored candidates come first (``HybridCandidates.prioritize``), ranked
 by how tightly their best matched timestamp fits the window
 (``tightness_rank``): for "18 March 1965" a chunk dated 1965-03-18 comes before
-one that only says "1965", whichever edge carried the date, and
+one that only says "1965", whichever edge carried the date, while dates at least
+as precise as the question rank alike and keep their similarity order, and
 ``finalize`` — the same step plain hybrid uses — cuts it to ``top_k`` and selects
 the facts against the entities that survive the cut. Context formatting and
 completion are inherited unchanged.
@@ -39,6 +40,7 @@ from cognee.modules.retrieval.temporal_hybrid.matching import (
     tightest_first,
     tightness_rank,
     to_epoch_ms,
+    window_span_ms,
 )
 from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
 from cognee.shared.logging_utils import get_logger
@@ -193,7 +195,9 @@ class TemporalHybridRetriever(HybridRetriever):
             candidates.prioritize(
                 self.last_anchors["chunk_ids"],
                 self.last_anchors["entity_ids"],
-                chunk_rank=tightness_rank(self.last_anchors["chunk_timestamps"], in_window),
+                chunk_rank=tightness_rank(
+                    self.last_anchors["chunk_timestamps"], in_window, window_span_ms(start, end)
+                ),
             )
         )
         if reranked["chunks"] == self.last_baseline["chunks"] and (
