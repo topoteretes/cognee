@@ -39,7 +39,8 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
-from cognee.modules.chunking.external_metadata import node_set_names_from_external_metadata
+from cognee.modules.chunking.external_metadata import decode_external_metadata
+from cognee.modules.engine.models.node_set import validate_node_set_names
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.code_graph.resolve_repo import (
     CodeRepositoryError,
@@ -442,7 +443,8 @@ async def extract_code_repo_graph(
                 "its current location."
             )
 
-        node_set = node_set_names_from_external_metadata(data_item.external_metadata)
+        metadata = decode_external_metadata(data_item.external_metadata)
+        node_set = validate_node_set_names(metadata.get("node_set")) if metadata else None
 
         data_points = await extract_code_graph(repo_path=repo_path, node_set=node_set)
         state = await add_code_graph_data_points(data_points, ctx=ctx, graph_only=True)

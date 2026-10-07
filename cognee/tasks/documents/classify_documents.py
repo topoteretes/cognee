@@ -1,6 +1,5 @@
 import json
 
-from cognee.modules.chunking.external_metadata import node_set_names_from_external_metadata
 from cognee.modules.data.models import Data
 from cognee.modules.data.processing.document_types import (
     AudioDocument,
@@ -14,7 +13,8 @@ from cognee.modules.data.processing.document_types import (
     TextDocument,
     UnstructuredDocument,
 )
-from cognee.modules.engine.models.node_set import NodeSet
+from cognee.modules.engine.models.node_set import NodeSet, validate_node_set_names
+from cognee.modules.engine.utils.generate_node_id import generate_node_id
 from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.tasks.code_graph.code_files import is_code_sourced
 from cognee.tasks.code_graph.code_repo import is_code_repo_sourced
@@ -72,9 +72,9 @@ def update_node_set(document):
 
     Parses the external_metadata of the given document and updates the document's
     belongs_to_set attribute with NodeSet objects generated from the node_set found in the
-    external_metadata. If the external_metadata is not valid JSON, is not a dictionary, does
-    not contain the 'node_set' key, or if node_set is not a list, the function has no effect
-    and will return early.
+    external_metadata. If the external_metadata is not valid JSON, is not a dictionary, or
+    does not contain the 'node_set' key, the function has no effect and will return early.
+    A node_set that is not a list of names raises instead of leaving the document untagged.
 
     Parameters:
     -----------
@@ -82,7 +82,18 @@ def update_node_set(document):
         - document: The document object which contains external_metadata from which the
           node_set will be extracted.
     """
-    node_set = node_set_names_from_external_metadata(document.external_metadata)
+    try:
+        external_metadata = json.loads(document.external_metadata)
+    except json.JSONDecodeError:
+        return
+
+    if not isinstance(external_metadata, dict):
+        return
+
+    if "node_set" not in external_metadata:
+        return
+
+    node_set = validate_node_set_names(external_metadata["node_set"])
     if node_set is None:
         return
 

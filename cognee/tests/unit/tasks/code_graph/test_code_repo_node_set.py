@@ -816,3 +816,52 @@ async def test_respelling_retag_strips_old_spelling_from_property_but_keeps_the_
 
     engine.remove_belongs_to_set_tags.assert_awaited_once_with(["Team-A"], node_ids=[REPO_NODE_ID])
     engine.delete_edge_triples.assert_not_awaited()
+
+
+def _repo_manifest_item(tmp_path, external_metadata):
+    """A CODE_REPO manifest row pointing at an existing directory."""
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({"repo_path": str(repo_dir)}))
+    return SimpleNamespace(
+        id="manifest-1",
+        raw_data_location=str(manifest),
+        system_metadata={"source": "code_repo"},
+        external_metadata=external_metadata,
+    )
+
+
+def _stub_code_graph_tasks(monkeypatch):
+    module = importlib.import_module("cognee.tasks.code_graph.extract_code_graph")
+    extract = AsyncMock(return_value=[])
+    monkeypatch.setattr(module, "extract_code_graph", extract)
+    monkeypatch.setattr(module, "add_code_graph_data_points", AsyncMock(return_value=[]))
+    monkeypatch.setattr(module, "add_code_graph_edges", AsyncMock(return_value=[]))
+    return extract
+
+
+@pytest.mark.asyncio
+async def test_repo_route_passes_the_manifest_node_set_to_the_code_graph(tmp_path, monkeypatch):
+    from cognee.tasks.code_graph.code_repo import extract_code_repo_graph
+
+    extract = _stub_code_graph_tasks(monkeypatch)
+    item = _repo_manifest_item(tmp_path, {"node_set": ["team-a"]})
+
+    await extract_code_repo_graph([item])
+
+    assert extract.await_args.kwargs["node_set"] == ["team-a"]
+
+
+@pytest.mark.asyncio
+async def test_repo_route_rejects_a_malformed_manifest_node_set(tmp_path, monkeypatch):
+    """Same rule as classify_documents: a bad tag raises, never loads untagged."""
+    from cognee.modules.engine.models.node_set import InvalidNodeSetError
+    from cognee.tasks.code_graph.code_repo import extract_code_repo_graph
+
+    extract = _stub_code_graph_tasks(monkeypatch)
+    item = _repo_manifest_item(tmp_path, {"node_set": "team-a"})
+
+    with pytest.raises(InvalidNodeSetError):
+        await extract_code_repo_graph([item])
+    extract.assert_not_awaited()

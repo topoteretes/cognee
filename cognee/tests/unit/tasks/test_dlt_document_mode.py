@@ -189,10 +189,6 @@ class TestRowNodeSet:
     def test_already_namespaced_names_are_kept_once(self):
         assert _node_set(["notion:ws:root", "ws:root", " notion:ws:root "]) == ["notion:ws:root"]
 
-    def test_non_strings_and_blanks_inside_the_list_are_ignored(self):
-        assert _node_set([3, None, "", "   ", {"a": 1}, "ws:root"]) == ["notion:ws:root"]
-        assert _node_set([3, None]) is None
-
     def test_spellings_of_one_node_set_keep_the_first(self):
         """Dedupe is by node-set identity, the same normalization the graph uses."""
         assert _node_set(["Project A", "project_a", "PROJECT A"]) == ["notion:Project A"]
@@ -209,6 +205,17 @@ class TestRowNodeSetNotAList:
         with pytest.raises(CogneeValidationError, match=found) as error:
             _node_set(value)
         assert "row 'p1'" in str(error.value) and "notion_pages" in str(error.value)
+
+    @pytest.mark.parametrize("entry", [3, None, "", "   ", {"a": 1}])
+    def test_an_entry_that_is_not_a_non_empty_string(self, entry):
+        """Same rule as add(node_set=...): a bad entry is never dropped quietly."""
+        with pytest.raises(CogneeValidationError, match="not a non-empty string") as error:
+            _node_set(["ws:root", entry])
+        assert "row 'p1'" in str(error.value)
+
+    def test_an_entry_that_cannot_be_a_node_set_name(self):
+        with pytest.raises(CogneeValidationError, match="cannot be encoded"):
+            _node_set(["ws:root\ud800"])
 
     def test_a_value_dlt_moved_to_a_variant_column(self):
         """A bare string under the json hint lands in cognee_node_set__v_text, this one NULL."""
