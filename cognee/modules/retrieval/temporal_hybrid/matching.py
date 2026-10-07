@@ -20,7 +20,9 @@ Start is inclusive and end is exclusive:
 - An inclusive range includes the entire final named unit.
 - A precise second covers that second; end is the next second.
 - "Before X" leaves start null and sets end to X's lower bound.
+- "Until X", "through X", "up to X" include X: start null, end at X's upper bound.
 - "After X" sets start to X's upper bound and leaves end null.
+- "Since X" includes X: start at X's lower bound, end null.
 - No explicit time, relative time, or disjoint windows: both null.
 
 Every non-null boundary must include year, month, day, hour, minute, and second.
