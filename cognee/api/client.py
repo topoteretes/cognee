@@ -1,5 +1,6 @@
 """FastAPI server for the Cognee API."""
 
+import asyncio
 import os
 from contextlib import asynccontextmanager
 from traceback import format_exc
@@ -143,13 +144,35 @@ async def lifespan(app: FastAPI):
     # full message instead of surfacing as a generic 409 per improve call.
     from cognee.modules.improve import get_improve_config
 
-    get_improve_config()
+    improve_config = get_improve_config()
+
+    # Bridge idle sessions into long-term memory before the cache TTL expires
+    # them (opt-in). Stopped before the background drain below.
+    consolidation_stop = asyncio.Event()
+    consolidation_task = None
+    if improve_config.idle_consolidation_enabled:
+        from cognee.modules.improve.idle_consolidation import run_idle_consolidation_loop
+
+        consolidation_task = asyncio.create_task(run_idle_consolidation_loop(consolidation_stop))
+        logger.info(
+            "Idle-session consolidation enabled: sessions idle for %gs are bridged every %gs",
+            improve_config.idle_consolidation_after_seconds,
+            improve_config.idle_consolidation_interval_seconds,
+        )
 
     # Emit a clear startup message for docker logs
     logger.info("Backend server has started")
 
     async with pipeline_recovery_service():
         yield
+
+    if consolidation_task is not None:
+        consolidation_stop.set()
+        try:
+            # wait_for cancels the sweep itself if it outlives the timeout.
+            await asyncio.wait_for(consolidation_task, timeout=BACKGROUND_DRAIN_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            logger.warning("Idle-session consolidation sweep cancelled at shutdown")
 
     # Let in-flight background work (background remember runs, the session
     # improve bridge) finish before the engines below are torn down under it.

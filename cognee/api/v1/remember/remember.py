@@ -272,17 +272,21 @@ def _data_to_text(data) -> str:
 _SESSION_PLACEHOLDER_PREFIXES = ("[UploadFile]", "[file:", "[BinaryIO", "[SpooledTemporaryFile")
 
 
-async def _add_to_session(session_id: str, data, user):
+async def _add_to_session(session_id: str, data, user, dataset_id=None):
     """Add a Q&A entry to the session cache.
 
     Sessions store chat-shaped content (prompts, assistant answers,
     Q&A turns). File-upload data coerces to placeholder strings like
     ``[UploadFile]`` / ``[file: name]`` — those are useless in the
     session cache and pollute recall results, so they're skipped.
+
+    ``dataset_id`` attributes the session record to the dataset the entry
+    was remembered into, so dataset-scoped session lookups (dataset forget,
+    idle consolidation) find it.
     """
     from cognee.infrastructure.session.get_session_manager import get_session_manager
 
-    sm = get_session_manager()
+    sm = get_session_manager(dataset_id=dataset_id)
     if not sm.is_available:
         logger.warning("remember: session cache not available (enable CACHING=true)")
         return
@@ -1900,7 +1904,7 @@ async def _remember_inner(
         # Session memory: store in session cache, then optionally bridge to graph
         if session_id:
             operation_context.set_session_id(session_id)
-            await _add_to_session(session_id, data, user)
+            await _add_to_session(session_id, data, user, dataset_id=dataset_id)
             result = RememberResult(
                 status="session_stored",
                 dataset_name=dataset_name,
