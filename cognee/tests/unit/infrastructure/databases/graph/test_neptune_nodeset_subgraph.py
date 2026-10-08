@@ -1,11 +1,26 @@
 """NodeSet query contract tests without an external Neptune service."""
 
-from unittest.mock import AsyncMock
+import sys
+from types import ModuleType
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from cognee.infrastructure.databases.graph.neptune_driver.adapter import NeptuneGraphDB
 from cognee.modules.engine.models.node_set import NodeSet
+
+try:
+    from cognee.infrastructure.databases.graph.neptune_driver.adapter import NeptuneGraphDB
+except ModuleNotFoundError as error:
+    if error.name != "botocore":
+        raise
+    # These tests bypass AWS client initialization, so Config only needs to be importable.
+    config_module = ModuleType("botocore.config")
+    config_module.Config = MagicMock()
+    sys.modules["botocore.config"] = config_module
+    try:
+        from cognee.infrastructure.databases.graph.neptune_driver.adapter import NeptuneGraphDB
+    finally:
+        del sys.modules["botocore.config"]
 
 
 @pytest.fixture
