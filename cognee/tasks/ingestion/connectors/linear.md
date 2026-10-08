@@ -41,8 +41,13 @@ document, so asking about a discussion finds the issue it belongs to.
 - Archived issues, projects and comments are included (`include_archived=True`). Linear
   archives closed issues automatically, so skipping them would drop most of a team's
   history. Issues of a team's sub-teams are not: select the sub-team itself.
-- Trashed issues are skipped. Once ingested they stay in memory: this source does not
-  forget on delete yet (the `_deleted` column is declared and always `False`).
+- Deleting an issue or project in Linear moves it to the trash. The next sync emits it
+  as a `{"id": ..., "_deleted": True}` tombstone, so it is forgotten, and counts it in
+  `cognee_sync_stats["deleted"]`. This holds with `include_archived=False` too.
+- Restoring an item from the trash does not change its `updatedAt`, so it is ingested
+  again at its next edit (or, for an issue, its next comment).
+- Linear purges its trash after 30 days, and an admin can delete permanently right
+  away: an item that is gone before a sync sees it in the trash is not forgotten.
 - A comment that is deleted in Linear is hard-deleted there, so it is not seen and
   stays in the issue's document until the issue changes next.
 - An issue moved to another team stays in the old team's table.
@@ -55,6 +60,14 @@ streams (issues, comments, projects) keeps a floor and the ids seen exactly at i
 run with no changes yields nothing. Comments are their own stream because an edited
 comment does not reliably bump its issue's `updatedAt`: a changed comment re-renders its
 issue.
+
+Trashing does not bump `updatedAt` either, only `archivedAt`. Two more streams read what
+was archived since the last run, archived items included whatever `include_archived`
+says, and forget the trashed ones. Linear cannot filter projects by `archivedAt`, so that
+stream lists the team's projects (one request per 50). A quiet run therefore costs five
+requests. These streams run last: while a backfill uses whole runs they wait, and catch
+up once it is done. The first run after upgrading from a version without them reads
+every issue archived since the first sync, which can take several runs on a big team.
 
 Linear allows 5,000 requests and 2,000,000 complexity points per hour for an OAuth app
 user (2,500 and 3,000,000 for a personal API key), shared by everything that user does,
