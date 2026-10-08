@@ -2,14 +2,15 @@
 
 Runs the default path from an extracted ``KnowledgeGraph`` down to storage —
 ``integrate_chunk_graphs`` then ``add_data_points`` — with no LLM involved, and
-reads the result back through the same adapter query the temporal retriever
-uses (``collect_time_ids``).
+reads the result back through the same adapter range lookup the TEMPORAL
+retriever uses (``get_timestamps_in_range``).
 """
 
 import logging
 import pathlib
 import re
 import shutil
+from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
@@ -20,11 +21,11 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.low_level import setup
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.data.processing.document_types import TextDocument
+from cognee.modules.retrieval.temporal_hybrid.matching import to_epoch_ms
 from cognee.shared.data_models import Edge as KGEdge
 from cognee.shared.data_models import KnowledgeGraph, Node
 from cognee.tasks.graph.extract_graph_from_data import integrate_chunk_graphs
 from cognee.tasks.storage.add_data_points import add_data_points
-from cognee.tasks.temporal_graph.models import Timestamp as LLMTimestamp
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +116,10 @@ async def test_timestamp_node_is_stored_and_found_by_time_range(clean_test_envir
     assert (str(chunk.id), timestamp_id, "contains") in relationships
 
     # The same lookup the temporal retriever runs: the year 1867 finds it, 1900 does not.
-    assert await graph_engine.collect_time_ids(
-        LLMTimestamp(year=1867), LLMTimestamp(year=1867, month=12, day=31)
-    ) == [timestamp_id]
-    assert await graph_engine.collect_time_ids(LLMTimestamp(year=1900)) == []
+    in_1867 = await graph_engine.get_timestamps_in_range(_ms(1867), _ms(1868))
+    assert [str(node["id"]) for node in in_1867] == [timestamp_id]
+    assert await graph_engine.get_timestamps_in_range(_ms(1900), _ms(1901)) == []
+
+
+def _ms(year: int) -> int:
+    return to_epoch_ms(datetime(year, 1, 1, tzinfo=timezone.utc))

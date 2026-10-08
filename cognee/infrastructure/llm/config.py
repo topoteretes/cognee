@@ -163,8 +163,6 @@ class LLMConfig(BaseSettings):
     # speech. Set it when the base model has no vision capability.
     image_transcribe_model: str = ""
     graph_prompt_path: str = "generate_graph_prompt.txt"
-    temporal_graph_prompt_path: str = "generate_event_graph_prompt.txt"
-    event_entity_prompt_path: str = "generate_event_entity_prompt.txt"
     image_transcription_prompt_path: str = "transcribe_image_prompt.txt"
     image_transcription_max_completion_tokens: int = 1024
     image_transcription_reasoning_effort: str = "low"

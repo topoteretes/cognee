@@ -943,7 +943,7 @@ async def test_gliner_extractor_rejects_unknown_kwargs_instead_of_swallowing():
 
 # The branches that cannot honour the extractor must raise before doing any
 # work — never silently run something other than what the caller selected.
-# All three checks sit at the top of cognify(), before any DB or span setup.
+# Both checks sit at the top of cognify(), before any DB or span setup.
 
 
 @pytest.mark.asyncio

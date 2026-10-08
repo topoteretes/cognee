@@ -48,6 +48,9 @@ def _utc(*parts: int) -> datetime:
 async def clean_graph(request, monkeypatch):
     for key, value in incremental_test_backend_env().items():
         monkeypatch.setenv(key, value)
+    # Zero vectors, like the incremental suites: no assertion reads them, and with no
+    # key the keyless default would download a fastembed model on every CI leg.
+    monkeypatch.setenv("MOCK_EMBEDDING", "true")
     base_dir = pathlib.Path(__file__).parent.parent.parent.parent
     slug = re.sub(r"[^0-9A-Za-z]+", "_", request.node.name)
     system_dir = str(base_dir / ".cognee_system/test_temporal_range" / slug)

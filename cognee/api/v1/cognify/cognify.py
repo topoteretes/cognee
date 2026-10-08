@@ -1,4 +1,5 @@
 import asyncio
+import warnings
 from collections.abc import Collection
 from typing import Literal
 from uuid import UUID
@@ -53,12 +54,34 @@ from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_sum
 from cognee.tasks.graph.resolve_temporal_contradictions import resolve_temporal_contradictions
 from cognee.tasks.provenance import record_provenance
 from cognee.tasks.storage import add_data_points
-from cognee.tasks.temporal_graph.extract_events_and_entities import extract_events_and_timestamps
-from cognee.tasks.temporal_graph.extract_knowledge_graph_from_events import (
-    extract_knowledge_graph_from_events,
-)
 
 logger = get_logger("cognify")
+
+TEMPORAL_COGNIFY_DEPRECATED = (
+    "temporal_cognify is deprecated and ignored, and will be removed in the next release: "
+    "cognify() now extracts dates as Timestamp nodes by default, and SearchType.TEMPORAL "
+    "reranks by them. Drop the argument. A dataset built with temporal_cognify=True holds "
+    "Event nodes that current code no longer indexes: TEMPORAL search ignores them, graph "
+    "completion no longer searches their names, and the next triplet enrichment re-embeds "
+    "their triplets without the event name. Rebuild such a dataset with "
+    "forget(dataset=..., memory_only=True) and then cognify()."
+)
+
+
+def drop_deprecated_temporal_cognify(kwargs: dict) -> None:
+    """Strip the deprecated ``temporal_cognify`` flag from ``kwargs`` with a warning.
+
+    The event pipeline it switched to is gone, so any value runs the default pipeline.
+    Unknown cognify kwargs are forwarded into the extraction LLM call, so the flag
+    must never travel on. The warning is also logged: when the caller runs
+    ``asyncio.run(cognify(...))`` directly, Python attributes the warning to asyncio and
+    the default filters hide it.
+    """
+    if "temporal_cognify" not in kwargs:
+        return
+    kwargs.pop("temporal_cognify")
+    warnings.warn(TEMPORAL_COGNIFY_DEPRECATED, DeprecationWarning, stacklevel=3)
+    logger.warning(TEMPORAL_COGNIFY_DEPRECATED)
 
 
 def _wrap_cognify_exception(error: BaseException, datasets) -> "Exception":
@@ -329,10 +352,7 @@ async def cognify(
     resolved_extractor = resolve_extractor(extractor, cognify_config)
     resolved_summary_method = resolve_summary_method(summary_method, cognify_config)
 
-    # Removed option, accepted and ignored: the default pipeline extracts dates as
-    # Timestamp nodes, which SearchType.TEMPORAL reads. Dropped here because unknown
-    # kwargs are forwarded into the extraction LLM call.
-    kwargs.pop("temporal_cognify", None)
+    drop_deprecated_temporal_cognify(kwargs)
     if dry_run and resolved_extractor == GLINER_DEMO_EXTRACTOR:
         raise ValueError(
             "dry_run estimates the LLM extraction pipeline only; it has no cost model "
@@ -480,7 +500,7 @@ async def cognify(
         # Per-item routing: each data item resolves to the task list its kind
         # requires — DLT-source manifests run the deterministic DLT list, code
         # files run the enola code graph list, everything else runs the
-        # standard (or temporal) list. The lists are built once up front and
+        # standard list. The lists are built once up front and
         # the resolver is a sync closure over them (the distributed runner
         # materializes per-item task columns, so it needs concrete lists, not
         # an async factory). One run_pipeline call, one cognify_pipeline run
@@ -700,52 +720,3 @@ async def get_dlt_tasks(
         # source), so these Task objects are safe to share across datasets.
         Task(extract_dlt_source_edges, needs_llm=False),
     ]
-
-
-async def get_temporal_tasks(
-    user: User = None,
-    chunker=TextChunker,
-    chunk_size: int | None = None,
-    chunks_per_batch: int | None = None,
-) -> list[Task]:
-    """
-    Builds and returns a list of temporal processing tasks to be executed in sequence.
-
-    The pipeline includes:
-    1. Document classification.
-    2. Document chunking with a specified or default chunk size.
-    3. Event and timestamp extraction from chunks.
-    4. Knowledge graph extraction from events.
-    5. Batched insertion of data points.
-
-    Args:
-        user (User, optional): The user requesting task execution.
-        chunker (Callable, optional): A text chunking function/class to split documents. Defaults to TextChunker.
-        chunk_size (int, optional): Maximum token size per chunk. If not provided, uses system default.
-        chunks_per_batch (int, optional): Number of chunks to process in a single batch in Cognify
-
-    Returns:
-        list[Task]: A list of Task objects representing the temporal processing pipeline.
-    """
-    if chunks_per_batch is None:
-        configured = get_cognify_config().chunks_per_batch
-        chunks_per_batch = configured if configured is not None else 10
-
-    temporal_tasks = [
-        # EXTRACT: classify raw Data items into typed Document objects
-        Task(classify_documents),
-        # EXTRACT: split Documents into semantic text chunks
-        Task(
-            extract_chunks_from_documents,
-            max_chunk_size=await resolve_chunk_size(chunk_size),
-            chunker=chunker,
-        ),
-        # COGNIFY: extract temporal events and timestamps from chunks
-        Task(extract_events_and_timestamps, task_config={"batch_size": chunks_per_batch}),
-        # COGNIFY: build knowledge graph from extracted events
-        Task(extract_knowledge_graph_from_events),
-        # LOAD: persist nodes, edges, and embeddings to graph/vector DBs
-        Task(add_data_points, task_config={"batch_size": chunks_per_batch}),
-    ]
-
-    return temporal_tasks

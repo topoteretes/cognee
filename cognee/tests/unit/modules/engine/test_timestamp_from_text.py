@@ -3,8 +3,7 @@ from datetime import datetime, timezone
 import pytest
 
 from cognee.modules.engine.models import Timestamp
-from cognee.modules.engine.utils import generate_timestamp_datapoint, timestamp_from_text
-from cognee.tasks.temporal_graph.models import Timestamp as LLMTimestamp
+from cognee.modules.engine.utils import timestamp_from_text
 
 
 def _epoch_ms(*parts) -> int:
@@ -74,15 +73,6 @@ def test_id_derives_from_the_normalized_string():
     assert timestamp_from_text("1969").id == Timestamp.id_for("1969")
     # Same calendar fields, different stated precision: two nodes.
     assert timestamp_from_text("1969").id != timestamp_from_text("1969-01-01").id
-
-
-def test_temporal_pipeline_timestamps_keep_their_explicit_id_and_gain_a_name():
-    timestamp = generate_timestamp_datapoint(LLMTimestamp(year=1969, month=7, day=20))
-
-    assert timestamp.timestamp_str == "1969-07-20 00:00:00"
-    assert timestamp.name == timestamp.timestamp_str
-    assert timestamp.precision == "second"
-    assert timestamp.id != Timestamp.id_for(timestamp.timestamp_str)
 
 
 @pytest.mark.parametrize(

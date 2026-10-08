@@ -1,8 +1,10 @@
 """Time-bounded recall over an ingested timeline.
 
-``remember()`` extracts the dates in the text as Timestamp nodes, so
+``remember()`` extracts the dates it reads as ``Timestamp`` nodes, so
 ``SearchType.TEMPORAL`` can answer questions that depend on ordering — before, after,
-and between a pair of dates — rather than on embedding similarity alone.
+and between a pair of dates — rather than on embedding similarity alone. ``recall()``
+also routes a question with an absolute date to TEMPORAL on its own; the query type is
+pinned here so every question takes that path.
 """
 
 import asyncio
@@ -25,12 +27,8 @@ QUERIES = [
 async def main():
     await cognee.forget(everything=True)
 
-    # Dates in the text become Timestamp nodes alongside the usual graph.
-    await cognee.remember(
-        TEXT,
-        dataset_name="timeline_demo",
-        self_improvement=False,
-    )
+    # The default extraction stores each date as a Timestamp node next to the usual graph.
+    await cognee.remember(TEXT, dataset_name="timeline_demo", self_improvement=False)
 
     for query in QUERIES:
         results = await cognee.recall(
