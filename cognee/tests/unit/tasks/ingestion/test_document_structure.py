@@ -9,6 +9,10 @@ from uuid import uuid4
 
 import pytest
 
+from cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter import (
+    SQLAlchemyAdapter,
+)
+from cognee.modules.data.models import Data
 from cognee.modules.engine.models import StructureContainer
 from cognee.tasks.ingestion import document_structure
 from cognee.tasks.ingestion.document_structure import StructureRow, plan_document_structure
@@ -80,8 +84,7 @@ async def test_a_dataset_without_structure_does_not_touch_the_graph(monkeypatch)
         raise AssertionError("the graph was opened")
 
     async def rows(_dataset_id):
-        drive_row = {"source": "google_drive", "table_name": "t", "external_id": "1"}
-        return [SimpleNamespace(id=uuid4(), system_metadata=drive_row, extension="txt")]
+        return []
 
     monkeypatch.setattr(document_structure, "get_graph_engine", no_graph)
     monkeypatch.setattr(document_structure, "dataset_rows", rows)
@@ -90,6 +93,49 @@ async def test_a_dataset_without_structure_does_not_touch_the_graph(monkeypatch)
     )
 
     assert await document_structure.reconcile_document_structure() is None
+
+
+@pytest.mark.asyncio
+async def test_dataset_rows_returns_only_the_rows_that_carry_a_structure(monkeypatch, tmp_path):
+    """The filter is in the query, so a dataset of plain documents is never read row by row.
+    A row at the top of its tree has empty ancestors and still counts; a row with no
+    system_metadata at all is left alone."""
+    engine = SQLAlchemyAdapter(f"sqlite+aiosqlite:///{tmp_path / 'relational.db'}")
+    await engine.create_database()
+    monkeypatch.setattr(document_structure, "get_relational_engine", lambda: engine)
+
+    def data(dataset_id, system_metadata):
+        return Data(
+            id=uuid4(),
+            name="doc",
+            extension="txt",
+            mime_type="text/plain",
+            raw_data_location="/x",
+            original_data_location="/x",
+            owner_id=uuid4(),
+            dataset_id=dataset_id,
+            content_hash=str(uuid4()),
+            system_metadata=system_metadata,
+            pipeline_status={},
+            loader_engine="text_loader",
+        )
+
+    notion = {"source": "notion", "table_name": "notion_pages", "external_id": "p"}
+    top_of_tree = data(DATASET_ID, {**notion, "structure": {"ancestors": []}})
+    below = data(DATASET_ID, {**notion, "structure": {"ancestors": [_page("p")]}})
+    plain = data(DATASET_ID, {"source": "google_drive", "table_name": "t", "external_id": "1"})
+    unstamped = data(DATASET_ID, None)
+    elsewhere = data(uuid4(), {**notion, "structure": {"ancestors": []}})
+    try:
+        async with engine.get_async_session() as session:
+            session.add_all([top_of_tree, below, plain, unstamped, elsewhere])
+            await session.commit()
+
+        rows = await document_structure.dataset_rows(DATASET_ID)
+    finally:
+        await engine.engine.dispose()
+
+    assert {row.id for row in rows} == {top_of_tree.id, below.id}
 
 
 def test_two_rows_that_name_a_container_differently_leave_it_the_newest_name():

@@ -60,26 +60,25 @@ class StructurePlan:
 
 
 async def dataset_rows(dataset_id: UUID) -> list:
-    """The Data columns the pass reads: it runs on every cognify of every dataset,
-    and a full ORM row per document cost more than the pass itself."""
+    """The dataset's rows that carry a tree position, with only the Data columns the pass
+    reads. It runs on every cognify of every dataset, so the filter is in the query: a
+    dataset without structure costs one query that returns nothing, not a read of every row."""
     async with get_relational_engine().get_async_session() as session:
         result = await session.execute(
-            select(
-                Data.id, Data.system_metadata, Data.extension, Data.updated_at, Data.created_at
-            ).filter(Data.dataset_id == dataset_id)
+            select(Data.id, Data.system_metadata, Data.extension, Data.updated_at, Data.created_at)
+            .filter(Data.dataset_id == dataset_id)
+            .filter(Data.system_metadata["structure"].as_string().is_not(None))
         )
         return list(result.all())
 
 
 def structure_rows(data_rows: list) -> list[StructureRow]:
-    """The rows that carry a tree position. Any other row is never touched."""
+    """The rows ``dataset_rows`` returned, as the pass reads them."""
     from cognee.tasks.documents.classify_documents import document_class_for
 
     rows = []
     for data in data_rows:
         meta = data.system_metadata
-        if not isinstance(meta, dict) or not isinstance(meta.get("structure"), dict):
-            continue
         changed = data.updated_at or data.created_at
         rows.append(
             StructureRow(
