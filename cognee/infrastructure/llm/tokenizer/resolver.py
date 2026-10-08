@@ -11,7 +11,8 @@ advisory warning when a mismatch is unavoidable.
 
 Resolution, by embedding provider:
 
-* ``openai``            -> ``TikTokenTokenizer`` for the model (BPE, correct).
+* ``openai``            -> an explicit ``HUGGINGFACE_TOKENIZER`` override if set,
+  otherwise ``TikTokenTokenizer`` for the model.
 * ``gemini``            -> ``TikTokenTokenizer`` default (Gemini has no local
   tokenizer; token counts are approximate).
 * ``mistral``           -> ``MistralTokenizer`` for the model.
@@ -160,6 +161,12 @@ def resolve_embedding_tokenizer(
     bare = _bare_model(model)
 
     if "openai" in provider_lower and "compatible" not in provider_lower:
+        if huggingface_tokenizer:
+            return _huggingface_or_fallback(
+                huggingface_tokenizer,
+                max_completion_tokens,
+                context=f"explicit tokenizer {huggingface_tokenizer!r} for {model!r}",
+            )
         # tiktoken.encoding_for_model raises KeyError on a model it does not know
         # (e.g. a newly released embedding model), so guard the "never raises"
         # contract with the shared warn-and-fall-back-to-default-TikToken path.
