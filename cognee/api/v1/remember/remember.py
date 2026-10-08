@@ -1028,10 +1028,10 @@ async def remember(
         result.raw_result    # {dataset_id: PipelineRunInfo}
     """
     from cognee import __version__ as cognee_version
-    from cognee.api.v1.cognify.cognify import reject_removed_temporal_cognify
+    from cognee.api.v1.cognify.cognify import drop_deprecated_temporal_cognify
     from cognee.shared.utils import send_telemetry
 
-    reject_removed_temporal_cognify(kwargs)
+    drop_deprecated_temporal_cognify(kwargs)
 
     # Migration dispatch: a MemorySource streams COGX records from an external
     # memory system (Mem0, Zep/Graphiti, Letta, a COGX archive, ...). The

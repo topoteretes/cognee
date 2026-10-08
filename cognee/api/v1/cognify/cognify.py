@@ -57,32 +57,31 @@ from cognee.tasks.storage import add_data_points
 
 logger = get_logger("cognify")
 
-TEMPORAL_COGNIFY_REMOVED = (
-    "temporal_cognify was removed: cognify() now extracts dates as Timestamp nodes by "
-    "default, and SearchType.TEMPORAL reranks by them. Drop the argument. A dataset "
-    "built with temporal_cognify=True holds Event nodes that current code no longer "
-    "indexes: TEMPORAL search ignores them, graph completion no longer searches their "
-    "names, and the next triplet enrichment re-embeds their triplets without the event "
-    "name. Rebuild such a dataset with forget(dataset=..., memory_only=True) and then "
-    "cognify()."
+TEMPORAL_COGNIFY_DEPRECATED = (
+    "temporal_cognify is deprecated and ignored, and will be removed in the next release: "
+    "cognify() now extracts dates as Timestamp nodes by default, and SearchType.TEMPORAL "
+    "reranks by them. Drop the argument. A dataset built with temporal_cognify=True holds "
+    "Event nodes that current code no longer indexes: TEMPORAL search ignores them, graph "
+    "completion no longer searches their names, and the next triplet enrichment re-embeds "
+    "their triplets without the event name. Rebuild such a dataset with "
+    "forget(dataset=..., memory_only=True) and then cognify()."
 )
 
 
-def reject_removed_temporal_cognify(kwargs: dict) -> None:
-    """Strip the removed ``temporal_cognify`` flag from ``kwargs``, raising when it is set.
+def drop_deprecated_temporal_cognify(kwargs: dict) -> None:
+    """Strip the deprecated ``temporal_cognify`` flag from ``kwargs`` with a warning.
 
+    The event pipeline it switched to is gone, so any value runs the default pipeline.
     Unknown cognify kwargs are forwarded into the extraction LLM call, so the flag
-    must never travel on. ``True`` asked for the deleted event pipeline and raises;
-    a falsy value was always a no-op, so it is dropped with a deprecation warning.
-    The warning is also logged: when the caller runs ``asyncio.run(cognify(...))``
-    directly, Python attributes the warning to asyncio and the default filters hide it.
+    must never travel on. The warning is also logged: when the caller runs
+    ``asyncio.run(cognify(...))`` directly, Python attributes the warning to asyncio and
+    the default filters hide it.
     """
     if "temporal_cognify" not in kwargs:
         return
-    if kwargs.pop("temporal_cognify"):
-        raise TypeError(TEMPORAL_COGNIFY_REMOVED)
-    warnings.warn(TEMPORAL_COGNIFY_REMOVED, DeprecationWarning, stacklevel=3)
-    logger.warning(TEMPORAL_COGNIFY_REMOVED)
+    kwargs.pop("temporal_cognify")
+    warnings.warn(TEMPORAL_COGNIFY_DEPRECATED, DeprecationWarning, stacklevel=3)
+    logger.warning(TEMPORAL_COGNIFY_DEPRECATED)
 
 
 def _wrap_cognify_exception(error: BaseException, datasets) -> "Exception":
@@ -353,7 +352,7 @@ async def cognify(
     resolved_extractor = resolve_extractor(extractor, cognify_config)
     resolved_summary_method = resolve_summary_method(summary_method, cognify_config)
 
-    reject_removed_temporal_cognify(kwargs)
+    drop_deprecated_temporal_cognify(kwargs)
     if dry_run and resolved_extractor == GLINER_DEMO_EXTRACTOR:
         raise ValueError(
             "dry_run estimates the LLM extraction pipeline only; it has no cost model "
