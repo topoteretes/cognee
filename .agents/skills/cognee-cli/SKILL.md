@@ -72,7 +72,7 @@ cognee-cli feedback ...                      # attach feedback to results
 (`completed` / `already_completed` / `skipped` / `errored`) and the skip
 reason (e.g. `no_session_ids`, `lock_held`, `triplet_embedding_disabled`).
 `remember`/`improve` build their graphs through `cognify()`, so cognify-level
-settings (e.g. `CONTRADICTION_DETECTION=true`) apply to them too.
+settings (e.g. `PROVENANCE_TRACKING=true`) apply to them too.
 
 ## Legacy / lower-level commands
 
