@@ -173,6 +173,67 @@ async def test_scoped_depth_does_not_traverse_an_excluded_bridge(engines):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("seed", ["shared", "a-only"])
+async def test_scoped_depth_preserves_stored_edge_direction(engines, seed):
+    fragment = await get_memory_fragment(
+        graph_engine=engines.graph,
+        node_type=NodeSet,
+        node_name=["A"],
+        relevant_ids_to_filter=[_id(seed)],
+        neighborhood_depth=1,
+        feedback_influence=0.0,
+    )
+
+    assert sorted(
+        (
+            edge.node1.attributes["name"],
+            edge.attributes["relationship_type"],
+            edge.node2.attributes["name"],
+            edge.directed,
+        )
+        for edge in fragment.edges
+    ) == [
+        ("a-only", "belongs_to", "A", True),
+        ("shared", "belongs_to", "A", True),
+        ("shared", "related", "a-only", True),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_scoped_depth_preserves_real_reverse_edges_and_self_loops(engines):
+    await engines.graph.add_edges(
+        [
+            (_id("a-only"), _id("shared"), "related", {}),
+            (_id("shared"), _id("shared"), "related", {}),
+        ]
+    )
+    fragment = await get_memory_fragment(
+        graph_engine=engines.graph,
+        node_type=NodeSet,
+        node_name=["A"],
+        relevant_ids_to_filter=[_id("shared")],
+        neighborhood_depth=1,
+        feedback_influence=0.0,
+    )
+
+    assert sorted(
+        (
+            edge.node1.attributes["name"],
+            edge.attributes["relationship_type"],
+            edge.node2.attributes["name"],
+            edge.directed,
+        )
+        for edge in fragment.edges
+    ) == [
+        ("a-only", "belongs_to", "A", True),
+        ("a-only", "related", "shared", True),
+        ("shared", "belongs_to", "A", True),
+        ("shared", "related", "a-only", True),
+        ("shared", "related", "shared", True),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_depth_projection_respects_an_explicit_group_type(engines):
     class SyntheticGroup:
         pass
