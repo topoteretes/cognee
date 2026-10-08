@@ -10,6 +10,8 @@ over the deterministic mock LLM and embeddings of the journeys tier and read the
 back from the graph.
 """
 
+from contextlib import contextmanager
+
 import httpx
 import pytest
 import pytest_asyncio
@@ -17,6 +19,7 @@ import pytest_asyncio
 import cognee
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.provenance.markers import stores_provenance_in_graph
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.users.methods import get_default_user
@@ -255,9 +258,19 @@ def mock_ai(monkeypatch):
         "COGNEE_SKIP_PREFLIGHT": "1",
     }.items():
         monkeypatch.setenv(name, value)
-    mocks.install_all({})
-    yield
+    from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_config
+    from cognee.infrastructure.llm.config import get_llm_config
+
+    # The configs are cached on first use: without clearing them the mock's 256
+    # dimensions and key would outlive this test, and the real ones would be
+    # cached under it.
+    get_embedding_config.cache_clear()
+    get_llm_config.cache_clear()
+    llm = mocks.install_all({})
+    yield llm
     mocks.uninstall_all()
+    get_embedding_config.cache_clear()
+    get_llm_config.cache_clear()
 
 
 def _structured_tree():
@@ -349,46 +362,16 @@ async def test_moving_a_page_within_its_root_leaves_one_parent_edge_and_no_repro
     )
     await _sync_and_cognify(fake)
     before = await _notion_data()
+    extraction_calls = len(mock_ai.calls)
 
     _move_child_under(fake, ROOT, MID)
     await _sync_and_cognify(fake)
 
     tree = await _page_tree()
     assert {edge for edge in tree if edge[0] == CHILD} == {(CHILD, MID)}
-    # Same root, same text: the page keeps its id, so cognify never reprocessed it.
+    # Same root, same text: the page keeps its id, and nothing was sent to the LLM.
     assert (await _notion_data())[CHILD].id == before[CHILD].id
-
-
-@pytest.mark.asyncio
-async def test_moving_a_page_to_another_root_leaves_one_parent_edge(clean_environment, mock_ai):
-    fake = _structured_tree()
-    await _sync_and_cognify(fake)
-
-    _move_child_under(fake, ROOT, OTHER)
-    await _sync_and_cognify(fake)
-
-    tree = await _page_tree()
-    assert {edge for edge in tree if edge[0] == CHILD} == {(CHILD, OTHER)}
-
-
-@pytest.mark.asyncio
-async def test_a_deleted_page_loses_its_node_and_edges_and_its_children_stay(
-    clean_environment, mock_ai
-):
-    fake = _structured_tree()
-    await _sync_and_cognify(fake)
-    data = await _notion_data()
-
-    await cognee.forget(data_id=data[ROOT].id, dataset=DATASET_NAME)
-    await cognee.cognify(datasets=[DATASET_NAME])
-
-    # The page and every edge it had are gone; the pages that sat under it are not.
-    assert await _page_tree() == {
-        (ROW, f"data_source:{DATA_SOURCE}"),
-        (f"data_source:{DATA_SOURCE}", f"database:{DATABASE}"),
-        (SUB, OTHER),
-    }
-    assert set(await _notion_data()) == {CHILD, ROW, OTHER, SUB}
+    assert len(mock_ai.calls) == extraction_calls
 
 
 @pytest.mark.asyncio
@@ -402,3 +385,229 @@ async def test_forgetting_the_last_row_of_a_database_removes_its_containers(
     await cognee.forget(data_id=data[ROW].id, dataset=DATASET_NAME)
 
     assert await _page_tree() == {(CHILD, ROOT), (SUB, OTHER)}
+
+
+@pytest.mark.asyncio
+async def test_a_page_deleted_in_notion_loses_its_node_and_edges_and_its_children_stay(
+    clean_environment, mock_ai
+):
+    fake = _structured_tree()
+    fake.pages[MID] = _page(MID, "Middle", {"type": "page_id", "page_id": ROOT})
+    fake.blocks[MID] = [_paragraph("b7", "A page between.")]
+    fake.blocks[ROOT].append(
+        {"id": MID, "type": "child_page", "has_children": False, "child_page": {}}
+    )
+    _move_child_under(fake, ROOT, MID)
+    await _sync_and_cognify(fake)
+    assert (CHILD, MID) in await _page_tree()
+
+    # MID is deleted in Notion, and CHILD is moved out of it in the same edit.
+    del fake.pages[MID]
+    fake.blocks[ROOT] = [block for block in fake.blocks[ROOT] if block["id"] != MID]
+    fake.blocks[ROOT].append(
+        {"id": CHILD, "type": "child_page", "has_children": False, "child_page": {}}
+    )
+    fake.pages[CHILD]["parent"] = {"type": "page_id", "page_id": ROOT}
+    await _sync_and_cognify(fake)
+
+    data = await _notion_data()
+    assert MID not in data and CHILD in data
+    tree = await _page_tree()
+    assert (CHILD, ROOT) in tree
+    assert not [edge for edge in tree if MID in edge]
+
+
+@pytest.mark.asyncio
+async def test_editing_a_parent_in_notion_keeps_the_edges_of_its_unchanged_children(
+    clean_environment, mock_ai
+):
+    fake = _structured_tree()
+    await _sync_and_cognify(fake)
+    before = await _page_tree()
+    # Spelled out, so the comparison below cannot pass with a tree that was empty both times.
+    assert before == {
+        (CHILD, ROOT),
+        (ROW, f"data_source:{DATA_SOURCE}"),
+        (f"data_source:{DATA_SOURCE}", f"database:{DATABASE}"),
+        (f"database:{DATABASE}", ROOT),
+        (SUB, OTHER),
+    }
+    root_id = (await _notion_data())[ROOT].id
+
+    fake.blocks[ROOT].insert(0, _paragraph("b9", "Q5 moves orders to Redis."))
+    fake.pages[ROOT]["last_edited_time"] = "2026-02-01T00:00:00.000Z"
+    await _sync_and_cognify(fake)
+
+    # The parent was extracted again under a new document id; the children were not.
+    assert (await _notion_data())[ROOT].id != root_id
+    assert await _page_tree() == before
+
+
+@pytest.mark.asyncio
+async def test_a_graph_that_was_not_empty_first_drops_containers_at_the_next_cognify(
+    clean_environment, mock_ai
+):
+    """Only a graph that is empty when first written stores its provenance in the graph.
+    On any other graph (every deployment that existed before) forgetting a row cannot
+    remove the containers beneath it; the next cognify does."""
+    from cognee.modules.engine.models import NodeSet
+
+    fake = _structured_tree()
+    await _sync(fake, roots=(ROOT, OTHER))
+    user = await get_default_user()
+    (dataset,) = await get_authorized_existing_datasets(
+        user=user, permission_type="read", datasets=[DATASET_NAME]
+    )
+    async with set_database_global_context_variables(dataset.id, user.id):
+        await (await get_graph_engine()).add_nodes([NodeSet(name="written-before-cognify")])
+    await cognee.cognify(datasets=[DATASET_NAME])
+    assert (ROW, f"data_source:{DATA_SOURCE}") in await _page_tree()
+    async with set_database_global_context_variables(dataset.id, user.id):
+        engine = await get_graph_engine()
+        # The mode the test is about, and no ref on a container the graph could not honour.
+        assert not await stores_provenance_in_graph(engine)
+        containers = [
+            str(node_id)
+            for node_id, properties in (await engine.get_graph_data())[0]
+            if properties.get("type") == "StructureContainer"
+        ]
+        assert containers
+        for node_id, snapshot in (await engine.get_node_delete_data(containers)).items():
+            assert snapshot.source_ref_keys == [], node_id
+
+    await cognee.forget(data_id=(await _notion_data())[ROW].id, dataset=DATASET_NAME)
+    assert (f"data_source:{DATA_SOURCE}", f"database:{DATABASE}") in await _page_tree()
+
+    await cognee.cognify(datasets=[DATASET_NAME])
+    assert await _page_tree() == {(CHILD, ROOT), (SUB, OTHER)}
+
+
+def _null_staged_structure():
+    """Blank the structure column of every staged row, as rows staged by an older cognee are."""
+    import glob
+    import os
+    import sqlite3
+
+    from cognee.infrastructure.databases.relational.config import get_relational_config
+
+    nulled = 0
+    for path in glob.glob(os.path.join(get_relational_config().db_path, "dlt_database_*")):
+        connection = sqlite3.connect(path)
+        for (table,) in connection.execute("select name from sqlite_master where type='table'"):
+            columns = [row[1] for row in connection.execute(f'pragma table_info("{table}")')]
+            if "cognee_structure" in columns:
+                nulled += connection.execute(
+                    f'update "{table}" set cognee_structure = NULL'
+                ).rowcount
+        connection.commit()
+        connection.close()
+    assert nulled, "no staged row had a structure column to blank"
+
+
+@pytest.mark.asyncio
+async def test_rows_synced_before_structure_existed_get_it_on_the_next_sync(clean_environment):
+    from sqlalchemy import select
+
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.data.models import Data
+
+    fake = _structured_tree()
+    await _sync(fake, roots=(ROOT, OTHER))
+    before = await _notion_data()
+    engine = get_relational_engine()
+    async with engine.get_async_session() as session:
+        for record in (await session.execute(select(Data))).scalars():
+            if isinstance(record.system_metadata, dict):
+                record.system_metadata = {
+                    key: value
+                    for key, value in record.system_metadata.items()
+                    if key != "structure"
+                }
+        await session.commit()
+    assert all(
+        "structure" not in record.system_metadata for record in (await _notion_data()).values()
+    )
+
+    # What an upgrade finds: staging rows written before the column existed hold no
+    # structure, and stored state has no ancestors, so every page is read again.
+    _null_staged_structure()
+
+    from cognee.tasks.ingestion.connectors import notion as notion_module
+
+    original = notion_module._iter_rows
+
+    def legacy_state(client, roots, sources, workspace_id, previous, *args):
+        stripped = {
+            page: {key: value for key, value in seen.items() if key != "ancestors"}
+            for page, seen in previous.items()
+        }
+        return original(client, roots, sources, workspace_id, stripped, *args)
+
+    notion_module._iter_rows = legacy_state
+    try:
+        await _sync(fake, roots=(ROOT, OTHER))
+    finally:
+        notion_module._iter_rows = original
+
+    after = await _notion_data()
+    assert {key: record.id for key, record in after.items()} == {
+        key: record.id for key, record in before.items()
+    }
+    assert after[CHILD].system_metadata["structure"]["ancestors"][0]["id"] == ROOT
+
+
+@contextmanager
+def _extraction_fails_for(needle):
+    """Make the extraction of any chunk containing ``needle`` raise, as an LLM error would.
+
+    Restored on exit, not through monkeypatch: that would undo after ``mock_ai`` has put the
+    real gateway back, and leave the fake one installed for the next test."""
+    from cognee.infrastructure.llm.LLMGateway import LLMGateway
+    from cognee.shared.data_models import KnowledgeGraph
+
+    original = LLMGateway.acreate_structured_output
+
+    def wrapped(text_input, system_prompt, response_model, **kwargs):
+        if (
+            needle in str(text_input)
+            and isinstance(response_model, type)
+            and issubclass(response_model, KnowledgeGraph)
+        ):
+
+            async def refuse():
+                raise RuntimeError("injected extraction failure")
+
+            return refuse()
+        return original(text_input, system_prompt, response_model, **kwargs)
+
+    LLMGateway.acreate_structured_output = staticmethod(wrapped)
+    try:
+        yield
+    finally:
+        LLMGateway.acreate_structured_output = original
+
+
+@pytest.mark.asyncio
+async def test_one_page_that_cannot_be_extracted_does_not_freeze_the_tree_of_the_rest(
+    clean_environment, mock_ai
+):
+    """By default (RAISE_INCREMENTAL_LOADING_ERRORS) a failing item raises its own error
+    and the run ends with it; a page that moved in the same sync still gets its parent."""
+    fake = _structured_tree()
+    fake.pages[MID] = _page(MID, "Middle", {"type": "page_id", "page_id": ROOT})
+    fake.blocks[MID] = [_paragraph("b7", "A page between.")]
+    fake.blocks[ROOT].append(
+        {"id": MID, "type": "child_page", "has_children": False, "child_page": {}}
+    )
+    await _sync_and_cognify(fake)
+    assert (CHILD, ROOT) in await _page_tree()
+
+    _move_child_under(fake, ROOT, MID)
+    fake.blocks[SUB] = [_paragraph("b6", "POISON standup moved to 11am.")]
+    fake.pages[SUB]["last_edited_time"] = "2026-03-01T00:00:00.000Z"
+    await _sync(fake, roots=(ROOT, OTHER))
+
+    with _extraction_fails_for("POISON"), pytest.raises(Exception, match="injected extraction"):
+        await cognee.cognify(datasets=[DATASET_NAME])
+
+    assert {edge for edge in await _page_tree() if edge[0] == CHILD} == {(CHILD, MID)}

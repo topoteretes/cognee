@@ -300,15 +300,9 @@ class _WalkItem:
 
 
 def _ancestors_of(parent: _WalkItem, name: str | None = None) -> tuple[dict, ...]:
-    """The ``ancestors`` of an item reached through ``parent``.
-
-    A page is a row of this source and the chain stops there: whatever sits
-    above it is that page's own business, so moving a page never changes the
-    structure of its descendants and never re-renders them. A database or data
-    source has no row, so its chain carries on up to the page it hangs from.
-    ``name`` overrides ``parent.name`` for a database whose title was only read
-    once it was fetched.
-    """
+    """The ``ancestors`` of an item reached through ``parent``. The chain stops at the
+    first page, so moving a page never re-renders its descendants; ``name`` is a
+    database's title, read only once it is fetched."""
     if parent.kind == "page":
         return ({"kind": "page", "id": parent.id, "document": True},)
     title = parent.name if name is None else name
@@ -365,13 +359,19 @@ def _resolve_roots(
                     )
                 )
             continue
-        # A data source named as a root still knows the database it belongs to.
+        # Read for its title, so the container is named the same whichever way the
+        # walk reaches the database.
         parent = root_data_source.get("parent") or {}
-        database_root = (
-            _WalkItem("database", _canonical_id(parent["database_id"]), root_id)
-            if parent.get("type") == "database_id" and parent.get("database_id")
-            else None
-        )
+        database_root = None
+        if parent.get("type") == "database_id" and parent.get("database_id"):
+            database_id = _canonical_id(parent["database_id"])
+            try:
+                database_name = _rich_text(client.get_database(database_id).get("title"))
+            except NotionAPIError as exc:
+                if not _is_gone(exc):
+                    raise
+                database_name = ""
+            database_root = _WalkItem("database", database_id, root_id, name=database_name)
         roots.append(
             _WalkItem(
                 "data_source",

@@ -533,7 +533,13 @@ async def cognify(
                 embedding_config=embedding_config,
                 data_cache=data_cache,
                 extras={"graph_extractor": resolved_extractor},
-                after_run_completed=after_cognify_run,
+                # Reconcile the structure document sources describe, also when an
+                # item failed: one bad page must not freeze the tree of the rest.
+                after_run=reconcile_document_structure,
+                # Fold the vector fragments this run wrote, once per dataset,
+                # after the run is recorded complete; bounded per run, so a
+                # bloated store drains over several cognify runs.
+                after_run_completed=compact_vector_store,
             )
         except Exception as error:
             # Run-level failures (e.g. an AuthenticationError escaping a task)
@@ -571,18 +577,6 @@ async def cognify(
         record_operation_duration(_duration_ms, _attrs)
 
         return result
-
-
-async def after_cognify_run() -> None:
-    """What cognify does once per dataset, after the run is recorded complete.
-
-    Reconciles the structure document sources describe (``child_of`` edges), then
-    folds the vector fragments this run wrote; the compaction is bounded per
-    run, so a bloated store drains over several cognify runs. Both swallow their
-    own failures, because neither may fail a run that already completed.
-    """
-    await reconcile_document_structure()
-    await compact_vector_store()
 
 
 async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's comment)

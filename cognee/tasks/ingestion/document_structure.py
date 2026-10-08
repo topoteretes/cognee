@@ -1,45 +1,34 @@
-"""Document structure pass: turns the tree position document-source rows carry
-into ``child_of`` edges.
+"""Turn the tree position document rows carry (``dlt_utils.STRUCTURE_COLUMN``) into
+``child_of`` edges, without an LLM.
 
-A document-mode row may say where it sits in its source's tree
-(``dlt_utils.STRUCTURE_COLUMN``, kept in ``Data.system_metadata["structure"]``).
-This pass runs once per dataset after cognify and makes the graph agree with
-what the rows say, deterministically and without an LLM:
-
-* a row's Document node gets a ``child_of`` edge to its parent, which is either
-  another row of the same source (looked up by ``external_id``, never by
-  ``data_id``, which changes with the content) or a ``StructureContainer`` node
-  built from the row's own description of it;
-* a container gets a ``child_of`` edge to what it hangs from;
-* a parent that is not in the dataset (outside the selected roots, already
-  forgotten) gets no edge and is no error;
-* edges and containers the rows no longer describe are removed, so a moved row
-  keeps exactly one parent.
-
-It is a full reconcile on every run rather than a task over the items of this
-run: cognify skips a row whose content did not change, so a pure move never
-reaches a task, and editing a parent gives its Document a new id (the old one is
-deleted with every edge the children had to it) while the children are not
-reprocessed.
+Runs after every cognify over the whole dataset, not over the run's items: a moved
+row keeps its content and is skipped by cognify, and an edited parent gets a new
+Document id while its children are not reprocessed.
 """
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from uuid import UUID
 
+from sqlalchemy import select
+
 from cognee.context_global_variables import current_dataset_id
 from cognee.infrastructure.databases.exceptions import UnsupportedProvenanceCapability
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.provenance.delete_data import EdgeIdentity
 from cognee.infrastructure.databases.provenance.markers import stores_provenance_in_graph
-from cognee.infrastructure.databases.provenance.source_refs import make_source_ref_key
-from cognee.modules.data.methods.get_dataset_data import get_dataset_data
+from cognee.infrastructure.databases.provenance.source_refs import (
+    make_source_ref_key,
+    parse_source_ref_key,
+)
+from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.data.models import Data
 from cognee.modules.engine.models.StructureContainer import CHILD_OF, StructureContainer
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("document_structure")
 
-# Edges are deleted in chunks so one statement never carries a whole dataset.
+# Matches the code graph sweep, so one delete never carries a whole dataset.
 _DELETE_CHUNK_SIZE = 2000
 
 
@@ -53,32 +42,37 @@ class StructureRow:
     table_name: str
     external_id: str
     ancestors: tuple[dict, ...]
-    # Newest first wins when two rows of one source claim the same external_id.
     rank: float
 
 
 @dataclass
 class StructurePlan:
-    """What the rows say the graph should hold."""
+    """The containers and ``child_of`` edges the rows describe."""
 
     containers: dict[UUID, StructureContainer] = field(default_factory=dict)
-    # Container id -> data ids of the rows beneath it, which own it.
+    # Container id -> the rows beneath it, whose source refs own it.
     owners: dict[UUID, set[UUID]] = field(default_factory=dict)
-    # (child id, parent id) pairs, all ``child_of``.
     edges: set[tuple[str, str]] = field(default_factory=set)
-    # Nodes whose ``child_of`` edges the plan fully describes: every edge one of
-    # them has that is not in ``edges`` is stale.
+    # Nodes whose every ``child_of`` edge the plan describes.
     managed: set[str] = field(default_factory=set)
     row_count: int = 0
     unresolved: int = 0
 
 
-def structure_rows(data_rows: list) -> list[StructureRow]:
-    """The rows of a dataset that carry a tree position.
+async def dataset_rows(dataset_id: UUID) -> list:
+    """The Data columns the pass reads: it runs on every cognify of every dataset,
+    and a full ORM row per document cost more than the pass itself."""
+    async with get_relational_engine().get_async_session() as session:
+        result = await session.execute(
+            select(
+                Data.id, Data.system_metadata, Data.extension, Data.updated_at, Data.created_at
+            ).filter(Data.dataset_id == dataset_id)
+        )
+        return list(result.all())
 
-    A row without ``system_metadata["structure"]`` (any other source, or one
-    synced before the column existed) says nothing and is never touched.
-    """
+
+def structure_rows(data_rows: list) -> list[StructureRow]:
+    """The rows that carry a tree position. Any other row is never touched."""
     from cognee.tasks.documents.classify_documents import document_class_for
 
     rows = []
@@ -86,22 +80,15 @@ def structure_rows(data_rows: list) -> list[StructureRow]:
         meta = data.system_metadata
         if not isinstance(meta, dict) or not isinstance(meta.get("structure"), dict):
             continue
-        source, table_name, external_id = (
-            meta.get("source"),
-            meta.get("table_name"),
-            meta.get("external_id"),
-        )
-        if not (source and table_name and external_id):
-            continue
         changed = data.updated_at or data.created_at
         rows.append(
             StructureRow(
                 data_id=data.id,
                 document_type=document_class_for(data).__name__,
-                source=source,
-                table_name=table_name,
-                external_id=str(external_id),
-                ancestors=tuple(meta["structure"].get("ancestors") or ()),
+                source=meta["source"],
+                table_name=meta["table_name"],
+                external_id=str(meta["external_id"]),
+                ancestors=tuple(meta["structure"]["ancestors"]),
                 rank=changed.timestamp() if changed else 0.0,
             )
         )
@@ -109,14 +96,14 @@ def structure_rows(data_rows: list) -> list[StructureRow]:
 
 
 def plan_document_structure(rows: list[StructureRow], dataset_id: UUID) -> StructurePlan:
-    """Work out the containers and ``child_of`` edges a dataset's rows describe."""
-    newest_first = sorted(rows, key=lambda row: (row.rank, str(row.data_id)), reverse=True)
-    by_external_id: dict[tuple[str, str, str], StructureRow] = {}
-    for row in newest_first:
-        by_external_id.setdefault((row.source, row.table_name, row.external_id), row)
+    """What the rows describe. A parent row is found by ``external_id``, since its
+    ``data_id`` changes with its content; the newest row wins an ``external_id`` two
+    rows claim, and names a container two rows name differently."""
+    oldest_first = sorted(rows, key=lambda row: (row.rank, str(row.data_id)))
+    by_external_id = {(row.source, row.table_name, row.external_id): row for row in oldest_first}
 
     plan = StructurePlan(row_count=len(rows))
-    for row in reversed(newest_first):
+    for row in oldest_first:
         child = str(row.data_id)
         plan.managed.add(child)
         for entry in row.ancestors:
@@ -124,14 +111,12 @@ def plan_document_structure(rows: list[StructureRow], dataset_id: UUID) -> Struc
                 parent_row = by_external_id.get((row.source, row.table_name, entry["id"]))
                 if parent_row is None:
                     plan.unresolved += 1
-                    break
-                plan.edges.add((child, str(parent_row.data_id)))
-                # A row is a row: what sits above it is its own row's business.
+                else:
+                    plan.edges.add((child, str(parent_row.data_id)))
                 break
             container_id = StructureContainer.container_id(
                 dataset_id, row.source, row.table_name, entry["kind"], entry["id"]
             )
-            # Oldest first, so the newest row's name for a container is the one kept.
             plan.containers[container_id] = StructureContainer(
                 id=container_id,
                 name=entry.get("name") or entry["id"],
@@ -151,7 +136,8 @@ def plan_document_structure(rows: list[StructureRow], dataset_id: UUID) -> Struc
 async def reconcile_structure(
     graph_engine, dataset_id: UUID, plan: StructurePlan, document_types: set[str]
 ) -> dict[str, int]:
-    """Make the graph hold exactly the containers and edges of ``plan``."""
+    """Make the graph hold the plan. Nothing is removed until everything is added,
+    so a failure part way leaves something extra, never something missing."""
     container_type = StructureContainer.__name__
     nodes, edges = await graph_engine.get_filtered_graph_data(
         [{"type": sorted(document_types | {container_type})}]
@@ -173,27 +159,29 @@ async def reconcile_structure(
         for container_id, properties in existing_containers.items()
         if properties.get("dataset_id") == str(dataset_id) and container_id not in wanted
     ]
-    # A container's name is the only thing about it that changes in place.
     new_containers = [
         container
         for container_id, container in wanted.items()
         if container_id not in existing_containers
-        or existing_containers[container_id].get("name") != container.name
+    ]
+    renamed_containers = [
+        container
+        for container_id, container in wanted.items()
+        if container_id in existing_containers
+        and existing_containers[container_id].get("name") != container.name
     ]
     provenance = await stores_provenance_in_graph(graph_engine)
-    for container in new_containers:
-        owners = sorted(plan.owners[container.id])
-        # Stamped at write time so the node is never without an owner, which is
-        # what lets forgetting its last row remove it.
-        stamp = {"source_ref_key": make_source_ref_key(dataset_id, owners[0])} if provenance else {}
+    for container in new_containers + renamed_containers:
+        owner = min(plan.owners[container.id])
+        stamp = {"source_ref_key": make_source_ref_key(dataset_id, owner)} if provenance else {}
         await graph_engine.add_nodes([container], **stamp)
     if provenance:
         await _stamp_containers(graph_engine, dataset_id, plan)
-    if stale_containers:
-        await graph_engine.delete_nodes(stale_containers)
 
-    stale_edges = sorted(edge for edge in existing_edges - plan.edges if edge[0] in plan.managed)
-    new_edges = sorted(plan.edges - existing_edges)
+    # An empty page has no chunks and so no Document node; its edges wait for one.
+    present = {str(node_id) for node_id, _properties in nodes} | set(wanted)
+    plannable = {edge for edge in plan.edges if edge[0] in present and edge[1] in present}
+    new_edges = sorted(plannable - existing_edges)
     if new_edges:
         now = datetime.now(timezone.utc).isoformat()
         await graph_engine.add_edges(
@@ -213,31 +201,47 @@ async def reconcile_structure(
                 for child, parent in new_edges
             ]
         )
+    stale_edges = sorted(edge for edge in existing_edges - plan.edges if edge[0] in plan.managed)
     removed_edges = await _delete_edges(graph_engine, stale_edges)
+    if stale_containers:
+        await graph_engine.delete_nodes(stale_containers)
     return {
         "rows": plan.row_count,
         "containers_added": len(new_containers),
+        "containers_renamed": len(renamed_containers),
         "containers_removed": len(stale_containers),
         "edges_added": len(new_edges),
         "edges_removed": removed_edges,
+        "edges_waiting_for_a_document": len(plan.edges - plannable),
         "unresolved_parents": plan.unresolved,
     }
 
 
 async def _stamp_containers(graph_engine, dataset_id: UUID, plan: StructurePlan) -> None:
-    """Give every container the source ref of every row beneath it, so forgetting
-    the last of those rows removes the container with it."""
+    """Give each container the source ref of every row beneath it and take back the
+    ref of a row that moved out, so forgetting its last row removes it."""
     current = await graph_engine.get_node_delete_data([str(i) for i in plan.containers])
     for container_id, owners in plan.owners.items():
         wanted = {make_source_ref_key(dataset_id, data_id) for data_id in owners}
         existing = current.get(str(container_id))
-        missing = sorted(wanted - set(existing.source_ref_keys if existing else ()))
+        held = set(existing.source_ref_keys if existing else ())
+        missing = sorted(wanted - held)
         if missing:
             await graph_engine.attach_node_source_refs([str(container_id)], missing)
+        stale = sorted(ref for ref in held - wanted if _is_row_ref_of(ref, dataset_id))
+        if stale:
+            await graph_engine.remove_node_source_refs([str(container_id)], stale)
+
+
+def _is_row_ref_of(source_ref_key: str, dataset_id: UUID) -> bool:
+    """Whether a ref is a document-level ref of this dataset, the kind this pass stamps."""
+    parsed = parse_source_ref_key(source_ref_key)
+    return parsed.dataset_id == dataset_id and parsed.chunk_id is None
 
 
 async def _delete_edges(graph_engine, stale_edges: list[tuple[str, str]]) -> int:
-    """Delete stale ``child_of`` edges; an adapter without the capability keeps them."""
+    """Delete stale ``child_of`` edges. Neptune cannot delete an edge by identity, so
+    there a moved row keeps its old parent too."""
     if not stale_edges:
         return 0
     identities = [EdgeIdentity(child, parent, CHILD_OF) for child, parent in stale_edges]
@@ -246,8 +250,8 @@ async def _delete_edges(graph_engine, stale_edges: list[tuple[str, str]]) -> int
             await graph_engine.delete_edge_triples(identities[start : start + _DELETE_CHUNK_SIZE])
     except UnsupportedProvenanceCapability:
         logger.warning(
-            "This graph backend cannot delete edges by identity: %d stale child_of edge(s) "
-            "(from moved rows) stay until the rows are removed.",
+            "This graph backend cannot delete an edge by identity, so %d stale child_of "
+            "edge(s) of moved rows stay until the rows are removed.",
             len(identities),
         )
         return 0
@@ -255,28 +259,17 @@ async def _delete_edges(graph_engine, stale_edges: list[tuple[str, str]]) -> int
 
 
 async def reconcile_document_structure() -> dict[str, int] | None:
-    """The ``after_run_completed`` step of cognify: reconcile the current
-    dataset's structure.
-
-    Does nothing for a dataset none of whose rows carry a tree position. A
-    failure is logged and swallowed, because it must never fail the cognify run
-    that already completed; cancellation is not swallowed.
-    """
-    try:
-        dataset_id = current_dataset_id.get()
-        if dataset_id is None:
-            return None
-        rows = structure_rows(await get_dataset_data(dataset_id))
-        if not rows:
-            return None
-        plan = plan_document_structure(rows, dataset_id)
-        stats = await reconcile_structure(
-            await get_graph_engine(), dataset_id, plan, {row.document_type for row in rows}
-        )
-    except Exception as exc:
-        logger.warning("Document structure pass skipped: %s", exc, exc_info=True)
+    """The ``after_run`` step of cognify. Does nothing for a dataset whose rows carry
+    no tree position."""
+    dataset_id = current_dataset_id.get()
+    rows = structure_rows(await dataset_rows(dataset_id))
+    if not rows:
         return None
+    plan = plan_document_structure(rows, dataset_id)
+    stats = await reconcile_structure(
+        await get_graph_engine(), dataset_id, plan, {row.document_type for row in rows}
+    )
     (logger.info if stats["edges_added"] or stats["edges_removed"] else logger.debug)(
-        "Document structure: %s", stats
+        "Document structure of dataset %s: %s", dataset_id, stats
     )
     return stats

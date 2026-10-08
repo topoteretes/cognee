@@ -104,7 +104,8 @@ true}`), also when it sits inside a column or toggle: the parent is the page tha
 the block. A database row lists its data source, its database and the page the database sits on;
 the database and the data source have no content of their own, so they are listed with their
 title (`{"kind": "data_source" | "database", "id": ..., "name": ...}`). A root has an empty list.
-A root passed as a database or data source id keeps the database it belongs to.
+A root passed as a database id lists the database; a root passed as a data source id lists the
+database it belongs to (read once for its title), but not the page that database sits on.
 
 After each cognify, cognee turns this into `child_of` edges (child to parent, no LLM): a page's
 document to its parent page's document, a database row's document to its data source, the data
@@ -112,7 +113,10 @@ source to its database, the database to its page. Databases and data sources bec
 `StructureContainer` nodes, one per dataset. A parent that is not synced (outside the selected
 roots, or forgotten) gets no edge. The edges follow the pages: moving a page leaves exactly one
 parent edge, deleting one removes its node and edges and leaves its children where they are, and a
-database disappears with its last row.
+database disappears with its last row. The last holds the moment the row is forgotten on a graph
+that stores its provenance (one that was empty when cognee first wrote to it); on any other graph
+the database goes at the next cognify that still has structured pages. On a graph backend that cannot
+delete an edge by identity (Neptune) a moved page keeps its old parent edge as well.
 
 Where a page sits is not part of its identity. Moving it inside its root keeps its document id
 and does not run extraction again; renaming a database re-reads its rows once, because the title

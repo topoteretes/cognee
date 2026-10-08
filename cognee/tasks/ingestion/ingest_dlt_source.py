@@ -305,9 +305,8 @@ def _row_content_hash(row_dict: dict) -> str:
     The reserved node_set column is left out while it is unset, so a table
     that merely gained the column (NULL or empty on every row) hashes exactly
     as it did before and no existing document gets a new id. A row that sets
-    it is re-hashed like any other column change. The structure column is
-    never hashed: where a row sits in its source's tree is metadata about the
-    row, so moving it must not give it a new id and a new extraction.
+    it is re-hashed like any other column change. The structure column is never
+    hashed: moving a row must not give it a new id and a new extraction.
     """
     hashable = {
         key: value

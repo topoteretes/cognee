@@ -615,24 +615,18 @@ async def _stable_row_ids(rows: list[DltRowData], user: User, dataset_id: UUID) 
     return [old_id if old_id in adopted else new_id for old_id, new_id in zip(old_ids, new_ids)]
 
 
-# Rows are looked up in batches this size, to stay within SQLite's bind-parameter limit.
+# Within SQLite's bind-parameter limit.
 _STRUCTURE_REFRESH_BATCH = 500
 
 
-async def _refresh_row_structure(items: list[DataItem], dataset_id: UUID | None) -> None:
-    """Store the tree position of rows that are already ingested.
-
-    A row whose content did not change keeps its data_id, and add() skips an
-    item whose record is already processed, so ingestion never rewrites its
-    ``system_metadata``. The tree position is not part of the content, so a row
-    that moved would keep its old parent: this writes the new one onto the
-    existing record before add() runs. Only the ``structure`` key is touched,
-    and only when it differs.
-    """
+async def _refresh_row_structure(items: list[DataItem], dataset_id: UUID) -> None:
+    """Write the tree position onto rows that are already ingested. add() skips a
+    record whose content is unchanged, so a moved row would otherwise keep its old
+    parent. Only the ``structure`` key changes, and only where it differs."""
     wanted = {
         item.data_id: item.system_metadata["structure"]
         for item in items
-        if dataset_id is not None and "structure" in (item.system_metadata or {})
+        if "structure" in item.system_metadata
     }
     if not wanted:
         return
@@ -652,9 +646,8 @@ async def _refresh_row_structure(items: list[DataItem], dataset_id: UUID | None)
                 )
             )
             for data in rows.scalars():
-                metadata = data.system_metadata or {}
-                if metadata.get("structure") != wanted[data.id]:
-                    data.system_metadata = {**metadata, "structure": wanted[data.id]}
+                if data.system_metadata.get("structure") != wanted[data.id]:
+                    data.system_metadata = {**data.system_metadata, "structure": wanted[data.id]}
         await session.commit()
 
 
@@ -690,7 +683,7 @@ def _build_document_data_item(row: DltRowData, data_id: UUID, source_tag: str) -
     if row_data.get("id"):
         system_metadata["external_id"] = str(row_data["id"])
     structure = _row_structure(row, source_tag)
-    if structure is not None:
+    if structure is not None and "external_id" in system_metadata:
         system_metadata["structure"] = structure
 
     return DataItem(
@@ -779,36 +772,34 @@ def _row_node_set(row: DltRowData, source_tag: str) -> list[str] | None:
     return list(unique.values()) or None
 
 
-def _row_structure(row: DltRowData, source_tag: str) -> dict | None:
-    """The tree position a document row names in its ``cognee_structure`` column.
+_STRUCTURE_ENTRY_KEYS = {"kind", "id", "name", "document"}
 
-    The column must hold ``{"ancestors": [entry, ...]}``, each entry an object
-    with a non-empty string ``kind`` and ``id``, an optional string ``name`` and
-    an optional boolean ``document`` (see ``dlt_utils.STRUCTURE_COLUMN``). An
-    unset column returns ``None``: the row says nothing about structure, which
-    is not the same as the empty list of a row at the top of its tree. Any other
-    shape raises, naming the source, table and row, for the same reason a bad
-    node set does: dropping it quietly would leave the row looking placed when
-    it is not.
-    """
+
+def _row_structure(row: DltRowData, source_tag: str) -> dict | None:
+    """The row's ``cognee_structure`` (``dlt_utils.STRUCTURE_COLUMN``), or ``None`` when
+    unset, which is not the empty list of a row at the top of its tree. Any other
+    shape stops the sync, naming the row, like a bad node set does."""
     raw = _reserved_json_column(row, source_tag, STRUCTURE_COLUMN, _raise_structure_shape)
     if raw is None:
         return None
     if not isinstance(raw, dict) or not isinstance(raw.get("ancestors"), list):
         _raise_structure_shape(row, source_tag, "a value without an ancestors list")
-    ancestors = []
-    for entry in raw["ancestors"]:
+    # No check for text a backend cannot store: dlt refuses a lone surrogate at
+    # extract (checked on 1.28.2), and a graph write that refuses a value fails loudly.
+    for position, entry in enumerate(raw["ancestors"]):
         if (
             not isinstance(entry, dict)
+            or set(entry) - _STRUCTURE_ENTRY_KEYS
             or not all(isinstance(entry.get(key), str) and entry[key] for key in ("kind", "id"))
             or not isinstance(entry.get("name", ""), str)
             or not isinstance(entry.get("document", False), bool)
         ):
             _raise_structure_shape(row, source_tag, "an ancestor that is not a valid entry")
-        ancestors.append(
-            {key: entry[key] for key in ("kind", "id", "name", "document") if key in entry}
-        )
-    return {"ancestors": ancestors}
+        if entry.get("document") and position != len(raw["ancestors"]) - 1:
+            _raise_structure_shape(row, source_tag, "an ancestor after a document ancestor")
+        if entry.get("document") and entry["id"] == str(row.row_data.get("id")):
+            _raise_structure_shape(row, source_tag, "the row itself as its parent")
+    return {"ancestors": raw["ancestors"]}
 
 
 def _raise_structure_shape(row: DltRowData, source_tag: str, found: str) -> NoReturn:

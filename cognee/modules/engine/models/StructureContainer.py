@@ -1,3 +1,4 @@
+import json
 from uuid import NAMESPACE_OID, UUID, uuid5
 
 from cognee.infrastructure.engine import DataPoint
@@ -7,13 +8,8 @@ CHILD_OF = "child_of"
 
 
 class StructureContainer(DataPoint):
-    """A node for something a document source organizes its rows under (a Notion
-    database or data source, a folder) that has no content of its own.
-
-    Built by the structure pass from what the rows say about their ancestors
-    (see ``dlt_utils.STRUCTURE_COLUMN``), never extracted by an LLM. It keeps its
-    source's id and kind so a reader can tell what it stands for.
-    """
+    """Something a document source files rows under that has no content of its own
+    (a Notion database or data source), built from what the rows say about it."""
 
     name: str
     kind: str
@@ -28,10 +24,7 @@ class StructureContainer(DataPoint):
     def container_id(
         cls, dataset_id: UUID, source: str, table_name: str, kind: str, external_id: str
     ) -> UUID:
-        """The id of a container, scoped by dataset so two datasets syncing the
-        same workspace never share a node (the graph is shared when backend
-        access control is off)."""
-        return uuid5(
-            NAMESPACE_OID,
-            f"cognee:structure:{dataset_id}:{source}:{table_name}:{kind}:{external_id}",
-        )
+        """Scoped by dataset, since with access control off two datasets syncing one
+        workspace share a graph."""
+        parts = ["cognee:structure", str(dataset_id), source, table_name, kind, external_id]
+        return uuid5(NAMESPACE_OID, json.dumps(parts))
