@@ -295,6 +295,12 @@ exclude = [
   "/tools",
 ]
 
+[tool.hatch.build.hooks.version]
+# Stamp the release into the package on every build (sdist and wheel), so a copy
+# of the `cognee` directory without its *.dist-info, such as a vendored tree or a
+# bundled app, still knows which release it is. Read by cognee/version.py.
+path = "cognee/_version.py"
+
 [tool.hatch.build.targets.wheel]
 packages = ["cognee", "cognee_db_workers", "kuzu"]
 

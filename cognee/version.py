@@ -6,7 +6,12 @@ from pathlib import Path
 
 def get_cognee_version() -> str:
     """Returns either the version of installed cognee package or the one
-    found in nearby pyproject.toml"""
+    found in nearby pyproject.toml.
+
+    A copy of the package that has neither (vendored source, a bundled app, a
+    layer that strips *.dist-info) falls back to the version the build backend
+    stamped into ``cognee/_version.py``. Only when that file is missing too is
+    the version ``unknown``."""
     with (
         suppress(FileNotFoundError, StopIteration),
         open(
@@ -23,4 +28,9 @@ def get_cognee_version() -> str:
     try:
         return importlib.metadata.version("cognee")
     except importlib.metadata.PackageNotFoundError:
+        pass
+    try:
+        from cognee._version import __version__
+    except ImportError:
         return "unknown"
+    return __version__
