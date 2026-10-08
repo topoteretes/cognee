@@ -1104,6 +1104,22 @@ def test_mcp_allowed_hosts_admits_named_host(monkeypatch, transport):
 
 
 @pytest.mark.parametrize("transport", ["http", "sse"])
+def test_mcp_allowed_hosts_admits_https_origin(monkeypatch, transport):
+    """Behind a TLS-terminating proxy the browser sends an https Origin."""
+    monkeypatch.delenv("MCP_DISABLE_DNS_REBINDING_PROTECTION", raising=False)
+    monkeypatch.setenv("MCP_ALLOWED_HOSTS", "myserver.local:*")
+
+    from src import server
+
+    app = server._build_http_app(transport, "0.0.0.0")
+
+    assert _probe(app, transport, Host="myserver.local", Origin="https://myserver.local") != 403
+    assert _probe(app, transport, Host="myserver.local", Origin="http://myserver.local:8000") != 403
+    # Trusting https for allowed hosts must not admit any other origin.
+    assert _probe(app, transport, Host="myserver.local", Origin="https://attacker.example") == 403
+
+
+@pytest.mark.parametrize("transport", ["http", "sse"])
 def test_dns_rebinding_protection_can_be_disabled(monkeypatch, transport):
     monkeypatch.setenv("MCP_DISABLE_DNS_REBINDING_PROTECTION", "true")
     monkeypatch.delenv("MCP_ALLOWED_HOSTS", raising=False)
