@@ -51,6 +51,7 @@ from cognee.tasks.documents import (
 from cognee.tasks.graph import detect_contradictions
 from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
 from cognee.tasks.graph.resolve_temporal_contradictions import resolve_temporal_contradictions
+from cognee.tasks.ingestion.document_structure import reconcile_document_structure
 from cognee.tasks.provenance import record_provenance
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.temporal_graph.extract_events_and_entities import extract_events_and_timestamps
@@ -526,6 +527,9 @@ async def cognify(
                 embedding_config=embedding_config,
                 data_cache=data_cache,
                 extras={"graph_extractor": resolved_extractor},
+                # Reconcile the structure document sources describe, also when an
+                # item failed: one bad page must not freeze the tree of the rest.
+                after_run=reconcile_document_structure,
                 # Fold the vector fragments this run wrote, once per dataset,
                 # after the run is recorded complete; bounded per run, so a
                 # bloated store drains over several cognify runs.

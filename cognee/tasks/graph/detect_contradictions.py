@@ -27,6 +27,7 @@ from cognee.infrastructure.engine import DataPoint, is_internal_node
 from cognee.infrastructure.llm import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from cognee.modules.cognify.config import get_cognify_config
+from cognee.modules.engine.models.StructureContainer import CHILD_OF
 from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.graph.models import ContradictionList
@@ -36,7 +37,7 @@ logger = get_logger("detect_contradictions")
 # Relationship names that describe graph structure rather than a semantic fact.
 # Edges of these types are skipped when building the list of facts to compare.
 STRUCTURAL_RELATIONSHIPS = frozenset(
-    {"contains", "is_part_of", "made_from", "exists_in", "contradicts"}
+    {"contains", "is_part_of", "made_from", "exists_in", "contradicts", CHILD_OF}
 )
 
 

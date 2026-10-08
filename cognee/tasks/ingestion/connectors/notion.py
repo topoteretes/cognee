@@ -54,6 +54,11 @@ Design
 * **Moving a page** between two selected roots, or changing the roots so
   another one reaches it, changes its ``cognee_node_set`` (which is hashed
   into its row identity), so it is re-ingested once under its new root.
+* **Structure**: each row also carries ``cognee_structure``, where the page
+  sits in the tree it was reached through (see ``_ancestors_of``). It is not
+  hashed, so moving a page inside its root keeps its identity and does not
+  extract again; it is part of what is remembered per page, so a move
+  re-emits the row. The structure pass turns it into ``child_of`` edges.
 
 Limitations
 -----------
@@ -92,7 +97,7 @@ from uuid import UUID
 
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion import dlt_utils
-from cognee.tasks.ingestion.dlt_utils import DOCUMENT_SOURCE_ATTR, NODE_SET_COLUMN
+from cognee.tasks.ingestion.dlt_utils import DOCUMENT_SOURCE_ATTR, NODE_SET_COLUMN, STRUCTURE_COLUMN
 
 logger = get_logger("notion_connector")
 
@@ -276,6 +281,27 @@ class _WalkItem:
     # Pages discovered via a data-source query already come back as full page
     # objects; carrying them forward here avoids a redundant GET per row.
     prefetched: dict | None = None
+    # Where this item sits in the tree it was reached through, nearest parent
+    # first (see ``_ancestors_of``). Empty for a root.
+    ancestors: tuple[dict, ...] = ()
+    # The title of a database or data source, as the object that listed it names it.
+    name: str = ""
+
+
+def _ancestors_of(parent: _WalkItem, name: str | None = None) -> tuple[dict, ...]:
+    """The ``ancestors`` of an item reached through ``parent``. The chain stops at the
+    first page, so moving a page never re-renders its descendants; ``name`` is a
+    database's title, read only once it is fetched."""
+    if parent.kind == "page":
+        return ({"kind": "page", "id": parent.id, "document": True},)
+    title = parent.name if name is None else name
+    entry = {"kind": parent.kind, "id": parent.id, **({"name": title} if title else {})}
+    return (entry, *parent.ancestors)
+
+
+def _data_source_name(data_source: dict) -> str:
+    """The title of a data source, from its own object or from a database's listing of it."""
+    return data_source.get("name") or _rich_text(data_source.get("title"))
 
 
 def _resolve_roots(
@@ -295,7 +321,7 @@ def _resolve_roots(
     for root_id in root_data_source_ids:
         root_id = _canonical_id(root_id)
         try:
-            client.get_data_source(root_id)
+            root_data_source = client.get_data_source(root_id)
         except NotionAPIError as exc:
             if exc.status_code != 404:
                 raise
@@ -307,14 +333,44 @@ def _resolve_roots(
                     f"Notion root {root_id!r} is not a page, data source, or database "
                     "this integration can access.",
                 ) from exc
+            database_root = _WalkItem(
+                "database", root_id, root_id, name=_rich_text(database.get("title"))
+            )
             for data_source in database.get("data_sources") or []:
                 roots.append(
                     _WalkItem(
-                        "data_source", _canonical_id(data_source["id"]), root_id, is_root=True
+                        "data_source",
+                        _canonical_id(data_source["id"]),
+                        root_id,
+                        is_root=True,
+                        ancestors=_ancestors_of(database_root),
+                        name=_data_source_name(data_source),
                     )
                 )
             continue
-        roots.append(_WalkItem("data_source", root_id, root_id, is_root=True))
+        # Read for its title, so the container is named the same whichever way the
+        # walk reaches the database.
+        parent = root_data_source.get("parent") or {}
+        database_root = None
+        if parent.get("type") == "database_id" and parent.get("database_id"):
+            database_id = _canonical_id(parent["database_id"])
+            try:
+                database_name = _rich_text(client.get_database(database_id).get("title"))
+            except NotionAPIError as exc:
+                if not _is_gone(exc):
+                    raise
+                database_name = ""
+            database_root = _WalkItem("database", database_id, root_id, name=database_name)
+        roots.append(
+            _WalkItem(
+                "data_source",
+                root_id,
+                root_id,
+                is_root=True,
+                ancestors=_ancestors_of(database_root) if database_root else (),
+                name=_data_source_name(root_data_source),
+            )
+        )
     return roots
 
 
@@ -330,8 +386,8 @@ def _iter_rows(
 ):
     """Yield one document row per changed/new page, then deletion tombstones.
 
-    ``previous_pages`` is ``{page_id: {"last_edited_time", "root_id"}}`` from
-    the prior run. Any transient error (network, 429/5xx exhausted retries)
+    ``previous_pages`` is ``{page_id: {"last_edited_time", "root_id", "ancestors"}}``
+    from the prior run. Any transient error (network, 429/5xx exhausted retries)
     propagates un-caught, which aborts the whole dlt extraction before
     ``state`` is touched, a partial walk never produces tombstones. A 403/404
     on a page or database reached *through* the tree (not an explicit root)
@@ -364,12 +420,15 @@ def _iter_rows(
                     raise
                 logger.warning("Notion: database %s is gone, skipping: %s", item.id, exc)
                 continue
+            ancestors = _ancestors_of(item, _rich_text(database.get("title")))
             for data_source in database.get("data_sources") or []:
                 queue.append(
                     _WalkItem(
                         "data_source",
                         _canonical_id(data_source["id"]),
                         item.root_id,
+                        ancestors=ancestors,
+                        name=_data_source_name(data_source),
                     )
                 )
             continue
@@ -378,6 +437,7 @@ def _iter_rows(
             stats["containers_scanned"] += 1
             # A data source is only reached from a root or from a database that was
             # just read, so a failing query is never proof its rows are gone.
+            ancestors = _ancestors_of(item)
             for result in _query_data_source(client, item.id):
                 is_data_source = result.get("object") == "data_source"
                 queue.append(
@@ -386,6 +446,8 @@ def _iter_rows(
                         _canonical_id(result["id"]),
                         item.root_id,
                         prefetched=None if is_data_source else result,
+                        ancestors=ancestors,
+                        name=_data_source_name(result) if is_data_source else "",
                     )
                 )
             continue
@@ -404,7 +466,13 @@ def _iter_rows(
 
         # The root is part of what was synced: a page that another selected root
         # reaches now keeps its last_edited_time but needs a new cognee_node_set.
-        seen = {"last_edited_time": page.get("last_edited_time"), "root_id": item.root_id}
+        # So is where it sits: a page moved under another parent keeps its
+        # last_edited_time but needs its new ancestors.
+        seen = {
+            "last_edited_time": page.get("last_edited_time"),
+            "root_id": item.root_id,
+            "ancestors": list(item.ancestors),
+        }
         present_pages[item.id] = seen
         stats["pages_scanned"] += 1
         is_database_row = (page.get("parent") or {}).get("type") == "data_source_id"
@@ -428,16 +496,24 @@ def _iter_rows(
                 ),
                 "_deleted": False,
                 NODE_SET_COLUMN: [f"notion:{workspace_id}:{item.root_id}"],
+                STRUCTURE_COLUMN: {"ancestors": list(item.ancestors)},
             }
         else:
             stats["pages_unchanged"] += 1
 
+        ancestors = _ancestors_of(item)
         for block in discovered:
             block_type = block.get("type")
             if block_type == "child_page":
-                queue.append(_WalkItem("page", _canonical_id(block["id"]), item.root_id))
+                queue.append(
+                    _WalkItem("page", _canonical_id(block["id"]), item.root_id, ancestors=ancestors)
+                )
             elif block_type == "child_database":
-                queue.append(_WalkItem("database", _canonical_id(block["id"]), item.root_id))
+                queue.append(
+                    _WalkItem(
+                        "database", _canonical_id(block["id"]), item.root_id, ancestors=ancestors
+                    )
+                )
 
     deleted_ids = sorted(set(previous_pages) - set(present_pages))
     for page_id in deleted_ids:
@@ -755,10 +831,10 @@ def notion_source(
     import dlt
     import httpx
 
-    if getattr(dlt_utils, "DOCUMENT_SYNC_VERSION", 0) < 2:
+    if getattr(dlt_utils, "DOCUMENT_SYNC_VERSION", 0) < 3:
         raise RuntimeError(
-            "Notion sync requires a Cognee build that reads per-row node sets "
-            "(DOCUMENT_SYNC_VERSION >= 2). Upgrade Cognee before syncing."
+            "Notion sync requires a Cognee build that reads per-row node sets and "
+            "structure (DOCUMENT_SYNC_VERSION >= 3). Upgrade Cognee before syncing."
         )
 
     resolved_token = token or os.getenv("NOTION_API_KEY")
@@ -778,8 +854,9 @@ def notion_source(
         name=resource_name,
         primary_key="id",
         write_disposition="merge",
-        # cognee_node_set needs no json hint here: ingest_dlt_source applies
-        # NODE_SET_COLUMN_HINT to every document source, merged with this one.
+        # cognee_node_set and cognee_structure need no json hint here:
+        # ingest_dlt_source applies DOCUMENT_COLUMN_HINTS to every document
+        # source, merged with this one.
         columns={"_deleted": {"data_type": "bool", "hard_delete": True}},
     )
     def notion_pages():

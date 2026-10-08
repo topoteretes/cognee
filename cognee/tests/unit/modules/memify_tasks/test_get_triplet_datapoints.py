@@ -212,3 +212,28 @@ async def test_get_triplet_datapoints_no_get_triplets_batch_method(mock_graph_en
         with pytest.raises(NotImplementedError, match="does not support get_triplets_batch"):
             async for triplet in get_triplet_datapoints([{}], triplets_batch_size=100):
                 triplets.append(triplet)
+
+
+@pytest.mark.asyncio
+async def test_child_of_structure_edges_are_not_embedded_as_triplets(mock_graph_engine):
+    """A page's place in its source's tree is structure, not a fact: it is never embedded,
+    and a move would otherwise leave a stale triplet vector behind."""
+    mock_graph_engine.get_triplets_batch.return_value = [
+        {
+            "start_node": {"id": "page1", "type": "Entity", "name": "Child"},
+            "end_node": {"id": "page2", "type": "Entity", "name": "Parent"},
+            "relationship_properties": {"relationship_name": "child_of"},
+        }
+    ]
+
+    with (
+        patch.object(
+            get_triplet_datapoints_module, "get_graph_engine", return_value=mock_graph_engine
+        ),
+        patch.object(get_triplet_datapoints_module, "get_all_subclasses") as mock_get_subclasses,
+    ):
+        mock_get_subclasses.return_value = [Triplet, EdgeType, Entity]
+
+        triplets = [t async for t in get_triplet_datapoints([{}], triplets_batch_size=100)]
+
+    assert triplets == []
