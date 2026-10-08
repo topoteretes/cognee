@@ -773,20 +773,17 @@ async def test_get_gliner_demo_tasks_shape():
 
 
 @pytest.mark.asyncio
-async def test_get_gliner_demo_tasks_appends_optional_graph_tasks_in_order():
+async def test_get_gliner_demo_tasks_appends_provenance_after_storage():
     with patch.object(tasks_module, "require_gliner2"):
         tasks = await get_gliner_demo_tasks(
             ["person"],
             track_provenance=True,
-            check_contradictions=True,
-            functional_relationships={"ceo_of"},
             chunk_size=512,
         )
 
-    assert [task.executable.__name__ for task in tasks][-3:] == [
+    assert [task.executable.__name__ for task in tasks][-2:] == [
+        "add_data_points",
         "record_provenance",
-        "detect_contradictions",
-        "resolve_temporal_contradictions",
     ]
 
 
@@ -861,6 +858,7 @@ async def _cognify_standard_tasks(**kwargs):
 
     with (
         patch.object(migrations, "run_migrations_and_block", AsyncMock()),
+        patch.object(cognify_module, "ensure_extractor_runtime", AsyncMock()),
         patch.object(cognify_module, "get_pipeline_executor", return_value=execute_pipeline),
         # These tests select task lists; runtime installation has its own suite.
         patch.object(cognify_module, "ensure_extractor_runtime", AsyncMock()),
@@ -1093,13 +1091,8 @@ def test_resolve_extractor_never_installs_the_gliner_runtime():
 def test_default_pipeline_needs_llm_formula():
     from cognee.modules.cognify.config import default_pipeline_needs_llm
 
-    assert default_pipeline_needs_llm("llm", _config_with_extractor("llm")) is True
-    assert default_pipeline_needs_llm("gliner_demo", _config_with_extractor("gliner_demo")) is False
-    # The opt-in contradiction pass is an LLM task appended to the gliner list too.
-    contradiction_config = _config_with_extractor("gliner_demo").model_copy(
-        update={"contradiction_detection": True}
-    )
-    assert default_pipeline_needs_llm("gliner_demo", contradiction_config) is True
+    assert default_pipeline_needs_llm("llm") is True
+    assert default_pipeline_needs_llm("gliner_demo") is False
 
 
 @pytest.mark.asyncio
@@ -1116,15 +1109,9 @@ async def test_default_task_list_llm_need_is_derived_from_the_tasks():
         llm_tasks = await cognify_module.get_default_tasks(
             graph_model=KnowledgeGraph, chunk_size=512
         )
-        gliner_with_contradictions = await get_gliner_demo_tasks(
-            chunk_size=512, check_contradictions=True
-        )
 
     assert pipeline_needs_llm(gliner_tasks) is False
     assert pipeline_needs_llm(llm_tasks) is True
-    # detect_contradictions defaults to needs_llm=True, so the union flags the
-    # gliner list without any formula involved.
-    assert pipeline_needs_llm(gliner_with_contradictions) is True
 
 
 def test_needs_llm_survives_with_config():

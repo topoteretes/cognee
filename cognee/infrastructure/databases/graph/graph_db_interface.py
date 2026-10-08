@@ -1077,8 +1077,8 @@ class GraphDBInterface(ABC):
     async def update_node(self, node_id: str, values: dict[str, Any]) -> bool:
         """
         Merge *values* into an existing node's properties, leaving every field not
-        named in *values* untouched. Used to patch a single scalar (e.g. stamping
-        ``valid_to`` when a fact is superseded) without rewriting the whole node.
+        named in *values* untouched. Used to patch user preferences without
+        rewriting the whole node.
 
         Optional extension — implemented by LadybugAdapter (the default backend).
         Other adapters may not support partial node updates yet and raise here.

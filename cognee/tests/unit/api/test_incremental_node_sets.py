@@ -58,7 +58,6 @@ async def test_fresh_chunks_reach_extraction_with_document_membership(monkeypatc
     config = SimpleNamespace(
         chunks_per_batch=1,
         triplet_embedding=False,
-        contradiction_detection=False,
         summary_method="llm",
     )
     publish = AsyncMock()

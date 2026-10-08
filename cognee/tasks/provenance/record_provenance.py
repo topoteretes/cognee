@@ -1,9 +1,9 @@
 """Opt-in cognify task writing the audit-grade provenance ledger.
 
 Pipeline seam: spliced in by ``get_default_tasks`` right after
-``add_data_points`` (node ids are persisted and stable) and before the
-contradiction-detection spread, when the ``provenance_tracking`` CognifyConfig
-flag is on (env ``PROVENANCE_TRACKING``, default off).
+``add_data_points`` (node ids are persisted and stable), when the
+``provenance_tracking`` CognifyConfig flag is on (env ``PROVENANCE_TRACKING``,
+default off).
 
 For every item this ingestion produced it appends document -> chunk -> entity
 -> relationship lineage entries to the relational ``provenance_entries``
@@ -23,10 +23,10 @@ made_from/is_part_of/contains shape are covered by a generic fallback that
 walks the model with ``get_graph_from_model`` (the same traversal
 ``add_data_points`` uses) and records every node and edge.
 
-Hard constraints, mirroring ``detect_contradictions``: the task returns its
-input unchanged and swallows all of its own errors — provenance can never
-break ingestion. Missing ctx, missing dataset/data ids, or raw items with no
-document degrade to entries with ``source_ref_key=None``, never a raise.
+The task returns its input unchanged and swallows all of its own errors —
+provenance can never break ingestion. Missing ctx, missing dataset/data ids,
+or raw items with no document degrade to entries with ``source_ref_key=None``,
+never a raise.
 """
 
 from cognee.infrastructure.databases.provenance import data_item_id, make_source_ref_key
