@@ -1283,7 +1283,7 @@ wheels = [
 
 [[package]]
 name = "cognee"
-version = "1.6.2"
+version = "1.6.3"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
@@ -1531,7 +1531,7 @@ requires-dist = [
     { name = "deepeval", marker = "extra == 'deepeval'", specifier = ">=3.0.1,<4" },
     { name = "deptry", marker = "extra == 'dev'", specifier = ">=0.20.0,<0.21" },
     { name = "diskcache", specifier = ">=5.6.3" },
-    { name = "dlt", extras = ["sqlalchemy"], specifier = ">=1.9.0,<2" },
+    { name = "dlt", extras = ["sqlalchemy"], specifier = ">=1.9.0,<1.31" },
     { name = "docling", marker = "extra == 'docling-full'", specifier = ">=2.115,<3" },
     { name = "docling-slim", extras = ["convert-core", "format-pdf", "format-office", "format-html", "format-email", "format-markdown", "format-latex"], marker = "extra == 'docling'", specifier = ">=2.115,<3" },
     { name = "enola-cli", specifier = "==0.4.26" },

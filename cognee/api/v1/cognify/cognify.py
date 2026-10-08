@@ -330,16 +330,10 @@ async def cognify(
     resolved_extractor = resolve_extractor(extractor, cognify_config)
     resolved_summary_method = resolve_summary_method(summary_method, cognify_config)
 
-    if "temporal_cognify" in kwargs:
-        # Removed option. cognify() forwards unknown kwargs into the extraction LLM
-        # call, so it has to raise here rather than vanish there.
-        raise TypeError(
-            "cognify() no longer takes temporal_cognify. The default pipeline extracts "
-            "dates as Timestamp nodes and SearchType.TEMPORAL reads them, so drop the "
-            "argument. A dataset built with temporal_cognify=True keeps its Event nodes, "
-            "which TEMPORAL does not read: rebuild it with forget(dataset=..., "
-            "memory_only=True) and then cognify()."
-        )
+    # Removed option, accepted and ignored: the default pipeline extracts dates as
+    # Timestamp nodes, which SearchType.TEMPORAL reads. Dropped here because unknown
+    # kwargs are forwarded into the extraction LLM call.
+    kwargs.pop("temporal_cognify", None)
     if dry_run and resolved_extractor == GLINER_DEMO_EXTRACTOR:
         raise ValueError(
             "dry_run estimates the LLM extraction pipeline only; it has no cost model "

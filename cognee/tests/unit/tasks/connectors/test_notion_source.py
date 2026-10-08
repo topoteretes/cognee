@@ -6,6 +6,7 @@ as ``test_google_drive_source.py``.
 """
 
 import json
+import sys
 
 import httpx
 import pytest
@@ -821,39 +822,55 @@ def _nested_toggles(fake, levels, leaf):
     fake.blocks[parent] = [leaf]
 
 
-def test_a_tree_nested_past_the_discovery_cap_aborts_instead_of_tombstoning():
+def test_a_sub_page_below_any_number_of_container_blocks_is_found():
+    # Deeper than the interpreter's recursion limit: discovery must not recurse.
+    levels = sys.getrecursionlimit() + 100
     fake = FakeNotion()
     fake.pages[ROOT_PAGE_ID] = _page_object(
         ROOT_PAGE_ID, "Root", parent={"type": "workspace", "workspace": True}
     )
     _nested_toggles(
         fake,
-        notion_module._MAX_DISCOVERY_DEPTH + 1,
-        {"id": CHILD_PAGE_ID, "type": "child_page", "has_children": False, "child_page": {}},
-    )
-    previous = {ROOT_PAGE_ID: "2024-01-01T00:00:00.000Z", CHILD_PAGE_ID: "x"}
-    rows = []
-    with pytest.raises(NotionAPIError, match="nested deeper"):
-        rows.extend(_iter_rows(_client(fake), [ROOT_PAGE_ID], [], WORKSPACE_ID, previous, {}, {}))
-    assert not any(row.get("_deleted") for row in rows)
-
-
-def test_a_page_deeper_than_the_render_cap_is_still_kept():
-    fake = FakeNotion()
-    fake.pages[ROOT_PAGE_ID] = _page_object(
-        ROOT_PAGE_ID, "Root", parent={"type": "workspace", "workspace": True}
-    )
-    _nested_toggles(
-        fake,
-        notion_module._MAX_RENDER_DEPTH + 2,
+        levels,
         {"id": CHILD_PAGE_ID, "type": "child_page", "has_children": False, "child_page": {}},
     )
     fake.pages[CHILD_PAGE_ID] = _page_object(
-        CHILD_PAGE_ID, "Deep", parent={"type": "block_id", "block_id": "toggle-11"}
+        CHILD_PAGE_ID, "Deep", parent={"type": "block_id", "block_id": f"toggle-{levels - 1}"}
     )
     fake.blocks[CHILD_PAGE_ID] = []
+    # The root is unchanged, so only discovery walks the toggles, not rendering.
+    previous = {
+        ROOT_PAGE_ID: {
+            "last_edited_time": "2024-01-01T00:00:00.000Z",
+            "root_id": ROOT_PAGE_ID,
+            "ancestors": [],
+        }
+    }
+    rows = list(_iter_rows(_client(fake), [ROOT_PAGE_ID], [], WORKSPACE_ID, previous, {}, {}))
+    assert {row["id"] for row in rows} == {CHILD_PAGE_ID}
+    assert not any(row.get("_deleted") for row in rows)
+
+
+def test_deeply_nested_text_is_rendered_in_full():
+    fake = FakeNotion()
+    fake.pages[ROOT_PAGE_ID] = _page_object(
+        ROOT_PAGE_ID, "Root", parent={"type": "workspace", "workspace": True}
+    )
+    _nested_toggles(fake, 25, _rich_text_block("deep", "paragraph", "bottom of the tree"))
     rows = list(_iter_rows(_client(fake), [ROOT_PAGE_ID], [], WORKSPACE_ID, {}, {}, {}))
-    assert {row["id"] for row in rows} == {ROOT_PAGE_ID, CHILD_PAGE_ID}
+    assert [row["id"] for row in rows] == [ROOT_PAGE_ID]
+    assert "bottom of the tree" in rows[0]["content"]
+
+
+def test_text_below_more_levels_than_the_recursion_limit_is_rendered():
+    fake = FakeNotion()
+    fake.pages[ROOT_PAGE_ID] = _page_object(
+        ROOT_PAGE_ID, "Root", parent={"type": "workspace", "workspace": True}
+    )
+    levels = sys.getrecursionlimit() + 100
+    _nested_toggles(fake, levels, _rich_text_block("deep", "paragraph", "bottom of the tree"))
+    rows = list(_iter_rows(_client(fake), [ROOT_PAGE_ID], [], WORKSPACE_ID, {}, {}, {}))
+    assert "bottom of the tree" in rows[0]["content"]
 
 
 def test_a_synced_copy_of_an_unreadable_original_neither_aborts_nor_is_searched():
@@ -887,10 +904,9 @@ def test_resource_carries_its_pipeline_scope_and_document_marker():
     assert getattr(resource, DOCUMENT_SOURCE_ATTR) == "notion"
 
 
-def test_a_page_chain_past_the_walk_cap_aborts_instead_of_tombstoning(monkeypatch):
-    monkeypatch.setattr(notion_module, "_MAX_WALK_DEPTH", 2)
+def test_a_long_page_chain_is_walked_to_the_end():
     fake = FakeNotion()
-    chain = [ROOT_PAGE_ID, "p1", "p2", "p3"]
+    chain = [ROOT_PAGE_ID] + [f"p{index}" for index in range(150)]
     for index, page_id in enumerate(chain):
         parent = (
             {"type": "workspace", "workspace": True}
@@ -910,11 +926,8 @@ def test_a_page_chain_past_the_walk_cap_aborts_instead_of_tombstoning(monkeypatc
             if index + 1 < len(chain)
             else []
         )
-    previous = {page_id: "2024-01-01T00:00:00.000Z" for page_id in chain}
-    rows = []
-    with pytest.raises(NotionAPIError, match="nested deeper"):
-        rows.extend(_iter_rows(_client(fake), [ROOT_PAGE_ID], [], WORKSPACE_ID, previous, {}, {}))
-    assert not any(row.get("_deleted") for row in rows)
+    rows = list(_iter_rows(_client(fake), [ROOT_PAGE_ID], [], WORKSPACE_ID, {}, {}, {}))
+    assert [row["id"] for row in rows] == chain
 
 
 def test_an_original_synced_block_is_searched_for_sub_pages():

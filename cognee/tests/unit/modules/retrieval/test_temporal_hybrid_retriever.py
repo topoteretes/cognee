@@ -149,13 +149,16 @@ def test_tightest_first_orders_by_precision_then_time():
     assert [n["id"] for n in tightest_first(nodes)] == ["day_early", "day_late", "month", "year"]
 
 
-def test_tightness_rank_prefers_the_timestamp_that_fits_the_window():
+DAY = 86_400_000
+YEAR = 365 * DAY
+
+
+def test_tightness_rank_puts_dates_coarser_than_a_day_question_last():
     from cognee.modules.retrieval.temporal_hybrid.matching import tightness_rank
 
-    day, year = 86_400_000, 365 * 86_400_000
     in_window = [
-        {"id": "ts_day", "time_at": 0, "time_until": day},
-        {"id": "ts_year", "time_at": -(100 * day), "time_until": -(100 * day) + year},
+        {"id": "ts_day", "time_at": 0, "time_until": DAY},
+        {"id": "ts_year", "time_at": -(100 * DAY), "time_until": -(100 * DAY) + YEAR},
         {"id": "ts_legacy", "time_at": 0},  # no time_until: a second
     ]
     rank = tightness_rank(
@@ -166,9 +169,55 @@ def test_tightness_rank_prefers_the_timestamp_that_fits_the_window():
             "c_none": {"ts_x"},
         },
         in_window,
+        DAY,
     )
-    assert rank["c_legacy"] < rank["c_day"] < rank["c_year"]
+    # A second fits a day question as fully as the day does.
+    assert rank["c_legacy"] == rank["c_day"] < rank["c_year"]
     assert rank["c_none"] == float("inf")
+
+
+def test_tightness_rank_ties_every_date_inside_a_year_question():
+    """For "in 2020" a row dated 2020-09-14 must not outrank a paragraph dated
+    September 2020: both fit the year fully, so similarity decides."""
+    from cognee.modules.retrieval.temporal_hybrid.matching import tightness_rank
+
+    in_window = [
+        {"id": "ts_day", "time_at": 0, "time_until": DAY},
+        {"id": "ts_month", "time_at": 0, "time_until": 30 * DAY},
+        {"id": "ts_year", "time_at": 0, "time_until": YEAR},
+        {"id": "ts_decade", "time_at": 0, "time_until": 10 * YEAR},
+    ]
+    rank = tightness_rank(
+        {
+            "c_day": {"ts_day"},
+            "c_month": {"ts_month"},
+            "c_year": {"ts_year"},
+            "c_decade": {"ts_decade"},
+        },
+        in_window,
+        YEAR,
+    )
+    assert rank["c_day"] == rank["c_month"] == rank["c_year"] < rank["c_decade"]
+
+
+def test_tightness_rank_ties_everything_for_an_open_window():
+    from cognee.modules.retrieval.temporal_hybrid.matching import tightness_rank
+
+    in_window = [
+        {"id": "ts_day", "time_at": 0, "time_until": DAY},
+        {"id": "ts_year", "time_at": 0, "time_until": YEAR},
+    ]
+    rank = tightness_rank({"c_day": {"ts_day"}, "c_year": {"ts_year"}}, in_window, float("inf"))
+    assert rank["c_day"] == rank["c_year"]
+
+
+def test_window_span_is_infinite_when_a_side_is_open():
+    from cognee.modules.retrieval.temporal_hybrid.matching import window_span_ms
+
+    start, end = _utc(2020, 1, 1), _utc(2021, 1, 1)
+    assert window_span_ms(start, end) == 366 * DAY  # 2020 is a leap year
+    assert window_span_ms(start, None) == float("inf")
+    assert window_span_ms(None, end) == float("inf")
 
 
 def test_prioritize_with_no_anchored_candidate_is_the_plain_slice():
@@ -492,9 +541,13 @@ async def test_temporal_retriever_fallbacks_return_the_baseline(
     assert retriever.last_reason == reason
     assert result == retriever.last_baseline
     assert [chunk["id"] for chunk in result["chunks"]] == ["c1", "c2"]
-    # A rerank that ran but moved nothing is not a fallback; the rest warn.
-    assert ("No time-anchored data found for this question" in caplog.text) is not bool(
-        anchors["chunk_ids"]
+    # No window gets its own warning (the reason stays on last_reason); a rerank that
+    # ran but moved nothing is not a fallback; the rest warn that no dated data matched.
+    no_window = interval[2] is not None
+    assert ("Could not extract a time window from this question" in caplog.text) is no_window
+    assert reason not in caplog.text
+    assert ("No time-anchored data found for this question" in caplog.text) is (
+        not no_window and not anchors["chunk_ids"]
     )
 
 

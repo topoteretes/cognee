@@ -1,7 +1,7 @@
 [project]
 name = "cognee"
 
-version = "1.6.2"
+version = "1.6.3"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
@@ -123,7 +123,7 @@ dependencies = [
     # its snapshot contract and known answers are validated by test_code_graph_e2e.py.
     "enola-cli==0.4.26",
     # dlt powers database, CSV and Google Drive/Gmail ingestion.
-    "dlt[sqlalchemy]>=1.9.0,<2",
+    "dlt[sqlalchemy]>=1.9.0,<1.31",
     # dlt's filesystem read_csv reader requires pandas but does not declare it
     "pandas>=2.2.2,<3.0.0",
 ]
