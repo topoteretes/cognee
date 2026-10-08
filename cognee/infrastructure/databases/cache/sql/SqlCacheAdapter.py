@@ -1,4 +1,4 @@
-"""Engine-agnostic SQL cache adapter (Postgres via asyncpg, SQLite via aiosqlite)."""
+"""Engine-agnostic SQL cache adapter (Postgres via asyncpg, SQLite via aiosqlite, Turso via pyturso)."""
 
 import asyncio
 import json
@@ -110,9 +110,10 @@ class _SqlAdvisoryLockHandle:
 class SqlCacheAdapter(CacheDBInterface):
     """SQL-backed cache adapter for session QA, trace, usage-log, and KV storage.
 
-    Runs on any SQLAlchemy async URL — production Postgres (``postgresql+asyncpg``)
-    and serverless SQLite (``sqlite+aiosqlite``) share the same code paths; Postgres
-    extras (``FOR UPDATE``, advisory locks) degrade gracefully on SQLite.
+    Runs on any SQLAlchemy async URL — production Postgres (``postgresql+asyncpg``),
+    serverless SQLite (``sqlite+aiosqlite``) and the Turso rewrite engine
+    (``sqlite+cognee_turso``) share the same code paths; Postgres extras
+    (``FOR UPDATE``, advisory locks) degrade gracefully on the SQLite-family engines.
 
     Note: the factory caches one adapter per ``lock_key`` (Ladybug per-db lock_key
     instantiation pattern), so several instances may share one database.
@@ -142,6 +143,15 @@ class SqlCacheAdapter(CacheDBInterface):
             self._is_postgres = url.get_backend_name() == "postgresql"
 
             is_sqlite = url.get_backend_name() == "sqlite"
+            # Turso uses the sqlite dialect through cognee's own driver; it needs its
+            # PRAGMAs and connect args. The journal mode is pinned to wal: a cache
+            # write that hit an mvcc write-write conflict would be lost, not retried.
+            is_turso = url.get_driver_name() == "cognee_turso"
+            turso_config = None
+            if is_turso:
+                from cognee.infrastructure.databases.turso import get_turso_config
+
+                turso_config = get_turso_config().wal_only()
 
             relational_config = get_relational_config()
             pool_args: dict = (
@@ -157,6 +167,10 @@ class SqlCacheAdapter(CacheDBInterface):
                 # with SQLITE_BUSY when several processes share one cache.db.
                 connect_args = dict(pool_args.pop("connect_args", None) or {})
                 connect_args.setdefault("timeout", 30)
+                if is_turso:
+                    from cognee.infrastructure.databases.turso import connect_args_for_mode
+
+                    connect_args.update(connect_args_for_mode(turso_config))
                 pool_args["connect_args"] = connect_args
 
             self.engine = create_async_engine(
@@ -164,7 +178,11 @@ class SqlCacheAdapter(CacheDBInterface):
                 json_serializer=lambda obj: json.dumps(obj, cls=JSONEncoder),
                 **pool_args,
             )
-            if is_sqlite:
+            if is_turso:
+                from cognee.infrastructure.databases.turso import configure_engine
+
+                configure_engine(self.engine, config=turso_config)
+            elif is_sqlite:
 
                 @event.listens_for(self.engine.sync_engine, "connect")
                 def _set_sqlite_pragmas(dbapi_connection, connection_record):
@@ -177,7 +195,8 @@ class SqlCacheAdapter(CacheDBInterface):
         except ModuleNotFoundError as error:
             raise CacheConnectionError(
                 "SQL cache backend driver is not installed "
-                "(CACHE_BACKEND=postgres requires cognee[postgres]): " + str(error)
+                "(CACHE_BACKEND=postgres requires cognee[postgres], "
+                "CACHE_BACKEND=turso requires cognee[turso]): " + str(error)
             ) from error
         except Exception as error:
             raise CacheConnectionError(

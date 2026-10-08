@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import aclosing
 from typing import Any
 from uuid import UUID
 
@@ -38,16 +39,17 @@ async def _drive_marking_held(dataset_id: UUID, source: AsyncIterator[Any]) -> A
     across a yield — which in background mode would make a later run wrongly skip
     the lock. See ``held_datasets``.
     """
-    marked = held_datasets.get() | {dataset_id}
-    while True:
-        token = held_datasets.set(marked)
-        try:
-            item = await source.__anext__()
-        except StopAsyncIteration:
-            return
-        finally:
-            held_datasets.reset(token)
-        yield item
+    async with aclosing(source):
+        marked = held_datasets.get() | {dataset_id}
+        while True:
+            token = held_datasets.set(marked)
+            try:
+                item = await source.__anext__()
+            except StopAsyncIteration:
+                return
+            finally:
+                held_datasets.reset(token)
+            yield item
 
 
 async def run_pipeline(
@@ -66,17 +68,23 @@ async def run_pipeline(
     data_cache: bool = False,
     skip_connection_test: bool = False,
     needs_llm: bool = True,
+    extras: dict | None = None,
+    after_run_completed: Callable[[], Awaitable[Any]] | None = None,
 ):
     """``tasks`` is either the task list every data item runs, or a callable
     mapping one item to its task list (a task resolver — see ``run_tasks``);
     items resolved to different lists still share one run per dataset.
+    ``extras`` carries caller-resolved context into each item's PipelineContext.
 
     Whether the run needs the LLM drives the first-use LLM connection probe
     (skipped-but-never-marked-done when not needed; embeddings are always
     probed). For a task list it is derived from the tasks themselves — the
     union of ``Task.needs_llm`` — and the ``needs_llm`` parameter applies only
     when ``tasks`` is a resolver, whose caller must pass the union over every
-    list the resolver can return."""
+    list the resolver can return.
+
+    ``after_run_completed`` is awaited after each dataset's run completes,
+    inside that dataset's database context (see ``run_tasks``)."""
     if tasks is None:
         raise ValueError(
             "run_pipeline requires tasks: a task list or a per-item task resolver callable"
@@ -96,7 +104,7 @@ async def run_pipeline(
     # TODO: If multiple datasets are provided, we currently run them sequentially to avoid overwhelming the system with too many concurrent pipeline runs.
     #       In the future, we could consider adding concurrency here with proper resource management and limits.
     for dataset in authorized_datasets:
-        async for run_info in run_pipeline_per_dataset(
+        source = run_pipeline_per_dataset(
             dataset=dataset,
             user=user,
             tasks=tasks,
@@ -108,8 +116,12 @@ async def run_pipeline(
             llm_config=llm_config,
             embedding_config=embedding_config,
             data_cache=data_cache,
-        ):
-            yield run_info
+            extras=extras,
+            after_run_completed=after_run_completed,
+        )
+        async with aclosing(source):
+            async for run_info in source:
+                yield run_info
 
 
 async def run_pipeline_per_dataset(
@@ -124,6 +136,8 @@ async def run_pipeline_per_dataset(
     llm_config: LLMConfig | None = None,
     embedding_config: EmbeddingConfig | None = None,
     data_cache=False,
+    extras: dict | None = None,
+    after_run_completed: Callable[[], Awaitable[Any]] | None = None,
 ):
     # The actual work of a single run, factored out so it can run either under
     # the per-dataset lock (normal case) or directly (re-entrant case below).
@@ -145,23 +159,24 @@ async def run_pipeline_per_dataset(
             llm_config=llm_config,
             embedding_config=embedding_config,
             data_cache=data_cache,
+            extras=extras,
+            after_run_completed=after_run_completed,
         )
 
-        async for pipeline_run_info in pipeline_run:
-            yield pipeline_run_info
+        async with aclosing(pipeline_run):
+            async for pipeline_run_info in pipeline_run:
+                yield pipeline_run_info
 
-    if dataset.id in held_datasets.get():
-        # Re-entrant run: an ancestor pipeline run on this dataset already holds
-        # the lock (e.g. cognify_session calls add()/cognify() on the same dataset
-        # from inside a memify run). Re-acquiring the non-reentrant lock from the
-        # same execution would self-deadlock, so run without re-locking — external
-        # runs stay excluded by the lock the ancestor holds.
-        async for run_info in _run_body():
-            yield run_info
-        return
+    async with aclosing(_run_body()) as body:
+        if dataset.id in held_datasets.get():
+            # An ancestor run already owns this dataset's non-reentrant lock.
+            async for run_info in body:
+                yield run_info
+            return
 
-    # External run: serialize on the per-dataset lock, marking the dataset held so
-    # any nested run on it takes the re-entrant path above.
-    async with await get_dataset_lock(dataset.id):
-        async for run_info in _drive_marking_held(dataset.id, _run_body()):
-            yield run_info
+        async with (
+            await get_dataset_lock(dataset.id),
+            aclosing(_drive_marking_held(dataset.id, body)) as source,
+        ):
+            async for run_info in source:
+                yield run_info
