@@ -348,7 +348,9 @@ Completion types (an LLM writes the answer):
 - `GRAPH_COMPLETION_DECOMPOSITION`: splits the question into sub-queries first
 - `GRAPH_SUMMARY_COMPLETION`: graph context + pre-computed summaries
 - `RAG_COMPLETION`: traditional RAG over document chunks
-- `TRIPLET_COMPLETION`: subject-predicate-object style graph Q&A
+- `TRIPLET_COMPLETION`: subject-predicate-object style graph Q&A; requires a triplet index,
+  so run `await cognee.improve(dataset="...")` before querying a graph created only with
+  `add()`/`cognify()` or with `remember(..., self_improvement=False)`
 - `TEMPORAL`: time-aware graph search
 - `AGENTIC_COMPLETION`: multi-step loop that can load `skills` and call `tools`
 
