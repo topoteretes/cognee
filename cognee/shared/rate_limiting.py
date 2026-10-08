@@ -7,7 +7,7 @@ policy live in ``cognee.infrastructure.llm.overload_policy``; configuration
 is read at use-time, never snapshotted at import.
 """
 
-from contextlib import asynccontextmanager, nullcontext
+from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
 
 from aiolimiter import AsyncLimiter
 
@@ -16,6 +16,24 @@ from aiolimiter import AsyncLimiter
 # LLM_RATE_LIMIT_REQUESTS) and so importing this module stays dependency-light.
 _llm_rate_limiter: "AsyncLimiter | None" = None
 _embedding_rate_limiter: "AsyncLimiter | None" = None
+
+
+def set_rate_limiters(
+    llm: "AbstractAsyncContextManager | None" = None,
+    embedding: "AbstractAsyncContextManager | None" = None,
+) -> None:
+    """Replace the limiters LLM and embedding dispatch enter.
+
+    Any async context manager works, so a host can supply a limiter whose budget
+    is shared across processes (e.g. Redis-backed) instead of the per-process
+    AsyncLimiter. Passing ``None`` restores the default, built lazily from config
+    on next use. Only which limiter paces changes: whether pacing applies is still
+    decided by LLM_RATE_LIMIT_ENABLED / EMBEDDING_RATE_LIMIT_ENABLED and the
+    overload policy.
+    """
+    global _llm_rate_limiter, _embedding_rate_limiter
+    _llm_rate_limiter = llm
+    _embedding_rate_limiter = embedding
 
 
 def _get_llm_rate_limiter() -> AsyncLimiter:
