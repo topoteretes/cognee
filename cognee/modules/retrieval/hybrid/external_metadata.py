@@ -13,7 +13,7 @@ allowlist different keys without re-ingesting.
 from typing import Any
 
 from cognee.modules.chunking.external_metadata import decode_external_metadata
-from cognee.modules.retrieval.hybrid.results import payload
+from cognee.modules.retrieval.utils.results import payload
 
 PAYLOAD_KEY = "external_metadata"
 

@@ -1,14 +1,21 @@
-from typing import Any
+from typing import Any, NamedTuple
 
 from cognee.modules.engine.models.DltColumn import DltColumn
 from cognee.modules.engine.models.Entity import Entity
+from cognee.modules.graph.utils.fact_conflicts import (
+    CONFLICT_ABOUT,
+    CONFLICT_VALUE,
+    fact_status,
+    is_conflict_edge,
+    status_label,
+)
 from cognee.modules.retrieval.hybrid.chunks import search_collections
 from cognee.modules.retrieval.hybrid.facts import connection_edge_type_id
-from cognee.modules.retrieval.hybrid.results import (
+from cognee.modules.retrieval.hybrid.results import payload_matches_node_filter
+from cognee.modules.retrieval.utils.results import (
     display_value,
     first_display_value,
     payload,
-    payload_matches_node_filter,
     result_id,
 )
 from cognee.shared.logging_utils import get_logger
@@ -70,6 +77,12 @@ async def build_entities(
         return [], set()
 
     entities = [_entity_from_result(result) for result in entity_hits]
+    scoped = bool(node_name)
+    # _hydrate_entity re-decides this per entity; the two early returns below
+    # never reach it, so a scoped search clears the seed description here.
+    if scoped:
+        for entity in entities:
+            entity["description"] = None
     entity_ids = [entity["id"] for entity in entities if entity["id"]]
     if not entity_ids:
         return entities, set()
@@ -89,14 +102,72 @@ async def build_entities(
         node_name,
         node_name_filter_operator,
     )
-    reachable_edge_type_ids = _reachable_edge_type_ids(connections_by_entity_id)
+    seeds_by_id = _seed_properties(nodes)
     for entity in entities:
+        connections = connections_by_entity_id.get(entity["id"], [])
+        _hydrate_entity(entity, seeds_by_id.get(entity["id"], {}), connections, scoped=scoped)
         entity["edges"] = _edge_bullets_from_connections(
-            connections_by_entity_id.get(entity["id"], []),
+            connections,
             max_edges_per_entity,
             edge_ranks or {},
         )
-    return entities, reachable_edge_type_ids
+    return entities, _reachable_edge_type_ids(connections_by_entity_id)
+
+
+def _seed_properties(nodes: list[Any]) -> dict[str, dict]:
+    """Raw node properties from the one-hop read, keyed by id."""
+    return {
+        str(node[0]): node[1]
+        for node in nodes or []
+        if isinstance(node, (list, tuple)) and len(node) == 2 and isinstance(node[1], dict)
+    }
+
+
+def _hydrate_entity(
+    entity: dict, seed: dict, connections: list[tuple[dict, dict, dict]], *, scoped: bool
+) -> None:
+    """Fill the fields the one-hop neighborhood supplies: type, description, conflicts."""
+    entity["type"] = _type_from_connections(entity["id"], entity["type"], connections)
+    # A node-name-scoped search answers about the named nodes. Reviewed
+    # descriptions and conflict explanations belong to the whole-graph answer.
+    entity["description"] = None if scoped else _reviewed_description(seed)
+    if scoped:
+        return
+    conflicts = _conflict_explanations(connections)
+    if conflicts:
+        entity["conflicts"] = conflicts
+
+
+def _type_from_connections(
+    entity_id: str, current_type: Any, connections: list[tuple[dict, dict, dict]]
+) -> Any:
+    """The last ``is_a`` target that names a type; an unnamed one keeps what we had."""
+    for source, edge, target in connections:
+        if _is_type_relationship(edge["relationship_name"]) and str(source.get("id")) == entity_id:
+            current_type = display_value(target.get("name")) or current_type
+    return current_type
+
+
+def _reviewed_description(seed: dict) -> str | None:
+    """Only a reviewed entity's description is shown.
+
+    An unreviewed one can still restate a value a stored conflict has since
+    marked superseded, which would contradict the edge bullets beside it.
+    """
+    if not seed.get("conflicts_reviewed_at"):
+        return None
+    return " ".join(str(seed.get("description") or "").split())
+
+
+def _conflict_explanations(connections: list[tuple[dict, dict, dict]]) -> list[str]:
+    """Explanations from the FactConflict nodes attached to this entity."""
+    texts = {
+        display_value(source.get("text"))
+        for source, edge, _ in connections
+        if edge["relationship_name"] in {CONFLICT_ABOUT, CONFLICT_VALUE}
+        and source.get("type") == "FactConflict"
+    }
+    return sorted(text for text in texts if text)
 
 
 def _partition_neighborhood(
@@ -234,7 +305,18 @@ def _edge_bullets_from_connections(
     if max_edges <= 0:
         return []
 
-    edges = []
+    ranked = _deduplicated_bullets(connections)
+    ranked.sort(key=lambda ranked_edge: _edge_sort_key(ranked_edge.bullet, edge_ranks))
+    selected = ranked[:max_edges]
+    # Inside the window a superseded fact sinks below the ones that still hold.
+    # The sort is stable, so everything else keeps the rank order above.
+    selected.sort(key=lambda ranked_edge: ranked_edge.superseded)
+    return [ranked_edge.bullet for ranked_edge in selected]
+
+
+def _deduplicated_bullets(connections: Any) -> list["_RankedEdge"]:
+    """One bullet per distinct connection, skipping the review's own bookkeeping edges."""
+    bullets: list[_RankedEdge] = []
     seen_keys = set()
     seen_texts = set()
     for connection in connections or []:
@@ -243,10 +325,13 @@ def _edge_bullets_from_connections(
             continue
 
         source, edge, target = unpacked
-        bullet = _edge_bullet(source, edge, target)
-        if not bullet:
+        if is_conflict_edge(edge.get("relationship_name") or ""):
+            continue
+        ranked_edge = _edge_bullet(source, edge, target)
+        if not ranked_edge:
             continue
 
+        bullet = ranked_edge.bullet
         dedupe_key = _edge_dedupe_key(bullet)
         if dedupe_key and dedupe_key in seen_keys:
             continue
@@ -257,9 +342,8 @@ def _edge_bullets_from_connections(
             seen_keys.add(dedupe_key)
         else:
             seen_texts.add(bullet["text"])
-        edges.append(bullet)
-    edges.sort(key=lambda edge: _edge_sort_key(edge, edge_ranks))
-    return edges[:max_edges]
+        bullets.append(ranked_edge)
+    return bullets
 
 
 def _edge_sort_key(edge: dict, edge_ranks: dict[str, int]) -> tuple[int, int]:
@@ -281,7 +365,14 @@ def _unpack_connection(connection: Any) -> tuple[dict, dict, dict] | None:
     return source, edge, target
 
 
-def _edge_bullet(source: dict, edge: dict, target: dict) -> dict | None:
+class _RankedEdge(NamedTuple):
+    """An edge bullet plus the one ranking signal that does not belong inside it."""
+
+    bullet: dict
+    superseded: bool
+
+
+def _edge_bullet(source: dict, edge: dict, target: dict) -> _RankedEdge | None:
     source_label = _node_label(source)
     target_label = _node_label(target)
     relationship = display_value(edge.get("relationship_name"))
@@ -290,17 +381,22 @@ def _edge_bullet(source: dict, edge: dict, target: dict) -> dict | None:
         text = f"{source_label} -- {relationship} -- {target_label}"
     if not text:
         return None
+    properties = edge.get("properties") or {}
+    label = status_label(properties)
 
-    return {
-        "text": text,
-        "source": source_label,
-        "target": target_label,
-        "source_id": display_value(source.get("id")),
-        "relationship": relationship,
-        "target_id": display_value(target.get("id")),
-        "edge_type_id": connection_edge_type_id(edge),
-        "edge_object_id": display_value((edge.get("properties") or {}).get("edge_object_id")),
-    }
+    return _RankedEdge(
+        {
+            "text": f"{text} {label}" if label else text,
+            "source": source_label,
+            "target": target_label,
+            "source_id": display_value(source.get("id")),
+            "relationship": relationship,
+            "target_id": display_value(target.get("id")),
+            "edge_type_id": connection_edge_type_id(edge),
+            "edge_object_id": display_value(properties.get("edge_object_id")),
+        },
+        fact_status(properties) == "superseded",
+    )
 
 
 def _edge_dedupe_key(edge: dict) -> tuple[str, str, str] | None:

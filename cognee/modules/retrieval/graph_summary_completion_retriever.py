@@ -1,4 +1,5 @@
 from cognee.base_config import get_base_config
+from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.utils.completion import summarize_text
 
@@ -12,7 +13,7 @@ class GraphSummaryCompletionRetriever(GraphCompletionRetriever):
     information efficiently. Public methods include:
 
     - __init__()
-    - resolve_edges_to_text()
+    - render_edges()
     """
 
     def __init__(
@@ -48,14 +49,14 @@ class GraphSummaryCompletionRetriever(GraphCompletionRetriever):
         )
         self.summarize_prompt_path = summarize_prompt_path
 
-    async def resolve_edges_to_text(self, retrieved_edges: list) -> str:
+    async def render_edges(self, retrieved_edges: list) -> str:
         """
         Convert retrieved graph edges into a summary without redundancies.
 
         This asynchronous method processes a list of retrieved edges and summarizes their
-        content using a specified prompt path. It relies on the parent's implementation to
-        convert the edges to text before summarizing. Raises an error if the summarization fails
-        due to an invalid prompt path.
+        content using a specified prompt path. The base class appends the stored conflict
+        explanations after this returns, so they never enter the summarization call.
+        Raises an error if the summarization fails due to an invalid prompt path.
 
         Parameters:
         -----------
@@ -67,5 +68,5 @@ class GraphSummaryCompletionRetriever(GraphCompletionRetriever):
 
             - str: A summary string representing the content of the retrieved edges.
         """
-        direct_text = await super().resolve_edges_to_text(retrieved_edges)
+        direct_text = await resolve_edges_to_text(retrieved_edges)
         return await summarize_text(direct_text, self.summarize_prompt_path, self.system_prompt)

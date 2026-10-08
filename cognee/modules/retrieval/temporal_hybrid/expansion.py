@@ -18,7 +18,8 @@ promoting those displaces the entities the question is about.
 
 from typing import Any
 
-from cognee.modules.retrieval.hybrid.results import payload, payload_matches_node_filter, result_id
+from cognee.modules.retrieval.hybrid.results import payload_matches_node_filter
+from cognee.modules.retrieval.utils.results import payload, result_id
 
 
 def attached_node_ids(timestamps: list[dict], nodes_edges: tuple[list, list]) -> list[str]:
