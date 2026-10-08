@@ -7,12 +7,13 @@ different datasets proceed in parallel.
 """
 
 import asyncio
+import threading
 from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
 
-from cognee.infrastructure.locks import dataset_lock, get_dataset_lock, held_datasets
+from cognee.infrastructure.locks import DatasetLock, dataset_lock, get_dataset_lock, held_datasets
 
 
 @pytest.mark.asyncio
@@ -111,6 +112,82 @@ async def test_delete_waits_for_pipeline_holding_the_lock():
 
 
 # ---------------------------------------------------------------------------
+# Event-loop agnosticism: the cached per-dataset lock must work across event
+# loops. asyncio.Lock binds to the first loop that awaits it, so the previous
+# registry crashed with "is bound to a different event loop" for any embedder
+# running cognee operations via asyncio.run on worker threads — and a lock
+# left acquired by a finished loop wedged the dataset until process restart.
+# ---------------------------------------------------------------------------
+
+
+def test_lock_usable_across_sequential_event_loops():
+    """Two asyncio.run calls (two loops) may use the same cached dataset lock."""
+    dataset_id = uuid4()
+
+    async def operation():
+        async with dataset_lock(dataset_id):
+            await asyncio.sleep(0)
+
+    asyncio.run(operation())
+    # Raised RuntimeError("... is bound to a different event loop") before.
+    asyncio.run(operation())
+
+
+def test_same_dataset_serialized_across_threads_with_own_loops():
+    """Operations on one dataset from different threads/loops never overlap."""
+    dataset_id = uuid4()
+    events: list[str] = []
+    first_holds = threading.Event()
+
+    async def first():
+        async with dataset_lock(dataset_id):
+            events.append("a:start")
+            first_holds.set()
+            await asyncio.sleep(0.1)
+            events.append("a:end")
+
+    async def second():
+        async with dataset_lock(dataset_id):
+            events.append("b:start")
+            events.append("b:end")
+
+    thread_a = threading.Thread(target=lambda: asyncio.run(first()))
+    thread_a.start()
+    assert first_holds.wait(timeout=2)
+    thread_b = threading.Thread(target=lambda: asyncio.run(second()))
+    thread_b.start()
+    thread_a.join(timeout=5)
+    thread_b.join(timeout=5)
+
+    assert events == ["a:start", "a:end", "b:start", "b:end"]
+
+
+def test_different_datasets_do_not_block_across_loops():
+    """A dataset lock held on one loop must not stall another dataset's lock."""
+    held = threading.Event()
+    release = threading.Event()
+
+    async def hold_other_dataset():
+        async with dataset_lock(uuid4()):
+            held.set()
+            await asyncio.to_thread(release.wait, 2)
+
+    holder = threading.Thread(target=lambda: asyncio.run(hold_other_dataset()))
+    holder.start()
+    assert held.wait(timeout=2)
+    try:
+
+        async def use_own_dataset():
+            async with dataset_lock(uuid4()):
+                pass
+
+        asyncio.run(use_own_dataset())  # must not wait on the held lock
+    finally:
+        release.set()
+        holder.join(timeout=5)
+
+
+# ---------------------------------------------------------------------------
 # Lock-ordering guard (SDK-483): canonical order is dataset lock -> queue slot.
 # A task already holding a DatasetQueue slot must not acquire a dataset lock.
 # ---------------------------------------------------------------------------
@@ -159,7 +236,7 @@ async def test_lock_after_slot_on_other_dataset_warns_but_proceeds(fresh_enabled
     await fresh_enabled_queue.ensure_slot(slot_dataset_id)
     try:
         lock = await get_dataset_lock(lock_dataset_id)
-        assert isinstance(lock, asyncio.Lock)
+        assert isinstance(lock, DatasetLock)
     finally:
         await fresh_enabled_queue.release_slot_for(slot_dataset_id)
 
@@ -177,4 +254,4 @@ async def test_canonical_order_lock_then_slot_is_allowed(fresh_enabled_queue):
 async def test_lock_without_any_slot_is_unaffected(fresh_enabled_queue):
     """The guard is inert for tasks holding no slot."""
     lock = await get_dataset_lock(uuid4())
-    assert isinstance(lock, asyncio.Lock)
+    assert isinstance(lock, DatasetLock)
