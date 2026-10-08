@@ -32,7 +32,7 @@ def _dataset_scope(dataset) -> list[str]:
 
 
 def _skills_node_set() -> NodeSet:
-    return NodeSet(id=generate_node_id(f"NodeSet:{SKILLS_NODE_SET}"), name=SKILLS_NODE_SET)
+    return NodeSet(name=SKILLS_NODE_SET)
 
 
 def _storage_context(user, dataset, key: str) -> PipelineContext | None:

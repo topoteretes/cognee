@@ -3778,7 +3778,7 @@ class LadybugAdapter(GraphDBInterface):
         chunk_list = sorted({str(node_id) for node_id in chunk_ids})
         entity_list = sorted({str(node_id) for node_id in entity_ids})
         if not chunk_list and not entity_list:
-            return temporal_anchors_from_rows([], [])
+            return temporal_anchors_from_rows([], [], [])
         conditions = ["time_at IS NOT NULL"]
         params: dict[str, Any] = {}
         if end is not None:
@@ -3804,7 +3804,7 @@ class LadybugAdapter(GraphDBInterface):
             MATCH (c:Node)-[r:EDGE]->(t:Node)
             WHERE c.id IN $candidate_ids AND t.type = 'Timestamp'
             {window.format(carry="c")}
-            RETURN DISTINCT c.id, c.type, t.id
+            RETURN DISTINCT c.id, t.id
             """,
             {**params, "candidate_ids": chunk_list + entity_list},
         )
@@ -3821,8 +3821,9 @@ class LadybugAdapter(GraphDBInterface):
                 {**params, "chunk_ids": chunk_list},
             )
         return temporal_anchors_from_rows(
-            [(row[0], row[1], row[2]) for row in direct_rows],
+            [(row[0], row[1]) for row in direct_rows],
             [(row[0], row[1], row[2]) for row in via_rows],
+            chunk_list,
         )
 
     async def get_triplets_batch(self, offset: int, limit: int) -> list[dict[str, Any]]:

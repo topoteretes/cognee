@@ -1,7 +1,7 @@
 [project]
 name = "cognee"
 
-version = "1.6.2"
+version = "1.6.3"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
@@ -57,8 +57,17 @@ dependencies = [
     "rdflib>=7.1.4,<7.2.0",
     "pypdf>=6.6.2,<7.0.0",
     "jinja2>=3.1.3,<4",
+    # lancedb bundles its own Lance core and pylance must ship the same one:
+    # the bounded compaction in cognee_db_workers.lancedb_compaction hands
+    # tables to pylance (``table.to_lance()``). lancedb 0.39.x bundles Lance
+    # 12.0, so pylance stays on 12.0.x and the two are bumped together with
+    # LANCE_CORE_BY_LANCEDB in cognee_db_workers/lancedb_compaction.py
+    # (``strings _lancedb*.so | grep lance-core`` shows the bundled core). If
+    # an override pairs them differently, compaction turns itself off with a
+    # warning instead of writing to the tables. pylance 12 requires
+    # lance-namespace<0.12, so the lockfile holds lance-namespace at 0.11.x.
+    "lancedb>=0.39.0,<0.40.0",
     "dateparser>=1.2,<2",  # temporal hints and date normalization in default graph extraction
-    "lancedb>=0.24.3,<1.0.0",  # 0.24.2 bundles lance 0.32.0 whose list-column decoder panics on tables with deletion vectors
     "nbformat>=5.7.0,<6.0.0",
     "alembic>=1.13.3,<2",
     "limits>=4.4.1,<6",
@@ -77,7 +86,7 @@ dependencies = [
     "onnxruntime>=1.24.1 ; python_version >= '3.14'",
     "structlog>=25.2.0,<26",
     "pympler>=1.1,<2.0.0",
-    "pylance>=0.22.0,<=0.36.0",
+    "pylance>=12.0.0,<12.1.0",  # same Lance release line as lancedb, see above
     # ladybug 0.18.x+ publishes only macosx_15_0 wheels (its sdist needs C++20
     # std::atomic_ref, which Apple Clang's libc++ on macOS <= 14 lacks), so
     # macOS 13/14 (Darwin 22/23) get 0.17.x — the last line with macosx_13_0
@@ -114,7 +123,7 @@ dependencies = [
     # its snapshot contract and known answers are validated by test_code_graph_e2e.py.
     "enola-cli==0.4.26",
     # dlt powers database, CSV and Google Drive/Gmail ingestion.
-    "dlt[sqlalchemy]>=1.9.0,<2",
+    "dlt[sqlalchemy]>=1.9.0,<1.31",
     # dlt's filesystem read_csv reader requires pandas but does not declare it
     "pandas>=2.2.2,<3.0.0",
 ]

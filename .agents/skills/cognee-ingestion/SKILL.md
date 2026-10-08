@@ -1,6 +1,6 @@
 ---
 name: cognee-ingestion
-description: Use when putting data into cognee memory with remember() — choosing inputs (text, files, folders, URLs, repos, databases), datasets and node_sets, loaders, ontologies, the graph extractor (LLM or GLiNER), chunking, dry-run cost estimates, temporal graphs, or when remember() raises on a keyword argument.
+description: Use when putting data into cognee memory with remember() — choosing inputs (text, files, folders, URLs, repos, databases), datasets and node_sets, loaders, ontologies, the graph extractor (LLM or GLiNER), chunking, dry-run cost estimates, or when remember() raises on a keyword argument.
 ---
 
 # Ingest data with remember()

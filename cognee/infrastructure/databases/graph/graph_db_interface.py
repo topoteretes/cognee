@@ -49,26 +49,45 @@ def timestamp_overlaps(node: dict, start: int | None, end: int | None) -> bool:
     return (end is None or time_at < end) and (start is None or time_until > start)
 
 
-def empty_temporal_anchors() -> dict[str, set[str]]:
-    return {"timestamp_ids": set(), "chunk_ids": set(), "entity_ids": set()}
+def empty_temporal_anchors() -> dict:
+    return {
+        "timestamp_ids": set(),
+        "chunk_ids": set(),
+        "entity_ids": set(),
+        "chunk_timestamps": {},
+    }
 
 
 def temporal_anchors_from_rows(
-    direct_rows: Iterable[tuple[str, str, str]],
+    direct_rows: Iterable[tuple[str, str]],
     via_rows: Iterable[tuple[str, str, str]],
+    chunk_ids: Iterable[str],
 ) -> dict[str, set[str]]:
     """Assemble ``get_temporal_anchors``' result from the two row shapes the
-    adapters produce: ``(candidate_id, candidate_type, timestamp_id)`` for an edge
-    straight into a matching timestamp, and ``(chunk_id, entity_id, timestamp_id)``
-    for a candidate chunk that ``contains`` an entity with such an edge."""
+    adapters produce: ``(candidate_id, timestamp_id)`` for an edge straight into a
+    matching timestamp, and ``(chunk_id, entity_id, timestamp_id)`` for a candidate
+    chunk that ``contains`` an entity with such an edge. A directly anchored
+    candidate is a chunk when the caller passed it as one (``chunk_ids``), not by
+    its node type: DLT rows are chunks of their own graph type (``DltRow``).
+
+    ``chunk_timestamps`` maps each anchored chunk to the matching timestamp ids
+    it reached, directly or through an entity. The retriever ranks anchored
+    chunks by how tightly the best of those timestamps fits the window: a chunk
+    dated "1965-03-18" is about that day, a chunk that says "1965" merely
+    overlaps it."""
+    chunk_set = {str(node_id) for node_id in chunk_ids}
     anchors = empty_temporal_anchors()
-    for candidate_id, candidate_type, timestamp_id in direct_rows:
+    for candidate_id, timestamp_id in direct_rows:
         anchors["timestamp_ids"].add(str(timestamp_id))
-        bucket = "chunk_ids" if candidate_type == "DocumentChunk" else "entity_ids"
-        anchors[bucket].add(str(candidate_id))
+        if str(candidate_id) in chunk_set:
+            anchors["chunk_ids"].add(str(candidate_id))
+            anchors["chunk_timestamps"].setdefault(str(candidate_id), set()).add(str(timestamp_id))
+        else:
+            anchors["entity_ids"].add(str(candidate_id))
     for chunk_id, entity_id, timestamp_id in via_rows:
         anchors["timestamp_ids"].add(str(timestamp_id))
         anchors["chunk_ids"].add(str(chunk_id))
+        anchors["chunk_timestamps"].setdefault(str(chunk_id), set()).add(str(timestamp_id))
         anchors["entity_ids"].add(str(entity_id))
     return anchors
 
@@ -231,8 +250,9 @@ class GraphDBInterface(ABC):
         membership in one dataset without disturbing unrelated nodes that
         legitimately still carry the tag.
 
-        Default no-op; only Neo4j overrides this today. Other
-        list-property-storing adapters are free to implement it later.
+        Default no-op; Ladybug, postgres_demo, Neo4j, and Turso override this
+        today. Other list-property-storing adapters are free to implement it
+        later.
         """
         return
 
@@ -927,8 +947,10 @@ class GraphDBInterface(ABC):
         a time carries it into every chunk that mentions it. An entity is anchored
         when any of its edges points at a matching timestamp; the relationship
         name is not inspected. Returns ``{"timestamp_ids", "chunk_ids",
-        "entity_ids"}``: the matched timestamps, the anchored candidate chunks and
-        the anchored entities (candidates and the ones reached through chunks).
+        "entity_ids", "chunk_timestamps"}``: the matched timestamps, the anchored
+        candidate chunks, the anchored entities (candidates and the ones reached
+        through chunks), and per anchored chunk the matched timestamp ids it
+        reached.
 
         Reading from the candidate side keeps the cost proportional to the
         candidate count whatever the window matches — the retriever's reason for
@@ -952,7 +974,7 @@ class GraphDBInterface(ABC):
                 and timestamp_overlaps({**props, "id": node_id}, start, end)
             )
 
-        direct_rows: list[tuple[str, str, str]] = []
+        direct_rows: list[tuple[str, str]] = []
         contained: dict[str, set[str]] = {}  # candidate chunk -> entities it contains
         for source, target, relationship, _props in edges:
             source_id, target_id = str(source), str(target)
@@ -963,8 +985,7 @@ class GraphDBInterface(ABC):
             ):
                 contained.setdefault(source_id, set()).add(target_id)
             if _in_window(target_id) and (source_id in chunk_set or source_id in entity_set):
-                source_type = "DocumentChunk" if source_id in chunk_set else "Entity"
-                direct_rows.append((source_id, source_type, target_id))
+                direct_rows.append((source_id, target_id))
 
         via_rows: list[tuple[str, str, str]] = []
         reached = set().union(*contained.values()) if contained else set()
@@ -980,7 +1001,7 @@ class GraphDBInterface(ABC):
                     for chunk_id, entities in contained.items():
                         if source_id in entities:
                             via_rows.append((chunk_id, source_id, target_id))
-        return temporal_anchors_from_rows(direct_rows, via_rows)
+        return temporal_anchors_from_rows(direct_rows, via_rows, chunk_set)
 
     @abstractmethod
     async def get_neighborhood(

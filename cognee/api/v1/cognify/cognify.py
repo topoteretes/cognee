@@ -6,6 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
+from cognee.infrastructure.databases.vector.compact_vector_store import compact_vector_store
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.llm import resolve_chunk_size
@@ -546,6 +547,10 @@ async def cognify(
                 embedding_config=embedding_config,
                 data_cache=data_cache,
                 extras={"graph_extractor": resolved_extractor},
+                # Fold the vector fragments this run wrote, once per dataset,
+                # after the run is recorded complete; bounded per run, so a
+                # bloated store drains over several cognify runs.
+                after_run_completed=compact_vector_store,
             )
         except Exception as error:
             # Run-level failures (e.g. an AuthenticationError escaping a task)
