@@ -10,7 +10,7 @@ import json
 from importlib import import_module
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi import FastAPI
@@ -44,10 +44,11 @@ def _events(*, fail_with=None):
 @pytest.fixture
 def client(monkeypatch):
     monkeypatch.setattr(router_module, "send_telemetry", lambda *args, **kwargs: None)
+    authorized_dataset = SimpleNamespace(id=UUID(DATASET_ID))
     monkeypatch.setattr(
         router_module,
         "get_authorized_existing_datasets",
-        AsyncMock(side_effect=lambda ids, _permission, _user: [SimpleNamespace(id=ids[0])]),
+        AsyncMock(return_value=[authorized_dataset]),
     )
     json_path = AsyncMock(return_value=JSON_PAYLOAD)
     monkeypatch.setattr(visualize_pkg, "visualize_graph_json", json_path)
@@ -59,6 +60,7 @@ def client(monkeypatch):
     app.dependency_overrides[get_authenticated_user] = lambda: SimpleNamespace(id=uuid4())
     with TestClient(app) as test_client:
         test_client.json_path = json_path
+        test_client.authorized_dataset = authorized_dataset
         test_client.stream_calls = calls
         yield test_client
 
@@ -201,3 +203,20 @@ def test_the_streamed_chunk_is_valid_json(client):
 
     data_lines = [line[6:] for line in response.text.splitlines() if line.startswith("data: ")]
     assert json.loads(data_lines[1]) == {"index": 0, "nodes": [{"id": "a"}], "links": []}
+
+
+def test_the_json_path_hands_over_the_dataset_it_authorized(client):
+    """Passing the Dataset, not its id, is what spares visualize_graph_json a
+    second permission check (SDK-972)."""
+    _get(client)
+
+    assert client.json_path.await_args.kwargs["dataset"] is client.authorized_dataset
+
+
+def test_session_events_are_collected_unless_the_request_opts_out(client):
+    _get(client)
+    _get(client, "&include_session_events=false")
+
+    default_call, opted_out_call = client.json_path.await_args_list
+    assert default_call.kwargs["include_session_events"] is True
+    assert opted_out_call.kwargs["include_session_events"] is False

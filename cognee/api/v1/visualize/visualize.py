@@ -14,7 +14,7 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.data.methods import get_authorized_existing_datasets, get_datasets_graph_counts
-from cognee.modules.data.models import Data
+from cognee.modules.data.models import Data, Dataset
 from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models.User import User
@@ -42,7 +42,7 @@ logger = get_logger()
 
 async def fetch_visualization_data(
     user: User | None = None,
-    dataset: str | UUID | None = DEFAULT_DATASET_NAME,
+    dataset: str | UUID | Dataset | None = DEFAULT_DATASET_NAME,
     *,
     full: bool = False,
     query: str | None = None,
@@ -75,7 +75,11 @@ async def fetch_visualization_data(
     # is set with None: a no-op when access control is off, and an (expected)
     # error in multi-user mode where a dataset is required.
     resolved_dataset = None
-    if dataset:
+    if isinstance(dataset, Dataset):
+        # The caller authorized this dataset itself, e.g. a router that
+        # already checked read permission, so it is not checked again.
+        resolved_dataset = dataset
+    elif dataset:
         authorized = await get_authorized_existing_datasets([dataset], "read", user)
         resolved_dataset = authorized[0] if authorized else None
 
@@ -195,7 +199,7 @@ async def visualize_graph(
     include_session_events: bool = True,
     session_ids: list | None = None,
     user: User | None = None,
-    dataset: str | UUID | None = DEFAULT_DATASET_NAME,
+    dataset: str | UUID | Dataset | None = DEFAULT_DATASET_NAME,
     *,
     full: bool = False,
     query: str | None = None,
@@ -229,7 +233,9 @@ async def visualize_graph(
             first authorized match selects which user+dataset database is
             visualized. Defaults to "main_dataset" (the same default used by
             add/cognify/remember). Pass None to skip dataset resolution and
-            render the current context's graph.
+            render the current context's graph. A ``Dataset`` instance is
+            taken as already authorized and used as is, with no permission
+            check: only pass one you got from get_authorized_existing_datasets.
         full: When True, render the entire graph (legacy behavior).
         query: Optional query string; its nearest vector hits seed the subgraph.
         seed_node_ids: Explicit seed node ids for neighborhood expansion.
@@ -272,7 +278,7 @@ async def visualize_graph_json(
     include_session_events: bool = True,
     session_ids: list | None = None,
     user: User | None = None,
-    dataset: str | UUID | None = DEFAULT_DATASET_NAME,
+    dataset: str | UUID | Dataset | None = DEFAULT_DATASET_NAME,
     *,
     full: bool = False,
     query: str | None = None,
@@ -316,7 +322,7 @@ async def visualize_graph_json(
 
 async def visualize_semantic_json(
     user: User | None = None,
-    dataset: str | UUID | None = DEFAULT_DATASET_NAME,
+    dataset: str | UUID | Dataset | None = DEFAULT_DATASET_NAME,
     *,
     full: bool = False,
     query: str | None = None,

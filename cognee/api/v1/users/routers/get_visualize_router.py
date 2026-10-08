@@ -143,8 +143,10 @@ def get_visualize_router() -> APIRouter:
             # Verify user has permission to read dataset
             dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
 
+            # The authorized Dataset itself, not its id: visualize_graph then
+            # does not check permission a second time.
             html_visualization = await visualize_graph(
-                dataset=dataset[0].id,
+                dataset=dataset[0],
                 user=user,
                 full=full,
                 query=query,
@@ -214,6 +216,14 @@ def get_visualize_router() -> APIRouter:
                 "negotiation on `Accept`; true or false decides outright."
             ),
         ),
+        include_session_events: bool = Query(
+            True,
+            description=(
+                "Include the dataset's search/improve history as `search_events`. "
+                "Defaults to true; a client that reads that history elsewhere "
+                "(e.g. `/visualize/live-events`) can pass false to skip collecting it."
+            ),
+        ),
         user: User = Depends(get_authenticated_user),
     ):
         """
@@ -229,13 +239,13 @@ def get_visualize_router() -> APIRouter:
         ## Query Parameters
         Same as `GET /visualize` (dataset_id, full, query, seed_node_ids,
         neighborhood_depth, neighborhood_seed_top_k, max_nodes), plus
-        `stream`.
+        `stream` and `include_session_events`.
 
         ## Response
         A JSON object with `nodes`, `links`, `color_maps`, `schema_graph`,
         `schema_data`, `pipeline_stages`, `edge_classes`, `bundles`,
         `provenance_index`, `has_meaningful_topological_rank`, `memory_map`
-        and `search_events`.
+        and `search_events` (empty when `include_session_events=false`).
 
         ## Streaming
         Sent when the request has `Accept: text/event-stream` or
@@ -248,7 +258,9 @@ def get_visualize_router() -> APIRouter:
         most one chunk's size, the first also carrying `color_maps.node_set`);
         `done` (totals). A failure after the response started is one
         `error` event with `message` and `status`. The heavy side payloads
-        are not streamed, and `full=true` cannot be streamed.
+        are not streamed, and `full=true` cannot be streamed. A stream never
+        carries `search_events` regardless of `include_session_events`; the
+        Memory tab gets that history from `/visualize/live-events` instead.
 
         ## Error Codes
         - **409 Conflict**: Dataset not found, permission denied, or the
@@ -330,7 +342,7 @@ def get_visualize_router() -> APIRouter:
                 )
 
             payload = await visualize_graph_json(
-                dataset=dataset[0].id,
+                dataset=dataset[0],
                 user=user,
                 full=full,
                 query=query,
@@ -338,6 +350,7 @@ def get_visualize_router() -> APIRouter:
                 neighborhood_depth=neighborhood_depth,
                 neighborhood_seed_top_k=neighborhood_seed_top_k,
                 max_nodes=max_nodes,
+                include_session_events=include_session_events,
             )
             return JSONResponse(status_code=200, content=payload)
 
@@ -442,7 +455,7 @@ def get_visualize_router() -> APIRouter:
             dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
 
             payload = await visualize_semantic_json(
-                dataset=dataset[0].id,
+                dataset=dataset[0],
                 user=user,
                 full=full,
                 query=query,
