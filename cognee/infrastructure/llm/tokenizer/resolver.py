@@ -29,6 +29,7 @@ warning. Resolution is advisory only and never raises: a wrong count is a
 degraded estimate, not a fatal error.
 """
 
+import sys
 from collections.abc import Callable
 
 from cognee.infrastructure.llm.tokenizer.HuggingFace import HuggingFaceTokenizer
@@ -107,6 +108,7 @@ def _load_or_tiktoken_fallback(
     when ``mistral-common`` is not installed. A failure degrades to an
     approximate count rather than aborting chunk sizing.
     """
+    outer_error = sys.exc_info()[1]
     try:
         return build()
     except Exception as error:
@@ -119,6 +121,14 @@ def _load_or_tiktoken_fallback(
             _TRANSFORMERS_HINT if missing else _MISMATCH_HINT,
             exc_info=True,
         )
+        # The exception chain may hold a library's exception-in-local cycle, pinning callers.
+        # Stops at the caller's own active exception, which is not ours to modify.
+        seen = set()
+        exception = error
+        while exception is not None and exception is not outer_error and id(exception) not in seen:
+            seen.add(id(exception))
+            exception.__traceback__ = None
+            exception = exception.__cause__ or exception.__context__
         return TikTokenTokenizer(model=None, max_completion_tokens=max_completion_tokens)
 
 

@@ -6,7 +6,11 @@ the three tokenizer classes in the resolver with sentinels so they assert the
 selection logic and warnings only, with no optional deps and no network.
 """
 
+import gc
 import logging
+import sys
+import traceback
+import weakref
 from unittest.mock import patch
 
 import pytest
@@ -203,3 +207,63 @@ def test_bare_model_strips_one_provider_tag():
     # Splits once, so a multi-segment repo after the provider tag survives.
     assert resolver._bare_model("hosted_vllm/BAAI/bge-m3") == "BAAI/bge-m3"
     assert resolver._bare_model(None) is None
+
+
+def test_fallback_releases_caller_despite_library_exception_cycle(monkeypatch):
+    def build():
+        def download():
+            try:
+                raise RuntimeError("offline")
+            except RuntimeError as error:
+                head_call_error = error
+            raise head_call_error
+
+        try:
+            return download()
+        except RuntimeError as head_call_error:
+            raise ImportError("Could not load tokenizer") from head_call_error
+
+    def call_with_sentinel():
+        sentinel = _FakeTokenizer("sentinel")
+        sentinel_ref = weakref.ref(sentinel)
+        tokenizer = resolver._load_or_tiktoken_fallback(build, 512, context="test model")
+        assert tokenizer.kind == "tiktoken"
+        assert tokenizer.kwargs == {"model": None, "max_completion_tokens": 512}
+        return sentinel_ref
+
+    def warning(*args, **kwargs):
+        # Rich-style formatting materializes cached locals without retaining the record.
+        exception = sys.exc_info()[1]
+        while exception is not None:
+            for frame, _ in traceback.walk_tb(exception.__traceback__):
+                frame.f_locals.copy()
+            exception = exception.__cause__ or exception.__context__
+
+    monkeypatch.setattr(
+        resolver, "TikTokenTokenizer", lambda **kwargs: _FakeTokenizer("tiktoken", **kwargs)
+    )
+    monkeypatch.setattr(resolver.logger, "warning", warning)
+    was_enabled = gc.isenabled()
+    gc.disable()
+    try:
+        sentinel_ref = call_with_sentinel()
+        assert sentinel_ref() is None
+    finally:
+        if was_enabled:
+            gc.enable()
+
+
+def test_fallback_keeps_callers_active_exception_traceback(monkeypatch):
+    def build():
+        raise ImportError("Could not load tokenizer")
+
+    monkeypatch.setattr(
+        resolver, "TikTokenTokenizer", lambda **kwargs: _FakeTokenizer("tiktoken", **kwargs)
+    )
+    try:
+        raise RuntimeError("caller")
+    except RuntimeError as original:
+        saved = original.__traceback__
+        tokenizer = resolver._load_or_tiktoken_fallback(build, 512, context="test model")
+        assert original.__traceback__ is saved
+    assert tokenizer.kind == "tiktoken"
