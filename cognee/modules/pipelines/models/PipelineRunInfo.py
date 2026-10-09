@@ -15,12 +15,16 @@ class PipelineRunInfo(BaseModel):
     payload: Any | list[Data] | None = None
     # Per-item results: one {"run_info": PipelineRunInfo, "data_id": UUID}
     # entry per data item the run handled. For an add() run, read
-    # ``data_ids`` instead of walking this.
+    # ``added_data_ids`` instead of walking this.
     data_ingestion_info: list | None = None
     # Ids of the data items an add() run stored, or found already holding the
-    # same content. Only add() fills it; None on every other pipeline's run
-    # infos and on an add() that has no per-item results yet (background run).
-    data_ids: list[UUID] | None = None
+    # same content. Despite the name, those existing data items are included:
+    # nothing new was added for them, but the id still names where the caller's
+    # content lives (their data_ingestion_info entry says
+    # PipelineRunAlreadyCompleted). Only add() fills it; None on every other
+    # pipeline's run infos and on an add() that has no per-item results yet
+    # (background run).
+    added_data_ids: list[UUID] | None = None
 
     model_config = {
         "arbitrary_types_allowed": True,
@@ -29,15 +33,15 @@ class PipelineRunInfo(BaseModel):
         "json_encoders": {Data: lambda d: d.to_json()},
     }
 
-    # Leave data_ids out unless add() filled it, so the run infos nested in
+    # Leave added_data_ids out unless add() filled it, so the run infos nested in
     # data_ingestion_info, progress ticks and other pipelines' results don't
-    # each carry "data_ids": null. No return annotation on purpose: with one,
+    # each carry "added_data_ids": null. No return annotation on purpose: with one,
     # pydantic replaces the model's serialization schema (OpenAPI) with a dict.
     @model_serializer(mode="wrap")
-    def _omit_unset_data_ids(self, handler):
+    def _omit_unset_added_data_ids(self, handler):
         serialized = handler(self)
-        if self.data_ids is None and isinstance(serialized, dict):
-            serialized.pop("data_ids", None)
+        if self.added_data_ids is None and isinstance(serialized, dict):
+            serialized.pop("added_data_ids", None)
         return serialized
 
 
