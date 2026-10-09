@@ -839,6 +839,10 @@ def get_integrations_router():
         want provider vocabulary; ``/resources`` is the stable generic path.
         The returned selection is three-state: ``null`` means all resources,
         an empty list means none, and a non-empty list is an allowlist.
+
+        ## Path Parameters
+        - **provider** (str): Key of a registered OAuth provider (see GET
+          /api/v1/integrations/status).
         """
         integration = _integration_or_404(provider)
         if integration.resource_selection_key is None:
@@ -886,7 +890,16 @@ def get_integrations_router():
         payload: IntegrationResourceSelectionPayload,
         user: User = Depends(get_authenticated_user),
     ) -> IntegrationResourceSelectionResultDTO:
-        """Persist a full resource selection for a connected integration."""
+        """Persist a full resource selection for a connected integration.
+
+        ## Path Parameters
+        - **provider** (str): Key of a registered OAuth provider (see GET
+          /api/v1/integrations/status).
+
+        ## Request Parameters
+        - **resourceIds** (Optional[List[str]]): Provider resource identifiers to store as
+          the full selection, de-duplicated; omit or null to clear it.
+        """
         integration = _integration_or_404(provider)
         selection_key = integration.resource_selection_key
         if selection_key is None:
@@ -912,7 +925,12 @@ def get_integrations_router():
     async def sync_integration(
         provider: str, user: User = Depends(get_authenticated_user)
     ) -> IntegrationSyncResultDTO:
-        """Start a provider sync without changing its stored selection."""
+        """Start a provider sync without changing its stored selection.
+
+        ## Path Parameters
+        - **provider** (str): Key of a registered OAuth provider (see GET
+          /api/v1/integrations/status).
+        """
         integration = _integration_or_404(provider)
         credential = await get_active_credential_for_user(user.id, integration.provider)
         if credential is None:
@@ -944,6 +962,10 @@ def get_integrations_router():
         ## Path Parameters
         - **provider** (str): Key of a registered OAuth provider (see GET
           /api/v1/integrations/status).
+
+        ## Query Parameters
+        - **delete_data** (bool): When true, also deletes the dataset created by this
+          integration after the connection is revoked. Defaults to False.
         """
         with new_span("cognee.integrations.disconnect") as span:
             span.set_attribute("cognee.integrations.provider", provider)
