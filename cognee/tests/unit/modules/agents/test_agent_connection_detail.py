@@ -39,3 +39,8 @@ async def test_connection_detail_by_name_survives_deactivation():
     assert all(agent.agent_session_name != name for agent in listing.agents), (
         "the default listing still excludes inactive connections"
     )
+
+    unnamed = await get_agent_connection_detail(user=user, agent_id=user.id)
+    assert unnamed is None or unnamed.agent.agent_session_name != name, (
+        "the unnamed lookup still excludes inactive connections"
+    )
