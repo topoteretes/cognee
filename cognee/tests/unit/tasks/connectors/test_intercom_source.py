@@ -13,3 +13,8 @@ def test_intercom_get_headers():
     assert headers["Authorization"] == "Bearer my_token"
     assert headers["Accept"] == "application/json"
     assert headers["Intercom-Version"] == "2.11"
+
+def test_intercom_source_tags():
+    from cognee.tasks.ingestion.dlt_utils import document_source_tag
+    source = intercom_source(token="my_test_token")
+    assert document_source_tag(source) == "intercom"
