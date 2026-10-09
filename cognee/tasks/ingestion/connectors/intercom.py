@@ -65,4 +65,28 @@ def intercom_source(
             
             data = resp.json()
             contacts = data.get("data", [])
-            url = None  # prevent infinite loop for now
+            
+            for contact in contacts:
+                contact_id = contact.get("id")
+                name = contact.get("name")
+                email = contact.get("email")
+                role = contact.get("role")
+                updated_at = contact.get("updated_at")
+                
+                content_lines = [
+                    f"Intercom Contact: {name or 'Unknown'}",
+                    f"Email: {email}",
+                    f"Role: {role}"
+                ]
+                        
+                yield {
+                    "id": contact_id,
+                    "title": f"Intercom Contact: {name or email or contact_id}",
+                    "content": "\n".join(content_lines),
+                    "updated_at": updated_at,
+                    "email": email,
+                    "role": role
+                }
+            
+            pages = data.get("pages", {})
+            url = pages.get("next")
