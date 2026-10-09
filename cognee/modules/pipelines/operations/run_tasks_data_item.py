@@ -323,7 +323,11 @@ def _stored_source_uri(data_point: Data) -> str | None:
     Raw text has no source of its own, so it has none; cognee's stored copy is
     deliberately not reported as one.
     """
-    cognee_metadata = (data_point.external_metadata or {}).get("_cognee")
+    # Data items stored by older versions can hold any JSON here, e.g. a string.
+    external_metadata = data_point.external_metadata
+    if not isinstance(external_metadata, dict):
+        return None
+    cognee_metadata = external_metadata.get("_cognee")
     if not isinstance(cognee_metadata, dict):
         return None
     source_uri = cognee_metadata.get("source_uri")

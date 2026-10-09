@@ -27,6 +27,16 @@ def test_a_stored_data_item_reports_its_source_and_raw_text_has_none():
     assert _source_fields(stored_text, data_item=None)["data_location"] is None
 
 
+def test_a_legacy_data_item_with_string_metadata_has_no_location():
+    legacy = _stored(name="old_doc", label=None, external_metadata='{"source": "legacy"}')
+
+    assert _source_fields(legacy, data_item=None) == {
+        "data_name": "old_doc",
+        "data_location": None,
+        "data_label": None,
+    }
+
+
 def test_an_item_that_failed_before_it_was_stored_is_named_from_its_input(tmp_path):
     broken = tmp_path / "broken.docx"
     broken.write_bytes(b"not really a docx")
