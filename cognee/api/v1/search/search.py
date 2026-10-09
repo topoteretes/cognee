@@ -97,6 +97,14 @@ async def search(
             Best for: Complex questions, analysis, summaries, insights.
             Returns: Conversational AI responses with graph-backed context.
 
+        **TRIPLET_COMPLETION**:
+            LLM answers grounded in embedded graph triplets.
+            Requires the dataset's Triplet_text vector collection. After cognify,
+            await create_triplet_embeddings(user=user, dataset=dataset_name) from
+            cognee.memify_pipelines.create_triplet_embeddings before searching.
+            Use the same user and dataset for preparation and search; preparation
+            requires write access. See docs/recall-vs-search.md for an example.
+
         **RAG_COMPLETION**:
             Traditional RAG using document chunks without graph structure.
             Best for: Direct document retrieval, specific fact-finding.

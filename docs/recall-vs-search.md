@@ -73,6 +73,43 @@ raw = await cognee.search(
 )
 ```
 
+## Preparing triplet search
+
+`SearchType.TRIPLET_COMPLETION` retrieves embedded graph triplets and uses an LLM to
+answer from them. Unlike ordinary graph search, it requires the dataset's `Triplet_text`
+vector collection. With the default configuration, `add()` followed by `cognify()` does
+not build that collection. Run the `create_triplet_embeddings` memify pipeline after
+graph extraction and before querying this search type:
+
+```python
+import cognee
+from cognee import SearchType
+from cognee.memify_pipelines.create_triplet_embeddings import create_triplet_embeddings
+from cognee.modules.users.methods import get_default_user
+
+# Run inside an async function, after add/cognify has built this dataset's graph.
+dataset_name = "project"
+user = await get_default_user()
+await create_triplet_embeddings(user=user, dataset=dataset_name, run_in_background=False)
+
+results = await cognee.search(
+    "What did Alice work on?",
+    query_type=SearchType.TRIPLET_COMPLETION,
+    datasets=[dataset_name],
+    user=user,
+)
+```
+
+Use the same user and dataset for preparation and search. In a multi-user application,
+pass the authenticated user instead of the default user; preparation requires write
+access to the dataset. Prepare each dataset you intend to search and await completion.
+The same prerequisite applies when selecting this type through `recall()`.
+
+If search raises `NoDataError` mentioning `create_triplet_embeddings`, the triplet
+collection is missing in the selected dataset. Check that graph extraction produced
+relationships, then run the preparation pipeline for that dataset. The error does not
+mean that ordinary `GRAPH_COMPLETION` search is unavailable.
+
 ## The router
 
 Source: `cognee/api/v1/recall/query_router.py`.
