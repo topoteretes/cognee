@@ -10,6 +10,9 @@ permissions:
 
 jobs:
   docker-build-and-push:
+    # Publishing is owned by the canonical upstream repository. Fork pushes
+    # must not attempt Docker Hub authentication with unavailable secrets.
+    if: github.repository == 'topoteretes/cognee'
     runs-on: ubuntu-latest
 
     steps:
@@ -17,9 +20,11 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Set up Docker Buildx
+        if: steps.credentials.outputs.available == 'true'
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
 
       - name: Log in to Docker Hub
+        if: steps.credentials.outputs.available == 'true'
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4.6.0
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
