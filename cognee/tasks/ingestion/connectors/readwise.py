@@ -51,3 +51,9 @@ def readwise_source(
     token = token or os.environ.get("READWISE_ACCESS_TOKEN")
     if not token:
         raise ValueError("Readwise access token must be provided or set in READWISE_ACCESS_TOKEN environment variable")
+
+    @dlt.resource(name=resource_name, write_disposition="merge", primary_key="id")
+    def readwise_highlights(last_updated_time: dlt.sources.incremental = dlt.sources.incremental("updated")) -> Iterator[dict]:  # noqa: B008
+        headers = _get_headers(token)
+        url = f"{READWISE_API_URL}/highlights/"
+        params = {}
