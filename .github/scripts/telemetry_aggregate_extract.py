@@ -129,8 +129,19 @@ _ENDPOINT = (
 # Surface the event came from: 'sdk' (the default), 'api', 'cli', 'mcp' (set by each
 # entrypoint since SDK-775), 'cloud' (set by the managed cloud). Safe enum.
 _ORIGIN = "coalesce(json_extract_string(properties, '$.telemetry_origin'), 'unknown')"
-# Normalized version: strip the -local suffix so builds compare cleanly.
-_VERSION = "coalesce(regexp_replace(cognee_version, '-local$', ''), 'unknown')"
+# Normalized version: strip the -local suffix so builds compare cleanly. The
+# missing versions are kept apart: 'unknown-null' is an event without the field,
+# 'unknown-recovered' a startup-recovery event (it sends the literal "unknown" on
+# purpose, its Started event has the version) and 'unknown-unresolved' a client
+# that sent "unknown" because it could not resolve its own version.
+_VERSION = (
+    "CASE WHEN cognee_version IS NULL THEN 'unknown-null' "
+    "WHEN cognee_version = 'unknown' "
+    "AND json_extract_string(properties, '$.recovered_at_startup') = 'true' "
+    "THEN 'unknown-recovered' "
+    "WHEN cognee_version = 'unknown' THEN 'unknown-unresolved' "
+    "ELSE regexp_replace(cognee_version, '-local$', '') END"
+)
 # Whether the LLM was usable (a key set, or a provider that needs none). A keyless
 # install still reports the default llm provider/model; this tells the two apart.
 # Rows from builds before the field are 'unknown'.
