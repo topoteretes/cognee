@@ -169,7 +169,7 @@ async def test_detached_pipeline_never_cleans_up_even_after_return(ingestion, mo
 
 
 @pytest.mark.asyncio
-async def test_add_fills_data_ids_from_per_item_results(ingestion, monkeypatch):
+async def test_add_fills_added_data_ids_from_per_item_results(ingestion, monkeypatch):
     stored = uuid4()
     completed = ingestion.run_info(PipelineRunCompleted)
     completed.data_ingestion_info = [
@@ -180,4 +180,4 @@ async def test_add_fills_data_ids_from_per_item_results(ingestion, monkeypatch):
 
     result = await add_module.add("source", dataset_name="documents")
 
-    assert result.data_ids == [stored]
+    assert result.added_data_ids == [stored]
