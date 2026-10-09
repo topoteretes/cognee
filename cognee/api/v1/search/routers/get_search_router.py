@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
@@ -64,6 +64,9 @@ class SearchPayloadDTO(InDTO):
             "Restrict results to nodes in these node_sets"
             " (the node_set values used during add/remember)."
         ),
+    )
+    node_name_filter_operator: Literal["AND", "OR"] = Field(
+        default="OR", description="Combine node-set filters using AND or OR."
     )
     top_k: int | None = Field(default=15)
     only_context: bool = Field(
@@ -282,6 +285,7 @@ def get_search_router() -> APIRouter:
                 dataset_ids=payload.dataset_ids,
                 system_prompt=payload.system_prompt,
                 node_name=payload.node_name,
+                node_name_filter_operator=payload.node_name_filter_operator,
                 top_k=payload.top_k,
                 verbose=payload.verbose,
                 only_context=payload.only_context,
