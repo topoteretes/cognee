@@ -159,10 +159,14 @@ async def run_tasks_data_item_incremental(
     if not isinstance(data_item, Data):
         # If the DataItem carries a stable data_id (e.g. from DLT), prefer it
         # over the content lookup so lookups stay consistent.
+        from cognee.modules.data.methods import resolve_data_id
         from cognee.tasks.ingestion.data_item import DataItem as DataItemType
 
         if isinstance(data_item, DataItemType) and data_item.data_id is not None:
-            data_id = data_item.data_id
+            # Resolve the pin as ingest_data does: a legacy id names the data
+            # item it was forked into, which is where the content is stored.
+            pin = data_item.data_id
+            data_id = await resolve_data_id(dataset.id, pin) or pin
             async with db_engine.get_async_session() as session:
                 data_point = (
                     await session.execute(select(Data).filter(Data.id == data_id))
