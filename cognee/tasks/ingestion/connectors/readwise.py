@@ -64,4 +64,23 @@ def readwise_source(
             
             data = resp.json()
             highlights = data.get("results", [])
-            url = None  # prevent infinite loop for now
+            
+            for hl in highlights:
+                hl_id = hl.get("id")
+                text = hl.get("text")
+                note = hl.get("note", "")
+                url_hl = hl.get("url")
+                updated = hl.get("updated")
+                
+                content = f"Highlight: {text}\nNote: {note}"
+                        
+                yield {
+                    "id": str(hl_id),
+                    "title": f"Readwise Highlight {hl_id}",
+                    "content": content,
+                    "updated": updated,
+                    "url": url_hl or f"https://readwise.io/open/{hl_id}"
+                }
+            
+            url = data.get("next")
+            params = {}  # query params are embedded in the next URL if they exist
