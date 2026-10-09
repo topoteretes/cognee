@@ -39,6 +39,18 @@ def test_long_list_of_data_records_is_bounded():
     assert result[-1] == f"... [truncated, {len(records)} ids total]"
 
 
+def test_id_cap_boundary_is_exclusive():
+    # The cap is the last size kept whole: a dataset of exactly MAX_RUN_INFO_IDS
+    # records must not grow a marker, and one more record must.
+    at_cap = [Data(id=uuid4(), name=f"doc-{index}") for index in range(MAX_RUN_INFO_IDS)]
+    assert summarize_run_info_data(at_cap) == [str(record.id) for record in at_cap]
+
+    over_cap = at_cap + [Data(id=uuid4(), name="one-more")]
+    result = summarize_run_info_data(over_cap)
+    assert len(result) == MAX_RUN_INFO_IDS + 1
+    assert result[-1] == f"... [truncated, {MAX_RUN_INFO_IDS + 1} ids total]"
+
+
 def test_small_payload_is_preserved_verbatim():
     text = "Session trace: a small amount of text"
     assert summarize_run_info_data(text) == text
