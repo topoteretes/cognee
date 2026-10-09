@@ -24,3 +24,9 @@ from cognee.tasks.ingestion import dlt_utils
 logger = logging.getLogger(__name__)
 
 READWISE_API_URL = "https://readwise.io/api/v2"
+
+def _get_headers(token: str) -> dict:
+    return {
+        "Authorization": f"Token {token}",
+        "Content-Type": "application/json"
+    }
