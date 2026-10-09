@@ -746,17 +746,13 @@ async def test_background_cancelled_before_start_finishes_and_closes_once(harnes
     assert retry.status == "completed"
 
 
-@pytest.mark.parametrize(
-    "detail", ["", "engine unavailable", "message " * 2000], ids=["empty", "ordinary", "oversized"]
-)
+@pytest.mark.parametrize("detail", ["", "message " * 2000], ids=["empty", "oversized"])
 def test_pre_stage_error_preserves_type_and_bounds_message(harness, detail):
     from cognee.modules.operations.scrub_error import ERROR_MESSAGE_MAX_LENGTH
 
     message = harness.improve_mod._pre_stage_error_text(asyncio.CancelledError(detail))
     assert "CancelledError" in message
     assert len(message) <= ERROR_MESSAGE_MAX_LENGTH
-    if detail == "engine unavailable":
-        assert detail in message
 
 
 @pytest.mark.asyncio

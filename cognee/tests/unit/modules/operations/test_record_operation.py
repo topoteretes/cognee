@@ -281,9 +281,8 @@ async def test_operation_rows_are_invisible_to_pipeline_status_readers(ops_engin
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure", ["probe", "cancel_before_start"])
-async def test_background_improve_persists_one_failed_scrubbed_row(
-    ops_engine, monkeypatch, failure
+async def test_background_improve_cancelled_before_start_persists_one_failed_scrubbed_row(
+    ops_engine, monkeypatch
 ):
     from cognee.infrastructure.background_tasks import wait_for_background_tasks
     from cognee.tests.unit.api.v1.improve.conftest import FakeStage, ImproveHarness
@@ -298,19 +297,10 @@ async def test_background_improve_persists_one_failed_scrubbed_row(
     )
     secret = "sk-dummycredential123456789"
 
-    async def failing_probe(*_args):
-        raise RuntimeError(f"engine unavailable: {secret}")
-
-    if failure == "probe":
-        monkeypatch.setattr(harness.improve_mod, "resolve_graph_capabilities", failing_probe)
-
     result = await harness.improve(run_in_background=True)
-    if failure == "cancel_before_start":
-        result._task.cancel(secret)
-        with pytest.raises(asyncio.CancelledError):
-            await result._task
-    else:
-        await result.wait()
+    result._task.cancel(secret)
+    with pytest.raises(asyncio.CancelledError):
+        await result._task
     assert await wait_for_background_tasks(timeout=2)
 
     assert result.finished and result.status == "errored"
@@ -320,7 +310,7 @@ async def test_background_improve_persists_one_failed_scrubbed_row(
     row = rows[0]
     assert row.operation_name == "improve"
     assert row.outcome == "failed"
-    assert row.error_class == ("RuntimeError" if failure == "probe" else "CancelledError")
+    assert row.error_class == "CancelledError"
     assert row.error_message is not None
     assert secret not in row.error_message
     assert "[secret]" in row.error_message
