@@ -54,6 +54,20 @@ def _extract_added_data_ids(data_ingestion_info: Any) -> list[UUID]:
     return added_data_ids
 
 
+def _remote_added_data_ids(result: dict) -> list[UUID] | None:
+    """``added_data_ids`` from a remote add() response, as UUIDs like a local call.
+
+    The server sends the ids as strings. An older server sends no such key, so
+    they are read from its ``data_ingestion_info`` instead. ``None`` when
+    neither is there (a background run that just started).
+    """
+    if result.get("added_data_ids") is not None:
+        return [UUID(str(value)) for value in result["added_data_ids"]]
+    if result.get("data_ingestion_info") is not None:
+        return _extract_added_data_ids(result["data_ingestion_info"])
+    return None
+
+
 async def add(
     data: BinaryIO | list[BinaryIO] | str | list[str] | DataItem | list[DataItem] | Any,
     dataset_name: str = DEFAULT_DATASET_NAME,
@@ -248,6 +262,7 @@ async def add(
     client = get_remote_client()
     if client is not None:
         result = await client.add(data, dataset_name)
+        result["added_data_ids"] = _remote_added_data_ids(result)
         # Wrap in a simple namespace so callers expecting .model_dump() still work
         from types import SimpleNamespace
 
