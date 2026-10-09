@@ -239,6 +239,9 @@ class FSCacheAdapter(CacheDBInterface):
         self, user_id: str, session_id: str, last_n: int = 5
     ) -> list[SessionQAEntry]:
         """Return the most recent QA entries stored for the given session."""
+        if last_n <= 0:
+            return []
+
         session_key = self._session_key(user_id, session_id)
         entries = [SessionQAEntry(**entry) for entry in self._load_entries(session_key)]
         if not entries:
@@ -454,6 +457,8 @@ class FSCacheAdapter(CacheDBInterface):
         trace_key = self._agent_trace_key(user_id, session_id)
         entries = [SessionAgentTraceEntry(**entry) for entry in self._load_entries(trace_key)]
         if last_n is not None:
+            if last_n <= 0:
+                return []
             return entries[-last_n:]
         return entries
 
