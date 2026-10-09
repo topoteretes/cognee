@@ -686,6 +686,7 @@ def get_remember_router() -> APIRouter:
         "/entry",
         summary="Remember a session entry (QA, trace, feedback) into the session cache",
         response_model=dict,
+        openapi_extra={"x-cognee-session-dataset-ids": True},
     )
     @log_usage(function_name="POST /v1/remember/entry", log_type="api_endpoint")
     async def remember_entry(

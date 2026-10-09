@@ -479,3 +479,30 @@ async def test_last_used_at_write_failure_never_breaks_auth():
 
     with patch(f"{USER_MANAGER_MODULE}.get_relational_engine", return_value=engine):
         assert await manager.get_by_token("raw-key") is user
+
+
+@pytest.mark.parametrize(
+    "conflict", [UserAlreadyExists(), IntegrityError("insert", {}, Exception())]
+)
+def test_create_only_never_rotates_an_existing_identity(client, conflict):
+    with (
+        patch.object(_router_module, "create_agent", AsyncMock(side_effect=conflict)),
+        patch.object(
+            _router_module, "_find_plugin_agent", AsyncMock(return_value=_fake_agent_user())
+        ),
+        patch.object(_router_module, "_rotate_agent_api_key", AsyncMock()) as rotate,
+        patch.object(_router_module, "register_agent_connection", AsyncMock()) as register,
+    ):
+        response = client.post(
+            "/api/v1/integrations/plugins/claude-code/provision?create_only=true"
+        )
+    assert response.status_code == 409
+    rotate.assert_not_awaited()
+    register.assert_not_awaited()
+
+
+def test_create_only_capability_is_discoverable(client):
+    operation = client.get("/openapi.json").json()["paths"][
+        "/api/v1/integrations/plugins/{plugin_key}/provision"
+    ]["post"]
+    assert any(p["name"] == "create_only" and p["in"] == "query" for p in operation["parameters"])

@@ -226,6 +226,7 @@ class CloudClient:
         dataset_name: str = "main_dataset",
         session_id: str | None = None,
         skill_improvement: dict | None = None,
+        dataset_id: UUID | None = None,
     ) -> dict:
         """POST /api/v1/remember/entry — store a typed MemoryEntry.
 
@@ -242,6 +243,9 @@ class CloudClient:
             "session_id": session_id,
             "skill_improvement": skill_improvement,
         }
+
+        if dataset_id is not None:
+            payload["dataset_id"] = str(dataset_id)
 
         async with session.post(
             f"{self.service_url}/api/v1/remember/entry",
