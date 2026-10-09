@@ -43,4 +43,9 @@ def intercom_source(
         token: Intercom Access Token. Falls back to INTERCOM_ACCESS_TOKEN.
         resource_name: The dlt resource / table name to yield rows into.
     """
-    pass
+    try:
+        import dlt
+    except ImportError as e:
+        raise ImportError(
+            "The Intercom connector requires dlt: pip install dlt"
+        ) from e
