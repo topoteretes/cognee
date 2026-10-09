@@ -159,9 +159,7 @@ class TestRejections:
 
     def test_non_list_any_of(self):
         with pytest.raises(CogneeValidationError, match="anyOf"):
-            model_from_json_schema(
-                {"type": "object", "properties": {"value": {"anyOf": {"type": "string"}}}}
-            )
+            model_from_json_schema({"type": "object", "properties": {"value": {"anyOf": 5}}})
 
     def test_empty_type_list(self):
         with pytest.raises(CogneeValidationError, match="type"):
