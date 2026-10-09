@@ -120,7 +120,7 @@ class NodeEdgeVectorSearch:
         """Separates search results into node and edge distances with stable shapes.
 
         Ensures all collections are present in the output, even if empty:
-        - Batch mode: missing/empty collections become [[]] * query_list_length
+        - Batch mode: missing/empty collections become one empty list per query
         - Single mode: missing/empty collections become []
         """
         self.node_distances = {}
@@ -161,7 +161,9 @@ class NodeEdgeVectorSearch:
                 collection_name=collection_name, query_texts=query_batch, limit=None
             )
         except CollectionNotFoundError:
-            return [[]] * len(query_batch)
+            # One list per query, not `[[]] * n`: that repeats a single list
+            # object, so extending one query's results extends every query's.
+            return [[] for _ in range(len(query_batch))]
 
     async def _run_single_search(
         self,
