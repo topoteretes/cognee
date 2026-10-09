@@ -10,7 +10,7 @@ leaves it ``None``.
 import json
 from uuid import UUID, uuid4
 
-from cognee.api.v1.add.add import _extract_added_data_ids
+from cognee.api.v1.add.add import _extract_added_data_ids, _remote_added_data_ids
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunAlreadyCompleted,
     PipelineRunCompleted,
@@ -117,3 +117,23 @@ def test_unset_added_data_ids_are_left_out_of_the_output():
     # The serializer must not hide the model's fields from the OpenAPI schema.
     schema = PipelineRunInfo.model_json_schema(mode="serialization")
     assert "added_data_ids" in schema["properties"]
+
+
+def test_remote_added_data_ids_are_uuids_for_any_server_response():
+    """A remote add() gets JSON: string ids, or no such key from an older server."""
+    stored, failed = uuid4(), uuid4()
+    run = _run_info(
+        PipelineRunErrored,
+        data_ingestion_info=[
+            {"run_info": _run_info(PipelineRunCompleted), "data_id": stored},
+            {"run_info": _run_info(PipelineRunErrored), "data_id": failed},
+        ],
+        added_data_ids=[stored],
+    )
+    newer = json.loads(run.model_dump_json())
+    older = {key: value for key, value in newer.items() if key != "added_data_ids"}
+    background = json.loads(_run_info(PipelineRunStarted).model_dump_json())
+
+    assert _remote_added_data_ids(newer) == [stored]
+    assert _remote_added_data_ids(older) == [stored]
+    assert _remote_added_data_ids(background) is None
