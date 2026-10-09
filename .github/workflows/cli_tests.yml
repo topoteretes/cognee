@@ -11,6 +11,13 @@ permissions:
 on:
   workflow_call:
     inputs:
+      has-secrets:
+        # False on fork PRs, where GitHub withholds repository secrets. Jobs
+        # that need a real LLM/embedding key skip instead of failing on an
+        # empty key. Other callers leave the default and run everything.
+        required: false
+        type: boolean
+        default: true
       python-version:
         required: false
         type: string
@@ -24,27 +31,32 @@ on:
         required: false
         type: string
         default: ''
+    # Optional, not required: on a fork PR `secrets: inherit` passes none, and a
+    # required secret makes GitHub refuse to start ANY job in this workflow,
+    # including the ones that need no key. Jobs that do need one gate on
+    # inputs.has-secrets instead.
     secrets:
       LLM_PROVIDER:
-        required: true
+        required: false
       LLM_MODEL:
-        required: true
+        required: false
       LLM_ENDPOINT:
-        required: true
+        required: false
       LLM_API_KEY:
-        required: true
+        required: false
       LLM_ARGS:
         required: false
       LLM_API_VERSION:
-        required: true
+        required: false
       EMBEDDING_PROVIDER:
-        required: true
+        required: false
       EMBEDDING_MODEL:
-        required: true
+        required: false
       EMBEDDING_API_KEY:
-        required: true
+        required: false
 
 env:
+  CI_HAS_SECRETS: ${{ inputs.has-secrets }}
   RUNTIME__LOG_LEVEL: ERROR
   ENV: 'dev'
   COGNEE_SKIP_CONNECTION_TEST: 'true'
@@ -58,13 +70,10 @@ jobs:
     env:
       ENV: 'dev'
       LLM_PROVIDER: openai
-      LLM_MODEL: ${{ secrets.LLM_MODEL }}
-      LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-      LLM_ARGS: ${{ secrets.LLM_ARGS }}
-      LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
-      EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-      EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+      LLM_MODEL: "openai/gpt-4o-mini"
+      LLM_API_KEY: "mock-not-used"
+      EMBEDDING_MODEL: "openai/text-embedding-3-large"
+      EMBEDDING_API_KEY: "mock-not-used"
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -112,7 +121,10 @@ jobs:
           cognee_version: ${{ inputs.cognee_version }}
 
       - name: Run CLI Integration Tests
-        run: uv run pytest cognee/tests/cli_tests/cli_integration_tests/ -v
+        shell: bash
+        run: |
+          source .github/scripts/keyless_ci_env.sh
+          uv run pytest cognee/tests/cli_tests/cli_integration_tests/ -v
 
   cli-functionality-tests:
     name: CLI Functionality Tests
@@ -147,7 +159,9 @@ jobs:
           cognee_version: ${{ inputs.cognee_version }}
 
       - name: Test CLI Help Commands
+        shell: bash
         run: |
+          source .github/scripts/keyless_ci_env.sh
           uv run python -m cognee.cli._cognee --help
           uv run python -m cognee.cli._cognee --version
           uv run python -m cognee.cli._cognee add --help
@@ -157,7 +171,9 @@ jobs:
           uv run python -m cognee.cli._cognee config --help
 
       - name: Test CLI Config Subcommands
+        shell: bash
         run: |
+          source .github/scripts/keyless_ci_env.sh
           uv run python -m cognee.cli._cognee config get --help
           uv run python -m cognee.cli._cognee config set --help
           uv run python -m cognee.cli._cognee config list --help
@@ -165,7 +181,9 @@ jobs:
           uv run python -m cognee.cli._cognee config reset --help
 
       - name: Test CLI Error Handling
+        shell: bash
         run: |
+          source .github/scripts/keyless_ci_env.sh
           # Test invalid command (should fail gracefully)
           ! uv run python -m cognee.cli._cognee invalid_command
 

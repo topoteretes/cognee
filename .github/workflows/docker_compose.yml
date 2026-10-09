@@ -2,6 +2,11 @@ name: test | docker compose
 
 on:
   workflow_call:
+    inputs:
+      has-secrets:
+        required: false
+        type: boolean
+        default: true
 
 # Least-privilege token (OSSF Scorecard: Token-Permissions). This workflow only
 # checks out the repo and builds/runs images locally — no GITHUB_TOKEN writes.
@@ -9,6 +14,7 @@ permissions:
   contents: read
 
 env:
+  CI_HAS_SECRETS: ${{ inputs.has-secrets }}
   COGNEE_SKIP_CONNECTION_TEST: 'true'
   # The default user is created with no password; a server started with this
   # set gives it the password once. Compose passes it into the container, and
@@ -53,11 +59,14 @@ jobs:
         LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
         EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
         EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+      shell: bash
       run: |
+        source .github/scripts/keyless_ci_env.sh
         # Only variables that actually have a value: a bare `LLM_ARGS=` (empty
         # secret) reaches LLMConfig.llm_args — a dict field — as "" and kills
         # the container at import time.
-        printenv | grep -E '^(LLM_|EMBEDDING_)[A-Za-z0-9_]*=.+' > .env
+        # Without secrets nothing matches; the container then runs keyless.
+        { printenv | grep -E '^(LLM_|EMBEDDING_)[A-Za-z0-9_]*=.+' || true; } > .env
         echo "EMBEDDING_DIMENSIONS=300" >> .env
         echo "COGNEE_SKIP_CONNECTION_TEST=true" >> .env
         # Point the relational store at the postgres service so the e2e
@@ -134,7 +143,9 @@ jobs:
       env:
         COGNEE_E2E_MANAGE_COMPOSE: '1'
         COGNEE_E2E_COMPOSE_PROFILES: 'postgres,mcp'
+      shell: bash
       run: |
+        source .github/scripts/keyless_ci_env.sh
         # The suite is decoupled from the `cognee` package: --confcutdir keeps
         # pytest from loading the heavy ancestor conftests, and --no-project
         # keeps uv from syncing the whole project on the runner.
@@ -152,7 +163,10 @@ jobs:
             --confcutdir=cognee/tests/e2e/docker_compose \
             -v --timeout=900
 
+    # The one step that needs an LLM: it asserts on a GRAPH_COMPLETION answer.
+    # Runs without secrets skip it; everything above runs keyless.
     - name: Verify remember and recall round-trip
+      if: ${{ inputs.has-secrets }}
       run: |
         TOKEN=$(curl -sf -X POST http://localhost:8000/api/v1/auth/login \
           -d "username=default_user@example.com&password=${DEFAULT_USER_PASSWORD}" | jq -r .access_token)

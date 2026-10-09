@@ -13,6 +13,7 @@ from cognee.modules.ontology.ontology_config import Config
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 from cognee.modules.search.types import SearchType
 from cognee.shared.logging_utils import get_logger
+from cognee.tests.utils.ci_search_type import completion_or_chunks
 
 logger = get_logger()
 
@@ -150,7 +151,7 @@ async def main():
         logger.info(f"Created {len(triplets_phase2)} triplets from {len(edges_phase2)} edges")
 
         search_results_phase2 = await cognee.search(
-            query_type=SearchType.TRIPLET_COMPLETION,
+            query_type=completion_or_chunks(SearchType.TRIPLET_COMPLETION),
             query_text="What products does Apple make?",
         )
 

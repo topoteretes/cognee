@@ -134,7 +134,7 @@ async def _ingest_single_run():
     d2 = r2.data_ingestion_info[0]["data_id"]
     d3 = r3.data_ingestion_info[0]["data_id"]
 
-    cognify_result = await cognee.cognify()
+    cognify_result = await cognee.cognify(extractor="llm")
     dataset_id = next(iter(cognify_result.keys()))
 
     return dataset_id, d1, d2, d3
