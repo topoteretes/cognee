@@ -42,6 +42,16 @@ env:
   ENV: 'dev'
 
 jobs:
+  # ══ Product journeys against the real providers ═══════════════════════════
+  # The PR gate runs these in mock mode; nightly is where the hit-rate and
+  # answer-leak thresholds are measured against the model we actually ship with.
+  journeys-llm:
+    name: Product Journeys (real LLM)
+    uses: ./.github/workflows/journey_tests.yml
+    with:
+      mode: llm
+    secrets: inherit
+
   # ══ Performance: each caller runs BOTH file_based and postgres backends ════
   perf-wap-llm:
     name: Performance — War and Peace (real LLM)
@@ -189,6 +199,7 @@ jobs:
   notify:
     name: Test Completion Status
     needs: [
+      journeys-llm,
       perf-wap-llm,
       perf-wap-mock,
       perf-datasheets-llm,
@@ -219,6 +230,7 @@ jobs:
           # `== "success"` AND-chain would have failed the nightly EVERY day
           # for arms that were never meant to run that day.
           RESULTS: |
+            ${{ needs.journeys-llm.result }}
             ${{ needs.perf-wap-llm.result }}
             ${{ needs.perf-wap-mock.result }}
             ${{ needs.perf-datasheets-llm.result }}
@@ -243,11 +255,11 @@ jobs:
           if [ "$bad" -eq 0 ]; then
             echo "passed=true" >> "$GITHUB_OUTPUT"
             echo "emoji=✅" >> "$GITHUB_OUTPUT"
-            echo "summary=All $ran nightly performance arms completed successfully!" >> "$GITHUB_OUTPUT"
+            echo "summary=All $ran nightly arms completed successfully!" >> "$GITHUB_OUTPUT"
           else
             echo "passed=false" >> "$GITHUB_OUTPUT"
             echo "emoji=❌" >> "$GITHUB_OUTPUT"
-            echo "summary=$bad of $ran nightly performance arms failed." >> "$GITHUB_OUTPUT"
+            echo "summary=$bad of $ran nightly arms failed." >> "$GITHUB_OUTPUT"
           fi
           echo "ran_at=$(date -u '+%Y-%m-%d %H:%M UTC')" >> "$GITHUB_OUTPUT"
           # Two cadences now exist (daily = datasheets only, weekly = everything).
