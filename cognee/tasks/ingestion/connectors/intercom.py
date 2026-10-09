@@ -32,3 +32,15 @@ def _get_headers(token: str) -> dict:
         "Accept": "application/json",
         "Intercom-Version": INTERCOM_VERSION,
     }
+
+def intercom_source(
+    token: str | None = None,
+    resource_name: str = "intercom_contacts"
+):
+    """Create a dlt source yielding Intercom contacts.
+
+    Args:
+        token: Intercom Access Token. Falls back to INTERCOM_ACCESS_TOKEN.
+        resource_name: The dlt resource / table name to yield rows into.
+    """
+    pass
