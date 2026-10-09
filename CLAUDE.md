@@ -713,8 +713,6 @@ this rule applies only to internal PRs.
 ## Code Style
 
 - **Formatter**: Ruff (configured in `pyproject.toml`)
-- **Line length**: 100 characters
-- **String quotes**: Use double quotes `"` not single quotes `'` (enforced by ruff-format)
 - **Pre-commit hooks**: Run ruff linting and formatting automatically
 - **Type hints**: Encouraged (ty checks enabled)
 - **Important**: Always run `pre-commit run --all-files` before committing to catch formatting issues
