@@ -605,13 +605,14 @@ class CogneeClient:
     async def remember(
         self,
         data: Any,
-        dataset_name: str = "main_dataset",
+        dataset_name: str | None = "main_dataset",
         session_id: str | None = None,
         custom_prompt: str | None = None,
         filename: str | None = None,
         content_base64: str | None = None,
         ontology_key: str | list[str] | None = None,
         self_improvement: bool = True,
+        dataset_id: UUID | None = None,
     ) -> dict[str, Any]:
         """Store data in memory via remember().
 
@@ -625,6 +626,10 @@ class CogneeClient:
         upload), not both. File uploads are permanent-memory only.
         ontology_key selects one or more uploaded ontologies for permanent
         extraction; local mode resolves keys for the default user.
+        dataset_id targets an existing dataset by UUID and takes precedence
+        over dataset_name, matching the server. Datasets are shared across
+        users only by id, so it is required to write into a dataset another
+        user shared with the caller.
         """
         if content_base64 and data:
             raise ValueError("Pass either `data` or `filename` + `content_base64`, not both.")
@@ -659,9 +664,12 @@ class CogneeClient:
                         "answer": str(data),
                         "context": "",
                     },
-                    "dataset_name": dataset_name,
                     "session_id": session_id,
                 }
+                if dataset_name:
+                    payload["dataset_name"] = dataset_name
+                if dataset_id:
+                    payload["dataset_id"] = str(dataset_id)
                 if not self_improvement:
                     payload["self_improvement"] = False
                 response = await self.client.post(
@@ -674,7 +682,11 @@ class CogneeClient:
 
             endpoint = f"{self.api_url}/api/v1/remember"
             files = self._build_upload(data, filename, content_base64)
-            form_data: dict[str, Any] = {"datasetName": dataset_name}
+            form_data: dict[str, Any] = {}
+            if dataset_name:
+                form_data["datasetName"] = dataset_name
+            if dataset_id:
+                form_data["datasetId"] = str(dataset_id)
             if custom_prompt:
                 form_data["custom_prompt"] = custom_prompt
             if ontology_keys:
@@ -728,10 +740,11 @@ class CogneeClient:
                 else:
                     remember_data = data
 
-                kwargs = {
-                    "data": remember_data,
-                    "dataset_name": dataset_name,
-                }
+                kwargs = {"data": remember_data}
+                if dataset_name:
+                    kwargs["dataset_name"] = dataset_name
+                if dataset_id:
+                    kwargs["dataset_id"] = dataset_id
                 if ontology_config is not None:
                     kwargs["config"] = {"ontology_config": ontology_config}
                 if session_id:
@@ -754,14 +767,21 @@ class CogneeClient:
                         except OSError:
                             pass
 
-                return {
+                response = {
                     "status": getattr(result, "status", "completed"),
                     "dataset_name": dataset_name,
                     "session_id": session_id,
                 }
+                if dataset_id:
+                    response["dataset_id"] = str(dataset_id)
+                return response
 
     async def get_recall_state(
-        self, datasets: list[str] | None = None, *, deadline: float | None = None
+        self,
+        datasets: list[str] | None = None,
+        *,
+        dataset_ids: list[UUID] | None = None,
+        deadline: float | None = None,
     ) -> RecallState:
         """Best-effort empty-result diagnostics; never fetch documents or run an LLM.
 
@@ -783,15 +803,15 @@ class CogneeClient:
             return max(minimum, deadline - asyncio.get_running_loop().time())
 
         pipelines = ["add_pipeline", "cognify_pipeline", "code_graph_pipeline"]
+        # Ids take precedence over names, as they do for the recall itself.
+        wanted = [str(dataset_id) for dataset_id in dataset_ids] if dataset_ids else datasets
         if self.use_api:
             hop = remaining()
             visible = await self.list_datasets(timeout=hop if hop is not None else 2.0)
             selected = (
                 visible
-                if not datasets
-                else [
-                    d for d in visible if d.get("name") in datasets or str(d.get("id")) in datasets
-                ]
+                if not wanted
+                else [d for d in visible if d.get("name") in wanted or str(d.get("id")) in wanted]
             )
             if not selected:
                 return RecallState("none")
@@ -811,7 +831,7 @@ class CogneeClient:
         from cognee.modules.users.methods import get_default_user
 
         user = await get_default_user()
-        selected = await get_authorized_existing_datasets(datasets, "read", user)
+        selected = await get_authorized_existing_datasets(dataset_ids or datasets, "read", user)
         if not selected:
             return RecallState("none")
         ids = [dataset.id for dataset in selected]
@@ -831,8 +851,15 @@ class CogneeClient:
         top_k: int = 15,
         scope: list[str] | str | None = None,
         code_query: dict | None = None,
+        dataset_ids: list[UUID] | None = None,
     ) -> Any:
-        """Search memory via recall() with auto-routing and session awareness."""
+        """Search memory via recall() with auto-routing and session awareness.
+
+        dataset_ids scopes the search by dataset UUID and takes precedence over
+        datasets, matching the server. Datasets are shared across users only by
+        id, so ids are required to search a dataset another user shared with
+        the caller; names resolve only to datasets the caller owns.
+        """
         if not system_prompt:
             system_prompt = _default_recall_system_prompt()
         if self.use_api:
@@ -840,7 +867,9 @@ class CogneeClient:
             payload = {"query": query_text, "top_k": top_k, "search_type": None}
             if search_type:
                 payload["search_type"] = search_type.upper()
-            if not datasets and not session_id:
+            if dataset_ids:
+                payload["dataset_ids"] = [str(dataset_id) for dataset_id in dataset_ids]
+            if not datasets and not dataset_ids and not session_id:
                 # A bare recall (no dataset and no session) targets the empty
                 # default dataset and 404s ("Recall prerequisites not met"). Fall
                 # back to every dataset the caller can see so an unscoped
@@ -871,6 +900,8 @@ class CogneeClient:
                     kwargs["query_type"] = SearchType[search_type.upper()]
                 if datasets:
                     kwargs["datasets"] = datasets
+                if dataset_ids:
+                    kwargs["dataset_ids"] = list(dataset_ids)
                 if session_id:
                     kwargs["session_id"] = session_id
                 if system_prompt:
