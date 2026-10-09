@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useCogniInstance } from "@/modules/tenant/TenantProvider";
 import { useFilter } from "@/ui/layout/FilterContext";
 import { TrackPageView } from "@/modules/analytics";
-import getSkills from "@/modules/skills/getSkills";
+import getSkills, { SKILLS_PAGE_LIMIT } from "@/modules/skills/getSkills";
 import getSkill from "@/modules/skills/getSkill";
 import type { Skill } from "@/modules/skills/types";
 import SkeletonBar from "@/ui/elements/SkeletonBar";
@@ -68,6 +68,10 @@ export default function SkillsPage() {
   // Skills per dataset, populated by scanning every brain. A brain is only
   // shown in the list once it has at least one registered skill.
   const [skillsByDataset, setSkillsByDataset] = useState<Record<string, Skill[]>>({});
+  // Skills the server reports per brain, ignoring pagination. The listing is
+  // capped at SKILLS_PAGE_LIMIT, so a row count alone cannot say whether a
+  // brain is fully shown.
+  const [totalsByDataset, setTotalsByDataset] = useState<Record<string, number>>({});
   const [scanning, setScanning] = useState(false);
   const [scanned, setScanned] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -107,13 +111,15 @@ export default function SkillsPage() {
       const entries = await Promise.all(
         datasets.map(async (ds) => {
           try {
-            return [ds.id, await getSkills(cogniInstance, ds.id)] as const;
+            const page = await getSkills(cogniInstance, ds.id);
+            return [ds.id, page.skills, page.total] as const;
           } catch {
-            return [ds.id, [] as Skill[]] as const;
+            return [ds.id, [] as Skill[], 0] as const;
           }
         }),
       );
-      setSkillsByDataset(Object.fromEntries(entries));
+      setSkillsByDataset(Object.fromEntries(entries.map(([id, skills]) => [id, skills])));
+      setTotalsByDataset(Object.fromEntries(entries.map(([id, , total]) => [id, total])));
     } catch {
       setError("Failed to load skills.");
     } finally {
@@ -157,6 +163,9 @@ export default function SkillsPage() {
     [selectedDatasetId, skillsByDataset],
   );
   const selectedDatasetName = datasets.find((d) => d.id === selectedDatasetId)?.name ?? "";
+  // What the server holds vs. what this page could fetch in one request.
+  const totalSkills = selectedDatasetId ? (totalsByDataset[selectedDatasetId] ?? skills.length) : 0;
+  const truncated = totalSkills > skills.length;
 
   // Client-side search across name, maintainer, description and tags.
   const filteredSkills = useMemo(() => {
@@ -275,7 +284,11 @@ export default function SkillsPage() {
                   <span style={{ fontSize: 11, fontWeight: 700, color: "rgba(237,236,234,0.55)", letterSpacing: "0.08em", textTransform: "uppercase" }}>{selectedDatasetName}</span>
                   <span style={{ fontSize: 11, color: "rgba(255,255,255,0.2)" }}>·</span>
                   <span style={{ fontSize: 11, color: "rgba(237,236,234,0.35)" }}>
-                    {query ? `${filteredSkills.length} of ${skills.length}` : skills.length} skill{skills.length !== 1 ? "s" : ""}
+                    {query
+                      ? `${filteredSkills.length} of ${skills.length}`
+                      : truncated
+                        ? `${skills.length} of ${totalSkills}`
+                        : skills.length} skill{totalSkills !== 1 ? "s" : ""}
                   </span>
                 </>
               ) : (
@@ -385,6 +398,15 @@ export default function SkillsPage() {
                     </div>
                   );
                 })
+              )}
+
+              {/* The listing is one request, capped by the server. Say so rather
+                  than letting the page present a page as the whole brain — the
+                  same notice ScrollLoader shows for a capped document list. */}
+              {truncated && !query && (
+                <div style={{ padding: "12px 16px", borderTop: "1px solid rgba(255,255,255,0.07)", fontSize: 12, color: "rgba(237,236,234,0.3)", textAlign: "center" }}>
+                  This view is limited to {SKILLS_PAGE_LIMIT.toLocaleString()} skills. {(totalSkills - skills.length).toLocaleString()} more are not shown.
+                </div>
               )}
             </div>
           </div>

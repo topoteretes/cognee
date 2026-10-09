@@ -67,6 +67,7 @@
   "GET /api/v1/sessions/{session_id}",
   "GET /api/v1/settings",
   "GET /api/v1/skills/",
+  "GET /api/v1/skills/count",
   "GET /api/v1/skills/{skill_id}",
   "GET /api/v1/slack/channels",
   "GET /api/v1/slack/history/{team_id}",

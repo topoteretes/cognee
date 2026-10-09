@@ -44,6 +44,19 @@ def _skill_to_dict(skill: Skill, *, include_procedure: bool = False) -> dict[str
     return data
 
 
+async def _collect_scoped_skills(
+    dataset: str | UUID | None,
+    include_inactive: bool,
+) -> list[dict[str, Any]]:
+    """Collect every matching skill inside the dataset's database context."""
+    if dataset is not None:
+        owner_id = await _resolve_dataset_owner(dataset)
+        if owner_id is not None:
+            async with set_database_global_context_variables(dataset, owner_id):
+                return await _collect_skills(dataset, include_inactive)
+    return await _collect_skills(dataset, include_inactive)
+
+
 async def list_skills(
     dataset: str | UUID | None = None,
     include_inactive: bool = False,
@@ -55,23 +68,29 @@ async def list_skills(
     Parameters:
         dataset: dataset id/name used to scope the graph databases.
         include_inactive: when False (default) only ``is_active`` skills are returned.
-        limit/offset: optional pagination over the name-sorted result.
+        limit/offset: optional pagination over the name-sorted result. The returned
+            length is a page size, not a total — use :func:`count_skills` for that.
     """
-    if dataset is not None:
-        owner_id = await _resolve_dataset_owner(dataset)
-        if owner_id is not None:
-            async with set_database_global_context_variables(dataset, owner_id):
-                skills = await _collect_skills(dataset, include_inactive)
-        else:
-            skills = await _collect_skills(dataset, include_inactive)
-    else:
-        skills = await _collect_skills(dataset, include_inactive)
+    skills = await _collect_scoped_skills(dataset, include_inactive)
 
     if offset:
         skills = skills[offset:]
     if limit is not None:
         skills = skills[:limit]
     return skills
+
+
+async def count_skills(
+    dataset: str | UUID | None = None,
+    include_inactive: bool = False,
+) -> int:
+    """Return how many skills ``list_skills`` would page over.
+
+    Exists so a caller that renders a list can tell a full page from a truncated
+    one. ``list_skills`` applies ``limit`` as a slice, so its length saturates at
+    the limit and cannot distinguish "exactly 200 skills" from "the first 200".
+    """
+    return len(await _collect_scoped_skills(dataset, include_inactive))
 
 
 async def get_skill(skill_id: str, dataset: str | UUID) -> dict[str, Any] | None:

@@ -92,3 +92,89 @@ def test_delete_skill_requires_dataset_query_param(monkeypatch):
     response = client.delete(f"/api/v1/skills/{uuid4()}")
 
     assert response.status_code == 422
+
+
+def _list_client(monkeypatch, *, authorized=True, skills=None, total=0) -> TestClient:
+    """Client for the list/count routes, recording the arguments they forward."""
+    app = _app()
+    app.dependency_overrides[router_module.get_authenticated_user] = lambda: SimpleNamespace(
+        id=uuid4(),
+        tenant_id=None,
+    )
+
+    async def fake_authorized_datasets(dataset_ids, _permission, _user):
+        if not authorized:
+            return []
+        return [SimpleNamespace(id=dataset_ids[0])]
+
+    monkeypatch.setattr(router_module, "send_telemetry", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        router_module,
+        "get_authorized_existing_datasets",
+        fake_authorized_datasets,
+    )
+
+    calls: dict = {}
+
+    async def fake_list_skills(**kwargs):
+        calls["list"] = kwargs
+        return skills or []
+
+    async def fake_count_skills(**kwargs):
+        calls["count"] = kwargs
+        return total
+
+    monkeypatch.setattr(list_module, "list_skills", fake_list_skills)
+    monkeypatch.setattr(list_module, "count_skills", fake_count_skills)
+
+    client = TestClient(app)
+    client.calls = calls
+    return client
+
+
+def test_list_skills_forwards_pagination(monkeypatch):
+    client = _list_client(monkeypatch)
+
+    response = client.get(
+        "/api/v1/skills/",
+        params={"dataset_id": str(uuid4()), "limit": 1000, "offset": 200},
+    )
+
+    assert response.status_code == 200
+    assert client.calls["list"]["limit"] == 1000
+    assert client.calls["list"]["offset"] == 200
+
+
+def test_count_skills_returns_total(monkeypatch):
+    """The count is the whole dataset, not the page the list route would return."""
+    client = _list_client(monkeypatch, skills=[{"id": "a"}], total=378)
+    dataset_id = str(uuid4())
+
+    response = client.get("/api/v1/skills/count", params={"dataset_id": dataset_id})
+
+    assert response.status_code == 200
+    assert response.json() == {"count": 378}
+    # Proves /count reached the count handler rather than being captured as a
+    # skill_id by GET /{skill_id}, which is declared after it.
+    assert client.calls["count"]["include_inactive"] is False
+
+
+def test_count_skills_honors_include_inactive(monkeypatch):
+    client = _list_client(monkeypatch, total=5)
+
+    response = client.get(
+        "/api/v1/skills/count",
+        params={"dataset_id": str(uuid4()), "include_inactive": "true"},
+    )
+
+    assert response.status_code == 200
+    assert client.calls["count"]["include_inactive"] is True
+
+
+def test_count_skills_forbidden(monkeypatch):
+    client = _list_client(monkeypatch, authorized=False)
+
+    response = client.get("/api/v1/skills/count", params={"dataset_id": str(uuid4())})
+
+    assert response.status_code == 403
+    assert response.json() == {"error": "Not authorized for this dataset"}

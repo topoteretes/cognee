@@ -70,6 +70,12 @@ class SkillIngestRequest(BaseModel):
     )
 
 
+class SkillCountResponse(BaseModel):
+    """Total number of skills in a dataset, ignoring pagination."""
+
+    count: int = Field(description="Number of skills matching the request.")
+
+
 class ErrorResponse(BaseModel):
     """Generic API error response."""
 
@@ -164,6 +170,11 @@ def get_skills_router() -> APIRouter:
     ) -> list[dict]:
         """Return the skills available in an authorized dataset, with publisher metadata.
 
+        Results are paginated. The response is capped at **limit** items (200 by
+        default), so the number of rows returned is a page size, not a total; page
+        through with **offset**. Use `GET /count` for the total, so a caller can
+        tell a full dataset from a truncated page.
+
         ## Query Parameters
         - **dataset_id** (UUID): Dataset UUID to scope the skills to. List your datasets via GET
           /api/v1/datasets to find it.
@@ -201,6 +212,63 @@ def get_skills_router() -> APIRouter:
         except Exception:
             logger.exception("list skills failed")
             return JSONResponse(status_code=409, content={"error": "Failed to list skills"})
+
+    @router.get(
+        "/count",
+        response_model=SkillCountResponse,
+        responses={403: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
+    )
+    async def count_dataset_skills(
+        dataset_id: UUID = Query(..., description="Dataset UUID to scope the skills to."),
+        include_inactive: bool = Query(
+            default=False, description="Include skills whose is_active flag is false."
+        ),
+        user: User = Depends(get_authenticated_user),
+    ):
+        """Count the skills in an authorized dataset.
+
+        Exists so a caller that only needs "how many skills" does not have to fetch
+        them to count them. `GET /` is paginated, so its length is a page size, not
+        a total: a page of exactly `limit` rows is indistinguishable from a dataset
+        of exactly `limit` skills without this.
+
+        ## Query Parameters
+        - **dataset_id** (UUID): Dataset UUID to scope the skills to.
+        - **include_inactive** (bool): Include skills whose is_active flag is false.
+          Defaults to False.
+
+        ## Response
+        - **count**: Number of skills in the dataset.
+        """
+        send_telemetry(
+            "Skills Count API Endpoint Invoked",
+            user,
+            additional_properties={
+                "endpoint": "GET /v1/skills/count",
+                "dataset_id": str(dataset_id),
+                "cognee_version": cognee_version,
+            },
+        )
+
+        from cognee.api.v1.skills.list_skills import count_skills
+
+        try:
+            dataset = await _authorized_dataset(dataset_id, user, "read")
+            return SkillCountResponse(
+                count=await count_skills(
+                    dataset=dataset.id,
+                    include_inactive=include_inactive,
+                )
+            )
+        except PermissionDeniedError:
+            return JSONResponse(
+                status_code=403, content={"error": "Not authorized for this dataset"}
+            )
+        except CogneeApiError:
+            raise
+        except Exception:
+            logger.exception("count skills failed")
+            return JSONResponse(status_code=409, content={"error": "Failed to count skills"})
 
     @router.get(
         "/{skill_id}",
