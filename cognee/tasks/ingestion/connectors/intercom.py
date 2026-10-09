@@ -58,3 +58,11 @@ def intercom_source(
     def intercom_contacts(last_updated_time: dlt.sources.incremental = dlt.sources.incremental("updated_at")) -> Iterator[dict]:  # noqa: B008
         headers = _get_headers(token)
         url = f"{INTERCOM_API_URL}/contacts"
+        
+        while url:
+            resp = httpx.get(url, headers=headers, timeout=30)
+            resp.raise_for_status()
+            
+            data = resp.json()
+            contacts = data.get("data", [])
+            url = None  # prevent infinite loop for now
