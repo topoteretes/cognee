@@ -131,7 +131,11 @@ export default function OverviewPage(): React.ReactElement {
 
   const { runs, sessions, loading } = useDashboardTelemetry(telemetryRange);
   const { data: hourlyCosts = null } = useTenantHourlyCosts(tenant?.tenant_id ?? null, range);
-  const connectedIntegrations = useConnectedIntegrations(sessions, tenant?.tenant_id ?? null);
+  const connectedIntegrations = useConnectedIntegrations(
+    sessions,
+    tenant?.tenant_id ?? null,
+    cogniInstance,
+  );
   const sourceStatuses = useDataSourceStatuses(DATA_SOURCE_PROVIDERS, tenant?.tenant_id ?? null);
   // Dashboard metrics always report workspace-wide totals — pass null so the
   // graph counts never inherit a dataset selection carried over from another page.
