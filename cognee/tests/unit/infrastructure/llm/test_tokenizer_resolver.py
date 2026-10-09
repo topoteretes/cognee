@@ -124,6 +124,42 @@ def test_huggingface_load_failure_falls_back_with_warning(caplog):
     assert any("Falling back" in r.message for r in caplog.records)
 
 
+@pytest.mark.parametrize(
+    "model",
+    ["openai/text-embedding-3-large", "openrouter/openai/text-embedding-3-large"],
+)
+def test_custom_provider_with_openai_model_uses_tiktoken_not_huggingface(caplog, model):
+    # EMBEDDING_PROVIDER=custom with an OpenAI model embeds fine (litellm routes
+    # on the model prefix), so the tokenizer is resolved locally, never via a
+    # HuggingFace lookup that 404s. Gateway ids carry two provider tags.
+    tik = patch(
+        f"{_MODULE}.TikTokenTokenizer",
+        side_effect=lambda **kw: _FakeTokenizer("tiktoken", **kw),
+    )
+    hf = patch(f"{_MODULE}.HuggingFaceTokenizer", side_effect=AssertionError("network"))
+    with caplog.at_level(logging.WARNING), tik, hf:
+        tok = resolve_embedding_tokenizer(provider="custom", model=model)
+    assert tok.kind == "tiktoken"
+    assert tok.kwargs["model"] == "text-embedding-3-large"
+    assert not caplog.records
+
+
+def test_explicit_huggingface_tokenizer_wins_over_openai_model_name():
+    tok = _resolve(
+        provider="custom",
+        model="openai/text-embedding-3-large",
+        huggingface_tokenizer="BAAI/bge-m3",
+    )
+    assert tok.kind == "huggingface"
+    assert tok.kwargs["model"] == "BAAI/bge-m3"
+
+
+def test_custom_provider_with_huggingface_model_still_uses_its_repo():
+    tok = _resolve(provider="custom", model="BAAI/bge-m3")
+    assert tok.kind == "huggingface"
+    assert tok.kwargs["model"] == "BAAI/bge-m3"
+
+
 def test_no_resolvable_target_falls_back_with_warning(caplog):
     with caplog.at_level(logging.WARNING):
         tok = _resolve(provider="custom", model=None)
