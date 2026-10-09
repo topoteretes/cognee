@@ -2,9 +2,9 @@
 
 Guards against unbounded growth of the ``pipeline_runs`` table: large
 payloads passed to ``add``/``cognify`` used to be stored verbatim in
-``run_info["data"]`` on every run, with no reader and no size limit. The
-helper now bounds that payload while preserving the existing behaviour for
-empty input and lists of ``Data`` records.
+``run_info["data"]`` on every run, with no size limit and nothing consuming
+the value. The helper now bounds that payload while preserving the existing
+behaviour for empty input and lists of ``Data`` records.
 """
 
 from uuid import uuid4
