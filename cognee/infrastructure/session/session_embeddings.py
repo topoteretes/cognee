@@ -112,7 +112,7 @@ async def index_session_qa(
         )
         await index_data_points([point])
     except Exception as error:
-        logger.warning("Session QA vector indexing failed open: %s", error)
+        logger.warning("Session QA vector indexing failed open: %s", error, exc_info=True)
 
 
 async def search_session_qa_ids(
@@ -127,9 +127,9 @@ async def search_session_qa_ids(
         return []
 
     try:
-        from cognee.infrastructure.databases.vector import get_vector_engine
+        from cognee.infrastructure.databases.vector import get_vector_engine_async
 
-        vector_engine = get_vector_engine()
+        vector_engine = await get_vector_engine_async()
         results = await vector_engine.search(
             SESSION_QA_VECTOR_COLLECTION,
             query_text=query_text,
@@ -141,7 +141,7 @@ async def search_session_qa_ids(
         logger.debug("Session QA vector collection is not initialized yet.")
         return []
     except Exception as error:
-        logger.warning("Session QA vector search failed open: %s", error)
+        logger.warning("Session QA vector search failed open: %s", error, exc_info=True)
         return []
 
     return [str(result.id) for result in results or [] if getattr(result, "id", None) is not None]
@@ -150,22 +150,22 @@ async def search_session_qa_ids(
 async def delete_session_qa_vector(*, qa_id: str) -> None:
     """Delete one cached QA turn from the vector engine. Fail-open."""
     try:
-        from cognee.infrastructure.databases.vector import get_vector_engine
+        from cognee.infrastructure.databases.vector import get_vector_engine_async
 
-        vector_engine = get_vector_engine()
+        vector_engine = await get_vector_engine_async()
         await vector_engine.delete_data_points(SESSION_QA_VECTOR_COLLECTION, [UUID(qa_id)])
     except Exception as error:
-        logger.warning("Session QA vector delete failed open: %s", error)
+        logger.warning("Session QA vector delete failed open: %s", error, exc_info=True)
 
 
 async def delete_session_qa_vectors(*, user_id: str, session_id: str) -> None:
     """Remove all QA vector rows for a session by stripping its scope tag. Fail-open."""
     try:
-        from cognee.infrastructure.databases.vector import get_vector_engine
+        from cognee.infrastructure.databases.vector import get_vector_engine_async
 
-        vector_engine = get_vector_engine()
+        vector_engine = await get_vector_engine_async()
         await vector_engine.remove_belongs_to_set_tags(
             [session_scope_tag(user_id, session_id)],
         )
     except Exception as error:
-        logger.warning("Session QA vector session cleanup failed open: %s", error)
+        logger.warning("Session QA vector session cleanup failed open: %s", error, exc_info=True)

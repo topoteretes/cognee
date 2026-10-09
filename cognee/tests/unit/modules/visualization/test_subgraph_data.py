@@ -1,0 +1,400 @@
+"""Unit tests for bounded-subgraph seed resolution and truncation."""
+
+from functools import partial
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, call, patch
+
+import pytest
+
+from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+from cognee.modules.visualization.preprocessor import SEMANTIC_TYPE_KEY
+from cognee.modules.visualization.subgraph_data import (
+    DEFAULT_NEIGHBORHOOD_DEPTH,
+    fetch_visualization_graph_data,
+    resolve_seed_node_ids,
+    resolve_seeds_from_query,
+    resolve_seeds_from_recall,
+    truncate_subgraph,
+)
+
+
+def _mock_engine():
+    """A mocked engine with no native bounded read, so it takes the interface default.
+
+    A bare MagicMock would answer ``iter_bounded_neighborhood`` with another
+    MagicMock, which is not an async iterator.
+    """
+    engine = MagicMock()
+    engine.iter_bounded_neighborhood = partial(GraphDBInterface.iter_bounded_neighborhood, engine)
+    engine.get_entity_type_names = AsyncMock(return_value={})
+    return engine
+
+
+def _chain_graph(node_count: int = 20):
+    """A simple 0-1-2-...-N chain; deterministic and easy to reason about."""
+    nodes = [(str(i), {"type": "Entity", "name": f"N{i}"}) for i in range(node_count)]
+    edges = [(str(i), str(i + 1), "related_to", {}) for i in range(node_count - 1)]
+    return nodes, edges
+
+
+# --- recall seed extraction ------------------------------------------------
+
+
+def test_resolve_seeds_from_recall_node_ids_dict():
+    seeds = resolve_seeds_from_recall({"node_ids": ["a", "b", "a"]})
+    assert seeds == ["a", "b"]
+
+
+def test_resolve_seeds_from_recall_qa_entries_provenance():
+    entries = [
+        SimpleNamespace(used_graph_element_ids={"node_ids": ["9", "8"]}),
+        SimpleNamespace(used_graph_element_ids={"node_ids": ["8", "7"]}),
+    ]
+    seeds = resolve_seeds_from_recall(entries)
+    assert seeds == ["9", "8", "7"]
+
+
+def test_resolve_seeds_from_recall_dict_items():
+    # Serialized QA entries (dicts) are handled like their object form.
+    items = [{"used_graph_element_ids": {"node_ids": ["9", "8"]}}, {"text": "no provenance"}]
+    assert resolve_seeds_from_recall(items) == ["9", "8"]
+
+
+def test_resolve_seeds_from_recall_ignores_shapes_without_node_ids():
+    # A graph result item carries text/metadata but no graph node ids.
+    item = SimpleNamespace(text="an answer", metadata={"chunk_id": "c1"})
+    assert resolve_seeds_from_recall([item]) == []
+    assert resolve_seeds_from_recall(None) == []
+
+
+def test_resolve_seeds_from_recall_malformed_node_ids_returns_empty():
+    # Non-list node_ids must degrade to [] rather than crashing or char-splitting.
+    assert resolve_seeds_from_recall({"node_ids": 5}) == []
+    assert resolve_seeds_from_recall({"node_ids": "a1b2"}) == []
+
+
+# --- query seed extraction (ordering fix) ----------------------------------
+
+
+@pytest.mark.asyncio
+async def test_resolve_seeds_from_query_orders_by_distance_and_is_deterministic():
+    # Same node "a" appears in two collections with different scores; "a" has
+    # the best (lowest) score so it must rank first, and the top-k must be the
+    # nearest hits in distance order — not an arbitrary set slice.
+    fake = MagicMock()
+    fake.embed_and_retrieve_distances = AsyncMock()
+    fake.has_results = MagicMock(return_value=True)
+    fake.node_distances = {
+        "Entity_name": [
+            SimpleNamespace(id="c", score=0.9),
+            SimpleNamespace(id="a", score=0.1),
+        ],
+        "DocumentChunk_text": [
+            SimpleNamespace(id="b", score=0.5),
+            SimpleNamespace(id="a", score=0.3),
+        ],
+    }
+
+    with patch(
+        "cognee.modules.visualization.subgraph_data.NodeEdgeVectorSearch",
+        return_value=fake,
+    ):
+        top2 = await resolve_seeds_from_query("q", seed_top_k=2)
+        top3 = await resolve_seeds_from_query("q", seed_top_k=3)
+
+    assert top2 == ["a", "b"]
+    assert top3 == ["a", "b", "c"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_seeds_from_query_empty_when_no_hits():
+    fake = MagicMock()
+    fake.embed_and_retrieve_distances = AsyncMock()
+    fake.has_results = MagicMock(return_value=False)
+    with patch(
+        "cognee.modules.visualization.subgraph_data.NodeEdgeVectorSearch",
+        return_value=fake,
+    ):
+        assert await resolve_seeds_from_query("q") == []
+
+
+# --- seed priority ---------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_resolve_seed_priority_explicit_over_recall_query_degree():
+    engine = _mock_engine()
+    engine.get_graph_data = AsyncMock(return_value=_chain_graph(5))
+    with patch(
+        "cognee.modules.visualization.subgraph_data.resolve_seeds_from_query",
+        AsyncMock(return_value=["q1"]),
+    ):
+        seeds, source = await resolve_seed_node_ids(
+            engine,
+            seed_node_ids=["explicit"],
+            recall_result={"node_ids": ["r1"]},
+            query="ignored",
+        )
+    assert (seeds, source) == (["explicit"], "explicit")
+
+
+@pytest.mark.asyncio
+async def test_resolve_seed_priority_falls_through_to_degree():
+    # The ranking is the adapter's job now, so this asserts the fall-through
+    # and that the adapter is asked — not how it counts. How it counts is
+    # covered by the interface-default test below.
+    engine = _mock_engine()
+    engine.get_top_degree_node_ids = AsyncMock(return_value=["hub"])
+    engine.get_graph_data = AsyncMock(
+        side_effect=AssertionError("seed ranking must not read the whole graph")
+    )
+
+    seeds, source = await resolve_seed_node_ids(engine, seed_top_k=1)
+
+    assert source == "degree"
+    assert seeds == ["hub"]
+    engine.get_top_degree_node_ids.assert_awaited_once_with(1)
+
+
+@pytest.mark.asyncio
+async def test_resolve_seed_none_on_empty_graph():
+    engine = _mock_engine()
+    engine.get_top_degree_node_ids = AsyncMock(return_value=[])
+    seeds, source = await resolve_seed_node_ids(engine)
+    assert (seeds, source) == ([], "none")
+
+
+# --- truncation ------------------------------------------------------------
+
+
+def test_truncate_subgraph_caps_keeps_seeds_and_drops_dangling_edges():
+    nodes, edges = _chain_graph(6)
+    (kept_nodes, kept_edges), truncated = truncate_subgraph(
+        nodes, edges, seed_ids=["0"], max_nodes=3
+    )
+    kept_ids = {str(n) for n, _ in kept_nodes}
+    assert truncated is True
+    assert len(kept_nodes) == 3
+    assert "0" in kept_ids  # seed always kept
+    assert kept_ids == {"0", "1", "2"}  # nearest hop neighbors of the seed
+    assert all(str(e[0]) in kept_ids and str(e[1]) in kept_ids for e in kept_edges)
+
+
+def test_truncate_subgraph_noop_under_cap():
+    nodes, edges = _chain_graph(4)
+    (kept_nodes, kept_edges), truncated = truncate_subgraph(
+        nodes, edges, seed_ids=["0"], max_nodes=500
+    )
+    assert truncated is False
+    assert (kept_nodes, kept_edges) == (nodes, edges)
+
+
+# --- fetch orchestration ---------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_fetch_full_graph_skips_neighborhood():
+    full_graph = _chain_graph(5)
+    engine = _mock_engine()
+    engine.get_graph_data = AsyncMock(return_value=full_graph)
+    engine.get_neighborhood = AsyncMock()
+
+    graph_data = await fetch_visualization_graph_data(engine, full=True)
+
+    assert graph_data == full_graph
+    engine.get_graph_data.assert_awaited_once()
+    engine.get_neighborhood.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_fetch_subgraph_expands_explicit_seeds():
+    full_graph = _chain_graph(20)
+    subgraph = (full_graph[0][8:12], full_graph[1][8:11])
+    engine = _mock_engine()
+    engine.get_neighborhood = AsyncMock(return_value=subgraph)
+
+    graph_data = await fetch_visualization_graph_data(
+        engine,
+        seed_node_ids=["10"],
+        neighborhood_depth=DEFAULT_NEIGHBORHOOD_DEPTH,
+    )
+
+    engine.get_neighborhood.assert_awaited_once_with(
+        node_ids=["10"], depth=DEFAULT_NEIGHBORHOOD_DEPTH
+    )
+    nodes, edges = graph_data
+    # Same subgraph, with the seed first and then nodes by hop distance.
+    assert [node_id for node_id, _ in nodes] == ["10", "9", "11", "8"]
+    assert sorted(nodes) == sorted(subgraph[0])
+    assert sorted(edges) == sorted(subgraph[1])
+
+
+@pytest.mark.asyncio
+async def test_fetch_subgraph_uses_query_seeds():
+    subgraph = _chain_graph(4)
+    engine = _mock_engine()
+    engine.get_neighborhood = AsyncMock(return_value=subgraph)
+    engine.get_graph_data = AsyncMock()
+
+    with patch(
+        "cognee.modules.visualization.subgraph_data.resolve_seeds_from_query",
+        AsyncMock(return_value=["3", "4"]),
+    ):
+        await fetch_visualization_graph_data(engine, query="python")
+
+    engine.get_neighborhood.assert_awaited_once_with(node_ids=["3", "4"], depth=2)
+    engine.get_graph_data.assert_not_awaited()  # query path never loads full graph
+
+
+@pytest.mark.asyncio
+async def test_fetch_truncates_oversized_neighborhood():
+    # get_neighborhood returns more than max_nodes; fetch must cap while keeping
+    # the seed and leaving no dangling edges.
+    nodes, edges = _chain_graph(20)
+    engine = _mock_engine()
+    engine.get_neighborhood = AsyncMock(return_value=(nodes, edges))
+
+    kept_nodes, kept_edges = await fetch_visualization_graph_data(
+        engine, seed_node_ids=["0"], neighborhood_depth=5, max_nodes=4
+    )
+    kept_ids = {str(n) for n, _ in kept_nodes}
+    assert len(kept_nodes) == 4
+    assert "0" in kept_ids
+    assert all(str(e[0]) in kept_ids and str(e[1]) in kept_ids for e in kept_edges)
+
+
+@pytest.mark.asyncio
+async def test_fetch_no_seeds_renders_empty():
+    engine = _mock_engine()
+    engine.get_top_degree_node_ids = AsyncMock(return_value=[])
+    engine.get_neighborhood = AsyncMock()
+
+    graph_data = await fetch_visualization_graph_data(engine)
+
+    assert graph_data == ([], [])
+    engine.get_neighborhood.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "kwargs",
+    [{"neighborhood_depth": 0}, {"seed_top_k": 0}, {"max_nodes": 0}],
+)
+async def test_fetch_validates_bounds(kwargs):
+    engine = _mock_engine()
+    with pytest.raises(ValueError):
+        await fetch_visualization_graph_data(engine, **kwargs)
+
+
+# --- semantic types outside the read (SDK-794) -----------------------------
+
+
+class _TypedStore:
+    """alice -knows- bob, each ``is_a`` Person, and a Person type node.
+
+    ``get_neighborhood`` honours ``edge_types`` and is undirected, like the
+    real adapters, and records every call.
+    """
+
+    def __init__(self):
+        self.nodes = {
+            "alice": {"type": "Entity", "name": "Alice"},
+            "bob": {"type": "Entity", "name": "Bob"},
+            "person": {"type": "EntityType", "name": "Person"},
+            "chunk": {"type": "DocumentChunk", "text": "Alice knows Bob"},
+        }
+        self.edges = [
+            ("alice", "bob", "knows", {}),
+            ("alice", "person", "is_a", {}),
+            ("bob", "person", "is_a", {}),
+            ("chunk", "alice", "contains", {}),
+        ]
+        self.calls = []
+
+    async def get_neighborhood(self, node_ids, depth=1, edge_types=None):
+        self.calls.append((list(node_ids), depth, edge_types))
+        members = set(node_ids)
+        for _ in range(depth):
+            # One hop per round: expand from a snapshot of the frontier.
+            reached = set(members)
+            for source, target, relation, _props in self.edges:
+                if edge_types and relation not in edge_types:
+                    continue
+                if source in reached or target in reached:
+                    members |= {source, target}
+        nodes = [(node_id, dict(self.nodes[node_id])) for node_id in members]
+        edges = [e for e in self.edges if e[0] in members and e[1] in members]
+        return nodes, edges
+
+    def iter_bounded_neighborhood(self, seeds, depth, max_nodes, **options):
+        return GraphDBInterface.iter_bounded_neighborhood(self, seeds, depth, max_nodes, **options)
+
+
+@pytest.mark.asyncio
+async def test_neighbours_keep_their_type_when_the_type_node_is_outside_the_read():
+    store = _TypedStore()
+    # Seeded on the chunk, depth 1: alice is admitted, her Person node is not.
+    nodes, _ = await fetch_visualization_graph_data(
+        store, seed_node_ids=["chunk"], neighborhood_depth=1
+    )
+    by_id = dict(nodes)
+    assert "person" not in by_id
+    assert by_id["alice"][SEMANTIC_TYPE_KEY] == "Person"
+    assert SEMANTIC_TYPE_KEY not in by_id["chunk"]
+
+
+@pytest.mark.asyncio
+async def test_a_budget_cut_never_drops_an_entity_type():
+    store = _TypedStore()
+    # max_nodes=2 keeps chunk and alice and cuts the Person node.
+    nodes, _ = await fetch_visualization_graph_data(
+        store, seed_node_ids=["chunk"], neighborhood_depth=2, max_nodes=2
+    )
+    by_id = dict(nodes)
+    assert set(by_id) == {"chunk", "alice"}
+    assert by_id["alice"][SEMANTIC_TYPE_KEY] == "Person"
+
+
+@pytest.mark.asyncio
+async def test_the_type_lookup_never_starts_from_a_type_node():
+    store = _TypedStore()
+    await fetch_visualization_graph_data(store, seed_node_ids=["person"], neighborhood_depth=1)
+    lookups = [c for c in store.calls if c[2] == ["is_a"]]
+    assert lookups, "the read should look up the admitted entities' types"
+    for seeds, depth, _ in lookups:
+        assert "person" not in seeds
+        assert "chunk" not in seeds
+        assert depth == 1
+
+
+@pytest.mark.asyncio
+async def test_a_failed_type_lookup_still_returns_the_read(caplog):
+    store = _TypedStore()
+
+    async def broken(entity_ids):
+        raise RuntimeError("edge type filter unsupported by this store")
+
+    store.get_entity_type_names = broken
+    nodes, _ = await fetch_visualization_graph_data(
+        store, seed_node_ids=["chunk"], neighborhood_depth=1
+    )
+    assert {node_id for node_id, _ in nodes} == {"chunk", "alice"}
+    assert all(SEMANTIC_TYPE_KEY not in properties for _, properties in nodes)
+
+
+@pytest.mark.asyncio
+async def test_a_native_type_lookup_is_preferred_over_the_neighbourhood_default():
+    store = _TypedStore()
+    asked = []
+
+    async def native(entity_ids):
+        asked.append(list(entity_ids))
+        return {"alice": "Person"}
+
+    store.get_entity_type_names = native
+    nodes, _ = await fetch_visualization_graph_data(
+        store, seed_node_ids=["chunk"], neighborhood_depth=1
+    )
+    assert asked == [["alice"]]
+    assert not [c for c in store.calls if c[2] == ["is_a"]]
+    assert dict(nodes)["alice"][SEMANTIC_TYPE_KEY] == "Person"

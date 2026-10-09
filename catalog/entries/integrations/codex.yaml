@@ -1,0 +1,25 @@
+id: codex
+title: Cognee plugin for Codex
+kind: integration
+stack: agent-runtime
+tags:
+  - codex
+  - openai
+  - cli
+  - marketplace-plugin
+summary: Distribute cognee-cli skills to Codex users through the Codex plugin marketplace.
+what_youll_build: A Codex environment where a user can trigger cognee setup, ingest a codebase, and launch the UI without leaving the assistant.
+quickstart: |
+  # from the Codex marketplace, install the cognee plugin
+  # then in a Codex session:
+  cognee-cli add "./my-project"
+  cognee-cli cognify
+  cognee-cli search "How does authentication work?"
+expected_output: |
+  A search response referencing files in the ingested codebase, with cognee
+  running locally against SQLite + LanceDB + Ladybug.
+difficulty: easy
+repo: topoteretes/cognee-integrations
+path: integrations/codex
+inventory_slug: codex
+docs_url: https://docs.cognee.ai/integrations/codex

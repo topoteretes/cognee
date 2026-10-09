@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from typing import Any
 
@@ -10,19 +9,22 @@ from pydantic import BaseModel
 from tenacity import (
     before_sleep_log,
     retry,
-    retry_if_not_exception_type,
     stop_after_attempt,
     wait_exponential_jitter,
 )
 
-from cognee.infrastructure.llm.retry_config import (
-    llm_retry_stop_condition,
-)
-
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.config import get_llm_config
+from cognee.infrastructure.llm.exceptions import raise_if_budget_exhausted
+from cognee.infrastructure.llm.retry_config import (
+    llm_retry_condition,
+    llm_retry_stop_condition,
+)
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
     GenericAPIAdapter,
+)
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
+    get_instructor_mode,
 )
 from cognee.modules.observability.get_observe import get_observe
 from cognee.shared.logging_utils import get_logger
@@ -43,7 +45,14 @@ class MistralAdapter(GenericAPIAdapter):
     - show_prompt
     """
 
-    default_instructor_mode = "mistral_tools"
+    # Declared False even though GenericAPIAdapter declares True. This class
+    # overrides acreate_structured_output without a `response_model is str`
+    # branch and defines no acreate_str_output, so a plain-text answer never
+    # reaches the parent's streaming door. Inheriting True would promote a
+    # sink, announce `stage: generating`, and then emit nothing at all.
+    supports_answer_streaming = False
+
+    default_instructor_mode = get_instructor_mode("mistral")
 
     def __init__(
         self,
@@ -81,13 +90,7 @@ class MistralAdapter(GenericAPIAdapter):
     @retry(
         stop=llm_retry_stop_condition,
         wait=wait_exponential_jitter(8, 128),
-        retry=retry_if_not_exception_type(
-            (
-                litellm.exceptions.NotFoundError,
-                litellm.exceptions.AuthenticationError,
-                asyncio.CancelledError,
-            )
-        ),
+        retry=llm_retry_condition,
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
@@ -140,29 +143,27 @@ class MistralAdapter(GenericAPIAdapter):
                 else:
                     raise ValueError("Failed to get valid response after retries")
             except litellm.exceptions.BadRequestError as e:
-                logger.error(f"Bad request error: {str(e)}")
-                raise ValueError(f"Invalid request: {str(e)}")
+                logger.error(f"Bad request error: {e!s}")
+                raise ValueError(f"Invalid request: {e!s}")
 
         except JSONSchemaValidationError as e:
-            logger.error(f"Schema validation failed: {str(e)}")
+            logger.error(f"Schema validation failed: {e!s}")
             logger.debug(f"Raw response: {e.raw_response}")
-            raise ValueError(f"Response failed schema validation: {str(e)}")
+            raise ValueError(f"Response failed schema validation: {e!s}")
+        except Exception as e:
+            # Same detail-carrying message as the other adapters.
+            raise_if_budget_exhausted(e)
+            raise
 
     @observe(as_type="transcription")
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(2, 128),
-        retry=retry_if_not_exception_type(
-            (
-                litellm.exceptions.NotFoundError,
-                litellm.exceptions.AuthenticationError,
-                asyncio.CancelledError,
-            )
-        ),
+        retry=llm_retry_condition,
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    async def create_transcript(self, input) -> TranscriptionReturnType | None:
+    async def create_transcript(self, input: str, **kwargs: Any) -> TranscriptionReturnType | None:
         """
         Generate an audio transcript from a user query.
 
@@ -180,7 +181,10 @@ class MistralAdapter(GenericAPIAdapter):
         transcription_model = self.transcription_model
         if self.transcription_model.startswith("mistral"):
             transcription_model = self.transcription_model.split("/")[-1]
-        file_name = input.split("/")[-1]
+        # Normalize Windows ("\") and POSIX ("/") separators before taking the
+        # basename; on Windows `input` is a backslash path, so splitting on "/"
+        # alone would send the full path as the file name to the API.
+        file_name = str(input).replace("\\", "/").split("/")[-1]
         async with open_data_file(input, mode="rb") as f:
             transcription_response = self.mistral_client.audio.transcriptions.complete(
                 model=transcription_model,

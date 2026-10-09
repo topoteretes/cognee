@@ -1,4 +1,9 @@
 import { CogneeInstance } from "../instances/types";
+import { getPipelineSettingsFromStorage } from "../configuration/pipelineSettings";
+
+// HYBRID_COMPLETION over a large graph routinely exceeds the client's 30s
+// default — this is the endpoint CLO-333 was filed against.
+const RECALL_TIMEOUT_MS = 120_000;
 
 export type RecallScope =
   | "all"
@@ -20,30 +25,34 @@ export interface RecallRequest {
 /**
  * Unified recall call. Hits POST /v1/recall (not /v1/search), so the
  * server's scope-aware fan-out applies: graph + session + trace +
- * graph_context, tagged with _source.
+ * graph_context, tagged with source.
  *
- * Pass ``searchType: null`` to opt into the server's auto-router.
- * Default keeps ``GRAPH_COMPLETION`` for backward compat.
+ * ``searchType`` is omitted by default, which lets the server auto-route
+ * the query (rule-based, HYBRID_COMPLETION fallback). Pass a value to pin a
+ * strategy.
  */
 export default function recallKnowledge(
   instance: CogneeInstance,
   req: RecallRequest,
 ): Promise<unknown[]> {
+  const pipelineSettings = getPipelineSettingsFromStorage();
   const body: Record<string, unknown> = { query: req.query };
   if (req.scope !== undefined) body.scope = req.scope;
   if (req.sessionId) body.session_id = req.sessionId;
   if (req.datasets) body.datasets = req.datasets;
   if (req.datasetIds) body.dataset_ids = req.datasetIds;
-  if (req.topK !== undefined) body.top_k = req.topK;
-  // Explicit null asks the server to auto-route; omitting keeps
-  // the current HTTP default (GRAPH_COMPLETION).
-  if (req.searchType !== undefined) body.search_type = req.searchType;
+  body.top_k = req.topK ?? pipelineSettings.topK;
+  // Server default is false; we default on so completions ship with citations.
+  body.include_references = pipelineSettings.includeReferences;
+  // Omitted (or null) means the server auto-routes; a value pins the strategy.
+  if (req.searchType) body.search_type = req.searchType;
 
   return instance
     .fetch("/v1/recall", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      timeoutMs: RECALL_TIMEOUT_MS,
     })
     .then(async (r) => {
       if (r.ok) return r.json();

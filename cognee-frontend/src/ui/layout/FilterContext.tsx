@@ -1,8 +1,21 @@
 "use client";
 
-import { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef, ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef, useSyncExternalStore, ReactNode } from "react";
+import { useQuery, useQueryClient, type UseQueryOptions } from "@tanstack/react-query";
 import { useCogniInstance, useTenant } from "@/modules/tenant/TenantProvider";
 import getDatasets from "@/modules/datasets/getDatasets";
+import { BACKGROUND_QUERY_RETRY_COUNT, backgroundQueryRetryDelay } from "@/modules/query/backgroundQueryRetry";
+
+// Local/loaded pods can take several seconds per request (see COG-5722) —
+// a background poll shouldn't surface a false "error" at the default 10s
+// GET timeout just because the pod is slow, so it gets more headroom than
+// a user-initiated request would.
+const BACKGROUND_POLL_TIMEOUT_MS = 25_000;
+// Syncs the selected-dataset filter across same-browser tabs on the same
+// tenant. Deliberately narrow — only a real user action (picking a dataset)
+// broadcasts, never a poll tick, so this can't multiply background load the
+// way COG-5721/5722 just fixed.
+const DATASET_SYNC_CHANNEL = "cognee-selected-dataset-sync";
 
 export interface Agent {
   id: string;
@@ -75,14 +88,92 @@ function colorForTenant(id: string): string {
   return TENANT_COLORS[Math.abs(hash) % TENANT_COLORS.length];
 }
 
+const PERSISTED_TENANT_KEY = "cognee_selected_tenant";
+const PERSISTED_TENANT_NAME_KEY = "cognee_selected_tenant_name";
+const PERSISTED_FIELD_SEPARATOR = "::";
+
+// Persisted workspace as one string, for useSyncExternalStore to compare by
+// value. Server snapshot is always empty (no localStorage there), matching
+// hydration's first client pass; React swaps in the real value right after.
+function getPersistedWorkspaceSnapshot(): string {
+  const id = localStorage.getItem(PERSISTED_TENANT_KEY);
+  const name = localStorage.getItem(PERSISTED_TENANT_NAME_KEY);
+  return id && name ? `${id}${PERSISTED_FIELD_SEPARATOR}${name}` : "";
+}
+function getServerPersistedWorkspaceSnapshot(): string { return ""; }
+function subscribeToPersistedWorkspace(onStoreChange: () => void): () => void {
+  window.addEventListener("storage", onStoreChange);
+  return () => window.removeEventListener("storage", onStoreChange);
+}
+
+// Shared with useRefreshDatasetsOnMount below, so both land on the exact same
+// query — same key, same fetch behavior — and react-query dedupes them into
+// one in-flight request instead of two independent fetches.
+function datasetsQueryOptions(
+  cogniInstance: ReturnType<typeof useCogniInstance>["cogniInstance"],
+  tenantId: string | null,
+  enabled: boolean,
+): UseQueryOptions<Dataset[]> {
+  return {
+    queryKey: ["datasets", tenantId],
+    queryFn: ({ signal }) =>
+      getDatasets(cogniInstance!, signal, BACKGROUND_POLL_TIMEOUT_MS).then((d: Dataset[]) => (Array.isArray(d) ? d : [])),
+    enabled,
+    refetchInterval: false,
+    retry: BACKGROUND_QUERY_RETRY_COUNT,
+    retryDelay: backgroundQueryRetryDelay,
+  };
+}
+
+// FilterProvider lives in the layout and never remounts on navigation, so its
+// datasets query never gets a mount-triggered refetch just from moving
+// between pages — only from a user-initiated create/delete/upload. That
+// leaves datasets created out-of-band (e.g. by an agent session) stale on
+// pages that read the list from FilterContext. Pages that need the list to be
+// current (Mindmap, Dashboard) call this once to opt into a
+// mount-time freshness check — it shares the provider's query key, so
+// react-query dedupes it with the provider's own fetch instead of firing a
+// second network request, and only actually hits the network if the cached
+// data is stale.
+export function useRefreshDatasetsOnMount(): void {
+  const { cogniInstance, isInitializing } = useCogniInstance();
+  const { tenant, tenantReady } = useTenant();
+  const tenantId = tenant?.tenant_id ?? null;
+  useQuery({
+    ...datasetsQueryOptions(cogniInstance, tenantId, !!cogniInstance && !isInitializing && tenantReady),
+    refetchOnMount: "always",
+  });
+}
+
 export function FilterProvider({ children }: { children: ReactNode }) {
   const { cogniInstance, isInitializing } = useCogniInstance();
-  const { tenant, availableTenants, switchTenant } = useTenant();
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [datasets, setDatasets] = useState<Dataset[]>([]);
+  const { tenant, tenantReady, availableTenants, switchTenant } = useTenant();
+  const queryClient = useQueryClient();
+  const [agents] = useState<Agent[]>([]);
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [selectedDataset, setSelectedDataset] = useState<Dataset | null>(null);
-  const [loading, setLoading] = useState(true);
+  const tenantId = tenant?.tenant_id ?? null;
+
+  // Single source of truth for the datasets list — shared via this query key
+  // with any other hook/page that needs it (e.g. OverviewPage), so they
+  // dedupe into one in-flight request instead of fetching independently.
+  // The list rarely changes (only on user create/delete/upload), so there's
+  // no background poll here — refreshDatasets() invalidates on mutation, and
+  // react-query's default refetchOnWindowFocus keeps it from going stale
+  // across tabs/sessions without hammering every page that mounts this
+  // provider (most of which never even render the list).
+  const datasetsQuery = useQuery(
+    // tenantReady, not just cogniInstance: a freshly-created workspace's pod
+    // can still be unreachable while cogniInstance already exists (see
+    // useDashboardTelemetry.ts / useGraphSummary.ts for the same fix).
+    datasetsQueryOptions(cogniInstance, tenantId, !!cogniInstance && !isInitializing && tenantReady),
+  );
+
+  // Memoized so the fallback `[]` isn't a fresh reference on every render —
+  // keeps the `value` memo below (and its consumers) stable when there's no
+  // query data yet.
+  const datasets = useMemo(() => datasetsQuery.data ?? [], [datasetsQuery.data]);
+  const loading = datasetsQuery.isLoading;
 
   // Build workspaces from available tenants
   const tenantWorkspaces = useMemo<Workspace[]>(() => {
@@ -96,109 +187,78 @@ export function FilterProvider({ children }: { children: ReactNode }) {
     }));
   }, [availableTenants]);
 
-  const currentWorkspace = useMemo(() => {
-    if (!tenant) return tenantWorkspaces[0];
-    return tenantWorkspaces.find((ws) => ws.id === tenant.tenant_id) ?? tenantWorkspaces[0];
-  }, [tenant, tenantWorkspaces]);
+  // Persisted workspace selection. A plain effect flashes the hardcoded
+  // default for one frame first; a lazy useState initializer reading
+  // localStorage removes that flash but disagrees with the server's
+  // (localStorage-less) render, causing a hydration mismatch.
+  // useSyncExternalStore avoids both: hydration's first client pass matches
+  // the server, then swaps in the real value synchronously before paint.
+  const persistedKey = useSyncExternalStore(
+    subscribeToPersistedWorkspace,
+    getPersistedWorkspaceSnapshot,
+    getServerPersistedWorkspaceSnapshot,
+  );
+  const persistedSelection = useMemo<Workspace | null>(() => {
+    if (!persistedKey) return null;
+    const separatorIndex = persistedKey.indexOf(PERSISTED_FIELD_SEPARATOR);
+    const id = persistedKey.slice(0, separatorIndex);
+    const name = persistedKey.slice(separatorIndex + PERSISTED_FIELD_SEPARATOR.length);
+    return { id, name, initial: name.charAt(0).toUpperCase(), color: colorForTenant(id), type: "organization" as const };
+  }, [persistedKey]);
 
-  const [workspace, setWorkspaceState] = useState<Workspace>(DEFAULT_WORKSPACES[0]);
+  // The workspace shown in the topbar — derived, not its own state. It used
+  // to be mirrored into a separate useState synced by an effect, which added
+  // an extra render round-trip (persistedSelection settles -> this recomputes
+  // -> the effect fires -> the mirror updates) for the same flash this exists
+  // to avoid.
+  const workspace = useMemo(() => {
+    if (tenant) return tenantWorkspaces.find((ws) => ws.id === tenant.tenant_id) ?? tenantWorkspaces[0];
+    // tenant not resolved yet — prefer the persisted selection over the
+    // hardcoded personal default so a user on another workspace never sees
+    // "Personal workspace" flash first.
+    return persistedSelection ?? tenantWorkspaces[0];
+  }, [tenant, tenantWorkspaces, persistedSelection]);
 
-  // Sync workspace state when tenant data loads
-  useEffect(() => {
-    if (currentWorkspace) setWorkspaceState(currentWorkspace);
-  }, [currentWorkspace]);
-
+  // Window-focus refetch, retry-with-backoff, and interval polling are all
+  // handled by the query above (refetchOnWindowFocus defaults to true,
+  // respecting staleTime so rapid alt-tabbing doesn't burst-refetch).
   const refreshDatasets = useCallback(() => {
-    if (!cogniInstance) return;
-    getDatasets(cogniInstance).then((d: Dataset[]) => {
-      setDatasets(Array.isArray(d) ? d : []);
-    }).catch(() => {});
-  }, [cogniInstance]);
+    void queryClient.invalidateQueries({ queryKey: ["datasets", tenantId] });
+  }, [queryClient, tenantId]);
 
-  // Refresh all data (datasets + agents)
-  const refreshAll = useCallback(() => {
-    if (!cogniInstance) return;
-    Promise.all([
-      cogniInstance.fetch("/v1/activity/agents")
-        .then((r) => r.ok ? r.json() : [])
-        .catch(() => []),
-      getDatasets(cogniInstance)
-        .then((d: Dataset[]) => (Array.isArray(d) ? d : []))
-        .catch(() => []),
-    ]).then(([agentData, datasetData]) => {
-      setAgents(Array.isArray(agentData) ? agentData : []);
-      setDatasets(datasetData);
-    }).catch(() => {});
-  }, [cogniInstance]);
+  // Read inside the channel's onmessage below instead of depending on
+  // `datasets` directly — that would tear down and recreate the channel on
+  // every 15s datasets poll.
+  const datasetsRef = useRef(datasets);
+  useEffect(() => { datasetsRef.current = datasets; }, [datasets]);
 
-  // Initial fetch
+  const channelRef = useRef<BroadcastChannel | null>(null);
   useEffect(() => {
-    if (!cogniInstance || isInitializing) return;
-
-    let cancelled = false;
-
-    function fetchAll() {
-      return Promise.all([
-        cogniInstance!.fetch("/v1/activity/agents")
-          .then((r) => r.ok ? r.json() : [])
-          .catch(() => []),
-        getDatasets(cogniInstance!)
-          .then((d: Dataset[]) => (Array.isArray(d) ? d : []))
-          .catch(() => []),
-      ]).then(async ([agentData, datasetData]) => {
-        if (cancelled) return;
-        setAgents(Array.isArray(agentData) ? agentData : []);
-        if (!cancelled) setDatasets(datasetData);
-      }).catch(() => {});
-    }
-
-    fetchAll().finally(() => {
-      if (!cancelled) setLoading(false);
-    });
-
-    const interval = setInterval(fetchAll, 15000);
+    if (typeof BroadcastChannel === "undefined" || !tenantId) return;
+    const channel = new BroadcastChannel(DATASET_SYNC_CHANNEL);
+    channelRef.current = channel;
+    channel.onmessage = (event: MessageEvent<{ tenantId: string; datasetId: string | null }>) => {
+      if (event.data.tenantId !== tenantId) return;
+      const dataset = event.data.datasetId
+        ? datasetsRef.current.find((d) => d.id === event.data.datasetId) ?? null
+        : null;
+      setSelectedDataset(dataset);
+    };
     return () => {
-      cancelled = true;
-      clearInterval(interval);
+      channel.close();
+      channelRef.current = null;
     };
-  }, [cogniInstance, isInitializing]);
+  }, [tenantId]);
 
-  // Refetch on window focus (debounced to prevent burst on rapid alt-tab)
-  useEffect(() => {
-    let timeout: ReturnType<typeof setTimeout>;
-    const onFocus = () => {
-      clearTimeout(timeout);
-      timeout = setTimeout(refreshAll, 2000);
-    };
-    window.addEventListener("focus", onFocus);
-    return () => { window.removeEventListener("focus", onFocus); clearTimeout(timeout); };
-  }, [refreshAll]);
-
-  // Retry with backoff if initial fetch returned empty (e.g. cold start 401s)
-  const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    if (loading || !cogniInstance || datasets.length > 0) {
-      if (retryRef.current) clearTimeout(retryRef.current);
-      return;
-    }
-    let attempt = 0;
-    const maxAttempts = 3;
-    const retry = () => {
-      if (attempt >= maxAttempts) return;
-      attempt++;
-      retryRef.current = setTimeout(() => {
-        refreshAll();
-        retry();
-      }, attempt * 2000);
-    };
-    retry();
-    return () => { if (retryRef.current) clearTimeout(retryRef.current); };
-  }, [loading, cogniInstance, datasets.length, refreshAll]);
+  const setSelectedDatasetSynced = useCallback((dataset: Dataset | null) => {
+    setSelectedDataset(dataset);
+    if (tenantId) channelRef.current?.postMessage({ tenantId, datasetId: dataset?.id ?? null });
+  }, [tenantId]);
 
   const handleAgentChange = useCallback((agent: Agent | null) => {
     setSelectedAgent(agent);
-    setSelectedDataset(null);
-  }, []);
+    setSelectedDatasetSynced(null);
+  }, [setSelectedDatasetSynced]);
 
   const handleWorkspaceChange = useCallback((ws: Workspace) => {
     // If selecting a different tenant, trigger a full tenant switch (sets cookie + reloads)
@@ -206,10 +266,11 @@ export function FilterProvider({ children }: { children: ReactNode }) {
       switchTenant(ws.id, ws.name);
       return;
     }
-    setWorkspaceState(ws);
+    // Re-selecting the current workspace: nothing to switch, just reset the
+    // page-local filters (workspace itself is derived from `tenant`, above).
     setSelectedAgent(null);
-    setSelectedDataset(null);
-  }, [tenant, switchTenant]);
+    setSelectedDatasetSynced(null);
+  }, [tenant, switchTenant, setSelectedDatasetSynced]);
 
 
   const value = useMemo(() => ({
@@ -219,12 +280,12 @@ export function FilterProvider({ children }: { children: ReactNode }) {
     selectedAgent,
     selectedDataset,
     setSelectedAgent: handleAgentChange,
-    setSelectedDataset,
+    setSelectedDataset: setSelectedDatasetSynced,
     agents,
     datasets,
     loading,
     refreshDatasets,
-  }), [workspace, tenantWorkspaces, selectedAgent, selectedDataset, agents, datasets, loading, handleAgentChange, handleWorkspaceChange, refreshDatasets]);
+  }), [workspace, tenantWorkspaces, selectedAgent, selectedDataset, agents, datasets, loading, handleAgentChange, handleWorkspaceChange, refreshDatasets, setSelectedDatasetSynced]);
 
   return (
     <FilterContext.Provider value={value}>

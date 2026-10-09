@@ -1,13 +1,16 @@
-from cognee.infrastructure.databases.graph.config import get_graph_context_config
-from cognee.infrastructure.databases.vector.config import get_vectordb_context_config
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.graph.config import get_graph_context_config
+from cognee.infrastructure.databases.vector import get_vector_engine_async
+from cognee.infrastructure.databases.vector.config import get_vectordb_context_config
 
 from .capabilities import EngineCapability
 from .unified_store_engine import UnifiedStoreEngine
 
 HYBRID_PROVIDERS = {}
-UNIFIED_PROVIDERS = {"pghybrid"}
+# Providers selected by USE_UNIFIED_PROVIDER rather than by the graph/vector
+# provider pair. Empty since the Postgres hybrid adapter moved out of tree —
+# the hook stays so a future unified backend has somewhere to register.
+UNIFIED_PROVIDERS = set()
 
 
 def _is_hybrid_provider(graph_config: dict, vector_config: dict) -> bool:
@@ -25,12 +28,7 @@ def _is_hybrid_provider(graph_config: dict, vector_config: dict) -> bool:
 
 
 async def _create_hybrid_adapter(graph_config: dict, vector_config: dict):
-    """Create a single adapter instance for a hybrid backend.
-
-    For pghybrid, reuses the cached PGVectorAdapter from get_vector_engine()
-    (requires VECTOR_DB_PROVIDER=pgvector) so that metadata caches persist
-    across calls.
-    """
+    """Create a single adapter instance for a hybrid backend."""
     import os
 
     unified_provider = os.environ.get("USE_UNIFIED_PROVIDER", "")
@@ -38,14 +36,14 @@ async def _create_hybrid_adapter(graph_config: dict, vector_config: dict):
 
     if provider == "neptune_analytics":
         from cognee.infrastructure.databases.hybrid.neptune_analytics.NeptuneAnalyticsAdapter import (
-            NeptuneAnalyticsAdapter,
             NEPTUNE_ANALYTICS_ENDPOINT_URL,
+            NeptuneAnalyticsAdapter,
         )
         from cognee.infrastructure.databases.vector.embeddings import get_embedding_engine
 
         graph_url = graph_config.get("graph_database_url", "")
         if not graph_url:
-            raise EnvironmentError("Missing Neptune endpoint.")
+            raise OSError("Missing Neptune endpoint.")
 
         if not graph_url.startswith(NEPTUNE_ANALYTICS_ENDPOINT_URL):
             raise ValueError(
@@ -61,34 +59,13 @@ async def _create_hybrid_adapter(graph_config: dict, vector_config: dict):
             embedding_engine=embedding_engine,
         )
 
-    if provider == "pghybrid":
-        from cognee.infrastructure.databases.hybrid.postgres.adapter import (
-            PostgresHybridAdapter,
-        )
-        from cognee.infrastructure.databases.graph.postgres.adapter import PostgresAdapter
-        from cognee.infrastructure.databases.relational.get_relational_engine import (
-            get_relational_engine,
-        )
-
-        # Graph adapter gets its own engine from the relational connection string
-        graph_adapter = PostgresAdapter(connection_string=get_relational_engine().db_uri)
-
-        # Vector adapter: reuse the cached PGVectorAdapter from the
-        # vector engine factory. This requires VECTOR_DB_PROVIDER=pgvector.
-        vector_adapter = get_vector_engine()
-
-        return PostgresHybridAdapter(
-            graph_adapter=graph_adapter,
-            vector_adapter=vector_adapter,
-        )
-
-    raise EnvironmentError(f"Unsupported hybrid provider: {provider}")
+    raise OSError(f"Unsupported hybrid provider: {provider}")
 
 
 async def get_unified_engine() -> UnifiedStoreEngine:
     """Build a UnifiedStoreEngine for the current async context.
 
-    - Reads the same context variables as get_graph_engine / get_vector_engine
+    - Reads the same context variables as get_graph_engine / get_vector_engine_async
       so multi-tenant routing works identically.
     - Detects hybrid providers (where graph and vector share a backend) and
       creates a single adapter instance with HYBRID_* capabilities.
@@ -96,7 +73,7 @@ async def get_unified_engine() -> UnifiedStoreEngine:
 
     This function is NOT cached itself because it must respect per-request
     ContextVar values.  The underlying engine factories (get_graph_engine,
-    get_vector_engine) do their own caching.
+    get_vector_engine_async) do their own caching.
     """
     graph_config = get_graph_context_config()
     vector_config = get_vectordb_context_config()
@@ -117,7 +94,7 @@ async def get_unified_engine() -> UnifiedStoreEngine:
         )
 
     graph_engine = await get_graph_engine()
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine_async()
 
     return UnifiedStoreEngine(
         graph_engine=graph_engine,

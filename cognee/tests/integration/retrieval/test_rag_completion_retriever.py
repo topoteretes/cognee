@@ -1,20 +1,22 @@
+import logging
 import os
-from typing import List
-import pytest
 import pathlib
-import pytest_asyncio
-import cognee
 
-from cognee.low_level import setup
-from cognee.tasks.storage import add_data_points
-from cognee.infrastructure.databases.vector import get_vector_engine
-from cognee.modules.chunking.models import DocumentChunk
-from cognee.modules.data.processing.document_types import TextDocument
-from cognee.modules.retrieval.exceptions.exceptions import NoDataError
-from cognee.modules.retrieval.completion_retriever import CompletionRetriever
+import pytest
+import pytest_asyncio
+
+import cognee
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.engine import DataPoint
-from cognee.modules.data.processing.document_types import Document
+from cognee.low_level import setup
+from cognee.modules.chunking.models import DocumentChunk
+from cognee.modules.data.processing.document_types import Document, TextDocument
 from cognee.modules.engine.models import Entity
+from cognee.modules.retrieval.completion_retriever import CompletionRetriever
+from cognee.modules.retrieval.exceptions.exceptions import NoDataError
+from cognee.tasks.storage import add_data_points
+
+logger = logging.getLogger(__name__)
 
 
 class DocumentChunkWithEntities(DataPoint):
@@ -23,7 +25,7 @@ class DocumentChunkWithEntities(DataPoint):
     chunk_index: int
     cut_type: str
     is_part_of: Document
-    contains: List[Entity] = None
+    contains: list[Entity] = None
 
     metadata: dict = {"index_fields": ["text"]}
 
@@ -85,18 +87,20 @@ async def setup_test_environment_with_chunks_simple():
         await cognee.prune.prune_system(metadata=True)
 
         from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
-        from cognee.infrastructure.databases.vector.create_vector_engine import (
-            _create_vector_engine,
-        )
         from cognee.infrastructure.databases.relational.create_relational_engine import (
             create_relational_engine,
+        )
+        from cognee.infrastructure.databases.vector.create_vector_engine import (
+            _create_vector_engine,
         )
 
         _create_graph_engine.cache_clear()
         _create_vector_engine.cache_clear()
         create_relational_engine.cache_clear()
     except Exception:
-        pass
+        logger.debug(
+            "Ignoring exception in setup_test_environment_with_chunks_simple", exc_info=True
+        )
 
 
 @pytest_asyncio.fixture
@@ -188,18 +192,20 @@ async def setup_test_environment_with_chunks_complex():
         await cognee.prune.prune_system(metadata=True)
 
         from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
-        from cognee.infrastructure.databases.vector.create_vector_engine import (
-            _create_vector_engine,
-        )
         from cognee.infrastructure.databases.relational.create_relational_engine import (
             create_relational_engine,
+        )
+        from cognee.infrastructure.databases.vector.create_vector_engine import (
+            _create_vector_engine,
         )
 
         _create_graph_engine.cache_clear()
         _create_vector_engine.cache_clear()
         create_relational_engine.cache_clear()
     except Exception:
-        pass
+        logger.debug(
+            "Ignoring exception in setup_test_environment_with_chunks_complex", exc_info=True
+        )
 
 
 @pytest_asyncio.fixture
@@ -220,10 +226,10 @@ async def setup_test_environment_empty():
     await cognee.prune.prune_system(metadata=True)
 
     from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
-    from cognee.infrastructure.databases.vector.create_vector_engine import _create_vector_engine
     from cognee.infrastructure.databases.relational.create_relational_engine import (
         create_relational_engine,
     )
+    from cognee.infrastructure.databases.vector.create_vector_engine import _create_vector_engine
 
     _create_graph_engine.cache_clear()
     _create_vector_engine.cache_clear()
@@ -236,18 +242,18 @@ async def setup_test_environment_empty():
         await cognee.prune.prune_system(metadata=True)
 
         from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
-        from cognee.infrastructure.databases.vector.create_vector_engine import (
-            _create_vector_engine,
-        )
         from cognee.infrastructure.databases.relational.create_relational_engine import (
             create_relational_engine,
+        )
+        from cognee.infrastructure.databases.vector.create_vector_engine import (
+            _create_vector_engine,
         )
 
         _create_graph_engine.cache_clear()
         _create_vector_engine.cache_clear()
         create_relational_engine.cache_clear()
     except Exception:
-        pass
+        logger.debug("Ignoring exception in setup_test_environment_empty", exc_info=True)
 
 
 @pytest.mark.asyncio
@@ -323,7 +329,7 @@ async def test_get_rag_completion_context_on_empty_graph(setup_test_environment_
     with pytest.raises(NoDataError):
         await retriever.get_retrieved_objects(query)
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine_async()
     await vector_engine.create_collection(
         "DocumentChunk_text", payload_schema=DocumentChunkWithEntities
     )

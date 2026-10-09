@@ -43,6 +43,7 @@
   const graphView = document.getElementById('graph-view');
   const schemaView = document.getElementById('schema-view');
   const memoryView = document.getElementById('memory-view');
+  const semanticView = document.getElementById('semantic-view');
   tabs.forEach(btn => {
     btn.addEventListener('click', () => {
       tabs.forEach(t => { t.style.background='transparent'; t.style.color='var(--text2)'; t.classList.remove('active'); });
@@ -51,8 +52,10 @@
       graphView.style.display = view === 'graph' ? '' : 'none';
       schemaView.style.display = view === 'schema' ? '' : 'none';
       if (memoryView) memoryView.style.display = view === 'memory' ? '' : 'none';
+      if (semanticView) semanticView.style.display = view === 'semantic' ? '' : 'none';
       if (view === 'schema' && window._renderSchemaGraph) window._renderSchemaGraph();
       if (view === 'memory' && window._renderMemoryView) window._renderMemoryView();
+      if (view === 'semantic' && window._renderSemanticView) window._renderSemanticView();
     });
   });
 })();

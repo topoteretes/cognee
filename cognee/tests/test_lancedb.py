@@ -3,19 +3,21 @@ import pathlib
 
 import cognee
 from cognee import visualize_graph
-from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.files.storage import get_storage_config
 from cognee.modules.data.models import Data
-from cognee.modules.users.methods import get_default_user
-from cognee.modules.search.types import SearchType
 from cognee.modules.search.operations import get_history
+from cognee.modules.search.types import SearchType
+from cognee.modules.users.methods import get_default_user
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
 
 async def test_local_file_deletion(data_text, file_location):
-    from sqlalchemy import select
     import hashlib
+
+    from sqlalchemy import select
+
     from cognee.infrastructure.databases.relational import get_relational_engine
 
     engine = get_relational_engine()
@@ -71,9 +73,9 @@ async def test_getting_of_documents(dataset_id_1):
 async def test_vector_engine_search_none_limit():
     query_text = "Tell me about Quantum computers"
 
-    from cognee.infrastructure.databases.vector import get_vector_engine
+    from cognee.infrastructure.databases.vector import get_vector_engine_async
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine_async()
     collection_name = "Entity_name"
 
     query_vector = (await vector_engine.embedding_engine.embed_text([query_text]))[0]
@@ -110,9 +112,9 @@ async def test_vector_engine_search_with_nodeset_filtering():
     node_set = ["NLP", "Quantum"]
     query_text = "Tell me about NLP"
 
-    from cognee.infrastructure.databases.vector import get_vector_engine
+    from cognee.infrastructure.databases.vector import get_vector_engine_async
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine_async()
     query_vector = (await vector_engine.embedding_engine.embed_text([query_text]))[0]
 
     # Search with "OR" operator
@@ -250,14 +252,14 @@ async def main():
 
     await cognee.cognify([dataset_name_2, dataset_name_1])
 
-    from cognee.infrastructure.databases.vector import get_vector_engine
+    from cognee.infrastructure.databases.vector import get_vector_engine_async
     from cognee.modules.data.methods import get_datasets_by_name
 
     user = await get_default_user()
     dataset_1 = (await get_datasets_by_name([dataset_name_1], user.id))[0]
     await test_getting_of_documents(dataset_1.id)
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine_async()
     random_node = (
         await vector_engine.search("Entity_name", "Quantum computer", include_payload=True)
     )[0]
@@ -297,8 +299,11 @@ async def main():
         print(f"{result}\n")
 
     user = await get_default_user()
-    history = await get_history(user.id)
-    assert len(history) == 8, "Search history is not correct."
+    # Two datasets, so an unscoped search records a query and a result per
+    # dataset while a scoped one records a single pair: 2 + 1 + 1 + 2 = 6 queries, each with its result.
+    # limit=0 lifts get_history's default cap of 10.
+    history = await get_history(user.id, limit=0)
+    assert len(history) == 12, "Search history is not correct."
 
     await test_vector_engine_search_none_limit()
 

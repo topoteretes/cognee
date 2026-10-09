@@ -1,46 +1,82 @@
 """Public tracing API: enable/disable tracing and retrieve traces."""
 
 import os
-from typing import Optional
 
 from cognee.modules.observability.tracing import (
     CogneeTrace,
+    get_exporter,
     setup_tracing,
     shutdown_tracing,
-    get_exporter,
 )
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 _tracing_enabled: bool = False
 
 
 def enable_tracing(console_output: bool = False) -> None:
-    """Enable OpenTelemetry tracing for Cognee.
+    """Enable OpenTelemetry tracing, metrics, and log bridge for Cognee.
 
-    Sets up a TracerProvider with an in-memory CogneeSpanExporter.
-    Optionally prints spans to the console when *console_output* is True.
+    Sets up a TracerProvider with an in-memory CogneeSpanExporter, a
+    MeterProvider for memory-semconv metrics, and an OTel log bridge so
+    all cognee loggers emit OTel log records.
+    Optionally prints spans/metrics to the console when *console_output* is True.
     """
     global _tracing_enabled
     setup_tracing(console_output=console_output)
+    try:
+        from cognee.modules.observability.metrics import setup_metrics
+
+        setup_metrics(console_output=console_output)
+    except Exception:
+        logger.debug("Ignoring exception in enable_tracing", exc_info=True)
+    try:
+        from cognee.modules.observability.logs import setup_log_bridge
+
+        setup_log_bridge(console_output=console_output)
+    except Exception:
+        logger.debug("Ignoring exception in enable_tracing", exc_info=True)
     _tracing_enabled = True
 
 
 def disable_tracing() -> None:
-    """Disable tracing and shut down the TracerProvider."""
+    """Disable tracing, metrics, and log bridge; shut down their providers."""
     global _tracing_enabled
     shutdown_tracing()
+    try:
+        from cognee.modules.observability.metrics import shutdown_metrics
+
+        shutdown_metrics()
+    except Exception:
+        logger.debug("Ignoring exception in disable_tracing", exc_info=True)
+    try:
+        from cognee.modules.observability.logs import shutdown_log_bridge
+
+        shutdown_log_bridge()
+    except Exception:
+        logger.debug("Ignoring exception in disable_tracing", exc_info=True)
     _tracing_enabled = False
 
 
 def is_tracing_enabled() -> bool:
     """Return True when tracing is active.
 
-    Checks the module-level flag, then the ``cognee_tracing_enabled`` config
-    field, then falls back to the ``COGNEE_TRACING_ENABLED`` env var directly
-    (to support runtime changes, e.g. in tests).  When enabled but not yet
-    initialized, lazily calls ``enable_tracing()`` if OpenTelemetry is
-    available.
+    An explicit ``COGNEE_TRACING_ENABLED=false`` is authoritative and vetoes
+    everything, including Langfuse-key auto-enablement and an already-latched
+    enabled state. Otherwise checks the module-level flag, then the
+    ``cognee_tracing_enabled`` config field, then falls back to the env var
+    directly (to support runtime changes, e.g. in tests). When enabled but
+    not yet initialized, lazily calls ``enable_tracing()`` if OpenTelemetry
+    is available.
     """
     global _tracing_enabled
+
+    from cognee.base_config import _tracing_explicitly_disabled
+
+    if _tracing_explicitly_disabled():
+        return False
+
     if _tracing_enabled:
         return True
 
@@ -62,7 +98,7 @@ def is_tracing_enabled() -> bool:
     return False
 
 
-def get_last_trace() -> Optional[CogneeTrace]:
+def get_last_trace() -> CogneeTrace | None:
     """Return the most recent completed trace from the in-memory buffer."""
     exporter = get_exporter()
     if exporter is None:

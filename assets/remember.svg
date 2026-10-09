@@ -1,0 +1,69 @@
+<svg viewBox="0 0 740 400" xmlns="http://www.w3.org/2000/svg" role="img" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif">
+<title>remember() turning a sentence into a memory graph</title>
+<desc>cognee.remember() reads "Vasilije founded cognee in Berlin", highlights three entities, which sprout as glowing purple nodes connected by labeled edges and link into existing memory.</desc>
+<defs>
+<filter id="glow" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+<filter id="softglow" x="-120%" y="-120%" width="340%" height="340%"><feGaussianBlur stdDeviation="7" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+</defs>
+
+<rect x="0" y="0" width="740" height="400" fill="#0a0a0d"/>
+
+<text x="40" y="42" font-size="21" font-weight="700" fill="#f3f0fa">Turn a sentence into a memory graph agents can reason over</text>
+<rect x="42" y="52" width="46" height="3" rx="1.5" fill="#a974ff"/>
+
+<g>
+<rect x="540" y="92" width="172" height="28" rx="14" fill="#19132b" stroke="#6b4fb0" stroke-width="1"/>
+<circle cx="558" cy="106" r="4" fill="#b98cff" filter="url(#glow)"/>
+<text x="572" y="110.5" font-size="12.5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" fill="#cdbcf2">cognee.remember()</text>
+</g>
+
+<g font-size="15">
+<rect x="45" y="100" width="66" height="23" rx="5" fill="#3a2566" opacity="0"><animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.10;0.86;1" dur="7s" repeatCount="indefinite"/></rect>
+<rect x="186" y="100" width="67" height="23" rx="5" fill="#3a2566" opacity="0"><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.10;0.16;0.86;1" dur="7s" repeatCount="indefinite"/></rect>
+<rect x="282" y="100" width="55" height="23" rx="5" fill="#3a2566" opacity="0"><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.16;0.22;0.86;1" dur="7s" repeatCount="indefinite"/></rect>
+<text x="52" y="116.5" fill="#f3f0fa" font-weight="700">Vasilije</text>
+<text x="119" y="116.5" fill="#9b93ab">founded</text>
+<text x="193" y="116.5" fill="#f3f0fa" font-weight="700">cognee</text>
+<text x="261" y="116.5" fill="#9b93ab">in</text>
+<text x="289" y="116.5" fill="#f3f0fa" font-weight="700">Berlin</text>
+</g>
+
+<g>
+<g stroke="#332d44" stroke-width="2" fill="none">
+<line x1="165" y1="322" x2="120" y2="272"/>
+<line x1="165" y1="322" x2="150" y2="374"/>
+</g>
+<circle cx="165" cy="322" r="12" fill="#564f6b"/>
+<circle cx="120" cy="272" r="9" fill="#433c57"/>
+<circle cx="150" cy="374" r="9" fill="#433c57"/>
+<text x="92" y="352" font-size="10.5" fill="#7d7590">existing memory</text>
+</g>
+
+<line x1="470" y1="302" x2="177" y2="322" stroke="#a974ff" stroke-width="2" stroke-dasharray="296" stroke-dashoffset="296" filter="url(#glow)">
+<animate attributeName="stroke-dashoffset" values="296;296;0;0;296" keyTimes="0;0.47;0.57;0.86;1" dur="7s" repeatCount="indefinite"/>
+</line>
+
+<line x1="410" y1="160" x2="535" y2="215" stroke="#a974ff" stroke-width="2.5" stroke-dasharray="140" stroke-dashoffset="140" filter="url(#glow)">
+<animate attributeName="stroke-dashoffset" values="140;140;0;0;140" keyTimes="0;0.27;0.37;0.86;1" dur="7s" repeatCount="indefinite"/>
+</line>
+<line x1="535" y1="215" x2="470" y2="302" stroke="#a974ff" stroke-width="2.5" stroke-dasharray="115" stroke-dashoffset="115" filter="url(#glow)">
+<animate attributeName="stroke-dashoffset" values="115;115;0;0;115" keyTimes="0;0.37;0.47;0.86;1" dur="7s" repeatCount="indefinite"/>
+</line>
+
+<g font-size="11" fill="#c4a6ff" opacity="0"><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.37;0.45;0.86;1" dur="7s" repeatCount="indefinite"/>
+<text x="455" y="181" text-anchor="middle">founded</text></g>
+<g font-size="11" fill="#c4a6ff" opacity="0"><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.47;0.55;0.86;1" dur="7s" repeatCount="indefinite"/>
+<text x="505" y="262" text-anchor="middle">based in</text></g>
+
+<circle cx="410" cy="160" r="0" fill="#a974ff" filter="url(#softglow)"><animate attributeName="r" values="0;0;16;14;14;0" keyTimes="0;0.143;0.22;0.27;0.86;1" dur="7s" repeatCount="indefinite"/></circle>
+<g opacity="0"><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.24;0.30;0.86;1" dur="7s" repeatCount="indefinite"/>
+<text x="410" y="135" font-size="12.5" font-weight="700" fill="#f3f0fa" text-anchor="middle">Vasilije</text></g>
+
+<circle cx="535" cy="215" r="0" fill="#a974ff" filter="url(#softglow)"><animate attributeName="r" values="0;0;16;14;14;0" keyTimes="0;0.243;0.32;0.37;0.86;1" dur="7s" repeatCount="indefinite"/></circle>
+<g opacity="0"><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.34;0.40;0.86;1" dur="7s" repeatCount="indefinite"/>
+<text x="535" y="190" font-size="12.5" font-weight="700" fill="#f3f0fa" text-anchor="middle">cognee</text></g>
+
+<circle cx="470" cy="302" r="0" fill="#c9a8ff" filter="url(#softglow)"><animate attributeName="r" values="0;0;16;14;14;0" keyTimes="0;0.343;0.42;0.47;0.86;1" dur="7s" repeatCount="indefinite"/></circle>
+<g opacity="0"><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.44;0.50;0.86;1" dur="7s" repeatCount="indefinite"/>
+<text x="470" y="339" font-size="12.5" font-weight="700" fill="#f3f0fa" text-anchor="middle">Berlin</text></g>
+</svg>

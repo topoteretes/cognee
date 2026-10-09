@@ -3,22 +3,23 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from cognee.modules.search.exceptions import UnsupportedSearchTypeError
-from cognee.modules.search.types import SearchType
-from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
-from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+from cognee.modules.retrieval.code_retriever import CodeRetriever
+from cognee.modules.retrieval.graph_completion_context_extension_retriever import (
+    GraphCompletionContextExtensionRetriever,
+)
+from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
 from cognee.modules.retrieval.graph_completion_decomposition_retriever import (
     DecompositionMode,
     GraphCompletionDecompositionRetriever,
 )
-from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
-from cognee.modules.retrieval.graph_completion_context_extension_retriever import (
-    GraphCompletionContextExtensionRetriever,
-)
+from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
 )
-from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
+from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
+from cognee.modules.retrieval.temporal_hybrid_retriever import TemporalHybridRetriever
+from cognee.modules.search.exceptions import UnsupportedSearchTypeError
+from cognee.modules.search.types import SearchType
 
 
 class _DummyCommunityRetriever:
@@ -121,6 +122,26 @@ async def test_default_mapping_passes_top_k_to_retrievers():
 
 
 @pytest.mark.asyncio
+async def test_code_retriever_receives_structured_operation_config():
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+
+    retriever_instance = await mod.get_search_type_retriever_instance(
+        SearchType.CODE,
+        query_text="Checkout",
+        retriever_specific_config={
+            "operation": "traverse",
+            "direction": "reverse",
+            "max_depth": 3,
+        },
+    )
+
+    assert isinstance(retriever_instance, CodeRetriever)
+    assert retriever_instance.operation == "traverse"
+    assert retriever_instance.config["direction"] == "reverse"
+    assert retriever_instance.config["max_depth"] == 3
+
+
+@pytest.mark.asyncio
 async def test_chunks_retriever_receives_nodeset_filter_arguments():
     import cognee.modules.search.methods.get_search_type_retriever_instance as mod
     from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
@@ -134,6 +155,44 @@ async def test_chunks_retriever_receives_nodeset_filter_arguments():
     )
 
     assert isinstance(retriever_instance, ChunksRetriever)
+    assert retriever_instance.top_k == 30
+    assert retriever_instance.node_name == ["KEN", "src_type:figure"]
+    assert retriever_instance.node_name_filter_operator == "AND"
+
+
+@pytest.mark.asyncio
+async def test_rag_completion_retriever_receives_nodeset_filter_arguments():
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+    from cognee.modules.retrieval.completion_retriever import CompletionRetriever
+
+    retriever_instance = await mod.get_search_type_retriever_instance(
+        SearchType.RAG_COMPLETION,
+        query_text="land cover",
+        top_k=30,
+        node_name=["KEN", "src_type:figure"],
+        node_name_filter_operator="AND",
+    )
+
+    assert isinstance(retriever_instance, CompletionRetriever)
+    assert retriever_instance.top_k == 30
+    assert retriever_instance.node_name == ["KEN", "src_type:figure"]
+    assert retriever_instance.node_name_filter_operator == "AND"
+
+
+@pytest.mark.asyncio
+async def test_triplet_completion_retriever_receives_nodeset_filter_arguments():
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+    from cognee.modules.retrieval.triplet_retriever import TripletRetriever
+
+    retriever_instance = await mod.get_search_type_retriever_instance(
+        SearchType.TRIPLET_COMPLETION,
+        query_text="land cover",
+        top_k=30,
+        node_name=["KEN", "src_type:figure"],
+        node_name_filter_operator="AND",
+    )
+
+    assert isinstance(retriever_instance, TripletRetriever)
     assert retriever_instance.top_k == 30
     assert retriever_instance.node_name == ["KEN", "src_type:figure"]
     assert retriever_instance.node_name_filter_operator == "AND"
@@ -159,6 +218,8 @@ async def test_hybrid_completion_retriever_receives_config():
             "text_summaries_top_k": 0,
             "use_importance_weight": False,
             "facts_top_k": 4,
+            "include_external_metadata": True,
+            "external_metadata_keys": ["created_at", "source_id"],
         },
     )
 
@@ -174,10 +235,12 @@ async def test_hybrid_completion_retriever_receives_config():
     assert retriever_instance.text_summaries_top_k == 0
     assert retriever_instance.use_importance_weight is False
     assert retriever_instance.facts_top_k == 4
+    assert retriever_instance.include_external_metadata is True
+    assert retriever_instance.external_metadata_keys == ["created_at", "source_id"]
 
 
 @pytest.mark.asyncio
-async def test_hybrid_completion_uses_top_k_for_default_channel_limits():
+async def test_hybrid_completion_caps_default_channel_limits():
     import cognee.modules.search.methods.get_search_type_retriever_instance as mod
 
     retriever_instance = await mod.get_search_type_retriever_instance(
@@ -187,11 +250,45 @@ async def test_hybrid_completion_uses_top_k_for_default_channel_limits():
     )
 
     assert isinstance(retriever_instance, HybridRetriever)
-    assert retriever_instance.chunks_top_k == 11
-    assert retriever_instance.entities_top_k == 11
+    assert retriever_instance.chunks_top_k == 10
+    assert retriever_instance.entities_top_k == 10
     assert retriever_instance.text_summaries_top_k is None
     assert retriever_instance.use_importance_weight is True
-    assert retriever_instance.facts_top_k == 11
+    assert retriever_instance.facts_top_k == 10
+    assert retriever_instance.include_references is False
+    # Metadata surfacing is opt-in: off, with an empty allowlist, unless asked for.
+    assert retriever_instance.include_external_metadata is False
+    assert retriever_instance.external_metadata_keys == []
+
+
+@pytest.mark.asyncio
+async def test_hybrid_completion_leaves_lane_defaults_when_top_k_is_none():
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+
+    retriever_instance = await mod.get_search_type_retriever_instance(
+        SearchType.HYBRID_COMPLETION,
+        query_text="q",
+        top_k=None,
+    )
+
+    assert retriever_instance.chunks_top_k == 5
+    assert retriever_instance.entities_top_k == 5
+    assert retriever_instance.facts_top_k == 5
+
+
+@pytest.mark.asyncio
+async def test_hybrid_completion_keeps_search_top_k_when_below_lane_cap():
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+
+    retriever_instance = await mod.get_search_type_retriever_instance(
+        SearchType.HYBRID_COMPLETION,
+        query_text="q",
+        top_k=5,
+    )
+
+    assert retriever_instance.chunks_top_k == 5
+    assert retriever_instance.entities_top_k == 5
+    assert retriever_instance.facts_top_k == 5
 
 
 @pytest.mark.asyncio
@@ -218,14 +315,13 @@ async def test_hybrid_completion_get_retriever_output_smoke():
 
     vector.search = AsyncMock(side_effect=search)
     vector.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2]])
+    vector.has_collection = AsyncMock(return_value=True)
     graph = MagicMock()
     graph.is_empty = AsyncMock(return_value=False)
     graph.get_neighborhood = AsyncMock(return_value=([], []))
     unified = MagicMock()
     unified.vector = vector
     unified.graph = graph
-    bm25_retriever = MagicMock()
-    bm25_retriever.get_retrieved_objects = AsyncMock(return_value=[])
 
     with (
         patch.object(
@@ -234,9 +330,8 @@ async def test_hybrid_completion_get_retriever_output_smoke():
             new_callable=AsyncMock,
             return_value=graph,
         ),
-        patch.object(
-            retriever_output_module,
-            "update_node_access_timestamps",
+        patch(
+            "cognee.modules.retrieval.session_aware_completion.update_node_access_timestamps",
             new_callable=AsyncMock,
         ),
         patch(
@@ -245,8 +340,9 @@ async def test_hybrid_completion_get_retriever_output_smoke():
             return_value=unified,
         ),
         patch(
-            "cognee.modules.retrieval.hybrid.chunks.BM25ChunksRetriever",
-            return_value=bm25_retriever,
+            "cognee.modules.search.methods.hybrid_deferral.get_vector_engine_async",
+            new_callable=AsyncMock,
+            return_value=vector,
         ),
         patch(
             "cognee.modules.retrieval.hybrid_retriever.generate_completion",
@@ -265,7 +361,37 @@ async def test_hybrid_completion_get_retriever_output_smoke():
         payload.context == "## Relevant passages\nChunk context\n\n## Relevant entities\n### Entity"
     )
     assert payload.completion == ["answer"]
-    assert retriever_output_module._count_retrieved_objects(payload.result_object) == 2
+    from cognee.modules.retrieval.session_aware_completion import count_retrieved_objects
+
+    assert count_retrieved_objects(payload.result_object) == 2
+
+
+@pytest.mark.asyncio
+async def test_skills_retriever_registered_with_dataset():
+    import types
+    from uuid import uuid4
+
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+    from cognee.modules.retrieval.skills_retriever import SkillsRetriever
+
+    dataset = types.SimpleNamespace(id=uuid4())
+
+    retriever_instance = await mod.get_search_type_retriever_instance(
+        SearchType.SKILLS, query_text="how do I deploy", top_k=4, dataset=dataset
+    )
+
+    assert isinstance(retriever_instance, SkillsRetriever)
+    assert retriever_instance.top_k == 4
+    assert retriever_instance.dataset_id == str(dataset.id)
+
+
+@pytest.mark.asyncio
+async def test_skills_requires_dataset():
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+    from cognee.modules.retrieval.exceptions.exceptions import QueryValidationError
+
+    with pytest.raises(QueryValidationError, match="exactly one explicit dataset"):
+        await mod.get_search_type_retriever_instance(SearchType.SKILLS, query_text="q")
 
 
 @pytest.mark.asyncio
@@ -303,7 +429,6 @@ async def test_coding_rules_uses_node_name_as_rules_nodeset_name():
             GraphCompletionContextExtensionRetriever,
         ),
         (SearchType.GRAPH_SUMMARY_COMPLETION, GraphSummaryCompletionRetriever),
-        (SearchType.TEMPORAL, TemporalRetriever),
     ],
 )
 async def test_graph_search_retrievers_receive_feedback_influence(search_type, expected_class):
@@ -329,7 +454,6 @@ async def test_graph_search_retrievers_default_triplet_penalty_is_updated():
         SearchType.GRAPH_COMPLETION_COT,
         SearchType.GRAPH_COMPLETION_CONTEXT_EXTENSION,
         SearchType.GRAPH_SUMMARY_COMPLETION,
-        SearchType.TEMPORAL,
     ]:
         retriever_instance = await mod.get_search_type_retriever_instance(
             search_type, query_text="q"
@@ -362,3 +486,49 @@ async def test_graph_completion_decomposition_defaults_to_answer_per_subquery():
 
     assert isinstance(retriever_instance, GraphCompletionDecompositionRetriever)
     assert retriever_instance.decomposition_mode is DecompositionMode.ANSWER_PER_SUBQUERY
+
+
+@pytest.mark.asyncio
+async def test_temporal_forwards_include_references_like_hybrid():
+    """SDK-828: TEMPORAL is a HybridRetriever; evidence must reach it the same way."""
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+
+    retriever_instance = await mod.get_search_type_retriever_instance(
+        SearchType.TEMPORAL, query_text="q", top_k=3, include_references=True
+    )
+
+    assert isinstance(retriever_instance, TemporalHybridRetriever)
+    assert retriever_instance.include_references is True
+    assert retriever_instance.top_k == 3
+    assert retriever_instance.chunks_top_k == 12  # candidate budget: 4x top_k unless configured
+
+
+@pytest.mark.asyncio
+async def test_temporal_resolves_a_null_top_k_instead_of_crashing():
+    """The REST models accept ``top_k: null``; TEMPORAL must default it like HYBRID does."""
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+
+    retriever_instance = await mod.get_search_type_retriever_instance(
+        SearchType.TEMPORAL, query_text="q", top_k=None
+    )
+
+    assert isinstance(retriever_instance, TemporalHybridRetriever)
+    assert retriever_instance.top_k == 5
+    assert retriever_instance.chunks_top_k == 20
+
+
+@pytest.mark.asyncio
+async def test_temporal_forwards_external_metadata_keys_like_hybrid():
+    """Adding a date to a question must not strip the source metadata the caller asked for."""
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+
+    config = {"include_external_metadata": True, "external_metadata_keys": ["source_id"]}
+    temporal = await mod.get_search_type_retriever_instance(
+        SearchType.TEMPORAL, query_text="q", top_k=3, retriever_specific_config=config
+    )
+    hybrid = await mod.get_search_type_retriever_instance(
+        SearchType.HYBRID_COMPLETION, query_text="q", top_k=3, retriever_specific_config=config
+    )
+
+    assert temporal.include_external_metadata is True
+    assert temporal.external_metadata_keys == hybrid.external_metadata_keys == ["source_id"]

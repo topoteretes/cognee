@@ -1,17 +1,20 @@
 import os
 import pathlib
-import pytest
+from contextlib import AsyncExitStack
 from unittest.mock import AsyncMock, patch
+
+import pytest
 
 import cognee
 from cognee.api.v1.datasets import datasets
 from cognee.context_global_variables import set_database_global_context_variables
-from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.llm import LLMGateway
+from cognee.infrastructure.locks import dataset_lock
 from cognee.modules.engine.operations.setup import setup
 from cognee.modules.users.methods import create_user, get_default_user
-from cognee.shared.data_models import KnowledgeGraph, Node, Edge, SummarizedContent
+from cognee.shared.data_models import Edge, KnowledgeGraph, Node, SummarizedContent
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
@@ -108,7 +111,7 @@ async def test_delete_dataset_ladybug(mock_create_structured_output: AsyncMock):
 
     mock_create_structured_output.side_effect = mock_llm_output
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine_async()
 
     assert not await vector_engine.has_collection("EdgeType_relationship_name")
     assert not await vector_engine.has_collection("Entity_name")
@@ -137,11 +140,16 @@ async def test_delete_dataset_ladybug(mock_create_structured_output: AsyncMock):
     )
 
     cognify_result: dict = await cognee.cognify()
-    johns_dataset_id = list(cognify_result.keys())[0]
+    johns_dataset_id = next(iter(cognify_result.keys()))
 
     cognify_result: dict = await cognee.cognify(user=new_user)
-    maries_dataset_id = list(cognify_result.keys())[0]
+    maries_dataset_id = next(iter(cognify_result.keys()))
 
+    # Canonical lock order (SDK-483): hold the dataset lock before the legacy
+    # context call below acquires its queue slot; nested add/cognify/delete
+    # re-enter via held_datasets instead of re-acquiring the lock.
+    _lock_stack = AsyncExitStack()
+    await _lock_stack.enter_async_context(dataset_lock(johns_dataset_id))
     await set_database_global_context_variables(johns_dataset_id, default_user.id)
     graph_engine = await get_graph_engine()
     johns_initial_nodes, johns_initial_edges = await graph_engine.get_graph_data()
@@ -150,6 +158,10 @@ async def test_delete_dataset_ladybug(mock_create_structured_output: AsyncMock):
         f"Expected 9 data nodes and 10 edges for John, got {len(johns_data_nodes)} and {len(johns_initial_edges)}"
     )
 
+    # Canonical lock order (SDK-483): hold the dataset lock before the legacy
+    # context call below acquires its queue slot; nested add/cognify/delete
+    # re-enter via held_datasets instead of re-acquiring the lock.
+    await _lock_stack.enter_async_context(dataset_lock(maries_dataset_id))
     await set_database_global_context_variables(maries_dataset_id, new_user.id)
     graph_engine = await get_graph_engine()
     maries_initial_nodes, maries_initial_edges = await graph_engine.get_graph_data()
@@ -182,13 +194,13 @@ async def test_delete_dataset_ladybug(mock_create_structured_output: AsyncMock):
     nodes, edges = await graph_engine.get_graph_data()
     assert len(nodes) == 0 and len(edges) == 0, "Nodes and edges are not deleted."
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine_async()
 
     for collection_name, initial_nodes in johns_initial_nodes_by_collection.items():
         query_node_ids = [
             node[0]
             for node in initial_nodes
-            if node[0] in set([node[0] for node in johns_initial_nodes])
+            if node[0] in {node[0] for node in johns_initial_nodes}
         ]
 
         if query_node_ids:

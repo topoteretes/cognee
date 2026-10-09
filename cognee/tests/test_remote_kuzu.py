@@ -1,12 +1,13 @@
 import os
-import shutil
-import cognee
 import pathlib
+import shutil
+
+import cognee
 from cognee.infrastructure.files.storage import get_storage_config
-from cognee.shared.logging_utils import get_logger
-from cognee.modules.search.types import SearchType
 from cognee.modules.search.operations import get_history
+from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
@@ -70,9 +71,9 @@ async def main():
 
         await cognee.cognify([dataset_name])
 
-        from cognee.infrastructure.databases.vector import get_vector_engine
+        from cognee.infrastructure.databases.vector import get_vector_engine_async
 
-        vector_engine = get_vector_engine()
+        vector_engine = await get_vector_engine_async()
         random_node = (
             await vector_engine.search("Entity_name", "Quantum computer", include_payload=True)
         )[0]

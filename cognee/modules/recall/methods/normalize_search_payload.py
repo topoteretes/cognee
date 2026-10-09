@@ -7,7 +7,7 @@ same wire shape regardless of search type.
 """
 
 import json
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -31,9 +31,12 @@ _KIND_BY_SEARCH_TYPE: dict[SearchType, SearchResultKind] = {
     SearchType.NATURAL_LANGUAGE: SearchResultKind.NATURAL_LANGUAGE,
     SearchType.TEMPORAL: SearchResultKind.TEMPORAL,
     SearchType.CODING_RULES: SearchResultKind.CODING_RULE,
+    SearchType.CODE: SearchResultKind.CODE,
     SearchType.CHUNKS: SearchResultKind.CHUNK,
     SearchType.CHUNKS_LEXICAL: SearchResultKind.CHUNK,
     SearchType.SUMMARIES: SearchResultKind.SUMMARY,
+    SearchType.AGENTIC_COMPLETION: SearchResultKind.GRAPH_COMPLETION,
+    SearchType.SKILLS: SearchResultKind.SKILL,
 }
 
 
@@ -65,7 +68,7 @@ def _text_from_dict(payload: dict) -> str:
         return str(payload)
 
 
-def _score_from(value: Any) -> Optional[float]:
+def _score_from(value: Any) -> float | None:
     if isinstance(value, dict):
         score = value.get("score")
         if isinstance(score, (int, float)):
@@ -103,11 +106,15 @@ def _build_item(
     kind: SearchResultKind,
 ) -> SearchResultItem:
     """Build a single SearchResultItem from one retriever output element."""
+    structured: Any | None = None
+
     if isinstance(entry, str):
         text = entry
         raw: dict = {"value": entry}
     elif isinstance(entry, BaseModel):
         raw = entry.model_dump(mode="json")
+        structured = raw
+        kind = SearchResultKind.STRUCTURED
         text = _text_from_dict(raw)
     elif isinstance(entry, dict):
         raw = entry
@@ -119,6 +126,10 @@ def _build_item(
         raw = _coerce_to_dict(entry)
         text = _text_from_dict(raw) if raw else str(entry)
 
+    metadata = _provenance_metadata(raw)
+    if payload.evidence:
+        metadata["evidence"] = [reference.model_dump(mode="json") for reference in payload.evidence]
+
     return SearchResultItem(
         kind=kind,
         search_type=payload.search_type,
@@ -126,8 +137,9 @@ def _build_item(
         score=_score_from(entry),
         dataset_id=str(payload.dataset_id) if payload.dataset_id else None,
         dataset_name=payload.dataset_name,
-        metadata=_provenance_metadata(raw),
+        metadata=metadata,
         raw=raw,
+        structured=structured,
     )
 
 
@@ -144,8 +156,20 @@ def normalize_search_payload(payload: SearchResultPayload) -> list[SearchResultI
     """Normalize one dataset's retriever payload into SearchResultItems."""
     kind = _KIND_BY_SEARCH_TYPE.get(payload.search_type, SearchResultKind.UNKNOWN)
 
+    if payload.only_context and payload.user_prompt:
+        # One item, not one per context entry: the LLM input is a single artifact. Its
+        # text is the user prompt; the system prompt rides on its own field, as the LLM
+        # receives the two as separate messages. The pair is only ever set when
+        # retrieval found something, so the item count keeps meaning "did retrieval
+        # find anything" — recall's on_empty tools fallback and the session
+        # short-circuit both read it.
+        item = _build_item(payload.user_prompt, payload, kind)
+        return [item.model_copy(update={"system_prompt": payload.system_prompt})]
+
     if payload.only_context:
-        entries = _flatten(payload.context)
+        # Retrievers report a miss as None, "" or []; a bare "" must not become an item,
+        # or "nothing found" reads as a hit to recall's on_empty tools fallback.
+        entries = [entry for entry in _flatten(payload.context) if entry]
     elif payload.completion is not None:
         entries = _flatten(payload.completion)
     elif payload.context is not None:

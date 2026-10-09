@@ -11,6 +11,7 @@ Covers the scenarios that used to silently hang or leak:
 
 from __future__ import annotations
 
+import logging
 import multiprocessing as mp
 import sys
 import time
@@ -26,6 +27,21 @@ from cognee_db_workers.harness import (
     _describe_exitcode,
     run_worker_loop,
     spawn_without_main,
+)
+
+logger = logging.getLogger(__name__)
+
+# These tests construct subprocess workers explicitly, so the
+# *_SUBPROCESS_ENABLED=false the Windows CI jobs set cannot keep them from
+# spawning. On Windows the spawned child intermittently deadlocks at
+# interpreter startup (a python.exe frozen at ~3.8 MB that never signals
+# ready) and pytest hangs on it until the job timeout -- observed with the
+# watchdog on runs 33643650, 33648260941 and 33729891452. Tracked as
+# SDK-540; unskip these when its fix lands. Full coverage continues on the
+# ubuntu and macOS legs.
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="explicit worker spawn deadlocks intermittently on Windows (SDK-540)",
 )
 
 
@@ -46,13 +62,11 @@ def _echo(registry, req):
 def _sleep(registry, req):
     # Sleep forever — simulates a hung native call.
     time.sleep(60.0)
-    return None
 
 
 def _sleep_param(registry, req):
     # Bounded sleep used by race-window tests. Caller sets the duration.
     time.sleep(req.args[0])
-    return None
 
 
 class _NotPicklable:
@@ -258,7 +272,7 @@ def test_worker_killed_mid_request_flips_closed():
             session.call(Request(op=OP_ECHO, args=("hi",)))
         # Session should now be flipped to closed; next call gets the faster,
         # explicit "session is closed" message.
-        assert session._closed is True
+        assert session._closed_event.is_set()
         with pytest.raises(SubprocessTransportError, match="session is closed"):
             session.call(Request(op=OP_ECHO, args=("hi",)))
     finally:
@@ -276,7 +290,7 @@ def test_init_timeout_raises():
     session = SubprocessSession(proc, req_q, resp_q, init_timeout=1.0)
     with pytest.raises(RuntimeError, match="init timed out"):
         session.wait_for_ready()
-    assert session._closed is True
+    assert session._closed_event.is_set()
 
 
 def test_init_failure_propagates():
@@ -290,7 +304,7 @@ def test_init_failure_propagates():
     session = SubprocessSession(proc, req_q, resp_q, init_timeout=5.0)
     with pytest.raises(RuntimeError, match="init failed"):
         session.wait_for_ready()
-    assert session._closed is True
+    assert session._closed_event.is_set()
 
 
 def test_init_clean_exit_before_ready_surfaces_diagnostics():
@@ -441,14 +455,19 @@ def test_init_signal_killed_worker_surfaces_signal_name():
 
 
 def test_call_timeout_on_hung_worker():
-    """A request that doesn't return within the deadline raises TimeoutError
-    and marks the session closed so callers don't wait forever.
+    """A request that doesn't return within the deadline raises TimeoutError.
+
+    Under the concurrent-RPC design a per-call timeout no longer marks the
+    whole session closed — sibling in-flight calls can still complete and
+    callers can issue fresh requests against the same session. The hung
+    op stays pending on the worker until ``shutdown()`` reaps it.
     """
     session = _start_session(call_timeout=1.0)
     try:
         with pytest.raises(TimeoutError):
             session.call(Request(op=OP_SLEEP, args=()))
-        assert session._closed is True
+        # Session remains operational despite the per-call timeout.
+        assert not session._closed_event.is_set()
     finally:
         session.shutdown()
 
@@ -469,7 +488,7 @@ def test_unpicklable_return_surfaces_error():
         # The worker's pickle of the Response will fail when putting on the
         # queue. mp.Queue raises at put time. We just want to ensure it
         # doesn't hang the session.
-        with pytest.raises(Exception):
+        with pytest.raises(Exception):  # noqa: B017 - transport or timeout error depending on platform; the test guards against a hang
             session.call(Request(op=OP_RETURN_UNPICKLABLE, args=()), timeout=5.0)
     finally:
         session.shutdown()
@@ -503,7 +522,9 @@ async def test_kuzu_adapter_rejects_use_after_close(tmp_path):
         try:
             await adapter.close()
         except Exception:
-            pass
+            logger.debug(
+                "Ignoring exception in test_kuzu_adapter_rejects_use_after_close", exc_info=True
+            )
 
 
 # --- retry / replay -------------------------------------------------------
@@ -857,6 +878,10 @@ def test_concurrent_shutdown_with_inflight_call_does_not_hang():
                         TimeoutError("call() timed out — response likely stolen by shutter")
                     )
             except Exception as exc:
+                logger.debug(
+                    "Ignoring exception in test_concurrent_shutdown_with_inflight_call_does_not_hang.caller",
+                    exc_info=True,
+                )
                 with errors_lock:
                     errors.append(exc)
 
@@ -864,6 +889,10 @@ def test_concurrent_shutdown_with_inflight_call_does_not_hang():
             try:
                 s.shutdown(timeout=1.0)
             except Exception as exc:
+                logger.debug(
+                    "Ignoring exception in test_concurrent_shutdown_with_inflight_call_does_not_hang.shutter",
+                    exc_info=True,
+                )
                 with errors_lock:
                     errors.append(exc)
 

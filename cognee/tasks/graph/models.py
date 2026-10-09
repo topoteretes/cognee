@@ -1,4 +1,5 @@
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Union
+
 from pydantic import BaseModel, Field
 
 
@@ -39,8 +40,8 @@ class NodeModel(BaseModel):
 
     node_id: str
     name: str
-    default_relationship: Optional[RelationshipModel] = None
-    children: List[Union[Dict[str, Any], "NodeModel"]] = Field(default_factory=list)
+    default_relationship: RelationshipModel | None = None
+    children: list[Union[dict[str, Any], "NodeModel"]] = Field(default_factory=list)
 
 
 NodeModel.model_rebuild()

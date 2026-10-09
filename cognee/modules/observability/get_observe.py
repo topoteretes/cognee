@@ -1,8 +1,135 @@
 import functools
 
 from cognee.base_config import get_base_config
-from .observers import Observer
+from cognee.shared.logging_utils import get_logger
+
 from .exceptions import UnsupportedObserverError
+from .observers import Observer
+
+logger = get_logger()
+
+# Cap span input/output like the DB adapters cap query text (redact_secrets(query[:500])).
+_MAX_OBSERVED_CHARS = 8000
+
+
+def _set_generation_attributes(span, adapter, func, args, kwargs) -> None:
+    """Emit OTel-GenAI + Langfuse attributes on a generation span so any OTLP backend
+    (Langfuse, Dash0, Datadog, ...) renders the LLM call as a generation with model
+    and input.
+
+    ``langfuse.observation.type`` is set unconditionally so the span is still
+    classified as a generation when the model name is unavailable (e.g. llama.cpp
+    local mode leaves ``model=None``). ``gen_ai.request.model`` is the *requested*
+    model; provider names follow the lowercase GenAI convention.
+    """
+    from cognee.modules.observability.tracing import (
+        GEN_AI_REQUEST_MODEL,
+        GEN_AI_SYSTEM,
+        LANGFUSE_OBSERVATION_INPUT,
+        LANGFUSE_OBSERVATION_TYPE,
+        redact_secrets,
+    )
+
+    span.set_attribute(LANGFUSE_OBSERVATION_TYPE, "generation")
+
+    model = getattr(adapter, "model", None)
+    if model:
+        span.set_attribute(GEN_AI_REQUEST_MODEL, model)
+
+    provider = getattr(adapter, "name", None)
+    if provider:
+        span.set_attribute(GEN_AI_SYSTEM, provider.lower())
+
+    payload = _generation_input_payload(func, args, kwargs)
+    if payload:
+        span.set_attribute(
+            LANGFUSE_OBSERVATION_INPUT, redact_secrets(payload[:_MAX_OBSERVED_CHARS])
+        )
+
+
+def _generation_input_payload(func, args, kwargs):
+    """Bind the LLM-adapter call and record its string prompt arguments as a JSON string,
+    keyed by parameter name. Works for positional and keyword calls, and is name-agnostic
+    so it keeps capturing the prompt if the adapter parameters are renamed. Skips
+    ``self``/``response_model`` and non-string args (the response-model type, numeric
+    options, the ``**kwargs`` dict). Returns None if the call can't be interpreted."""
+    import inspect
+    import json
+
+    try:
+        bound = inspect.signature(func).bind(*args, **kwargs)
+        bound.apply_defaults()
+        payload = {
+            name: value
+            for name, value in bound.arguments.items()
+            if name not in ("self", "cls", "response_model") and isinstance(value, str) and value
+        }
+        return json.dumps(payload, default=str) if payload else None
+    except Exception:
+        logger.debug("Falling back to None after error in _generation_input_payload", exc_info=True)
+        return None
+
+
+def _set_generation_output(span, result) -> None:
+    """Record the LLM response as the Langfuse output (best effort; never raises)."""
+    import json
+
+    from cognee.modules.observability.tracing import LANGFUSE_OBSERVATION_OUTPUT, redact_secrets
+
+    try:
+        if hasattr(result, "model_dump_json"):  # a pydantic structured output
+            output = result.model_dump_json()
+        elif isinstance(result, str):
+            output = result
+        else:
+            output = json.dumps(result, default=str)
+        span.set_attribute(
+            LANGFUSE_OBSERVATION_OUTPUT, redact_secrets(output[:_MAX_OBSERVED_CHARS])
+        )
+    except Exception:
+        logger.debug("Ignoring exception in _set_generation_output", exc_info=True)
+
+
+def _set_embedding_attributes(span, adapter) -> None:
+    """Emit standard OTel-GenAI attributes on an embeddings span (metadata only).
+
+    Uses only data available on the embedding engine (provider, model,
+    dimensions, endpoint). No input text is recorded. Follows the existing
+    generation pattern (CLIENT span, capped/redacted payloads) without
+    inventing a parallel vocabulary.
+    """
+    from cognee.modules.observability.tracing import (
+        GEN_AI_EMBEDDINGS_DIMENSION_COUNT,
+        GEN_AI_OPERATION_NAME,
+        GEN_AI_PROVIDER_NAME,
+        GEN_AI_REQUEST_MODEL,
+        SERVER_ADDRESS,
+    )
+
+    span.set_attribute(GEN_AI_OPERATION_NAME, "embeddings")
+
+    provider = getattr(adapter, "provider", None)
+    if provider:
+        span.set_attribute(GEN_AI_PROVIDER_NAME, str(provider).lower())
+
+    model = getattr(adapter, "model", None)
+    if model:
+        span.set_attribute(GEN_AI_REQUEST_MODEL, model)
+
+    dimensions = getattr(adapter, "dimensions", None)
+    if isinstance(dimensions, int):
+        span.set_attribute(GEN_AI_EMBEDDINGS_DIMENSION_COUNT, dimensions)
+
+    endpoint = getattr(adapter, "endpoint", None)
+    if endpoint:
+        try:
+            from urllib.parse import urlparse
+
+            host = urlparse(str(endpoint)).hostname
+            if host:
+                span.set_attribute(SERVER_ADDRESS, host)
+        except Exception:
+            logger.debug("Ignoring exception in _set_embedding_attributes", exc_info=True)
 
 
 def _wrap_with_otel(inner_decorator):
@@ -29,18 +156,36 @@ def _wrap_with_otel(inner_decorator):
                     if not is_tracing_enabled():
                         return await wrapped(*args, **kwargs)
 
+                    from opentelemetry.trace import SpanKind
+
                     from cognee.modules.observability.tracing import (
-                        get_tracer,
                         COGNEE_SPAN_CATEGORY,
+                        get_tracer,
                     )
 
                     tracer = get_tracer()
                     if tracer is None:
                         return await wrapped(*args, **kwargs)
 
-                    with tracer.start_as_current_span(f"cognee.observe.{func.__name__}") as span:
+                    kind = (
+                        SpanKind.CLIENT
+                        if category in ("generation", "embeddings")
+                        else SpanKind.INTERNAL
+                    )
+                    with tracer.start_as_current_span(
+                        f"cognee.observe.{func.__name__}", kind=kind
+                    ) as span:
                         span.set_attribute(COGNEE_SPAN_CATEGORY, category)
-                        return await wrapped(*args, **kwargs)
+                        is_generation = category == "generation" and bool(args)
+                        is_embedding = category == "embeddings" and bool(args)
+                        if is_generation:
+                            _set_generation_attributes(span, args[0], func, args, kwargs)
+                        if is_embedding:
+                            _set_embedding_attributes(span, args[0])
+                        result = await wrapped(*args, **kwargs)
+                        if is_generation:
+                            _set_generation_output(span, result)
+                        return result
 
                 @functools.wraps(func)
                 def sync_wrapper(*args, **kwargs):
@@ -49,18 +194,36 @@ def _wrap_with_otel(inner_decorator):
                     if not is_tracing_enabled():
                         return wrapped(*args, **kwargs)
 
+                    from opentelemetry.trace import SpanKind
+
                     from cognee.modules.observability.tracing import (
-                        get_tracer,
                         COGNEE_SPAN_CATEGORY,
+                        get_tracer,
                     )
 
                     tracer = get_tracer()
                     if tracer is None:
                         return wrapped(*args, **kwargs)
 
-                    with tracer.start_as_current_span(f"cognee.observe.{func.__name__}") as span:
+                    kind = (
+                        SpanKind.CLIENT
+                        if category in ("generation", "embeddings")
+                        else SpanKind.INTERNAL
+                    )
+                    with tracer.start_as_current_span(
+                        f"cognee.observe.{func.__name__}", kind=kind
+                    ) as span:
                         span.set_attribute(COGNEE_SPAN_CATEGORY, category)
-                        return wrapped(*args, **kwargs)
+                        is_generation = category == "generation" and bool(args)
+                        is_embedding = category == "embeddings" and bool(args)
+                        if is_generation:
+                            _set_generation_attributes(span, args[0], func, args, kwargs)
+                        if is_embedding:
+                            _set_embedding_attributes(span, args[0])
+                        result = wrapped(*args, **kwargs)
+                        if is_generation:
+                            _set_generation_output(span, result)
+                        return result
 
                 import asyncio
 

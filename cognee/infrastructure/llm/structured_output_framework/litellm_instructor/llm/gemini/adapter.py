@@ -1,6 +1,5 @@
 """Adapter for Gemini API LLM provider"""
 
-import asyncio
 import logging
 from typing import Any
 
@@ -13,17 +12,22 @@ from pydantic import BaseModel
 from tenacity import (
     before_sleep_log,
     retry,
-    retry_if_not_exception_type,
     wait_exponential_jitter,
 )
 
+from cognee.infrastructure.llm.exceptions import (
+    ContentPolicyFilterError,
+    raise_if_budget_exhausted,
+)
 from cognee.infrastructure.llm.retry_config import (
+    llm_retry_condition,
     llm_retry_stop_condition,
 )
-
-from cognee.infrastructure.llm.exceptions import ContentPolicyFilterError
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
     GenericAPIAdapter,
+)
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
+    get_instructor_mode,
 )
 from cognee.modules.observability.get_observe import get_observe
 from cognee.shared.logging_utils import get_logger
@@ -47,7 +51,14 @@ class GeminiAdapter(GenericAPIAdapter):
     - transcribe_image(input) -> BaseModel: Inherited from GenericAPIAdapter
     """
 
-    default_instructor_mode = "json_mode"
+    # Declared False even though GenericAPIAdapter declares True. This class
+    # overrides acreate_structured_output without a `response_model is str`
+    # branch and defines no acreate_str_output, so a plain-text answer never
+    # reaches the parent's streaming door. Inheriting True would promote a
+    # sink, announce `stage: generating`, and then emit nothing at all.
+    supports_answer_streaming = False
+
+    default_instructor_mode = get_instructor_mode("gemini")
 
     def __init__(
         self,
@@ -57,6 +68,7 @@ class GeminiAdapter(GenericAPIAdapter):
         endpoint: str | None = None,
         api_version: str | None = None,
         transcription_model: str | None = None,
+        image_transcribe_model: str | None = None,
         instructor_mode: str | None = None,
         fallback_model: str | None = None,
         fallback_api_key: str | None = None,
@@ -71,6 +83,7 @@ class GeminiAdapter(GenericAPIAdapter):
             endpoint=endpoint,
             api_version=api_version,
             transcription_model=transcription_model,
+            image_transcribe_model=image_transcribe_model,
             fallback_model=fallback_model,
             fallback_api_key=fallback_api_key,
             fallback_endpoint=fallback_endpoint,
@@ -87,13 +100,7 @@ class GeminiAdapter(GenericAPIAdapter):
     @retry(
         stop=llm_retry_stop_condition,
         wait=wait_exponential_jitter(8, 128),
-        retry=retry_if_not_exception_type(
-            (
-                litellm.exceptions.NotFoundError,
-                litellm.exceptions.AuthenticationError,
-                asyncio.CancelledError,
-            )
-        ),
+        retry=llm_retry_condition,
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
@@ -154,9 +161,19 @@ class GeminiAdapter(GenericAPIAdapter):
                 isinstance(error, InstructorRetryException)
                 and "content management policy" not in str(error).lower()
             ):
-                raise error
+                # No failover exists for this shape: classify here, since the
+                # handler further down is unreachable once this clause matches.
+                raise_if_budget_exhausted(error)
+                raise
 
             if not (self.fallback_model and self.fallback_api_key and self.fallback_endpoint):
+                # Nothing left to try, so classify here rather than at the top of
+                # the clause: a policy-worded InstructorRetryException that also
+                # carries budget wording (the model's partial completion is
+                # rendered into str(error)) would otherwise be classified before
+                # ever reaching the fallback attempt below, silently dropping a
+                # failover a differently-keyed fallback could still satisfy.
+                raise_if_budget_exhausted(error)
                 raise ContentPolicyFilterError(
                     f"The provided input contains content that is not aligned with our content policy: {text_input}"
                 )
@@ -186,12 +203,20 @@ class GeminiAdapter(GenericAPIAdapter):
                 ContentPolicyViolationError,
                 InstructorRetryException,
             ) as error:
+                # The fallback capped out too, and there is nothing left to try,
+                # so classify unconditionally here rather than only in one branch.
+                raise_if_budget_exhausted(error)
+
                 if (
                     isinstance(error, InstructorRetryException)
                     and "content management policy" not in str(error).lower()
                 ):
-                    raise error
+                    raise
                 else:
                     raise ContentPolicyFilterError(
                         f"The provided input contains content that is not aligned with our content policy: {text_input}"
                     )
+        except Exception as e:
+            # Same detail-carrying message as the wrapped-error paths above.
+            raise_if_budget_exhausted(e)
+            raise

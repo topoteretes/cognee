@@ -11,13 +11,14 @@ Two targets, selected by the source's import mode:
   the source (``valid_at``/``invalid_at``) is preserved as edge properties.
 """
 
+import dataclasses
+from collections.abc import AsyncIterable, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 from types import SimpleNamespace
-from typing import Any, AsyncIterable, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any
 from uuid import NAMESPACE_OID, UUID, uuid5
 
-from cognee.infrastructure.engine.utils.generate_node_id import generate_node_id
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.migration.cogx import (
     COGXEntity,
@@ -40,9 +41,9 @@ BATCH_NODE_TARGET = 2000
 
 @dataclass
 class TranslationResult:
-    data_items: List[DataItem] = field(default_factory=list)
-    graph_batches: List[Dict[str, Any]] = field(default_factory=list)
-    counts: Dict[str, int] = field(default_factory=dict)
+    data_items: list[DataItem] = field(default_factory=list)
+    graph_batches: list[dict[str, Any]] = field(default_factory=list)
+    counts: dict[str, int] = field(default_factory=dict)
     # Facts dropped because a subject/object UUID reference could not be
     # resolved to any exported node (never fabricated as UUID-named entities).
     skipped_facts: int = 0
@@ -55,12 +56,12 @@ def record_data_id(record: COGXRecord) -> UUID:
     return uuid5(NAMESPACE_OID, f"cogx:{record.external_system}:{record.external_id}")
 
 
-def _iso(value: Optional[datetime]) -> Optional[str]:
+def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value else None
 
 
-def _record_external_metadata(record: COGXRecord) -> Dict[str, Any]:
-    metadata: Dict[str, Any] = {
+def _record_external_metadata(record: COGXRecord) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
         "external_system": record.external_system,
         "external_id": record.external_id,
     }
@@ -103,7 +104,7 @@ def _render_fact_line(fact: COGXFact) -> str:
     return line
 
 
-def _data_item_for(record: COGXRecord, content: str, label: Optional[str] = None) -> DataItem:
+def _data_item_for(record: COGXRecord, content: str, label: str | None = None) -> DataItem:
     return DataItem(
         data=content,
         label=label,
@@ -120,7 +121,7 @@ def _looks_like_uuid(value: str) -> bool:
         return False
 
 
-def data_item_from_record(record: COGXRecord) -> Optional[DataItem]:
+def data_item_from_record(record: COGXRecord) -> DataItem | None:
     """Translate a content-bearing record into a DataItem; None for graph records."""
     if record.kind == "document":
         return _data_item_for(record, record.content, record.title)
@@ -136,8 +137,8 @@ def data_item_from_record(record: COGXRecord) -> Optional[DataItem]:
     return None
 
 
-def _fact_edge_properties(fact: COGXFact) -> Dict[str, Any]:
-    properties: Dict[str, Any] = {
+def _fact_edge_properties(fact: COGXFact) -> dict[str, Any]:
+    properties: dict[str, Any] = {
         "relationship_name": fact.predicate,
         "source_system": fact.external_system,
         "source_external_id": fact.external_id,
@@ -156,20 +157,36 @@ def _fact_edge_properties(fact: COGXFact) -> Dict[str, Any]:
 def _register_entity(
     record: COGXEntity,
     *,
-    entity_types: Dict[str, EntityType],
-    by_node_id: Dict[UUID, Any],
-    by_external_id: Dict[str, Any],
-    first_external_id: Dict[UUID, str],
+    entity_types: dict[str, EntityType],
+    by_node_id: dict[UUID, Any],
+    by_external_id: dict[str, Any],
+    first_external_id: dict[UUID, str],
+    preserve_source_ids: bool = False,
 ) -> Any:
-    """Register an entity record, merging same-named records into one node."""
+    """Register an entity record.
+
+    ``preserve_source_ids`` (cognee-origin archives): the record's external_id
+    IS the source node's UUID — keep it, so the imported graph is an exact
+    copy (same-named-but-distinct source entities stay distinct, and edge keys
+    survive verbatim). Source UUIDs are themselves deterministic
+    ``Entity.id_for(<llm identity>)`` values, so re-cognifying the same
+    content on the target still converges on the same nodes.
+
+    Otherwise (cross-provider archives): derive class-namespaced ids exactly
+    as cognee's own extraction does (``Entity.id_for`` via identity_fields),
+    merging same-named records into one node.
+    """
 
     def _entity_type_for(name: str) -> EntityType:
         key = name.lower()
         if key not in entity_types:
-            entity_types[key] = EntityType(id=generate_node_id(name), name=name, description=name)
+            entity_types[key] = EntityType(id=EntityType.id_for(name), name=name, description=name)
         return entity_types[key]
 
-    node_id = generate_node_id(record.name)
+    if preserve_source_ids and _looks_like_uuid(record.external_id):
+        node_id = UUID(record.external_id)
+    else:
+        node_id = Entity.id_for(record.name)
     description = record.description or record.name
     if record.aliases:
         description = f"{description} Also known as: {', '.join(record.aliases)}."
@@ -203,16 +220,19 @@ def _register_entity(
 
 
 def _build_graph_batches(
-    entities: List[COGXEntity], facts: List[COGXFact], raw_nodes: List[COGXRawNode]
-) -> Tuple[List[Dict[str, Any]], int]:
+    entities: list[COGXEntity],
+    facts: list[COGXFact],
+    raw_nodes: list[COGXRawNode],
+    preserve_source_ids: bool = False,
+) -> tuple[list[dict[str, Any]], int]:
     """Map entity/fact/raw-node records onto bounded graph batches.
 
-    Entity ids come from ``generate_node_id(name)`` — the same scheme cognify
-    uses — so preserved facts merge into the existing graph vocabulary instead
-    of forming a disconnected parallel graph. Raw nodes are rehydrated back
-    into DataPoint instances (keeping their original ids) so facts referencing
-    them stay resolvable. Facts whose subject/object UUID reference cannot be
-    resolved are skipped — never fabricated as UUID-named entities.
+    Entity ids come from ``Entity.id_for(name)`` — the class-namespaced scheme
+    cognify uses — so preserved facts merge into the existing graph vocabulary
+    instead of forming a disconnected parallel graph. Raw nodes are rehydrated
+    back into DataPoint instances (keeping their original ids) so facts
+    referencing them stay resolvable. Facts whose subject/object UUID reference
+    cannot be resolved are skipped — never fabricated as UUID-named entities.
 
     Nodes are split into batches of ~``BATCH_NODE_TARGET``; each fact lands in
     a batch containing one of its endpoints, with the other endpoint included
@@ -223,10 +243,10 @@ def _build_graph_batches(
     if not entities and not facts and not raw_nodes:
         return [], 0
 
-    entity_types: Dict[str, EntityType] = {}
-    by_external_id: Dict[str, Any] = {}
-    by_node_id: Dict[UUID, Any] = {}
-    first_external_id: Dict[UUID, str] = {}
+    entity_types: dict[str, EntityType] = {}
+    by_external_id: dict[str, Any] = {}
+    by_node_id: dict[UUID, Any] = {}
+    first_external_id: dict[UUID, str] = {}
 
     for record in raw_nodes:
         properties = record.properties or {}
@@ -243,10 +263,11 @@ def _build_graph_batches(
             by_node_id=by_node_id,
             by_external_id=by_external_id,
             first_external_id=first_external_id,
+            preserve_source_ids=preserve_source_ids,
         )
 
-    batches: List[Dict[str, Any]] = []
-    batch_index_of: Dict[UUID, int] = {}
+    batches: list[dict[str, Any]] = []
+    batch_index_of: dict[UUID, int] = {}
     ordered_nodes = list(entity_types.values()) + list(by_node_id.values())
     for start in range(0, len(ordered_nodes), BATCH_NODE_TARGET):
         chunk = ordered_nodes[start : start + BATCH_NODE_TARGET]
@@ -254,11 +275,11 @@ def _build_graph_batches(
         for node in chunk:
             batch_index_of[node.id] = len(batches) - 1
 
-    def _resolve_ref(ref: str) -> Optional[Any]:
+    def _resolve_ref(ref: str) -> Any | None:
         node = by_external_id.get(ref)
         if node is not None:
             return node
-        node = by_node_id.get(generate_node_id(ref))
+        node = by_node_id.get(Entity.id_for(ref))
         if node is not None:
             return node
         if _looks_like_uuid(ref):
@@ -267,12 +288,17 @@ def _build_graph_batches(
             return None
         # Plain-name reference (cross-provider archives): treat it as an
         # entity name and create the entity.
-        entity = Entity(id=generate_node_id(ref), name=ref, description=ref)
+        entity = Entity(id=Entity.id_for(ref), name=ref, description=ref)
         by_node_id[entity.id] = entity
         return entity
 
-    duplicated_in_batch: Dict[int, Set[UUID]] = {}
+    duplicated_in_batch: dict[int, set[UUID]] = {}
     skipped_facts = 0
+    # Same resolved-key dedup as the streaming path (first fact wins): distinct
+    # refs can resolve to one edge key, and re-MERGEing duplicates crashes
+    # Ladybug's rel-update row lookup during fresh bulk imports.
+    seen_edge_keys: set[tuple[UUID, UUID, str]] = set()
+    deduped_edges = 0
 
     for fact in facts:
         subject = _resolve_ref(fact.subject_ref)
@@ -291,6 +317,12 @@ def _build_graph_batches(
                 ", ".join(unresolved),
             )
             continue
+
+        edge_key = (subject.id, target.id, fact.predicate)
+        if edge_key in seen_edge_keys:
+            deduped_edges += 1
+            continue
+        seen_edge_keys.add(edge_key)
 
         index = batch_index_of.get(subject.id)
         if index is None:
@@ -316,6 +348,8 @@ def _build_graph_batches(
             (subject.id, target.id, fact.predicate, _fact_edge_properties(fact))
         )
 
+    if deduped_edges:
+        logger.info("Deduplicated %d facts that resolved to already-seen edge keys.", deduped_edges)
     batches = [batch for batch in batches if batch["nodes"] or batch["edges"]]
     return batches, skipped_facts
 
@@ -323,12 +357,13 @@ def _build_graph_batches(
 class _RecordTranslator:
     """Incremental record translator shared by the sync and async entry points."""
 
-    def __init__(self, mode: str):
+    def __init__(self, mode: str, preserve_source_ids: bool = False):
         self.mode = mode
+        self.preserve_source_ids = preserve_source_ids
         self.result = TranslationResult(cognify_data_items=mode != "preserve")
-        self.entities: List[COGXEntity] = []
-        self.facts: List[COGXFact] = []
-        self.raw_nodes: List[COGXRawNode] = []
+        self.entities: list[COGXEntity] = []
+        self.facts: list[COGXFact] = []
+        self.raw_nodes: list[COGXRawNode] = []
 
     def add(self, record: COGXRecord) -> None:
         result = self.result
@@ -379,31 +414,35 @@ class _RecordTranslator:
                     )
                 )
         else:
-            batches, skipped_facts = _build_graph_batches(entities, facts, self.raw_nodes)
+            batches, skipped_facts = _build_graph_batches(
+                entities, facts, self.raw_nodes, preserve_source_ids=self.preserve_source_ids
+            )
             result.graph_batches.extend(batches)
             result.skipped_facts = skipped_facts
         return result
 
 
-def translate_records(records: Iterable[COGXRecord], mode: str) -> TranslationResult:
+def translate_records(
+    records: Iterable[COGXRecord], mode: str, preserve_source_ids: bool = False
+) -> TranslationResult:
     """Translate COGX records according to the import fidelity mode."""
-    translator = _RecordTranslator(mode)
+    translator = _RecordTranslator(mode, preserve_source_ids=preserve_source_ids)
     for record in records:
         translator.add(record)
     return translator.finish()
 
 
 async def translate_record_stream(
-    records: AsyncIterable[COGXRecord], mode: str
+    records: AsyncIterable[COGXRecord], mode: str, preserve_source_ids: bool = False
 ) -> TranslationResult:
     """Translate an async record stream without first materializing it as a list."""
-    translator = _RecordTranslator(mode)
+    translator = _RecordTranslator(mode, preserve_source_ids=preserve_source_ids)
     async for record in records:
         translator.add(record)
     return translator.finish()
 
 
-def wrap_graph_batch(batch: Dict[str, Any], source_system: str, index: int) -> DataItem:
+def wrap_graph_batch(batch: dict[str, Any], source_system: str, index: int) -> DataItem:
     """Wrap a graph batch in a DataItem with a deterministic data_id.
 
     The pipeline runtime treats DataItems with a stable ``data_id`` as
@@ -427,6 +466,12 @@ def _provenance_ctx(ctx):
     add_data_points stamps ledger provenance from ``ctx.data_item.id``, which
     exists on Data ORM records but not on raw ingestion DataItems. Substitute
     the DataItem's deterministic ``data_id`` so provenance still lands.
+
+    Only ``data_item`` is replaced; every other PipelineContext field is
+    carried over via ``dataclasses.replace`` so consumers that read ctx
+    attributes (e.g. ``add_data_points`` reads ``ctx.pipeline_run_id``) never
+    see a field-stripped context — a hand-copied field list here silently
+    drops any parameter later added to PipelineContext.
     """
     if ctx is None:
         return None
@@ -434,12 +479,7 @@ def _provenance_ctx(ctx):
     if data_item is None or hasattr(data_item, "id"):
         return ctx
     data_id = getattr(data_item, "data_id", None)
-    return SimpleNamespace(
-        user=getattr(ctx, "user", None),
-        dataset=getattr(ctx, "dataset", None),
-        data_item=SimpleNamespace(id=data_id) if data_id else None,
-        extras=getattr(ctx, "extras", None),
-    )
+    return dataclasses.replace(ctx, data_item=SimpleNamespace(id=data_id) if data_id else None)
 
 
 # Edge batches can run larger than node batches: edges are small tuples and
@@ -447,7 +487,9 @@ def _provenance_ctx(ctx):
 EDGE_BATCH_TARGET = 2 * BATCH_NODE_TARGET
 
 
-async def stream_graph_from_source(source, stats: Dict[str, int], ctx=None) -> Dict[str, int]:
+async def stream_graph_from_source(
+    source, stats: dict[str, int], ctx=None, graph_only: bool = False
+) -> dict[str, int]:
     """Two-pass streaming graph import for replayable preserve-mode sources.
 
     Pass 1 streams the records once: raw nodes are rehydrated and flushed to
@@ -467,23 +509,32 @@ async def stream_graph_from_source(source, stats: Dict[str, int], ctx=None) -> D
 
     ctx = _provenance_ctx(ctx)
 
-    entity_types: Dict[str, EntityType] = {}
-    by_external_id: Dict[str, Any] = {}
-    by_node_id: Dict[UUID, Any] = {}
-    first_external_id: Dict[UUID, str] = {}
-    known_node_ids: Set[UUID] = set()
-    external_to_node_id: Dict[str, UUID] = {}
+    # Cognee-origin archives keep the source node UUIDs verbatim (exact graph
+    # copy); other systems get class-namespaced ids (see _register_entity).
+    preserve_source_ids = source.source_system == "cognee"
 
-    async def flush(nodes: List[Any], edges: Optional[List[Tuple]] = None) -> None:
+    entity_types: dict[str, EntityType] = {}
+    by_external_id: dict[str, Any] = {}
+    by_node_id: dict[UUID, Any] = {}
+    first_external_id: dict[UUID, str] = {}
+    known_node_ids: set[UUID] = set()
+    external_to_node_id: dict[str, UUID] = {}
+
+    async def flush(nodes: list[Any], edges: list[tuple] | None = None) -> None:
         if not nodes and not edges:
             return
-        await add_data_points(list(nodes), custom_edges=list(edges) if edges else None, ctx=ctx)
+        await add_data_points(
+            list(nodes),
+            custom_edges=list(edges) if edges else None,
+            ctx=ctx,
+            graph_only=graph_only,
+        )
         stats["graph_nodes"] += len(nodes)
         stats["graph_edges"] += len(edges or [])
         logger.info("Streamed graph batch: %d nodes, %d edges", len(nodes), len(edges or []))
 
     # Pass 1: raw nodes stream straight to storage; entities buffer for merging.
-    batch: List[Any] = []
+    batch: list[Any] = []
     async for record in source.records():
         if record.kind == "raw_node":
             properties = record.properties or {}
@@ -505,6 +556,7 @@ async def stream_graph_from_source(source, stats: Dict[str, int], ctx=None) -> D
                 by_node_id=by_node_id,
                 by_external_id=by_external_id,
                 first_external_id=first_external_id,
+                preserve_source_ids=preserve_source_ids,
             )
     await flush(batch)
 
@@ -518,16 +570,22 @@ async def stream_graph_from_source(source, stats: Dict[str, int], ctx=None) -> D
     entity_types, by_node_id, by_external_id, ordered_nodes = {}, {}, {}, []
 
     # Pass 2: facts resolve against the slim registry and flush as edge batches.
-    stub_batch: List[Any] = []
-    edge_batch: List[Tuple] = []
-    stubbed: Set[UUID] = set()
+    stub_batch: list[Any] = []
+    edge_batch: list[tuple] = []
+    stubbed: set[UUID] = set()
+    # Distinct fact refs can RESOLVE to the same (source, target, relationship)
+    # edge key (entities merge by name), so dedupe at the resolved level —
+    # first fact wins. Re-MERGEing a duplicate is not only wasteful: the
+    # resulting ON MATCH SET rel update crashes Ladybug's committed-in-memory
+    # row lookup (csr_node_group.cpp KU_UNREACHABLE) during fresh bulk imports.
+    seen_edge_keys: set[tuple[UUID, UUID, str]] = set()
 
-    def resolve(ref: str) -> Tuple[Optional[UUID], Optional[Any]]:
+    def resolve(ref: str) -> tuple[UUID | None, Any | None]:
         """Resolve a fact ref to a node id; returns (id, new_stub_entity_or_None)."""
         node_id = external_to_node_id.get(ref)
         if node_id is not None:
             return node_id, None
-        candidate = generate_node_id(ref)
+        candidate = Entity.id_for(ref)
         if candidate in known_node_ids or candidate in stubbed:
             return candidate, None
         if _looks_like_uuid(ref):
@@ -557,6 +615,11 @@ async def stream_graph_from_source(source, stats: Dict[str, int], ctx=None) -> D
                 ", ".join(unresolved),
             )
             continue
+        edge_key = (subject_id, object_id, record.predicate)
+        if edge_key in seen_edge_keys:
+            stats["deduped_edges"] += 1
+            continue
+        seen_edge_keys.add(edge_key)
         for stub in (subject_stub, object_stub):
             if stub is not None and stub.id not in stubbed:
                 stub_batch.append(stub)
@@ -570,7 +633,7 @@ async def stream_graph_from_source(source, stats: Dict[str, int], ctx=None) -> D
     return stats
 
 
-async def store_imported_graph(batches, ctx=None):
+async def store_imported_graph(batches, ctx=None, graph_only: bool = False):
     """Pipeline task: persist translated graph batches via add_data_points."""
     from cognee.tasks.storage.add_data_points import add_data_points
 
@@ -585,6 +648,7 @@ async def store_imported_graph(batches, ctx=None):
             batch["nodes"],
             custom_edges=batch["edges"] or None,
             ctx=ctx,
+            graph_only=graph_only,
         )
         logger.info(
             "Stored imported graph batch: %d nodes, %d edges",

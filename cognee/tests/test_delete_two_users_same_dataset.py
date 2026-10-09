@@ -1,17 +1,21 @@
 import os
-import random
-import pytest
 import pathlib
-from uuid import NAMESPACE_OID, uuid5
+import random
+from contextlib import AsyncExitStack
 from unittest.mock import AsyncMock, patch
+from uuid import NAMESPACE_OID, uuid5
+
+import pytest
 
 import cognee
 from cognee.api.v1.datasets import datasets
 from cognee.context_global_variables import set_database_global_context_variables
-from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.llm import LLMGateway
+from cognee.infrastructure.locks import dataset_lock
+from cognee.modules.chunking.chunk_id import chunk_content_hash, content_chunk_id
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
 from cognee.modules.data.methods import (
@@ -19,8 +23,8 @@ from cognee.modules.data.methods import (
     get_authorized_dataset_by_name,
 )
 from cognee.modules.data.models import Data
-from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.data.processing.document_types import TextDocument
+from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.engine.operations.setup import setup
 from cognee.modules.engine.utils import generate_node_id
 from cognee.modules.graph.legacy.record_data_in_legacy_ledger import record_data_in_legacy_ledger
@@ -31,7 +35,7 @@ from cognee.modules.users.methods import create_user
 from cognee.modules.users.permissions.methods.authorized_give_permission_on_datasets import (
     authorized_give_permission_on_datasets,
 )
-from cognee.shared.data_models import KnowledgeGraph, Node, Edge, SummarizedContent
+from cognee.shared.data_models import Edge, KnowledgeGraph, Node, SummarizedContent
 from cognee.tasks.storage import index_data_points, index_graph_edges
 from cognee.tests.utils.assert_edges_vector_index_not_present import (
     assert_edges_vector_index_not_present,
@@ -77,13 +81,19 @@ async def main(mock_create_structured_output: AsyncMock):
     marie = await create_user(email="marie@example.com", password="marie_password")
 
     # Johns's context
-    await set_database_global_context_variables("main_dataset", john.id)
+    johns_dataset = await create_authorized_dataset("main_dataset", john)
+    # Canonical lock order (SDK-483): hold the dataset lock before the legacy
+    # context call below acquires its queue slot; nested add/cognify/delete
+    # re-enter via held_datasets instead of re-acquiring the lock.
+    _lock_stack = AsyncExitStack()
+    await _lock_stack.enter_async_context(dataset_lock(johns_dataset.id))
+    await set_database_global_context_variables(johns_dataset.id, john.id)
     graph_engine = await get_graph_engine()
     nodes, edges = await graph_engine.get_graph_data()
 
     assert len(nodes) == 0 and len(edges) == 0, "Graph is not empty."
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine_async()
 
     assert not await vector_engine.has_collection("EdgeType_relationship_name")
     assert not await vector_engine.has_collection("Entity_name")
@@ -107,7 +117,7 @@ async def main(mock_create_structured_output: AsyncMock):
     maries_data_id = add_marie_result.data_ingestion_info[0]["data_id"]
 
     johns_cognify_result: dict = await cognee.cognify(datasets=["main_dataset"], user=john)
-    johns_dataset_id = list(johns_cognify_result.keys())[0]
+    johns_dataset_id = next(iter(johns_cognify_result.keys()))
 
     johns_document = TextDocument(
         id=johns_data_id,
@@ -116,7 +126,7 @@ async def main(mock_create_structured_output: AsyncMock):
         external_metadata="",
     )
     johns_chunk = DocumentChunk(
-        id=uuid5(NAMESPACE_OID, f"{str(johns_data_id)}-0"),
+        id=content_chunk_id(str(johns_data_id), chunk_content_hash(johns_text), 0),
         text=johns_text,
         chunk_size=14,
         chunk_index=0,
@@ -146,7 +156,7 @@ async def main(mock_create_structured_output: AsyncMock):
         external_metadata="",
     )
     maries_chunk = DocumentChunk(
-        id=uuid5(NAMESPACE_OID, f"{str(maries_data_id)}-0"),
+        id=content_chunk_id(str(maries_data_id), chunk_content_hash(maries_text), 0),
         text=maries_text,
         chunk_size=14,
         chunk_index=0,
@@ -174,7 +184,9 @@ async def main(mock_create_structured_output: AsyncMock):
     )
 
     # John's initial assertions
-    await set_database_global_context_variables("main_dataset", john.id)
+    await set_database_global_context_variables(
+        (await create_authorized_dataset("main_dataset", john)).id, john.id
+    )
     # Assert data points presence in the graph, vector collections and nodes table
     await assert_graph_nodes_present(
         johns_data

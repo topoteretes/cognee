@@ -19,8 +19,8 @@ from .bucketing.graph.placement import (
     validate_graph_buckets_can_be_extended,
     validate_vector_buckets_can_be_extended,
 )
-from .build import build_context_index, group_buckets_by_level
 from .bucketing_strategy import BucketingStrategyName
+from .build import build_context_index, group_buckets_by_level
 from .load import dataset_id_from_context, load_context_index_input_from_graph
 from .models import GlobalContextIndexUpdateData, SummaryNode
 from .persist import delete_context_index_nodes, persist_context_index_edges
@@ -253,7 +253,7 @@ async def build_and_persist_context_index(
         ctx=ctx,
     )
 
-    await persist_context_index_edges(assignments, unified_engine)
+    await persist_context_index_edges(assignments, unified_engine, ctx=ctx)
     return context_datapoints
 
 

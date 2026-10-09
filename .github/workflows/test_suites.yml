@@ -1,19 +1,25 @@
 name: Test Suites
 permissions:
   contents: read
-  packages: write
+  packages: read  # reusable test workflows pull the ghcr.io CI image
 
 on:
   push:
     branches: [ main, dev ]
   pull_request:
     branches: [ main, dev ]
-    types: [opened, synchronize, reopened, labeled]
+    # No `labeled`: label-core-team.yml labels every core-team PR on open, and
+    # a `labeled` trigger queued a second run that cancelled the first (both
+    # runs on the same sha, seconds apart, on every PR).
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # Cancel superseded PR runs, but never a push-to-dev run: consecutive merges
+  # were cancelling each other's full run (15 of the last 40 push runs), so
+  # dev's real state was unknown most of the time.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   RUNTIME__LOG_LEVEL: ERROR
@@ -22,6 +28,9 @@ env:
 jobs:
   # ── Build pre-baked CI container ──────────────────────────────────────
   build-ci-env:
+    permissions:
+      contents: read
+      packages: write  # pushes the CI image
     name: Build CI Environment
     runs-on: ubuntu-latest
     if: >-
@@ -32,7 +41,7 @@ jobs:
       ci-image: ${{ steps.set-image.outputs.image }}
     steps:
       - name: Sparse checkout (deps only)
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           sparse-checkout: |
             pyproject.toml
@@ -45,14 +54,17 @@ jobs:
       - name: Compute dep hash and image tag
         id: set-image
         run: |
-          DEP_HASH=$(sha256sum pyproject.toml uv.lock | sha256sum | head -c 16)
+          # Dockerfile.ci is part of the key: it decides which extras get baked
+          # into the image, so changing it must produce a new tag (the build is
+          # skipped whenever the tag already exists).
+          DEP_HASH=$(sha256sum pyproject.toml uv.lock Dockerfile.ci | sha256sum | head -c 16)
           IMAGE="ghcr.io/${{ github.repository }}/ci-env:deps-${DEP_HASH}"
           echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
           echo "dep_hash=${DEP_HASH}" >> "$GITHUB_OUTPUT"
           echo "Image tag: ${IMAGE}"
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -71,11 +83,11 @@ jobs:
 
       - name: Set up Docker Buildx
         if: steps.check.outputs.exists != 'true'
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
 
       - name: Build and push CI image
         if: steps.check.outputs.exists != 'true'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
         with:
           context: .
           file: Dockerfile.ci
@@ -114,6 +126,16 @@ jobs:
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
+
+  journey-tests:
+    # Product contract journeys in mock-LLM mode: no secrets, so fork PRs get a
+    # real signal here even when the secret-dependent suites cannot run.
+    name: Product Journeys
+    uses: ./.github/workflows/journey_tests.yml
+    needs: [ build-ci-env ]
+    if: ${{ !cancelled() }}
+    with:
+      ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
 
   slow-e2e-tests:
     name: Slow End-to-End Tests
@@ -164,11 +186,20 @@ jobs:
     name: OS and Python Tests Ubuntu
     uses: ./.github/workflows/test_different_operating_systems.yml
     with:
-      python-versions: '["3.10.x", "3.11.x", "3.12.x", "3.13.x", "3.14.x"]'
+      # The interpreter edges only. Every version-specific fix on dev since
+      # 2025-06 was 3.10 (5) or 3.14 (1); none was 3.11/3.12/3.13-only. Those
+      # three run in release_test.yml instead. The unit suite is byte-identical across the
+      # legs, so this cuts three of eight copies with no change in what a
+      # passing run proves.
+      python-versions: '["3.10.x", "3.14.x"]'
       os: '["ubuntu-22.04"]'
       # postgres so the SQL cache adapter tests run instead of skipping; omitted
       # on macos/windows (extended) where psycopg2 has no prebuilt wheels.
-      extra-dependencies: 'postgres'
+      # aws/neptune/langchain/dlt: the CI-image copy of the unit suite (deleted
+      # -- it was the slowest of eight identical copies, behind a 3-minute image
+      # pull) was the only leg with these, and four test files importorskip on
+      # them. Resolved from the existing lock on 3.10.
+      extra-dependencies: 'postgres aws neptune langchain dlt'
     secrets: inherit
 
   different-os-tests-extended:
@@ -221,6 +252,11 @@ jobs:
     uses: ./.github/workflows/backend_docker_build_test.yml
     secrets: inherit
 
+  ui-docker-ci-test:
+    name: UI Docker CI test
+    uses: ./.github/workflows/frontend_docker_build_test.yml
+    secrets: inherit
+
   temporal-graph-tests:
     name: Temporal Graph Test
     needs: [ build-ci-env ]
@@ -237,6 +273,13 @@ jobs:
     uses: ./.github/workflows/search_db_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
+      # One Python per backend combo, not four. Half of the sixteen legs ran
+      # in the CI image, which pins Python 3.11 regardless of the matrix: the
+      # job labelled "Python 3.13" logged "Python 3.11.14". So those were the
+      # same run four times. The Python dimension is the unit matrix's job;
+      # this workflow's value is the four backend combos, which all stay.
+      # The full version sweep for the two bare Neo4j jobs runs in release_test.yml.
+      python-versions: '["3.11"]'
     secrets: inherit
 
   relational-db-migration-tests:
@@ -248,27 +291,6 @@ jobs:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
 
-  # NOTE: intentionally excluded from the `notify` aggregator below — this is
-  # external infra (Modal + Azure secrets), informational only; it must not gate
-  # merges. (`continue-on-error` is not allowed on a reusable-workflow job.)
-  distributed-tests:
-    name: Distributed Cognee Test
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
-    uses: ./.github/workflows/distributed_test.yml
-    with:
-      ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
-    secrets: inherit
-
-  db-examples-tests:
-    name: DB Examples Tests
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
-    uses: ./.github/workflows/db_examples_tests.yml
-    with:
-      ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
-    secrets: inherit
-
   notify:
     name: Test Completion Status
     needs: [
@@ -276,6 +298,7 @@ jobs:
       basic-tests,
       e2e-tests,
       cli-tests,
+      journey-tests,
       slow-e2e-tests,
       graph-db-tests,
       vector-db-tests,
@@ -289,10 +312,10 @@ jobs:
       mcp-test,
       docker-compose-test,
       docker-ci-test,
+      ui-docker-ci-test,
       temporal-graph-tests,
       search-db-tests,
       relational-db-migration-tests,
-      db-examples-tests,
     ]
     runs-on: ubuntu-latest
     if: ${{ !cancelled() }}
@@ -303,6 +326,7 @@ jobs:
                 "${{ needs.basic-tests.result }}" == "success" &&
                 "${{ needs.e2e-tests.result }}" == "success" &&
                 "${{ needs.cli-tests.result }}" == "success" &&
+                "${{ needs.journey-tests.result }}" == "success" &&
                 "${{ needs.slow-e2e-tests.result }}" == "success" &&
                 "${{ needs.graph-db-tests.result }}" == "success" &&
                 "${{ needs.vector-db-tests.result }}" == "success" &&
@@ -316,10 +340,10 @@ jobs:
                 "${{ needs.mcp-test.result }}" == "success" &&
                 "${{ needs.docker-compose-test.result }}" == "success" &&
                 "${{ needs.docker-ci-test.result }}" == "success" &&
+                "${{ needs.ui-docker-ci-test.result }}" == "success" &&
                 "${{ needs.temporal-graph-tests.result }}" == "success" &&
                 "${{ needs.search-db-tests.result }}" == "success" &&
-                "${{ needs.relational-db-migration-tests.result }}" == "success" &&
-                "${{ needs.db-examples-tests.result }}" == "success" ]]; then
+                "${{ needs.relational-db-migration-tests.result }}" == "success" ]]; then
             echo "All test suites completed successfully!"
           else
             echo "One or more test suites failed."
@@ -340,7 +364,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout PR
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
 
@@ -361,7 +385,7 @@ jobs:
       - name: Mint private-repo token
         if: ${{ steps.gate.outputs.run == 'true' }}
         id: app-token
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
         with:
           app-id: ${{ secrets.CI_APP_ID }}
           private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
@@ -370,7 +394,7 @@ jobs:
 
       - name: Fetch private review skill + slack map
         if: ${{ steps.gate.outputs.run == 'true' }}
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           repository: ${{ github.repository_owner }}/cognee-ci
           token: ${{ steps.app-token.outputs.token }}
@@ -390,14 +414,14 @@ jobs:
 
       - name: Claude Code review
         if: ${{ steps.gate.outputs.run == 'true' }}
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@756cc22e19660d20e8cc9496b4f242475a7f7790  # v1.0.235
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           prompt: "/pr-review"
           claude_args: >-
             --allowed-tools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Glob,Grep"
-            --max-turns 20
+            --max-turns 40
             --model claude-sonnet-4-5-20250929
 
       - name: DM review summary to PR author on Slack

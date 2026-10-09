@@ -1,11 +1,7 @@
 "use client";
-import { Flex } from "@mantine/core";
-import CogneeMascotWaveAnimation from "./CogneeMascotWaveAnimation";
 
+// The new hero-style auth design is a single centered composition over the
+// animated background — the former white side panel is retired.
 export default function AuthContentSectionCarousel() {
-  return (
-    <Flex w={"calc(100vw * 1/2)"} className={"!bg-white hidden lg:flex"}>
-      <CogneeMascotWaveAnimation />
-    </Flex>
-  );
+  return null;
 }

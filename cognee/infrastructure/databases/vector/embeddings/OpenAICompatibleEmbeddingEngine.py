@@ -16,41 +16,47 @@ import asyncio
 import logging
 import math
 import os
-from typing import List, Optional
 
 import httpx
 import numpy as np
+import openai
 from openai import AsyncOpenAI
 from tenacity import (
     before_sleep_log,
     retry,
-    retry_if_not_exception_type,
     stop_after_delay,
     wait_exponential_jitter,
 )
 
+from cognee.infrastructure.databases.exceptions import (
+    EmbeddingContextWindowTooSmallError,
+    EmbeddingCredentialsError,
+    EmbeddingException,
+)
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
     EmbeddingEngine,
 )
-from cognee.infrastructure.llm.tokenizer.HuggingFace import HuggingFaceTokenizer
-from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
+from cognee.infrastructure.databases.vector.embeddings.input_limit import (
+    init_input_limit,
+    litellm_input_limit,
+    sane_limit,
+)
+from cognee.infrastructure.databases.vector.embeddings.retry_config import (
+    embedding_retry_condition,
+)
 from cognee.infrastructure.databases.vector.embeddings.utils import (
     handle_embedding_response,
     sanitize_embedding_text_inputs,
 )
-from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
+from cognee.infrastructure.llm.exceptions import raise_if_budget_exhausted
+from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
+from cognee.modules.observability.get_observe import get_observe
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 
 logger = get_logger("OpenAICompatibleEmbeddingEngine")
 
-
-class EmbeddingException(Exception):
-    """Raised when an embedding request fails."""
-
-    def __init__(self, message: str, name: str = "EmbeddingException"):
-        self.message = message
-        self.name = name
-        super().__init__(self.message)
+observe = get_observe()
 
 
 class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
@@ -84,20 +90,26 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
 
     def __init__(
         self,
-        model: Optional[str] = "default",
+        model: str | None = "default",
         dimensions: int = 3072,
-        max_completion_tokens: int = 8191,
-        endpoint: Optional[str] = "http://localhost:8080",
-        api_key: Optional[str] = "no-key-required",
+        max_completion_tokens: int | None = None,
+        endpoint: str | None = "http://localhost:8080",
+        api_key: str | None = "no-key-required",
         batch_size: int = 36,
+        input_type: str | None = None,
     ):
         self.model = model or "default"
         self.dimensions = dimensions
-        self.max_completion_tokens = max_completion_tokens
         self.endpoint = endpoint or "http://localhost:8080"
         self.api_key = api_key or "no-key-required"
         self.batch_size = batch_size
+        # Some OpenAI-compatible servers (e.g. self-hosted NVIDIA NIM
+        # containers) require an "input_type" field ("query" / "passage")
+        # that isn't part of the OpenAI embeddings spec. Sent via extra_body
+        # so it has no effect on servers that ignore unknown fields.
+        self.input_type = input_type
         self.tokenizer = self.get_tokenizer()
+        init_input_limit(self, max_completion_tokens)
 
         enable_mocking = os.getenv("MOCK_EMBEDDING", "false").lower()
         self.mock = enable_mocking in ("true", "1", "yes")
@@ -111,14 +123,23 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
             base = base + "/v1"
         self._client = AsyncOpenAI(api_key=self.api_key, base_url=base, timeout=120)
 
+    @observe(as_type="embeddings")
     @retry(
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(2, 128),
-        retry=retry_if_not_exception_type((ValueError, asyncio.CancelledError)),
+        # Budget exhaustion is terminal too: this engine talks to any
+        # OpenAI-compatible base URL, a LiteLLM proxy included. It is classified
+        # by predicate rather than by class -- see embeddings/retry_config.py.
+        retry=embedding_retry_condition(
+            EmbeddingContextWindowTooSmallError,
+            EmbeddingCredentialsError,
+            ValueError,
+            asyncio.CancelledError,
+        ),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    async def embed_text(self, text: List[str]) -> List[List[float]]:
+    async def embed_text(self, text: list[str]) -> list[list[float]]:
         """
         Embed a list of text strings into vector representations.
 
@@ -143,18 +164,27 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
             return handle_embedding_response(original_texts, embeddings, self.dimensions)
 
         try:
+            create_kwargs = {
+                "model": self.model,
+                "input": sanitized_text,
+                "encoding_format": "float",
+            }
+            if self.input_type:
+                create_kwargs["extra_body"] = {"input_type": self.input_type}
+
             async with embedding_rate_limiter_context_manager():
                 response = await asyncio.wait_for(
-                    self._client.embeddings.create(
-                        model=self.model,
-                        input=sanitized_text,
-                        encoding_format="float",
-                    ),
+                    self._client.embeddings.create(**create_kwargs),
                     timeout=300.0,
                 )
             embeddings = [item.embedding for item in response.data]
 
         except Exception as error:
+            # A proxy spend cap is terminal, and none of the branches below can
+            # read it correctly: it is neither a context-window problem nor a
+            # connectivity one. Raise the same actionable 402 the LLM path does.
+            raise_if_budget_exhausted(error)
+
             error_str = str(error).lower()
 
             # Handle context window exceeded by splitting input
@@ -180,9 +210,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
                     s = original_texts[0]
                     third = len(s) // 3
                     if third == 0:
-                        raise EmbeddingException(
-                            "Text is too short to split further but exceeds context window."
-                        ) from error
+                        raise EmbeddingContextWindowTooSmallError from error
                     left_part, right_part = s[: third * 2], s[third:]
                     (left_vec,), (right_vec,) = await asyncio.gather(
                         self.embed_text([left_part]),
@@ -209,6 +237,31 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
                 raise EmbeddingException(
                     "Cannot connect to embedding endpoint. Check EMBEDDING_ENDPOINT."
                 ) from error
+
+            if isinstance(error, (openai.AuthenticationError, openai.PermissionDeniedError)):
+                # Terminal credential failures are re-raised as a cognee type,
+                # not as the openai class: the class is what the exclusion list
+                # cannot use (the generic wrap below would hide it from the
+                # predicate anyway), and staying inside CogneeApiError is what
+                # keeps the API's 422 instead of falling through a router's
+                # ``except Exception`` into a 500. Diverges from
+                # LiteLLMEmbeddingEngine, which re-raises litellm's class bare so
+                # the CLI's remediation can match its message; that message shape
+                # is litellm's, not this SDK's, so the rationale does not carry
+                # over. The provider's text is preserved in the message instead.
+                #
+                # NotFoundError is deliberately left retryable here, unlike in
+                # LiteLLMEmbeddingEngine: an ingress or reverse proxy in front of
+                # a self-hosted server can 404 transiently during a rolling
+                # deploy, which is realistic for exactly this engine. The cost is
+                # that a permanent 404 (a typo'd model name, a wrong base path)
+                # still burns the full ladder.
+                logger.error(
+                    "Embedding endpoint rejected the request: %s. EMBEDDING_ENDPOINT='%s'.",
+                    str(error),
+                    self.endpoint,
+                )
+                raise EmbeddingCredentialsError(str(error)) from error
 
             logger.error(
                 "Error embedding text: %s. EMBEDDING_ENDPOINT='%s'.",
@@ -243,18 +296,18 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         """
         return self.batch_size
 
+    input_limit_source = "litellm model table or the model's tokenizer"
+
+    async def input_limit(self) -> int | None:
+        """A self-hosted server names no limit; the served model id is usually a
+        HuggingFace repo (its tokenizer knows) or a hosted model litellm knows."""
+        return litellm_input_limit(self.model) or sane_limit(self.tokenizer.model_input_limit)
+
     def get_tokenizer(self):
-        """Load a tokenizer for chunk sizing against OpenAI-compatible embedding servers."""
-        logger.debug("Loading HuggingfaceTokenizer for OpenAICompatibleEmbeddingEngine...")
-        try:
-            tokenizer = HuggingFaceTokenizer(
-                model=self.model,
-                max_completion_tokens=self.max_completion_tokens,
-            )
-        except Exception as error:
-            logger.warning("Could not get tokenizer from HuggingFace due to: %s", error)
-            logger.info("Switching to TikToken default tokenizer.")
-            tokenizer = TikTokenTokenizer(
-                model=None, max_completion_tokens=self.max_completion_tokens
-            )
-        return tokenizer
+        """Load a tokenizer for chunk sizing against OpenAI-compatible embedding servers.
+
+        The served model id is usually a HuggingFace repo, so resolution uses the
+        model's own tokenizer and warns/falls back safely on mismatch (issue #3646).
+        """
+        logger.debug("Loading tokenizer for OpenAICompatibleEmbeddingEngine...")
+        return resolve_embedding_tokenizer(provider="openai_compatible", model=self.model)

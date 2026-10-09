@@ -1,24 +1,33 @@
-from cognee.modules.data.models import Data
 import json
-from cognee.modules.pipelines.tasks.task import task_summary
+
+from cognee.modules.data.models import Data
 from cognee.modules.data.processing.document_types import (
-    Document,
-    PdfDocument,
     AudioDocument,
+    CodeFileDocument,
+    CodeRepoDocument,
+    CsvDocument,
+    DltSourceDocument,
+    Document,
     ImageDocument,
+    PdfDocument,
     TextDocument,
     UnstructuredDocument,
-    CsvDocument,
-    DltRowDocument,
 )
-from cognee.modules.engine.models.node_set import NodeSet
+from cognee.modules.engine.models.node_set import NodeSet, validate_node_set_names
 from cognee.modules.engine.utils.generate_node_id import generate_node_id
+from cognee.modules.pipelines.tasks.task import task_summary
+from cognee.tasks.code_graph.code_files import is_code_sourced
+from cognee.tasks.code_graph.code_repo import is_code_repo_sourced
 from cognee.tasks.documents.exceptions import WrongDataDocumentInputError
-from cognee.tasks.ingestion.dlt_utils import is_dlt_sourced
+from cognee.tasks.ingestion.dlt_utils import is_dlt_source_manifest, is_dlt_sourced
 
 EXTENSION_TO_DOCUMENT_CLASS = {
     "pdf": PdfDocument,  # Text documents
     "txt": TextDocument,
+    "md": TextDocument,
+    "json": TextDocument,
+    "xml": TextDocument,
+    "yaml": TextDocument,
     "csv": CsvDocument,
     "docx": UnstructuredDocument,
     "doc": UnstructuredDocument,
@@ -63,9 +72,9 @@ def update_node_set(document):
 
     Parses the external_metadata of the given document and updates the document's
     belongs_to_set attribute with NodeSet objects generated from the node_set found in the
-    external_metadata. If the external_metadata is not valid JSON, is not a dictionary, does
-    not contain the 'node_set' key, or if node_set is not a list, the function has no effect
-    and will return early.
+    external_metadata. If the external_metadata is not valid JSON, is not a dictionary, or
+    does not contain the 'node_set' key, the function has no effect and will return early.
+    A node_set that is not a list of names raises instead of leaving the document untagged.
 
     Parameters:
     -----------
@@ -84,15 +93,42 @@ def update_node_set(document):
     if "node_set" not in external_metadata:
         return
 
-    node_set = external_metadata["node_set"]
-    if not isinstance(node_set, list):
+    node_set = validate_node_set_names(external_metadata["node_set"])
+    if node_set is None:
         return
 
-    document.belongs_to_set = [
-        NodeSet(id=generate_node_id(f"NodeSet:{node_set_name}"), name=node_set_name)
-        for node_set_name in node_set
-    ]
+    document.belongs_to_set = [NodeSet(name=node_set_name) for node_set_name in node_set]
     document.source_node_set = ", ".join(node_set)
+
+
+def document_class_for(data_item) -> type[Document]:
+    """The document class a data item classifies to. Pure — reads only fields
+    already on the record (system_metadata, extension); no I/O, no config.
+    User-writable external_metadata is deliberately never consulted, so users
+    cannot steer records into (or out of) the DLT route.
+
+    Single source of truth for the dispatch: classify_documents builds
+    instances from it, and cognify routing (modules/cognify/routing.py)
+    derives task routes from it, so classification and routing cannot
+    disagree.
+    """
+    if is_dlt_source_manifest(data_item):
+        return DltSourceDocument
+    if is_dlt_sourced(data_item):
+        # Tombstone: pre-manifest per-row DLT records are unsupported. Routing
+        # them standard would silently send structured rows to the LLM, so
+        # fail loudly instead. Delete such records or re-add the source.
+        raise ValueError(
+            f"Data item {getattr(data_item, 'id', '?')} is a pre-manifest per-row DLT "
+            "record (system_metadata.source == 'dlt'), which is no longer supported. "
+            "Delete it or re-add the DLT source to ingest it as a manifest."
+        )
+    if is_code_sourced(data_item):
+        return CodeFileDocument
+    if is_code_repo_sourced(data_item):
+        return CodeRepoDocument
+    extension = (data_item.extension or "").lower()
+    return EXTENSION_TO_DOCUMENT_CLASS.get(extension, TextDocument)
 
 
 @task_summary("Classified {n} document(s)")
@@ -124,10 +160,7 @@ async def classify_documents(data_documents: list[Data]) -> list[Document]:
 
     documents = []
     for data_item in data_documents:
-        if is_dlt_sourced(data_item):
-            doc_class = DltRowDocument
-        else:
-            doc_class = EXTENSION_TO_DOCUMENT_CLASS[data_item.extension]
+        doc_class = document_class_for(data_item)
 
         document = doc_class(
             id=data_item.id,

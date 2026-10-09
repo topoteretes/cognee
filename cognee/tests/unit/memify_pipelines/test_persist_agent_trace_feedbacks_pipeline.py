@@ -24,10 +24,6 @@ async def test_persist_agent_trace_feedbacks_pipeline_wires_memify_tasks():
             new=AsyncMock(return_value=[authorized_dataset]),
         ) as get_authorized_dataset,
         patch(
-            "cognee.memify_pipelines.persist_agent_trace_feedbacks_in_knowledge_graph.set_database_global_context_variables",
-            new=AsyncMock(),
-        ) as set_db_ctx,
-        patch(
             "cognee.memify_pipelines.persist_agent_trace_feedbacks_in_knowledge_graph.memify",
             new=AsyncMock(return_value={"status": "ok"}),
         ) as memify_mock,
@@ -44,10 +40,16 @@ async def test_persist_agent_trace_feedbacks_pipeline_wires_memify_tasks():
     assert result == {"status": "ok"}
     set_user_ctx.assert_awaited_once_with(user)
     get_authorized_dataset.assert_awaited_once()
-    set_db_ctx.assert_awaited_once_with("dataset-1", "owner-1")
+    # The pipeline must NOT enter the database context before memify (its old
+    # legacy `await` form held a queue slot until task end — the SDK-483
+    # deadlock). memify's own run enters the context under the dataset lock.
+    import cognee.memify_pipelines.persist_agent_trace_feedbacks_in_knowledge_graph as pat_module
+
+    assert not hasattr(pat_module, "set_database_global_context_variables")
 
     memify_kwargs = memify_mock.call_args.kwargs
     assert memify_kwargs["dataset"] == "dataset-1"
+    assert memify_kwargs["user"] == user
     assert memify_kwargs["data"] == [{}]
     assert len(memify_kwargs["extraction_tasks"]) == 1
     assert len(memify_kwargs["enrichment_tasks"]) == 1
@@ -59,3 +61,4 @@ async def test_persist_agent_trace_feedbacks_pipeline_wires_memify_tasks():
     assert extraction_task.default_params["kwargs"]["last_n_steps"] == 3
     assert enrichment_task.default_params["kwargs"]["dataset_id"] == "dataset-1"
     assert enrichment_task.default_params["kwargs"]["node_set_name"] == "custom_feedbacks"
+    assert enrichment_task.default_params["kwargs"]["user"] == user

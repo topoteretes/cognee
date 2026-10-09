@@ -23,6 +23,13 @@ class LLMInterface(ABC):
 
     max_completion_tokens: int
 
+    # Whether a plain-text answer from this adapter reaches a listening
+    # TokenSink. Declared rather than inferred because "will not stream" and
+    # "has not streamed yet" are indistinguishable at the promotion site, and
+    # guessing wrong means announcing a stream that never produces a token.
+    # Default False: an adapter opts in by routing through stream_text_completion.
+    supports_answer_streaming: bool = False
+
     @abstractmethod
     async def acreate_structured_output(
         self, text_input: str, system_prompt: str, response_model: type[T]
@@ -44,7 +51,7 @@ class LLMInterface(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def create_transcript(self, input: str) -> TranscriptionReturnType | None:
+    async def create_transcript(self, input: str, **kwargs: Any) -> TranscriptionReturnType | None:
         """
         Generate an audio transcript from a user query.
 
@@ -55,6 +62,9 @@ class LLMInterface(ABC):
         Parameters:
         -----------
             - input: The path to the audio file that needs to be transcribed.
+            - kwargs: Optional provider-specific transcription options (e.g. response
+              format or timestamp granularities). Implementations that do not support
+              them should accept and ignore them rather than raise.
 
         Returns:
         --------
@@ -64,7 +74,13 @@ class LLMInterface(ABC):
 
     # TODO: Implement a return type. Most adapters return a 'ModelResponse' while the Ollama adapter does something else.
     @abstractmethod
-    async def transcribe_image(self, input: str) -> Any:
+    async def transcribe_image(
+        self,
+        input: str,
+        prompt: str | None = None,
+        max_completion_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> Any:
         """
         Generate a transcription of an image from a user query.
 
@@ -74,6 +90,10 @@ class LLMInterface(ABC):
         Parameters:
         -----------
             - input: The path to the image file that needs to be transcribed.
+            - prompt: Optional extraction instruction; adapter default when omitted.
+            - max_completion_tokens: Optional length cap; adapter default when omitted.
+            - reasoning_effort: Optional reasoning-effort hint for reasoning models; ignored on
+              models that do not support it.
 
         Returns:
         --------

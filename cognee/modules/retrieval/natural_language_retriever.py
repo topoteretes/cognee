@@ -1,13 +1,62 @@
-from typing import Any, Optional
-from cognee.shared.logging_utils import get_logger
+import json
+from typing import Any
+
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+from cognee.infrastructure.engine import INTERNAL_PROPERTY, is_internal_node
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions import SearchTypeNotSupported
-from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("NaturalLanguageRetriever")
+
+
+def _is_internal_schema_row(row: Any) -> bool:
+    """True for a node-schema row that describes internal nodes.
+
+    On backends with per-node property keys (Neo4j), internal nodes are the only
+    ones carrying the ``is_internal`` key, so a schema row whose collected
+    property list contains it describes internal nodes. On backends with a fixed
+    column set (Ladybug/Kuzu) the marker lives inside the serialized
+    ``properties`` blob and never shows up as a key, so this is a no-op there —
+    the fixed columns carry nothing internal-specific to hide.
+    """
+    if isinstance(row, dict):
+        values = row.values()
+    elif isinstance(row, (list, tuple)):
+        values = row
+    else:
+        return False
+    for value in values:
+        if value == INTERNAL_PROPERTY:
+            return True
+        if isinstance(value, (list, tuple, set)) and INTERNAL_PROPERTY in value:
+            return True
+    return False
+
+
+def _contains_internal_node(value: Any) -> bool:
+    """True when a raw query result value contains an internal graph node.
+
+    Handles deserialized node dicts (``is_internal`` at the top level), nested
+    containers, and Ladybug/Kuzu raw rows where node properties come back as a
+    serialized JSON string column.
+    """
+    if isinstance(value, dict):
+        if is_internal_node(value):
+            return True
+        return any(_contains_internal_node(item) for item in value.values())
+    if isinstance(value, (list, tuple, set)):
+        return any(_contains_internal_node(item) for item in value)
+    if isinstance(value, str) and INTERNAL_PROPERTY in value:
+        try:
+            parsed = json.loads(value)
+        except ValueError:
+            return False
+        return isinstance(parsed, dict) and is_internal_node(parsed)
+    return False
 
 
 class NaturalLanguageRetriever(BaseRetriever):
@@ -21,11 +70,17 @@ class NaturalLanguageRetriever(BaseRetriever):
     - get_completion: Returns a completion based on the query and context.
     """
 
+    # The caller gets the rows the generated Cypher returned, never an LLM answer, so
+    # the pre-retrieval turn analysis has nothing to feed: it could only rewrite the
+    # question or answer it with an acknowledgement in place of the rows (the same
+    # reason the Cypher and chunk retrievers opt out).
+    supports_session_turn_preparation = False
+
     def __init__(
         self,
         system_prompt_path: str = "natural_language_retriever_system.txt",
         max_attempts: int = 3,
-        session_id: Optional[str] = None,
+        session_id: str | None = None,
     ):
         """Initialize retriever with optional custom prompt paths."""
         self.system_prompt_path = system_prompt_path
@@ -48,6 +103,9 @@ class NaturalLanguageRetriever(BaseRetriever):
             RETURN DISTINCT key;
             """
         )
+        # Internal nodes (e.g. per-user preference state) must never be surfaced,
+        # so keep their labels out of the schema handed to the LLM.
+        node_schemas = [row for row in node_schemas or [] if not _is_internal_schema_row(row)]
         return node_schemas, edge_schemas
 
     async def _generate_cypher_query(self, query: str, edge_schemas, previous_attempts=None) -> str:
@@ -86,6 +144,11 @@ class NaturalLanguageRetriever(BaseRetriever):
                 )
                 context = await graph_engine.query(cypher_query)
 
+                if isinstance(context, list):
+                    # Internal nodes (e.g. per-user preference state) must never
+                    # reach a user; drop any row that contains one.
+                    context = [row for row in context if not _contains_internal_node(row)]
+
                 if context:
                     result_count = len(context) if isinstance(context, list) else 1
                     logger.info(
@@ -97,7 +160,7 @@ class NaturalLanguageRetriever(BaseRetriever):
 
             except Exception as e:
                 previous_attempts += f"Query: {cypher_query if 'cypher_query' in locals() else 'Not generated'} -> Executed with error: {e}\n"
-                logger.error(f"Error executing query: {str(e)}")
+                logger.exception("Error executing query")
 
         logger.warning(
             f"Failed to get results after {self.max_attempts} attempts for query: '{query[:50]}...'"
@@ -107,15 +170,16 @@ class NaturalLanguageRetriever(BaseRetriever):
     async def get_retrieved_objects(self, query: str) -> Any:
         graph_engine = await get_graph_engine()
 
-        # Postgres backends do not support Cypher generation/execution
-        from cognee.infrastructure.databases.graph.postgres.adapter import PostgresAdapter
-        from cognee.infrastructure.databases.hybrid.postgres.adapter import PostgresHybridAdapter
-
-        if isinstance(graph_engine, (PostgresAdapter, PostgresHybridAdapter)):
+        # Cypher support is declared on the adapter class
+        # (GraphDBInterface.supports_cypher_queries), so backends like Postgres
+        # and Turso are excluded without importing optional backend packages
+        # absent from slim images.
+        if not getattr(graph_engine, "supports_cypher_queries", True):
             raise SearchTypeNotSupported(
-                "Natural language search is not supported with the Postgres graph backend. "
-                "This retriever generates and executes Cypher queries, which require a "
-                "graph-native backend (Neo4j, Ladybug)."
+                f"Natural language search is not supported with the "
+                f"{type(graph_engine).__name__} graph backend. This retriever generates "
+                "and executes Cypher queries, which require a Cypher-capable graph "
+                "backend (Neo4j, Ladybug)."
             )
 
         is_empty = await graph_engine.is_empty()
@@ -126,7 +190,7 @@ class NaturalLanguageRetriever(BaseRetriever):
 
         return await self._execute_cypher_query(query, graph_engine)
 
-    async def get_context_from_objects(self, query: str, retrieved_objects: Any) -> Optional[Any]:
+    async def get_context_from_objects(self, query: str, retrieved_objects: Any) -> Any | None:
         """
         Retrieves relevant context using a natural language query converted to Cypher.
 
@@ -142,14 +206,16 @@ class NaturalLanguageRetriever(BaseRetriever):
         Returns:
         --------
 
-            - Optional[Any]: Returns the context retrieved from the graph database based on the
-              query.
+            - Optional[Any]: Always None. The rows travel as the retrieved objects
+              (``SearchResultPayload.result_object``); ``context`` is typed as text and
+              rejects raw graph rows, which failed every search that found something.
         """
-        # TODO: Do we want to process retrieved_objects into a context string?
-        return retrieved_objects
+        # Same shape as CypherSearchRetriever: the rows are the result, there is no
+        # text context to render them into.
+        return None
 
     async def get_completion_from_context(
-        self, query: str, retrieved_objects: Any, context: Optional[Any] = None
+        self, query: str, retrieved_objects: Any, context: Any | None = None
     ) -> Any:
         """
         Returns a completion based on the query and context.
@@ -170,7 +236,8 @@ class NaturalLanguageRetriever(BaseRetriever):
         Returns:
         --------
 
-            - Any: Returns the completion derived from the given query and context.
+            - Any: Always None. This retriever does not generate a completion; the
+              caller reads the rows from the retrieved objects.
         """
         # TODO: Do we want to generate a completion using LLM here?
-        return context
+        return None

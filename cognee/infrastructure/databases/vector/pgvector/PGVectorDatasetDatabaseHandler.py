@@ -1,19 +1,18 @@
 from uuid import UUID
-from typing import Optional
 
 from sqlalchemy import text
 
-from cognee.modules.users.models import User
-from cognee.modules.users.models import DatasetDatabase
-from cognee.infrastructure.databases.vector import get_vectordb_config
 from cognee.infrastructure.databases.dataset_database_handler import DatasetDatabaseHandlerInterface
-from cognee.infrastructure.databases.vector.create_vector_engine import (
-    create_vector_engine,
-)
 from cognee.infrastructure.databases.postgres import (
     create_pg_database_if_not_exists,
     drop_pg_database_if_exists,
 )
+from cognee.infrastructure.databases.vector import get_vectordb_config
+from cognee.infrastructure.databases.vector.create_vector_engine import (
+    create_vector_engine,
+    vector_engine_cache,
+)
+from cognee.modules.users.models import DatasetDatabase, User
 
 
 class PGVectorDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
@@ -22,7 +21,7 @@ class PGVectorDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     """
 
     @classmethod
-    async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
+    async def create_dataset(cls, dataset_id: UUID | None, user: User | None) -> dict:
         vector_config = get_vectordb_config()
 
         if vector_config.vector_db_provider != "pgvector":
@@ -92,16 +91,11 @@ class PGVectorDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
             password=info["password"],
         )
 
-        vector_engine = create_vector_engine(
-            vector_db_provider=dataset_database.vector_database_provider,
-            vector_db_url=dataset_database.vector_database_url,
-            vector_db_name=dataset_database.vector_database_name,
-            vector_db_port=dataset_database.vector_database_connection_info["port"],
-            vector_db_key=dataset_database.vector_database_key,
-            vector_db_username=dataset_database.vector_database_connection_info["username"],
-            vector_db_password=dataset_database.vector_database_connection_info["password"],
-            vector_db_host=dataset_database.vector_database_connection_info["host"],
-        )
-
-        # Reset cached metadata from the vector adapter
-        vector_engine.reset_metadata_cache()
+        # The pipeline caches its engine for this database under a context-config
+        # key (pgvector handler) that differs from other creation paths, so evict
+        # by database name — closing every engine and its cached collection
+        # metadata. Evict AFTER the drop: an engine resolved concurrently during
+        # the drop's awaits would be re-cached and survive a pre-drop eviction.
+        # Post-drop nothing stale can persist — engines connect lazily and a fresh
+        # adapter starts with empty collection metadata.
+        vector_engine_cache.evict_for_database(dataset_database.vector_database_name)

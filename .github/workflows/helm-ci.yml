@@ -1,0 +1,42 @@
+name: Helm CI
+
+on:
+  push:
+    paths:
+      - 'deployment/helm/**'
+  pull_request:
+    paths:
+      - 'deployment/helm/**'
+
+# Least-privilege token (OSSF Scorecard: Token-Permissions). Lint/template
+# validation only — no GITHUB_TOKEN writes.
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310  # v5.0.1
+
+      - name: Lint
+        run: helm lint deployment/helm
+
+      - name: Template
+        run: helm template test deployment/helm
+
+      - name: Install kubeconform
+        run: |
+          curl -sL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz \
+            | tar xz -C /usr/local/bin
+
+      - name: Validate manifests
+        run: helm template test deployment/helm | kubeconform -strict -summary
+
+      - name: Schema validation
+        run: |
+          helm install test deployment/helm --dry-run \
+            --set postgres.auth.password=test \
+            --set existingSecret=test-secret

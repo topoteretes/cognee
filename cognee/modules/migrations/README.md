@@ -92,8 +92,8 @@ converge it on the next upgrade.
   move triplet points too.
 - The relational delete-ledger (`nodes.slug`, `edges.source/destination`) and
   the legacy `graph_relationship_ledger` key on graph node ids.
-- Engines arrive wrapped (`_VectorEngineHandle`, leased proxies) — they spoof
-  `__class__`, so dispatch on `engine.__class__.__name__`, never `type(engine)`.
+- Engines arrive wrapped in the cache's leased proxy — it spoofs `__class__`,
+  so dispatch on `engine.__class__.__name__`, never `type(engine)`.
 - lance 0.32's `merge_insert` can panic on tables carrying deletion vectors —
   prefer plain `add` + delete in migrations, compact when the handle allows.
 - Hybrid graph+vector backends (Neptune Analytics) store vectors as graph

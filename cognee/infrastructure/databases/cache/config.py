@@ -1,7 +1,8 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
-from typing import Optional, Literal
+from typing import Literal
+
 import pydantic
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class CacheConfig(BaseSettings):
@@ -9,19 +10,27 @@ class CacheConfig(BaseSettings):
     Configuration for distributed cache systems (e.g., Redis), used for locking or coordination.
 
     Attributes:
-    - cache_backend: Session cache backend; one of "redis", "fs", "tapes", "sqlite", "postgres"
-      (default "sqlite"). "sqlite" and "postgres" use the SQL cache adapter, differing only in
-      default connection URL resolution.
+    - cache_backend: Session cache backend; one of "redis", "fs", "tapes", "sqlite", "turso",
+      "postgres" (default "sqlite"). "sqlite", "turso" and "postgres" use the SQL cache adapter,
+      differing only in default connection URL resolution and driver: "turso" is the same
+      cache.db layout on the Turso rewrite engine (pyturso, ``pip install cognee"[turso]"``),
+      honouring the TURSO_* settings.
     - cache_db_url: SQLAlchemy async URL for the SQL cache backends (env CACHE_DB_URL, e.g.
-      postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db). When unset, "sqlite" uses a
-      cache.db file next to the relational SQLite database and "postgres" falls back to the
-      relational DB_* settings.
+      postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db). When unset, "sqlite" and
+      "turso" use a cache.db file next to the relational database and "postgres" falls back
+      to the relational DB_* settings.
     - cache_purge_interval_seconds: Minimum interval (in seconds) between global TTL purge
       sweeps in the SQL cache backends (default: 900).
     - shared_ladybug_lock: Shared Ladybug lock logic on/off.
       SHARED_KUZU_LOCK remains supported as a legacy alias.
     - cache_host: Hostname of the cache service.
     - cache_port: Port number for the cache service.
+    - cache_ssl: Connect to the Redis cache over TLS (default False). Required for managed
+      Redis with in-transit encryption enabled (e.g. AWS ElastiCache, GCP Memorystore,
+      Azure Cache for Redis).
+    - cache_ssl_cert_reqs: TLS certificate verification when cache_ssl is True — one of
+      "required", "optional", or "none" (default "required"). "none" disables verification
+      (e.g. self-signed certs); passed through to redis-py.
     - agentic_lock_expire: Automatic lock expiration time (in seconds).
     - agentic_lock_timeout: Maximum time (in seconds) to wait for the lock release.
     - session_ttl_seconds: Time-to-live for Redis session keys in seconds (default: 7 days).
@@ -31,23 +40,34 @@ class CacheConfig(BaseSettings):
     - auto_feedback: When caching is True, run automatic feedback detection and session-context
       guidance on each query (default True). Adds one structured-output LLM call per answered
       turn; set AUTO_FEEDBACK=false to disable.
+    - session_search_mode: How one session turn executes (default "concurrent"). Both
+      modes make the same two LLM calls; they differ in how those calls are sequenced,
+      and the trade is which turn the analysis can influence.
+      "concurrent" runs the turn analysis alongside retrieval and answering, so a turn
+      costs one answer call of wall-clock time -- but its context updates land after this
+      turn's answer and apply from the next one.
+      "sequential" runs the analysis first, so its rewritten query drives retrieval and
+      its context updates reach this turn's answer -- at the cost of two calls in a row.
     """
 
-    cache_backend: Literal["redis", "fs", "tapes", "sqlite", "postgres"] = "sqlite"
-    cache_db_url: Optional[str] = None
+    cache_backend: Literal["redis", "fs", "tapes", "sqlite", "turso", "postgres"] = "sqlite"
+    cache_db_url: str | None = None
     cache_purge_interval_seconds: int = 900
     caching: bool = True
     auto_feedback: bool = True
+    session_search_mode: Literal["sequential", "concurrent"] = "concurrent"
     shared_ladybug_lock: bool = False
     shared_kuzu_lock: bool = False
     cache_host: str = "localhost"
     cache_port: int = 6379
-    cache_username: Optional[str] = None
-    cache_password: Optional[str] = None
+    cache_username: str | None = None
+    cache_password: str | None = None
+    cache_ssl: bool = False
+    cache_ssl_cert_reqs: str | None = "required"
     agentic_lock_expire: int = 240
     agentic_lock_timeout: int = 300
-    session_ttl_seconds: Optional[int] = 604800
-    max_session_context_chars: Optional[int] = None
+    session_ttl_seconds: int | None = 604800
+    max_session_context_chars: int | None = None
     usage_logging: bool = False
     usage_logging_ttl: int = 604800
     tapes_ingest_url: str = "http://localhost:8082"
@@ -56,7 +76,7 @@ class CacheConfig(BaseSettings):
     tapes_model: str = "cognee-session"
     tapes_request_timeout: float = 5.0
 
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    model_config = SettingsConfigDict(extra="allow")
 
     @pydantic.model_validator(mode="after")
     def sync_legacy_ladybug_lock(self):
@@ -71,12 +91,15 @@ class CacheConfig(BaseSettings):
             "cache_purge_interval_seconds": self.cache_purge_interval_seconds,
             "caching": self.caching,
             "auto_feedback": self.auto_feedback,
+            "session_search_mode": self.session_search_mode,
             "shared_ladybug_lock": self.shared_ladybug_lock,
             "shared_kuzu_lock": self.shared_kuzu_lock,
             "cache_host": self.cache_host,
             "cache_port": self.cache_port,
             "cache_username": self.cache_username,
             "cache_password": self.cache_password,
+            "cache_ssl": self.cache_ssl,
+            "cache_ssl_cert_reqs": self.cache_ssl_cert_reqs,
             "agentic_lock_expire": self.agentic_lock_expire,
             "agentic_lock_timeout": self.agentic_lock_timeout,
             "session_ttl_seconds": self.session_ttl_seconds,

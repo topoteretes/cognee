@@ -1,11 +1,12 @@
 import sys
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from cognee.infrastructure.databases.cache.models import SessionQAEntry
-from cognee.tasks.memify.extract_user_sessions import extract_user_sessions
+import pytest
+
 from cognee.exceptions import CogneeSystemError
+from cognee.infrastructure.databases.cache.models import SessionQAEntry
 from cognee.modules.users.models import User
+from cognee.tasks.memify.extract_user_sessions import extract_user_sessions
 
 # Get the actual module object (not the function) for patching
 extract_user_sessions_module = sys.modules["cognee.tasks.memify.extract_user_sessions"]
@@ -39,10 +40,14 @@ def mock_qa_data():
 
 
 def _make_mock_session_manager(entries_or_empty, is_available: bool = True):
-    """Create a mock SessionManager with get_session and is_available."""
+    """Create a mock SessionManager with get_session, watermark APIs and is_available."""
     mock_sm = MagicMock()
     mock_sm.is_available = is_available
     mock_sm.get_session = AsyncMock(return_value=entries_or_empty)
+    # Watermark storage surface: no stored state means nothing persisted yet.
+    mock_sm.get_session_context_entries = AsyncMock(return_value=[])
+    mock_sm.update_session_context_entry = AsyncMock(return_value=True)
+    mock_sm.create_session_context_entry = AsyncMock(return_value=True)
     return mock_sm
 
 
@@ -66,11 +71,15 @@ async def test_extract_user_sessions_success(mock_user, mock_qa_data):
             sessions.append(session)
 
         assert len(sessions) == 1
-        assert "Session ID: test_session" in sessions[0]
-        assert "Question: What is cognee?" in sessions[0]
-        assert "Answer: Cognee is a knowledge graph solution" in sessions[0]
-        assert "Question: How does it work?" in sessions[0]
-        assert "Answer: It processes data and creates graphs" in sessions[0]
+        assert "Session ID: test_session" in sessions[0].text
+        assert "Question: What is cognee?" in sessions[0].text
+        assert "Answer: Cognee is a knowledge graph solution" in sessions[0].text
+        assert "Question: How does it work?" in sessions[0].text
+        assert "Answer: It processes data and creates graphs" in sessions[0].text
+        assert sessions[0].session_id == "test_session"
+        assert sessions[0].user_id == "test-user-123"
+        assert sessions[0].persisted_qa_count == 2
+        assert sessions[0].last_entry_time == mock_qa_data[-1].time
         mock_session_manager.get_session.assert_called_once_with(
             user_id="test-user-123",
             session_id="test_session",

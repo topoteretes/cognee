@@ -46,7 +46,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
 
@@ -68,13 +68,127 @@ jobs:
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
         run: uv run python ./cognee/tests/test_cognee_server_start.py
 
+  run-serve-routing-test:
+    name: Serve Routing e2e
+    runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      # Mocked LLM and embeddings: no secrets. The suite starts a real instance
+      # and drives the proxied SDK surface (add, cognify, list_data, update,
+      # search, recall, remember, improve, forget) through cognee.serve() over
+      # real HTTP, so a client/route contract drift fails here — the proxy's
+      # unit tests use mock sessions and cannot catch it.
+      - name: Run serve() routing suite
+        env:
+          ENV: 'dev'
+        run: uv run pytest cognee/tests/e2e/serve_routing/
+
+  run-migration-model-lockstep-guard:
+    name: Migration/Model Lockstep Guard
+    runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      # Standalone lockstep guard: the Alembic chain and the ORM models must
+      # describe the same schema (see the test's docstring). Deliberately its
+      # own check so a break is visible by name, and deliberately secret-free:
+      # it replays migrations onto a local SQLite database only.
+      - name: Run Migration/Model Lockstep Guard
+        run: uv run pytest cognee/tests/e2e/migrations/test_migration_model_lockstep.py -v
+
+  run-bundled-extension-offline:
+    name: Bundled JSON Extension Offline e2e
+    # Deliberately NOT in the ci-image container: the test drives the runner's
+    # docker daemon (fetches real extension binaries from GHCR, then runs the
+    # check in a --network=none container). Secret-free by design.
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      # Real-engine offline proof for every ladybug version pinned in uv.lock:
+      # resolver -> fetched GHCR binaries -> probe -> LOAD by absolute path ->
+      # working JSON function, all with the network disabled. This is the only
+      # check that catches a future ladybug changing its failing-INSTALL error
+      # format, which would silently break bundle selection (the mocked unit
+      # tests feed the probe a canned error string).
+      - name: Run offline bundled-extension e2e
+        run: ./cognee/tests/e2e/bundled_extension/run_offline_e2e.sh
+
+  run-keyless-e2e:
+    name: Keyless e2e — GLiNER + fastembed, no LLM key
+    # Bare runner on purpose: the ci-image carries pre-installed extras and
+    # secrets-shaped config, and this job has to prove the install a new user
+    # gets — core deps only, nothing configured. The first cognify installs the
+    # GLiNER runtime itself (CPU torch + the gliner extra, gliner_demo/install.py).
+    runs-on: ubuntu-22.04
+    env:
+      # The workflow-level skip disables the keyless rerouting as well
+      # (keyless_local_defaults_apply), so it must be off here.
+      COGNEE_SKIP_CONNECTION_TEST: 'false'
+      HF_HOME: ${{ github.workspace }}/.model-cache/huggingface
+      FASTEMBED_CACHE_PATH: ${{ github.workspace }}/.model-cache/fastembed
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.12.x'
+          base-extras: ''
+          extra-dependencies: ''
+
+      # No LLM_API_KEY, no EMBEDDING_*: GRAPH_EXTRACTOR=auto must resolve to
+      # GLiNER and embeddings to fastembed, and add -> cognify -> search ->
+      # visualize -> remember -> recall must all complete without a provider
+      # call. The script scrubs any provider variable that leaks in.
+      # TODO: expand this job — cache the model downloads (~800 MB per run),
+      # add the session-scoped remember/improve path (SDK-691) and the CLI /
+      # REST default search types once they are keyless-aware (SDK-690).
+      - name: Run keyless e2e
+        run: uv run python ./cognee/tests/e2e/keyless/keyless_ingest_check.py
+
+      # Every stored chunk must fit the embedding model's window and be embedded
+      # whole: with the default model, with a model whose tokenizer.json stores a
+      # truncation length, and with one that stores a fixed padding length (SDK-810).
+      - name: Run chunk token budget check (default model)
+        run: uv run python ./cognee/tests/e2e/keyless/chunk_token_budget_check.py
+      - name: Run chunk token budget check (snowflake-arctic-embed-xs)
+        run: uv run python ./cognee/tests/e2e/keyless/chunk_token_budget_check.py snowflake/snowflake-arctic-embed-xs
+      - name: Run chunk token budget check (all-MiniLM-L6-v2)
+        run: uv run python ./cognee/tests/e2e/keyless/chunk_token_budget_check.py sentence-transformers/all-MiniLM-L6-v2
+
+      # A cognify run SIGKILLed after two documents, a second run, then startup
+      # recovery: the two completed documents must survive and the run must be
+      # closed as abandoned. Same keyless GLiNER stack, so it lives here.
+      - name: Run startup recovery crash check
+        run: uv run python ./cognee/tests/e2e/keyless/startup_recovery_crash_check.py
+
   run-telemetry-test:
     name: Run Telemetry Test
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -93,26 +207,113 @@ jobs:
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
         run: uv run python ./cognee/tests/test_telemetry.py
 
-  run-telemetry-pipeline-test:
-    name: Run Telemetry Pipeline Test
+  run-incremental-update-matrix:
+    name: Incremental update e2e — ${{ matrix.name }}
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Each leg runs the chunk-level update suite and the stress e2e
+          # against a full stack: graph + vector + (for Postgres) relational.
+          # Neo4j Community has no per-dataset databases, so its leg runs
+          # single-user; the others run with access control on where the
+          # suite asks for it.
+          - name: LadybugDB + LanceDB
+            graph: kuzu
+            vector: lancedb
+            acl: 'true'
+            extras: ''
+          - name: Postgres graph + PGVector
+            graph: postgres
+            vector: pgvector
+            acl: 'true'
+            extras: postgres
+          - name: Neo4j + LanceDB
+            graph: neo4j
+            vector: lancedb
+            acl: 'false'
+            extras: neo4j
+    services:
+      neo4j:
+        image: neo4j:5.21
+        env:
+          NEO4J_AUTH: neo4j/cognee_test_password
+          NEO4J_PLUGINS: '["apoc"]'
+          NEO4J_dbms_security_procedures_unrestricted: apoc.*
+        ports:
+          - 7687:7687
+        options: >-
+          --health-cmd "wget -qO- http://localhost:7474 || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
+      postgres:
+        image: ghcr.io/topoteretes/pgvector:pg17
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          POSTGRES_USER: cognee
+          POSTGRES_PASSWORD: cognee
+          POSTGRES_DB: cognee_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    env:
+      ENV: 'dev'
+      INCR_TEST_GRAPH_PROVIDER: ${{ matrix.graph }}
+      INCR_TEST_VECTOR_PROVIDER: ${{ matrix.vector }}
+      INCR_TEST_ACL: ${{ matrix.acl }}
+      INCR_TEST_DB_HOST: ${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}
+      INCR_TEST_DB_PORT: 5432
+      INCR_TEST_DB_USERNAME: cognee
+      INCR_TEST_DB_PASSWORD: cognee
+      INCR_TEST_DB_NAME: cognee_db
+      INCR_TEST_GRAPH_URL: bolt://${{ inputs.ci-image != '' && 'neo4j' || '127.0.0.1' }}:7687
+      INCR_TEST_GRAPH_USER: neo4j
+      INCR_TEST_GRAPH_PASSWORD: cognee_test_password
+      INCR_TEST_GRAPH_NAME: neo4j
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+          extra-dependencies: ${{ matrix.extras }}
+
+      # Mocked LLM and embeddings: no secrets. The suite covers the incremental
+      # update flow end to end and the chunk-ownership deletion semantics; the
+      # stress run mutates a book through every edit shape and audits ownership.
+      - name: Run incremental update suite
+        run: uv run pytest cognee/tests/e2e/incremental_update/
+
+      - name: Run incremental update stress test
+        run: uv run python ./cognee/tests/test_incremental_update_stress.py
+
+  run-pipeline-error-propagation-test:
+    name: Pipeline Error Propagation Test
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
           python-version: '3.11.x'
 
-      - name: Add telemetry identifier
-        run: |
-          echo "test-machine" > .anon_id
-
-      - name: Run default basic pipeline with telemetry on
+      - name: Run pipeline error propagation test
         env:
-          ENV: 'local'
+          ENV: 'dev'
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
@@ -121,7 +322,59 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-        run: uv run python ./cognee/tests/test_library.py
+        run: uv run python ./cognee/tests/test_pipeline_error_propagation.py
+
+  run-cogx-roundtrip-test:
+    name: COGX Roundtrip Test
+    runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Run COGX roundtrip test
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        run: uv run python ./cognee/tests/test_cogx_roundtrip.py
+
+  run-external-source-import-test:
+    name: External Source Import Test (Zep export -> COGX import -> search)
+    runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Run external source import test
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        run: uv run python ./cognee/tests/test_external_source_import.py
 
   run-deduplication-test:
     name: Deduplication Test
@@ -149,7 +402,7 @@ jobs:
           - 5432:5432
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -169,23 +422,89 @@ jobs:
           DB_HOST: ${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}
         run: uv run python ./cognee/tests/test_deduplication.py
 
+  run-dlt-mixed-input-test:
+    name: DLT Mixed Input E2E Test
+    runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+          extra-dependencies: "dlt"
+
+      - name: Run DLT Mixed Input Test
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        run: uv run python ./cognee/tests/test_dlt_mixed_input_e2e.py
+
+      - name: Run DLT Update Test
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        run: uv run python ./cognee/tests/test_dlt_update_e2e.py
+
+  run-code-graph-e2e-test:
+    name: Code Graph E2E Test (enola ingest -> typed graph -> CODE search)
+    runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      # Install only core dependencies: this job verifies that a default cognee
+      # install includes enola and can run the code-graph route.
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+          base-extras: ''
+
+      # Deliberately NO LLM/embedding secrets: the enola code-graph route must
+      # ingest, store and answer SearchType.CODE queries without an API key.
+      - name: Run code graph e2e test
+        env:
+          ENV: 'dev'
+        run: uv run python ./cognee/tests/test_code_graph_e2e.py
+
   run-s3-bucket-test:
       name: S3 Bucket Test
       runs-on: ubuntu-22.04
       container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
       steps:
         - name: Check out repository
-          uses: actions/checkout@v6
+          uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
         - name: Cognee Setup
           uses: ./.github/actions/cognee_setup
           with:
             python-version: '3.11.x'
-            extra-dependencies: "aws"
+            extra-dependencies: "aws dlt"
 
         - name: Run S3 Bucket Test
           env:
             ENV: 'dev'
+            # dlt's telemetry thread is non-daemon and can hang interpreter
+            # exit on CI runners; the S3 test ingests through dlt now.
+            RUNTIME__DLTHUB_TELEMETRY: "false"
             LLM_MODEL: ${{ secrets.LLM_MODEL }}
             LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
             LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
@@ -204,7 +523,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -233,7 +552,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -259,7 +578,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -285,7 +604,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -311,7 +630,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -340,7 +659,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -370,7 +689,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -396,7 +715,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -422,7 +741,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -441,40 +760,13 @@ jobs:
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
         run: uv run python ./cognee/tests/test_delete_permission.py
 
-  test-deletion-on-default-graph:
-    name: Delete default graph data test
-    runs-on: ubuntu-22.04
-    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
-    steps:
-      - name: Check out
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Cognee Setup
-        uses: ./.github/actions/cognee_setup
-        with:
-          python-version: '3.11.x'
-
-      - name: Run deletion on default graph
-        env:
-          ENV: 'dev'
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_ARGS: ${{ secrets.LLM_ARGS }}
-          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
-          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-        run: uv run python ./cognee/tests/test_delete_default_graph.py
-
   test-deletion-on-default-graph-non-mocked:
     name: Delete default graph data test (non-mocked)
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
 
@@ -495,13 +787,13 @@ jobs:
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
         run: uv run python ./cognee/tests/test_delete_default_graph_non_mocked.py
 
-  test-deletion-on-custom-graph:
-    name: Delete custom graph data test
+  test-delete-two-documents-empty-store:
+    name: Delete two documents, verify incremental empty store (Ladybug/LanceDB)
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
 
@@ -510,7 +802,7 @@ jobs:
         with:
           python-version: '3.11.x'
 
-      - name: Run deletion on custom graph
+      - name: Run two-document incremental delete (Ladybug/LanceDB)
         env:
           ENV: 'dev'
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
@@ -518,9 +810,114 @@ jobs:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_ARGS: ${{ secrets.LLM_ARGS }}
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-        run: uv run python ./cognee/tests/test_delete_custom_graph.py
+        run: uv run python ./cognee/tests/test_delete_two_documents_empty_store.py
+
+  test-delete-two-documents-empty-store-postgres:
+    name: Delete two documents, verify incremental empty store (Postgres + PGVector)
+    runs-on: ubuntu-latest
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    defaults:
+      run:
+        shell: bash
+    services:
+      postgres:
+        image: ghcr.io/topoteretes/pgvector:pg17
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          POSTGRES_USER: cognee
+          POSTGRES_PASSWORD: cognee
+          POSTGRES_DB: cognee_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+          extra-dependencies: "postgres"
+
+      - name: Run two-document incremental delete (Postgres graph + PGVector + Postgres relational)
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          GRAPH_DATABASE_PROVIDER: 'postgres'
+          GRAPH_DATABASE_NAME: 'cognee_db'
+          GRAPH_DATABASE_HOST: ${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}
+          GRAPH_DATABASE_PORT: 5432
+          GRAPH_DATABASE_USERNAME: cognee
+          GRAPH_DATABASE_PASSWORD: cognee
+          VECTOR_DB_PROVIDER: 'pgvector'
+          VECTOR_DB_NAME: 'cognee_db'
+          VECTOR_DB_HOST: ${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}
+          VECTOR_DB_PORT: 5432
+          VECTOR_DB_USERNAME: cognee
+          VECTOR_DB_PASSWORD: cognee
+          DB_PROVIDER: 'postgres'
+          DB_NAME: 'cognee_db'
+          DB_HOST: ${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}
+          DB_PORT: 5432
+          DB_USERNAME: cognee
+          DB_PASSWORD: cognee
+        run: uv run python ./cognee/tests/test_delete_two_documents_empty_store.py
+
+  test-delete-two-documents-empty-store-neo4j:
+    name: Delete two documents, verify incremental empty store (Neo4j/LanceDB)
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Setup Neo4j with GDS
+        uses: ./.github/actions/setup_neo4j
+        id: neo4j
+
+      - name: Run two-document incremental delete (Neo4j graph + LanceDB)
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          GRAPH_DATABASE_PROVIDER: "neo4j"
+          GRAPH_DATABASE_URL: ${{ steps.neo4j.outputs.neo4j-url }}
+          GRAPH_DATABASE_USERNAME: ${{ steps.neo4j.outputs.neo4j-username }}
+          GRAPH_DATABASE_PASSWORD: ${{ steps.neo4j.outputs.neo4j-password }}
+          # Neo4j Community has no multi-database support, so run single-tenant
+          # (one shared graph). The graph-native provenance delete under test is
+          # independent of per-dataset isolation.
+          ENABLE_BACKEND_ACCESS_CONTROL: 'false'
+        run: uv run python ./cognee/tests/test_delete_two_documents_empty_store.py
 
   # Neo4j jobs - NO container (uses setup_neo4j docker action)
   test-deletion-on-default-graph_with_legacy_data_1_neo4j:
@@ -528,7 +925,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out
-        uses: actions/checkout@master
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -563,7 +960,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
 
@@ -591,7 +988,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
-        uses: actions/checkout@master
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -617,7 +1014,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
-        uses: actions/checkout@master
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -642,7 +1039,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
-        uses: actions/checkout@master
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -667,7 +1064,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out
-        uses: actions/checkout@master
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -700,7 +1097,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -760,7 +1157,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -798,7 +1195,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -858,7 +1255,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -917,7 +1314,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -972,7 +1369,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -1012,7 +1409,7 @@ jobs:
         shell: bash
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -1062,7 +1459,7 @@ jobs:
           - 5432:5432
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -1098,7 +1495,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out
-        uses: actions/checkout@master
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -1165,7 +1562,7 @@ jobs:
           --health-retries 5
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -1212,7 +1609,7 @@ jobs:
           --health-retries 5
     steps:
       - name: Check out
-        uses: actions/checkout@master
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -1246,41 +1643,13 @@ jobs:
           CACHE_HOST: 'localhost'
         run: uv run python ./cognee/tests/test_feedback_weights_memify_pipeline.py
 
-  run-pipeline-cache-test:
-    name: Test Pipeline Caching
-    runs-on: ubuntu-22.04
-    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
-    steps:
-      - name: Check out
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - name: Cognee Setup
-        uses: ./.github/actions/cognee_setup
-        with:
-          python-version: '3.11.x'
-
-      - name: Run Pipeline Cache Test
-        env:
-          ENV: 'dev'
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_ARGS: ${{ secrets.LLM_ARGS }}
-          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
-          EMBEDDING_DIMENSIONS: 300
-          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-        run: uv run python ./cognee/tests/test_pipeline_cache.py
-
   run-graph-model-from-schema-test:
     name: Test Graph Model Generation From Schema
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
 
@@ -1310,7 +1679,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
 
@@ -1334,13 +1703,42 @@ jobs:
           ENABLE_BACKEND_ACCESS_CONTROL: false
         run: uv run python ./cognee/tests/test_custom_model.py
 
+  run-custom-model-relationships-test:
+    name: Test Custom Model Relationships Cognify
+    runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Run Custom Model Relationships Test
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          ENABLE_BACKEND_ACCESS_CONTROL: false
+        run: uv run python ./cognee/tests/test_custom_model_relationships.py
+
   run-dataset-queue-test:
     name: Test Dataset Queues Cognee
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
 
@@ -1369,7 +1767,7 @@ jobs:
     container:  ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
 
@@ -1413,7 +1811,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -1428,8 +1826,12 @@ jobs:
           uv pip install -e ./cognee-mcp
 
           # 2. Force-install the local root to overwrite the PyPI version
-          # This replaces the PyPI 'cognee' with your current branch code
-          uv pip install --force-reinstall -e .
+          # This replaces the PyPI 'cognee' with your current branch code.
+          # --no-deps: the environment was already synced from uv.lock, and a
+          # fresh resolution here ignores the lock and upgrades dependencies
+          # one package at a time (opentelemetry-api past the locked
+          # opentelemetry-sdk, which pins the API to its exact version).
+          uv pip install --no-deps --force-reinstall -e .
 
       - name: Run api/tool usage logger
         env:
@@ -1461,7 +1863,7 @@ jobs:
         shell: bash
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
 
@@ -1493,7 +1895,7 @@ jobs:
         shell: bash
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
 
@@ -1524,7 +1926,7 @@ jobs:
         shell: bash
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
 
@@ -1547,7 +1949,7 @@ jobs:
         shell: bash
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
 
@@ -1570,7 +1972,7 @@ jobs:
         shell: bash
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
 
@@ -1584,35 +1986,23 @@ jobs:
           ENV: 'dev'
         run: uv run pytest cognee/tests/api/test_agents_e2e.py -v
 
-  run_agent_registry_tests:
-    name: Agent Registry Tests
-    runs-on: ubuntu-latest
-    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - name: Check out
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - name: Cognee Setup
-        uses: ./.github/actions/cognee_setup
-        with:
-          python-version: '3.11.x'
-
-      - name: Run Agent Registry Tests
-        env:
-          ENV: 'dev'
-        run: uv run pytest cognee/tests/unit/modules/agents/test_agent_registry.py -v
-
   backwards-compatibility-sqlite:
     name: Backwards compatibility — SQLite + LanceDB + Kuzu
     runs-on: ubuntu-22.04
 
     env:
-      COGNEE_COMPATIBILITY_TEST_VERSION: v0.5.6
+      # Earliest version whose session mechanism is testable against the
+      # current branch: improve() exists from v1.0, but the SQL session cache
+      # (cache.db) only shipped in v1.2.0 — older tags stored sessions in
+      # Redis, which this job neither runs nor reads. v1.2.0 exercises both
+      # the data migrations and the session persistence watermark takeover.
+      COGNEE_COMPATIBILITY_TEST_VERSION: v1.2.0
+
+      # Phase 1/2 run real dlt pipelines; dlt's telemetry thread (default ON,
+      # posts to telemetry.scalevector.ai) is non-daemon and a wedged call
+      # blocks interpreter exit — observed as a phase-1 step hanging ~25 min
+      # AFTER printing "Phase 1 completed successfully".
+      RUNTIME__DLTHUB_TELEMETRY: "false"
 
       ENV: dev
       LLM_PROVIDER: ${{ secrets.LLM_PROVIDER }}
@@ -1627,17 +2017,17 @@ jobs:
       EMBEDDING_DIMENSIONS: 300
     steps:
       - name: Check out current branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: "3.11"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
           enable-cache: true
 
@@ -1650,7 +2040,7 @@ jobs:
         run: git checkout ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }}
 
       - name: Install cognee ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }} dependencies
-        run: uv sync --extra api --extra docs --extra dev
+        run: uv sync --extra api --extra docs --extra dev --extra dlt
 
       - name: "Phase 1 — add, cognify, search (cognee ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }})"
         run: uv run python /tmp/compat_scripts/phase1_seed.py
@@ -1660,7 +2050,7 @@ jobs:
         run: git checkout ${{ github.sha }}
 
       - name: Install current branch dependencies
-        run: uv sync --extra api --extra docs --extra dev
+        run: uv sync --extra api --extra docs --extra dev --extra dlt
 
       - name: Run Alembic migrations (current branch schema → legacy version databases)
         working-directory: cognee
@@ -1693,7 +2083,14 @@ jobs:
           - 5432:5432
 
     env:
-      COGNEE_COMPATIBILITY_TEST_VERSION: v0.5.6
+      # Same pin as the sqlite job — see the comment there.
+      COGNEE_COMPATIBILITY_TEST_VERSION: v1.2.0
+
+      # Phase 1/2 run real dlt pipelines; dlt's telemetry thread (default ON,
+      # posts to telemetry.scalevector.ai) is non-daemon and a wedged call
+      # blocks interpreter exit — observed as a phase-1 step hanging ~25 min
+      # AFTER printing "Phase 1 completed successfully".
+      RUNTIME__DLTHUB_TELEMETRY: "false"
 
       # Relational DB — PostgreSQL
       DB_PROVIDER: postgres
@@ -1725,17 +2122,17 @@ jobs:
 
     steps:
       - name: Check out current branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: "3.11"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
           enable-cache: true
 
@@ -1748,7 +2145,7 @@ jobs:
         run: git checkout ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }}
 
       - name: Install cognee ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }} dependencies (with postgres extra)
-        run: uv sync --extra api --extra docs --extra dev --extra postgres
+        run: uv sync --extra api --extra docs --extra dev --extra postgres --extra dlt
 
       - name: "Phase 1 — add, cognify, search (cognee ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }} / postgres)"
         run: uv run python /tmp/compat_scripts/phase1_seed.py
@@ -1758,7 +2155,7 @@ jobs:
         run: git checkout ${{ github.sha }}
 
       - name: Install current branch dependencies (with postgres extra)
-        run: uv sync --extra api --extra docs --extra dev --extra postgres
+        run: uv sync --extra api --extra docs --extra dev --extra postgres --extra dlt
 
       - name: Run Alembic migrations (current branch schema → legacy version databases)
         working-directory: cognee
@@ -1784,7 +2181,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -1822,7 +2219,7 @@ jobs:
           - 5432:5432
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -1858,7 +2255,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out repository
-        uses: actions/checkout@master
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -1885,7 +2282,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup

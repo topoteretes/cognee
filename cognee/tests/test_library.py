@@ -1,12 +1,13 @@
 import os
 import pathlib
+
 import cognee
+from cognee import update
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
 from cognee.modules.search.operations import get_history
+from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
-from cognee.modules.search.types import SearchType
-from cognee import update
 
 logger = get_logger()
 
@@ -51,9 +52,9 @@ async def main():
 
     cognify_run_info = await cognee.cognify([dataset_name])
 
-    from cognee.infrastructure.databases.vector import get_vector_engine
+    from cognee.infrastructure.databases.vector import get_vector_engine_async
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine_async()
     random_node = (await vector_engine.search("Entity_name", "AI", include_payload=True))[0]
     random_node_name = random_node.payload["text"]
 
@@ -110,7 +111,7 @@ async def main():
 
     # Test updating of documents
     # Get Pipeline Run object
-    pipeline_run_obj = list(cognify_run_info.values())[0]
+    pipeline_run_obj = next(iter(cognify_run_info.values()))
     for data_item in pipeline_run_obj.data_ingestion_info:
         # Update all documents in dataset to only contain Mark and Cindy information
         await update(

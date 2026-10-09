@@ -1,0 +1,127 @@
+{
+  "retriever_name": "hybrid_completion_20_20_qa_v1",
+  "conversation_index": 1,
+  "num_runs": 4,
+  "question_count": 20,
+  "overall": {
+    "beam_rubric": {
+      "mean": 0.7943749999999999,
+      "run_std": 0.00457068963108452,
+      "ci_lower": 0.7151015625,
+      "ci_upper": 0.8685442708333333
+    },
+    "kendall_tau": {
+      "mean": 0.514638501094228,
+      "run_std": 0.010406007487352596,
+      "ci_lower": 0.4333062209154007,
+      "ci_upper": 0.5933333333333335
+    }
+  },
+  "by_question_type": {
+    "abstention": {
+      "question_count": 2,
+      "beam_rubric": {
+        "mean": 0.5,
+        "run_std": 0.0,
+        "ci_lower": 0.125,
+        "ci_upper": 0.875
+      },
+      "kendall_tau": null
+    },
+    "contradiction_resolution": {
+      "question_count": 2,
+      "beam_rubric": {
+        "mean": 0.875,
+        "run_std": 0.0,
+        "ci_lower": 0.78125,
+        "ci_upper": 0.96875
+      },
+      "kendall_tau": null
+    },
+    "event_ordering": {
+      "question_count": 2,
+      "beam_rubric": {
+        "mean": 0.7875,
+        "run_std": 0.0478713553878169,
+        "ci_lower": 0.675,
+        "ci_upper": 0.9
+      },
+      "kendall_tau": {
+        "mean": 0.514638501094228,
+        "run_std": 0.010406007487352596,
+        "ci_lower": 0.4322488366160173,
+        "ci_upper": 0.5933333333333335
+      }
+    },
+    "information_extraction": {
+      "question_count": 2,
+      "beam_rubric": {
+        "mean": 0.9791666666666667,
+        "run_std": 0.04166666666666663,
+        "ci_lower": 0.9375,
+        "ci_upper": 1.0
+      },
+      "kendall_tau": null
+    },
+    "instruction_following": {
+      "question_count": 2,
+      "beam_rubric": {
+        "mean": 1.0,
+        "run_std": 0.0,
+        "ci_lower": 1.0,
+        "ci_upper": 1.0
+      },
+      "kendall_tau": null
+    },
+    "knowledge_update": {
+      "question_count": 2,
+      "beam_rubric": {
+        "mean": 1.0,
+        "run_std": 0.0,
+        "ci_lower": 1.0,
+        "ci_upper": 1.0
+      },
+      "kendall_tau": null
+    },
+    "multi_session_reasoning": {
+      "question_count": 2,
+      "beam_rubric": {
+        "mean": 0.5,
+        "run_std": 0.0,
+        "ci_lower": 0.125,
+        "ci_upper": 0.875
+      },
+      "kendall_tau": null
+    },
+    "preference_following": {
+      "question_count": 2,
+      "beam_rubric": {
+        "mean": 1.0,
+        "run_std": 0.0,
+        "ci_lower": 1.0,
+        "ci_upper": 1.0
+      },
+      "kendall_tau": null
+    },
+    "summarization": {
+      "question_count": 2,
+      "beam_rubric": {
+        "mean": 0.8020833333333333,
+        "run_std": 0.04959325297599204,
+        "ci_lower": 0.6979166666666667,
+        "ci_upper": 0.90625
+      },
+      "kendall_tau": null
+    },
+    "temporal_reasoning": {
+      "question_count": 2,
+      "beam_rubric": {
+        "mean": 0.5,
+        "run_std": 0.0,
+        "ci_lower": 0.125,
+        "ci_upper": 0.875
+      },
+      "kendall_tau": null
+    }
+  }
+}

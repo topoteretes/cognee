@@ -10,6 +10,12 @@ const compat = new FlatCompat({
 });
 
 const eslintConfig = [
+  // `next lint` used to apply these ignores implicitly; plain `eslint .`
+  // does not, so without this it also lints build output and coverage
+  // reports. `scripts/**` is standalone public-repo sync tooling (see
+  // scripts/sync-to-public.sh) — not part of the app build, and not
+  // something `next lint` ever covered either.
+  { ignores: [".next/**", "out/**", "build/**", "coverage/**", "scripts/**"] },
   ...compat.extends("next/core-web-vitals", "next/typescript"),
 ];
 

@@ -1,10 +1,11 @@
-from typing import Any, Optional
+from typing import Any
+
 from fastapi.encoders import jsonable_encoder
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.retrieval.base_retriever import BaseRetriever
+from cognee.modules.retrieval.exceptions import CypherSearchError, SearchTypeNotSupported
 from cognee.modules.retrieval.utils.completion import generate_completion
-from cognee.modules.retrieval.exceptions import SearchTypeNotSupported, CypherSearchError
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("CypherSearchRetriever")
@@ -19,11 +20,21 @@ class CypherSearchRetriever(BaseRetriever):
     - get_completion: Returns the graph connections context.
     """
 
+    # Runs a Cypher query and returns rows; the prompt paths it accepts are never sent
+    # to an LLM, so an only_context preview must not render a prompt for it.
+    supports_prompt_preview = False
+
+    # The query is a Cypher statement, not a conversational turn. Running it through
+    # the pre-retrieval turn analysis let the LLM rewrite it into prose (which the
+    # graph engine then failed to parse) or answer it with an acknowledgement instead
+    # of the rows.
+    supports_session_turn_preparation = False
+
     def __init__(
         self,
         user_prompt_path: str = "context_for_question.txt",
         system_prompt_path: str = "answer_simple_question.txt",
-        session_id: Optional[str] = None,
+        session_id: str | None = None,
     ):
         """Initialize retriever with optional custom prompt paths."""
         self.user_prompt_path = user_prompt_path
@@ -34,16 +45,14 @@ class CypherSearchRetriever(BaseRetriever):
         try:
             graph_engine = await get_graph_engine()
 
-            # Postgres backends do not support raw Cypher queries
-            from cognee.infrastructure.databases.graph.postgres.adapter import PostgresAdapter
-            from cognee.infrastructure.databases.hybrid.postgres.adapter import (
-                PostgresHybridAdapter,
-            )
-
-            if isinstance(graph_engine, (PostgresAdapter, PostgresHybridAdapter)):
+            # Cypher support is declared on the adapter class
+            # (GraphDBInterface.supports_cypher_queries), so the check needs no
+            # imports of optional backend packages absent from slim images.
+            if not getattr(graph_engine, "supports_cypher_queries", True):
                 raise SearchTypeNotSupported(
-                    "Cypher search is not supported with the Postgres graph backend. "
-                    "Use a graph-native backend (Neo4j, Ladybug) for raw Cypher queries."
+                    f"Cypher search is not supported with the "
+                    f"{type(graph_engine).__name__} graph backend. Use a "
+                    "Cypher-capable graph backend (Neo4j, Ladybug) for raw Cypher queries."
                 )
 
             is_empty = await graph_engine.is_empty()
@@ -81,7 +90,7 @@ class CypherSearchRetriever(BaseRetriever):
         return None
 
     async def get_completion_from_context(
-        self, query: str, retrieved_objects: Any, context: Optional[Any] = None
+        self, query: str, retrieved_objects: Any, context: Any | None = None
     ) -> Any:
         """
         Returns the graph connections context.

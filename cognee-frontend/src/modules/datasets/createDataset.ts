@@ -1,19 +1,25 @@
+import { notifySurveyTrigger } from "@/services/survey/surveyTriggerBridge";
 import { CogneeInstance } from "../instances/types";
 
 export default async function createDataset(
   dataset: { name: string },
   instance: CogneeInstance,
   tenantId?: string | null,
+  signal?: AbortSignal,
 ) {
   const response = await instance.fetch(`/v1/datasets/`, {
     method: "POST",
     body: JSON.stringify(dataset),
     headers: { "Content-Type": "application/json" },
+    signal,
   });
   const created = await response.json();
 
-  // Grant tenant-level read+write so all tenant members can see this dataset
-  if (tenantId && created.id) {
+  // Grant tenant-level read+write so all tenant members can see this dataset.
+  // Skip in local (self-hosted) mode, where tenantId is the "local" sentinel
+  // rather than a real UUID — there's no multi-tenant sharing to set up there.
+  const isRealTenantId = !!tenantId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tenantId);
+  if (isRealTenantId && created.id) {
     const body = JSON.stringify([created.id]);
     try {
       await Promise.all([
@@ -21,17 +27,21 @@ export default async function createDataset(
           method: "POST",
           body,
           headers: { "Content-Type": "application/json" },
+          signal,
         }),
         instance.fetch(`/v1/permissions/datasets/${tenantId}?permission_name=write`, {
           method: "POST",
           body,
           headers: { "Content-Type": "application/json" },
+          signal,
         }),
       ]);
     } catch {
       // Non-fatal — dataset was created, just not shared yet
     }
   }
+
+  notifySurveyTrigger("datasource_added");
 
   return created;
 }

@@ -1,45 +1,93 @@
-import pytest
-from unittest.mock import AsyncMock, patch
+import sys
+from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
 
+import pytest
+
+from cognee.exceptions import CogneeSystemError, CogneeValidationError
+from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
+from cognee.infrastructure.session.session_persist_watermark import SessionPersistWindow
+from cognee.modules.pipelines.models.PipelineRunInfo import (
+    PipelineRunCompleted,
+    PipelineRunErrored,
+)
 from cognee.tasks.memify.cognify_session import cognify_session
-from cognee.exceptions import CogneeValidationError, CogneeSystemError
+
+# Get the actual module object (not the function) for patching
+cognify_session_module = sys.modules["cognee.tasks.memify.cognify_session"]
+
+
+def _window(text: str, persisted_qa_count: int = 1) -> SessionPersistWindow:
+    return SessionPersistWindow(
+        user_id="test-user-123",
+        session_id="test_session",
+        text=text,
+        persisted_qa_count=persisted_qa_count,
+    )
+
+
+def _mock_session_manager():
+    mock_sm = MagicMock()
+    mock_sm.update_session_context_entry = AsyncMock(return_value=True)
+    mock_sm.create_session_context_entry = AsyncMock(return_value=True)
+    return mock_sm
 
 
 @pytest.mark.asyncio
 async def test_cognify_session_success():
-    """Test successful cognification of session data."""
-    session_data = (
-        "Session ID: test_session\n\nQuestion: What is AI?\n\nAnswer: AI is artificial intelligence"
+    """Test successful cognification of a session window."""
+    window = _window(
+        "Session ID: test_session\n\nQuestion: What is AI?\n\nAnswer: AI is artificial intelligence",
+        persisted_qa_count=1,
     )
+    mock_sm = _mock_session_manager()
 
     with (
         patch("cognee.add", new_callable=AsyncMock) as mock_add,
         patch("cognee.cognify", new_callable=AsyncMock) as mock_cognify,
+        patch.object(cognify_session_module, "get_session_manager", return_value=mock_sm),
     ):
-        await cognify_session(session_data, dataset_id="123")
+        await cognify_session(window, dataset_id="123")
 
         mock_add.assert_called_once_with(
-            session_data, dataset_id="123", node_set=["user_sessions_from_cache"]
+            window.text,
+            dataset_id="123",
+            node_set=["user_sessions_from_cache"],
+            user=None,
         )
-        mock_cognify.assert_called_once()
+        mock_cognify.assert_called_once_with(datasets=["123"], user=None, raise_on_error=False)
+        # Watermark advanced after successful cognify.
+        mock_sm.update_session_context_entry.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_cognify_session_empty_string():
-    """Test cognification fails with empty string."""
-    with pytest.raises(CogneeValidationError) as exc_info:
-        await cognify_session("")
+async def test_cognify_session_accepts_batched_windows():
+    """The pipeline runner delivers windows in list batches; each is processed."""
+    windows = [
+        _window("Question: q1?\n\nAnswer: a1\n\n", persisted_qa_count=1),
+        _window("Question: q2?\n\nAnswer: a2\n\n", persisted_qa_count=2),
+    ]
+    mock_sm = _mock_session_manager()
 
-    assert "Session data cannot be empty" in str(exc_info.value)
+    with (
+        patch("cognee.add", new_callable=AsyncMock) as mock_add,
+        patch("cognee.cognify", new_callable=AsyncMock) as mock_cognify,
+        patch.object(cognify_session_module, "get_session_manager", return_value=mock_sm),
+    ):
+        await cognify_session(windows, dataset_id="123")
+
+        assert mock_add.call_count == 2
+        assert mock_cognify.call_count == 2
+        assert mock_sm.update_session_context_entry.call_count == 2
 
 
 @pytest.mark.asyncio
-async def test_cognify_session_whitespace_string():
-    """Test cognification fails with whitespace-only string."""
+async def test_cognify_session_empty_window_text():
+    """Test cognification fails with a whitespace-only window."""
     with pytest.raises(CogneeValidationError) as exc_info:
-        await cognify_session("   \n\t  ")
+        await cognify_session(_window("   \n\t  "))
 
-    assert "Session data cannot be empty" in str(exc_info.value)
+    assert "Session window cannot be empty" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -48,64 +96,292 @@ async def test_cognify_session_none_data():
     with pytest.raises(CogneeValidationError) as exc_info:
         await cognify_session(None)
 
-    assert "Session data cannot be empty" in str(exc_info.value)
+    assert "Session window cannot be empty" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_cognify_session_plain_string_rejected():
+    """The old string contract is gone: only SessionPersistWindow is accepted."""
+    with pytest.raises(CogneeValidationError):
+        await cognify_session("Session ID: test\n\nQuestion: test?")
 
 
 @pytest.mark.asyncio
 async def test_cognify_session_add_failure():
-    """Test cognification handles cognee.add failure."""
-    session_data = "Session ID: test\n\nQuestion: test?"
+    """Test cognification handles cognee.add failure without advancing the watermark."""
+    mock_sm = _mock_session_manager()
 
     with (
         patch("cognee.add", new_callable=AsyncMock) as mock_add,
         patch("cognee.cognify", new_callable=AsyncMock),
+        patch.object(cognify_session_module, "get_session_manager", return_value=mock_sm),
     ):
         mock_add.side_effect = Exception("Add operation failed")
 
         with pytest.raises(CogneeSystemError) as exc_info:
-            await cognify_session(session_data)
+            await cognify_session(_window("Question: test?"))
 
         assert "Failed to cognify session data" in str(exc_info.value)
         assert "Add operation failed" in str(exc_info.value)
+        mock_sm.update_session_context_entry.assert_not_called()
+        mock_sm.create_session_context_entry.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_cognify_session_cognify_failure():
-    """Test cognification handles cognify failure."""
-    session_data = "Session ID: test\n\nQuestion: test?"
+    """Test cognification handles cognify failure without advancing the watermark."""
+    mock_sm = _mock_session_manager()
 
     with (
         patch("cognee.add", new_callable=AsyncMock),
         patch("cognee.cognify", new_callable=AsyncMock) as mock_cognify,
+        patch.object(cognify_session_module, "get_session_manager", return_value=mock_sm),
     ):
         mock_cognify.side_effect = Exception("Cognify operation failed")
 
         with pytest.raises(CogneeSystemError) as exc_info:
-            await cognify_session(session_data)
+            await cognify_session(_window("Question: test?"))
 
         assert "Failed to cognify session data" in str(exc_info.value)
         assert "Cognify operation failed" in str(exc_info.value)
+        mock_sm.update_session_context_entry.assert_not_called()
+        mock_sm.create_session_context_entry.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_cognify_session_errored_run_info_skips_watermark_and_continues():
+    """A window whose build errored (raise_on_error=False path) is skipped:
+    no watermark advance, no raise, remaining windows still processed."""
+    from uuid import uuid4
+
+    from cognee.modules.pipelines.models.PipelineRunInfo import (
+        PipelineRunCompleted,
+        PipelineRunErrored,
+    )
+
+    windows = [
+        _window("Question: q1?\n\nAnswer: a1\n\n", persisted_qa_count=1),
+        _window("Question: q2?\n\nAnswer: a2\n\n", persisted_qa_count=2),
+    ]
+    mock_sm = _mock_session_manager()
+
+    common = {"pipeline_run_id": uuid4(), "dataset_id": uuid4(), "dataset_name": "ds"}
+    errored = PipelineRunErrored(
+        **common, error_class="AuthenticationError", error_message="invalid api key"
+    )
+    completed = PipelineRunCompleted(**common)
+
+    with (
+        patch("cognee.add", new_callable=AsyncMock),
+        patch("cognee.cognify", new_callable=AsyncMock) as mock_cognify,
+        patch.object(cognify_session_module, "get_session_manager", return_value=mock_sm),
+    ):
+        mock_cognify.side_effect = [{"ds": errored}, {"ds": completed}]
+
+        await cognify_session(windows, dataset_id="123")
+
+        assert mock_cognify.call_count == 2
+        # Only the second (successful) window advanced its watermark.
+        mock_sm.update_session_context_entry.assert_called_once()
+
+
+BUDGET_SENTENCE = "Budget has been exceeded! Current cost: 20.0, Max budget: 20.0"
+
+
+def _errored_run(error_class: str, error_message: str) -> PipelineRunErrored:
+    return PipelineRunErrored(
+        pipeline_run_id=uuid4(),
+        dataset_id=uuid4(),
+        dataset_name="ds",
+        error_class=error_class,
+        error_message=error_message,
+    )
+
+
+def _completed_run() -> PipelineRunCompleted:
+    return PipelineRunCompleted(pipeline_run_id=uuid4(), dataset_id=uuid4(), dataset_name="ds")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error_class,error_message",
+    [
+        (
+            "LLMPaymentRequiredError",
+            (
+                "LLMPaymentRequiredError: LLM provider requires payment or token budget is "
+                "exhausted. (Status code: 402)"
+            ),
+        ),
+        ("RateLimitError", f"litellm.RateLimitError: {BUDGET_SENTENCE}"),
+    ],
+    ids=["converted_error", "provider_sentence"],
+)
+async def test_cognify_session_budget_errored_run_stops_at_that_window(error_class, error_message):
+    """An errored build is normally one window's problem and the loop goes on.
+    An exhausted budget is every remaining window's problem: the loop stops and
+    the error leaves as LLMPaymentRequiredError, never wrapped."""
+    windows = [
+        _window("Question: q1?\n\nAnswer: a1\n\n", persisted_qa_count=1),
+        _window("Question: q2?\n\nAnswer: a2\n\n", persisted_qa_count=2),
+        _window("Question: q3?\n\nAnswer: a3\n\n", persisted_qa_count=3),
+    ]
+    mock_sm = _mock_session_manager()
+
+    with (
+        patch("cognee.add", new_callable=AsyncMock) as mock_add,
+        patch("cognee.cognify", new_callable=AsyncMock) as mock_cognify,
+        patch.object(cognify_session_module, "get_session_manager", return_value=mock_sm),
+    ):
+        mock_cognify.side_effect = [
+            {"ds": _completed_run()},
+            {"ds": _errored_run(error_class, error_message)},
+            {"ds": _completed_run()},
+        ]
+
+        with pytest.raises(LLMPaymentRequiredError) as exc_info:
+            await cognify_session(windows, dataset_id="123")
+
+    assert not isinstance(exc_info.value, CogneeSystemError)
+    assert exc_info.value.status_code == 402
+    assert "Failed to cognify session data" not in str(exc_info.value)
+    # The third window was never added or built.
+    assert mock_add.call_count == 2
+    assert mock_cognify.call_count == 2
+    # Only the window persisted before the failure advanced its watermark.
+    mock_sm.update_session_context_entry.assert_called_once()
+    written = mock_sm.update_session_context_entry.call_args.kwargs["merge"]
+    assert written["persisted_qa_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_cognify_session_budget_error_raised_by_cognify_is_not_wrapped():
+    """cognify(raise_on_error=False) re-raises a run-level error as it is. A
+    budget error has to stay the same typed object on its way out, or the
+    caller sees a CogneeSystemError with no way to tell what it was."""
+    budget_error = LLMPaymentRequiredError(f"LLM budget exhausted: {BUDGET_SENTENCE}")
+    windows = [
+        _window("Question: q1?\n\nAnswer: a1\n\n", persisted_qa_count=1),
+        _window("Question: q2?\n\nAnswer: a2\n\n", persisted_qa_count=2),
+    ]
+    mock_sm = _mock_session_manager()
+
+    with (
+        patch("cognee.add", new_callable=AsyncMock),
+        patch("cognee.cognify", new_callable=AsyncMock) as mock_cognify,
+        patch.object(cognify_session_module, "get_session_manager", return_value=mock_sm),
+    ):
+        mock_cognify.side_effect = budget_error
+
+        with pytest.raises(LLMPaymentRequiredError) as exc_info:
+            await cognify_session(windows, dataset_id="123")
+
+    assert exc_info.value is budget_error
+    assert mock_cognify.call_count == 1
+    mock_sm.update_session_context_entry.assert_not_called()
+    mock_sm.create_session_context_entry.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_cognify_session_provider_budget_error_leaves_as_payment_required():
+    """A budget rejection that reached this task unconverted — the provider's
+    own error — is converted here, with the original kept as its cause."""
+    provider_error = Exception(f"litellm.RateLimitError: RateLimitError: {BUDGET_SENTENCE}")
+    mock_sm = _mock_session_manager()
+
+    with (
+        patch("cognee.add", new_callable=AsyncMock),
+        patch("cognee.cognify", new_callable=AsyncMock) as mock_cognify,
+        patch.object(cognify_session_module, "get_session_manager", return_value=mock_sm),
+    ):
+        mock_cognify.side_effect = provider_error
+
+        with pytest.raises(LLMPaymentRequiredError) as exc_info:
+            await cognify_session(_window("Question: test?"), dataset_id="123")
+
+    assert exc_info.value.__cause__ is provider_error
+    assert BUDGET_SENTENCE in exc_info.value.message
+    mock_sm.update_session_context_entry.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_cognify_session_re_raises_validation_error():
     """Test that CogneeValidationError is re-raised as-is."""
     with pytest.raises(CogneeValidationError):
-        await cognify_session("")
+        await cognify_session([])
 
 
 @pytest.mark.asyncio
 async def test_cognify_session_with_special_characters():
     """Test cognification with special characters."""
-    session_data = "Session: test™ © Question: What's special? Answer: Cognee is special!"
+    window = _window("Session: test™ © Question: What's special? Answer: Cognee is special!")
+    mock_sm = _mock_session_manager()
 
     with (
         patch("cognee.add", new_callable=AsyncMock) as mock_add,
         patch("cognee.cognify", new_callable=AsyncMock) as mock_cognify,
+        patch.object(cognify_session_module, "get_session_manager", return_value=mock_sm),
     ):
-        await cognify_session(session_data, dataset_id="123")
+        await cognify_session(window, dataset_id="123")
 
         mock_add.assert_called_once_with(
-            session_data, dataset_id="123", node_set=["user_sessions_from_cache"]
+            window.text,
+            dataset_id="123",
+            node_set=["user_sessions_from_cache"],
+            user=None,
         )
-        mock_cognify.assert_called_once()
+        mock_cognify.assert_called_once_with(datasets=["123"], user=None, raise_on_error=False)
+
+
+@pytest.mark.asyncio
+async def test_cognify_session_passes_user_to_add_and_cognify():
+    """Test user is forwarded to cognee.add/cognee.cognify."""
+    window = _window(
+        "Session ID: test_session\n\nQuestion: What is AI?\n\nAnswer: AI is artificial intelligence"
+    )
+    user = object()
+    mock_sm = _mock_session_manager()
+
+    with (
+        patch("cognee.add", new_callable=AsyncMock) as mock_add,
+        patch("cognee.cognify", new_callable=AsyncMock) as mock_cognify,
+        patch.object(cognify_session_module, "get_session_manager", return_value=mock_sm),
+    ):
+        await cognify_session(window, dataset_id="123", user=user)
+
+        mock_add.assert_called_once_with(
+            window.text,
+            dataset_id="123",
+            node_set=["user_sessions_from_cache"],
+            user=user,
+        )
+        mock_cognify.assert_called_once_with(datasets=["123"], user=user, raise_on_error=False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("date_key", ["effective_date", "published_on"])
+async def test_cognify_session_preserves_last_entry_time_as_source_metadata(monkeypatch, date_key):
+    from dataclasses import replace
+
+    from cognee.modules.improve.config import ImproveConfig
+    from cognee.tasks.ingestion.data_item import DataItem
+
+    monkeypatch.setattr(
+        cognify_session_module,
+        "get_improve_config",
+        lambda: ImproveConfig(effective_date_key=date_key),
+    )
+    window = replace(_window("Alice is CEO."), last_entry_time="2025-01-02T12:00:00+00:00")
+    with (
+        patch("cognee.add", new_callable=AsyncMock) as add,
+        patch("cognee.cognify", new_callable=AsyncMock),
+        patch.object(
+            cognify_session_module, "get_session_manager", return_value=_mock_session_manager()
+        ),
+    ):
+        await cognify_session(window, dataset_id="123")
+    content = add.call_args.args[0]
+    assert isinstance(content, DataItem)
+    assert content.data == window.text
+    assert content.external_metadata == {date_key: window.last_entry_time}
+    assert content.literal_text is True

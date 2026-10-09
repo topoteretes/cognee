@@ -1,0 +1,72 @@
+import { NextRequest, NextResponse } from "next/server";
+import { getServerBackendUrl } from "@/modules/config/serverRuntimeConfig";
+
+export async function GET(request: NextRequest) {
+  const localApiUrl = getServerBackendUrl();
+  const { searchParams } = request.nextUrl;
+  const datasetId = searchParams.get("dataset_id");
+  console.log("[api/schema/inventory] request received, dataset_id:", datasetId);
+
+  if (!datasetId) {
+    return NextResponse.json({ error: "dataset_id required" }, { status: 400 });
+  }
+
+  const headers: Record<string, string> = {};
+  const cookie = request.headers.get("cookie");
+  if (cookie) headers["cookie"] = cookie;
+  const authHeader = request.headers.get("authorization");
+  if (authHeader) headers["authorization"] = authHeader;
+  const apiKey = request.headers.get("x-api-key");
+  if (apiKey) headers["x-api-key"] = apiKey;
+
+  // Server-side default-user login, used only when the browser sent no
+  // credentials at all. DEFAULT_USER_PASSWORD is the configured password;
+  // the literal is the local dev-stack value (`cognee-cli -ui`, docker-compose.yml),
+  // kept so deployments created before SDK-549 keep working. Against a server
+  // whose default user has no password this attempt simply fails and the
+  // request is forwarded unauthenticated, exactly as it would with no fallback.
+  const defaultUserPassword = process.env.DEFAULT_USER_PASSWORD || "default_password";
+  if (!cookie && !authHeader && !apiKey) {
+    console.log("[api/schema/inventory] no auth headers, attempting default login");
+    try {
+      const loginResp = await fetch(`${localApiUrl}/api/v1/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          username: process.env.DEFAULT_USER_EMAIL || "default_user@example.com",
+          password: defaultUserPassword,
+        }).toString(),
+      });
+      console.log("[api/schema/inventory] login response status:", loginResp.status);
+      if (loginResp.ok) {
+        const data = await loginResp.json();
+        headers["authorization"] = `Bearer ${data.access_token}`;
+      }
+    } catch (err) {
+      console.warn("[api/schema/inventory] login attempt failed:", err);
+    }
+  }
+
+  const samplesPerType = searchParams.get("samples_per_type") ?? "5";
+  const sort = searchParams.get("sort") ?? "count";
+  const backendUrl = `${localApiUrl}/api/v1/schema/inventory?dataset_id=${datasetId}&samples_per_type=${samplesPerType}&sort=${sort}`;
+  console.log("[api/schema/inventory] forwarding to:", backendUrl);
+
+  try {
+    const response = await fetch(backendUrl, { headers });
+    console.log("[api/schema/inventory] backend response status:", response.status);
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => "(unreadable)");
+      console.error("[api/schema/inventory] backend error body:", body);
+      return NextResponse.json({ error: `Backend returned ${response.status}`, detail: body }, { status: response.status });
+    }
+
+    const data = await response.json();
+    console.log("[api/schema/inventory] success, items:", Array.isArray(data) ? data.length : typeof data);
+    return NextResponse.json(data);
+  } catch (err) {
+    console.error("[api/schema/inventory] fetch threw:", err);
+    return NextResponse.json({ error: "Failed to reach backend", detail: String(err) }, { status: 502 });
+  }
+}

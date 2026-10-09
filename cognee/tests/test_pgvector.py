@@ -1,19 +1,22 @@
 import os
 import pathlib
+
 import cognee
 from cognee.infrastructure.files.storage import get_storage_config
-from cognee.modules.search.operations import get_history
-from cognee.shared.logging_utils import get_logger
 from cognee.modules.data.models import Data
+from cognee.modules.search.operations import get_history
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
 
 async def test_local_file_deletion(data_text, file_location, dataset_1_id, dataset_2_id):
-    from sqlalchemy import select
     import hashlib
+
+    from sqlalchemy import select
+
     from cognee.infrastructure.databases.relational import get_relational_engine
 
     engine = get_relational_engine()
@@ -23,7 +26,11 @@ async def test_local_file_deletion(data_text, file_location, dataset_1_id, datas
         encoded_text = data_text.encode("utf-8")
         data_hash = hashlib.md5(encoded_text).hexdigest()
         # Get data entry from database based on hash contents
-        data = (await session.scalars(select(Data).where(Data.content_hash == data_hash))).one()
+        data = (
+            await session.scalars(
+                select(Data).where(Data.content_hash == data_hash, Data.dataset_id == dataset_2_id)
+            )
+        ).one()
         assert os.path.isfile(data.raw_data_location.replace("file://", "")), (
             f"Data location doesn't exist: {data.raw_data_location}"
         )
@@ -37,7 +44,10 @@ async def test_local_file_deletion(data_text, file_location, dataset_1_id, datas
         # Get data entry from database based on file path
         data = (
             await session.scalars(
-                select(Data).where(Data.original_data_location == "file://" + file_location)
+                select(Data).where(
+                    Data.original_data_location == "file://" + file_location,
+                    Data.dataset_id == dataset_1_id,
+                )
             )
         ).one()
         assert os.path.isfile(data.original_data_location.replace("file://", "")), (
@@ -71,9 +81,9 @@ async def test_getting_of_documents(dataset_id_1):
 async def test_vector_engine_search_none_limit():
     query_text = "Tell me about Quantum computers"
 
-    from cognee.infrastructure.databases.vector import get_vector_engine
+    from cognee.infrastructure.databases.vector import get_vector_engine_async
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine_async()
 
     collection_name = "Entity_name"
 
@@ -111,9 +121,9 @@ async def test_vector_engine_search_with_nodeset_filtering():
     node_set = ["NLP", "Quantum"]
     query_text = "Tell me about NLP"
 
-    from cognee.infrastructure.databases.vector import get_vector_engine
+    from cognee.infrastructure.databases.vector import get_vector_engine_async
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine_async()
     query_vector = (await vector_engine.embedding_engine.embed_text([query_text]))[0]
 
     # Search with "OR" operator
@@ -211,7 +221,14 @@ async def test_vector_nodeset_filtering_retriever_integration():
 
 async def main():
     cognee.config.set_vector_db_config(
-        {"vector_db_url": "", "vector_db_key": "", "vector_db_provider": "pgvector"}
+        {
+            "vector_db_url": "",
+            "vector_db_key": "",
+            "vector_db_provider": "pgvector",
+            # Derived from the provider only when the provider comes from the
+            # environment, so a config dict has to name it.
+            "vector_dataset_database_handler": "pgvector",
+        }
     )
     cognee.config.set_relational_db_config(
         {
@@ -266,14 +283,14 @@ async def main():
 
     await cognee.cognify([dataset_name_2, dataset_name_1])
 
-    from cognee.infrastructure.databases.vector import get_vector_engine
+    from cognee.infrastructure.databases.vector import get_vector_engine_async
     from cognee.modules.data.methods import get_datasets_by_name
 
     user = await get_default_user()
     dataset_1 = (await get_datasets_by_name([dataset_name_1], user.id))[0]
     await test_getting_of_documents(dataset_1.id)
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine_async()
     random_node = (
         await vector_engine.search("Entity_name", "Quantum computer", include_payload=True)
     )[0]
@@ -312,7 +329,11 @@ async def main():
         print(f"{result}\n")
 
     user = await get_default_user()
-    history = await get_history(user.id)
+    # This test runs with access control disabled (see vector_db_tests.yml), so
+    # search payloads carry no dataset and there is no per-dataset fan-out:
+    # each of the 4 searches records exactly one query and one result row.
+    # limit=0 lifts get_history's default cap of 10.
+    history = await get_history(user.id, limit=0)
     assert len(history) == 8, "Search history is not correct."
 
     await test_vector_engine_search_none_limit()
@@ -329,6 +350,22 @@ async def main():
         dataset_1_id=add_1_payload.dataset_id,
         dataset_2_id=add_2_payload.dataset_id,
     )
+
+    # remember() / recall() reach this store the way an SDK caller does;
+    # everything above drives add() / cognify() / search() instead. Kept after
+    # the search-history assert, since recall() adds to that history too.
+    remember_dataset = "store_remember_check"
+    await cognee.remember(
+        ["Cognee keeps embeddings in the vector store and entities in the graph store."],
+        dataset_name=remember_dataset,
+        self_improvement=False,
+    )
+    recall_results = await cognee.recall(
+        query_text="Where does cognee keep embeddings?",
+        query_type=SearchType.CHUNKS,
+        datasets=[remember_dataset],
+    )
+    assert recall_results, "recall() returned nothing after remember() on PGVector"
 
     await cognee.prune.prune_data()
     data_root_directory = get_storage_config()["data_root_directory"]

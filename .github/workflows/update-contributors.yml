@@ -5,12 +5,19 @@ on:
     - cron: "0 0 * * 1" # Runs every Monday
   workflow_dispatch: # Allows manual trigger
 
+# Least-privilege default (OSSF Scorecard: Token-Permissions); the single job
+# opts into contents: write explicitly because it commits CONTRIBUTORS.md.
+permissions:
+  contents: read
+
 jobs:
   update-contributors:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # commits and pushes the regenerated CONTRIBUTORS.md
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Generate Contributor List
         run: |

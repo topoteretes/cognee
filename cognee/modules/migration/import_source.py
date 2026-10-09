@@ -16,9 +16,10 @@ Two execution shapes:
 """
 
 import time
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 from uuid import NAMESPACE_OID, uuid5
 
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.migration.loader import (
     data_item_from_record,
     store_imported_graph,
@@ -26,7 +27,7 @@ from cognee.modules.migration.loader import (
     translate_record_stream,
     wrap_graph_batch,
 )
-from cognee.modules.migration.sources.base import MemorySource
+from cognee.modules.migration.sources.base import IMPORT_MODES, MemorySource
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.data_item import DataItem
 
@@ -42,7 +43,255 @@ DATA_ITEMS_PER_ADD = 200
 _GRAPH_RECORD_KINDS = ("entity", "fact", "raw_node")
 
 
-def _pipeline_run_id(pipeline_result: Any) -> Optional[str]:
+def _source_label(source: MemorySource) -> str:
+    """A loggable identifier for a source. Sources can carry archive data
+    (including credentials in the social layer), so their attribute values
+    must never reach the logs — the class name identifies the system instead."""
+    return type(source).__name__
+
+
+def _mode_label(source: MemorySource) -> str:
+    """The static IMPORT_MODES copy of the source's (validated) mode, so the
+    logged string never derives from the source object itself."""
+    return IMPORT_MODES[IMPORT_MODES.index(source.mode)]
+
+
+async def _ensure_user(user_payload: dict[str, Any]):
+    """Create-or-match a user by email, transferring credentials on creation.
+
+    An existing target user is returned untouched — their credentials are
+    never clobbered by an import. A missing user is created and then given
+    the archived credentials (hashed password + account flags) directly, so
+    restored accounts authenticate with their original passwords.
+    """
+    import secrets
+
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.users.methods import create_user, get_user_by_email
+    from cognee.modules.users.models import User
+
+    existing = await get_user_by_email(user_payload["email"])
+    if existing is not None:
+        return existing
+
+    created = await create_user(user_payload["email"], secrets.token_urlsafe(32))
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        record = await session.get(User, created.id)
+        record.hashed_password = user_payload["hashed_password"]
+        record.is_active = user_payload.get("is_active", True)
+        record.is_superuser = user_payload.get("is_superuser", False)
+        record.is_verified = user_payload.get("is_verified", False)
+        await session.commit()
+    # CALLERS MUST GATE: this writes hashed_password and is_superuser straight from
+    # the archive. Both current callers go through _require_social_layer_superuser.
+    # The payload carries credentials (hashed password, email) — log nothing from it.
+    logger.info("Restored a user account from the archive social layer.")
+    return created
+
+
+async def _resolve_import_user(source: MemorySource, user):
+    """The identity the import runs as.
+
+    Archives carrying a social layer import AS the archived dataset OWNER
+    (created/matched by email first): per-dataset databases derive their
+    physical location from the owner id, so ownership must be right BEFORE
+    the rows land — it cannot be reassigned afterwards. All other imports
+    run as the caller's user, exactly as before.
+
+    Processing a social layer requires a SUPERUSER importer: the archive
+    supplies emails, password hashes, and account flags verbatim, so an
+    unprivileged importer could otherwise mint arbitrary accounts (including
+    superusers) with credentials of their choosing — both via the SDK and via
+    the /v1/remember archive-upload endpoint.
+    """
+    social_layer = getattr(source, "social_layer", None)
+    if not social_layer:
+        return user
+
+    # Gate on the social layer EXISTING, not on it carrying an "owner". Both
+    # consumers of the layer create accounts through _ensure_user, and checking
+    # owner_payload first let an archive whose permissions.json carried "grants"
+    # but no "owner" return here before the check ever ran.
+    await _require_social_layer_superuser(user)
+
+    owner_payload = social_layer.get("owner")
+    if owner_payload is None:
+        # Nothing to reassign ownership to; the import runs as the caller, and the
+        # grants are replayed later by _apply_social_grants under the same gate.
+        return user
+    return await _ensure_user(owner_payload)
+
+
+async def _require_social_layer_superuser(user):
+    """Resolve the importing identity and require it to be a superuser.
+
+    The archive supplies emails, password hashes and account flags verbatim, and
+    every path that consumes a social layer mints accounts through ``_ensure_user``,
+    which writes ``hashed_password`` and ``is_superuser`` straight from the payload.
+    So this must gate the layer as a whole: gating only the owner-restore path left
+    the grant-replay path reachable by any caller, which is privilege escalation to
+    superuser with an attacker-chosen password hash.
+
+    Returns the resolved importer so callers do not resolve the default user twice.
+    """
+    importer = user
+    if importer is None:
+        from cognee.modules.users.methods import get_default_user
+
+        importer = await get_default_user()
+    if not importer.is_superuser:
+        from cognee.modules.users.exceptions.exceptions import PermissionDeniedError
+
+        raise PermissionDeniedError(
+            message="Importing an archive that carries a social layer (permissions.json) "
+            "requires a superuser: it restores user accounts and credentials."
+        )
+    return importer
+
+
+async def _apply_social_grants(source: MemorySource, dataset_name: str, owner, importer) -> None:
+    """Re-apply the archive's ACL grants onto the freshly imported dataset.
+
+    Users are created/matched by email (credentials transfer on creation);
+    ``give_permission_on_dataset`` deduplicates existing ACL rows, so
+    re-importing is idempotent. The importing user additionally keeps read
+    access — they held the archive bytes, and this prevents silent lockout
+    when restoring someone else's dataset.
+    """
+    social_layer = getattr(source, "social_layer", None)
+    if not social_layer:
+        return
+
+    # Re-asserted here rather than trusted from the caller: this function creates
+    # accounts through _ensure_user independently of the owner-restore path, and it
+    # is reached from import_source() on any truthy social layer.
+    importer = await _require_social_layer_superuser(importer)
+
+    from cognee.modules.data.methods import get_authorized_existing_datasets
+    from cognee.modules.users.permissions.methods import give_permission_on_dataset
+
+    datasets = await get_authorized_existing_datasets([dataset_name], "read", owner)
+    if not datasets:
+        logger.warning(
+            "No dataset %r found after import; cannot restore its social layer.", dataset_name
+        )
+        return
+    dataset_id = datasets[0].id
+
+    for grant in social_layer.get("grants", []):
+        principal = await _ensure_user(grant["user"])
+        for permission_name in grant.get("permissions", []):
+            await give_permission_on_dataset(principal, dataset_id, permission_name)
+
+    if importer.id != owner.id:
+        await give_permission_on_dataset(importer, dataset_id, "read")
+
+
+def _revision_to_stamp(
+    archive_revision: str | None,
+    stored_revision: str | None,
+    ordered_revisions: list[str],
+) -> str | None:
+    """The revision the imported store should be re-stamped at, or None.
+
+    Stamps only BACKWARD — when the archive's revision is strictly behind the
+    store's current stamp — so the next migration run replays exactly
+    archive -> head over the imported rows (idempotent over already-current
+    data). Never forward: stamping ahead would mark the store's own data as
+    migrated when it is not. Unknown revisions (either side written by newer
+    code) and an unstamped store (None = base, already minimal) leave the
+    stamp untouched.
+    """
+    if archive_revision is None or stored_revision is None:
+        return None
+    if archive_revision not in ordered_revisions or stored_revision not in ordered_revisions:
+        return None
+    if ordered_revisions.index(archive_revision) < ordered_revisions.index(stored_revision):
+        return archive_revision
+    return None
+
+
+async def _restamp_to_source_revision(source: MemorySource, dataset_name: str, user) -> None:
+    """Align the target's migration stamp with a cognee-origin archive.
+
+    Preserve/hybrid imports write the archive's raw nodes with their
+    source-store ids, so the target must not claim a newer data-migration
+    revision than the exported data actually has. When the archive carries a
+    revision behind the target's stamp, re-stamp backward; the next migration
+    gate then replays revision -> head over the imported data. External
+    sources carry no revision (their records are written entirely by
+    current-code pipelines) and are skipped, as are re-derive imports (no raw
+    nodes land).
+    """
+    archive_revision = getattr(source, "migration_revision", None)
+    if archive_revision is None or source.mode == "re-derive":
+        return
+
+    from cognee.context_global_variables import backend_access_control_enabled
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.migrations.migration import order_migrations
+    from cognee.modules.migrations.registry import MIGRATIONS
+    from cognee.modules.migrations.runner import stamp_revisions
+
+    ordered_revisions = [migration.revision for migration in order_migrations(MIGRATIONS)]
+    if archive_revision not in ordered_revisions:
+        logger.warning(
+            "Archive migration revision is unknown to this chain — the archive was "
+            "exported by newer code; leaving the store's migration stamp unchanged."
+        )
+        return
+
+    db_engine = get_relational_engine()
+    if backend_access_control_enabled():
+        from cognee.modules.data.methods import get_authorized_existing_datasets
+        from cognee.modules.users.methods import get_default_user
+        from cognee.modules.users.models import DatasetDatabase
+
+        if user is None:
+            user = await get_default_user()
+        datasets = await get_authorized_existing_datasets([dataset_name], "read", user)
+        if not datasets:
+            logger.warning(
+                "No dataset %r found after import; cannot align its migration stamp.",
+                dataset_name,
+            )
+            return
+        dataset_id = datasets[0].id
+        async with db_engine.get_async_session() as session:
+            record = await session.get(DatasetDatabase, dataset_id)
+        stored_revision = record.migration_revision if record else None
+        target = _revision_to_stamp(archive_revision, stored_revision, ordered_revisions)
+        if target is None:
+            return
+        await stamp_revisions(target=target, dataset_ids=[dataset_id])
+    else:
+        from cognee.modules.migrations.models import (
+            GLOBAL_DATABASE_VERSION_ROW_ID,
+            GlobalDatabaseVersion,
+        )
+
+        async with db_engine.get_async_session() as session:
+            record = await session.get(GlobalDatabaseVersion, GLOBAL_DATABASE_VERSION_ROW_ID)
+        stored_revision = record.global_migration_revision if record else None
+        target = _revision_to_stamp(archive_revision, stored_revision, ordered_revisions)
+        if target is None:
+            return
+        await stamp_revisions(target=target)
+
+    # Log the registry's own copy of the revision string — archive-derived
+    # values must never reach the logs (target is guaranteed to be in the chain).
+    stamped_revision = ordered_revisions[ordered_revisions.index(target)]
+    logger.info(
+        "Stamped store back to archive migration revision %r (was %r); the next "
+        "migration run replays %r -> head over the imported data.",
+        stamped_revision,
+        stored_revision,
+        stamped_revision,
+    )
+
+
+def _pipeline_run_id(pipeline_result: Any) -> str | None:
     """Extract the pipeline run id from a run_custom_pipeline return value.
 
     Blocking runs return ``{dataset_id: PipelineRunCompleted}``; background
@@ -61,10 +310,11 @@ def _pipeline_run_id(pipeline_result: Any) -> Optional[str]:
 
 async def import_memory_source(
     source: MemorySource,
-    dataset_name: str = "main_dataset",
+    dataset_name: str = DEFAULT_DATASET_NAME,
     user=None,
     run_in_background: bool = False,
-    node_set: Optional[list] = None,
+    node_set: list | None = None,
+    graph_only: bool = False,
     **kwargs,
 ) -> "RememberResult":
     """Import all records from a memory source into a dataset.
@@ -76,12 +326,51 @@ async def import_memory_source(
     record-level deterministic ids (``data_id`` from external_system +
     external_id, node ids from entity names) make re-running an interrupted
     or repeated import safe.
+
+    ``graph_only=True`` persists the imported graph without initializing or
+    writing a vector engine, and skips the first-run LLM/embedding connection
+    checks: the import then needs no API key at all. Only vector-independent
+    search (e.g. ``CHUNKS_LEXICAL``) can retrieve from such a dataset until it
+    is indexed. Applies to the graph records of preserve-mode imports; raw
+    document content stored via ``add()`` is unaffected.
     """
+    from cognee.modules.migrations.startup import run_migrations_and_block
+
+    # Imports are writes, so they take the same migration gate as
+    # remember()/cognify() (the remember() MemorySource dispatch happens
+    # before its own gate). This also records the data-migration revision —
+    # stamping a fresh store at head — BEFORE the imported rows arrive;
+    # without it the populated store has no recorded revision and the first
+    # migration-aware startup replays the entire data chain over it. It must
+    # run before user resolution: on a fresh store it also creates the
+    # relational schema that user lookup needs.
+    await run_migrations_and_block(dataset_name, user)
+
+    # Archives carrying a social layer import AS the archived owner (see
+    # _resolve_import_user); everything else runs as the caller's user.
+    importer = user
+    user = await _resolve_import_user(source, user)
+
     node_set = node_set or [f"import:{source.source_system}"]
 
     if source.mode == "preserve" and getattr(source, "replayable", False):
-        return await _import_streaming(source, dataset_name, user, run_in_background, node_set)
-    return await _import_buffered(source, dataset_name, user, run_in_background, node_set, **kwargs)
+        result = await _import_streaming(
+            source, dataset_name, user, run_in_background, node_set, graph_only
+        )
+    else:
+        result = await _import_buffered(
+            source, dataset_name, user, run_in_background, node_set, graph_only, **kwargs
+        )
+
+    # After the rows land: cognee-origin archives may need the migration
+    # stamp aligned backward to the SOURCE store's revision (see
+    # _restamp_to_source_revision) and their social layer restored (grants
+    # re-applied for recreated users).
+    await _restamp_to_source_revision(source, dataset_name, user)
+    if getattr(source, "social_layer", None):
+        await _apply_social_grants(source, dataset_name, owner=user, importer=importer)
+
+    return result
 
 
 async def _import_streaming(
@@ -90,6 +379,7 @@ async def _import_streaming(
     user,
     run_in_background: bool,
     node_set: list,
+    graph_only: bool = False,
 ) -> "RememberResult":
     """Preserve-mode import with bounded memory.
 
@@ -102,8 +392,8 @@ async def _import_streaming(
 
     started_at = time.monotonic()
 
-    counts: Dict[str, int] = {}
-    pending: List[DataItem] = []
+    counts: dict[str, int] = {}
+    pending: list[DataItem] = []
     data_items_stored = 0
     async for record in source.records():
         counts[record.kind] = counts.get(record.kind, 0) + 1
@@ -118,9 +408,14 @@ async def _import_streaming(
         await add(pending, dataset_name=dataset_name, user=user, node_set=node_set)
         data_items_stored += len(pending)
 
-    logger.info("Importing from %s (mode=preserve, streaming): %s", source.source_system, counts)
+    logger.info("Importing from %s (mode=preserve, streaming): %s", _source_label(source), counts)
 
-    stats: Dict[str, int] = {"graph_nodes": 0, "graph_edges": 0, "skipped_facts": 0}
+    stats: dict[str, int] = {
+        "graph_nodes": 0,
+        "graph_edges": 0,
+        "skipped_facts": 0,
+        "deduped_edges": 0,
+    }
     pipeline_result = None
     has_graph_records = any(counts.get(kind) for kind in _GRAPH_RECORD_KINDS)
     if has_graph_records:
@@ -128,7 +423,7 @@ async def _import_streaming(
         from cognee.modules.run_custom_pipeline import run_custom_pipeline
 
         async def stream_import_graph(items, ctx=None):
-            return await stream_graph_from_source(source, stats, ctx=ctx)
+            return await stream_graph_from_source(source, stats, ctx=ctx, graph_only=graph_only)
 
         pipeline_data_item = DataItem(
             data={"source_system": source.source_system, "kind": "graph_stream"},
@@ -146,6 +441,10 @@ async def _import_streaming(
             user=user,
             run_in_background=run_in_background,
             pipeline_name="migration_import_pipeline",
+            # A graph-only import touches neither the LLM nor the embedding
+            # engine, so the first-run connection checks must not demand an
+            # API key (mirrors the code-graph pipeline's posture).
+            skip_connection_test=graph_only,
         )
 
     backgrounded = run_in_background and has_graph_records
@@ -153,7 +452,7 @@ async def _import_streaming(
         logger.warning(
             "Skipped %d facts with unresolvable UUID references during import from %s.",
             stats["skipped_facts"],
-            source.source_system,
+            _source_label(source),
         )
 
     run_id = _pipeline_run_id(pipeline_result)
@@ -165,6 +464,7 @@ async def _import_streaming(
         "graph_nodes": stats["graph_nodes"],
         "graph_edges": stats["graph_edges"],
         "skipped_facts": stats["skipped_facts"],
+        "deduped_edges": stats["deduped_edges"],
         "pipeline_run_id": run_id,
     }
     if backgrounded:
@@ -189,6 +489,7 @@ async def _import_buffered(
     user,
     run_in_background: bool,
     node_set: list,
+    graph_only: bool = False,
     **kwargs,
 ) -> "RememberResult":
     """Translate the full record stream, then run data items and graph batches."""
@@ -198,20 +499,26 @@ async def _import_buffered(
 
     # Translate the record stream directly: no full raw-record list is kept,
     # so peak memory is bounded by the translation output alone.
-    translation = await translate_record_stream(source.records(), source.mode)
+    translation = await translate_record_stream(
+        source.records(),
+        source.mode,
+        # Cognee-origin archives keep source node UUIDs verbatim; other
+        # systems get class-namespaced ids (see _register_entity).
+        preserve_source_ids=source.source_system == "cognee",
+    )
 
     logger.info(
         "Importing %d records from %s (mode=%s): %s",
         sum(translation.counts.values()),
-        source.source_system,
-        source.mode,
+        _source_label(source),
+        _mode_label(source),
         translation.counts,
     )
     if translation.skipped_facts:
         logger.warning(
             "Skipped %d facts with unresolvable UUID references during import from %s.",
             translation.skipped_facts,
-            source.source_system,
+            _source_label(source),
         )
 
     graph_nodes = sum(len(batch["nodes"]) for batch in translation.graph_batches)
@@ -236,12 +543,13 @@ async def _import_buffered(
             for index, batch in enumerate(translation.graph_batches)
         ]
         pipeline_result = await run_custom_pipeline(
-            tasks=[Task(store_imported_graph)],
+            tasks=[Task(store_imported_graph, graph_only=graph_only)],
             data=wrapped_batches,
             dataset=dataset_name,
             user=user,
             run_in_background=run_in_background,
             pipeline_name="migration_import_pipeline",
+            skip_connection_test=graph_only,
         )
 
     run_id = _pipeline_run_id(pipeline_result)

@@ -1,54 +1,59 @@
 """SDK entry point: export a dataset's memory to a portable format."""
 
 from pathlib import Path
-from typing import Literal, Optional, Union, overload
+from typing import Literal, overload
 from uuid import UUID
 
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.migration.export import ExportResult, export_dataset
 from cognee.modules.migration.snapshot import GraphSnapshot
-from cognee.modules.observability import new_span, COGNEE_DATASET_NAME
+from cognee.modules.observability import COGNEE_DATASET_NAME, new_span
 
 _FileFormat = Literal["cogx", "json", "graphml", "cypher"]
 
 
 @overload
 async def export(
-    dataset: Union[str, UUID] = "main_dataset",
+    dataset: str | UUID = DEFAULT_DATASET_NAME,
     format: Literal["pydantic"] = "pydantic",
-    destination: Optional[Union[str, Path]] = None,
+    destination: str | Path | None = None,
     user=None,
     link_relations: bool = False,
+    include_permissions: bool = False,
 ) -> GraphSnapshot: ...
 
 
 @overload
 async def export(
-    dataset: Union[str, UUID],
+    dataset: str | UUID,
     format: _FileFormat,
-    destination: Optional[Union[str, Path]] = None,
+    destination: str | Path | None = None,
     user=None,
     link_relations: bool = False,
+    include_permissions: bool = False,
 ) -> ExportResult: ...
 
 
 @overload
 async def export(
-    dataset: Union[str, UUID] = "main_dataset",
+    dataset: str | UUID = DEFAULT_DATASET_NAME,
     *,
     format: _FileFormat,
-    destination: Optional[Union[str, Path]] = None,
+    destination: str | Path | None = None,
     user=None,
     link_relations: bool = False,
+    include_permissions: bool = False,
 ) -> ExportResult: ...
 
 
 async def export(
-    dataset: Union[str, UUID] = "main_dataset",
+    dataset: str | UUID = DEFAULT_DATASET_NAME,
     format: str = "pydantic",
-    destination: Optional[Union[str, Path]] = None,
+    destination: str | Path | None = None,
     user=None,
     link_relations: bool = False,
-) -> Union[ExportResult, GraphSnapshot]:
+    include_permissions: bool = False,
+) -> ExportResult | GraphSnapshot:
     """Export a dataset's knowledge graph.
 
     Args:
@@ -97,4 +102,5 @@ async def export(
             destination=destination,
             user=user,
             link_relations=link_relations,
+            include_permissions=include_permissions,
         )

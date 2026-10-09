@@ -1,14 +1,14 @@
 import asyncio
-import cognee
-from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
-
-from cognee.shared.logging_utils import setup_logging, INFO
-from cognee.tasks.temporal_graph.models import Timestamp
-from cognee.api.v1.search import SearchType
-from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 from collections import Counter
+
+import cognee
+from cognee.api.v1.cognify.cognify import get_temporal_tasks
+from cognee.api.v1.search import SearchType
+from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 from cognee.modules.engine.utils.generate_timestamp_datapoint import date_to_int
+from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
+from cognee.shared.logging_utils import INFO, get_logger, setup_logging
+from cognee.tasks.temporal_graph.models import Timestamp
 
 logger = get_logger()
 
@@ -79,7 +79,9 @@ async def main():
 
     await cognee.add([biography_1, biography_2])
 
-    await cognee.cognify(temporal_cognify=True)
+    # The event pipeline is no longer a cognify() option; run its task list directly
+    # until it is removed.
+    await cognee.run_custom_pipeline(tasks=await get_temporal_tasks(), dataset="main_dataset")
 
     graph_engine = await get_graph_engine()
     graph = await graph_engine.get_graph_data()

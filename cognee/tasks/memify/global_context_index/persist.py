@@ -5,6 +5,8 @@ from types import SimpleNamespace
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
+from cognee.infrastructure.databases.provenance import make_source_ref_key
+from cognee.infrastructure.databases.provenance.markers import stores_provenance_in_graph
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.tasks.storage import add_data_points
@@ -80,11 +82,50 @@ async def persist_context_summaries(
         )
 
 
+def _context_index_source_ref(ctx: PipelineContext | None) -> tuple[str | None, str | None]:
+    """Dataset-level source ref + run id for the global-context-index edges.
+
+    Reuses the same sentinel data id as the context summary nodes
+    (``ensure_global_context_storage_context``) so the ``summarized_in`` edges
+    carry the same provenance key as the summaries they connect — both are then
+    removed together when the dataset is deleted. These edges are dataset-scoped
+    (built over many summaries), so they are deliberately not tied to a single
+    ingested data item.
+    """
+    ctx = ensure_global_context_storage_context(ctx)
+    if ctx is None:
+        return None, None
+    dataset_id = getattr(ctx.dataset, "id", ctx.dataset)
+    data_id = getattr(ctx.data_item, "id", None)
+    if dataset_id is None or data_id is None:
+        return None, None
+    pipeline_run_id = getattr(ctx, "pipeline_run_id", None)
+    return (
+        make_source_ref_key(dataset_id, data_id),
+        str(pipeline_run_id) if pipeline_run_id else None,
+    )
+
+
 async def persist_context_index_edges(
     assignments: list[BucketAssignment],
     unified_engine: Any,
+    ctx: PipelineContext | None = None,
 ) -> None:
     summarized_in_edges = build_context_index_edges(assignments)
-    if summarized_in_edges:
-        # Structural global context index edges are written directly by this task.
-        await unified_engine.graph.add_edges(summarized_in_edges)
+    if not summarized_in_edges:
+        return
+
+    # Structural global context index edges are written directly by this task.
+    # On a graph-provenance graph, fold a dataset-level source ref into the write so
+    # the edges are deletable/rollbackable; on ledger graphs they are unstamped
+    # as before (the source ref is ignored).
+    source_ref_key = None
+    pipeline_run_id = None
+    if await stores_provenance_in_graph(unified_engine.graph):
+        source_ref_key, pipeline_run_id = _context_index_source_ref(ctx)
+
+    await unified_engine.graph.add_edges(
+        summarized_in_edges,
+        source_ref_key=source_ref_key,
+        pipeline_run_id=pipeline_run_id,
+    )

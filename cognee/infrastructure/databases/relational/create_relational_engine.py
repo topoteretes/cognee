@@ -1,7 +1,8 @@
 from functools import lru_cache
-from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
 
 from sqlalchemy import URL
+
+from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
 
 from .sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
 
@@ -15,8 +16,10 @@ def create_relational_engine(
     db_username: str,
     db_password: str,
     db_provider: str,
-    database_connect_args: tuple = None,
-    pool_args: tuple = None,
+    database_connect_args: tuple | None = None,
+    pool_args: tuple | None = None,
+    db_turso_url: str | None = None,
+    db_turso_auth_token: str | None = None,
 ) -> SQLAlchemyAdapter:
     """
     Create a relational database engine based on the specified parameters.
@@ -68,6 +71,32 @@ def create_relational_engine(
             raise ImportError(
                 "PostgreSQL dependencies are not installed. Please install with 'pip install cognee\"[postgres]\"' or 'pip install cognee\"[postgres-binary]\"' to use PostgreSQL functionality."
             )
+
+    elif db_provider == "turso":
+        from cognee.infrastructure.databases.turso import require_turso
+
+        # Probe the driver here: the adapter module imports it lazily, so importing
+        # the module alone would not surface a missing turso extra.
+        require_turso()
+
+        if db_turso_url or db_turso_auth_token:
+            raise OSError(
+                "Remote Turso databases are not supported by the local Turso backend in this "
+                "version (DB_TURSO_URL / DB_TURSO_AUTH_TOKEN are set). Unset them to use a "
+                "local Turso database file under DB_PATH, or pick another DB_PROVIDER. These "
+                "settings are deprecated leftovers of the former libSQL replica adapter and "
+                "will be removed in a future release."
+            )
+
+        from .sqlalchemy.TursoAdapter import TursoAdapter
+
+        # The Turso rewrite engine (pyturso) drives the query path, migrations and
+        # the sqlite-dialect code paths through cognee's own SQLAlchemy dialect.
+        return TursoAdapter(
+            f"{db_path}/{db_name}",
+            connect_args=database_connect_args,
+            pool_args=pool_args,
+        )
 
     else:
         raise ConnectionError("unsupported DB type: " + db_provider)

@@ -2,24 +2,24 @@
 
 import os
 from functools import lru_cache
-from typing import Optional
 
-from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.databases.cache.config import get_cache_config
 from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInterface
+from cognee.infrastructure.databases.cache.config import get_cache_config
 from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import FSCacheAdapter
 from cognee.infrastructure.databases.exceptions import CacheConnectionError
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("CacheEngine")
 
 
-def _resolve_cache_db_url(backend: str, cache_db_url: Optional[str]) -> str:
+def _resolve_cache_db_url(backend: str, cache_db_url: str | None) -> str:
     """
     Resolve the SQLAlchemy async URL for the SQL cache backends.
 
-    CACHE_DB_URL wins when set. Otherwise "sqlite" mirrors the relational SQLite
-    engine's databases directory (with a dedicated cache.db file), and "postgres"
-    falls back to the relational DB_* settings when DB_PROVIDER=postgres.
+    CACHE_DB_URL wins when set. Otherwise "sqlite" and "turso" mirror the relational
+    engine's databases directory (with a dedicated cache.db file; "turso" opens it on
+    the Turso rewrite engine), and "postgres" falls back to the relational DB_*
+    settings when DB_PROVIDER=postgres.
     """
     if cache_db_url:
         return cache_db_url
@@ -28,14 +28,24 @@ def _resolve_cache_db_url(backend: str, cache_db_url: Optional[str]) -> str:
 
     relational_config = get_relational_config()
 
-    if backend == "sqlite":
+    if backend in ("sqlite", "turso"):
         db_path = relational_config.db_path
         if "s3://" in db_path:
             raise CacheConnectionError(
-                "CACHE_BACKEND=sqlite cannot store cache.db on S3; "
+                f"CACHE_BACKEND={backend} cannot store cache.db on S3; "
                 "set CACHE_DB_URL or CACHE_BACKEND=postgres"
             )
         os.makedirs(db_path, exist_ok=True)
+        if backend == "turso":
+            from cognee.infrastructure.databases.turso import require_turso, turso_url
+
+            try:
+                require_turso()
+            except ImportError as error:
+                raise CacheConnectionError(
+                    f"CACHE_BACKEND=turso requires the turso extra: {error}"
+                ) from error
+            return turso_url(f"{db_path}/cache.db")
         return f"sqlite+aiosqlite:///{db_path}/cache.db"
 
     if relational_config.db_provider == "postgres":
@@ -67,6 +77,8 @@ def create_cache_engine(
     cache_password: str,
     lock_key: str,
     log_key: str,
+    cache_ssl: bool = False,
+    cache_ssl_cert_reqs: str = "required",
     agentic_lock_expire: int = 240,
     agentic_lock_timeout: int = 300,
     session_ttl_seconds: int | None = 604800,
@@ -108,6 +120,8 @@ def create_cache_engine(
                 port=cache_port,
                 username=cache_username,
                 password=cache_password,
+                ssl=cache_ssl,
+                ssl_cert_reqs=cache_ssl_cert_reqs,
                 lock_name=lock_key,
                 log_key=log_key,
                 timeout=agentic_lock_expire,
@@ -129,7 +143,7 @@ def create_cache_engine(
                 tapes_model=tapes_model,
                 tapes_request_timeout=tapes_request_timeout,
             )
-        elif config.cache_backend in ("sqlite", "postgres"):
+        elif config.cache_backend in ("sqlite", "turso", "postgres"):
             from cognee.infrastructure.databases.cache.sql.SqlCacheAdapter import (
                 SqlCacheAdapter,
             )
@@ -163,16 +177,16 @@ def create_cache_engine(
         else:
             raise ValueError(
                 f"Unsupported cache backend: '{config.cache_backend}'. "
-                f"Supported backends are: 'redis', 'fs', 'tapes', 'sqlite', 'postgres'"
+                f"Supported backends are: 'redis', 'fs', 'tapes', 'sqlite', 'turso', 'postgres'"
             )
     else:
         return None
 
 
 def get_cache_engine(
-    lock_key: Optional[str] = "default_lock",
-    log_key: Optional[str] = "usage_logs",
-) -> Optional[CacheDBInterface]:
+    lock_key: str | None = "default_lock",
+    log_key: str | None = "usage_logs",
+) -> CacheDBInterface | None:
     """
     Returns a cache adapter instance using current context configuration.
     """
@@ -183,6 +197,8 @@ def get_cache_engine(
         cache_port=config.cache_port,
         cache_username=config.cache_username,
         cache_password=config.cache_password,
+        cache_ssl=config.cache_ssl,
+        cache_ssl_cert_reqs=config.cache_ssl_cert_reqs,
         lock_key=lock_key,
         log_key=log_key,
         agentic_lock_expire=config.agentic_lock_expire,
@@ -199,8 +215,8 @@ def get_cache_engine(
 
 
 async def close_cache_engine(
-    lock_key: Optional[str] = "default_lock",
-    log_key: Optional[str] = "usage_logs",
+    lock_key: str | None = "default_lock",
+    log_key: str | None = "usage_logs",
 ) -> None:
     """Close and clear the cached cache engine instance."""
     if create_cache_engine.cache_info().currsize == 0:
