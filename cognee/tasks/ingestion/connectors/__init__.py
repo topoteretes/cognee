@@ -20,3 +20,6 @@ __all__ = [
     "linear_source",
     "notion_source",
 ]
+from .airtable import airtable_source
+
+__all__.append("airtable_source")
