@@ -32,7 +32,6 @@ constraints = [
     { name = "spacy", marker = "python_full_version >= '3.14'", specifier = "<3.8.14" },
     { name = "wheel", specifier = ">=0.46.2" },
 ]
-overrides = [{ name = "python-magic", marker = "sys_platform != 'win32'", specifier = ">=0.4.27,<1.0.0" }]
 
 [[package]]
 name = "accelerate"
@@ -12180,7 +12179,7 @@ dependencies = [
     { name = "numpy", version = "2.3.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11' and python_full_version < '3.13'" },
     { name = "psutil", marker = "python_full_version < '3.13'" },
     { name = "python-iso639", marker = "python_full_version < '3.13'" },
-    { name = "python-magic", marker = "python_full_version < '3.13' and sys_platform != 'win32'" },
+    { name = "python-magic", marker = "python_full_version < '3.13'" },
     { name = "python-oxmsg", marker = "python_full_version < '3.13'" },
     { name = "rapidfuzz", version = "3.14.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "rapidfuzz", version = "3.14.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11' and python_full_version < '3.13'" },
@@ -12285,7 +12284,7 @@ dependencies = [
     { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13'" },
     { name = "psutil", marker = "python_full_version >= '3.13'" },
     { name = "python-iso639", marker = "python_full_version >= '3.13'" },
-    { name = "python-magic", marker = "python_full_version >= '3.13' and sys_platform != 'win32'" },
+    { name = "python-magic", marker = "python_full_version >= '3.13'" },
     { name = "python-oxmsg", marker = "python_full_version >= '3.13'" },
     { name = "rapidfuzz", version = "3.14.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13'" },
     { name = "regex", marker = "python_full_version >= '3.13'" },

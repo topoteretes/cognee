@@ -298,13 +298,6 @@ exclude = [
 packages = ["cognee", "cognee_db_workers", "kuzu"]
 
 [tool.uv]
-# Keep python-magic (an unstructured dependency) off Windows. libmagic is
-# optional for unstructured, which falls back to the pure-Python `filetype`
-# package, and python-magic's import-time libmagic probe wedges forever on
-# the GitHub Windows runners, which carry a mingw libmagic DLL on PATH.
-override-dependencies = [
-    "python-magic>=0.4.27,<1.0.0 ; platform_system != 'Windows'",
-]
 # Note: exclude newer packages that are less than 2 days old
 exclude-newer = "2 days"
 # Enola releases are deliberately pinned and validated against the code-graph
