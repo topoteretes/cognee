@@ -41,6 +41,9 @@ def _incremental_run(monkeypatch, completed=True):
         }
         if completed
         else {},
+        name="row",
+        label=None,
+        external_metadata={},
     )
 
     session = MagicMock()

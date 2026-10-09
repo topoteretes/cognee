@@ -8,7 +8,9 @@ within pipeline operations, supporting both incremental and regular processing m
 import os
 from collections.abc import AsyncGenerator
 from contextlib import aclosing
+from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlparse
 
 from sqlalchemy import select
 
@@ -215,6 +217,7 @@ async def run_tasks_data_item_incremental(
                     dataset_name=dataset.name,
                 ),
                 "data_id": data_id,
+                **_source_fields(data_point, data_item),
             }
             return
 
@@ -266,6 +269,7 @@ async def run_tasks_data_item_incremental(
                 dataset_name=dataset.name,
             ),
             "data_id": data_id,
+            **_source_fields(data_point, data_item),
         }
 
     except Exception as error:
@@ -290,10 +294,54 @@ async def run_tasks_data_item_incremental(
             # be processed." with a NULL error column.
             "error": error,
             "data_id": data_id,
+            **_source_fields(data_point, data_item),
         }
 
         if os.getenv("RAISE_INCREMENTAL_LOADING_ERRORS", "true").lower() == "true":
             raise
+
+
+def _source_fields(data_point: Data | None, data_item: Any) -> dict[str, Any]:
+    """Name, location and label for an item's per-item result entry.
+
+    They let a caller tell which input an id belongs to (a folder yields one
+    entry per file). Read from the stored data item when there is one, else
+    from the input itself, as for an item that failed before it was stored.
+    """
+    if data_point is not None:
+        return {
+            "data_name": data_point.name,
+            "data_location": _stored_source_uri(data_point),
+            "data_label": data_point.label,
+        }
+    return _input_source_fields(data_item)
+
+
+def _stored_source_uri(data_point: Data) -> str | None:
+    """Where the caller's content came from, as ingest_data recorded it.
+
+    Raw text has no source of its own, so it has none; cognee's stored copy is
+    deliberately not reported as one.
+    """
+    cognee_metadata = (data_point.external_metadata or {}).get("_cognee")
+    if not isinstance(cognee_metadata, dict):
+        return None
+    source_uri = cognee_metadata.get("source_uri")
+    return source_uri if isinstance(source_uri, str) else None
+
+
+def _input_source_fields(data_item: Any) -> dict[str, Any]:
+    """Name, location and label read from the input, for an item not stored yet."""
+    from cognee.tasks.ingestion.data_item import DataItem as DataItemType
+    from cognee.tasks.ingestion.ingest_data import _source_uri_from_input
+
+    location = _source_uri_from_input(data_item)
+    name = Path(unquote(urlparse(location).path)).stem if location else None
+    return {
+        "data_name": name or None,
+        "data_location": location,
+        "data_label": data_item.label if isinstance(data_item, DataItemType) else None,
+    }
 
 
 async def run_tasks_data_item_regular(
