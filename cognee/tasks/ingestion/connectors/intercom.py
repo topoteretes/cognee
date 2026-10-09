@@ -13,9 +13,9 @@ Sync a set of explicit Intercom resources into cognee incrementally.
     )
 """
 
-import os
 import logging
-from typing import Iterator
+import os
+from collections.abc import Iterator
 
 import httpx
 
@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 INTERCOM_API_URL = "https://api.intercom.io"
 INTERCOM_VERSION = "2.11"
 
+
 def _get_headers(token: str) -> dict:
     return {
         "Authorization": f"Bearer {token}",
@@ -33,10 +34,8 @@ def _get_headers(token: str) -> dict:
         "Intercom-Version": INTERCOM_VERSION,
     }
 
-def intercom_source(
-    token: str | None = None,
-    resource_name: str = "intercom_contacts"
-):
+
+def intercom_source(token: str | None = None, resource_name: str = "intercom_contacts"):
     """Create a dlt source yielding Intercom contacts.
 
     Args:
@@ -46,48 +45,50 @@ def intercom_source(
     try:
         import dlt
     except ImportError as e:
-        raise ImportError(
-            "The Intercom connector requires dlt: pip install dlt"
-        ) from e
+        raise ImportError("The Intercom connector requires dlt: pip install dlt") from e
 
     token = token or os.environ.get("INTERCOM_ACCESS_TOKEN")
     if not token:
-        raise ValueError("Intercom access token must be provided or set in INTERCOM_ACCESS_TOKEN environment variable")
+        raise ValueError(
+            "Intercom access token must be provided or set in INTERCOM_ACCESS_TOKEN environment variable"
+        )
 
     @dlt.resource(name=resource_name, write_disposition="merge", primary_key="id")
-    def intercom_contacts(last_updated_time: dlt.sources.incremental = dlt.sources.incremental("updated_at")) -> Iterator[dict]:  # noqa: B008
+    def intercom_contacts(
+        last_updated_time: dlt.sources.incremental = dlt.sources.incremental("updated_at"),  # noqa: B008
+    ) -> Iterator[dict]:
         headers = _get_headers(token)
         url = f"{INTERCOM_API_URL}/contacts"
-        
+
         while url:
             resp = httpx.get(url, headers=headers, timeout=30)
             resp.raise_for_status()
-            
+
             data = resp.json()
             contacts = data.get("data", [])
-            
+
             for contact in contacts:
                 contact_id = contact.get("id")
                 name = contact.get("name")
                 email = contact.get("email")
                 role = contact.get("role")
                 updated_at = contact.get("updated_at")
-                
+
                 content_lines = [
                     f"Intercom Contact: {name or 'Unknown'}",
                     f"Email: {email}",
-                    f"Role: {role}"
+                    f"Role: {role}",
                 ]
-                        
+
                 yield {
                     "id": contact_id,
                     "title": f"Intercom Contact: {name or email or contact_id}",
                     "content": "\n".join(content_lines),
                     "updated_at": updated_at,
                     "email": email,
-                    "role": role
+                    "role": role,
                 }
-            
+
             pages = data.get("pages", {})
             url = pages.get("next")
 
