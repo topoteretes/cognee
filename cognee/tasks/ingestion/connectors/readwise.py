@@ -30,3 +30,15 @@ def _get_headers(token: str) -> dict:
         "Authorization": f"Token {token}",
         "Content-Type": "application/json"
     }
+
+def readwise_source(
+    token: str | None = None,
+    resource_name: str = "readwise_highlights"
+):
+    """Create a dlt source yielding Readwise highlights.
+
+    Args:
+        token: Readwise Access Token. Falls back to READWISE_ACCESS_TOKEN.
+        resource_name: The dlt resource / table name to yield rows into.
+    """
+    pass
