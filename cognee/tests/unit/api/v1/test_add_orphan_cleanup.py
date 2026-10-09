@@ -181,3 +181,17 @@ async def test_add_fills_added_data_ids_from_per_item_results(ingestion, monkeyp
     result = await add_module.add("source", dataset_name="documents")
 
     assert result.added_data_ids == [stored]
+
+
+@pytest.mark.asyncio
+async def test_remote_add_returns_added_data_ids_as_uuids(monkeypatch):
+    stored = uuid4()
+    response = {"status": "PipelineRunCompleted", "added_data_ids": [str(stored)]}
+    client = SimpleNamespace(add=AsyncMock(return_value=response))
+    monkeypatch.setattr(
+        importlib.import_module("cognee.api.v1.serve.state"), "get_remote_client", lambda: client
+    )
+
+    result = await add_module.add("source")
+
+    assert result.added_data_ids == [stored]
