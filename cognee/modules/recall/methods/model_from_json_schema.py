@@ -155,6 +155,12 @@ def _build_object(
     for field_name, field_schema in properties.items():
         if not field_name.isidentifier():
             raise _fail(f"property name '{field_name}' is not a valid identifier")
+        # Pydantic drops a leading-underscore field as a private attribute and
+        # refuses the names BaseModel reserves in its model_ namespace.
+        if field_name.startswith("_") or (
+            field_name.startswith("model_") and hasattr(BaseModel, field_name)
+        ):
+            raise _fail(f"property name '{field_name}' is reserved by Pydantic")
         annotation = _type_from(field_schema, defs, depth, in_flight_refs, budget)
         if field_name in required:
             fields[field_name] = (annotation, ...)

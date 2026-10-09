@@ -199,6 +199,25 @@ class TestRejections:
                 }
             )
 
+    @pytest.mark.parametrize(
+        "field_name", ["_private", "model_config", "model_dump", "model_post_init"]
+    )
+    def test_reserved_property_name(self, field_name):
+        with pytest.raises(CogneeValidationError, match="reserved"):
+            model_from_json_schema(
+                {"type": "object", "properties": {field_name: {"type": "string"}}}
+            )
+
+    def test_name_shadowing_a_legacy_method_still_builds(self):
+        rebuilt = model_from_json_schema(
+            {
+                "type": "object",
+                "properties": {"schema": {"type": "string"}},
+                "required": ["schema"],
+            }
+        )
+        assert rebuilt.model_validate({"schema": "ok"}).model_dump() == {"schema": "ok"}
+
     def test_non_string_title_falls_back_to_default_name(self):
         rebuilt = model_from_json_schema(
             {"type": "object", "title": 5, "properties": {"value": {"type": "string"}}}
