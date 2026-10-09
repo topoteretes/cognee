@@ -1,0 +1,3090 @@
+[
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 0,
+  "question_type": "temporal",
+  "category": 2,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Maria's mom",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response 'Maria's mom' is a synonymous paraphrase of 'her mother' with identical meaning."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 1,
+  "question_type": "temporal",
+  "category": 2,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "21 December, 2022",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response gives the exact same full date as the gold answer, differing only in punctuation/formatting."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 2,
+  "question_type": "multi_hop",
+  "category": 1,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Kickboxing, Taekwondo",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer listing both martial arts John has done."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 3,
+  "question_type": "multi_hop",
+  "category": 1,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Volunteering at a homeless shelter",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning and wording."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 4,
+  "question_type": "temporal",
+  "category": 2,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "the week before 1 January, 2023",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the temporal information in the gold answer."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 5,
+  "question_type": "temporal",
+  "category": 2,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "December, 2022",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response gives the same month and year as the gold answer with equivalent formatting."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 6,
+  "question_type": "multi_hop",
+  "category": 1,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "the homeless shelter, church, the gym",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response lists all three correct locations where Maria has made friends: homeless shelter, gym, and church."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 7,
+  "question_type": "multi_hop",
+  "category": 1,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "little doll, film camera, childhood beach photos",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly includes both items from the gold answer (doll and film camera); the extra detail does not contradict anything."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 8,
+  "question_type": "open_domain",
+  "category": 3,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Financially strained",
+  "metrics": {
+   "llm_judge": {
+    "score": 0.0,
+    "reason": "[openai/gpt-5.1] WRONG: The response describes John as financially strained, which contradicts the gold answer that he is middle-class or wealthy."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 9,
+  "question_type": "multi_hop",
+  "category": 1,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Maria's aunt",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response matches the gold answer in meaning, identifying Maria's aunt as the person who gave her family money."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 10,
+  "question_type": "temporal",
+  "category": 2,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "24 February, 2023",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response gives the exact same date as the gold answer, just in a different but equivalent format."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 11,
+  "question_type": "multi_hop",
+  "category": 1,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "a little girl around 8, David, someone special at the shelter, Jean, Laura",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly includes three of the four people in the gold answer (David, Jean, Laura) without contradicting it, satisfying the requirement to mention at least half."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 12,
+  "question_type": "multi_hop",
+  "category": 1,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Aptitude test",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response identifies the same test (an aptitude test) even though it omits the 'military' qualifier, which does not change the core meaning here."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 13,
+  "question_type": "temporal",
+  "category": 2,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "the week before 6 March, 2023",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the temporal information in the gold answer, including the relative time frame and date."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 14,
+  "question_type": "open_domain",
+  "category": 3,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Likely yes",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response affirms that John would be considered patriotic, matching the gold answer of 'Yes' despite mild hedging."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 15,
+  "question_type": "multi_hop",
+  "category": 1,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "poetry class, creative writing class",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response mentions both poetry and creative writing classes, matching all parts of the gold answer in meaning."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 16,
+  "question_type": "temporal",
+  "category": 2,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "the week before 2 April, 2023",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response matches the gold answer in meaning and temporal specificity."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 17,
+  "question_type": "open_domain",
+  "category": 3,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Public policy",
+  "metrics": {
+   "llm_judge": {
+    "score": 0.0,
+    "reason": "[openai/gpt-5.1] WRONG: The response 'Public policy' does not match any of the listed acceptable degrees (Political science, Public administration, Public affairs)."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 18,
+  "question_type": "multi_hop",
+  "category": 1,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Rob",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer 'Rob'."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 19,
+  "question_type": "multi_hop",
+  "category": 1,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "broken windshield, broke down",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response lists both damages—a broken windshield and that the car broke down—which matches the gold answer in meaning."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 20,
+  "question_type": "temporal",
+  "category": 2,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "2022",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response gives the exact same year as the gold answer."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 21,
+  "question_type": "multi_hop",
+  "category": 1,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Pacific Northwest, California, East Coast",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response includes both regions from the gold answer (Pacific Northwest and East Coast), and the extra mention of California does not contradict them."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 22,
+  "question_type": "temporal",
+  "category": 2,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "March, 2023",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response matches the gold answer exactly in date and level of precision."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 23,
+  "question_type": "multi_hop",
+  "category": 1,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Peach cobbler, banana split sundae",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response lists the same two desserts as the gold answer, just in a different order and with equivalent wording."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 24,
+  "question_type": "temporal",
+  "category": 2,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "April, 2023",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response gives the same month and year as the gold answer with equivalent precision and only a formatting difference."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 25,
+  "question_type": "multi_hop",
+  "category": 1,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "England, Spain",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response lists the same countries as the gold answer, just in a different order, which is equivalent in meaning."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 26,
+  "question_type": "multi_hop",
+  "category": 1,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Bought a cross necklace, joined a nearby church",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response restates both actions—joining a local/nearby church and buying a cross necklace—with equivalent meaning."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 27,
+  "question_type": "temporal",
+  "category": 2,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "19 May, 2023",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response specifies 19 May 2023, which exactly matches the date implied by 'the Friday before 20 May 2023.'"
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 28,
+  "question_type": "multi_hop",
+  "category": 1,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Education, Infrastructure, Military veterans, Veterans' rights, Victims of domestic abuse, Homeless people, Firefighters/local fire station",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly includes all three causes—education/schools, infrastructure, and veterans—though it adds extra non-contradictory causes."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 29,
+  "question_type": "multi_hop",
+  "category": 1,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Ring-toss tournament, chili cook-off",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response lists the same two events as the gold answer, just in reversed order, which is equivalent in meaning."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 30,
+  "question_type": "multi_hop",
+  "category": 1,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "homeless shelter, local dog shelter",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly identifies both shelters Maria volunteers at, matching the homeless shelter and the dog shelter."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 31,
+  "question_type": "temporal",
+  "category": 2,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "3 June, 2013",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response gives a more specific date within 2013, which is consistent with the gold answer."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 32,
+  "question_type": "multi_hop",
+  "category": 1,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "hiking, mountaineering, yoga",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response includes both hiking and mountaineering from the gold answer, and the extra activity (yoga) does not contradict the gold."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 33,
+  "question_type": "multi_hop",
+  "category": 1,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Aerial yoga, Kundalini yoga",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response lists both types of yoga, aerial and kundalini, matching the gold answer in meaning."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 34,
+  "question_type": "temporal",
+  "category": 2,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "the week before 16 June, 2023",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response matches the gold answer in both meaning and temporal specificity."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 35,
+  "question_type": "multi_hop",
+  "category": 1,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Florida, Oregon",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response lists the same two states as the gold answer, just in reversed order, which is fully consistent."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 36,
+  "question_type": "multi_hop",
+  "category": 1,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "violin concert, live music event",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response lists the same two music events as the gold answer, just in reversed order, with no contradictions."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 37,
+  "question_type": "multi_hop",
+  "category": 1,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "project to support military veterans, petition to support military veterans, small party for veterans, marching event for veterans' rights, 5K charity run for veterans and their families, visit to a veteran's hospital, visit to a military memorial, virtual support group advocacy for the military",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly lists all five veteran-related events from the gold answer (petition, march, party, veterans hospital visit, and 5K charity run), with only additional consistent details."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 38,
+  "question_type": "temporal",
+  "category": 2,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "2 July, 2023",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response gives the exact same calendar date as the gold answer, just in a different but equivalent format."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 39,
+  "question_type": "open_domain",
+  "category": 3,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Independence Day",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning and wording."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 40,
+  "question_type": "multi_hop",
+  "category": 1,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Kyle",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response includes one of the two correct names (Kyle), which meets the requirement of at least half of the gold items without contradiction."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 41,
+  "question_type": "open_domain",
+  "category": 3,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Beach",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response matches the gold answer in meaning and wording ('Beach')."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 42,
+  "question_type": "multi_hop",
+  "category": 1,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "West County",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning and wording."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 43,
+  "question_type": "temporal",
+  "category": 2,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "the week before 7 July, 2023",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the temporal information in the gold answer, differing only in punctuation/formatting."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 44,
+  "question_type": "multi_hop",
+  "category": 1,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Hiking, picnic, camping trip, community work",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response includes hiking and a picnic, and 'community work' reasonably matches 'volunteer work', covering all gold items without contradiction."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 45,
+  "question_type": "open_domain",
+  "category": 3,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 0.0,
+    "reason": "[openai/gpt-5.1] WRONG: The response claims the information is not mentioned, but the gold answer gives a definite 'no' with reasoning, so the response contradicts the known fact."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 46,
+  "question_type": "temporal",
+  "category": 2,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "15–16 July, 2023",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response specifies 15–16 July 2023, which exactly matches the weekend before 22 July 2023."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 47,
+  "question_type": "multi_hop",
+  "category": 1,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "yoga, stretching and breathing, kickboxing, weight training, boot camps, taekwondo",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response includes three of the four listed exercises (weight training, kickboxing, yoga) without contradicting the gold answer, satisfying the requirement of at least half."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 48,
+  "question_type": "temporal",
+  "category": 2,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "30 July, 2023",
+  "metrics": {
+   "llm_judge": {
+    "score": 0.0,
+    "reason": "[openai/gpt-5.1] WRONG: The response gives a different and later date (30 July 2023) than the Sunday before 3 July 2023, so it does not match the gold answer."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 49,
+  "question_type": "multi_hop",
+  "category": 1,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Baked items",
+  "metrics": {
+   "llm_judge": {
+    "score": 0.0,
+    "reason": "[openai/gpt-5.1] WRONG: The response is more general than the gold answer and does not specifically identify cakes, so it is not semantically equivalent."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 50,
+  "question_type": "open_domain",
+  "category": 3,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "kindness, care, resilience, resourcefulness, passion, dedication, perseverance, determination, optimism, gratitude, motivation, mindfulness, grit, community-mindedness",
+  "metrics": {
+   "llm_judge": {
+    "score": 0.0,
+    "reason": "[openai/gpt-5.1] WRONG: The response only clearly matches one of the four gold attributes (passion/passionate) and does not capture at least half of them."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 51,
+  "question_type": "temporal",
+  "category": 2,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "3 August, 2022",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response gives a more precise date that falls within the gold answer’s approximate time frame of August 2022."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 52,
+  "question_type": "multi_hop",
+  "category": 1,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Cindy, Laura",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches both people named in the gold answer."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 53,
+  "question_type": "temporal",
+  "category": 2,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "2022",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold year 2022."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 54,
+  "question_type": "temporal",
+  "category": 2,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "4 August, 2023",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response gives the same specific date as the gold answer, just in a different but equivalent format."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 55,
+  "question_type": "temporal",
+  "category": 2,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "the week before 9 August, 2023",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning and temporal precision."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 56,
+  "question_type": "temporal",
+  "category": 2,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "the weekend before 9 August, 2023",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: Describing it as the weekend before 9 August 2023 correctly identifies the same weekend as the first weekend of August 2023."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 57,
+  "question_type": "multi_hop",
+  "category": 1,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Veterans, Victims of domestic abuse, Homeless people, Children in need, Unemployed people, Local fire station, Schoolchildren",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response includes two of the four gold causes (veterans and domestic violence/abuse) with no contradictions, satisfying the requirement of at least half."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 58,
+  "question_type": "temporal",
+  "category": 2,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "28 July, 2023",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response specifies the exact calendar date that is exactly two weeks before 11 August 2023, which is consistent with the gold answer."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 59,
+  "question_type": "temporal",
+  "category": 2,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Summer, 2022",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response expresses the same time period as the gold answer with equivalent precision and meaning."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 60,
+  "question_type": "multi_hop",
+  "category": 1,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Coco, Shadow",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches both of Maria's dogs' names in the gold answer."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 61,
+  "question_type": "temporal",
+  "category": 2,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "the week before 13 August, 2023",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response matches the gold answer in temporal specificity and meaning, differing only in punctuation."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 62,
+  "question_type": "multi_hop",
+  "category": 1,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "One",
+  "metrics": {
+   "llm_judge": {
+    "score": 0.0,
+    "reason": "[openai/gpt-5.1] WRONG: The response states that Maria adopted one dog, which contradicts the gold answer of two dogs."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 63,
+  "question_type": "temporal",
+  "category": 2,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Two weeks",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning and wording."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 64,
+  "question_type": "open_domain",
+  "category": 3,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Social worker",
+  "metrics": {
+   "llm_judge": {
+    "score": 0.0,
+    "reason": "[openai/gpt-5.1] WRONG: The response 'social worker' does not match either 'shelter coordinator' or 'counselor' and is not an equivalent paraphrase of those specific roles."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 65,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Education, infrastructure",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response mentions both education and infrastructure, matching the gold answer's main focuses in meaning."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 66,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Growing up seeing lack of education and crumbling infrastructure in John’s neighborhood",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response accurately paraphrases that John’s interest was sparked by growing up witnessing lack of education and deteriorating infrastructure in his neighborhood."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 67,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Enabled repairs and renovations that made the learning environment safer and more modern.",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response fully matches the gold answer in meaning, covering repairs, renovations, and their impact on safety and modernity of the learning environment."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 68,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Aerial yoga",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response matches the gold answer exactly in meaning and wording."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 69,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 0.0,
+    "reason": "[openai/gpt-5.1] WRONG: The response incorrectly claims the information is not mentioned even though the gold specifies she donated her old car."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 70,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Pizza",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning and wording."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 71,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "service-focused online group, virtual support group",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response includes the correct type of group ('service-focused online group'); the added detail of 'virtual support group' does not contradict the gold."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 72,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Gave out food and supplies at a homeless shelter, organized a toy drive for kids in need",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches both activities listed in the gold answer without contradiction."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 73,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Maria's aunt",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly identifies Maria's aunt as the person who inspired her to start volunteering, matching the gold answer in meaning."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 74,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 0.0,
+    "reason": "[openai/gpt-5.1] WRONG: The response incorrectly claims the information is not mentioned, while the gold answer provides a concrete reason."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 75,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "a divorce, losing her job, ending up homeless",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response includes all three correct elements—divorce, job loss, and homelessness—without contradiction."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 76,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "can't let go of the dream to make a difference in the community, saw the impact possible through politics, found it rewarding to work towards positive changes and a better future, felt a strong urge to serve country and community, passion for improving education and infrastructure",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response captures that he saw the impact he could make in the community through politics and wanted to make a difference, matching and expanding on the gold answer without contradiction."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 77,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "a beginner's yoga class",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning and wording."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 78,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Kyle",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer 'Kyle'."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 79,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "A few times a week",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning and wording."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 80,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "a painting",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly identifies that Maria made a painting, matching the core item in the gold answer even though it omits the specific subject of the painting."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 81,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "England",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 82,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "completion of a university degree",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 83,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Education, Infrastructure",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly repeats both areas of interest, education and infrastructure, matching the gold answer in meaning."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 84,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "a 5K charity run for a homeless shelter",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response gives the same event (a 5K charity run) and only adds non-contradictory detail about its cause."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 85,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Career fair at a local school",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning and wording."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 86,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Car broke down",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response matches the gold answer in meaning, stating that the car broke down."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 87,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "the Pacific Northwest coast, national parks",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly identifies the Pacific Northwest, matching the gold answer with only extra non-contradictory detail."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 88,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Politics and the government",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning and wording."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 89,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Make a real impact, improve education and infrastructure, research policies, raise awareness, start conversations to create positive change",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response includes the key reasons from the gold answer—raising awareness and starting conversations to create positive change—without contradiction."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 90,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Education reform, infrastructure development",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches both components of the gold answer without contradiction."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 91,
+  "question_type": "temporal",
+  "category": 2,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "a convention",
+  "metrics": {
+   "llm_judge": {
+    "score": 0.0,
+    "reason": "[openai/gpt-5.1] WRONG: The response omits the crucial 'tech-for-good' aspect of the convention and is too vague compared to the specific gold answer."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 92,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Three times a week",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning and wording."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 93,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "More energy, gains in strength, gains in endurance",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response restates all elements of the gold answer—more energy, increased strength, and increased endurance—with no contradictions."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 94,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Salads, Sandwiches, Homemade desserts, Banana split sundae",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response includes all three gold items and the extra item does not contradict them."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 95,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Made dinner",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response conveys the same activity of making dinner, with the omission of 'together' not changing the essential meaning."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 96,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Joined a nearby church",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning and wording."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 97,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "To feel closer to a community and her faith",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning and wording."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 98,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "a small party",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response captures the main event John hosted, a small party, which is the key element of the gold answer."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 99,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Shared their stories",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response captures one of the two gold answer elements (sharing stories), which is at least half and does not contradict the rest."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 100,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "great, awesome, heartwarming, motivated",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response includes the correct emotion 'heartwarming' from the gold answer and the extra emotions do not contradict it."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 101,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "a fundraiser",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly identifies that Maria is getting ready for a fundraiser, matching the gold answer in meaning."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 102,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "chili cook-off",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 103,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Max",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer ('Max')."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 104,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "10 years",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer of '10 years' for the duration Max was part of John's family."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 105,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Adopting a rescue dog",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response conveys the same intent of honoring the pet’s memory by adopting a rescue dog, matching the gold answer in meaning."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 106,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Responsibility, Compassion",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches both values in the gold answer."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 107,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 0.0,
+    "reason": "[openai/gpt-5.1] WRONG: The conversation does mention that Maria started volunteering at a local dog shelter once a month, so saying it was not mentioned is incorrect."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 108,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Like being in a fairy tale",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning and wording."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 109,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "free, light",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response matches both key feelings in the gold answer ('free' and 'light') with equivalent wording."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 110,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Joined a gym",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning and wording."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 111,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Kundalini yoga",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning and wording."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 112,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Assistant manager",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning and wording."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 113,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Self-doubt",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning and wording."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 114,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Support at home and from loved ones that helped him power through",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response mentions support at home, capturing at least one of the two gold elements without contradiction, which satisfies the grading rule."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 115,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Live music event",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning and wording."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 116,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "She had to leave and find a new place in a hurry.",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response restates the gold answer with the same meaning about needing to leave and quickly find a new place."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 117,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "marching event for veterans' rights",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response restates the gold answer with consistent extra detail, matching the same event type."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 118,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "A great respect for the military",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response includes one of the two gold reasons (respect for the military), which is at least half and does not contradict the gold answer."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 119,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "At least once a week.",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning and wording."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 120,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Flood",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer, identifying the natural disaster as a flood."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 121,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Ruined.",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly captures that the homes were ruined, matching the key impact described in the gold answer."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 122,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "A nasty flood that ruined many homes in John's old area",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response matches the gold answer by stating that a flood in John's old area was the motivation, only adding consistent detail about ruined homes."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 123,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Have dinner with friends from the gym",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning and wording."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 124,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "chilled under the trees, played games, ate yummy food, charades, scavenger hunt",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly includes that she played games such as charades and a scavenger hunt, matching the gold answer despite extra details."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 125,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "what we have, the need to give back",
+  "metrics": {
+   "llm_judge": {
+    "score": 0.0,
+    "reason": "[openai/gpt-5.1] WRONG: The response talks about gratitude and giving back rather than the veterans’ resilience and inspiring stories, so it does not match the key idea of the gold answer."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 126,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Appreciation for what we have, the need to give back, hope from their resilience, that it reminded John why he wanted to join the military",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response includes an explicit takeaway about the need to give back, matching the gold answer's core idea of appreciation for giving back."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 127,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Seeing the veterans' resilience",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response restates the gold answer with identical meaning."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 128,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "picnic, hiking",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response includes the correct activity, hiking, and the extra detail of a picnic does not contradict the gold answer."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 129,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "A great way to push yourself and mix things up.",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response captures the same positive view of trying new classes as a way to mix/switch up the routine, adding non-contradictory detail."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 130,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Weight training",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning and wording."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 131,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "dropped off baked goods at the homeless shelter",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly identifies Maria's community service as involvement with a homeless shelter, adding compatible detail about bringing baked goods without contradicting the gold answer."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 132,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Maria witnessed a family struggling on the streets and reached out to the shelter and asked if they needed volunteers.",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response fully matches the gold answer, correctly stating that she saw a struggling family and then contacted the shelter, with only consistent extra detail."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 133,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Visited a military memorial",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response captures the same core event—going to a military memorial—as the gold answer, only omitting the evaluative detail that it was meaningful."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 134,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Awestruck and humbled",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in wording and meaning."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 135,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "To remember and appreciate those who served.",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning and wording."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 136,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "to respect and appreciate veterans",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response captures the same idea of teaching children to respect and appreciate veterans as stated in the gold answer."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 137,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "John lost his job.",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly states that John lost his job, capturing the main fact from the gold answer even though it omits the company detail."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 138,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "community work",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning and wording."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 139,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Helped renovate a rundown community center",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning and wording."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 140,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Veterans and their families, victims of domestic abuse",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly includes 'veterans and their families' even though it adds an extra unsupported cause, which does not contradict the gold."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 141,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "local organization that helps victims of domestic abuse",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly identifies that John worked with a local organization, adding only consistent detail about its focus."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 142,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "a medal",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly identifies the recognition as a medal, matching the essential content of the gold answer."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 143,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Coco",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer, giving the same puppy name 'Coco'."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 144,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Camping",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 145,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "a really peaceful and awesome experience",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response preserves both key descriptors, 'peaceful' and 'awesome', adding only emphasis without changing the meaning."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 146,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not feeling like he's making much of an impact.",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response restates the gold answer with equivalent meaning and no contradictions."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 147,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Shadow",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer, giving the same name for Maria's second puppy."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 148,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Doing great — learning commands and house training.",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning and detail."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 149,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Part of the fire-fighting brigade",
+  "metrics": {
+   "llm_judge": {
+    "score": 0.0,
+    "reason": "[openai/gpt-5.1] WRONG: The response describes volunteering with a fire-fighting brigade, which does not match the gold answer of mentoring students at a local school."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 150,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "hiking, hanging out at the park, picnics, walks, swinging, climbing, sliding, playing games, board games, movie nights, attending concerts, making pizza, working out/boot camps, beach trips",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response includes all the activities in the gold answer (hiking, park, picnics, board games, movie nights) and adds non-contradictory extras."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 151,
+  "question_type": "single_hop",
+  "category": 4,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "fire truck",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly identifies that the donations helped acquire a fire truck, matching the gold answer in meaning despite omitting 'brand new'."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 152,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly states that the information is not mentioned and does not commit to any concrete answer."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 153,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly states that the requested information is not present in the conversation and does not invent a concrete answer."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 154,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "his neighbors",
+  "metrics": {
+   "llm_judge": {
+    "score": 0.0,
+    "reason": "[openai/gpt-5.1] WRONG: The question is unanswerable from the conversation, but the response gives a concrete answer ('his neighbors') instead of saying the information is not available."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 155,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly indicates that the information is not provided in the conversation and does not invent a reason."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 156,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly states that the information is not in the conversation and does not commit to a concrete activity."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 157,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly states that the name is not mentioned and does not invent a concrete answer."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 158,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly states that the information is not mentioned, declining to provide a concrete answer to an unanswerable question."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 159,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly states that the information is not given in the conversation and does not invent a concrete answer."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 160,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly states that the information is not given in the conversation and does not invent a concrete answer."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 161,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly states that the information is not in the conversation and does not provide a concrete answer."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 162,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly states that the information is not provided in the conversation and does not invent a concrete answer."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 163,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly states that the information is not mentioned and does not invent a concrete reason."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 164,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly states that the information is not present in the conversation and does not invent a concrete answer."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 165,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly indicates that the information is not provided in the conversation and does not invent a concrete answer."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 166,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly states that the information is not in the conversation and gives no concrete fabricated answer."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 167,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly states that the information is not present instead of guessing a specific food."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 168,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly states that the information is not in the conversation and does not invent a specific action."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 169,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly states that the information is not mentioned in the conversation and does not invent a reason."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 170,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly states that the duration is not mentioned and does not guess a specific length of time."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 171,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly states that the information is not mentioned, providing no concrete answer to an unanswerable question."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 172,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly states that the information is not mentioned and does not provide a concrete answer to an unanswerable question."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 173,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly indicates that the information is not present in the conversation and does not commit to a concrete answer."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 174,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly indicates the information is not in the conversation and does not provide a concrete answer."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 175,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly states that the information is not present in the conversation and does not invent a concrete role."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 176,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly states that the information is not mentioned in the conversation and does not invent a concrete challenge."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 177,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly states that the information is not given in the conversation and does not invent a concrete reason."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 178,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly indicates that the information is not present instead of inventing a specific event."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 179,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly states that the relevant information is not in the conversation and does not invent any concrete answer."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 180,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly states that the requested information is not present in the conversation and does not offer a concrete fabricated answer."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 181,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly states that the information is not available from the conversation and does not invent an answer."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 182,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly refuses to provide a specific reason and states that this information is not in the conversation, which is the required behavior for an unanswerable question."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 183,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly states that the information is not mentioned and does not invent a concrete answer."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 184,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly states that the information is not mentioned and does not invent an answer."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 185,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly states that the information is not in the conversation and does not commit to any concrete answer."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 186,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly states that the information is not provided in the conversation and does not invent a concrete cause."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 187,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly states that the information is not mentioned, giving no concrete answer to an unanswerable question."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 188,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly indicates the information is not available and does not commit to any concrete answer."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 189,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly states that the puppy's name is not given in the conversation and does not invent an answer."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 190,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Soul-nourishing",
+  "metrics": {
+   "llm_judge": {
+    "score": 0.0,
+    "reason": "[openai/gpt-5.1] WRONG: The response gives a concrete description instead of stating that the information is not available for an unanswerable question."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 191,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly states that the kitten’s name is not mentioned, without inventing a concrete answer."
+   }
+  }
+ },
+ {
+  "conversation_index": 2,
+  "conversation_id": "conv-41",
+  "question_idx": 192,
+  "question_type": "adversarial",
+  "category": 5,
+  "retriever_name": "hybrid_completion_20_20_20",
+  "run_idx": 0,
+  "answer": "Not mentioned in the conversation",
+  "metrics": {
+   "llm_judge": {
+    "score": 1.0,
+    "reason": "[openai/gpt-5.1] CORRECT: The response correctly indicates that the information is not present in the conversation and does not invent details."
+   }
+  }
+ }
+]
