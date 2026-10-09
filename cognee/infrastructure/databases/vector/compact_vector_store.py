@@ -1,4 +1,4 @@
-"""Vector store compaction at the end of a cognify run. Best-effort by contract."""
+"""Vector store compaction at the end of a cognify run."""
 
 from __future__ import annotations
 
@@ -23,11 +23,10 @@ def _summarize(stats: dict) -> str:
     )
     versions = sum(int(value.get("old_versions_removed", 0) or 0) for value in per_collection)
     pending_versions = sum(int(value.get("versions_pending", 0) or 0) for value in per_collection)
-    errors = sum(1 for value in per_collection if "error" in value)
     return (
         f"{len(per_collection)} collection(s), fragments {removed} -> {added}, "
         f"{versions} old version(s) removed, left for later runs: {pending_tasks} task(s) "
-        f"and {pending_versions} version(s), {errors} error(s)"
+        f"and {pending_versions} version(s)"
     )
 
 
@@ -55,12 +54,12 @@ async def compact_vector_store() -> dict | None:
     """Compact the vector store bound to the current (dataset) context.
 
     Adapters that reclaim nothing on their own (LanceDB) implement ``compact``;
-    for the rest it is ``VectorDBInterface``'s no-op. A failure here must never
-    fail the cognify run that already succeeded: it is logged and swallowed.
+    for the rest it is ``VectorDBInterface``'s no-op. A failure raises; the
+    cognify run it follows is already recorded as completed.
 
-    Cancellation is the one thing not swallowed, but it is not allowed to leave
-    the pass running either: in local mode the compaction runs in a thread and
-    in subprocess mode inside the worker, and neither stops when this
+    Cancellation is not allowed to leave the pass running: in local mode the
+    compaction runs in a thread and in subprocess mode inside the worker, and
+    neither stops when this
     coroutine is cancelled. Leaving the dataset context right after would
     close the adapter (and its worker) under a rewrite that is still
     committing. So the pass is shielded and, on cancel, waited out -- through
@@ -68,12 +67,8 @@ async def compact_vector_store() -> dict | None:
     short because a pass is bounded (``DEFAULT_MAX_TASKS_PER_RUN``,
     ``DEFAULT_MAX_VERSIONS_PER_RUN`` in ``cognee_db_workers.lancedb_compaction``).
     """
-    try:
-        vector_engine = await get_vector_engine_async()
-        pass_task = asyncio.ensure_future(vector_engine.compact())
-    except Exception as exc:
-        logger.warning("Vector store compaction skipped: %s", exc, exc_info=True)
-        return None
+    vector_engine = await get_vector_engine_async()
+    pass_task = asyncio.ensure_future(vector_engine.compact())
     try:
         stats = await asyncio.shield(pass_task)
     except asyncio.CancelledError:
@@ -83,9 +78,6 @@ async def compact_vector_store() -> dict | None:
                 "Vector store compaction failed during cancellation: %s", pass_task.exception()
             )
         raise
-    except Exception as exc:
-        logger.warning("Vector store compaction skipped: %s", exc, exc_info=True)
-        return None
     if isinstance(stats, dict):
         (logger.info if _did_work(stats) else logger.debug)(
             "Vector store compaction: %s", _summarize(stats)
