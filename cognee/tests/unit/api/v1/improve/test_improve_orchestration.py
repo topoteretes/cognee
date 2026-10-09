@@ -570,6 +570,7 @@ async def test_remote_client_passthrough_forwards_every_option(harness, monkeypa
         session_ids=["s1"],
         build_global_context_index=True,
         build_truth_subspace=True,
+        review_conflicts=True,
         run_in_background=True,
     )
 
@@ -580,6 +581,7 @@ async def test_remote_client_passthrough_forwards_every_option(harness, monkeypa
     assert kwargs["session_ids"] == ["s1"]
     assert kwargs["build_global_context_index"] is True
     assert kwargs["build_truth_subspace"] is True
+    assert kwargs["review_conflicts"] is True
     assert kwargs["run_in_background"] is True
     assert isinstance(result, ImproveResult)
     assert result.memify_run == {"legacy": "run"}
@@ -750,3 +752,26 @@ async def test_background_run_carries_the_stamp_on_the_deferred_row(harness):
 
     assert harness.operations[-1].run_info == {"s1": {"status": "completed"}}
     assert harness.finish_calls[-1]["context"] is harness.operations[-1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("disabled", [False, True])
+async def test_review_conflicts_env_applies_without_sdk_flag(harness, monkeypatch, disabled):
+    from unittest.mock import AsyncMock
+
+    from cognee.modules.improve.stages import ReviewConflictsStage
+
+    monkeypatch.setenv("IMPROVE_REVIEW_CONFLICTS", "true")
+    monkeypatch.setenv("IMPROVE_STAGES_DISABLED", "review_conflicts" if disabled else "")
+    harness.set_config()
+    stage = ReviewConflictsStage()
+    run = AsyncMock(return_value=StageResult.completed(stage.name))
+    monkeypatch.setattr(stage, "run", run)
+    harness.use_stages([stage])
+    result = await harness.improve()
+    if disabled:
+        assert result.stage(stage.name).reason == "disabled_by_config"
+        run.assert_not_awaited()
+    else:
+        assert result.stage(stage.name).status == "completed"
+        assert run.await_args.args[0].review_conflicts is True

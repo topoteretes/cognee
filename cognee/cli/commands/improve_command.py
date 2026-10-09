@@ -88,12 +88,12 @@ class ImproveCommand(SupportsCliCommand):
     description = """
 Enrich and improve the knowledge graph.
 
-Runs the self-improvement loop over a dataset: nine stages in a fixed order,
+Runs the self-improvement loop over a dataset: ten stages in a fixed order,
 each of which first declines work it cannot do (no LLM calls) and then runs.
 Stages 1-7 (feedback weights, session Q&A / trace persistence, agent context,
 distillation, user preferences, truth subspace) need --session-ids; triplet
-enrichment always runs when the graph changed; the truth subspace and the
-global context index are opt-in flags. The result prints one line per stage.
+enrichment runs when enabled and the graph changed. Conflict review, the
+truth subspace and the global context index are opt-in flags. The result prints one line per stage.
     """
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
@@ -141,6 +141,11 @@ global context index are opt-in flags. The result prints one line per stage.
             ),
         )
         parser.add_argument(
+            "--review-conflicts",
+            action="store_true",
+            help="Review conflicts using source documents and dates (opt-in stage)",
+        )
+        parser.add_argument(
             "--background",
             "-b",
             action="store_true",
@@ -162,6 +167,7 @@ global context index are opt-in flags. The result prints one line per stage.
             feedback_alpha: float | None = getattr(args, "feedback_alpha", None)
             build_global_context_index = bool(getattr(args, "build_global_context_index", False))
             build_truth_subspace = bool(getattr(args, "build_truth_subspace", False))
+            review_conflicts = bool(getattr(args, "review_conflicts", False))
 
             async def run_improve():
                 try:
@@ -179,6 +185,7 @@ global context index are opt-in flags. The result prints one line per stage.
                         session_ids=args.session_ids,
                         build_global_context_index=build_global_context_index,
                         build_truth_subspace=build_truth_subspace,
+                        review_conflicts=review_conflicts,
                         run_in_background=args.background,
                         **improve_kwargs,
                     )

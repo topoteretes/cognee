@@ -43,6 +43,7 @@ class ImproveRunInputs:
     feedback_alpha: float = DEFAULT_FEEDBACK_ALPHA
     build_global_context_index: bool = False
     build_truth_subspace: bool = False
+    review_conflicts: bool = False
     # Caller-supplied memify overrides (extraction_tasks, enrichment_tasks,
     # data, node_type, vector_db_config, graph_db_config). Read-only.
     memify_kwargs: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))

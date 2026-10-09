@@ -240,6 +240,7 @@ class TestImproveEndpoint:
             run_in_background=True,
             build_global_context_index=True,
             build_truth_subspace=True,
+            review_conflicts=True,
             feedback_alpha=0.2,
         )
 
@@ -253,6 +254,7 @@ class TestImproveEndpoint:
             "session_ids": ["s1"],
             "build_global_context_index": True,
             "build_truth_subspace": True,
+            "review_conflicts": True,
             "feedback_alpha": 0.2,
         }
 

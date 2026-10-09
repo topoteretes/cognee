@@ -59,7 +59,7 @@ class StageResult(BaseModel):
 
     # The untouched return of the wrapped pipeline call (``{dataset_id:
     # PipelineRunInfo}`` in blocking mode). Kept off the schema; the
-    # orchestrator lifts stage 8's copy onto ``ImproveResult.memify_run``.
+    # orchestrator lifts enrichment's copy onto ``ImproveResult.memify_run``.
     _raw_run: Any = PrivateAttr(default=None)
 
     # The exception a stage raised, when it did. A stage whose wrapped pipeline
@@ -68,7 +68,7 @@ class StageResult(BaseModel):
     _exception: BaseException | None = PrivateAttr(default=None)
 
     # ``run_info`` the stage wants stamped on the improve operation row
-    # (stage 8's enrichment watermark). The stage decides when it stamps; the
+    # (such as the enrichment watermark). The stage decides when it stamps; the
     # orchestrator only copies this onto the row it owns. Off the schema: it
     # is row bookkeeping, not part of the reported result.
     _run_info_stamp: dict | None = PrivateAttr(default=None)

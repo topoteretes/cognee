@@ -1,4 +1,4 @@
-"""The nine improve stages, wrapping the helpers that already exist.
+"""The improve stages, wrapping the helpers that already exist.
 
 Each class is a gate, a call into code that lives elsewhere
 (``memify_pipelines/``, ``infrastructure/session/``, ``modules/user_preferences/``,
@@ -31,10 +31,17 @@ REASON_TRIPLET_EMBEDDING_DISABLED = "triplet_embedding_disabled"
 REASON_NO_WRITES_SINCE_LAST_IMPROVE = "no_writes_since_last_improve"
 REASON_NO_NEW_SESSION_ENTRIES = "no_new_entries"
 REASON_NO_NEW_TRACE_STEPS = "no_new_trace_steps"
+REASON_EDGE_EVIDENCE_DISABLED = "edge_evidence_disabled"
+REASON_NO_NEW_FACTS = "no_new_facts"
 # The stage drafts text with an LLM and no usable one is configured (keyless
 # installs run on GLiNER + fastembed); the stages that only cognify or embed
 # are not gated on this — cognify resolves its own extractor.
 REASON_NO_LLM_CONFIGURED = "no_llm_configured"
+
+# Entity ids a failed review carries on its watermark stamp for the next run.
+# Beyond this the stamp is withheld instead, so the next run redoes the whole
+# window rather than carry a large id list in the operation row.
+REVIEW_RETRY_ENTITY_LIMIT = 500
 
 
 def _already_completed(stage_name: str, reason: str) -> StageResult:
@@ -375,8 +382,115 @@ class BuildTruthSubspaceStage(BaseStage):
         return StageResult.completed(self.name, **counts)
 
 
+class ReviewConflictsStage(BaseStage):
+    """Review changed facts and retry conflicts with missing citations or pending writes."""
+
+    name = "review_conflicts"
+
+    @staticmethod
+    def _stamped_retry_ids(watermark) -> list[str]:
+        """Entity ids a previous review stamped for retry; ignore a malformed value."""
+        ids = (watermark.stamp or {}).get("retry_entity_ids") if watermark else None
+        if not isinstance(ids, list):
+            return []
+        return [entity_id for entity_id in ids if isinstance(entity_id, str)]
+
+    def gate(self, inputs: ImproveRunInputs) -> str | None:
+        if not inputs.review_conflicts:
+            return REASON_OPT_IN_DISABLED
+        if not llm_available():
+            return REASON_NO_LLM_CONFIGURED
+        from cognee.modules.provenance.edge_evidence.config import get_provenance_config
+
+        if not get_provenance_config().edge_evidence_enabled:
+            return REASON_EDGE_EVIDENCE_DISABLED
+        return None
+
+    async def run(self, inputs: ImproveRunInputs) -> StageResult:
+        from datetime import datetime, timezone
+
+        from .graph_changes import REVIEW_WATERMARK_KEY, last_improve_watermark, watermark_stamp
+
+        started_at = datetime.now(timezone.utc)
+        watermark = await last_improve_watermark(
+            inputs.dataset_id,
+            REVIEW_WATERMARK_KEY,
+            exclude_operation_id=inputs.improve_operation_id,
+        )
+        # Without a watermark nothing has been reviewed yet, so review every entity.
+        if watermark is None:
+            return await self._review(inputs, entity_ids=None, since=None, started_at=started_at)
+
+        entity_ids = await self._changed_entity_ids(inputs, watermark)
+        if not entity_ids and not await self._has_conflicts_to_repair(inputs):
+            result = _already_completed(self.name, REASON_NO_NEW_FACTS)
+            result._run_info_stamp = watermark_stamp(
+                REVIEW_WATERMARK_KEY, result.status, started_at
+            )
+            return result
+        return await self._review(
+            inputs, entity_ids=entity_ids, since=watermark.started_at, started_at=started_at
+        )
+
+    async def _changed_entity_ids(self, inputs: ImproveRunInputs, watermark) -> list[str]:
+        """Entities a completed write touched since the watermark, plus the ones to retry.
+
+        Entities a previous run could not review are touched by no later write, so
+        without carrying them forward get_touched_entity_ids would never select
+        them again.
+        """
+        from cognee.modules.provenance.edge_evidence.lookup import get_touched_entity_ids
+
+        touched = await get_touched_entity_ids(inputs.dataset_id, watermark.started_at)
+        return sorted(touched | set(self._stamped_retry_ids(watermark)))
+
+    async def _has_conflicts_to_repair(self, inputs: ImproveRunInputs) -> bool:
+        """Is a stored conflict still waiting on a lost citation or an unfinished write?"""
+        from cognee.context_global_variables import set_database_global_context_variables
+        from cognee.infrastructure.databases.graph import get_graph_engine
+        from cognee.infrastructure.locks.dataset_lock import dataset_lock
+        from cognee.tasks.memify.review_conflicts.read_facts import (
+            find_conflicts_with_lost_citations,
+        )
+
+        # Match memify's lock/context order and release both before its wrapper
+        # runs, so the dataset queue slot is never held waiting.
+        async with (
+            dataset_lock(inputs.dataset_id),
+            set_database_global_context_variables(inputs.dataset_id, inputs.dataset.owner_id),
+        ):
+            graph = await get_graph_engine()
+            pending, drops = await find_conflicts_with_lost_citations(graph, inputs.dataset_id)
+        return bool(pending or drops)
+
+    async def _review(
+        self, inputs: ImproveRunInputs, *, entity_ids, since, started_at
+    ) -> StageResult:
+        """Run the review pipeline and stamp the watermark the next run reads."""
+        from cognee.memify_pipelines.review_conflicts import review_conflicts_pipeline
+
+        from .graph_changes import REVIEW_WATERMARK_KEY, watermark_stamp
+
+        run_result = await review_conflicts_pipeline(
+            dataset=inputs.dataset_id, user=inputs.user, entity_ids=entity_ids, since=since
+        )
+        result = StageResult.from_pipeline_run(self.name, run_result)
+        payload = result.run.payload if result.run is not None else None
+        failed = payload.get("unreviewed_entity_ids", []) if isinstance(payload, dict) else []
+        result.counts = {"entities_failed": len(failed)}
+        if failed:
+            logger.warning("improve: conflict review failed for entities: %s", failed)
+        # review_entities appends failures from three sites and dedups none of them.
+        retry_ids = sorted(set(failed))
+        if result.status == "completed" and len(retry_ids) <= REVIEW_RETRY_ENTITY_LIMIT:
+            result._run_info_stamp = watermark_stamp(
+                REVIEW_WATERMARK_KEY, result.status, started_at, retry_entity_ids=retry_ids
+            )
+        return result
+
+
 class TripletEnrichmentStage(BaseStage):
-    """Stage 8: default memify enrichment (triplet embeddings).
+    """Stage 9: default memify enrichment (triplet embeddings).
 
     Skipped when ``triplet_embedding`` is off and the caller supplied no tasks
     of their own (the default task list would be empty). ``already_completed``
@@ -456,7 +570,7 @@ class TripletEnrichmentStage(BaseStage):
 
 
 class GlobalContextIndexStage(BaseStage):
-    """Stage 9: build retrieval-ready bucket and root summaries (opt-in)."""
+    """Stage 10: build retrieval-ready bucket and root summaries (opt-in)."""
 
     name = "global_context_index"
 

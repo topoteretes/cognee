@@ -7,8 +7,9 @@ module does not own are taken from the primary result unchanged.
 
 from typing import Any
 
-from cognee.modules.retrieval.hybrid.results import empty_hybrid_result, result_id
+from cognee.modules.retrieval.hybrid.results import empty_hybrid_result
 from cognee.modules.retrieval.utils.merge_results import conversational_reserve, merge_ranked
+from cognee.modules.retrieval.utils.results import result_id
 
 _DERIVED_KEYS = frozenset(empty_hybrid_result())
 

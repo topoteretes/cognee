@@ -104,6 +104,7 @@ def test_forwards_every_option_to_improve(client, improve_stub):
             "nodeName": ["Alice"],
             "buildGlobalContextIndex": True,
             "buildTruthSubspace": True,
+            "reviewConflicts": True,
             "feedbackAlpha": 0.25,
             "runInBackground": True,
         },
@@ -116,6 +117,7 @@ def test_forwards_every_option_to_improve(client, improve_stub):
     assert kwargs["node_name"] == ["Alice"]
     assert kwargs["build_global_context_index"] is True
     assert kwargs["build_truth_subspace"] is True
+    assert kwargs["review_conflicts"] is True
     assert kwargs["feedback_alpha"] == 0.25
     assert kwargs["run_in_background"] is True
     assert kwargs["user"] is MOCK_USER
@@ -132,6 +134,7 @@ def test_defaults_leave_feedback_alpha_to_the_server_config(client, improve_stub
     assert kwargs["data"] is None
     assert kwargs["build_global_context_index"] is False
     assert kwargs["build_truth_subspace"] is False
+    assert kwargs["review_conflicts"] is False
     assert kwargs["run_in_background"] is False
     assert kwargs["session_ids"] is None
 

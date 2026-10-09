@@ -28,7 +28,7 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.modules.retrieval.hybrid.candidates import HybridCandidates
 from cognee.modules.retrieval.hybrid.chunks import chunk_collections, dlt_rows_indexed
-from cognee.modules.retrieval.hybrid.results import empty_hybrid_result, result_id
+from cognee.modules.retrieval.hybrid.results import empty_hybrid_result
 from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
 from cognee.modules.retrieval.temporal_hybrid.expansion import (
     attached_node_ids,
@@ -42,6 +42,7 @@ from cognee.modules.retrieval.temporal_hybrid.matching import (
     to_epoch_ms,
     window_span_ms,
 )
+from cognee.modules.retrieval.utils.results import result_id
 from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
 from cognee.shared.logging_utils import get_logger
 

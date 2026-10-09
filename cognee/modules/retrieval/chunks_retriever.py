@@ -4,6 +4,11 @@ from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
+from cognee.modules.retrieval.utils.conflict_context import (
+    attach_chunk_conflicts,
+    public_chunk_payload,
+    render_chunk_context,
+)
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("ChunksRetriever")
@@ -75,7 +80,7 @@ class ChunksRetriever(BaseRetriever):
         # TODO: Do we want to generate a completion using LLM here?
         if retrieved_objects:
             chunk_payloads = [
-                {**(found_chunk.payload or {}), "score": found_chunk.score}
+                public_chunk_payload(found_chunk) | {"score": found_chunk.score}
                 for found_chunk in retrieved_objects
             ]
             return chunk_payloads
@@ -99,8 +104,8 @@ class ChunksRetriever(BaseRetriever):
               empty string if none are found.
         """
         if retrieved_objects:
-            chunk_payload_texts = [found_chunk.payload["text"] for found_chunk in retrieved_objects]
-            return "\n".join(chunk_payload_texts)
+            payloads = [chunk.payload for chunk in retrieved_objects]
+            return render_chunk_context(payloads)
         else:
             return ""
 
@@ -132,10 +137,10 @@ class ChunksRetriever(BaseRetriever):
                 node_name=self.node_name,
                 node_name_filter_operator=self.node_name_filter_operator,
             )
-            logger.info(f"Found {len(found_chunks)} chunks from vector search")
-
-            return found_chunks
-
         except CollectionNotFoundError as error:
             logger.error("DocumentChunk_text collection not found in vector database")
             raise NoDataError("No data found in the system, please add data first.") from error
+
+        logger.info(f"Found {len(found_chunks)} chunks from vector search")
+        await attach_chunk_conflicts(found_chunks, graph_engine=unified.graph)
+        return found_chunks

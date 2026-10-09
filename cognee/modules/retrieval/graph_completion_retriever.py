@@ -18,6 +18,7 @@ from cognee.modules.retrieval.utils.completion import (
     generate_completion,
     generate_completion_batch,
 )
+from cognee.modules.retrieval.utils.conflict_context import format_conflicts, get_chunk_conflicts
 from cognee.modules.retrieval.utils.evidence import graph_context_evidence
 from cognee.modules.retrieval.utils.global_context import (
     format_global_context_prelude,
@@ -40,6 +41,18 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("GraphCompletionRetriever")
 
 
+def _document_chunk_ids(edges: list[Edge]) -> list[str]:
+    """Sorted ids of the DocumentChunk endpoints among the retrieved triplets."""
+    return sorted(
+        {
+            str(node.id)
+            for edge in edges
+            for node in (edge.node1, edge.node2)
+            if node.attributes.get("type") == "DocumentChunk"
+        }
+    )
+
+
 class GraphCompletionRetriever(BaseRetriever):
     """
     Retriever for handling graph-based completion searches.
@@ -53,6 +66,11 @@ class GraphCompletionRetriever(BaseRetriever):
     # (SDK-270 / gh #3728). Applies to the whole graph-completion family via
     # inheritance; AgenticRetriever opts back out.
     skip_completion_on_empty_context = True
+
+    # Resolved once per retrieval in get_retrieved_objects and reused by the
+    # context builders, which must not resolve a second engine mid-query. A
+    # class-level default keeps it readable on a retriever that has not searched yet.
+    _unified_engine = None
 
     def __init__(
         self,
@@ -164,6 +182,10 @@ class GraphCompletionRetriever(BaseRetriever):
         """
         Converts retrieved graph edges into a human-readable string format.
 
+        Renders the triplets, then appends the conflicts stored for the chunks
+        behind them. Subclasses override ``render_edges``, never this method, so
+        the conflict block is appended exactly once however the edges are rendered.
+
         Parameters:
         -----------
 
@@ -174,7 +196,33 @@ class GraphCompletionRetriever(BaseRetriever):
 
             - str: A formatted string representation of the nodes and their connections.
         """
+        rendered = await self.render_edges(retrieved_edges)
+        conflicts = await self._chunk_conflicts_block(retrieved_edges)
+        return "\n\n".join(section for section in (rendered, conflicts) if section)
+
+    async def render_edges(self, retrieved_edges: list) -> str:
+        """The triplet rendering itself: the one step a subclass may replace."""
         return await resolve_edges_to_text(retrieved_edges)
+
+    async def _chunk_conflicts_block(self, edges: list[Edge]) -> str:
+        """Conflicts stored for the chunks behind these triplets, as a trailing block.
+
+        The guard covers the id collection too, not just the I/O: subclasses in
+        this family hand ``resolve_edges_to_text`` shapes other than a flat list
+        of ``Edge``, and an additive block must never fail the search.
+        """
+        try:
+            chunk_ids = _document_chunk_ids(edges)
+            if not chunk_ids:
+                return ""
+            engine = self._unified_engine or await get_unified_engine()
+            chunks = await get_chunk_conflicts(engine.graph, chunk_ids)
+            return format_conflicts(
+                text for chunk in chunks.values() for text in chunk.conflicts.values()
+            )
+        except Exception:
+            logger.warning("Could not read graph context conflicts", exc_info=True)
+            return ""
 
     async def get_triplets(
         self,
@@ -195,7 +243,7 @@ class GraphCompletionRetriever(BaseRetriever):
             - list: A list of found triplets that match the query.
         """
         collections = self._get_vector_index_collections()
-        unified_engine = getattr(self, "_unified_engine", None)
+        unified_engine = self._unified_engine
         # Personal prefers weights ride into the triplet scorer. The lookup is
         # memoized per context — on a concurrent session turn each gather lane
         # inherits the read warmed by warm_preference_cache; without that warm
@@ -296,7 +344,7 @@ class GraphCompletionRetriever(BaseRetriever):
     async def _build_global_context_prelude(self, query: str | None) -> str:
         if not query:
             return ""
-        if getattr(self, "_unified_engine", None) is None:
+        if self._unified_engine is None:
             self._unified_engine = await get_unified_engine()
         root_text = await load_root_text()
         top_summaries = await search_top_global_context_summaries(
