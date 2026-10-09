@@ -14,8 +14,10 @@ class PipelineRunInfo(BaseModel):
     # Data must be mentioned in typing to allow custom encoders for Data to be activated
     payload: Any | list[Data] | None = None
     # Per-item results: one {"run_info": PipelineRunInfo, "data_id": UUID}
-    # entry per data item the run handled. For an add() run, read
-    # ``added_data_ids`` instead of walking this.
+    # entry per data item the run handled. Incremental runs also add
+    # "data_name", "data_location" (the caller's source; None for raw text)
+    # and "data_label", so ids can be mapped back to inputs. For an add() run,
+    # read ``added_data_ids`` for just the ids.
     data_ingestion_info: list | None = None
     # Ids of the data items an add() run stored, or found already holding the
     # same content. Despite the name, those existing data items are included:

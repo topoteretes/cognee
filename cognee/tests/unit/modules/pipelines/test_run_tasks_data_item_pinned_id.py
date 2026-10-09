@@ -28,6 +28,9 @@ async def test_a_pinned_legacy_id_is_reported_as_its_canonical_data_item(monkeyp
     stored = SimpleNamespace(
         id=canonical,
         pipeline_status={"p": {str(dataset.id): DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED}},
+        name="doc",
+        label=None,
+        external_metadata={},
     )
     monkeypatch.setattr(item_module, "get_relational_engine", lambda: _engine_returning(stored))
 
