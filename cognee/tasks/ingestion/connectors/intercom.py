@@ -25,3 +25,10 @@ logger = logging.getLogger(__name__)
 
 INTERCOM_API_URL = "https://api.intercom.io"
 INTERCOM_VERSION = "2.11"
+
+def _get_headers(token: str) -> dict:
+    return {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json",
+        "Intercom-Version": INTERCOM_VERSION,
+    }
