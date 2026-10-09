@@ -45,7 +45,8 @@ def test_no_token_placeholders_leak(tmp_path):
     """Any ``__SOMETHING__`` left in the output is an unfilled token slot
     and means a view or data substitution was missed."""
     html = _render(tmp_path)
-    # Exclude ``<\\/`` JSON escapes — those are legitimate.
+    # ``<`` in the data payloads is escaped as ``\\u003c``, which this
+    # token pattern cannot match, so no exclusion is needed.
     leaks = re.findall(r"__[A-Z][A-Z0-9_]*__", html)
     assert leaks == [], f"unfilled tokens: {leaks}"
 
