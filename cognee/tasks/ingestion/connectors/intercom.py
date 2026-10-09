@@ -12,3 +12,13 @@ Sync a set of explicit Intercom resources into cognee incrementally.
         write_disposition="merge",
     )
 """
+
+import os
+import logging
+from typing import Iterator
+
+import httpx
+
+from cognee.tasks.ingestion import dlt_utils
+
+logger = logging.getLogger(__name__)
