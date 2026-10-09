@@ -84,3 +84,11 @@ def readwise_source(
             
             url = data.get("next")
             params = {}  # query params are embedded in the next URL if they exist
+
+    @dlt.source(name="readwise")
+    def _readwise():
+        return readwise_highlights
+
+    source = _readwise()
+    setattr(source, dlt_utils.DOCUMENT_SOURCE_ATTR, "readwise")
+    return source
