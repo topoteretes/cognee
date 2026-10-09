@@ -49,3 +49,7 @@ def intercom_source(
         raise ImportError(
             "The Intercom connector requires dlt: pip install dlt"
         ) from e
+
+    token = token or os.environ.get("INTERCOM_ACCESS_TOKEN")
+    if not token:
+        raise ValueError("Intercom access token must be provided or set in INTERCOM_ACCESS_TOKEN environment variable")
