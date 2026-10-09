@@ -1,10 +1,14 @@
-from typing import Optional
-
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
-from cognee.modules.ontology.ontology_config import Config
-from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
-from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
+from cognee.modules.ontology.construct_data_points_and_edges_with_ontology import (
+    ensure_ontology_usable_in_strict_mode,
+)
 from cognee.modules.ontology.matching_strategies import FuzzyMatchingStrategy
+from cognee.modules.ontology.ontology_config import Config
+from cognee.modules.ontology.ontology_env_config import (
+    get_ontology_env_config,
+    normalize_ontology_mode,
+)
+from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 
 
 def get_default_ontology_resolver() -> BaseOntologyResolver:
@@ -12,9 +16,16 @@ def get_default_ontology_resolver() -> BaseOntologyResolver:
 
 
 def get_configured_ontology_resolver(
-    config: Optional[Config] = None,
-) -> Optional[BaseOntologyResolver]:
-    """Resolve the ontology resolver from an explicit config or the environment."""
+    config: Config | None = None,
+    ontology_file_path: str | None = None,
+) -> BaseOntologyResolver | None:
+    """Resolve an explicit file path, configured resolver, or environment in that order."""
+    if ontology_file_path:
+        return get_ontology_resolver_from_env(
+            ontology_resolver="rdflib",
+            matching_strategy="fuzzy",
+            ontology_file_path=ontology_file_path,
+        )
     if config is not None:
         ontology_config = config.get("ontology_config")
         if isinstance(ontology_config, dict) and "ontology_resolver" in ontology_config:
@@ -27,8 +38,27 @@ def get_configured_ontology_resolver(
         and ontology_config.ontology_resolver
         and ontology_config.matching_strategy
     ):
-        return get_ontology_resolver_from_env(**ontology_config.to_dict())
+        resolver = get_ontology_resolver_from_env(**ontology_config.to_dict())
+        if ontology_config.ontology_mode == "strict":
+            # Fail before any pipeline work: a mistyped ONTOLOGY_FILE_PATH yields an
+            # empty resolver, and strict mode over an empty ontology drops everything.
+            ensure_ontology_usable_in_strict_mode(resolver)
+        return resolver
     return None
+
+
+def get_configured_ontology_mode(config: Config | None = None) -> str:
+    """Resolve the ontology mode from an explicit config or the environment.
+
+    A per-call ``ontology_mode`` in the config wins; otherwise the ONTOLOGY_MODE
+    environment value applies. The result is always a normalized, valid mode.
+    """
+    if config is not None:
+        ontology_config = config.get("ontology_config")
+        if isinstance(ontology_config, dict) and ontology_config.get("ontology_mode") is not None:
+            return normalize_ontology_mode(ontology_config["ontology_mode"])
+
+    return get_ontology_env_config().ontology_mode
 
 
 def get_ontology_resolver_from_env(
@@ -65,7 +95,7 @@ def get_ontology_resolver_from_env(
             matching_strategy=FuzzyMatchingStrategy(), ontology_file=file_paths
         )
     else:
-        raise EnvironmentError(
+        raise OSError(
             f"Unsupported ontology resolver: {ontology_resolver}. "
             f"Supported resolvers are: RdfLib with FuzzyMatchingStrategy."
         )

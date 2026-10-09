@@ -8,13 +8,14 @@ for DLT-sourced relational data. Used by both extract_dlt_source_edges
 import json
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional
-from uuid import UUID, uuid5, NAMESPACE_OID
+from uuid import NAMESPACE_OID, UUID, uuid5
 
 from cognee.infrastructure.databases.provenance import graph_provenance_write_kwargs
 from cognee.modules.engine.models import DltColumn
-from cognee.tasks.schema.models import SchemaTable, SchemaRelationship
-from cognee.tasks.storage.index_data_points import index_data_points
+from cognee.modules.engine.utils.timestamp_from_text import timestamp_from_text
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.schema.models import SchemaRelationship, SchemaTable
+from cognee.tasks.storage.index_data_points import index_data_points
 
 if TYPE_CHECKING:
     from cognee.modules.pipelines.models import PipelineContext
@@ -31,17 +32,21 @@ async def emit_dlt_schema_graph(
     tables: dict,
     row_records: list[dict],
     ctx: Optional["PipelineContext"] = None,
-    emitted_value_node_ids: Optional[set] = None,
+    emitted_value_node_ids: set | None = None,
 ) -> None:
     """Build and persist the DLT schema graph for the given tables and rows.
 
     Args:
         tables: {table_name: {"schema_info", "foreign_keys", "dlt_db_name"}}
         row_records: [{"source_id": str, "table_name": str, "fk_references": [...],
-            "column_values": {column: value}}] — column_values is optional and
-            produces one shared ColumnValue node per unique (table, column,
-            value) with a column-named edge from the row, so rows sharing a
-            value connect through the same node.
+            "column_values": {column: value}, "timestamps": {column: str}}] —
+            column_values is optional and produces one shared ColumnValue node
+            per unique (table, column, value) with a column-named edge from the
+            row, so rows sharing a value connect through the same node.
+            timestamps is optional too: each normalized time string (see
+            ``dlt_temporal``) becomes a column-named edge from the row to the
+            ``Timestamp`` node for that instant — the same node LLM-extracted
+            dates resolve to — which is what temporal search anchors on.
         ctx: optional pipeline context for provenance/ledger registration.
         emitted_value_node_ids: set shared across batches of one pipeline run
             (mirrors ``emitted_schema_docs``). Value nodes already in the set
@@ -72,6 +77,7 @@ async def emit_dlt_schema_graph(
     seen_row_edges = set()
     fk_defs_seen = set()  # (table, column, ref_table, ref_column) for dedup
     column_value_nodes = {}  # node id -> ColumnValue, deduped across rows
+    timestamp_nodes = {}  # node id -> Timestamp, deduped across rows and columns
 
     # SchemaTable nodes for each source table
     table_node_ids = {}
@@ -256,17 +262,48 @@ async def emit_dlt_schema_graph(
                 )
             )
 
+        # Temporal cells: an edge named after the column into the Timestamp for
+        # the instant the cell states. Timestamps are not embedded (no index
+        # fields) and MERGE on their deterministic id, so re-adding one an
+        # earlier batch wrote is a no-op — no cross-batch bookkeeping needed.
+        for column, timestamp_str in record.get("timestamps", {}).items():
+            timestamp = timestamp_from_text(timestamp_str)
+            if timestamp is None:
+                continue
+            timestamp_nodes.setdefault(timestamp.id, timestamp)
+            edge_key = (source_id, str(timestamp.id), column)
+            if edge_key in seen_row_edges:
+                continue
+            seen_row_edges.add(edge_key)
+            fk_row_edges.append(
+                (
+                    source_uuid,
+                    timestamp.id,
+                    column,
+                    {
+                        "source_node_id": source_id,
+                        "target_node_id": str(timestamp.id),
+                        "relationship_name": column,
+                        "edge_text": f"{column} {timestamp.timestamp_str}",
+                        "source_table": table_name,
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                )
+            )
+
     # Persist to graph
-    nodes_to_add = schema_nodes + list(column_value_nodes.values())
+    nodes_to_add = schema_nodes + list(column_value_nodes.values()) + list(timestamp_nodes.values())
     if nodes_to_add:
         await graph_engine.add_nodes(nodes_to_add, **provenance_kwargs)
         await index_data_points(nodes_to_add)
         logger.info(
-            "Added %d nodes to graph (%d tables, %d relationships, %d column values).",
+            "Added %d nodes to graph (%d tables, %d relationships, %d column values, "
+            "%d timestamps).",
             len(nodes_to_add),
             len(table_node_ids),
             relationship_count,
             len(column_value_nodes),
+            len(timestamp_nodes),
         )
 
     # Mark value nodes as persisted only after the graph/vector writes above

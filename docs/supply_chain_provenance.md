@@ -13,31 +13,36 @@ This covers three layers of evidence:
 | PyPI sdist + wheel | **SLSA build provenance** (`actions/attest-build-provenance`) | GitHub repo → *Attestations* tab |
 | Docker images | **in-toto provenance + SBOM** (buildx `provenance`/`sbom`) | Pushed alongside the image manifest |
 
-The relevant workflows are `.github/workflows/release.yml` (tagged releases)
-and `.github/workflows/dev_canary_release.yml` (weekly dev canaries).
+The relevant workflows are `.github/workflows/release.yml` (tagged library releases),
+`.github/workflows/dev_canary_release.yml` (weekly dev canaries), and
+`.github/workflows/release_mcp.yml` (manual MCP releases).
 
 ---
 
 ## One-time setup: PyPI Trusted Publishing
 
 PyPI only accepts and displays PEP 740 attestations when a package is uploaded
-through **Trusted Publishing** (OpenID Connect), not an API token. The release
+through **Trusted Publishing** (OpenID Connect), not an API token. The library
 workflows have already been switched to OIDC (`id-token: write`, no
 `UV_PUBLISH_TOKEN`), but a project owner must register the trusted publishers
-on PyPI **once**:
+on PyPI **once**. `release_mcp.yml` is the exception until its publisher exists:
+see [cognee-mcp still uploads with a token](#cognee-mcp-still-uploads-with-a-token).
 
-1. Go to <https://pypi.org/manage/project/cognee/settings/publishing/>.
-2. Under **Add a new pending publisher** → **GitHub**, add **two** publishers
-   (one per release workflow file):
+PyPI scopes trusted publishers per project. Register **three** publishers, one
+per workflow: two on `cognee` and one on the separate `cognee-mcp` project.
 
-   | Field | Release publisher | Canary publisher |
-   | --- | --- | --- |
-   | Owner | `topoteretes` | `topoteretes` |
-   | Repository | `cognee` | `cognee` |
-   | Workflow name | `release.yml` | `dev_canary_release.yml` |
-   | Environment | *(leave blank)* | *(leave blank)* |
+1. Open the publishing settings for [cognee](https://pypi.org/manage/project/cognee/settings/publishing/)
+   and [cognee-mcp](https://pypi.org/manage/project/cognee-mcp/settings/publishing/).
+2. Under **Add a new publisher** → **GitHub**, add each publisher to the
+   PyPI project listed below:
 
-3. Save both.
+   | Field | Release publisher | Canary publisher | MCP release publisher |
+   | --- | --- | --- | --- |
+   | PyPI project | `cognee` | `cognee` | `cognee-mcp` |
+   | Owner | `topoteretes` | `topoteretes` | `topoteretes` |
+   | Repository | `cognee` | `cognee` | `cognee` |
+   | Workflow name | `release.yml` | `dev_canary_release.yml` | `release_mcp.yml` |
+   | Environment | *(leave blank)* | *(leave blank)* | *(leave blank)* |
 
 > The **Environment** value must match the `environment:` declared on the
 > publishing job. The workflows do not set one, so leave this blank — if you
@@ -51,13 +56,43 @@ on PyPI **once**:
 > PyPI publisher above. Note that required reviewers on the canary workflow
 > would block its weekly cron.
 
-After the publishers are registered, the next release uploads with provenance
-automatically. The legacy `PYPI_TOKEN` secret can be removed once a release has
-succeeded via Trusted Publishing.
+3. Save all three publishers.
 
-> ⚠️ **Do not run a release before the publishers are registered** — the publish
-> step will fail OIDC auth. The release workflow is `workflow_dispatch`-only, so
-> you control the timing.
+Release MCP by running `release_mcp.yml` from the `main` branch in the Actions
+tab. Other refs fail explicitly. The workflow reads the version from
+`cognee-mcp/pyproject.toml`, refuses to run if that version is already on PyPI,
+uploads it, and tags the commit `cognee-mcp-v<version>` (its own namespace,
+since cognee-mcp versions independently of the library).
+
+After the publishers are registered, the next library release uploads with
+provenance automatically.
+
+> ⚠️ **Do not run a library release before its publishers are registered** — the
+> publish step will fail OIDC auth. The release workflow is
+> `workflow_dispatch`-only, so you control the timing.
+
+### cognee-mcp still uploads with a token
+
+The `cognee-mcp` publisher in the table above has not been registered, and only
+the owner of that PyPI project can add it. Until then `release_mcp.yml` uploads
+with the `PYPI_TOKEN` repository secret, the account-wide token the library used
+before it moved to OIDC. Two consequences:
+
+- `cognee-mcp` files on PyPI carry no PEP 740 attestations. That includes 0.5.6,
+  which was uploaded by hand with the same token on 2026-10-01 after the first
+  OIDC run failed with `invalid-publisher`. The SLSA build provenance on GitHub
+  is still produced for every workflow release.
+- The token can publish every project its account owns, `cognee` included, so
+  it is a broader credential than this workflow needs.
+
+Moving over needs no workflow change, because the publish step uses Trusted
+Publishing whenever the secret is absent. Do it in this order:
+
+1. Register the `cognee-mcp` publisher from the table above.
+2. Delete the `PYPI_TOKEN` secret.
+
+The order matters. Deleting the secret first leaves MCP releases with no way to
+authenticate.
 
 ---
 

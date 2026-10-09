@@ -13,7 +13,7 @@ INSTRUCTOR_MODE_TABLE: dict[str, str | instructor.Mode] = {
     "anthropic": "anthropic_tools",
     "gemini": "json_mode",
     "bedrock": "json_schema_mode",
-    "ollama": "json_mode",
+    "ollama": "json_schema_mode",
     "mistral": "mistral_tools",
     "generic": "json_mode",
     "llama_cpp": instructor.Mode.JSON,

@@ -1,15 +1,41 @@
 import sys
-import pytest
 from unittest.mock import AsyncMock, patch
 
-from cognee.tasks.memify.get_triplet_datapoints import get_triplet_datapoints
+import pytest
+
+from cognee.infrastructure.engine import DataPoint
 from cognee.modules.engine.models import Triplet
 from cognee.modules.engine.models.Entity import Entity
-from cognee.infrastructure.engine import DataPoint
 from cognee.modules.graph.models.EdgeType import EdgeType
-
+from cognee.tasks.memify.get_triplet_datapoints import get_triplet_datapoints
 
 get_triplet_datapoints_module = sys.modules["cognee.tasks.memify.get_triplet_datapoints"]
+
+
+@pytest.mark.parametrize("json_marks", [False, True])
+def test_triplet_labels_preserve_identity_and_do_not_add_conflict_blocks(json_marks):
+    raw = {
+        "start_node": {"id": "chunk", "type": "DocumentChunk", "text": "Alice leads Acme"},
+        "end_node": {"id": "acme", "type": "Entity", "name": "Acme"},
+        "relationship_properties": {
+            "relationship_name": "contains",
+            "edge_text": "Alice leads Acme",
+        },
+    }
+    fields = {"DocumentChunk": ["text"], "Entity": ["name"], "EdgeType": ["relationship_name"]}
+    original, error = get_triplet_datapoints_module._process_single_triplet(raw, fields, 0, 0)
+    assert error is None
+    marks = (
+        {"conflict_marks_json": '[{"conflict_id":"f1","status":"superseded"}]'}
+        if json_marks
+        else {"conflict_marks": [{"conflict_id": "f1", "status": "superseded"}]}
+    )
+    raw["relationship_properties"].update(effective_date="2020-05-01", **marks)
+    reviewed, error = get_triplet_datapoints_module._process_single_triplet(raw, fields, 0, 0)
+    assert error is None
+    assert reviewed.id == original.id
+    assert "Alice leads Acme [superseded; as of 2020-05-01]-›Acme" in reviewed.text
+    assert "## Fact conflicts" not in reviewed.text and "source:" not in reviewed.text
 
 
 @pytest.fixture
@@ -212,3 +238,21 @@ async def test_get_triplet_datapoints_no_get_triplets_batch_method(mock_graph_en
         with pytest.raises(NotImplementedError, match="does not support get_triplets_batch"):
             async for triplet in get_triplet_datapoints([{}], triplets_batch_size=100):
                 triplets.append(triplet)
+
+
+@pytest.mark.asyncio
+async def test_conflict_links_are_not_embedded_or_reported_as_malformed(mock_graph_engine):
+    mock_graph_engine.get_triplets_batch.side_effect = [
+        [{"relationship_properties": {"relationship_name": "conflict_cites"}}],
+        [],
+    ]
+    with (
+        patch.object(
+            get_triplet_datapoints_module, "get_graph_engine", return_value=mock_graph_engine
+        ),
+        patch.object(get_triplet_datapoints_module, "_process_single_triplet") as process,
+        patch.object(get_triplet_datapoints_module.logger, "warning") as warning,
+    ):
+        assert [item async for item in get_triplet_datapoints([{}])] == []
+        process.assert_not_called()
+        warning.assert_not_called()

@@ -85,6 +85,7 @@ handles, the dataset queue, and the delete flows rely on::
 
 import asyncio
 import concurrent.futures
+import hashlib
 import inspect
 import logging
 import time
@@ -92,9 +93,18 @@ import weakref
 from collections import OrderedDict
 from functools import wraps
 from threading import Lock
-from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _key_id(key) -> str:
+    """Opaque, stable identifier for a cache key, safe to log.
+
+    Cache keys are factory-argument tuples and can embed connection strings
+    or credentials, so the key itself must never reach the logs.
+    """
+    return hashlib.sha256(repr(key).encode("utf-8", errors="replace")).hexdigest()[:12]
+
 
 # Every cache created by the ``closing_lru_cache`` decorator registers here so
 # the idle-TTL reaper can sweep them all through one entry point
@@ -181,7 +191,7 @@ def _run_close_coro_blocking(coro, value_type) -> None:
 _KW_MARK = object()
 
 
-def _start_close(value) -> Optional[concurrent.futures.Future]:
+def _start_close(value) -> concurrent.futures.Future | None:
     """Begin closing a value and return a ``concurrent.futures.Future`` that
     resolves once the close (including any async worker-process teardown) has
     completed — or ``None`` when there is nothing to wait for (no ``close()``,
@@ -385,7 +395,7 @@ class _LeasedCacheEntry:
 class _LeasedValueProxy:
     """Proxy that keeps a cache entry alive while callers hold it."""
 
-    __slots__ = ("_entry", "_finalizer", "__weakref__")
+    __slots__ = ("__weakref__", "_entry", "_finalizer")
 
     def __init__(self, entry: _LeasedCacheEntry):
         object.__setattr__(self, "_entry", entry)
@@ -455,7 +465,7 @@ class ClosingLRUCache:
     still cleaning up detached entries once they are genuinely unused.
     """
 
-    def __init__(self, maxsize: Optional[int] = 128, lease: bool = True, pinned_predicate=None):
+    def __init__(self, maxsize: int | None = 128, lease: bool = True, pinned_predicate=None):
         """``maxsize`` semantics mirror ``functools.lru_cache``:
 
         - ``int > 0`` — bounded LRU. The least-recently-used entry is evicted
@@ -481,8 +491,7 @@ class ClosingLRUCache:
         runs under the cache lock and must not re-enter the cache.
         """
         if isinstance(maxsize, int):
-            if maxsize < 0:
-                maxsize = 0
+            maxsize = max(maxsize, 0)
         elif maxsize is not None:
             raise TypeError("maxsize must be an int or None")
         self._cache: OrderedDict = OrderedDict()
@@ -547,9 +556,9 @@ class ClosingLRUCache:
             pending.result(timeout=PENDING_CLOSE_WAIT_SECONDS)
         except concurrent.futures.TimeoutError:
             logger.warning(
-                "Pending close for cache key %r did not finish within %ss; "
+                "Pending close for cache key %s did not finish within %ss; "
                 "proceeding to create a new value",
-                key,
+                _key_id(key),
                 PENDING_CLOSE_WAIT_SECONDS,
             )
             # Do not keep taxing every later lookup for this key with another
@@ -560,23 +569,22 @@ class ClosingLRUCache:
             # one means an invariant broke — surface it, then proceed with
             # creation as usual.
             logger.error(
-                "BUG: pending close for cache key %r was cancelled unexpectedly — nothing in "
+                "BUG: pending close for cache key %s was cancelled unexpectedly — nothing in "
                 "cognee cancels registry futures, so the closing-registry contract was "
                 "violated and must be root-caused (the operation itself continues safely)",
-                key,
+                _key_id(key),
             )
         except Exception:
             # By construction nothing lands here: close futures resolve with
             # a result, never an exception (see _start_close). Getting here
             # means that invariant broke — surface it loudly, but still
             # proceed: a creator must not fail over close bookkeeping.
-            logger.error(
-                "BUG: unexpected error while waiting for pending close of cache key %r — "
+            logger.exception(
+                "BUG: unexpected error while waiting for pending close of cache key %s — "
                 "registry futures must only ever resolve with None (see _start_close), so "
                 "the closing-registry contract was violated and must be root-caused "
                 "(the operation itself continues safely)",
-                key,
-                exc_info=True,
+                _key_id(key),
             )
 
     def _track_close(self, key, value) -> None:
@@ -627,8 +635,8 @@ class ClosingLRUCache:
             )
         except asyncio.TimeoutError:
             logger.warning(
-                "Pending close for cache key %r did not finish within %ss; %s",
-                key,
+                "Pending close for cache key %s did not finish within %ss; %s",
+                _key_id(key),
                 PENDING_CLOSE_WAIT_SECONDS,
                 timeout_action,
             )
@@ -643,23 +651,22 @@ class ClosingLRUCache:
             if not future.cancelled():
                 raise
             logger.error(
-                "BUG: pending close for cache key %r was cancelled unexpectedly — nothing in "
+                "BUG: pending close for cache key %s was cancelled unexpectedly — nothing in "
                 "cognee cancels registry futures, so the closing-registry contract was "
                 "violated and must be root-caused (the operation itself continues safely)",
-                key,
+                _key_id(key),
             )
         except Exception:
             # By construction nothing lands here: close futures resolve with
             # a result, never an exception (see _start_close). Getting here
             # means that invariant broke — surface it loudly, but let the
             # caller proceed: failing it over close bookkeeping is worse.
-            logger.error(
-                "BUG: unexpected error while waiting for pending close of cache key %r — "
+            logger.exception(
+                "BUG: unexpected error while waiting for pending close of cache key %s — "
                 "registry futures must only ever resolve with None (see _start_close), so "
                 "the closing-registry contract was violated and must be root-caused "
                 "(the operation itself continues safely)",
-                key,
-                exc_info=True,
+                _key_id(key),
             )
 
     def _wrap_cached_value(self, entry):
@@ -932,7 +939,7 @@ class ClosingLRUCache:
             return CacheInfo(size=len(self._cache), maxsize=self._maxsize)
 
 
-def closing_lru_cache(maxsize: Optional[int] = 128, lease: bool = True, pinned_predicate=None):
+def closing_lru_cache(maxsize: int | None = 128, lease: bool = True, pinned_predicate=None):
     """Decorator that caches return values in a :class:`ClosingLRUCache`.
 
     Drop-in replacement for ``@functools.lru_cache`` that closes values once

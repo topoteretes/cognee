@@ -1,3 +1,4 @@
+import logging
 import pathlib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -9,11 +10,14 @@ import cognee
 from cognee.infrastructure.session.session_manager import SessionManager
 from cognee.low_level import DataPoint
 from cognee.low_level import setup as cognee_setup
+from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.graph_completion_decomposition_retriever import (
     GraphCompletionDecompositionRetriever,
     QueryDecomposition,
 )
 from cognee.tasks.storage import add_data_points
+
+logger = logging.getLogger(__name__)
 
 ORIGINAL_QUERY = "Who works at Figma and who works at Canva?"
 SUBQUERIES = ["Who works at Figma?", "Who works at Canva?"]
@@ -107,7 +111,7 @@ async def setup_test_environment_simple():
         await cognee.prune.prune_system(metadata=True)
         _clear_engine_caches()
     except Exception:
-        pass
+        logger.debug("Ignoring exception in setup_test_environment_simple", exc_info=True)
 
 
 @pytest_asyncio.fixture
@@ -140,7 +144,7 @@ async def setup_test_environment_empty():
         await cognee.prune.prune_system(metadata=True)
         _clear_engine_caches()
     except Exception:
-        pass
+        logger.debug("Ignoring exception in setup_test_environment_empty", exc_info=True)
 
 
 @pytest.fixture
@@ -225,21 +229,21 @@ async def test_graph_completion_decomposition_answer_per_subquery_synthesis(
 
 @pytest.mark.asyncio
 async def test_graph_completion_decomposition_context_empty_graph(setup_test_environment_empty):
+    """An empty graph raises NoDataError before the query is decomposed, so no LLM
+    call is made (SDK-270 / gh #3728)."""
     retriever = GraphCompletionDecompositionRetriever()
 
-    with patch(
-        "cognee.infrastructure.llm.LLMGateway.LLMGateway.acreate_structured_output",
-        new_callable=AsyncMock,
-        return_value=_combined_decomposition(),
+    with (
+        patch(
+            "cognee.infrastructure.llm.LLMGateway.LLMGateway.acreate_structured_output",
+            new_callable=AsyncMock,
+            return_value=_combined_decomposition(),
+        ) as mock_llm,
+        pytest.raises(NoDataError, match="knowledge graph is empty"),
     ):
-        triplets = await retriever.get_retrieved_objects(ORIGINAL_QUERY)
-        context = await retriever.get_context_from_objects(
-            query=ORIGINAL_QUERY,
-            retrieved_objects=triplets,
-        )
+        await retriever.get_retrieved_objects(ORIGINAL_QUERY)
 
-    assert triplets == []
-    assert context == ""
+    mock_llm.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -270,6 +274,12 @@ async def test_graph_completion_decomposition_combined_mode_session_stores_only_
         patch(
             "cognee.infrastructure.session.session_manager.CacheConfig"
         ) as mock_session_cache_config,
+        # The auto-feedback gate reads CacheConfig in feedback_detection
+        # (session_manager delegates to it), so auto_feedback=False must be
+        # patched there or the turn analysis runs against the LLM fake.
+        patch(
+            "cognee.infrastructure.session.feedback_detection.CacheConfig"
+        ) as mock_detection_cache_config,
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.session_user"
         ) as mock_retriever_session_user,
@@ -285,6 +295,7 @@ async def test_graph_completion_decomposition_combined_mode_session_stores_only_
         session_cache_config.caching = True
         session_cache_config.auto_feedback = False
         mock_session_cache_config.return_value = session_cache_config
+        mock_detection_cache_config.return_value = session_cache_config
 
         mock_retriever_session_user.get.return_value = user
         mock_session_manager_user.get.return_value = user

@@ -35,7 +35,7 @@ def test_task_instances_pass_through_unchanged():
         return data
 
     task = Task(custom_task)
-    resolved = resolve_memify_tasks([task, "apply_frequency_weights"])
+    resolved = resolve_memify_tasks([task, "apply_feedback_weights"])
 
     assert resolved is not None
     assert resolved[0] is task
@@ -78,3 +78,10 @@ async def test_memify_rejects_unknown_task_name_before_running():
 
     with pytest.raises(CogneeValidationError, match="Unknown memify task name"):
         await memify(enrichment_tasks=["not_a_task"])
+
+
+def test_frequency_weights_task_is_not_selectable():
+    """Frequency weights were deleted; the registry must not advertise or resolve them."""
+    assert "apply_frequency_weights" not in supported_memify_task_names()
+    with pytest.raises(CogneeValidationError, match="Unknown memify task name"):
+        resolve_memify_tasks(["apply_frequency_weights"])

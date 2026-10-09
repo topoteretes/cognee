@@ -1,18 +1,23 @@
 import asyncio
 import re
-from typing import Any, Callable, Optional, List, Union
+from collections.abc import Callable
 from heapq import nlargest
+from typing import Any
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
+from cognee.modules.retrieval.utils.conflict_context import (
+    attach_chunk_conflicts,
+    public_chunk_payload,
+    render_chunk_context,
+)
 from cognee.shared.logging_utils import get_logger
-
 
 logger = get_logger("LexicalRetriever")
 
 
-def tokenize_words(text: str, stop_words: Optional[set[str]] = None) -> list[str]:
+def tokenize_words(text: str, stop_words: set[str] | None = None) -> list[str]:
     """Lowercase, split on word characters, and drop any stop words.
 
     Shared by the lexical retrievers so tokenization stays consistent across scorers.
@@ -24,6 +29,12 @@ def tokenize_words(text: str, stop_words: Optional[set[str]] = None) -> list[str
 
 
 class LexicalRetriever(BaseRetriever):
+    # Lexical search scores chunks locally and never calls an LLM, so the conversational
+    # session-turn analysis would add a pre-retrieval LLM round trip to an otherwise
+    # sub-second, deterministic path. Opt out, like the other non-generative retrievers.
+    # Inherited by BM25ChunksRetriever and JaccardChunksRetriever.
+    supports_session_turn_preparation = False
+
     def __init__(
         self, tokenizer: Callable, scorer: Callable, top_k: int = 15, with_scores: bool = False
     ):
@@ -63,7 +74,7 @@ class LexicalRetriever(BaseRetriever):
                 try:
                     chunk_id, document = node
                 except Exception:
-                    logger.warning("Skipping node with unexpected shape: %r", node)
+                    logger.warning("Skipping node with unexpected shape: %r", node, exc_info=True)
                     continue
 
                 if document.get("type") == "DocumentChunk" and document.get("text"):
@@ -78,8 +89,8 @@ class LexicalRetriever(BaseRetriever):
                         self.chunks[document_id] = tokens
                         self.payloads[document_id] = document
                         chunk_count += 1
-                    except Exception as e:
-                        logger.error("Tokenizer failed for chunk %s: %s", chunk_id, str(e))
+                    except Exception:
+                        logger.exception("Tokenizer failed for chunk %s", chunk_id)
 
             if chunk_count == 0:
                 logger.error("Initialization completed but no valid chunks were loaded.")
@@ -99,8 +110,8 @@ class LexicalRetriever(BaseRetriever):
 
         try:
             query_tokens = self.tokenizer(query)
-        except Exception as e:
-            logger.error("Failed to tokenize query: %s", str(e))
+        except Exception:
+            logger.exception("Failed to tokenize query")
             return []
 
         if not query_tokens:
@@ -114,8 +125,8 @@ class LexicalRetriever(BaseRetriever):
                 if not isinstance(score, (int, float)):
                     logger.warning("Non-numeric score for chunk %s → treated as 0.0", chunk_id)
                     score = 0.0
-            except Exception as e:
-                logger.error("Scorer failed for chunk %s: %s", chunk_id, str(e))
+            except Exception:
+                logger.exception("Scorer failed for chunk %s", chunk_id)
                 score = 0.0
             results.append((chunk_id, score))
 
@@ -127,10 +138,13 @@ class LexicalRetriever(BaseRetriever):
             len(query_tokens),
         )
 
+        # Copy: these payload dicts are this retriever's cache, shared across
+        # queries, and conflict annotation writes into the hits it is handed.
+        scored_hits = [(dict(self.payloads[chunk_id]), score) for chunk_id, score in top_results]
+        await attach_chunk_conflicts(scored_hits)
         if self.with_scores:
-            return [(self.payloads[chunk_id], score) for chunk_id, score in top_results]
-        else:
-            return [self.payloads[chunk_id] for chunk_id, _ in top_results]
+            return scored_hits
+        return [hit_payload for hit_payload, _ in scored_hits]
 
     async def get_context_from_objects(self, query: str, retrieved_objects: Any) -> str:
         """
@@ -148,15 +162,12 @@ class LexicalRetriever(BaseRetriever):
             - str: A string containing the combined text of the retrieved chunk payloads, or an
               empty string if none are found.
         """
-        if retrieved_objects:
-            payload_texts = [payload["text"] for payload in retrieved_objects]
-            return "\n".join(payload_texts)
-        else:
-            return ""
+        # render_chunk_context reads the payload out of either hit shape.
+        return render_chunk_context(retrieved_objects) if retrieved_objects else ""
 
     async def get_completion_from_context(
         self, query: str, retrieved_objects: Any, context: Any
-    ) -> Union[List[str], List[dict]]:
+    ) -> list[str] | list[dict]:
         """
         Returns a completion for the given query.
 
@@ -176,4 +187,8 @@ class LexicalRetriever(BaseRetriever):
             - List[dict]: The retrieved objects, i.e. the scored payloads.
         """
         # TODO: Do we want to generate a completion using LLM here?
-        return retrieved_objects
+        if not retrieved_objects:
+            return retrieved_objects
+        if self.with_scores:
+            return [(public_chunk_payload(payload), score) for payload, score in retrieved_objects]
+        return [public_chunk_payload(payload) for payload in retrieved_objects]

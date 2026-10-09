@@ -3,17 +3,16 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Optional
 from uuid import NAMESPACE_URL, UUID, uuid5
 
-from cognee.memory.entries import SkillRunEntry
 from cognee.context_global_variables import set_database_global_context_variables
+from cognee.memory.entries import SkillRunEntry
 from cognee.modules.engine.models import (
+    UNSCORED_SKILL_RUN_SCORE,
     CandidateSkill,
     NodeSet,
     SkillRun,
     ToolCall,
-    UNSCORED_SKILL_RUN_SCORE,
 )
 from cognee.modules.engine.operations.setup import setup
 from cognee.modules.engine.utils.generate_node_id import generate_node_id
@@ -24,7 +23,6 @@ from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.tools.resolve_skills import resolve_skills
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.storage.add_data_points import add_data_points
-
 
 logger = get_logger("cognee.tools.skill_runs")
 
@@ -70,7 +68,7 @@ async def remember_skill_run_entry(
     entry: SkillRunEntry,
     *,
     dataset_name: str,
-    session_id: Optional[str],
+    session_id: str | None,
     user=None,
 ) -> tuple[SkillRun, object]:
     """Persist a dataset-scoped SkillRun from the remember() typed-entry path."""
@@ -124,9 +122,7 @@ async def remember_skill_run_entry(
             latency_ms=entry.latency_ms,
             feedback=entry.feedback,
         )
-        run.belongs_to_set = [
-            NodeSet(id=generate_node_id(f"NodeSet:{entry.node_set}"), name=entry.node_set)
-        ]
+        run.belongs_to_set = [NodeSet(name=entry.node_set)]
 
         await add_data_points([run], ctx=_make_storage_context(user, dataset, entry.run_id))
 

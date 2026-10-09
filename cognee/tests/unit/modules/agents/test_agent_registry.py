@@ -7,10 +7,24 @@ import cognee
 from cognee.modules.agents.registry import (
     classify_memory_source_type,
     clear_registered_agent_connections,
+    derive_connection_type,
     list_registered_agent_connections,
     register_agent_connection,
 )
 from cognee.modules.users.methods import get_default_user
+
+
+def test_agent_connection_type_accepts_arbitrary_client_names():
+    """AgentConnectionType is intentionally a free string (not a closed
+    Literal) so a brand-new client (Cursor, Windsurf, ...) can self-declare
+    its own type without a backend code change. See models.py for why."""
+    from cognee.modules.agents.models import AgentConnection, RegisterAgentRequest
+
+    connection = AgentConnection(id="x", agent_session_name="y", type="cursor")
+    assert connection.type == "cursor"
+
+    request = RegisterAgentRequest(agent_session_name="z", type="windsurf")
+    assert request.type == "windsurf"
 
 
 @pytest.mark.asyncio
@@ -44,6 +58,32 @@ async def test_register_agent_connection_normalizes_memory_sources():
 )
 def test_classify_memory_source_type(name, expected):
     assert classify_memory_source_type(name) == expected
+
+
+@pytest.mark.parametrize(
+    ("source", "origin_function", "session_id", "expected"),
+    [
+        ("mcp", None, None, "mcp"),
+        ("api_key", None, None, "api"),
+        ("serve", None, None, "api"),
+        (None, None, "cc_myproj_ab12cd34", "claude_code"),
+        (None, "claude_code_remember", None, "claude_code"),
+        (None, None, "claude-code-1718000000", "claude_code"),
+        (None, None, "codex-1718000000", "codex"),
+        (None, "codex_cli", None, "codex"),
+        (None, None, "slack-bot-session", "slack"),
+        (None, None, "some_mcp_session", "mcp"),
+        (None, "custom_sdk_call", None, "sdk"),
+        (None, None, None, "unknown"),
+    ],
+)
+def test_derive_connection_type(source, origin_function, session_id, expected):
+    assert (
+        derive_connection_type(
+            origin_function=origin_function, session_id=session_id, source=source
+        )
+        == expected
+    )
 
 
 @pytest.mark.asyncio

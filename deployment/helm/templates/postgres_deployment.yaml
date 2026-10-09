@@ -1,35 +1,64 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .Release.Name }}-postgres
+  name: {{ include "cognee.postgres.fullname" . }}
   labels:
-    app: {{ .Release.Name }}-postgres
+    {{- include "cognee.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: {{ .Release.Name }}-postgres
+      {{- include "cognee.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: postgres
   template:
     metadata:
       labels:
-        app: {{ .Release.Name }}-postgres
+        {{- include "cognee.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: postgres
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secrets.yml") . | sha256sum }}
     spec:
       containers:
         - name: postgres
-          image: {{ .Values.postgres.image }}
+          image: {{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}
           ports:
             - containerPort: {{ .Values.postgres.port }}
           env:
             - name: POSTGRES_USER
-              value: {{ .Values.postgres.env.POSTGRES_USER }}
+              value: {{ .Values.postgres.auth.username | quote }}
             - name: POSTGRES_PASSWORD
-              value: {{ .Values.postgres.env.POSTGRES_PASSWORD }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret | default (printf "%s-secret" (include "cognee.fullname" .)) }}
+                  key: DB_PASSWORD
             - name: POSTGRES_DB
-              value: {{ .Values.postgres.env.POSTGRES_DB }}
+              value: {{ .Values.postgres.auth.database | quote }}
           volumeMounts:
             - name: postgres-storage
               mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              cpu: {{ .Values.postgres.resources.requests.cpu | quote }}
+              memory: {{ .Values.postgres.resources.requests.memory | quote }}
+            limits:
+              cpu: {{ .Values.postgres.resources.limits.cpu | quote }}
+              memory: {{ .Values.postgres.resources.limits.memory | quote }}
+          startupProbe:
+            exec:
+              command: [pg_isready, -U, {{ .Values.postgres.auth.username | quote }}, -d, {{ .Values.postgres.auth.database | quote }}]
+            failureThreshold: 30
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command: [pg_isready, -U, {{ .Values.postgres.auth.username | quote }}, -d, {{ .Values.postgres.auth.database | quote }}]
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: [pg_isready, -U, {{ .Values.postgres.auth.username | quote }}, -d, {{ .Values.postgres.auth.database | quote }}]
+            periodSeconds: 30
+            failureThreshold: 3
       volumes:
         - name: postgres-storage
           persistentVolumeClaim:
-            claimName: {{ .Release.Name }}-postgres-pvc
+            claimName: {{ include "cognee.postgres.fullname" . }}-pvc

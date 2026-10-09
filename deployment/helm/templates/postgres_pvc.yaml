@@ -1,7 +1,10 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: {{ .Release.Name }}-postgres-pvc
+  name: {{ include "cognee.postgres.fullname" . }}-pvc
+  labels:
+    {{- include "cognee.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
 spec:
   accessModes:
     - ReadWriteOnce

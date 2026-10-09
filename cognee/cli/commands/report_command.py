@@ -1,10 +1,10 @@
 import argparse
 import asyncio
 
+import cognee.cli.echo as fmt
 from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
 from cognee.cli.reference import SupportsCliCommand
-import cognee.cli.echo as fmt
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 

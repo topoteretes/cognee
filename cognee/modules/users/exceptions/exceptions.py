@@ -1,5 +1,6 @@
-from cognee.exceptions import CogneeValidationError
 from fastapi import status
+
+from cognee.exceptions import CogneeValidationError
 
 
 class RoleNotFoundError(CogneeValidationError):
@@ -44,8 +45,27 @@ class PermissionDeniedError(CogneeValidationError):
         message: str = "User does not have permission on documents.",
         name: str = "PermissionDeniedError",
         status_code=status.HTTP_403_FORBIDDEN,
+        log: bool = True,
+        log_level: str = "ERROR",
     ):
-        super().__init__(message, name, status_code)
+        super().__init__(message, name, status_code, log, log_level)
+
+
+class CapabilityDeniedError(PermissionDeniedError):
+    """Requester does not hold the capability the operation needs.
+
+    The message is built from the capability name so every check for the same
+    capability fails with identical text. That matters where a missing principal
+    has to read exactly like a refused request, or the response tells a caller
+    which ids exist. The name stays PermissionDeniedError so API responses are
+    the same as before this class existed.
+    """
+
+    def __init__(self, capability: str, log_level: str = "ERROR"):
+        super().__init__(
+            message=f"User is not authorized to {capability.replace('_', ' ')} for this tenant",
+            log_level=log_level,
+        )
 
 
 class PermissionNotFoundError(CogneeValidationError):
@@ -54,5 +74,35 @@ class PermissionNotFoundError(CogneeValidationError):
         message: str = "Permission type does not exist.",
         name: str = "PermissionNotFoundError",
         status_code=status.HTTP_403_FORBIDDEN,
+    ):
+        super().__init__(message, name, status_code)
+
+
+class CapabilityGrantToNonMemberError(PermissionDeniedError):
+    """A capability was granted to a user who is not a member of the tenant.
+
+    Unlike the masked CapabilityDeniedError, this one explains itself: the
+    caller has already passed the grant_capabilities check for the tenant, so
+    telling them the user has to be added first reveals nothing they could not
+    learn from the tenant's user list.
+    """
+
+    def __init__(self):
+        super().__init__(
+            message=(
+                "User is not a member of this tenant; add them to the tenant "
+                "before granting capabilities"
+            )
+        )
+
+
+class CapabilityNotFoundError(CogneeValidationError):
+    """Capability name is not in the CAPABILITY_TYPES catalog"""
+
+    def __init__(
+        self,
+        message: str = "Capability does not exist.",
+        name: str = "CapabilityNotFoundError",
+        status_code=status.HTTP_400_BAD_REQUEST,
     ):
         super().__init__(message, name, status_code)

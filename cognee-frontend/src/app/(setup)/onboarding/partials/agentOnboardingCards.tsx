@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { CLAUDE_MARKETPLACE_ADD, CLAUDE_PLUGIN_INSTALL, CODEX_HOOKS_ENABLE, CODEX_MARKETPLACE_ADD, CODEX_PLUGIN_INSTALL, UPLOAD_MEMORY_PROMPT, UPLOAD_SAMPLE_PROMPT, RECALL_SAMPLE_PROMPT } from "@/data/prompts";
+import { exportEnvVar } from "@/utils/osCommands";
+import type { PreferredOs } from "@/ui/layout/OsPreferenceContext";
 import { useOnboardingTrackEvent } from "../useOnboardingTrackEvent";
 
 export interface AgentOnboardingCard {
@@ -87,13 +89,14 @@ export function buildAgentOnboardingCards(params: {
   credsReady: boolean;
   connectVerified: boolean;
   goToDashboard: () => void;
+  os: PreferredOs;
 }): AgentOnboardingCard[] {
-  const { agent, name, baseUrl, credsCode, credsReady, connectVerified, goToDashboard } = params;
+  const { agent, name, baseUrl, credsCode, credsReady, connectVerified, goToDashboard, os } = params;
 
   const credsCard: AgentOnboardingCard = {
     title: "Copy your API credentials",
     description: "Open a terminal and run these to point your agent at your Cognee memory.",
-    node: <OnboardingInlineCode code={`export COGNEE_BASE_URL="${baseUrl}"`} toCopy={credsCode} loading={!credsReady} placeholder="Preparing your credentials…" agent={agent} copyTarget="api_credentials" />,
+    node: <OnboardingInlineCode code={exportEnvVar(os, "COGNEE_BASE_URL", baseUrl)} toCopy={credsCode} loading={!credsReady} placeholder="Preparing your credentials…" agent={agent} copyTarget="api_credentials" />,
   };
   const allSetCard: AgentOnboardingCard = {
     title: "You're all set",

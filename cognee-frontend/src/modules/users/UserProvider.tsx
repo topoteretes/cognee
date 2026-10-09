@@ -88,6 +88,11 @@ export default function UserProvider({ children }: Props): ReactNode {
     queryClient.setQueryData<UserMe>(ME_QUERY_KEY, updated);
   }, [queryClient]);
 
+  const dismissFeatureAnnouncement = useCallback(async (featureKey: string): Promise<void> => {
+    const updated = await http.patchJson<UserMe>(`/api/me/feature-announcements/${featureKey}/dismiss`);
+    queryClient.setQueryData<UserMe>(ME_QUERY_KEY, updated);
+  }, [queryClient]);
+
   const refetchTenants = useCallback((): void => {
     queryClient.invalidateQueries({ queryKey: TENANTS_QUERY_KEY });
   }, [queryClient]);
@@ -104,6 +109,7 @@ export default function UserProvider({ children }: Props): ReactNode {
         isUserMeError,
         markWelcomeSeen,
         markOnboardingComplete,
+        dismissFeatureAnnouncement,
         availableTenants,
         isLoadingTenants,
         isTenantsError,

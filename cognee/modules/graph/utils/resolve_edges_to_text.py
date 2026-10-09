@@ -1,8 +1,8 @@
 import string
-from typing import List
 from collections import Counter
 
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
+from cognee.modules.graph.utils.fact_conflicts import fact_status, status_label
 from cognee.modules.retrieval.utils.stop_words import DEFAULT_STOP_WORDS
 from cognee.shared.logging_utils import get_logger
 
@@ -10,7 +10,7 @@ logger = get_logger()
 
 
 def _get_top_n_frequent_words(
-    text: str, stop_words: set = None, top_n: int = 3, separator: str = ", "
+    text: str, stop_words: set | None = None, top_n: int = 3, separator: str = ", "
 ) -> str:
     """Concatenates the top N frequent words in text."""
     if stop_words is None:
@@ -30,7 +30,7 @@ def _create_title_from_text(text: str, first_n_words: int = 7, top_n_words: int 
     return f"{' '.join(first_words)}... [{top_words}]"
 
 
-def _extract_nodes_from_edges(retrieved_edges: List[Edge]) -> dict:
+def _extract_nodes_from_edges(retrieved_edges: list[Edge]) -> dict:
     """Creates a dictionary of nodes with their names and content."""
 
     logger.debug(
@@ -58,7 +58,15 @@ def _extract_nodes_from_edges(retrieved_edges: List[Edge]) -> dict:
     return nodes
 
 
-async def resolve_edges_to_text(retrieved_edges: List[Edge]) -> str:
+def _superseded_last(edge: Edge) -> bool:
+    """A superseded fact still belongs in the context, but after the one that replaced it.
+
+    sorted() is stable, so every other edge keeps the retriever's ranking.
+    """
+    return fact_status(edge.attributes) == "superseded"
+
+
+async def resolve_edges_to_text(retrieved_edges: list[Edge]) -> str:
     """Converts retrieved graph edges into a human-readable string format."""
     if not retrieved_edges:
         return ""
@@ -77,7 +85,7 @@ async def resolve_edges_to_text(retrieved_edges: List[Edge]) -> str:
         extra={"edge_count": len(retrieved_edges)},
     )
 
-    for edge in retrieved_edges:
+    for edge in sorted(retrieved_edges, key=_superseded_last):
         source_name = nodes[edge.node1.id]["name"]
         target_name = nodes[edge.node2.id]["name"]
         edge_label = (
@@ -91,6 +99,10 @@ async def resolve_edges_to_text(retrieved_edges: List[Edge]) -> str:
         description = edge.attributes.get("edge_text")
         if description and description != edge_label:
             line += f"  ({description})"
+
+        status = status_label(edge.attributes)
+        if status:
+            line += f" {status}"
 
         connections.append(line)
 

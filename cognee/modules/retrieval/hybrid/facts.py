@@ -1,8 +1,9 @@
-from typing import Any, Optional
+from dataclasses import dataclass, field
+from typing import Any
 
 from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
-from cognee.modules.retrieval.hybrid.results import first_display_value, payload, result_id
+from cognee.modules.retrieval.utils.results import first_display_value, payload, result_id
 
 MIN_FACT_WORD_COUNT = 3
 
@@ -10,7 +11,7 @@ MIN_FACT_WORD_COUNT = 3
 CONTAINS_FACT_PREFIX = "Document chunk mentions "
 
 
-def connection_edge_type_id(edge: dict) -> Optional[str]:
+def connection_edge_type_id(edge: dict) -> str | None:
     """Recompute the EdgeType vector row id for a graph connection edge.
 
     Must mirror index_graph_edges._get_edge_text: nonblank edge_text first
@@ -32,6 +33,80 @@ def edge_rank_by_id(edge_hits: list[Any]) -> dict[str, int]:
         if hit_id and hit_id not in ranks:
             ranks[hit_id] = rank
     return ranks
+
+
+def resolve_facts_top_k(
+    entities: list,
+    *,
+    node_scoped: bool,
+    facts_top_k: int,
+    entity_edge_budget: int,
+) -> int:
+    """When the entity lane is empty and unscoped, spend its edge budget on facts.
+
+    NodeSet-scoped searches stay at ``facts_top_k`` so unscoped EdgeType hits
+    cannot leak in when there are no scoped entities to pin them to.
+    """
+    if entities or node_scoped:
+        return facts_top_k
+    return entity_edge_budget
+
+
+def select_facts_for_entities(
+    edge_hits: list,
+    entities: list[dict],
+    reachable_edge_type_ids: set[str],
+    facts_top_k: int,
+    node_scoped: bool,
+) -> list[dict]:
+    if facts_top_k <= 0:
+        return []
+
+    bullet_ids = {
+        edge["edge_type_id"]
+        for entity in entities
+        for edge in entity.get("edges", [])
+        if edge.get("edge_type_id")
+    }
+    candidates = edge_hits
+    if node_scoped:
+        # EdgeType rows carry no node-set membership, so a scoped search keeps only the
+        # facts whose text is actually expressed by an edge on a scoped entity.
+        candidates = [hit for hit in edge_hits if result_id(hit) in reachable_edge_type_ids]
+    return select_facts(candidates, bullet_ids, facts_top_k)
+
+
+@dataclass(frozen=True)
+class FactCandidates:
+    """Everything fact selection needs except the entities it dedupes against.
+
+    Kept apart from the selection so a retriever that cuts its entity list
+    after the fetch (the temporal rerank, its fallback slice) can select facts
+    against the entities it finally shows, not the wider candidate set — a
+    fact dropped as "already under entity X" must not vanish with X.
+    """
+
+    edge_hits: list = field(default_factory=list)
+    reachable_edge_type_ids: set = field(default_factory=set)
+    node_scoped: bool = False
+    facts_top_k: int = 0
+    entity_edge_budget: int = 0
+
+
+def select_facts_from_candidates(candidates: FactCandidates, entities: list[dict]) -> list[dict]:
+    """The one assembly step: facts for the final ``entities``."""
+    return select_facts_for_entities(
+        candidates.edge_hits,
+        entities,
+        candidates.reachable_edge_type_ids,
+        resolve_facts_top_k(
+            entities,
+            node_scoped=candidates.node_scoped,
+            facts_top_k=candidates.facts_top_k,
+            entity_edge_budget=candidates.entity_edge_budget,
+        ),
+        candidates.node_scoped,
+    )
 
 
 def select_facts(edge_hits: list[Any], exclude_ids: set[str], facts_top_k: int) -> list[dict]:
@@ -62,8 +137,12 @@ def _fact_display_text(text: str) -> str:
     return stripped[:1].upper() + stripped[1:]
 
 
-def format_facts(facts: list[dict]) -> str:
-    texts = [fact["text"] for fact in facts or [] if fact.get("text")]
+def format_facts(facts: list[dict], *, exclude_texts=()) -> str:
+    texts = [
+        fact["text"]
+        for fact in facts or []
+        if fact.get("text") and fact["text"] not in exclude_texts
+    ]
     if not texts:
         return ""
     return "## Related facts\n" + "\n".join(f"- {text}" for text in texts)

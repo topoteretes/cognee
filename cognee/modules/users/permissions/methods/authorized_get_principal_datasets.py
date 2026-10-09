@@ -1,4 +1,3 @@
-from typing import List
 from uuid import UUID
 
 from cognee.modules.data.models import Dataset
@@ -18,7 +17,7 @@ from cognee.modules.users.permissions.methods.has_user_management_permission imp
 
 async def authorized_get_principal_datasets(
     principal_id: UUID, permission_name: str, requester_id: UUID
-) -> List[Dataset]:
+) -> list[Dataset]:
     """
         Return the datasets a principal holds a permission on, if the requester
         is allowed to ask about that principal.

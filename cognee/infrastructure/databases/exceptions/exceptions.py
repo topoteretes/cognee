@@ -1,9 +1,10 @@
 from fastapi import status
+
 from cognee.exceptions import (
     CogneeApiError,
+    CogneeConfigurationError,
     CogneeSystemError,
     CogneeValidationError,
-    CogneeConfigurationError,
 )
 
 
@@ -25,6 +26,18 @@ class DatabaseNotCreatedError(CogneeSystemError):
         log_level: str = "ERROR",
     ):
         super().__init__(message, name, status_code, log=log, log_level=log_level)
+
+
+class UnsupportedGraphOperation(CogneeApiError):
+    """Raised when a graph adapter does not implement a narrow optional operation."""
+
+    def __init__(
+        self,
+        message: str = "This graph backend does not support this operation.",
+        name: str = "UnsupportedGraphOperation",
+        status_code: int = status.HTTP_501_NOT_IMPLEMENTED,
+    ):
+        super().__init__(message, name, status_code)
 
 
 class UnsupportedProvenanceCapability(CogneeApiError):
@@ -136,6 +149,28 @@ class EmbeddingContextWindowTooSmallError(EmbeddingException):
         super().__init__(message, name, status_code)
 
 
+class EmbeddingCredentialsError(EmbeddingException):
+    """
+    Raised when the embedding endpoint rejects the request's credentials.
+
+    Covers both directions: credentials the server does not accept (401) and
+    credentials it accepts but does not permit for this model or organization
+    (403). Neither can clear inside a retry window, so engines raise this
+    instead of the provider's own class: keeping the failure inside the
+    ``CogneeApiError`` family is what lets the API return an actionable 422
+    rather than a 500, while listing it as terminal is what stops the backoff
+    ladder. The provider's own message is carried through as *message*.
+    """
+
+    def __init__(
+        self,
+        message: str = "Embedding endpoint rejected the credentials.",
+        name: str = "EmbeddingCredentialsError",
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+    ):
+        super().__init__(message, name, status_code)
+
+
 class MissingQueryParameterError(CogneeValidationError):
     """
     Raised when neither 'query_text' nor 'query_vector' is provided,
@@ -235,6 +270,32 @@ class SharedLadybugLockRequiresRedisError(CogneeConfigurationError):
 SharedKuzuLockRequiresRedisError = SharedLadybugLockRequiresRedisError
 
 
+class TursoDatabaseInUseError(CogneeConfigurationError):
+    """
+    Raised when a Turso database file is already open in another process.
+
+    The Turso engine (pyturso 0.7.x) locks a database file to the one process that
+    opened it, until that process exits, so a second cognee process on the same
+    files cannot open them. Stock SQLite allows this; the Turso backend does not.
+    """
+
+    def __init__(
+        self,
+        database_path: str = "",
+        name: str = "TursoDatabaseInUseError",
+        status_code: int = status.HTTP_409_CONFLICT,
+    ):
+        where = f" '{database_path}'" if database_path else ""
+        message = (
+            f"The Turso database file{where} is already open in another process. "
+            "The Turso backend allows one process per database file, and the lock is held "
+            "until that process exits. Stop the other cognee process using these files (an "
+            "API server, CLI command, or script), or give each process its own "
+            "SYSTEM_ROOT_DIRECTORY. See docs/turso-local.md."
+        )
+        super().__init__(message, name, status_code)
+
+
 class DatabaseCredentialsError(CogneeConfigurationError):
     """
     Raised when database credentials are incomplete or invalid.
@@ -247,6 +308,28 @@ class DatabaseCredentialsError(CogneeConfigurationError):
         self,
         message: str = "Database credentials are incomplete or invalid. Please check your configuration.",
         name: str = "DatabaseCredentialsError",
+        status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
+    ):
+        super().__init__(message, name, status_code)
+
+
+class Neo4jMultiDatabaseSupportError(CogneeConfigurationError):
+    """
+    Raised when per-dataset Neo4j databases cannot be provisioned because the
+    connected server does not support multi-database management.
+
+    ``CREATE DATABASE`` is available on Neo4j Enterprise and AuraDB only;
+    Community edition serves exactly one database per server.
+    """
+
+    def __init__(
+        self,
+        message: str = (
+            "The configured Neo4j server cannot provision per-dataset databases: "
+            "multi-database management (CREATE DATABASE) is available on Neo4j "
+            "Enterprise and AuraDB only."
+        ),
+        name: str = "Neo4jMultiDatabaseSupportError",
         status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
     ):
         super().__init__(message, name, status_code)

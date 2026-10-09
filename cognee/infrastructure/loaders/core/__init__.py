@@ -7,4 +7,4 @@ from .image_loader import ImageLoader
 from .text_loader import TextLoader
 from .video_loader import VideoLoader
 
-__all__ = ["TextLoader", "AudioLoader", "CodeLoader", "ImageLoader", "CsvLoader", "VideoLoader"]
+__all__ = ["AudioLoader", "CodeLoader", "CsvLoader", "ImageLoader", "TextLoader", "VideoLoader"]

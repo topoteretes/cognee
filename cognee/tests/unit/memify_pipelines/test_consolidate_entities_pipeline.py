@@ -454,7 +454,6 @@ async def test_pipeline_wires_memify_tasks_and_config():
             f"{module}.get_authorized_existing_datasets",
             new=AsyncMock(return_value=[dataset]),
         ),
-        patch(f"{module}.set_database_global_context_variables", new=_make_async_ctx_mock()) as ctx,
         patch(f"{module}.memify", new=AsyncMock(return_value={"status": "ok"})) as memify_mock,
     ):
         result = await consolidate_entities_pipeline(
@@ -462,8 +461,12 @@ async def test_pipeline_wires_memify_tasks_and_config():
         )
 
     assert result == {"status": "ok"}
-    # The graph is consolidated within the target dataset's database context.
-    ctx.assert_called_once_with("ds-1", "owner-1")
+    # The pipeline must NOT enter the database context around memify: holding
+    # its queue slot while memify waits on the dataset lock is the SDK-483
+    # deadlock. memify's own run enters the context under the lock.
+    import cognee.memify_pipelines.consolidate_entities as ce_module
+
+    assert not hasattr(ce_module, "set_database_global_context_variables")
 
     kwargs = memify_mock.call_args.kwargs
     assert kwargs["data"] == [{}]

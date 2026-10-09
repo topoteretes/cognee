@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from threading import RLock
-from typing import Iterable, Optional
 from uuid import UUID
+
+from pydantic import ValidationError
 
 from cognee.modules.agents.models import (
     AgentConnection,
@@ -66,8 +68,12 @@ def derive_connection_type(
         return source_lower  # type: ignore[return-value]
 
     text = f"{origin_function or ''} {session_id or ''}".lower()
-    if "claude" in text or "claude_code" in text or text.startswith("cc_"):
+    if "claude" in text or "claude_code" in text or (session_id or "").lower().startswith("cc_"):
         return "claude_code"
+    if "codex" in text:
+        return "codex"
+    if "slack" in text:
+        return "slack"
     if "mcp" in text:
         return "mcp"
     return "sdk" if origin_function else "unknown"
@@ -129,15 +135,15 @@ async def register_agent_connection(
     connection_type: AgentConnectionType = "unknown",
     memory_mode: AgentMemoryMode = "unknown",
     source: AgentSource = "api",
-    agent_id: Optional[str] = None,
-    origin_function: Optional[str] = None,
-    user_id: Optional[UUID] = None,
-    tenant_id: Optional[UUID] = None,
-    session_id: Optional[str] = None,
+    agent_id: str | None = None,
+    origin_function: str | None = None,
+    user_id: UUID | None = None,
+    tenant_id: UUID | None = None,
+    session_id: str | None = None,
     datasets: Iterable[AgentDatasetRef | dict] | None = None,
     status: str = "active",
-    last_active_at: Optional[datetime] = None,
-    metadata: Optional[dict] = None,
+    last_active_at: datetime | None = None,
+    metadata: dict | None = None,
 ) -> AgentConnection:
     dataset_refs = _normalize_datasets(datasets)
     resolved_agent_id = agent_id or build_agent_connection_id(
@@ -170,6 +176,18 @@ async def register_agent_connection(
     if user_id:
         await _persist_agent_connection(user_id, connection)
 
+    if user_id and session_id:
+        # Attribute the session to this connection in the relational store
+        # (fill-if-null), so agent↔session attribution survives registry
+        # restarts and is joinable by SQL. Best-effort: the session_records
+        # table is optional for registry correctness.
+        try:
+            from cognee.modules.session_lifecycle.metrics import set_session_agent
+
+            await set_session_agent(session_id=session_id, user_id=user_id, agent_id=connection.id)
+        except Exception as error:  # — attribution must not break registration
+            logger.debug("Session agent attribution skipped: %s", error, exc_info=True)
+
     return connection
 
 
@@ -192,7 +210,19 @@ async def list_persisted_agent_connections(
             if config.get("name") == AGENT_CONFIG_NAME:
                 agents_dict = config.get("configuration", {}).get("agents", {})
                 for data in agents_dict.values():
-                    connection = AgentConnection(**data)
+                    # The blob is writable by its owner through the public
+                    # configuration endpoint, so an entry is only trusted for
+                    # the user whose configuration holds it. Otherwise anyone
+                    # could name another user here and read their sessions.
+                    try:
+                        connection = AgentConnection(**data)
+                    except ValidationError:
+                        logger.debug(
+                            "Skipping malformed agent connection of user %s", user_id, exc_info=True
+                        )
+                        continue
+                    if connection.user_id != user_id:
+                        continue
                     if not active_only or connection.status == "active":
                         agents.append(connection)
     return agents

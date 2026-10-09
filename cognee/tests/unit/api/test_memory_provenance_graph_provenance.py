@@ -1,7 +1,7 @@
+import importlib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
-import importlib
 
 import pytest
 
@@ -91,6 +91,57 @@ async def test_read_memory_graph_provenance_builds_memory_payload(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_read_memory_graph_provenance_hides_internal_nodes(monkeypatch):
+    """Nodes marked is_internal are dropped, plus every edge and link touching them."""
+    dataset_id = uuid4()
+    data_id = uuid4()
+    source_ref = make_source_ref_key(dataset_id, data_id)
+    edge = EdgeIdentity("pref-1", "node-a", "prefers")
+    graph = SimpleNamespace(
+        find_node_source_refs_by_dataset=AsyncMock(
+            return_value={"node-a": [source_ref], "pref-1": [source_ref]}
+        ),
+        find_edge_source_refs_by_dataset=AsyncMock(return_value={edge: [source_ref]}),
+        get_graph_data=AsyncMock(
+            return_value=(
+                [
+                    ("node-a", {"type": "Entity", "name": "Alice"}),
+                    (
+                        "pref-1",
+                        {
+                            "type": "UserPreference",
+                            "name": "UserPreference",
+                            "is_internal": True,
+                            "preference_text": "prefers terse answers",
+                        },
+                    ),
+                ],
+                [("pref-1", "node-a", "prefers", {"weight": 1.4})],
+            )
+        ),
+    )
+    import cognee.infrastructure.databases.provenance.markers as markers_module
+    import cognee.infrastructure.databases.unified as unified_module
+
+    monkeypatch.setattr(
+        unified_module,
+        "get_unified_engine",
+        AsyncMock(return_value=SimpleNamespace(graph=graph)),
+    )
+    monkeypatch.setattr(markers_module, "stores_provenance_in_graph", AsyncMock(return_value=True))
+
+    payload = await provenance_module._read_memory_graph_provenance(dataset_ids=[str(dataset_id)])
+
+    assert payload["nodes"] == [
+        provenance_module.Node("node-a", {"type": "Entity", "name": "Alice"})
+    ]
+    assert payload["edges"] == []
+    assert payload["links"] == [
+        {"node_id": "node-a", "data_id": str(data_id), "dataset_id": str(dataset_id)}
+    ]
+
+
+@pytest.mark.asyncio
 async def test_read_memory_graph_provenance_returns_none_for_unmarked_graph(monkeypatch):
     dataset_id = uuid4()
     graph = SimpleNamespace()
@@ -171,3 +222,24 @@ async def test_get_memory_provenance_graph_does_not_fallback_after_graph_error(m
 
     graph_reader.assert_awaited_once_with(dataset_ids=[])
     relational_reader.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_dataset_scope_alone_still_scopes_the_relational_memory_fallback(monkeypatch):
+    """``scope_dataset_ids`` is a scoping argument on its own on the public
+    reader, so it has to count as "scoped" — reading the relational memory
+    tables unfiltered would hand back every dataset's extracted memory."""
+    _patch_empty_relational(monkeypatch)
+    relational_reader = AsyncMock(return_value=None)
+    monkeypatch.setattr(provenance_module, "_read_agents", AsyncMock(return_value=[]))
+    monkeypatch.setattr(provenance_module, "_read_sessions", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        provenance_module, "_read_memory_graph_provenance", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(provenance_module, "_read_memory_relational", relational_reader)
+
+    await provenance_module.get_memory_provenance_graph(
+        include_memory=True, scope_dataset_ids=[uuid4()]
+    )
+
+    relational_reader.assert_awaited_once_with(dataset_ids=[])

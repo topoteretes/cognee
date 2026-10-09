@@ -1,7 +1,6 @@
 """Shared utilities for DLT ingestion."""
 
 import json
-from typing import Optional
 
 # A dlt source sets this attribute to opt into the "document" ingestion path:
 # each row becomes a text document that flows through normal cognify (LLM entity
@@ -11,14 +10,63 @@ from typing import Optional
 # own nature rather than the shared engine hard-coding connector names.
 DOCUMENT_SOURCE_ATTR = "cognee_document_source"
 
+# Opt-in namespace for connectors whose incremental state must survive
+# alternating destination datasets. Unrelated DLT sources keep their contract.
+PIPELINE_SCOPE_ATTR = "cognee_pipeline_scope"
 
-def document_source_tag(item) -> Optional[str]:
+
+def pipeline_name_for_source(source, dataset_name: str) -> str:
+    from hashlib import sha256
+
+    scope = getattr(source, PIPELINE_SCOPE_ATTR, None)
+    if not isinstance(scope, str) or not scope:
+        return "ingest_dlt_source"
+    digest = sha256(json.dumps([dataset_name, scope]).encode()).hexdigest()[:32]
+    return f"ingest_dlt_{digest}"
+
+
+# Community/cloud hosts can refuse unsafe older cores before ingestion starts.
+# Version 1 scopes cleanup by staging table and handles a confirmed empty table.
+# Version 2 reads the per-row node_set column (NODE_SET_COLUMN).
+DOCUMENT_SYNC_VERSION = 2
+
+# A document-mode row may carry its own node sets in this column, as a JSON
+# list of names (see resolve_dlt_sources._row_node_set). Every name is
+# namespaced under the source tag, so a row can never name one of cognee's
+# own node sets. The type hint is applied at load time so dlt stores the list
+# on the row as json instead of normalizing it into a child table.
+NODE_SET_COLUMN = "cognee_node_set"
+NODE_SET_COLUMN_HINT = {NODE_SET_COLUMN: {"data_type": "json", "nullable": True}}
+
+
+def guarded_rows(rows, check_active=None):
+    """Check authorization before each extraction step and before publishing it.
+
+    Hosts run extraction on a worker thread and supply a synchronous bridge to
+    their credential store. Standalone SDK sources need no such callback.
+    """
+    iterator = iter(rows)
+    while True:
+        if check_active is not None:
+            check_active()
+        try:
+            row = next(iterator)
+        except StopIteration:
+            if check_active is not None:
+                check_active()
+            return
+        if check_active is not None:
+            check_active()
+        yield row
+
+
+def document_source_tag(item) -> str | None:
     """Return the document-source tag a dlt source opted into, else ``None``."""
     tag = getattr(item, DOCUMENT_SOURCE_ATTR, None)
     return tag if isinstance(tag, str) and tag else None
 
 
-def metadata_source(metadata) -> Optional[str]:
+def metadata_source(metadata) -> str | None:
     """Extract the ``source`` field from system metadata.
 
     Accepts a dict, a JSON string, or an object with a ``system_metadata``
@@ -60,3 +108,14 @@ async def load_dlt_manifest(raw_data_location: str) -> dict:
 
     async with open_data_file(raw_data_location, mode="r", encoding="utf-8") as file:
         return json.loads(file.read())
+
+
+def column_selected(selection: dict | None, table_name: str, column: str) -> bool:
+    """Whether ``selection`` ({table: [column, ...]}, "*" wildcards on either side)
+    names this cell. A table named in the selection gets exactly its list — an
+    empty list means none for that table — and only an unnamed table takes the
+    wildcard. An empty or missing selection names nothing."""
+    if not selection:
+        return False
+    columns = selection[table_name] if table_name in selection else selection.get("*", [])
+    return "*" in columns or column in columns

@@ -11,8 +11,8 @@ from uuid import uuid4
 
 import pytest
 
-from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.chunking.text_chunker_with_overlap import TextChunkerWithOverlap
+from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.data.processing.document_types import Document
 from cognee.modules.retrieval.utils.references import format_chunk_references
 

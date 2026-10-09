@@ -1,11 +1,12 @@
 import sys
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from cognee.infrastructure.databases.cache.models import SessionQAEntry
-from cognee.tasks.memify.extract_user_sessions import extract_user_sessions
+import pytest
+
 from cognee.exceptions import CogneeSystemError
+from cognee.infrastructure.databases.cache.models import SessionQAEntry
 from cognee.modules.users.models import User
+from cognee.tasks.memify.extract_user_sessions import extract_user_sessions
 
 # Get the actual module object (not the function) for patching
 extract_user_sessions_module = sys.modules["cognee.tasks.memify.extract_user_sessions"]
@@ -78,6 +79,7 @@ async def test_extract_user_sessions_success(mock_user, mock_qa_data):
         assert sessions[0].session_id == "test_session"
         assert sessions[0].user_id == "test-user-123"
         assert sessions[0].persisted_qa_count == 2
+        assert sessions[0].last_entry_time == mock_qa_data[-1].time
         mock_session_manager.get_session.assert_called_once_with(
             user_id="test-user-123",
             session_id="test_session",
