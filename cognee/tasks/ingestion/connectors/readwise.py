@@ -47,3 +47,7 @@ def readwise_source(
         raise ImportError(
             "The Readwise connector requires dlt: pip install dlt"
         ) from e
+
+    token = token or os.environ.get("READWISE_ACCESS_TOKEN")
+    if not token:
+        raise ValueError("Readwise access token must be provided or set in READWISE_ACCESS_TOKEN environment variable")
