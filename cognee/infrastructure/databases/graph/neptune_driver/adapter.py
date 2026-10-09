@@ -1096,7 +1096,7 @@ class NeptuneGraphDB(GraphDBInterface):
             raise RuntimeError(f"Failed to get neighbors: {error_msg}") from e
 
     async def get_nodeset_subgraph(
-        self, node_type: type[Any], node_name: list[str]
+        self, node_type: type[Any], node_name: list[str], node_name_filter_operator: str = "OR"
     ) -> tuple[list[tuple[int, dict]], list[tuple[int, int, str, dict]]]:
         """
         Fetch a subgraph consisting of a specific set of nodes and their relationships.
@@ -1105,24 +1105,35 @@ class NeptuneGraphDB(GraphDBInterface):
         -----------
             - node_type (Type[Any]): The type of nodes to include in the subgraph.
             - node_name (List[str]): A list of names of the nodes to include in the subgraph.
+            - node_name_filter_operator (str): "OR" keeps neighbours of any named node,
+              "AND" only neighbours connected to every named node.
 
         Returns:
         --------
             - Tuple[List[Tuple[int, dict]], List[Tuple[int, int, str, dict]]]: A tuple containing nodes and edges of the subgraph.
         """
         try:
+            if node_name_filter_operator == "OR":
+                neighbours = f"""
+            OPTIONAL MATCH (p)-[r]-(nbr:{self._GRAPH_NODE_LABEL})
+            WITH primary, collect(DISTINCT nbr) AS nbrs"""
+            else:
+                neighbours = f"""
+            MATCH (p)-[r]-(nbr:{self._GRAPH_NODE_LABEL})
+            WITH primary, nbr, COUNT(DISTINCT p) AS matched_count
+            WHERE matched_count = size(primary)
+            WITH primary, collect(DISTINCT nbr) AS nbrs"""
+
             # Query to get nodes by name and their connected subgraph
             query = f"""
             UNWIND $names AS wantedName
             MATCH (n:{self._GRAPH_NODE_LABEL})
             WHERE n.name = wantedName AND n.type = $type
             WITH collect(DISTINCT n) AS primary
-            UNWIND primary AS p
-            OPTIONAL MATCH (p)-[r]-(nbr:{self._GRAPH_NODE_LABEL})
-            WITH primary, collect(DISTINCT nbr) AS nbrs, collect(DISTINCT r) AS rels
-            WITH primary + nbrs AS nodelist, rels
+            UNWIND primary AS p{neighbours}
+            WITH primary + nbrs AS nodelist
             UNWIND nodelist AS node
-            WITH collect(DISTINCT node) AS nodes, rels
+            WITH collect(DISTINCT node) AS nodes
             MATCH (a:{self._GRAPH_NODE_LABEL})-[r]-(b:{self._GRAPH_NODE_LABEL})
             WHERE a IN nodes AND b IN nodes
             WITH nodes, collect(DISTINCT r) AS all_rels
