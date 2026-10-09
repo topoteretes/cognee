@@ -22,3 +22,5 @@ import httpx
 from cognee.tasks.ingestion import dlt_utils
 
 logger = logging.getLogger(__name__)
+
+READWISE_API_URL = "https://readwise.io/api/v2"
