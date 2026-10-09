@@ -27,6 +27,7 @@ async def log_pipeline_run_error(
     data_info: Any = None,
     origin: str | None = None,
     parent_operation_id: UUID | None = None,
+    results: list | None = None,
 ):
     """Append the ERRORED row for a run.
 
@@ -38,7 +39,7 @@ async def log_pipeline_run_error(
     a live ``User`` model. When ``user`` is supplied, its identity takes precedence.
     """
     if data_info is None:
-        data_info = summarize_run_info_data(data)
+        data_info = summarize_run_info_data(data, results)
 
     pipeline_run = PipelineRun(
         pipeline_run_id=pipeline_run_id,
