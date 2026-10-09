@@ -30,6 +30,10 @@ Design
   reliably bump ``Issue.updatedAt``, so changed comments are read as their own
   stream and the parent issues are re-rendered. A comment that was deleted
   is not seen, because Linear hard-deletes them.
+* **Deletes.** Deleting an issue or project in Linear trashes it, which sets
+  ``trashed`` and ``archivedAt`` but leaves ``updatedAt`` alone. Two more
+  streams walk issues and projects by ``archivedAt`` and emit a trashed one as
+  an ``{id, _deleted: True}`` tombstone, so it is forgotten.
 * **A run is bounded and resumable.** On a rate limit, low remaining quota, a
   spent request budget or an expired token the source stops cleanly, keeps the
   state it reached and reports it in ``cognee_sync_stats`` (``failed_rate_limit``).
@@ -40,9 +44,10 @@ Design
   the client object only; errors carry codes, never response bodies.
 
 .. note::
-   Archived issues are included (Linear archives closed issues automatically);
-   trashed issues are skipped and stay in memory once ingested. Moving an issue
-   to another team leaves it in the old team's table.
+   Archived issues are included (Linear archives closed issues automatically).
+   Restoring an item from the trash does not bump ``updatedAt`` either, so it
+   comes back at its next edit. Moving an issue to another team leaves it in the
+   old team's table.
 
 Privacy
 -------
@@ -141,10 +146,37 @@ query LinearTeamProjects($teamId: String!, $filter: ProjectFilter, $first: Int!,
              includeArchived: $archived) {
       pageInfo { hasNextPage endCursor }
       nodes {
-        id name description content url startDate targetDate updatedAt
+        id name description content url startDate targetDate trashed updatedAt
         status { name }
         lead { name }
       }
+    }
+  }
+}
+"""
+
+# Trashing sets ``archivedAt`` and leaves ``updatedAt`` alone, and trashed items
+# are archived, so these always include archived items.
+_ARCHIVED_ISSUES_QUERY = """
+query LinearTeamArchivedIssues($teamId: String!, $filter: IssueFilter, $first: Int!,
+                               $after: String) {
+  team(id: $teamId) {
+    issues(filter: $filter, first: $first, after: $after, orderBy: updatedAt,
+           includeArchived: true) {
+      pageInfo { hasNextPage endCursor }
+      nodes { id trashed archivedAt }
+    }
+  }
+}
+"""
+
+# ProjectFilter has no archivedAt, so every project is listed and filtered here.
+_ARCHIVED_PROJECTS_QUERY = """
+query LinearTeamArchivedProjects($teamId: String!, $first: Int!, $after: String) {
+  team(id: $teamId) {
+    projects(first: $first, after: $after, orderBy: updatedAt, includeArchived: true) {
+      pageInfo { hasNextPage endCursor }
+      nodes { id trashed archivedAt }
     }
   }
 }
@@ -433,6 +465,7 @@ class _Walker:
         self.emitted_issue_ids: set[str] = set()
         # comment id -> updatedAt as rendered into an issue this run
         self.rendered_comments: dict[str, str] = {}
+        self.deleted_ids: set[str] = set()
 
     # -- requests ----------------------------------------------------------
     def _call(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
@@ -461,9 +494,17 @@ class _Walker:
 
     # -- one stream --------------------------------------------------------
     def _walk(
-        self, name: str, fetch: Callable[[dict, str | None], tuple[list, dict]]
+        self,
+        name: str,
+        fetch: Callable[[dict, str | None], tuple[list, dict]],
+        field: str = "updatedAt",
     ) -> Iterator[dict]:
-        """Yield a stream's changed nodes, newest first, resumable after a cut."""
+        """Yield a stream's nodes whose ``field`` changed, resumable after a cut.
+
+        Pages are sorted by ``updatedAt``, so only a walk by ``updatedAt`` keeps a
+        ceiling: the last stamp read bounds the rows not read yet. Any other walk
+        falls back to its floor when Linear refuses its resume cursor.
+        """
         stream = self.state.setdefault("streams", {}).setdefault(name, {})
         floor = stream.get("floor")
         at_floor = set(stream.get("at_floor") or [])
@@ -476,7 +517,7 @@ class _Walker:
             window["gte"] = floor
         if ceiling:
             window["lte"] = ceiling
-        filter_ = {"updatedAt": window} if window else {}
+        filter_ = {field: window} if window else {}
 
         # An unfinished walk resumes from the page cursor it stopped at, over the
         # exact filter it started with. Resuming by ceiling alone cannot get past
@@ -497,18 +538,19 @@ class _Walker:
                 if not (first_fetch and after):
                     raise
                 after = None
-                filter_ = {"updatedAt": window} if window else {}
+                filter_ = {field: window} if window else {}
                 stream.pop("resume_after", None)
                 stream.pop("resume_filter", None)
                 nodes, page_info = fetch(filter_, after)
             first_fetch = False
             for node in nodes:
-                stamp = str(node.get("updatedAt") or "")
+                stamp = str(node.get(field) or "")
                 if new_floor is None or stamp > new_floor:
                     new_floor, new_at = stamp, {node["id"]}
                 elif stamp == new_floor:
                     new_at.add(node["id"])
-                stream["ceiling"] = stamp
+                if field == "updatedAt":
+                    stream["ceiling"] = stamp
                 stream["next_floor"] = new_floor
                 stream["next_at"] = sorted(new_at)
                 if stamp == floor and node["id"] in at_floor:
@@ -587,6 +629,25 @@ class _Walker:
         connection = team.get("projects") or {}
         return connection.get("nodes") or [], connection.get("pageInfo") or {}
 
+    def _fetch_archived_issues(self, filter_: dict, after: str | None) -> tuple[list, dict]:
+        team = self._team_query(
+            _ARCHIVED_ISSUES_QUERY,
+            {"filter": filter_ or None, "first": self.page_size, "after": after},
+        )
+        connection = team.get("issues") or {}
+        return connection.get("nodes") or [], connection.get("pageInfo") or {}
+
+    def _fetch_archived_projects(self, filter_: dict, after: str | None) -> tuple[list, dict]:
+        team = self._team_query(_ARCHIVED_PROJECTS_QUERY, {"first": self.page_size, "after": after})
+        connection = team.get("projects") or {}
+        since = (filter_.get("archivedAt") or {}).get("gte", "")
+        nodes = [
+            node
+            for node in connection.get("nodes") or []
+            if node.get("archivedAt") and str(node["archivedAt"]) >= since
+        ]
+        return nodes, connection.get("pageInfo") or {}
+
     def _all_comments(self, issue: dict) -> list[dict]:
         connection = issue.get("comments") or {}
         comments = list(connection.get("nodes") or [])
@@ -609,10 +670,18 @@ class _Walker:
                 raise LinearAPIError("Linear pagination did not advance")
         return comments
 
-    def _issue_row(self, issue: dict) -> dict | None:
+    def _deleted_row(self, row_id: str) -> dict:
+        """A row that makes dlt hard-delete a trashed issue or project by id."""
+        self.emitted += 1
+        self.stats["deleted"] += 1
+        self.deleted_ids.add(row_id)
+        return {"id": row_id, "_deleted": True}
+
+    def _issue_row(self, issue: dict) -> dict:
         if issue.get("trashed"):
-            self.stats["skipped"] += 1
-            return None
+            # Deleting an issue trashes it. Its comments are not read: the
+            # tombstone drops the whole document.
+            return self._deleted_row(f"issue:{issue['id']}")
         self.emitted += 1
         self.emitted_issue_ids.add(issue["id"])
         comments = self._all_comments(issue)
@@ -625,17 +694,18 @@ class _Walker:
         # Projects are few and go first, so a team whose issues use the whole run
         # budget cannot starve them.
         for project in self._walk("projects", self._fetch_projects):
-            self.emitted += 1
-            yield render_project(project)
+            if project.get("trashed"):
+                yield self._deleted_row(f"project:{project['id']}")
+            else:
+                self.emitted += 1
+                yield render_project(project)
 
         # The first issue walk renders every comment that exists, so the comment
         # stream only needs what changed since this run began. The margin covers
         # clock skew; a re-read comment only re-renders an unchanged issue.
         self.state.setdefault("backfill_started", _stamp(time.time() - _CLOCK_MARGIN_SECONDS))
         for issue in self._walk("issues", self._fetch_issues):
-            row = self._issue_row(issue)
-            if row is not None:
-                yield row
+            yield self._issue_row(issue)
 
         comments_stream = self.state["streams"].setdefault("comments", {})
         if "floor" not in comments_stream and "ceiling" not in comments_stream:
@@ -650,7 +720,7 @@ class _Walker:
         pending = self.state.setdefault("pending_issue_ids", [])
         for comment in self._walk("comments", self._fetch_comments):
             issue_id = (comment.get("issue") or {}).get("id")
-            if not issue_id or issue_id in pending:
+            if not issue_id or issue_id in pending or f"issue:{issue_id}" in self.deleted_ids:
                 continue
             rendered = self.rendered_comments.get(comment["id"])
             if rendered is not None and rendered >= str(comment.get("updatedAt") or ""):
@@ -660,10 +730,26 @@ class _Walker:
             chunk = pending[:_DIRTY_CHUNK]
             nodes, _ = self._fetch_issues({"id": {"in": chunk}}, None, first=len(chunk))
             for issue in nodes:
-                row = self._issue_row(issue)
-                if row is not None:
-                    yield row
+                yield self._issue_row(issue)
             del pending[: len(chunk)]
+
+        # Trashing an issue or project sets archivedAt but not updatedAt, so the
+        # walks above do not see it. These walk what was archived since the run
+        # began, whatever include_archived says, and forget what is trashed.
+        # They go last so they never hold back the sync. While a backfill uses
+        # whole runs they wait, and their floor keeps what they have not read.
+        archived = (
+            ("archived_issues", self._fetch_archived_issues, "issue"),
+            ("archived_projects", self._fetch_archived_projects, "project"),
+        )
+        for name, fetch, kind in archived:
+            self.state["streams"].setdefault(name, {}).setdefault(
+                "floor", self.state["backfill_started"]
+            )
+            for node in self._walk(name, fetch, field="archivedAt"):
+                row_id = f"{kind}:{node['id']}"
+                if node.get("trashed") and row_id not in self.deleted_ids:
+                    yield self._deleted_row(row_id)
 
 
 def _iter_rows(
@@ -727,7 +813,7 @@ def linear_source(
             injection point for tests and hosts.
         access_token: Used to build the client when ``service`` is omitted.
         include_archived: Include archived issues (Linear archives closed issues
-            automatically). Trashed issues are always skipped.
+            automatically). Trashed issues and projects are forgotten either way.
         page_size: Rows per page, at most 50: that is what keeps a page of issues
             with nested comments under Linear's 10,000-point query limit.
         max_requests: Request budget of one run. A bigger team finishes over
@@ -764,7 +850,7 @@ def linear_source(
     )
     def linear_team():
         stats.clear()
-        stats.update(scanned=0, skipped=0, failed=0)
+        stats.update(scanned=0, skipped=0, failed=0, deleted=0)
         yield from _iter_rows(
             client,
             team_id,
