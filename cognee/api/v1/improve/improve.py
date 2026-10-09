@@ -279,26 +279,38 @@ async def improve(
                 # Lock order: dataset lock, then the session claim, then (in the
                 # probe and the stages) a dataset-queue slot. The stages' own
                 # pipeline runs re-enter the dataset lock this task holds.
-                async with dataset_lock(inputs.dataset_id):
-                    await acquire_improve_lock_many(lock_keys)
-                    # The claim is owned here until execute_stages' finally
-                    # takes it over; the probe awaits real engine setup, so a
-                    # raise or a cancellation before then must release it.
-                    try:
-                        # Probed only once both are held: the probe leases the
-                        # graph engine, which a queued run must not hold while
-                        # it waits.
-                        claimed = inputs.with_capabilities(
-                            await resolve_graph_capabilities(
-                                inputs.dataset_id, getattr(inputs.dataset, "owner_id", None)
+                try:
+                    async with dataset_lock(inputs.dataset_id):
+                        await acquire_improve_lock_many(lock_keys)
+                        # The claim is owned here until execute_stages' finally
+                        # takes it over; the probe awaits real engine setup, so a
+                        # raise or a cancellation before then must release it.
+                        try:
+                            # Probed only once both are held: the probe leases the
+                            # graph engine, which a queued run must not hold while
+                            # it waits.
+                            claimed = inputs.with_capabilities(
+                                await resolve_graph_capabilities(
+                                    inputs.dataset_id, getattr(inputs.dataset, "owner_id", None)
+                                )
                             )
-                        )
-                    except BaseException:
-                        await release_improve_lock_many(lock_keys)
-                        raise
-                    # Awaiting the coroutine enters execute_stages synchronously
-                    # up to its try, so its finally owns the release from here.
-                    await execute_stages(claimed, result, lock_keys, operation)
+                        except BaseException:
+                            await release_improve_lock_many(lock_keys)
+                            raise
+                        # Awaiting the coroutine enters execute_stages synchronously
+                        # up to its try, so its finally owns the release from here.
+                        await execute_stages(claimed, result, lock_keys, operation)
+                except BaseException as exc:
+                    # The wait for the locks and the probe run before
+                    # execute_stages exists, so its finally cannot mark the
+                    # result for them. Without this, a probe failure or a
+                    # cancellation while queued leaves ``result`` saying
+                    # "running" forever to whoever holds it (background mode
+                    # hands it out before this task runs).
+                    if not result.finished:
+                        result.error = _pre_stage_error_text(exc)
+                        result.finished = True
+                    raise
 
             if run_in_background:
                 operation.defer_close()
@@ -418,6 +430,19 @@ async def _resolve_inputs(
     )
 
 
+def _pre_stage_error_text(exc: BaseException) -> str:
+    """``ImproveResult.error`` for a run that ended before its first stage.
+
+    Covers the wait for the dataset lock and the session claim, and the
+    graph-capability probe. A ``CancelledError`` carries no message, so the
+    exception type is always named.
+    """
+    detail = str(exc)
+    return "improve run ended before its stages started: " + (
+        f"{type(exc).__name__}: {detail}" if detail else type(exc).__name__
+    )
+
+
 def _skip_stages(result: ImproveResult, stages: Sequence[BaseStage], reason: str) -> None:
     """Record every stage in ``stages`` as skipped with ``reason``, in order."""
     for stage in stages:
@@ -482,19 +507,20 @@ def _abort_run(
 
 
 async def _run_detached(execute: Coroutine[Any, Any, None], operation: Any) -> None:
-    """Await the stage execution where a fatal stage has nowhere to raise.
+    """Await the claimed run where a failure has nowhere to raise.
 
-    The failure is logged and already on ``result.error`` for whoever awaits
-    ``result.wait()``. The deferred row close in ``finally`` is unconditional:
-    even a cancelled run records ``failed: CancelledError`` — with the close
-    deferred, skipping it would leave the run with no row at all.
+    A fatal stage, or a failure before the stages (the lock wait, the
+    capability probe), is logged and already on ``result.error`` for whoever
+    awaits ``result.wait()``. The deferred row close in ``finally`` is
+    unconditional: even a cancelled run records ``failed: CancelledError`` —
+    with the close deferred, skipping it would leave the run with no row at all.
     """
     error: BaseException | None = None
     try:
         await execute
     except Exception as caught:
         error = caught
-        logger.warning("improve: background run aborted by fatal stage: %s", caught, exc_info=True)
+        logger.warning("improve: background run failed: %s", caught, exc_info=True)
     except BaseException as caught:
         error = caught
         raise

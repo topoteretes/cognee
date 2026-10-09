@@ -655,6 +655,66 @@ async def test_cancellation_during_the_probe_releases_the_lock(harness):
     assert retry.status == "completed"
 
 
+@pytest.mark.asyncio
+async def test_background_probe_failure_finishes_the_result_as_errored(harness):
+    """The probe runs inside the detached task, before execute_stages' finally
+    exists. Its failure must still finish the result the caller already holds,
+    or ``status`` says "running" forever with nothing to explain it."""
+    harness.use_stages([FakeStage("a")])
+
+    async def failing_probe(_dataset_id, _owner_id):
+        raise RuntimeError("engine unavailable")
+
+    harness.monkeypatch.setattr(harness.improve_mod, "resolve_graph_capabilities", failing_probe)
+
+    result = await harness.improve(run_in_background=True)
+    await result.wait()
+
+    assert result._task.done()
+    assert result.finished
+    assert result.status == "errored"
+    assert "RuntimeError: engine unavailable" in result.error
+    assert result.stages == []
+    assert isinstance(harness.finish_calls[0]["error"], RuntimeError)
+    assert await _dataset_lock_is_free(harness)
+
+
+@pytest.mark.asyncio
+async def test_background_run_cancelled_while_queued_finishes_the_result(harness):
+    """A background run waits for the dataset lock inside its task. Cancelled
+    there, it never reaches execute_stages, so the result must be finished by
+    the wait itself — and the holder must be untouched."""
+    gate = asyncio.Event()
+    calls = []
+
+    async def slow_stage(_inputs):
+        await gate.wait()
+        return StageResult.completed("slow", items=1)
+
+    harness.use_stages([FakeStage("slow", run=slow_stage, calls=calls)])
+    holder = await harness.improve(session_ids=["chat_1"], run_in_background=True)
+    await asyncio.sleep(0)
+    queued = await harness.improve(session_ids=["chat_2"], run_in_background=True)
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert queued.status == "running"
+
+    queued._task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await queued._task
+
+    assert queued.finished
+    assert queued.status == "errored"
+    assert "CancelledError" in queued.error
+    assert queued.stages == []
+
+    gate.set()
+    await holder.wait()
+    assert holder.status == "completed"
+    assert calls == ["slow"]
+    assert await _dataset_lock_is_free(harness)
+
+
 def _stamped_stage(name: str, stamp: dict) -> FakeStage:
     def run(_inputs):
         result = StageResult.completed(name)
