@@ -60,7 +60,7 @@ from cognee.modules.observability import (
     COGNEE_SESSION_ID,
     new_span,
 )
-from cognee.modules.operations import finish_operation, record_operation
+from cognee.modules.operations import finish_operation, record_operation, scrub_error_message
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
 )
@@ -317,8 +317,7 @@ async def improve(
                 # ``operation`` is passed twice on purpose: execute_stages'
                 # finally sets the outcome from the finished stages, while
                 # _run_detached closes the deferred row even on cancellation.
-                task = asyncio.create_task(_run_detached(run_claimed(), operation))
-                result.attach_background_task(register_background_task(task))
+                result.attach_background_task(_start_background_run(run_claimed, result, operation))
                 return report(result)
 
             await run_claimed()
@@ -437,10 +436,11 @@ def _pre_stage_error_text(exc: BaseException) -> str:
     graph-capability probe. A ``CancelledError`` carries no message, so the
     exception type is always named.
     """
-    detail = str(exc)
-    return "improve run ended before its stages started: " + (
+    detail = scrub_error_message(exc)
+    message = "improve run ended before its stages started: " + (
         f"{type(exc).__name__}: {detail}" if detail else type(exc).__name__
     )
+    return scrub_error_message(message) or type(exc).__name__
 
 
 def _skip_stages(result: ImproveResult, stages: Sequence[BaseStage], reason: str) -> None:
@@ -504,6 +504,38 @@ def _abort_run(
         logger.debug("improve: could not attach partial result to %s", type(error).__name__)
 
     return error
+
+
+def _start_background_run(
+    execute: Callable[[], Coroutine[Any, Any, None]], result: ImproveResult, operation: Any
+) -> asyncio.Task:
+    """Launch a run and finalize even cancellation before its first task step.
+
+    Such a cancellation never enters the coroutine's ``finally``. The done
+    callback finishes the result and registers the deferred row close so
+    ``wait_for_background_tasks()`` also drains that write. Create the inner
+    coroutine only after the task starts, to avoid an unawaited coroutine.
+    """
+    started = False
+
+    async def run() -> None:
+        nonlocal started
+        started = True
+        await _run_detached(execute(), operation)
+
+    def finish_unstarted(task: asyncio.Task) -> None:
+        if started or not task.cancelled():
+            return
+        try:
+            task.exception()
+        except asyncio.CancelledError as error:
+            result.error = _pre_stage_error_text(error)
+            result.finished = True
+            register_background_task(asyncio.create_task(finish_operation(operation, error=error)))
+
+    task = asyncio.create_task(run())
+    task.add_done_callback(finish_unstarted)
+    return register_background_task(task)
 
 
 async def _run_detached(execute: Coroutine[Any, Any, None], operation: Any) -> None:
