@@ -29,6 +29,7 @@ are factored so that's a local change.
 import asyncio
 from collections.abc import AsyncGenerator, Iterable
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from typing import Any
 
 from cognee.shared.logging_utils import get_logger
@@ -119,6 +120,27 @@ _rerun_requested: set[str] = set()
 _improve_registry_lock = asyncio.Lock()
 
 
+@dataclass(frozen=True)
+class DeferredImproveRequest:
+    dataset: Any
+    session_ids: tuple[str, ...]
+    node_name: list[str] | None
+    feedback_alpha: float
+    build_global_context_index: bool
+    build_truth_subspace: bool
+    review_conflicts: bool
+    overrides: dict[str, Any]
+
+
+_deferred_improve_requests: dict[
+    tuple[str, str, tuple[str, ...]], DeferredImproveRequest
+] = {}
+_released_deferred_requests: dict[str, list[DeferredImproveRequest]] = {}
+
+_released_deferred_requests: dict[str, list[DeferredImproveRequest]] = {}
+
+
+
 async def try_acquire_improve_lock_many(keys: Iterable[str]) -> bool:
     """Atomically claim the improve-lock for every key in ``keys``, or none.
 
@@ -143,20 +165,83 @@ async def try_acquire_improve_lock_many(keys: Iterable[str]) -> bool:
         return True
 
 
-async def release_improve_lock_many(keys: Iterable[str]) -> None:
-    """Release every key claimed by ``try_acquire_improve_lock_many``.
+def _deferred_request_key(
+    request: DeferredImproveRequest,
+) -> tuple[str, str, tuple[str, ...]]:
+    user = request.overrides.get("user")
+    user_id = str(getattr(user, "id", user))
+    return f"dataset:{request.dataset}", user_id, request.session_ids
 
-    Not holder-scoped: it drops the keys whoever holds them, so a run must
-    release its claim exactly once — a second release after another run
-    re-claimed the keys would drop THAT run's claim. Unconditional about rerun
-    requests: one still pending on a key is left for the next claimant, whose
-    full pass covers it.
-    """
+
+async def defer_improve_request(
+    request: DeferredImproveRequest,
+    session_keys: Iterable[str],
+) -> bool:
+    dataset_key = f"dataset:{request.dataset}"
+    wanted_sessions = [key for key in session_keys if key]
+
+    async with _improve_registry_lock:
+        if dataset_key not in _improving_sessions:
+            return False
+
+        if any(key in _improving_sessions for key in wanted_sessions):
+            return False
+
+        _deferred_improve_requests[
+            _deferred_request_key(request)
+        ] = request
+        return True
+
+
+def _collect_deferred_for_keys(
+    keys: Iterable[str],
+) -> list[DeferredImproveRequest]:
+    wanted = set(keys)
+    deferred = []
+
+    for request_key, request in list(_deferred_improve_requests.items()):
+        if request_key[0] in wanted:
+            deferred.append(request)
+            _deferred_improve_requests.pop(request_key, None)
+
+    return deferred
+
+
+async def release_improve_lock_many(
+    keys: Iterable[str],
+) -> list[DeferredImproveRequest]:
     wanted = [key for key in keys if key]
+
     if not wanted:
-        return
+        return []
+
     async with _improve_registry_lock:
         _improving_sessions.difference_update(wanted)
+        return _collect_deferred_for_keys(wanted)
+
+
+async def release_or_rerun_or_collect_improve_lock_many(
+    keys: Iterable[str],
+    *,
+    rerun_keys: Iterable[str],
+) -> tuple[bool, list[DeferredImproveRequest]]:
+    wanted = [key for key in keys if key]
+    watched = [key for key in rerun_keys if key]
+
+    async with _improve_registry_lock:
+        pending = [
+            key
+            for key in watched
+            if key in _rerun_requested
+            and key in _improving_sessions
+        ]
+
+        if pending:
+            _rerun_requested.difference_update(pending)
+            return False, []
+
+        _improving_sessions.difference_update(wanted)
+        return True, _collect_deferred_for_keys(wanted)
 
 
 async def request_improve_rerun_many(keys: Iterable[str]) -> bool:
@@ -191,22 +276,30 @@ async def has_pending_improve_rerun(keys: Iterable[str]) -> bool:
 async def release_or_rerun_improve_lock_many(
     keys: Iterable[str], *, rerun_keys: Iterable[str]
 ) -> bool:
-    """Release every key — unless a rerun is pending on one of ``rerun_keys``.
+    """Release every key unless a rerun is pending.
 
-    One critical section decides both: when a request is pending on a
-    ``rerun_keys`` key we still hold, the request is consumed, EVERY key stays
-    claimed, and ``False`` says "run the stages once more". Otherwise all
-    ``keys`` are released and ``True`` is returned. Doing the check and the
-    release under the same registry lock means no request can land between
-    "checked" and "released" and be lost.
+    Deferred cross-session improve requests are transferred atomically with
+    the release so no queued request can be lost between checking and freeing
+    the dataset claim.
     """
     wanted = [key for key in keys if key]
     watched = [key for key in rerun_keys if key]
+
     async with _improve_registry_lock:
-        pending = [key for key in watched if key in _rerun_requested and key in _improving_sessions]
+        pending = [
+            key
+            for key in watched
+            if key in _rerun_requested and key in _improving_sessions
+        ]
+
         if pending:
             _rerun_requested.difference_update(pending)
             return False
+
+        deferred = _collect_deferred_for_keys(wanted)
+        if deferred and wanted:
+            _released_deferred_requests.setdefault(wanted[0], []).extend(deferred)
+
         _improving_sessions.difference_update(wanted)
         return True
 
@@ -227,3 +320,13 @@ def improve_lock_keys(
         f"session:{user_id}:{session_id}" for session_id in (session_ids or ()) if session_id
     )
     return (*sessions, f"dataset:{dataset_id}")
+
+
+async def pop_released_deferred_improves(
+    lock_keys: tuple[str, ...],
+) -> list[DeferredImproveRequest]:
+    async with _improve_registry_lock:
+        released = []
+        for key in lock_keys:
+            released.extend(_released_deferred_requests.pop(key, []))
+        return released

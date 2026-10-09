@@ -242,6 +242,7 @@ class ImproveResult(BaseModel):
     # ``rerun_passes`` holds one extra list of stage results per pass the
     # holder ran on request; ``stages`` stays the first pass.
     rerun_requested: bool = False
+    rerun_scheduled: bool = False
     rerun_passes: list[list[StageResult]] = Field(default_factory=list)
 
     _task: asyncio.Task | None = PrivateAttr(default=None)

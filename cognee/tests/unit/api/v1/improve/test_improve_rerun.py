@@ -74,6 +74,31 @@ async def test_lock_loser_on_a_session_requests_a_rerun_and_the_holder_runs_one_
 
 
 @pytest.mark.asyncio
+async def test_different_session_collision_is_scheduled_after_dataset_holder_releases(harness):
+    """A dataset collision from another session is retried after the holder releases."""
+    calls = []
+    holder, gate = await _start_holder(harness, calls, session_ids=["chat_1"])
+
+    loser = await harness.improve(session_ids=["chat_2"])
+
+    assert loser.lock_held
+    assert loser.rerun_requested is False
+    assert loser.rerun_scheduled is True
+    assert calls == ["slow"]
+
+    gate.set()
+    await holder.wait()
+
+    # The deferred session gets its own improve run after the dataset claim is free.
+    for _ in range(100):
+        if calls.count("slow") >= 2:
+            break
+        await asyncio.sleep(0)
+
+    assert calls.count("slow") == 2
+    assert calls.count("after") == 2
+
+@pytest.mark.asyncio
 async def test_dataset_only_collision_makes_no_rerun_request_and_no_extra_pass(harness):
     calls = []
     holder, gate = await _start_holder(harness, calls, session_ids=[])
