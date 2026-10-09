@@ -12,3 +12,8 @@ def test_readwise_get_headers():
     headers = _get_headers("my_token")
     assert headers["Authorization"] == "Token my_token"
     assert headers["Content-Type"] == "application/json"
+
+def test_readwise_source_tags():
+    from cognee.tasks.ingestion.dlt_utils import document_source_tag
+    source = readwise_source(token="my_test_token")
+    assert document_source_tag(source) == "readwise"
