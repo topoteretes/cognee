@@ -460,7 +460,7 @@ class SessionManager:
         else:
             # Feedback-only turn: nothing to answer, but we still record the exchange
             # (question + acknowledgement) so it stays in history and vector recall.
-            answer = acknowledgement_for_turn(turn_preparation.response_to_user)
+            answer = acknowledgement_for_turn()
             context_to_store = ""
             used_session_context_ids = None
             graph_elements = None
