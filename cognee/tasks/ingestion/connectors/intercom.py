@@ -53,3 +53,8 @@ def intercom_source(
     token = token or os.environ.get("INTERCOM_ACCESS_TOKEN")
     if not token:
         raise ValueError("Intercom access token must be provided or set in INTERCOM_ACCESS_TOKEN environment variable")
+
+    @dlt.resource(name=resource_name, write_disposition="merge", primary_key="id")
+    def intercom_contacts(last_updated_time: dlt.sources.incremental = dlt.sources.incremental("updated_at")) -> Iterator[dict]:  # noqa: B008
+        headers = _get_headers(token)
+        url = f"{INTERCOM_API_URL}/contacts"
