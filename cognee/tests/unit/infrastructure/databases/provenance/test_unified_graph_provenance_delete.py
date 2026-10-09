@@ -195,8 +195,19 @@ class FakeProvenanceGraphEngine:
 
     async def delete_nodes(self, node_ids):
         self._guard()
-        for node_id in node_ids:
+        # Mirror real graph backends: node deletion is a DETACHING delete
+        # (Neo4j ``DETACH DELETE``, Kuzu detach semantics), so every incident
+        # relationship disappears with the node. Modeling this here is what
+        # lets the suite catch planners that hard-delete an endpoint while a
+        # foreign-owned relationship is still attached to it.
+        removed = set(node_ids)
+        for node_id in removed:
             self.nodes.pop(node_id, None)  # idempotent
+        self.edges = {
+            edge: row
+            for edge, row in self.edges.items()
+            if edge.source_id not in removed and edge.target_id not in removed
+        }
 
     async def delete_edge_triples(self, edges):
         self._guard()
@@ -300,6 +311,19 @@ class FakeProvenanceGraphEngine:
             for e, row in self.edges.items()
         ]
         return nodes, edges
+
+    async def get_edges(self, node_id):
+        # Mirror the real adapters' incident-edge lookup (undirected match on
+        # either endpoint), returning the queried node first like Neo4j does.
+        return [
+            (
+                node_id,
+                e.target_id if e.source_id == node_id else e.source_id,
+                {"relationship_name": e.relationship_name},
+            )
+            for e in self.edges
+            if e.source_id == node_id or e.target_id == node_id
+        ]
 
     async def remove_belongs_to_set_tags(self, tags):
         self._guard()
@@ -656,6 +680,250 @@ async def test_orphaned_nodeset_tags_stripped_on_delete():
     assert "ns" not in graph.nodes
     assert getattr(graph, "removed_tags", []) == [["my_nodeset"]]
     assert vector.removed_tags == [["my_nodeset"]]
+
+
+# ---------------------------------------------------------------------------
+# Surviving-endpoint retention regressions (edge-first delete + get_edges check)
+# ---------------------------------------------------------------------------
+
+
+async def test_endpoint_with_foreign_edge_outside_matched_set_is_retained():
+    """A node unowned by the deleted ref must survive while a relationship the
+    deletion never matched (owned by a different ref) is still incident to it.
+
+    This is the exact detaching-delete corruption class: hard-deleting the node
+    would destroy the foreign-owned relationship."""
+    ref_a = make_source_ref_key(uuid4(), uuid4())
+    ref_b = make_source_ref_key(uuid4(), uuid4())
+    run = uuid4()
+
+    graph = FakeProvenanceGraphEngine()
+    graph.add_node("n_candidate", "Entity", ["name"], {"name": "candidate"})
+    graph.add_node("n_other", "Entity", ["name"], {"name": "other"})
+    foreign_edge = graph.add_edge("n_candidate", "n_other", "linked_to", "linked to")
+
+    await graph.attach_node_source_refs(["n_candidate"], [ref_a], run)
+    await graph.attach_node_source_refs(["n_other"], [ref_b], run)
+    await graph.attach_edge_source_refs([foreign_edge], [ref_b], run)
+
+    vector = FakeVectorEngine()
+    engine = _build_engine(graph, vector)
+
+    await engine.delete_by_source_ref(ref_a)
+
+    # The candidate node is retained as an endpoint of the foreign edge.
+    assert "n_candidate" in graph.nodes
+    assert graph.nodes["n_candidate"].source_ref_keys == []
+    assert graph.nodes["n_candidate"].source_run_refs == []
+    # The foreign-owned relationship survives with its ownership intact.
+    assert foreign_edge in graph.edges
+    assert graph.edges[foreign_edge].source_ref_keys == [ref_b]
+    # The retained node keeps its vector (it still exists in the graph).
+    assert all(ids != ["n_candidate"] for _, ids in vector.deleted)
+
+
+async def test_endpoint_of_shared_detached_edge_is_retained():
+    """A node unowned by the deleted ref survives when a shared edge (detached
+    of the ref, still foreign-owned) remains incident to it."""
+    ref_a = make_source_ref_key(uuid4(), uuid4())
+    ref_b = make_source_ref_key(uuid4(), uuid4())
+    run = uuid4()
+
+    graph = FakeProvenanceGraphEngine()
+    graph.add_node("n_candidate", "Entity", ["name"], {"name": "candidate"})
+    graph.add_node("n_other", "Entity", ["name"], {"name": "other"})
+    shared_edge = graph.add_edge("n_candidate", "n_other", "linked_to", "linked to")
+
+    await graph.attach_node_source_refs(["n_candidate"], [ref_a], run)
+    await graph.attach_node_source_refs(["n_other"], [ref_a, ref_b], run)
+    await graph.attach_edge_source_refs([shared_edge], [ref_a, ref_b], run)
+
+    vector = FakeVectorEngine()
+    engine = _build_engine(graph, vector)
+
+    await engine.delete_by_source_ref(ref_a)
+
+    assert shared_edge in graph.edges
+    assert graph.edges[shared_edge].source_ref_keys == [ref_b]
+    assert "n_candidate" in graph.nodes
+    assert graph.nodes["n_candidate"].source_ref_keys == []
+    assert "n_other" in graph.nodes
+    assert graph.nodes["n_other"].source_ref_keys == [ref_b]
+
+
+async def test_fully_unowned_component_is_deleted_edge_first():
+    """When node and incident edges are all unowned, everything is deleted and
+    the node passes the retention check (no incident edges remain)."""
+    ref = make_source_ref_key(uuid4(), uuid4())
+    run = uuid4()
+
+    graph = FakeProvenanceGraphEngine()
+    graph.add_node("n1", "Entity", ["name"], {"name": "a"})
+    graph.add_node("n2", "Entity", ["name"], {"name": "b"})
+    edge = graph.add_edge("n1", "n2", "linked_to", "linked to")
+
+    await graph.attach_node_source_refs(["n1", "n2"], [ref], run)
+    await graph.attach_edge_source_refs([edge], [ref], run)
+
+    vector = FakeVectorEngine()
+    engine = _build_engine(graph, vector)
+
+    await engine.delete_by_source_ref(ref)
+
+    assert graph.nodes == {}
+    assert graph.edges == {}
+    assert ("Entity_name", ["n1", "n2"]) in vector.deleted or (
+        ("Entity_name", ["n1"]) in vector.deleted and ("Entity_name", ["n2"]) in vector.deleted
+    )
+
+
+async def test_repeated_delete_is_idempotent_and_retained_node_stays():
+    """A second delete of the same ref is a no-op; the retained endpoint is not
+    rediscovered (its refs are gone) and is not deleted later."""
+    ref_a = make_source_ref_key(uuid4(), uuid4())
+    ref_b = make_source_ref_key(uuid4(), uuid4())
+    run = uuid4()
+
+    graph = FakeProvenanceGraphEngine()
+    graph.add_node("n_candidate", "Entity", ["name"], {"name": "candidate"})
+    graph.add_node("n_other", "Entity", ["name"], {"name": "other"})
+    foreign_edge = graph.add_edge("n_candidate", "n_other", "linked_to", "linked to")
+
+    await graph.attach_node_source_refs(["n_candidate"], [ref_a], run)
+    await graph.attach_node_source_refs(["n_other"], [ref_b], run)
+    await graph.attach_edge_source_refs([foreign_edge], [ref_b], run)
+
+    vector = FakeVectorEngine()
+    engine = _build_engine(graph, vector)
+
+    await engine.delete_by_source_ref(ref_a)
+    assert await graph.find_nodes_by_source_ref(ref_a) == []
+
+    snapshot_nodes = {nid: list(n.source_ref_keys) for nid, n in graph.nodes.items()}
+    snapshot_edges = {e: list(r.source_ref_keys) for e, r in graph.edges.items()}
+    deleted_before = list(vector.deleted)
+
+    await engine.delete_by_source_ref(ref_a)
+
+    assert {nid: list(n.source_ref_keys) for nid, n in graph.nodes.items()} == snapshot_nodes
+    assert {e: list(r.source_ref_keys) for e, r in graph.edges.items()} == snapshot_edges
+    assert vector.deleted == deleted_before
+
+
+async def test_retention_is_order_dependent_and_both_orders_preserve_foreign_ownership():
+    """Node A owned by ref_1; edge A->B owned by ref_2. Deleting ref_1 first
+    retains A (the ref_2 edge still needs its endpoint); deleting ref_2 first
+    removes the edge, so A is isolated and deleted afterwards. Neither order may
+    ever lose foreign-owned artifacts prematurely."""
+    ref_1 = make_source_ref_key(uuid4(), uuid4())
+    ref_2 = make_source_ref_key(uuid4(), uuid4())
+    run = uuid4()
+
+    def build():
+        graph = FakeProvenanceGraphEngine()
+        graph.add_node("a", "Entity", ["name"], {"name": "a"})
+        graph.add_node("b", "Entity", ["name"], {"name": "b"})
+        return graph, graph.add_edge("a", "b", "linked_to", "linked to")
+
+    # Order 1: ref_1 then ref_2.
+    graph, edge = build()
+    await graph.attach_node_source_refs(["a"], [ref_1], run)
+    await graph.attach_node_source_refs(["b"], [ref_2], run)
+    await graph.attach_edge_source_refs([edge], [ref_2], run)
+    engine = _build_engine(graph, FakeVectorEngine())
+
+    await engine.delete_by_source_ref(ref_1)
+    assert "a" in graph.nodes  # retained: ref_2 edge still incident
+    assert edge in graph.edges
+    await engine.delete_by_source_ref(ref_2)
+    assert edge not in graph.edges
+    assert "b" not in graph.nodes
+    # "a" became provenance-empty at ref_1 time and is never matched again.
+    assert "a" in graph.nodes
+    assert graph.nodes["a"].source_ref_keys == []
+
+    # Order 2: ref_2 then ref_1.
+    graph, edge = build()
+    await graph.attach_node_source_refs(["a"], [ref_1], run)
+    await graph.attach_node_source_refs(["b"], [ref_2], run)
+    await graph.attach_edge_source_refs([edge], [ref_2], run)
+    engine = _build_engine(graph, FakeVectorEngine())
+
+    await engine.delete_by_source_ref(ref_2)
+    assert edge not in graph.edges
+    assert "b" not in graph.nodes
+    assert "a" in graph.nodes  # still owned by ref_1
+    assert graph.nodes["a"].source_ref_keys == [ref_1]
+    await engine.delete_by_source_ref(ref_1)
+    assert "a" not in graph.nodes  # isolated and unowned -> deleted
+
+
+async def test_crash_between_edge_delete_and_node_delete_converges_on_retry():
+    """A failure after the edge hard-delete leaves the unowned node with its
+    refs (rediscoverable); the retry converges to the exact final state."""
+    ref = make_source_ref_key(uuid4(), uuid4())
+    run = uuid4()
+
+    class FailOnceDeleteNodes(FakeProvenanceGraphEngine):
+        def __init__(self):
+            super().__init__()
+            self._fail_delete_nodes = True
+
+        async def delete_nodes(self, node_ids):
+            if self._fail_delete_nodes:
+                self._fail_delete_nodes = False
+                raise RuntimeError("injected delete_nodes failure")
+            await super().delete_nodes(node_ids)
+
+    graph = FailOnceDeleteNodes()
+    graph.add_node("n1", "Entity", ["name"], {"name": "a"})
+    graph.add_node("n2", "Entity", ["name"], {"name": "b"})
+    edge = graph.add_edge("n1", "n2", "linked_to", "linked to")
+
+    await graph.attach_node_source_refs(["n1", "n2"], [ref], run)
+    await graph.attach_edge_source_refs([edge], [ref], run)
+
+    vector = FakeVectorEngine()
+    engine = _build_engine(graph, vector)
+
+    with pytest.raises(RuntimeError, match="injected delete_nodes failure"):
+        await engine.delete_by_source_ref(ref)
+
+    # The unowned edge is already gone (edge-first), but both nodes still carry
+    # their refs and stay rediscoverable for the retry.
+    assert edge not in graph.edges
+    assert await graph.find_nodes_by_source_ref(ref) == ["n1", "n2"]
+
+    await engine.delete_by_source_ref(ref)
+    assert graph.nodes == {}
+    assert graph.edges == {}
+
+
+async def test_retained_nodeset_keeps_its_tag():
+    """A NodeSet retained as a surviving endpoint must not have its tag
+    stripped from other artifacts — tag cleanup applies to deleted nodes only."""
+    ref_a = make_source_ref_key(uuid4(), uuid4())
+    ref_b = make_source_ref_key(uuid4(), uuid4())
+    run = uuid4()
+
+    graph = FakeProvenanceGraphEngine()
+    graph.add_node("ns", "NodeSet", ["name"], {"name": "my_nodeset"})
+    graph.add_node("member", "Entity", ["name"], {"name": "member"})
+    membership = graph.add_edge("member", "ns", "belongs_to", "belongs to")
+
+    await graph.attach_node_source_refs(["ns"], [ref_a], run)
+    await graph.attach_node_source_refs(["member"], [ref_b], run)
+    await graph.attach_edge_source_refs([membership], [ref_b], run)
+
+    vector = FakeVectorEngine()
+    engine = _build_engine(graph, vector)
+
+    await engine.delete_by_source_ref(ref_a)
+
+    assert "ns" in graph.nodes  # retained endpoint of the foreign membership edge
+    assert membership in graph.edges
+    assert getattr(graph, "removed_tags", []) == []
+    assert vector.removed_tags == []
 
 
 # Sanity: the parseable-ref helpers used by the fakes agree with the contract.
