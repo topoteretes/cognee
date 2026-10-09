@@ -26,6 +26,10 @@ from fastapi_users.jwt import decode_jwt, generate_jwt
 from fastapi_users.manager import BaseUserManager
 from pydantic import SecretStr
 
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
+
 PASSWORD_FINGERPRINT_CLAIM = "pwd"
 
 
@@ -60,8 +64,15 @@ class PasswordBoundJWTStrategy(JWTStrategy[models.UP, models.ID]):
             return None
 
         user_id = data.get("sub")
+        if user_id is None:
+            return None
         fingerprint = data.get(PASSWORD_FINGERPRINT_CLAIM)
-        if user_id is None or not isinstance(fingerprint, str):
+        if not isinstance(fingerprint, str):
+            logger.info(
+                "Rejected a token for user %s: it has no password fingerprint "
+                "(issued before session revocation was introduced).",
+                user_id,
+            )
             return None
 
         try:
@@ -71,5 +82,9 @@ class PasswordBoundJWTStrategy(JWTStrategy[models.UP, models.ID]):
 
         expected = self._password_fingerprint(user.hashed_password)
         if not hmac.compare_digest(fingerprint, expected):
+            logger.info(
+                "Rejected a token for user %s: the password changed after it was issued.",
+                user.id,
+            )
             return None
         return user
