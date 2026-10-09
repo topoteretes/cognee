@@ -170,7 +170,9 @@ async def add(
               re-deriving ids from content. They do not line up with the inputs:
               a directory yields one id per file, and duplicates and items that
               failed are left out. ``None`` with ``run_in_background=True``,
-              since the items are not stored yet when ``add()`` returns
+              since the items are not stored yet when ``add()`` returns. Empty
+              with ``incremental_loading=False``: that mode re-processes every
+              input without looking up its data item, so no ids are recorded
             - Execution timestamps and metadata
 
     Next Steps:
