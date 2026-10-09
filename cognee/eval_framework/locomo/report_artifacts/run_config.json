@@ -1,0 +1,53 @@
+{
+  "benchmark": "LoCoMo-10 (snap-research/locomo, data/locomo10.json)",
+  "dataset_sha256": "79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4",
+  "conversations": 10,
+  "questions": 1986,
+  "runs": 1,
+  "ingestion": {
+    "date": "2026-10-07",
+    "api": "remember() = add + cognify + improve, one call per conversation",
+    "documents": "overview + one document per window of 6 consecutive turns, each with a dated session header",
+    "window_turns": 6,
+    "chunk_size": 4096,
+    "llm": "openai/gpt-5-mini",
+    "embeddings": "openai/text-embedding-3-large"
+  },
+  "retrieval": {
+    "config": "configs/locomo_hybrid_20_20_20.json",
+    "retriever": "hybrid_completion",
+    "chunks_top_k": 20,
+    "entities_top_k": 20,
+    "facts_top_k": 20,
+    "max_edges_per_entity": 10
+  },
+  "answering": {
+    "date": "2026-10-09",
+    "model": "openai/gpt-5-mini",
+    "reasoning_effort": "model default",
+    "prompt": "qa_prompts/unified.txt",
+    "prompt_sha256": "5c340b1a10cabd22142dc311f932ba2a16042c44eac62be2305da20317844c60",
+    "same_prompt_for_every_question": true,
+    "category_label_used": false
+  },
+  "judge": {
+    "model": "openai/gpt-5.1",
+    "reasoning_effort": "medium",
+    "max_completion_tokens": 6000,
+    "system_prompt": "You are a strict but fair grader. Reply with JSON only.",
+    "prompt": "prompts/locomo_judge_prompt.txt",
+    "prompt_sha256": "3595726c99dbdd52ba61606c89d4fbf7cafa3a48dd4971a9f7b9e076e4435cb0"
+  },
+  "environment": {
+    "CACHING": "true",
+    "AUTO_FEEDBACK": "false",
+    "ENABLE_BACKEND_ACCESS_CONTROL": "false"
+  },
+  "stack": {
+    "cognee": "1.5.4",
+    "graph": "Ladybug 0.19.0",
+    "vector": "LanceDB 0.38.0",
+    "relational": "SQLite",
+    "litellm": "1.96.2"
+  }
+}

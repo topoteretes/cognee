@@ -117,7 +117,8 @@ def build_answer_record(
         "run_idx": run_idx,
     }
 
-    for optional_key in ("rubric", "difficulty", "golden_context"):
+    # adversarial_answer: the distractor LoCoMo's judge must reject on unanswerable questions.
+    for optional_key in ("rubric", "difficulty", "golden_context", "adversarial_answer"):
         if optional_key in question:
             answer[optional_key] = question[optional_key]
 
