@@ -174,6 +174,37 @@ class TestRejections:
                 }
             )
 
+    @pytest.mark.parametrize(
+        "field_schema, match",
+        [
+            ({"enum": 5}, "enum"),
+            ({"enum": "abc"}, "enum"),
+            ({"type": {}}, "type"),
+            ({"type": [{}]}, "type"),
+            ({"$ref": 5}, r"\$ref"),
+        ],
+    )
+    def test_malformed_keyword_value(self, field_schema, match):
+        with pytest.raises(CogneeValidationError, match=match):
+            model_from_json_schema({"type": "object", "properties": {"value": field_schema}})
+
+    @pytest.mark.parametrize("required", [5, "value", [5]])
+    def test_malformed_required(self, required):
+        with pytest.raises(CogneeValidationError, match="required"):
+            model_from_json_schema(
+                {
+                    "type": "object",
+                    "properties": {"value": {"type": "string"}},
+                    "required": required,
+                }
+            )
+
+    def test_non_string_title_falls_back_to_default_name(self):
+        rebuilt = model_from_json_schema(
+            {"type": "object", "title": 5, "properties": {"value": {"type": "string"}}}
+        )
+        assert rebuilt.__name__ == "ResponseModel"
+
 
 class TestUnions:
     def test_single_member_any_of_collapses_to_that_type(self):

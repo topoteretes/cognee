@@ -635,3 +635,26 @@ class TestRecallPermissionDenied:
         assert resp.status_code == 403
         assert "no access" in resp.text
         assert "cognify" not in resp.text.lower()
+
+
+class TestRecallResponseSchema:
+    def test_malformed_response_schema_returns_422_without_running_recall(
+        self, client, monkeypatch
+    ):
+        """A malformed response_schema is rejected before the recall pipeline starts,
+        as a 422 rather than a raw TypeError surfacing as a 500 (#4418)."""
+        recall_pkg = importlib.import_module("cognee.api.v1.recall")
+        recall_mock = AsyncMock(return_value=[])
+        monkeypatch.setattr(recall_pkg, "recall", recall_mock)
+
+        resp = client.post(
+            "/recall",
+            json={
+                "query": "q",
+                "response_schema": {"type": "object", "properties": {"value": {"anyOf": []}}},
+            },
+        )
+
+        assert resp.status_code == 422
+        assert "anyOf" in resp.text
+        recall_mock.assert_not_called()

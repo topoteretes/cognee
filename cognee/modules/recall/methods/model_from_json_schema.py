@@ -51,7 +51,9 @@ class _Budget:
             raise _fail(f"more than {_MAX_TOTAL_PROPERTIES} properties in total")
 
 
-def _resolve_ref(ref: str, defs: dict) -> tuple[str, dict]:
+def _resolve_ref(ref: Any, defs: dict) -> tuple[str, dict]:
+    if not isinstance(ref, str):
+        raise _fail("'$ref' must be a string")
     for prefix in ("#/$defs/", "#/definitions/"):
         if ref.startswith(prefix):
             name = ref[len(prefix) :]
@@ -88,8 +90,12 @@ def _type_from(
 
     if "enum" in schema:
         values = schema["enum"]
-        if not values or not all(isinstance(v, (str, int, bool)) for v in values):
-            raise _fail("enum values must be non-empty strings, integers, or booleans")
+        if (
+            not isinstance(values, list)
+            or not values
+            or not all(isinstance(v, (str, int, bool)) for v in values)
+        ):
+            raise _fail("'enum' must be a non-empty list of strings, integers, or booleans")
         return Literal[tuple(values)]
 
     if "anyOf" in schema:
@@ -102,8 +108,10 @@ def _type_from(
         return Union[tuple(members)]
 
     schema_type = schema.get("type")
+    if schema_type is not None and not isinstance(schema_type, (str, list)):
+        raise _fail("'type' must be a type name or a list of type names")
     if isinstance(schema_type, list):
-        if not schema_type:
+        if not schema_type or not all(isinstance(single, str) for single in schema_type):
             raise _fail("'type' must be a non-empty list of type names")
         members = [
             _type_from({**schema, "type": single}, defs, depth + 1, in_flight_refs, budget)
@@ -139,7 +147,10 @@ def _build_object(
         raise _fail("object schemas must declare non-empty 'properties'")
     budget.spend(len(properties))
 
-    required = set(schema.get("required", []))
+    required = schema.get("required", [])
+    if not isinstance(required, list) or not all(isinstance(name, str) for name in required):
+        raise _fail("'required' must be a list of property names")
+    required = set(required)
     fields: dict[str, tuple[Any, Any]] = {}
     for field_name, field_schema in properties.items():
         if not field_name.isidentifier():
@@ -151,7 +162,9 @@ def _build_object(
             fields[field_name] = (Optional[annotation], None)
 
     raw_name = schema.get("title") or fallback_name
-    model_name = raw_name if raw_name.isidentifier() else fallback_name
+    model_name = (
+        raw_name if isinstance(raw_name, str) and raw_name.isidentifier() else fallback_name
+    )
     return create_model(model_name, **fields)
 
 
