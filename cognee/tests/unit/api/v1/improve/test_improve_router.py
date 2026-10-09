@@ -186,10 +186,14 @@ def test_background_run_reports_running_with_no_stages(client, monkeypatch):
     assert body["stages"] == []
 
 
-def test_lost_lock_is_every_stage_skipped(client, monkeypatch):
+def test_an_all_skipped_run_is_reported_as_skipped(client, monkeypatch):
     improve_pkg = importlib.import_module("cognee.api.v1.improve")
-    result = ImproveResult.all_skipped(
-        ["feedback_weights", "triplet_enrichment"], "lock_held", dataset_name="docs"
+    result = ImproveResult(
+        dataset_name="docs",
+        stages=[
+            StageResult.skipped("feedback_weights", "no_session_ids"),
+            StageResult.skipped("triplet_enrichment", "no_session_ids"),
+        ],
     )
     monkeypatch.setattr(improve_pkg, "improve", AsyncMock(return_value=result))
 
@@ -198,7 +202,7 @@ def test_lost_lock_is_every_stage_skipped(client, monkeypatch):
     body = resp.json()
     assert resp.status_code == 200
     assert body["status"] == "skipped"
-    assert {stage["reason"] for stage in body["stages"]} == {"lock_held"}
+    assert {stage["reason"] for stage in body["stages"]} == {"no_session_ids"}
 
 
 def test_unexpected_error_is_a_generic_409(client, monkeypatch):

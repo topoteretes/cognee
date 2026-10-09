@@ -162,11 +162,17 @@ class TestExecute:
         assert echoed[-1] == "Improvement started in background!"
         assert len(echoed) == 2
 
-    def test_lost_lock_is_explained(self):
-        result = ImproveResult.all_skipped(["feedback_weights", "triplet_enrichment"], "lock_held")
+    def test_an_all_skipped_run_is_explained(self):
+        result = ImproveResult(
+            stages=[
+                StageResult.skipped("feedback_weights", "no_session_ids"),
+                StageResult.skipped("triplet_enrichment", "no_session_ids"),
+            ]
+        )
         _, echoed = self._execute(_parse(), result)
 
-        assert any("lock_held" in line for line in echoed)
+        assert any("Nothing to improve" in line for line in echoed)
+        assert any("no_session_ids" in line for line in echoed)
         assert not any("successfully" in line for line in echoed)
 
     def test_failure_becomes_a_cli_error(self):

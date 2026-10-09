@@ -316,26 +316,6 @@ async def _add_to_session(session_id: str, data, user):
     logger.info("remember: added entry to session '%s'", session_id)
 
 
-async def _rearm_session_improve_debounce(session_id: str, user) -> None:
-    """Refund the debounce window a lock-held bridge spent without persisting."""
-    from cognee.api.v1.remember.auto_improve_debounce import (
-        debounce_active,
-        rearm_auto_improve_debounce,
-    )
-
-    if not debounce_active():
-        return
-    user_id = str(user.id) if user is not None and hasattr(user, "id") else None
-    if not user_id:
-        return
-
-    from cognee.infrastructure.session.get_session_manager import get_session_manager
-
-    sm = get_session_manager()
-    if sm.is_available:
-        await rearm_auto_improve_debounce(sm, user_id, session_id)
-
-
 async def _session_improve_due(session_id: str, user) -> bool:
     """Apply the auto-improve debounce (B6) and advance its watermark when firing.
 
@@ -1933,26 +1913,6 @@ async def _remember_inner(
                             logger.warning(
                                 "remember: session improve reported errors (non-fatal): %s",
                                 result.improve_error,
-                            )
-                        elif result.improve.lock_held and result.improve.rerun_requested:
-                            # The holder of this session runs one more pass
-                            # before releasing, so this entry is bridged by it;
-                            # the debounce window stands.
-                            logger.info(
-                                "remember: session '%s' bridge deferred to the in-flight "
-                                "improve, which runs one more pass",
-                                session_id,
-                            )
-                        elif result.improve.lock_held:
-                            # Nothing was persisted — never log this as bridged.
-                            # Refund the debounce window so the next remember()
-                            # retries instead of waiting out a window this
-                            # bridge never used.
-                            await _rearm_session_improve_debounce(session_id, user)
-                            logger.info(
-                                "remember: session '%s' bridge skipped, another improve "
-                                "holds the lock; the next remember() retries",
-                                session_id,
                             )
                         else:
                             logger.info(
