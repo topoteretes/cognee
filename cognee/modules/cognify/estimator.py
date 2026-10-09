@@ -33,6 +33,7 @@ from pydantic import BaseModel
 from cognee.infrastructure.llm.config import get_llm_config
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
+from cognee.infrastructure.llm.utils import get_llm_tokenizer
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.cognify.config import get_cognify_config
@@ -178,16 +179,6 @@ class DryRunEstimate:
         return "\n".join(lines)
 
 
-def _llm_tokenizer() -> TikTokenTokenizer:
-    model = get_llm_config().llm_model.split("/", 1)[-1]
-    try:
-        return TikTokenTokenizer(model=model)
-    except Exception:
-        # Model unknown to tiktoken — fall back to its default encoding.
-        logger.debug("Falling back after error in _llm_tokenizer", exc_info=True)
-        return TikTokenTokenizer(model=None)
-
-
 def _count_tokens(text: str, tokenizer: TikTokenTokenizer) -> int:
     return tokenizer.count_tokens(text) if text else 0
 
@@ -238,7 +229,7 @@ def estimate_chunks(
     before any document is read, and reports them via ``skipped_dlt_chunks``
     and ``skipped_code_items``.
     """
-    tokenizer = _llm_tokenizer()
+    tokenizer = get_llm_tokenizer()
     model = get_llm_config().llm_model
     cognify_config = get_cognify_config()
     summarization_model = cognify_config.summarization_model

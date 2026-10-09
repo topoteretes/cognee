@@ -40,6 +40,7 @@ from cognee.modules.retrieval.utils.completion import (
     generate_completion,
     generate_completion_batch,
 )
+from cognee.modules.retrieval.utils.conflict_context import attach_chunk_conflicts
 from cognee.modules.retrieval.utils.global_context import (
     format_global_context_prelude,
     load_root_text,
@@ -56,6 +57,10 @@ DEFAULT_HYBRID_LANE_TOP_K = 10
 
 class HybridRetriever(BaseRetriever):
     """Completion retriever using chunk, entity, and optional global-context channels."""
+
+    # Resolved once per retrieval and reused by the context builders; see
+    # GraphCompletionRetriever for the same pattern.
+    _unified_engine = None
 
     # Search is not an LLM gateway: when every channel comes back empty there
     # is no answer to give (SDK-270 / gh #3728).
@@ -190,6 +195,9 @@ class HybridRetriever(BaseRetriever):
             self.include_external_metadata,
             self.external_metadata_keys,
         )
+        await attach_chunk_conflicts(
+            chunk_objects.get("chunks", []), graph_engine=self._unified_engine.graph
+        )
         return HybridCandidates(
             chunks=chunk_objects["chunks"],
             chunk_summaries=chunk_objects["chunk_summaries"],
@@ -261,7 +269,7 @@ class HybridRetriever(BaseRetriever):
         if not self.include_global_context_index or not query:
             return ""
 
-        if getattr(self, "_unified_engine", None) is None:
+        if self._unified_engine is None:
             self._unified_engine = await get_unified_engine()
 
         root_text, top_summaries = await asyncio.gather(

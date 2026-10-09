@@ -1,8 +1,7 @@
 """Approval-gated write-back: correction proposals for authorized databases.
 
-When cognee determines stored data is inaccurate — a ``contradicts`` edge
-from contradiction detection, or an explicit instruction — this module drafts
-an UPDATE with the LLM, validates it (single UPDATE, mandatory WHERE, table
+Given an explicit correction instruction, this module drafts an UPDATE with
+the LLM, validates it (single UPDATE, mandatory WHERE, table
 allowlist), dry-runs it inside a rolled-back transaction to capture the
 affected-row count, and stores everything as a ``ToolWriteProposal``.
 
@@ -219,70 +218,6 @@ async def propose_sql_write(
         sql,
     )
     return _proposal_to_public(row)
-
-
-async def propose_corrections_from_contradictions(
-    user_id: UUID,
-    connection_name: str,
-    limit: int = 10,
-) -> list[dict[str, Any]]:
-    """Draft correction proposals from the graph's ``contradicts`` edges.
-
-    Reads the contradictions recorded by ``detect_contradictions`` (each
-    carries both fact texts, the reason, and a confidence), asks the LLM
-    whether each is correctable in the given database, and stores a proposal
-    for those that are. Contradictions the model marks NOT_APPLICABLE are
-    skipped — with approval gating, a wrong mapping costs a rejected
-    proposal, never a wrong write.
-    """
-    connection = await get_tool_connection(user_id, connection_name)
-    _check_write_gates(connection)
-
-    from cognee.infrastructure.databases.graph import get_graph_engine
-
-    graph_engine = await get_graph_engine()
-    _, edges = await graph_engine.get_graph_data()
-
-    contradictions = []
-    for _source_id, _target_id, relationship_name, properties in edges:
-        if relationship_name != "contradicts":
-            continue
-        properties = properties or {}
-        contradictions.append(
-            {
-                "type": "contradiction",
-                "first_fact": properties.get("first_fact"),
-                "second_fact": properties.get("second_fact"),
-                "reason": properties.get("reason"),
-                "confidence": properties.get("confidence"),
-            }
-        )
-        if len(contradictions) >= limit:
-            break
-
-    proposals: list[dict[str, Any]] = []
-    for evidence in contradictions:
-        instruction = (
-            f"Cognee detected a contradiction: '{evidence['first_fact']}' contradicts "
-            f"'{evidence['second_fact']}' ({evidence['reason']}). If this database "
-            "holds the inaccurate value, draft the correction."
-        )
-        try:
-            drafted = await propose_sql_write(
-                user_id, connection_name, instruction, evidence=evidence
-            )
-        except ToolError as error:
-            logger.info("Skipped contradiction (not correctable here): %s", error)
-            continue
-        proposals.append(drafted)
-
-    logger.info(
-        "Drafted %d correction proposal(s) from %d contradiction(s) for '%s'",
-        len(proposals),
-        len(contradictions),
-        connection_name,
-    )
-    return proposals
 
 
 async def _get_owned_proposal(session, user_id: UUID, proposal_id) -> ToolWriteProposal:

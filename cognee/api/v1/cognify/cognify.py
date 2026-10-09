@@ -1,5 +1,4 @@
 import asyncio
-from collections.abc import Collection
 from typing import Literal
 from uuid import UUID
 
@@ -48,9 +47,7 @@ from cognee.tasks.documents import (
     classify_documents,
     extract_chunks_from_documents,
 )
-from cognee.tasks.graph import detect_contradictions
 from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
-from cognee.tasks.graph.resolve_temporal_contradictions import resolve_temporal_contradictions
 from cognee.tasks.provenance import record_provenance
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.temporal_graph.extract_events_and_entities import extract_events_and_timestamps
@@ -122,7 +119,6 @@ async def cognify(
     run_in_background: bool = False,
     incremental_loading: bool = True,
     custom_prompt: str | None = None,
-    functional_relationships: Collection[str] | None = None,
     data_per_batch: int = 20,
     llm_config: LLMConfig | None = None,
     embedding_config: EmbeddingConfig | None = None,
@@ -203,12 +199,6 @@ async def cognify(
                       If provided, this prompt will be used instead of the default prompts for
                       knowledge graph extraction. The prompt should guide the LLM on how to
                       extract entities and relationships from the text content.
-        functional_relationships: Relationship names that hold a single target per source
-                      (e.g. {"ceo_of"}). Once the graph is written, conflicting assertions
-                      of those relationships are resolved by recency: the most recent one
-                      stays current and the older ones are tagged as superseded — nothing
-                      is deleted. Off by default, because most cognee relationships are
-                      legitimately many-valued and collapsing them would corrupt the graph.
         dry_run: If True, return a stage-level estimate of LLM token usage and rough cost
                  without making LLM calls or writing graph results. The estimate covers all
                  data in the selected dataset(s); an incremental run may process fewer items.
@@ -322,6 +312,18 @@ async def cognify(
         - LLM_RATE_LIMIT_ENABLED: Enable rate limiting (default: False)
         - LLM_RATE_LIMIT_REQUESTS: Max requests per interval (default: 60)
     """
+    # Removed options, handled before anything else because cognify() forwards
+    # unknown kwargs into the extraction LLM call, where a deleted parameter
+    # name would be silently swallowed.
+    if "functional_relationships" in kwargs:
+        raise TypeError(
+            "cognify() no longer accepts functional_relationships; "
+            "use improve(review_conflicts=True)"
+        )
+    # temporal_cognify is accepted and ignored: the default pipeline extracts
+    # dates as Timestamp nodes, which SearchType.TEMPORAL reads.
+    kwargs.pop("temporal_cognify", None)
+
     cognify_config = get_cognify_config()
     # The extractor decision is made once, here, before any branch. Branches
     # that cannot honour it raise below instead of silently running something
@@ -329,10 +331,6 @@ async def cognify(
     resolved_extractor = resolve_extractor(extractor, cognify_config)
     resolved_summary_method = resolve_summary_method(summary_method, cognify_config)
 
-    # Removed option, accepted and ignored: the default pipeline extracts dates as
-    # Timestamp nodes, which SearchType.TEMPORAL reads. Dropped here because unknown
-    # kwargs are forwarded into the extraction LLM call.
-    kwargs.pop("temporal_cognify", None)
     if dry_run and resolved_extractor == GLINER_DEMO_EXTRACTOR:
         raise ValueError(
             "dry_run estimates the LLM extraction pipeline only; it has no cost model "
@@ -456,8 +454,6 @@ async def cognify(
                 chunk_attachment=chunk_attachment,
                 embed_triplets=cognify_config.triplet_embedding,
                 track_provenance=cognify_config.provenance_tracking,
-                check_contradictions=cognify_config.contradiction_detection,
-                functional_relationships=functional_relationships,
             )
         else:
             tasks = await get_default_tasks(
@@ -468,7 +464,6 @@ async def cognify(
                 config=config,
                 custom_prompt=custom_prompt,
                 chunks_per_batch=chunks_per_batch,
-                functional_relationships=functional_relationships,
                 chunk_attachment=chunk_attachment,
                 summary_method=resolved_summary_method,
                 **kwargs,
@@ -577,7 +572,6 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     config: Config = None,
     custom_prompt: str | None = None,
     chunks_per_batch: int | None = None,
-    functional_relationships: Collection[str] | None = None,
     chunk_attachment: Literal["direct", "all"] | None = None,
     summary_method: Literal["llm", "from_extraction"] | None = None,
     **kwargs,
@@ -585,7 +579,6 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     cognify_config = get_cognify_config()
     embed_triplets = cognify_config.triplet_embedding
     summary_method = summary_method or cognify_config.summary_method
-    check_contradictions = cognify_config.contradiction_detection
     track_provenance = cognify_config.provenance_tracking
 
     if chunks_per_batch is None:
@@ -633,22 +626,6 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             Task(record_provenance, task_config={"batch_size": chunks_per_batch}, needs_llm=False)
         )
 
-    if check_contradictions:
-        tasks.append(Task(detect_contradictions, task_config={"batch_size": chunks_per_batch}))
-
-    # OPTIONAL: for the relationships declared single-valued, tag the assertions a
-    # more recent one replaced. Runs last so the new facts are already stored and
-    # comparable with the ones they supersede; disabled by default.
-    if functional_relationships:
-        tasks.append(
-            Task(
-                resolve_temporal_contradictions,
-                functional_relationships=functional_relationships,
-                task_config={"batch_size": chunks_per_batch},
-                needs_llm=False,
-            )
-        )
-
     return tasks
 
 
@@ -659,10 +636,7 @@ async def get_dlt_tasks(
 
     No LLM tasks: each manifest row becomes one DocumentChunk (vector-indexed
     by add_data_points) and the graph structure comes from the relational
-    schema via extract_dlt_source_edges. Deliberate omissions relative to
-    get_default_tasks: contradiction detection (an LLM pass; DLT rows are
-    deterministic relational data) and functional_relationships (a cognify()
-    parameter that only applies to LLM-extracted temporal facts).
+    schema via extract_dlt_source_edges.
     """
     from cognee.tasks.ingestion.extract_dlt_source_edges import extract_dlt_source_edges
     from cognee.tasks.ingestion.purge_stale_dlt_source_artifacts import (

@@ -8,6 +8,8 @@ not wrap this call in ``set_database_global_context_variables`` (SDK-483).
 The actual work lives in ``cognee.tasks.memify.consolidate_entity_descriptions``.
 """
 
+import warnings
+
 from cognee import memify
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.pipelines.tasks.task import Task
@@ -51,6 +53,8 @@ async def consolidate_entity_descriptions_pipeline(
 ):
     """Rewrite Entity descriptions from their graph neighborhood, then summarize
     each EntityType from its member Entities and write is_a edge text.
+
+    Deprecated: use ``improve(review_conflicts=True)`` for Entity descriptions.
 
     Every size/budget cap below is a defensive backstop against pathological
     inputs (an unusually long description, an over-connected entity, a huge
@@ -97,6 +101,12 @@ async def consolidate_entity_descriptions_pipeline(
     Returns:
         The ``memify`` pipeline result.
     """
+    warnings.warn(
+        "consolidate_entity_descriptions_pipeline is deprecated; "
+        "use improve(review_conflicts=True)",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     extraction_tasks = [Task(get_entities_with_neighborhood)]
 
     enrichment_tasks = [

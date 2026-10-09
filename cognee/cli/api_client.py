@@ -359,6 +359,7 @@ class CogneeApiClient:
         run_in_background: bool = False,
         build_global_context_index: bool = False,
         build_truth_subspace: bool = False,
+        review_conflicts: bool = False,
         feedback_alpha: float | None = None,
     ) -> dict:
         payload: dict[str, Any] = {"run_in_background": run_in_background}
@@ -374,6 +375,8 @@ class CogneeApiClient:
             payload["build_global_context_index"] = True
         if build_truth_subspace:
             payload["build_truth_subspace"] = True
+        if review_conflicts:
+            payload["review_conflicts"] = True
         if feedback_alpha is not None:
             payload["feedback_alpha"] = feedback_alpha
         r = self._get_client().post(self._url("/api/v1/improve"), json=payload)

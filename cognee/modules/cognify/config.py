@@ -7,6 +7,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from cognee.exceptions import CogneeConfigurationError
 from cognee.shared.data_models import DefaultContentPrediction, SummarizedContent
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger("cognify.config")
 
 
 class CognifyConfig(BaseSettings):
@@ -19,11 +22,6 @@ class CognifyConfig(BaseSettings):
     summary_method: Literal["llm", "from_extraction"] = "llm"
     triplet_embedding: bool = False
     chunks_per_batch: int | None = None
-    # Opt-in contradiction detection (issue #3699). Default OFF so the standard
-    # cognify pipeline is unchanged. Tunables gate the verdict and the LLM payload.
-    contradiction_detection: bool = False
-    contradiction_confidence_threshold: float = 0.5
-    contradiction_max_facts: int = 500
     # Opt-in audit-grade provenance ledger (env: PROVENANCE_TRACKING). Default
     # OFF so the standard cognify pipeline is unchanged.
     provenance_tracking: bool = False
@@ -53,9 +51,6 @@ class CognifyConfig(BaseSettings):
             "summarization_model": self.summarization_model,
             "triplet_embedding": self.triplet_embedding,
             "chunks_per_batch": self.chunks_per_batch,
-            "contradiction_detection": self.contradiction_detection,
-            "contradiction_confidence_threshold": self.contradiction_confidence_threshold,
-            "contradiction_max_facts": self.contradiction_max_facts,
             "provenance_tracking": self.provenance_tracking,
             "graph_extractor": self.graph_extractor,
             "gliner_auto_install": self.gliner_auto_install,
@@ -65,8 +60,22 @@ class CognifyConfig(BaseSettings):
         }
 
 
+def _warn_if_contradiction_detection_is_set() -> None:
+    """A stale CONTRADICTION_DETECTION would otherwise look like it still did something.
+
+    Called from the cached read so the warning fires once per process rather
+    than on every config lookup.
+    """
+    if os.getenv("CONTRADICTION_DETECTION") is not None:
+        logger.warning(
+            "CONTRADICTION_DETECTION is ignored; use improve(review_conflicts=True) "
+            "or IMPROVE_REVIEW_CONFLICTS instead."
+        )
+
+
 @lru_cache
 def get_cognify_config():
+    _warn_if_contradiction_detection_is_set()
     return CognifyConfig()
 
 
@@ -270,14 +279,13 @@ async def ensure_extractor_runtime(extractor: str, config: CognifyConfig) -> Non
     )
 
 
-def default_pipeline_needs_llm(extractor: str, config: CognifyConfig) -> bool:
+def default_pipeline_needs_llm(extractor: str) -> bool:
     """True when the default cognify task list contains an LLM task.
 
     Serves only the early provider preflight in ``add()``/``remember()``,
-    which runs before any task list exists: extraction on the ``llm``
-    extractor and the opt-in contradiction pass are the LLM tasks of the
-    default pipeline. The pipeline-level gate does not use this formula — it
-    derives the need from the tasks themselves (``Task.needs_llm`` union, see
+    which runs before any task list exists. The pipeline-level gate does not
+    use this formula — it derives the need from the tasks themselves
+    (``Task.needs_llm`` union, see
     ``pipeline_needs_llm``) and is the authority when the two disagree.
     """
-    return extractor == LLM_EXTRACTOR or config.contradiction_detection
+    return extractor == LLM_EXTRACTOR
