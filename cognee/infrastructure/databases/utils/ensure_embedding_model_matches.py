@@ -65,6 +65,7 @@ async def ensure_embedding_model_matches(dataset_database: DatasetDatabase) -> N
     configured_model = embedding_record[MODEL_KEY]
     configured_dimensions = embedding_record[DIMENSIONS_KEY]
     info = dataset_database.vector_database_connection_info or {}
+    stored_model = info.get(MODEL_KEY)
     stored_dimensions = info.get(DIMENSIONS_KEY)
 
     if stored_dimensions is None:
@@ -81,12 +82,16 @@ async def ensure_embedding_model_matches(dataset_database: DatasetDatabase) -> N
             dataset_database, {MODEL_KEY: None, DIMENSIONS_KEY: stored_dimensions}
         )
 
-    if stored_dimensions == configured_dimensions:
+    # Two models of one width still embed into different spaces, and the store
+    # accepts the mix without an error. A legacy row's model is unknown (None),
+    # so there the width is all that can be compared.
+    same_model = stored_model is None or stored_model == configured_model
+    if stored_dimensions == configured_dimensions and same_model:
         return
 
     raise EmbeddingDimensionMismatchError(
         dataset_id=dataset_database.dataset_id,
-        stored_model=dataset_database.vector_database_connection_info.get(MODEL_KEY),
+        stored_model=stored_model,
         stored_dimensions=stored_dimensions,
         configured_model=configured_model,
         configured_dimensions=configured_dimensions,
