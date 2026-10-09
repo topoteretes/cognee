@@ -12,8 +12,8 @@ Three primitives:
   quick turns cannot read the same state and overwrite each other.
 
 * ``acquire_improve_lock_many(keys)`` / ``release_improve_lock_many(keys)``
-  — the claim a long-running ``improve()`` holds. Like the per-dataset
-  lock pipeline runs take, it waits: overlapping improves queue one after
+  — the session claim a long-running ``improve()`` holds on top of the
+  per-dataset lock. It waits: improves sharing a session queue one after
   another instead of skipping.
 
 Scope: single-worker FastAPI. For multi-worker deployments, layer a
@@ -139,19 +139,14 @@ async def release_improve_lock_many(keys: Iterable[str]) -> None:
         lock.release()
 
 
-def improve_lock_keys(
-    session_ids: Iterable[str] | None, dataset_id: Any, user_id: Any
-) -> tuple[str, ...]:
-    """The claim keys for one improve run: its session ids plus its dataset id.
+def improve_lock_keys(session_ids: Iterable[str] | None, user_id: Any) -> tuple[str, ...]:
+    """The session claim keys for one improve run.
 
     Session keys carry the user id because session state is scoped per
     ``(user_id, session_id)`` everywhere else — two users who both call a
-    session "chat" must never block each other. Every run also claims the
-    dataset key, session-fed or not, so a session-keyed bridge run and a
-    dataset-keyed run over the same dataset exclude each other — improves for
-    one dataset run one after another.
+    session "chat" must never block each other. The dataset is not a key:
+    improve holds the per-dataset lock for its whole run, like a pipeline run.
     """
-    sessions = tuple(
+    return tuple(
         f"session:{user_id}:{session_id}" for session_id in (session_ids or ()) if session_id
     )
-    return (*sessions, f"dataset:{dataset_id}")

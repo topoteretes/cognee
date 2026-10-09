@@ -31,6 +31,7 @@ from typing_extensions import TypedDict, Unpack
 
 from cognee.api.v1.serve.state import get_remote_client
 from cognee.infrastructure.background_tasks import register_background_task
+from cognee.infrastructure.locks.dataset_lock import dataset_lock
 from cognee.infrastructure.locks.session_lock import (
     acquire_improve_lock_many,
     improve_lock_keys,
@@ -111,9 +112,10 @@ async def improve(
     stages that draft text with an LLM (``extract_agent_context``,
     ``distill_sessions``, ``review_conflicts``, ``global_context_index``) are skipped with
     ``no_llm_configured`` when no usable LLM is configured, so a keyless
-    install still bridges sessions and traces into the graph. Improves that
-    touch the same sessions or dataset queue: each waits for the one before it
-    to finish, like pipeline runs on the same dataset. A failure in
+    install still bridges sessions and traces into the graph. A run holds the
+    dataset's lock from start to finish, like a pipeline run: improves,
+    cognify, add and forget on one dataset queue one after another, and
+    improves sharing a session queue too. A failure in
     ``persist_session_qa`` stops the run
     and raises, because silently losing session Q&A would be data loss; every
     other failure is recorded and the remaining stages still run.
@@ -127,7 +129,7 @@ async def improve(
         dataset: Dataset name or UUID to process. Resolved once; every stage
             receives the resolved id.
         run_in_background: Run all stages as one background task that waits
-            for the improve lock and holds it for its lifetime. The returned
+            for the dataset lock and holds it for its lifetime. The returned
             result has ``status == "running"``; ``await result.wait()`` blocks
             on it.
         node_name: Filter graph to specific named entities (enrichment stage).
@@ -256,11 +258,12 @@ async def improve(
                 review_conflicts=review_conflicts,
                 overrides=kwargs,
             )
-            # One claim per session id plus one for the dataset, so improves
-            # touching the same sessions or dataset queue one after another,
-            # like pipeline runs on the per-dataset lock; held until the last
-            # stage finishes, background included.
-            lock_keys = improve_lock_keys(inputs.session_ids, inputs.dataset_id, inputs.user.id)
+            # The whole run holds the dataset's lock, like a pipeline run, so
+            # improve, cognify, add, forget... on one dataset queue one after
+            # another. Sessions are claimed on top: two improves bridging one
+            # session into different datasets queue too. Both are held until
+            # the last stage finishes, background included.
+            lock_keys = improve_lock_keys(inputs.session_ids, inputs.user.id)
             # Created before the stages run: background mode hands this result
             # to the caller while the detached task is still filling it.
             result = ImproveResult(
@@ -273,24 +276,29 @@ async def improve(
             )
 
             async def run_claimed() -> None:
-                await acquire_improve_lock_many(lock_keys)
-                # The claim is owned here until execute_stages' finally takes
-                # it over; the probe awaits real engine setup, so a raise or a
-                # cancellation before then must release or the keys stay held.
-                try:
-                    # Probed only once the claim is held: the probe leases the
-                    # graph engine, which a queued run must not hold while waiting.
-                    claimed = inputs.with_capabilities(
-                        await resolve_graph_capabilities(
-                            inputs.dataset_id, getattr(inputs.dataset, "owner_id", None)
+                # Lock order: dataset lock, then the session claim, then (in the
+                # probe and the stages) a dataset-queue slot. The stages' own
+                # pipeline runs re-enter the dataset lock this task holds.
+                async with dataset_lock(inputs.dataset_id):
+                    await acquire_improve_lock_many(lock_keys)
+                    # The claim is owned here until execute_stages' finally
+                    # takes it over; the probe awaits real engine setup, so a
+                    # raise or a cancellation before then must release it.
+                    try:
+                        # Probed only once both are held: the probe leases the
+                        # graph engine, which a queued run must not hold while
+                        # it waits.
+                        claimed = inputs.with_capabilities(
+                            await resolve_graph_capabilities(
+                                inputs.dataset_id, getattr(inputs.dataset, "owner_id", None)
+                            )
                         )
-                    )
-                except BaseException:
-                    await release_improve_lock_many(lock_keys)
-                    raise
-                # Awaiting the coroutine enters execute_stages synchronously up
-                # to its try, so its finally owns the release from here.
-                await execute_stages(claimed, result, lock_keys, operation)
+                    except BaseException:
+                        await release_improve_lock_many(lock_keys)
+                        raise
+                    # Awaiting the coroutine enters execute_stages synchronously
+                    # up to its try, so its finally owns the release from here.
+                    await execute_stages(claimed, result, lock_keys, operation)
 
             if run_in_background:
                 operation.defer_close()

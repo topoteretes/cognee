@@ -142,11 +142,11 @@ There is no debounce timer: held-back entries wait for the next
 - **Typed entries do not auto-improve.** `remember(QAEntry/TraceEntry/
   FeedbackEntry, session_id=...)` stores the entry but never starts an
   improve. Call `improve(session_ids=[...])` yourself.
-- **Improves queue.** Improves for the same dataset or session run one at
-  a time: a second call waits for the running one, then runs, like two
-  `cognify()` calls on one dataset. A background call returns at once and
-  waits inside its task. The lock is per process only; multiple API workers
-  do not share it.
+- **Improves queue.** An improve holds the dataset's lock for its whole
+  run, like `cognify()`: improves, cognify, add and forget on one dataset
+  run one at a time, and improves sharing a session also wait for each
+  other. A background call returns at once and waits inside its task. The
+  lock is per process only; multiple API workers do not share it.
 - **Sessions bridge once.** Q&A and trace persistence are tracked per user
   and session, not per dataset, so bridging a session into dataset A and
   then into dataset B persists no new Q&A/traces into B. Distillation is

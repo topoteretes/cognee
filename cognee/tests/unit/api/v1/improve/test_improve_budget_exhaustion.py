@@ -70,6 +70,12 @@ async def _assert_claim_is_free(keys) -> None:
     await session_lock.release_improve_lock_many(keys)
 
 
+async def _assert_dataset_lock_is_free(harness) -> None:
+    from cognee.infrastructure.locks.dataset_lock import get_dataset_lock
+
+    assert not (await get_dataset_lock(harness.dataset.id)).locked()
+
+
 @pytest.mark.asyncio
 async def test_stage_that_raises_on_the_budget_stops_the_run_and_skips_the_rest(harness):
     calls = []
@@ -103,7 +109,7 @@ async def test_stage_that_raises_on_the_budget_stops_the_run_and_skips_the_rest(
     assert harness.span.attributes[COGNEE_IMPROVE_STAGES] == (
         "first=completed,broke=errored,after_1=skipped,after_2=skipped"
     )
-    await _assert_claim_is_free([f"dataset:{harness.dataset.id}"])
+    await _assert_dataset_lock_is_free(harness)
 
 
 @pytest.mark.asyncio
@@ -166,7 +172,7 @@ async def test_fatal_stage_on_the_budget_still_raises_and_names_the_budget(harne
     ]
     assert partial.error == partial.stages[1].error
     assert partial.status == "errored"
-    await _assert_claim_is_free([f"dataset:{harness.dataset.id}"])
+    await _assert_dataset_lock_is_free(harness)
 
 
 @pytest.mark.asyncio
@@ -281,7 +287,7 @@ async def test_budget_stop_releases_the_claim_once(harness, monkeypatch):
         ("after", "skipped", REASON_BUDGET_EXHAUSTED),
     ]
     assert len(releases) == 1
-    keys = session_lock.improve_lock_keys(["chat_1"], harness.dataset.id, harness.user.id)
+    keys = session_lock.improve_lock_keys(["chat_1"], harness.user.id)
     await _assert_claim_is_free(keys)
 
 
@@ -307,7 +313,7 @@ async def test_background_run_stops_on_the_budget_without_an_error_to_report(har
     assert result.error is None
     assert [call["error"] for call in harness.finish_calls] == [None]
     assert harness.operations[-1].outcome == OperationOutcome.FAILED
-    await _assert_claim_is_free([f"dataset:{harness.dataset.id}"])
+    await _assert_dataset_lock_is_free(harness)
 
 
 # --- the chain: cognify_session -> memify pipeline -> stage -> orchestrator ---
@@ -542,5 +548,5 @@ async def test_budget_failure_in_cognify_session_stops_the_improve_run(
     # the one that failed stays put, so the next improve picks it up.
     assert await get_persisted_qa_count(session_bridge.sessions, user_id, "chat_1") == 1
     assert await get_persisted_qa_count(session_bridge.sessions, user_id, "chat_2") == 0
-    keys = session_lock.improve_lock_keys(["chat_1", "chat_2"], harness.dataset.id, harness.user.id)
+    keys = session_lock.improve_lock_keys(["chat_1", "chat_2"], harness.user.id)
     await _assert_claim_is_free(keys)
