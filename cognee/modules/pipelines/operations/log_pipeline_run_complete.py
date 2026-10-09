@@ -22,8 +22,9 @@ async def log_pipeline_run_complete(
     tokens_in: int | None = None,
     tokens_out: int | None = None,
     embedding_tokens: int | None = None,
+    results: list | None = None,
 ):
-    data_info = summarize_run_info_data(data)
+    data_info = summarize_run_info_data(data, results)
 
     pipeline_run = PipelineRun(
         pipeline_run_id=pipeline_run_id,
