@@ -414,15 +414,19 @@ jobs:
 
       - name: Claude Code review
         if: ${{ steps.gate.outputs.run == 'true' }}
+        # `Agent` lets the skill spawn its two read-only sub-agents (LLM-cost impact,
+        # performance); they inherit this allow-list, so they can read but never post.
+        # The model defaults to Opus 5.5; the PR_REVIEW_MODEL repository variable
+        # overrides it without a PR.
         uses: anthropics/claude-code-action@756cc22e19660d20e8cc9496b4f242475a7f7790  # v1.0.235
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           prompt: "/pr-review"
           claude_args: >-
-            --allowed-tools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Glob,Grep"
-            --max-turns 40
-            --model claude-sonnet-4-5-20250929
+            --allowed-tools "mcp__github_inline_comment__create_inline_comment,Agent,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Glob,Grep"
+            --max-turns 80
+            --model ${{ vars.PR_REVIEW_MODEL || 'claude-opus-5-5' }}
 
       - name: DM review summary to PR author on Slack
         if: ${{ steps.gate.outputs.run == 'true' }}
