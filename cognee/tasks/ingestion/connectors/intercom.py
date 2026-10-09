@@ -90,3 +90,11 @@ def intercom_source(
             
             pages = data.get("pages", {})
             url = pages.get("next")
+
+    @dlt.source(name="intercom")
+    def _intercom():
+        return intercom_contacts
+
+    source = _intercom()
+    setattr(source, dlt_utils.DOCUMENT_SOURCE_ATTR, "intercom")
+    return source
