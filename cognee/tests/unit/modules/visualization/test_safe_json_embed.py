@@ -36,7 +36,7 @@ def test_safe_json_embed_plain_payload_roundtrips():
     assert json.loads(_safe_json_embed(payload)) == payload
 
 
-def test_rendered_html_escapes_comment_opener_from_node_text():
+def test_rendered_html_escapes_comment_opener_from_node_text(tmp_path):
     """A node whose text contains ``<!-- ... <script>`` must be embedded with
     the ``<!--`` neutralised, so it cannot break the Graph tab's ``<script>``.
 
@@ -48,7 +48,7 @@ def test_rendered_html_escapes_comment_opener_from_node_text():
         ("b", {"type": "DocumentChunk", "text": marker}),
     ]
     edges = [("b", "a", "contains", {})]
-    html = asyncio.run(cognee_network_visualization((nodes, edges)))
+    html = asyncio.run(cognee_network_visualization((nodes, edges), str(tmp_path / "out.html")))
 
     # The raw opener from node text must not appear; only the escaped form.
     assert "example <!-- an html comment" not in html
