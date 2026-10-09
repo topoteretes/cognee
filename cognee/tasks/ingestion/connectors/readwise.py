@@ -57,3 +57,11 @@ def readwise_source(
         headers = _get_headers(token)
         url = f"{READWISE_API_URL}/highlights/"
         params = {}
+        
+        while url:
+            resp = httpx.get(url, headers=headers, params=params, timeout=30)
+            resp.raise_for_status()
+            
+            data = resp.json()
+            highlights = data.get("results", [])
+            url = None  # prevent infinite loop for now
