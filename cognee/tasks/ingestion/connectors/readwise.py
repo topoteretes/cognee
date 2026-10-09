@@ -41,4 +41,9 @@ def readwise_source(
         token: Readwise Access Token. Falls back to READWISE_ACCESS_TOKEN.
         resource_name: The dlt resource / table name to yield rows into.
     """
-    pass
+    try:
+        import dlt
+    except ImportError as e:
+        raise ImportError(
+            "The Readwise connector requires dlt: pip install dlt"
+        ) from e
