@@ -22,3 +22,6 @@ import httpx
 from cognee.tasks.ingestion import dlt_utils
 
 logger = logging.getLogger(__name__)
+
+INTERCOM_API_URL = "https://api.intercom.io"
+INTERCOM_VERSION = "2.11"
