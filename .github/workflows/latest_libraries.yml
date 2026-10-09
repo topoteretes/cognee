@@ -1,0 +1,134 @@
+name: Latest Libraries
+
+# uv.lock is the only set of dependency versions CI ever tests: every job runs
+# `uv sync` against it, and it is rebuilt only when someone edits pyproject.
+# On top of that, `exclude-newer = "2 days"` hides any release younger than two
+# days from a rebuild. So a release that breaks cognee stays invisible until a
+# rebuild happens to pick it up, and then every suite fails at once. This job
+# meets it first: it installs cognee the way a PyPI user does, from `[project]`
+# metadata alone, so every dependency resolves to its newest release with
+# neither uv.lock nor any `[tool.uv]` setting in the way, and runs the keyless
+# core flow (add -> cognify with GLiNER -> CHUNKS search -> remember/recall).
+#
+# No secrets, by design. The libraries are whatever PyPI serves today, so this
+# is the one job that must never hold a credential a compromised release could
+# read: nothing is passed from `secrets`, GITHUB_TOKEN is read-only and not
+# persisted into the checkout, and the flow under test needs no provider key
+# (GLiNER + fastembed). It runs on a bare runner, not the ci-image, which
+# carries pre-installed extras and configured settings.
+#
+# Informational, not a required check: a red run here means a new release broke
+# cognee (or exposed a latent bug), which is a dependency ticket, not a reason
+# to block the PR that happened to run it.
+
+permissions:
+  contents: read
+
+on:
+  # Every PR, not only those touching pyproject: the releases that break
+  # cognee arrive on PyPI's schedule, not ours, and this is the only job that
+  # sees them.
+  pull_request:
+    branches: [dev, main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  keyless-on-latest:
+    name: Keyless e2e on the newest release of every dependency
+    runs-on: ubuntu-22.04
+    # The same flow on the lockfile takes about 4 minutes, model download included.
+    timeout-minutes: 20
+    env:
+      # The workflow-level skip other suites set disables the keyless rerouting
+      # as well (keyless_local_defaults_apply), so it must be off here.
+      COGNEE_SKIP_CONNECTION_TEST: 'false'
+      HF_HOME: ${{ github.workspace }}/.model-cache/huggingface
+      FASTEMBED_CACHE_PATH: ${{ github.workspace }}/.model-cache/fastembed
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          # The cache is keyed on uv.lock, which this job rewrites every run.
+          enable-cache: false
+
+      - name: Resolve like a PyPI user
+        # A `pip install cognee` sees only the wheel's metadata, i.e.
+        # `[project]`. The `[tool.uv]` table (exclude-newer, the
+        # constraint-dependencies that pin protobuf and friends) is not
+        # published and never reaches a user, so it must not shape this
+        # resolution either: UV_NO_CONFIG makes every uv command here,
+        # including the GLiNER runtime install cognify runs through `uv pip`,
+        # ignore it. UV_EXCLUDE_NEWER one day ahead then admits everything
+        # PyPI has published. uv.lock is not read at all: `uv pip` resolves
+        # from the metadata, like pip.
+        run: |
+          echo "UV_NO_CONFIG=1" >> "$GITHUB_ENV"
+          echo "UV_EXCLUDE_NEWER=$(date -u -d '+1 day' +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+      - name: Install cognee at the newest release of every dependency
+        run: |
+          uv venv .venv --python 3.12
+          uv pip install --python .venv/bin/python .
+
+      - name: Summarize the releases that differ from uv.lock
+        # So a red run names its suspects.
+        run: |
+          .venv/bin/python - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          import json, subprocess, tomllib
+          locked = {p["name"].lower(): p["version"] for p in tomllib.load(open("uv.lock", "rb"))["package"] if "version" in p}
+          installed = json.loads(subprocess.check_output(["uv", "pip", "list", "--python", ".venv/bin/python", "--format", "json"]))
+          print("## Installed releases that differ from uv.lock\n")
+          print("| package | uv.lock | installed |\n|---|---|---|")
+          rows = 0
+          for p in sorted(installed, key=lambda p: p["name"].lower()):
+              name = p["name"].lower()
+              if name == "cognee":
+                  continue
+              if locked.get(name) != p["version"]:
+                  print(f"| {name} | {locked.get(name, 'not locked')} | {p['version']} |")
+                  rows += 1
+          print(f"\n{rows} of {len(installed) - 1} installed packages differ from uv.lock.")
+          EOF
+
+      - name: Restore the local models
+        # GLiNER (~750 MB) and bge-small (~67 MB); the key names the models the
+        # flow downloads, so a model change gets a fresh cache.
+        id: models
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: .model-cache
+          key: keyless-models-${{ runner.os }}-gliner2.5-base-v1-bge-small-en-v1.5
+
+      # No LLM_API_KEY, no EMBEDDING_*: GRAPH_EXTRACTOR=auto resolves to GLiNER
+      # and embeddings to fastembed. The first cognify installs the GLiNER
+      # runtime (CPU torch + the gliner extra) at its newest releases too.
+      - name: Run the keyless core flow on the newest releases
+        run: .venv/bin/python ./cognee/tests/e2e/keyless/keyless_ingest_check.py
+
+      - name: Save the local models
+        # Saved on a red run as well (`actions/cache` alone saves only on
+        # success): a release that breaks search still downloaded the models,
+        # and the next run should not fetch 800 MB again to hit the same error.
+        if: always() && steps.models.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: .model-cache
+          key: keyless-models-${{ runner.os }}-gliner2.5-base-v1-bge-small-en-v1.5
