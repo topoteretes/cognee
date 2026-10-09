@@ -655,6 +655,199 @@ async def test_cancellation_during_the_probe_releases_the_lock(harness):
     assert retry.status == "completed"
 
 
+@pytest.mark.asyncio
+async def test_background_probe_failure_finishes_the_result_as_errored(harness):
+    """The probe runs inside the detached task, before execute_stages' finally
+    exists. Its failure must still finish the result the caller already holds,
+    or ``status`` says "running" forever with nothing to explain it."""
+    harness.use_stages([FakeStage("a")])
+
+    async def failing_probe(_dataset_id, _owner_id):
+        raise RuntimeError("engine unavailable")
+
+    harness.monkeypatch.setattr(harness.improve_mod, "resolve_graph_capabilities", failing_probe)
+
+    result = await harness.improve(run_in_background=True)
+    await result.wait()
+
+    assert result._task.done()
+    assert result.finished
+    assert result.status == "errored"
+    assert "RuntimeError: engine unavailable" in result.error
+    assert result.stages == []
+    assert isinstance(harness.finish_calls[0]["error"], RuntimeError)
+    assert await _dataset_lock_is_free(harness)
+
+
+@pytest.mark.asyncio
+async def test_background_run_cancelled_while_queued_finishes_the_result(harness):
+    """A background run waits for the dataset lock inside its task. Cancelled
+    there, it never reaches execute_stages, so the result must be finished by
+    the wait itself — and the holder must be untouched."""
+    gate = asyncio.Event()
+    calls = []
+
+    async def slow_stage(_inputs):
+        await gate.wait()
+        return StageResult.completed("slow", items=1)
+
+    harness.use_stages([FakeStage("slow", run=slow_stage, calls=calls)])
+    holder = await harness.improve(session_ids=["chat_1"], run_in_background=True)
+    await asyncio.sleep(0)
+    queued = await harness.improve(session_ids=["chat_2"], run_in_background=True)
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert queued.status == "running"
+
+    queued._task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await queued._task
+
+    assert queued.finished
+    assert queued.status == "errored"
+    assert "CancelledError" in queued.error
+    assert queued.stages == []
+    assert len(harness.finish_calls) == 1
+    assert isinstance(harness.finish_calls[0]["error"], asyncio.CancelledError)
+
+    gate.set()
+    await holder.wait()
+    assert holder.status == "completed"
+    assert calls == ["slow"]
+    assert await _dataset_lock_is_free(harness)
+
+
+@pytest.mark.asyncio
+async def test_background_cancelled_before_start_finishes_and_closes_once(harness, recwarn):
+    import gc
+
+    from cognee.infrastructure.background_tasks import wait_for_background_tasks
+
+    calls = []
+    harness.use_stages([FakeStage("a", calls=calls)])
+    result = await harness.improve(session_ids=["chat"], run_in_background=True)
+    result._task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await result._task
+
+    assert result.finished
+    assert result.status == "errored"
+    assert "CancelledError" in result.error
+    assert result.stages == []
+    assert calls == []
+    harness.improve_mod.resolve_graph_capabilities.assert_not_awaited()
+    assert await wait_for_background_tasks(timeout=1)
+    assert len(harness.finish_calls) == 1
+    assert isinstance(harness.finish_calls[0]["error"], asyncio.CancelledError)
+    gc.collect()
+    assert not any("was never awaited" in str(warning.message) for warning in recwarn)
+    assert await _dataset_lock_is_free(harness)
+    retry = await harness.improve(session_ids=["chat"])
+    assert retry.status == "completed"
+
+
+@pytest.mark.parametrize("detail", ["", "message " * 2000], ids=["empty", "oversized"])
+def test_pre_stage_error_preserves_type_and_bounds_message(harness, detail):
+    from cognee.modules.operations.scrub_error import ERROR_MESSAGE_MAX_LENGTH
+
+    message = harness.improve_mod._pre_stage_error_text(asyncio.CancelledError(detail))
+    assert "CancelledError" in message
+    assert len(message) <= ERROR_MESSAGE_MAX_LENGTH
+
+
+@pytest.mark.asyncio
+async def test_background_probe_error_redacts_sensitive_details(harness):
+    secret = "sk-dummycredential123456789"
+    email = "person@example.com"
+    path = "/Users/private-user/docs"
+
+    async def failing_probe(*_args):
+        raise RuntimeError(f"{secret} {email} {path}")
+
+    harness.use_stages([FakeStage("a")])
+    harness.monkeypatch.setattr(harness.improve_mod, "resolve_graph_capabilities", failing_probe)
+    result = await harness.improve(run_in_background=True)
+    await result.wait()
+
+    assert result.status == "errored"
+    assert "RuntimeError" in result.error
+    serialized = result.model_dump_json()
+    assert secret not in serialized
+    assert email not in serialized
+    assert "private-user" not in serialized
+    assert len(harness.finish_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_background_cancelled_during_probe_finishes_and_releases_claims(harness):
+    entered = asyncio.Event()
+    original_probe = harness.improve_mod.resolve_graph_capabilities
+
+    async def blocked_probe(*_args):
+        entered.set()
+        await asyncio.Event().wait()
+
+    harness.use_stages([FakeStage("a")])
+    harness.monkeypatch.setattr(harness.improve_mod, "resolve_graph_capabilities", blocked_probe)
+    result = await harness.improve(session_ids=["chat"], run_in_background=True)
+    await asyncio.wait_for(entered.wait(), 1)
+    result._task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await result._task
+
+    assert result.finished and result.status == "errored"
+    assert "CancelledError" in result.error
+    assert result.stages == []
+    assert len(harness.finish_calls) == 1
+    assert isinstance(harness.finish_calls[0]["error"], asyncio.CancelledError)
+    assert await _dataset_lock_is_free(harness)
+    harness.monkeypatch.setattr(harness.improve_mod, "resolve_graph_capabilities", original_probe)
+    retry = await asyncio.wait_for(harness.improve(session_ids=["chat"]), 1)
+    assert retry.status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_cancelled_session_claim_wait_releases_only_its_partial_claim(harness):
+    from cognee.infrastructure.locks.session_lock import (
+        acquire_improve_lock_many,
+        improve_lock_keys,
+        release_improve_lock_many,
+    )
+
+    holder_keys = improve_lock_keys(["z"], harness.user.id)
+    free_keys = improve_lock_keys(["a"], harness.user.id)
+    await acquire_improve_lock_many(holder_keys)
+    entered = asyncio.Event()
+    acquire = harness.improve_mod.acquire_improve_lock_many
+
+    async def observed_acquire(keys):
+        entered.set()
+        await acquire(keys)
+
+    harness.monkeypatch.setattr(harness.improve_mod, "acquire_improve_lock_many", observed_acquire)
+    harness.use_stages([FakeStage("a")])
+    result = await harness.improve(session_ids=["a", "z"], run_in_background=True)
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        result._task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await result._task
+        assert result.finished and result.status == "errored"
+        assert len(harness.finish_calls) == 1
+        assert isinstance(harness.finish_calls[0]["error"], asyncio.CancelledError)
+        harness.improve_mod.resolve_graph_capabilities.assert_not_awaited()
+        assert await _dataset_lock_is_free(harness)
+        await asyncio.wait_for(acquire_improve_lock_many(free_keys), 1)
+        await release_improve_lock_many(free_keys)
+        # The cancelled waiter must not release the holder's claim.
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(acquire_improve_lock_many(holder_keys), 0.01)
+    finally:
+        await release_improve_lock_many(holder_keys)
+    retry = await asyncio.wait_for(harness.improve(session_ids=["a", "z"]), 1)
+    assert retry.status == "completed"
+
+
 def _stamped_stage(name: str, stamp: dict) -> FakeStage:
     def run(_inputs):
         result = StageResult.completed(name)
