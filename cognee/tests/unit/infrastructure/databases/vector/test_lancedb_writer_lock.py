@@ -19,18 +19,21 @@ def _hold_lock(url, attempting, entered, release):
 def test_local_store_writers_are_serialized_across_processes(tmp_path):
     ctx = multiprocessing.get_context("spawn")
     url = str(tmp_path / "lancedb")
-    first_entered, first_release = ctx.Event(), ctx.Event()
+    # Every Event must stay referenced here: Process.start() drops its args once
+    # they are pickled, and a collected Event unlinks the semaphore the child
+    # has not rebuilt yet.
+    first_attempting, first_entered, first_release = ctx.Event(), ctx.Event(), ctx.Event()
     second_attempting, second_entered, second_release = ctx.Event(), ctx.Event(), ctx.Event()
-    first = ctx.Process(target=_hold_lock, args=(url, ctx.Event(), first_entered, first_release))
+    first = ctx.Process(target=_hold_lock, args=(url, first_attempting, first_entered, first_release))
     second = ctx.Process(
         target=_hold_lock,
         args=(url, second_attempting, second_entered, second_release),
     )
     try:
         first.start()
-        assert first_entered.wait(10)
+        assert first_entered.wait(30)
         second.start()
-        assert second_attempting.wait(10)
+        assert second_attempting.wait(30)
         assert not second_entered.wait(0.2)
         first_release.set()
         assert second_entered.wait(10)

@@ -249,10 +249,10 @@ class LanceDBAdapter(VectorDBInterface):
     @asynccontextmanager
     async def _write_lock(self):
         async with self.VECTOR_DB_LOCK:
-            url = self.url or getattr(self.connection, "_url", None)
+            url = self._store_url()
             if not url:
                 raise RuntimeError("LanceDB URL required for interprocess writer lock")
-            if url.startswith(("db://", "http://", "https://", "s3://", "gs://", "az://")):
+            if self._is_remote_store(url):
                 yield
             else:
                 # ponytail: one local-store writer; partition by table if throughput requires it.
@@ -793,7 +793,7 @@ class LanceDBAdapter(VectorDBInterface):
         adapter prunes versions once when it first opens the store
         (``_schedule_open_prune``), for what a closed adapter left behind.
 
-        Only the fragment rewrite runs under ``VECTOR_DB_LOCK``: its commit is a
+        Only the fragment rewrite runs under the writer lock: its commit is a
         Lance "rewrite" transaction that conflicts with a concurrent upsert or
         delete on the same fragments. Version pruning commits nothing and runs
         outside the lock, so writers are never blocked behind it. Concurrent
@@ -872,7 +872,7 @@ class LanceDBAdapter(VectorDBInterface):
         collection = await self.get_collection(collection_name)
         target_rows = options["target_rows_per_fragment"]
 
-        async with self.VECTOR_DB_LOCK:
+        async with self._write_lock():
             if self._subprocess_mode:
                 stats = await collection.compact_fragments(
                     target_rows_per_fragment=target_rows, max_tasks=max_tasks
