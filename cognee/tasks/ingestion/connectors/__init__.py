@@ -20,3 +20,6 @@ __all__ = [
     "linear_source",
     "notion_source",
 ]
+from .klaviyo import klaviyo_source
+
+__all__.append("klaviyo_source")
