@@ -17,8 +17,8 @@ from typing import (  # noqa: UP035 - typing.List is a distinct origin key, not 
 )
 from uuid import UUID
 
-from filelock import AsyncFileLock
 import lancedb
+from filelock import AsyncFileLock
 from lancedb.pydantic import LanceModel, Vector
 from pydantic import BaseModel
 
@@ -245,6 +245,10 @@ class LanceDBAdapter(VectorDBInterface):
         # Timer for one more prune once a pass's pending versions have aged
         # (see ``_schedule_followup_prune``).
         self._followup_prune_handle: asyncio.TimerHandle | None = None
+        # The duplicate-id scan started when this adapter first opens a local
+        # store (see ``_schedule_duplicate_check``).
+        self._duplicate_check_started = False
+        self._duplicate_check_task: asyncio.Task | None = None
 
     @asynccontextmanager
     async def _write_lock(self):
@@ -268,6 +272,7 @@ class LanceDBAdapter(VectorDBInterface):
         """
         connection = await self._open_connection()
         self._schedule_open_prune()
+        self._schedule_duplicate_check()
         return connection
 
     async def _open_connection(self):
@@ -989,19 +994,20 @@ class LanceDBAdapter(VectorDBInterface):
 
     async def _wait_for_open_prune(self) -> None:
         """Let a running version prune (first-open or follow-up, see
-        ``_start_prune_task``) finish -- it is bounded -- before this adapter
-        compacts, prunes or closes, so they never overlap and closing never tears
-        the worker down under it. A prune started on another event loop cannot be
-        awaited from this one and is left alone."""
-        task = self._open_prune_task
-        if task is None or task.done():
-            return
-        try:
-            same_loop = task.get_loop() is asyncio.get_running_loop()
-        except RuntimeError:
-            return
-        if same_loop:
-            await asyncio.wait({task})
+        ``_start_prune_task``) or first-open duplicate scan finish -- both are
+        bounded -- before this adapter compacts, prunes or closes, so they never
+        overlap and closing never tears the worker down under them. A task
+        started on another event loop cannot be awaited from this one and is
+        left alone."""
+        for task in (self._open_prune_task, self._duplicate_check_task):
+            if task is None or task.done():
+                continue
+            try:
+                same_loop = task.get_loop() is asyncio.get_running_loop()
+            except RuntimeError:
+                continue
+            if same_loop:
+                await asyncio.wait({task})
 
     async def _prune_pass(self, options: dict) -> dict:
         """Prune superseded versions across the store's tables; no fragment rewrites."""
@@ -1680,6 +1686,228 @@ class LanceDBAdapter(VectorDBInterface):
                     return
                 collection = await self.get_collection(collection_name)
                 await collection.delete(f"id IN ({id_list})")
+
+    # ------------------------------------------------------------------
+    # Duplicate-id detection and repair
+    # ------------------------------------------------------------------
+
+    def _schedule_duplicate_check(self) -> None:
+        """Start, once per adapter, a background scan of a local store for ids
+        stored in more than one row.
+
+        Writers that raced before the store-wide writer lock existed could each
+        insert the same new id, and an upsert updates every copy rather than
+        collapsing them, so such a store keeps its duplicates until
+        ``dedupe_collection`` repairs it. The scan only reads the ``id``
+        column and logs one warning per affected collection; it never writes
+        and never raises. Remote stores are skipped: the scan would read every
+        id over the network.
+        """
+        if self._duplicate_check_started:
+            return
+        self._duplicate_check_started = True
+        if self._is_remote_store(self._store_url()):
+            return
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        task = asyncio.ensure_future(self._check_duplicates_on_open())
+        self._duplicate_check_task = task
+        _OPEN_PRUNE_TASKS.add(task)
+        task.add_done_callback(_OPEN_PRUNE_TASKS.discard)
+        register_background_task(task)
+
+    async def _check_duplicates_on_open(self) -> dict[str, int]:
+        found: dict[str, int] = {}
+        try:
+            connection = await self._open_connection()
+            for name in list(await connection.table_names()):
+                surplus = await self.count_duplicate_ids(name)
+                if surplus:
+                    found[name] = surplus
+                    logger.warning(
+                        "LanceDB collection '%s' stores %d surplus row(s) under ids that "
+                        "appear more than once; run LanceDBAdapter.dedupe_collection('%s') "
+                        "on this store to repair it",
+                        name,
+                        surplus,
+                        name,
+                    )
+        except Exception as exc:
+            logger.debug("Duplicate-id scan on open skipped: %s", exc, exc_info=True)
+        return found
+
+    async def _duplicate_id_counts(self, collection_name: str) -> dict[str, int]:
+        """Map each id stored in more than one row of the collection to its row count."""
+        if not await self.has_collection(collection_name):
+            return {}
+        collection = await self.get_collection(collection_name)
+        rows = await collection.query().select(["id"]).to_list()
+        counts: dict[str, int] = {}
+        for row in rows:
+            counts[row["id"]] = counts.get(row["id"], 0) + 1
+        return {id_: count for id_, count in counts.items() if count > 1}
+
+    async def count_duplicate_ids(self, collection_name: str) -> int:
+        """Return how many rows ``dedupe_collection`` would remove: the rows
+        beyond the first under every id stored more than once. Reads only the
+        ``id`` column; a missing collection counts as clean."""
+        counts = await self._duplicate_id_counts(collection_name)
+        return sum(count - 1 for count in counts.values())
+
+    @staticmethod
+    def _merge_duplicate_rows(rows: list[dict]) -> tuple[dict, bool]:
+        """Collapse the rows stored under one id into the row to keep.
+
+        The row whose payload ``updated_at`` is newest supplies the vector and
+        payload. Write order is not recoverable from the table itself:
+        ``_rowid`` encodes (fragment, offset), and compaction moves older rows
+        into new, higher-numbered fragments, so the highest ``_rowid`` is not
+        reliably the last row written. It only breaks ties. ``belongs_to_set``
+        becomes the union across all copies (kept row's tags first), matching
+        how ``create_data_points`` merges tags on upsert, so no dataset loses
+        its membership.
+
+        Returns the merged row and whether the choice was ambiguous: copies
+        that differ in vector or payload with no ``updated_at`` to rank them.
+        """
+
+        def updated_at(row: dict):
+            value = (row.get("payload") or {}).get("updated_at")
+            return value if isinstance(value, (int, float)) else None
+
+        def content(row: dict):
+            payload = dict(row.get("payload") or {})
+            payload.pop("belongs_to_set", None)
+            return list(row["vector"]), payload
+
+        ranked = sorted(
+            rows,
+            key=lambda row: (updated_at(row) is not None, updated_at(row) or 0, row["_rowid"]),
+            reverse=True,
+        )
+        keep = ranked[0]
+        top = [row for row in ranked if updated_at(row) == updated_at(keep)]
+        ambiguous = any(content(row) != content(keep) for row in top[1:])
+
+        tags: list = []
+        for row in ranked:
+            tags.extend((row.get("payload") or {}).get("belongs_to_set") or [])
+        payload = dict(keep.get("payload") or {})
+        if tags or "belongs_to_set" in payload:
+            payload["belongs_to_set"] = list(dict.fromkeys(tags))
+        return {"id": keep["id"], "vector": list(keep["vector"]), "payload": payload}, ambiguous
+
+    async def dedupe_collection(self, collection_name: str, dry_run: bool = False) -> dict:
+        """Repair a collection that stores some ids in more than one row.
+
+        Keeps one row per id, chosen and merged by ``_merge_duplicate_rows``
+        (newest ``updated_at`` wins, ``belongs_to_set`` is the union), and
+        deletes the rest. Idempotent: a clean collection, or a second run, is
+        a no-op. ``dry_run=True`` only reports what a repair would do.
+
+        Each batch of ids is repaired under the writer lock in two commits,
+        ordered so that a crash between them loses nothing: first every copy
+        of an id is rewritten to the merged row (``merge_insert`` updates all
+        matches), then all copies but one are deleted by ``_rowid``. The rows
+        are re-read under the lock, so concurrent writes are never overwritten.
+
+        Returns ``duplicate_ids`` (ids stored more than once), ``rows_removed``
+        and ``ambiguous_ids`` (ids whose differing copies had no ``updated_at``
+        to rank them; the highest ``_rowid`` was kept, and they are logged).
+        """
+        counts = await self._duplicate_id_counts(collection_name)
+        report = {
+            "duplicate_ids": len(counts),
+            "rows_removed": 0,
+            "ambiguous_ids": [],
+        }
+        if not counts:
+            return report
+
+        duplicate_ids = list(counts)
+        for start in range(0, len(duplicate_ids), self.DELETE_PREDICATE_BATCH_SIZE):
+            batch = duplicate_ids[start : start + self.DELETE_PREDICATE_BATCH_SIZE]
+            id_list = ", ".join("'" + id_.replace("'", "''") + "'" for id_ in batch)
+            where_clause = f"id IN ({id_list})"
+
+            async with self._write_lock():
+                collection = await self.get_collection(collection_name)
+                rows = await collection.query().where(where_clause).with_row_id().to_list()
+                groups: dict[str, list[dict]] = {}
+                for row in rows:
+                    groups.setdefault(row["id"], []).append(row)
+
+                merged_records = []
+                surplus = 0
+                for id_, group in groups.items():
+                    if len(group) < 2:
+                        continue  # repaired by a concurrent writer since the scan
+                    surplus += len(group) - 1
+                    merged, ambiguous = self._merge_duplicate_rows(group)
+                    if ambiguous:
+                        report["ambiguous_ids"].append(id_)
+                    if any(
+                        list(row["vector"]) != merged["vector"]
+                        or (row.get("payload") or {}) != merged["payload"]
+                        for row in group
+                    ):
+                        merged_records.append(merged)
+
+                if dry_run:
+                    report["rows_removed"] += surplus
+                    continue
+                if not surplus:
+                    continue
+
+                self._mark_written(collection_name)
+                if merged_records:
+                    import pyarrow
+
+                    schema = await collection.schema()
+                    await (
+                        collection.merge_insert("id")
+                        .when_matched_update_all()
+                        .execute(pyarrow.Table.from_pylist(merged_records, schema=schema))
+                    )
+
+                # merge_insert rewrote the copies into new rows, so read the
+                # row ids again. Every copy is now identical: keep any one.
+                kept: set[str] = set()
+                doomed: list[int] = []
+                id_rows = (
+                    await collection.query()
+                    .where(where_clause)
+                    .select(["id"])
+                    .with_row_id()
+                    .to_list()
+                )
+                for row in sorted(id_rows, key=lambda row: row["_rowid"]):
+                    if row["id"] in kept:
+                        doomed.append(row["_rowid"])
+                    else:
+                        kept.add(row["id"])
+                if doomed:
+                    await collection.delete(f"_rowid IN ({', '.join(map(str, doomed))})")
+                report["rows_removed"] += len(doomed)
+
+        if report["ambiguous_ids"]:
+            logger.warning(
+                "dedupe_collection('%s'): %d id(s) had differing copies with no updated_at "
+                "to rank them; kept the copy with the highest _rowid: %s",
+                collection_name,
+                len(report["ambiguous_ids"]),
+                report["ambiguous_ids"][:20],
+            )
+        if report["rows_removed"] and not dry_run:
+            logger.info(
+                "dedupe_collection('%s'): removed %d surplus row(s) across %d id(s)",
+                collection_name,
+                report["rows_removed"],
+                report["duplicate_ids"],
+            )
+        return report
 
     async def remove_belongs_to_set_tags(
         self,
