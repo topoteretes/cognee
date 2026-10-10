@@ -1,9 +1,9 @@
 from os.path import basename
-from uuid import NAMESPACE_OID, uuid5
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from cognee.infrastructure.databases.vector import get_vector_engine_async
+from cognee.modules.chunking.chunk_id import chunk_content_hash, content_chunk_id
 from cognee.modules.chunking.Chunker import Chunker
 from cognee.shared.logging_utils import get_logger
 
@@ -44,15 +44,23 @@ class LangchainChunker(Chunker):
         # Resolve the embedding engine once — it's the same for every chunk, so
         # resolving it per chunk inside the loops just adds await/lookup overhead.
         embedding_engine = (await get_vector_engine_async()).embedding_engine
+        # Chunk identity is content-derived and scoped to the document; the
+        # occurrence counter keeps two identical texts in one document distinct
+        # (see chunk_id module).
+        hash_occurrences: dict = {}
         async for content_text in self.get_text():
             for chunk in self.splitter.split_text(content_text):
                 token_count = embedding_engine.tokenizer.count_tokens(chunk)
                 if token_count <= self.max_chunk_size:
+                    content_hash = chunk_content_hash(chunk)
+                    occurrence = hash_occurrences.get(content_hash, 0)
+                    hash_occurrences[content_hash] = occurrence + 1
                     yield DocumentChunk(
                         chunker_id=self.chunker_id,
-                        id=uuid5(NAMESPACE_OID, chunk),
+                        id=content_chunk_id(document_id, content_hash, occurrence),
                         text=chunk,
                         chunk_size=token_count,
+                        content_hash=content_hash,
                         is_part_of=self.document,
                         chunk_index=self.chunk_index,
                         cut_type="missing",
