@@ -21,6 +21,7 @@ import pytest
 
 pytest.importorskip("langchain_text_splitters")
 
+from cognee.modules.chunking.chunk_id import chunk_content_hash
 from cognee.modules.chunking.LangchainChunker import LangchainChunker
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.data.processing.document_types import Document
@@ -117,3 +118,51 @@ async def test_read_raises_for_chunks_over_max_chunk_size():
         pytest.raises(ValueError, match="larger than the maximum"),
     ):
         [chunk async for chunk in chunker.read()]
+
+
+async def _read_chunks(document: Document, text: str) -> list[DocumentChunk]:
+    async def get_text():
+        yield text
+
+    chunker = LangchainChunker(
+        document, max_chunk_size=512, get_text=get_text, chunk_size=8, chunk_overlap=0
+    )
+    with patch(
+        "cognee.modules.chunking.LangchainChunker.get_vector_engine_async",
+        new=AsyncMock(return_value=_mock_vector_engine()),
+    ):
+        return [chunk async for chunk in chunker.read()]
+
+
+@pytest.mark.asyncio
+async def test_identical_text_in_different_documents_gets_distinct_chunk_ids():
+    """Chunk ids were derived from the text alone, so two documents sharing a
+    passage produced one chunk id and add_data_points kept only one node."""
+    text = "Confidential. Do not distribute outside the company."
+
+    chunks_a = await _read_chunks(_make_document(), text)
+    chunks_b = await _read_chunks(_make_document(), text)
+
+    assert len(chunks_a) == len(chunks_b) == 1
+    assert chunks_a[0].id != chunks_b[0].id
+
+
+@pytest.mark.asyncio
+async def test_repeated_text_in_one_document_gets_distinct_chunk_ids():
+    footer = "Confidential. Do not distribute outside the company."
+    chunks = await _read_chunks(_make_document(), f"{footer}\n\nPage one body.\n\n{footer}")
+
+    assert [chunk.text for chunk in chunks] == [footer, "Page one body.", footer]
+    assert len({chunk.id for chunk in chunks}) == len(chunks)
+    assert chunks[0].content_hash == chunks[2].content_hash == chunk_content_hash(footer)
+
+
+@pytest.mark.asyncio
+async def test_chunk_ids_are_stable_for_the_same_document_and_text():
+    document = _make_document()
+    text = "Alpha beta gamma.\n\nDelta epsilon zeta."
+
+    first = await _read_chunks(document, text)
+    second = await _read_chunks(document, text)
+
+    assert [chunk.id for chunk in first] == [chunk.id for chunk in second]
