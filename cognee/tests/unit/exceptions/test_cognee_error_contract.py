@@ -67,6 +67,8 @@ SAMPLE_ARGUMENTS = {
     "dataset_id": "sample-dataset-id",
     "detail": "sample detail",
     "dimension": 1,
+    "collection_name": "Entity_name",
+    "incoming_dimensions": 1536,
     "field": "sample_field",
     "got": "sample",
     "max_index": 2,

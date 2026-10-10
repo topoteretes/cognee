@@ -22,7 +22,10 @@ from pydantic import BaseModel
 
 from cognee.infrastructure.background_tasks import register_background_task
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
-from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.infrastructure.databases.vector.exceptions import (
+    CollectionNotFoundError,
+    VectorDimensionMismatchError,
+)
 from cognee.infrastructure.databases.vector.pgvector.serialize_data import serialize_data
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
@@ -483,6 +486,26 @@ class LanceDBAdapter(VectorDBInterface):
         connection = await self.get_connection()
         return await connection.open_table(collection_name)
 
+    async def _stored_vector_width(self, collection) -> int | None:
+        """Fixed width of ``collection``'s vector column, or None if unreadable.
+
+        Used only to diagnose a write failure: a collection's ``vector`` column is
+        a fixed-size list whose ``list_size`` is the width it was built with. The
+        read is best-effort — any error here must not replace the write failure it
+        is trying to explain.
+        """
+        try:
+            schema = collection.schema()
+            if inspect.isawaitable(schema):
+                schema = await schema
+            if "vector" not in schema.names:
+                return None
+            list_size = getattr(schema.field("vector").type, "list_size", None)
+            return list_size if isinstance(list_size, int) else None
+        except Exception as e:  # noqa: BLE001
+            logger.debug("Could not read vector width for dimension diagnosis: %s", e)
+            return None
+
     async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
         """Upsert DataPoints into `collection_name`, merging belongs_to_set with any prior rows."""
         payload_schema = type(data_points[0])
@@ -605,6 +628,22 @@ class LanceDBAdapter(VectorDBInterface):
                     .execute(self._records_for_write(lance_data_points))
                 )
         except (ValueError, OSError, RuntimeError) as e:
+            # A fixed-width vector column rejects vectors of any other width with a
+            # low-level writer error that names neither the collection nor the real
+            # cause. Diagnose that here (only on failure, so successful writes pay
+            # nothing) and surface the two widths instead. This also supersedes the
+            # schema-drift recovery below: migration can only rebuild the table at
+            # the current width, so it cannot reconcile a genuine width mismatch.
+            stored_width = await self._stored_vector_width(collection)
+            if stored_width is not None:
+                incoming_width = len(data_vectors[0]) if data_vectors else vector_size
+                if stored_width != incoming_width:
+                    raise VectorDimensionMismatchError(
+                        collection_name=collection_name,
+                        stored_dimensions=stored_width,
+                        incoming_dimensions=incoming_width,
+                    ) from e
+
             # Two LanceDB schema-drift failure modes are recoverable by rebuilding
             # the table via Pydantic validation (which fills defaults from the
             # current DataPoint subclass):
