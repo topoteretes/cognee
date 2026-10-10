@@ -14,6 +14,11 @@ retry-safe order:
 Vectors are deleted first so that a failure leaves graph provenance intact and a
 retry converges. All three steps are individually idempotent.
 
+Because ``delete_nodes`` detaches on several engines (Ladybug/Neo4j ``DETACH
+DELETE``), the texts of edges incident to deleted nodes are snapshotted before
+step 3 and joined into the EdgeType orphan cleanup, which itself compares texts
+in the normalized ``EdgeType.id_for`` space (issue #5473).
+
 Vector ids mirror ``delete_from_graph_and_vector``:
   - node -> collection ``f"{node_type}_{field}"`` for each indexed field,
     id = node_id;
@@ -153,7 +158,15 @@ async def execute_source_ref_removal(
     # ------------------------------------------------------------------
     # 4. Hard-delete unowned artifacts.
     # ------------------------------------------------------------------
+    detached_edge_texts: list[str] = []
     if unowned_node_ids:
+        # delete_nodes is a DETACH DELETE on several engines (Ladybug/Neo4j): it
+        # also removes every edge incident to these nodes — including edges other
+        # source refs still own — and those edges are not in unowned_edges. Their
+        # texts must be snapshotted BEFORE the nodes disappear, so the EdgeType
+        # cleanup below can prune their artifacts instead of leaving orphans
+        # (issue #5473, defect A).
+        detached_edge_texts = await _collect_detached_edge_texts(graph_engine, unowned_node_ids)
         await graph_engine.delete_nodes(unowned_node_ids)
 
     if unowned_edges:
@@ -163,7 +176,9 @@ async def execute_source_ref_removal(
     # 5. Post-delete cleanup parity with delete_from_graph_and_vector
     #    (best-effort, non-fatal).
     # ------------------------------------------------------------------
-    await _cleanup_orphaned_edge_types(graph_engine, vector_engine, unowned_edges, edge_data)
+    await _cleanup_orphaned_edge_types(
+        graph_engine, vector_engine, unowned_edges, edge_data, detached_edge_texts
+    )
     await _cleanup_orphaned_nodeset_tags(graph_engine, vector_engine, unowned_node_ids, node_data)
 
     return SourceRefRemovalResult(
@@ -172,23 +187,55 @@ async def execute_source_ref_removal(
     )
 
 
+async def _collect_detached_edge_texts(graph_engine, node_ids: list[str]) -> list[str]:
+    """Best-effort snapshot of the retrieval texts of edges incident to ``node_ids``.
+
+    ``delete_nodes`` detaches on several engines (Ladybug/Neo4j ``DETACH DELETE``):
+    edges on the deleted nodes disappear even when another source ref still owns
+    them, and they are never in ``unowned_edges``. Their texts must therefore be
+    captured before the nodes are gone so the EdgeType cleanup can prune them.
+    Best-effort: any failure here must not block the delete, mirroring the
+    non-fatal cleanup below (issue #5473, defect A).
+    """
+    try:
+        _, edges = await graph_engine.get_graph_data()
+    except Exception as error:
+        logger.warning("EdgeType detach snapshot failed (non-fatal): %s", error, exc_info=True)
+        return []
+
+    node_id_set = set(node_ids)
+    detached_edge_texts: list[str] = []
+    for edge in edges:
+        if edge[0] in node_id_set or edge[1] in node_id_set:
+            properties = edge[3] if len(edge) > 3 and isinstance(edge[3], dict) else {}
+            edge_text = get_edge_retrieval_text(properties.get("edge_text"), edge[2])
+            if edge_text:
+                detached_edge_texts.append(edge_text)
+    return detached_edge_texts
+
+
 async def _cleanup_orphaned_edge_types(
     graph_engine,
     vector_engine,
     unowned_edges: list[EdgeIdentity],
     edge_data: dict[EdgeIdentity, EdgeDeleteData],
+    detached_edge_texts: list[str] | None = None,
 ) -> None:
     """Prune EdgeType nodes (and their vectors) whose text no longer appears.
 
     EdgeType artifacts are keyed by *shared* relationship text, so an EdgeType is
     only orphaned when no surviving edge in the graph still uses that text. We
     delete the graph node and the vector point together, off the same orphaned-
-    text set, so a relationship that another edge still uses keeps both.
-    """
-    if not unowned_edges:
-        return
+    id set, so a relationship that another edge still uses keeps both.
 
-    deleted_edge_texts: set[str] = set()
+    Candidates come from the explicitly unowned edges plus the texts of edges
+    removed as a side effect of DETACH DELETE (``detached_edge_texts``, see
+    ``_collect_detached_edge_texts``). Orphanhood is decided in the normalized id
+    space of ``EdgeType.id_for`` — the very key the delete uses — so a surviving
+    edge whose text differs only in case/spaces/apostrophes still protects the
+    shared point instead of losing it (issue #5473, defect B).
+    """
+    deleted_edge_texts: set[str] = set(detached_edge_texts or [])
     for edge in unowned_edges:
         data = edge_data[edge]
         edge_text = get_edge_retrieval_text(data.edge_text, edge.relationship_name)
@@ -200,17 +247,15 @@ async def _cleanup_orphaned_edge_types(
 
     try:
         _, remaining_edges = await graph_engine.get_graph_data()
-        remaining_edge_texts: set[str] = set()
+        remaining_edge_type_ids: set[str] = set()
         for edge in remaining_edges:
             properties = edge[3] if len(edge) > 3 and isinstance(edge[3], dict) else {}
             edge_text = get_edge_retrieval_text(properties.get("edge_text"), edge[2])
             if edge_text:
-                remaining_edge_texts.add(edge_text)
+                remaining_edge_type_ids.add(str(EdgeType.id_for(edge_text)))
 
-        orphaned_edge_texts = [
-            edge_text for edge_text in deleted_edge_texts if edge_text not in remaining_edge_texts
-        ]
-        orphaned_edge_type_ids = [str(EdgeType.id_for(text)) for text in orphaned_edge_texts]
+        candidate_edge_type_ids = {str(EdgeType.id_for(text)) for text in deleted_edge_texts}
+        orphaned_edge_type_ids = sorted(candidate_edge_type_ids - remaining_edge_type_ids)
 
         if orphaned_edge_type_ids:
             await graph_engine.delete_nodes(orphaned_edge_type_ids)
