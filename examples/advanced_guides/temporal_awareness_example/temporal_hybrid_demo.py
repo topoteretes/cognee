@@ -26,7 +26,7 @@ from cognee.api.v1.cognify.cognify import get_default_tasks
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.pipelines.tasks.task import Task
-from cognee.modules.retrieval.hybrid.results import result_id
+from cognee.modules.retrieval.utils.results import result_id
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import INFO, setup_logging
 

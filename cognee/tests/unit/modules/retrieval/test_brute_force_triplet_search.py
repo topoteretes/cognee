@@ -541,6 +541,9 @@ async def test_get_memory_fragment_projects_feedback_weight_only_when_feedback_i
         kwargs_without_feedback = mock_fragment.project_graph_from_db.call_args.kwargs
         assert "feedback_weight" not in kwargs_without_feedback["node_properties_to_project"]
         assert "feedback_weight" not in kwargs_without_feedback["edge_properties_to_project"]
+        assert {"conflict_marks", "conflict_marks_json", "effective_date"} <= set(
+            kwargs_without_feedback["edge_properties_to_project"]
+        )
 
         await get_memory_fragment(feedback_influence=0.2)
         kwargs_with_feedback = mock_fragment.project_graph_from_db.call_args.kwargs

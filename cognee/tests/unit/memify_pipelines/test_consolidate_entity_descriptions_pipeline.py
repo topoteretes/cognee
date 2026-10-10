@@ -1291,7 +1291,10 @@ async def test_pipeline_wires_memify_tasks_dataset_and_user():
     user = MagicMock()
     module = "cognee.memify_pipelines.consolidate_entity_descriptions"
 
-    with patch(f"{module}.memify", new=AsyncMock(return_value={"status": "ok"})) as memify_mock:
+    with (
+        patch(f"{module}.memify", new=AsyncMock(return_value={"status": "ok"})) as memify_mock,
+        pytest.warns(DeprecationWarning, match="review_conflicts"),
+    ):
         result = await consolidate_entity_descriptions_pipeline(user=user, dataset="ds-1")
 
     assert result == {"status": "ok"}

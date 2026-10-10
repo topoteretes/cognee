@@ -65,7 +65,14 @@ async def get_memory_fragment(
         properties_to_project = ["id", "description", "name", "type", "text", "importance_weight"]
 
     node_properties_to_project = list(properties_to_project)
-    edge_properties_to_project = ["relationship_name", "edge_text", "edge_object_id"]
+    edge_properties_to_project = [
+        "relationship_name",
+        "edge_text",
+        "edge_object_id",
+        "conflict_marks",
+        "conflict_marks_json",
+        "effective_date",
+    ]
 
     if feedback_influence > 0.0:
         if "feedback_weight" not in node_properties_to_project:

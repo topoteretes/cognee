@@ -77,6 +77,61 @@ async def test_passage_section_formatting():
 
 
 @pytest.mark.asyncio
+async def test_reviewed_hybrid_retrieval_attaches_sources_and_deduplicates_conflicts():
+    conflict = "Bob succeeded Alice as Acme CEO."
+    chunk = _result(
+        "chunk", {"id": "chunk", "text": "Bob became CEO.", "external_metadata": {"team": "A"}}
+    )
+    vector = MagicMock()
+    vector.has_collection = AsyncMock(return_value=False)
+    vector.search = _vector_search(
+        chunks=[chunk],
+        entities=[_result("acme", {"id": "acme", "text": "Acme"})],
+        edge_types=[_edge_hit(conflict)],
+    )
+    graph = _graph(
+        nodes=[
+            (
+                "acme",
+                {
+                    "name": "Acme",
+                    "description": "Bob leads Acme.",
+                    "conflicts_reviewed_at": "2026-01-10",
+                },
+            ),
+            ("company", {"name": "company"}),
+            ("f1", {"type": "FactConflict", "text": conflict}),
+        ],
+        edges=[
+            ("acme", "company", "is_a", {}),
+            ("f1", "acme", "conflict_about", {"edge_text": conflict}),
+            (
+                "f1",
+                "chunk",
+                "conflict_cites",
+                {"document": "Report", "effective_date": "2026-01-10"},
+            ),
+        ],
+    )
+    retriever = HybridRetriever(
+        text_summaries_top_k=0, include_external_metadata=True, external_metadata_keys=["team"]
+    )
+    with patch(
+        "cognee.modules.retrieval.hybrid_retriever.get_unified_engine",
+        new_callable=AsyncMock,
+        return_value=_unified(vector=vector, graph=graph),
+    ):
+        retrieved = await retriever.get_retrieved_objects(query="q")
+    context = await retriever.get_context_from_objects(query="q", retrieved_objects=retrieved)
+    assert chunk.payload["conflicts"] == [conflict]
+    assert "source: Report (2026-01-10)\nteam: A\nBob became CEO." in context
+    assert "### Acme (company)\nBob leads Acme." in context
+    assert context.count(conflict) == 1
+    assert "## Fact conflicts" in context
+    assert "## Related facts" not in context
+
+
+@pytest.mark.asyncio
 async def test_passage_section_formats_paired_summary_and_raw_text():
     retriever = HybridRetriever()
     context = await retriever.get_context_from_objects(

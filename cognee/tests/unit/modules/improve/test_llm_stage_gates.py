@@ -27,6 +27,7 @@ from cognee.modules.improve.stages import (
     DistillSessionsStage,
     ExtractAgentContextStage,
     GlobalContextIndexStage,
+    ReviewConflictsStage,
 )
 from cognee.tests.utils.keyless_gate_targets import (
     KEYLESS_GATE_IMPORT_EXCLUSIONS,
@@ -40,7 +41,9 @@ session_manager_module = sys.modules["cognee.infrastructure.session.get_session_
 
 
 def _inputs(**overrides):
-    return SimpleNamespace(**{"build_global_context_index": True, **overrides})
+    return SimpleNamespace(
+        **{"build_global_context_index": True, "review_conflicts": True, **overrides}
+    )
 
 
 def _session_manager(available=True, auto_feedback=True):
@@ -70,7 +73,12 @@ def test_keyless_gate_fixture_covers_module_level_llm_available_imports():
 
 @pytest.mark.parametrize(
     "stage",
-    [ExtractAgentContextStage(), DistillSessionsStage(), GlobalContextIndexStage()],
+    [
+        ExtractAgentContextStage(),
+        DistillSessionsStage(),
+        ReviewConflictsStage(),
+        GlobalContextIndexStage(),
+    ],
     ids=lambda stage: stage.name,
 )
 def test_llm_stages_decline_without_a_usable_llm(stage):
@@ -85,7 +93,12 @@ def test_llm_stages_decline_without_a_usable_llm(stage):
 
 @pytest.mark.parametrize(
     "stage",
-    [ExtractAgentContextStage(), DistillSessionsStage(), GlobalContextIndexStage()],
+    [
+        ExtractAgentContextStage(),
+        DistillSessionsStage(),
+        ReviewConflictsStage(),
+        GlobalContextIndexStage(),
+    ],
     ids=lambda stage: stage.name,
 )
 def test_llm_stages_run_when_an_llm_is_configured(stage):

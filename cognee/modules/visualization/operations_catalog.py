@@ -14,7 +14,7 @@ Curated from the implementation:
   * cognee/tasks/codingagents/coding_rule_associations.py
 
 The self-improvement rows (feedback weighting, session/trace persistence,
-distillation, preferences, truth subspace, triplet enrichment, global context
+distillation, preferences, truth subspace, conflict review, triplet enrichment, global context
 index) are **generated** from ``cognee.modules.improve.DEFAULT_STAGES`` — the
 only description of the improve stages — with their view copy kept here in
 ``_IMPROVE_STAGE_DESCRIPTORS``, keyed by stage name; a test asserts the key
@@ -64,7 +64,7 @@ _OPERATIONS: list[dict[str, Any]] = [
         "scope": "whole",
         "pipeline_name": "memify_pipeline",
         "summary": "Rewrites Entity descriptions from their neighborhood, summarizes each "
-        "EntityType from its members, and writes is_a edge text.",
+        "EntityType from its members, and writes is_a edge text. Deprecated: use review_conflicts.",
         "effects": [
             {"effect": "modifies", "target_type": "Entity", "property": "description"},
             {"effect": "modifies", "target_type": "EntityType", "property": "description"},
@@ -198,6 +198,15 @@ _IMPROVE_STAGE_DESCRIPTORS: dict[str, dict[str, Any]] = {
         "summary": "Scores chunks against accepted lessons (truth_alignment coordinates).",
         "effects": [
             {"effect": "modifies", "target_type": "DocumentChunk", "property": "truth_alignment"},
+        ],
+    },
+    "review_conflicts": {
+        "label": "review conflicts",
+        "summary": "Reviews source facts and dates, stores conflicts and updates descriptions.",
+        "pipeline_name": "memify_pipeline",
+        "effects": [
+            {"effect": "produces", "target_type": "FactConflict"},
+            {"effect": "modifies", "target_type": "Entity", "property": "description"},
         ],
     },
     "triplet_enrichment": {

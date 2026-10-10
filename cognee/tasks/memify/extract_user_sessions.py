@@ -105,6 +105,7 @@ async def extract_user_sessions(
                         session_id=session_id,
                         text=session_string,
                         persisted_qa_count=len(qa_data),
+                        last_entry_time=new_entries[-1].time,
                     )
                 except Exception as e:
                     logger.warning(f"Failed to extract session {session_id}: {e!s}", exc_info=True)
