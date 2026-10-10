@@ -230,7 +230,7 @@ async def complete_database_ingestion(schema, migrate_column_data):
 
                     for key, value in row_properties.items():
                         # Skip mapping primary key information to itself and mapping of foreign key information (as it will be mapped bellow)
-                        if key is primary_key_col or key in foreign_keys:
+                        if key == primary_key_col or key in foreign_keys:
                             continue
 
                         # Create column value node
