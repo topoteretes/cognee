@@ -6,8 +6,10 @@ from typing import Any
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 from cognee.infrastructure.engine import is_internal_node
+from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.graph.cognee_graph.CogneeAbstractGraph import CogneeAbstractGraph
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge, Node
+from cognee.modules.graph.cognee_graph.scoped_neighborhood import select_scoped_neighborhood
 from cognee.modules.graph.exceptions import (
     EntityNotFoundError,
     InvalidDimensionsError,
@@ -304,12 +306,15 @@ class CogneeGraph(CogneeAbstractGraph):
         edge_dimension: int = 1,
         triplet_distance_penalty: float = 6.5,
         feedback_influence: float = get_base_config().default_feedback_influence,
+        node_type: type | None = None,
+        node_name: list[str] | None = None,
+        node_name_filter_operator: str = "OR",
     ) -> None:
         """
         Project a neighborhood subgraph from the database around seed nodes.
 
-        Calls adapter.get_neighborhood() and processes nodes/edges the same way
-        as project_graph_from_db.
+        Unfiltered calls use adapter.get_neighborhood(). With a NodeSet filter,
+        traversal stays within the scoped subgraph, including intermediate nodes.
         """
         if node_dimension < 1 or edge_dimension < 1:
             raise InvalidDimensionsError()
@@ -319,11 +324,19 @@ class CogneeGraph(CogneeAbstractGraph):
             raise ValueError("seed_node_ids must not be empty")
         try:
             logger.info(f"Retrieving {depth}-hop neighborhood for {len(seed_node_ids)} seed nodes.")
-            nodes_data, edges_data = await adapter.get_neighborhood(
-                node_ids=seed_node_ids,
-                depth=depth,
-                edge_types=edge_types,
-            )
+            if node_name:
+                nodes_data, edges_data = await self._get_nodeset_subgraph(
+                    adapter, node_type or NodeSet, node_name, node_name_filter_operator
+                )
+                nodes_data, edges_data = select_scoped_neighborhood(
+                    nodes_data, edges_data, seed_node_ids, depth, edge_types
+                )
+            else:
+                nodes_data, edges_data = await adapter.get_neighborhood(
+                    node_ids=seed_node_ids,
+                    depth=depth,
+                    edge_types=edge_types,
+                )
 
             if not nodes_data:
                 raise EntityNotFoundError(message="Empty neighborhood projected from the database.")

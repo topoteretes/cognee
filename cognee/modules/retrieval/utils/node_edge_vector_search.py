@@ -99,10 +99,18 @@ class NodeEdgeVectorSearch:
             for collection_results in self.node_distances.values()
         )
 
-    def extract_relevant_node_ids(self) -> list[str]:
-        """Extracts unique node IDs from search results."""
+    def extract_relevant_node_ids(self, *, rank_by_score: bool = False) -> list[str]:
+        """Extract unique node IDs, optionally ordered by their best vector distance."""
         if self.query_list_length is not None:
             return []
+        if rank_by_score:
+            scored_nodes = sorted(
+                (node for results in self.node_distances.values() for node in results),
+                key=lambda node: node.score,
+            )
+            return list(
+                dict.fromkeys(str(node.id) for node in scored_nodes if getattr(node, "id", None))
+            )
         relevant_node_ids = set()
         for scored_results in self.node_distances.values():
             for scored_node in scored_results:

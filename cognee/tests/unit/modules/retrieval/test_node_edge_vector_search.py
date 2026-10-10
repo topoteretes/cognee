@@ -154,6 +154,42 @@ async def test_node_edge_vector_search_extract_relevant_node_ids_batch():
     assert node_ids == []
 
 
+def test_ranked_node_ids_use_the_best_distance_across_collections():
+    vector_search = NodeEdgeVectorSearch(vector_engine=AsyncMock())
+    vector_search.node_distances = {
+        "Entity_name": [
+            MockScoredResult("farthest", 0.9),
+            MockScoredResult("nearest", 0.8),
+            MockScoredResult("middle", 0.4),
+        ],
+        "TextSummary_text": [
+            MockScoredResult("nearest", 0.1),
+            MockScoredResult("middle", 0.6),
+            MockScoredResult(None, 0.0),
+        ],
+    }
+
+    assert vector_search.extract_relevant_node_ids(rank_by_score=True) == [
+        "nearest",
+        "middle",
+        "farthest",
+    ]
+
+
+def test_ranked_node_ids_keep_result_order_for_equal_distances():
+    vector_search = NodeEdgeVectorSearch(vector_engine=AsyncMock())
+    vector_search.node_distances = {
+        "Entity_name": [MockScoredResult("first", 0.1), MockScoredResult("second", 0.1)],
+        "TextSummary_text": [MockScoredResult("first", 0.1), MockScoredResult("third", 0.1)],
+    }
+
+    assert vector_search.extract_relevant_node_ids(rank_by_score=True) == [
+        "first",
+        "second",
+        "third",
+    ]
+
+
 @pytest.mark.asyncio
 async def test_node_edge_vector_search_has_results_single_query():
     """Test has_results returns True when results exist and False when only empties."""

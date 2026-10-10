@@ -3170,7 +3170,7 @@ class LadybugAdapter(GraphDBInterface):
 
         edges_query = """
             UNWIND $ids AS wanted
-            MATCH (a:Node)-[r:EDGE]-(b:Node)
+            MATCH (a:Node)-[r:EDGE]->(b:Node)
             WHERE a.id = wanted
             RETURN a.id, b.id, r.relationship_name, r.properties
         """
