@@ -15,8 +15,13 @@ from pydantic import BaseModel
 from pydantic._internal._core_utils import CoreSchemaOrField, is_core_schema
 from pydantic.json_schema import GenerateJsonSchema
 
-from cognee.shared.exceptions import ExternalSchemaReferenceError
+from cognee.shared.exceptions import ExternalSchemaReferenceError, ReservedGraphModelTitleError
 from cognee.shared.llm_graph_model import datapoint_model_to_basemodel
+
+# Generated graph-model classes are exec'd into this fixed module name. They are
+# excluded from the reserved-title set: they are outputs of this boundary, not
+# first-party cognee models, and would otherwise poison later schemas in a process.
+_GENERATED_MODULE_NAME = "cognee.shared._generated_graph_models"
 
 
 def _reject_external_refs(node) -> None:
@@ -41,8 +46,50 @@ def _reject_external_refs(node) -> None:
             _reject_external_refs(value)
 
 
+def _reserved_datapoint_type_names() -> set[str]:
+    """Names of cognee-owned DataPoint subclasses a graph model title must not reuse.
+
+    A schema title becomes the generated class name, which is persisted as the graph
+    node ``type``. Several components resolve nodes by that type (the tool registry,
+    skill resolution, ``convert_node_to_data_point``), so a user-supplied title that
+    matches a first-party model would mint nodes indistinguishable from cognee's own.
+    This is defense in depth behind the tool ``handler_ref`` allowlist.
+
+    Only models shipped inside the cognee package are reserved. Subclasses defined by
+    user code, examples, or the test-suite (``cognee.tests.*``) are excluded so
+    legitimate custom graph models and schema round-trips keep working.
+    """
+    # Importing the engine models package registers the first-party graph node types
+    # (Tool, Skill, ...) before we enumerate them.
+    import cognee.modules.engine.models
+    from cognee.infrastructure.engine import DataPoint
+    from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
+
+    reserved = {DataPoint.__name__}
+    for subclass in get_all_subclasses(DataPoint):
+        module = getattr(subclass, "__module__", "")
+        if module == _GENERATED_MODULE_NAME or module.startswith("cognee.tests"):
+            # Classes we generated for a previous schema are not first-party models.
+            continue
+        if module.startswith("cognee."):
+            reserved.add(subclass.__name__)
+    return reserved
+
+
+def _reject_reserved_titles(pydantic_json_schema: dict) -> None:
+    """Raise if the schema title collides with a registered cognee DataPoint type."""
+    title = pydantic_json_schema.get("title")
+    if isinstance(title, str) and title in _reserved_datapoint_type_names():
+        raise ReservedGraphModelTitleError(
+            f"graph_model title {title!r} collides with a registered cognee DataPoint type; "
+            "graph node types are reserved for cognee's own models. Rename the schema title "
+            "to a domain-specific name that is not a cognee type (e.g. 'Machine')."
+        )
+
+
 def graph_schema_to_graph_model(pydantic_json_schema: dict) -> BaseModel:
     _reject_external_refs(pydantic_json_schema)
+    _reject_reserved_titles(pydantic_json_schema)
     # If a custom graph model is provided, convert it from dict to a Pydantic model class
     config = GenerateConfig(
         # Second layer behind _reject_external_refs: the generator must never fetch
@@ -72,7 +119,7 @@ def graph_schema_to_graph_model(pydantic_json_schema: dict) -> BaseModel:
 
     # Dynamically create a module to execute the generated code and retrieve the model class
     # This is necessary to properly handle imports and references in the generated code
-    module_name = "cognee.shared._generated_graph_models"
+    module_name = _GENERATED_MODULE_NAME
     mod = types.ModuleType(module_name)
     sys.modules[module_name] = mod
 
