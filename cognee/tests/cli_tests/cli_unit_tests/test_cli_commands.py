@@ -591,6 +591,62 @@ class TestDeleteCommand:
         assert "dataset_name" in actions
         assert "all" in actions
         assert "force" in actions
+        assert "dry_run" in actions
+
+    @patch(_RESOLVE_USER_PATCH, new_callable=lambda: AsyncMock(return_value=_mock_user()))
+    @patch("cognee.cli.commands.delete_command.cognee_datasets")
+    @patch("cognee.cli.commands.delete_command.get_datasets_by_name")
+    @patch("cognee.cli.commands.delete_command.asyncio.run", side_effect=_mock_run)
+    def test_execute_dry_run_previews_without_deleting(
+        self, mock_asyncio_run, get_datasets_mock, datasets_mock, _mock_resolve
+    ):
+        """--dry-run resolves the same target but never calls a real deletion"""
+        expected_dataset_id = uuid4()
+        mock_dataset = MagicMock()
+        mock_dataset.id = expected_dataset_id
+
+        get_datasets_mock.return_value = [mock_dataset]
+
+        preview_report = {"status": "dry_run", "dry_run": True, "data_count": 0}
+        empty_dataset_mock = AsyncMock(return_value=preview_report)
+        datasets_mock.empty_dataset = empty_dataset_mock
+        delete_all_mock = AsyncMock()
+        datasets_mock.delete_all = delete_all_mock
+
+        command = DeleteCommand()
+        args = argparse.Namespace(
+            dataset_name="test_dataset", user_id=None, all=False, force=False, dry_run=True
+        )
+
+        command.execute(args)
+
+        empty_dataset_mock.assert_awaited_once_with(
+            dataset_id=expected_dataset_id, user=ANY, dry_run=True
+        )
+        delete_all_mock.assert_not_awaited()
+
+    @patch(_RESOLVE_USER_PATCH, new_callable=lambda: AsyncMock(return_value=_mock_user()))
+    @patch("cognee.cli.commands.delete_command.cognee_datasets")
+    @patch("cognee.cli.commands.delete_command.asyncio.run", side_effect=_mock_run)
+    def test_execute_dry_run_all_previews_delete_all(
+        self, mock_asyncio_run, datasets_mock, _mock_resolve
+    ):
+        """--dry-run --all previews delete_all without confirmation or deletion"""
+        preview_report = {"status": "dry_run", "dry_run": True, "dataset_count": 0}
+        delete_all_mock = AsyncMock(return_value=preview_report)
+        datasets_mock.delete_all = delete_all_mock
+        empty_dataset_mock = AsyncMock()
+        datasets_mock.empty_dataset = empty_dataset_mock
+
+        command = DeleteCommand()
+        args = argparse.Namespace(
+            dataset_name=None, user_id=None, all=True, force=False, dry_run=True
+        )
+
+        command.execute(args)
+
+        delete_all_mock.assert_awaited_once_with(user=ANY, dry_run=True)
+        empty_dataset_mock.assert_not_awaited()
 
     @patch(_RESOLVE_USER_PATCH, new_callable=lambda: AsyncMock(return_value=_mock_user()))
     @patch("cognee.cli.commands.delete_command.cognee_datasets")
