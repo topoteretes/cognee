@@ -65,9 +65,26 @@ async def prune_vector_databases():
         return
 
 
-async def prune_system(graph=True, vector=True, metadata=True, cache=True):
+async def prune_system(graph=True, vector=True, metadata=True, cache=True, dry_run=False):
     # Note: prune system should not be available through the API, it has no permission checks and will
     #       delete all graph and vector databases if called. It should only be used in development or testing environments.
+
+    if dry_run:
+        # Read-only preview: report which stores a real prune would clear.
+        # No engine is instantiated (even connecting can create empty database
+        # files) and nothing is recorded — the report is computed from the
+        # flags alone.
+        return {
+            "status": "dry_run",
+            "dry_run": True,
+            "operation": "prune_system",
+            "would_prune": {
+                "graph": bool(graph),
+                "vector": bool(vector),
+                "metadata": bool(metadata),
+                "cache": bool(cache),
+            },
+        }
 
     async def _prune():
         if vector and not backend_access_control_enabled():

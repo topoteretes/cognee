@@ -248,17 +248,31 @@ def get_datasets_router() -> APIRouter:
             ) from error
 
     @router.delete("")
-    async def delete_all(user: User = Depends(get_authenticated_user)):
+    async def delete_all(
+        dry_run: bool = Query(
+            False,
+            description="Preview what would be deleted without deleting anything.",
+        ),
+        user: User = Depends(get_authenticated_user),
+    ):
         """
         Delete all user's data.
 
         This endpoint permanently deletes all datasets that user created and all its associated data.
         The user must have delete permissions on the dataset to perform this operation.
 
+        ## Query Parameters
+        - **dry_run** (bool, default false): When true, no data is deleted; the
+          response reports every dataset and data item a real call would remove.
+
         ## Response
         No content returned on successful deletion.
+        With **dry_run=true**, a structured report of the deletion scope.
         If no datasets exist for the users, nothing happens.
         """
+        if dry_run:
+            return await datasets.delete_all(user, dry_run=True)
+
         await datasets.delete_all(user)
 
     @router.delete(
@@ -268,6 +282,10 @@ def get_datasets_router() -> APIRouter:
         dataset_id: UUID = PathParam(
             description="Dataset UUID, the id field from GET /api/v1/datasets (not the name)",
             examples=["b8a7c3de-4f5a-4b6c-8d9e-0f1a2b3c4d5e"],
+        ),
+        dry_run: bool = Query(
+            False,
+            description="Preview what would be deleted without deleting anything.",
         ),
         user: User = Depends(get_authenticated_user),
     ):
@@ -280,8 +298,13 @@ def get_datasets_router() -> APIRouter:
         ## Path Parameters
         - **dataset_id** (UUID): The unique identifier of the dataset to delete
 
+        ## Query Parameters
+        - **dry_run** (bool, default false): When true, no data is deleted; the
+          response reports the dataset and its data items a real call would remove.
+
         ## Response
         No content returned on successful deletion.
+        With **dry_run=true**, a structured report of the deletion scope.
 
         ## Error Codes
         - **401/403 Unauthorized/Forbidden**: Dataset doesn't exist or user lacks delete permission
@@ -293,9 +316,13 @@ def get_datasets_router() -> APIRouter:
             additional_properties={
                 "endpoint": f"DELETE /v1/datasets/{dataset_id!s}",
                 "dataset_id": str(dataset_id),
+                "dry_run": dry_run,
                 "cognee_version": cognee_version,
             },
         )
+
+        if dry_run:
+            return await datasets.empty_dataset(dataset_id, user, dry_run=True)
 
         await datasets.empty_dataset(dataset_id, user)
 
@@ -313,6 +340,10 @@ def get_datasets_router() -> APIRouter:
             description="Data item UUID, from GET /api/v1/datasets/{dataset_id}/data",
             examples=["f47ac10b-58cc-4372-a567-0e02b2c3d479"],
         ),
+        dry_run: bool = Query(
+            False,
+            description="Preview what would be deleted without deleting anything.",
+        ),
         user: User = Depends(get_authenticated_user),
     ):
         """
@@ -326,8 +357,13 @@ def get_datasets_router() -> APIRouter:
         - **dataset_id** (UUID): The unique identifier of the dataset containing the data
         - **data_id** (UUID): The unique identifier of the data item to delete
 
+        ## Query Parameters
+        - **dry_run** (bool, default false): When true, no data is deleted; the
+          response reports the data item a real call would remove.
+
         ## Response
         No content returned on successful deletion.
+        With **dry_run=true**, a structured report of the deletion scope.
 
         ## Error Codes
         - **401 Unauthorized**: Dataset doesn't exist or user lacks delete permission
@@ -344,9 +380,13 @@ def get_datasets_router() -> APIRouter:
                 "endpoint": f"DELETE /v1/datasets/{dataset_id!s}/data/{data_id!s}",
                 "dataset_id": str(dataset_id),
                 "data_id": str(data_id),
+                "dry_run": dry_run,
                 "cognee_version": cognee_version,
             },
         )
+
+        if dry_run:
+            return await datasets.delete_data(dataset_id, data_id, user, dry_run=True)
 
         await datasets.delete_data(dataset_id, data_id, user)
 
