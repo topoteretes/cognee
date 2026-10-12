@@ -371,6 +371,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                     async with self.engine.begin() as connection:
                         await connection.run_sync(self._metadata.reflect, only=[collection_name])
 
+                    await self._ensure_vector_index(collection_name)
+
     @retry(
         retry=retry_if_exception_type((DeadlockDetectedError, DBAPIError)),
         stop=stop_after_attempt(3),
@@ -486,9 +488,31 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 await session.execute(insert_statement)
             await session.commit()
 
+    async def _ensure_vector_index(self, collection_name: str) -> None:
+        """Create an HNSW index on the collection's vector column if within supported dimension limits."""
+        vector_size = self.embedding_engine.get_vector_size()
+        if vector_size > 2000:
+            logger.warning(
+                f"Vector dimension {vector_size} exceeds pgvector HNSW limit (2000). "
+                f"Skipping HNSW index on '{collection_name}'."
+            )
+            return
+
+        index_name = f"ix_{collection_name}_vector_hnsw"
+        query = text(
+            f'CREATE INDEX IF NOT EXISTS "{index_name}" ON "{collection_name}" USING hnsw (vector vector_cosine_ops)'
+        )
+        try:
+            async with self.engine.begin() as connection:
+                await connection.execute(query)
+        except (DBAPIError, ProgrammingError, exc.SQLAlchemyError) as e:
+            logger.warning(f"Could not create HNSW index on '{collection_name}': {e}")
+
     async def create_vector_index(self, index_name: str, index_property_name: str):
-        """Create the underlying index collection (table) for the given name/property pair."""
-        await self.create_collection(f"{index_name}_{index_property_name}")
+        """Create the underlying index collection (table) and HNSW ANN index on the vector column."""
+        collection_name = f"{index_name}_{index_property_name}"
+        await self.create_collection(collection_name)
+        await self._ensure_vector_index(collection_name)
 
     async def index_data_points(
         self, index_name: str, index_property_name: str, data_points: list[DataPoint]
@@ -656,7 +680,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         # Get PGVectorDataPoint Table from database
         PGVectorDataPoint = await self.get_table(collection_name)
 
-        if limit is None:
+        is_unbounded_search = limit is None
+        if is_unbounded_search:
             async with self.get_async_session() as session:
                 query = select(func.count()).select_from(PGVectorDataPoint)
                 result = await session.execute(query)
@@ -677,6 +702,15 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         )
         # Use async session to connect to the database
         async with self.get_async_session() as session:
+            if is_unbounded_search:
+                # When caller explicitly requests all results (limit=None), HNSW index
+                # truncates at hnsw.ef_search (default 40). Force sequential scan for this
+                # transaction to return full, accurate results across all rows.
+                try:
+                    await session.execute(text("SET LOCAL enable_indexscan = off;"))
+                    await session.execute(text("SET LOCAL enable_bitmapscan = off;"))
+                except (DBAPIError, ProgrammingError, exc.SQLAlchemyError) as e:
+                    logger.debug(f"Could not disable indexscan for unbounded search: {e}")
             if node_name:
                 if node_name_filter_operator == "AND":
                     filter_operator = "?&"
