@@ -3,6 +3,9 @@ from contextlib import aclosing
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy import select
+
+from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.llm.config import LLMConfig
 from cognee.infrastructure.locks import get_dataset_lock, held_datasets
@@ -139,10 +142,37 @@ async def run_pipeline_per_dataset(
     extras: dict | None = None,
     after_run_completed: Callable[[], Awaitable[Any]] | None = None,
 ):
+    items = data if isinstance(data, (list, tuple)) else [data] if data else []
+    selected_ids = [item.id for item in items if isinstance(item, Data)]
+    foreign_ids = [
+        str(item.id)
+        for item in items
+        if isinstance(item, Data) and item.dataset_id not in (None, dataset.id)
+    ]
+    if foreign_ids:
+        raise ValueError(
+            f"Data rows {', '.join(foreign_ids)} do not belong to dataset {dataset.id}."
+        )
+
     # The actual work of a single run, factored out so it can run either under
     # the per-dataset lock (normal case) or directly (re-entrant case below).
     async def _run_body():
         body_data = data if data else await get_dataset_data(dataset_id=dataset.id)
+
+        if selected_ids:
+            # Read the selected rows again under the dataset lock: a row may have
+            # been updated or deleted since the caller loaded it. An emptied
+            # selection runs over no data, never over the whole dataset.
+            async with get_relational_engine().get_async_session() as session:
+                current = {
+                    row.id: row
+                    for row in await session.scalars(select(Data).where(Data.id.in_(selected_ids)))
+                }
+            body_data = [
+                current[item.id] if isinstance(item, Data) else item
+                for item in items
+                if not isinstance(item, Data) or item.id in current
+            ]
 
         # The run always proceeds. Concurrent runs on one dataset are serialized
         # by the per-dataset lock, and already-processed documents are skipped
