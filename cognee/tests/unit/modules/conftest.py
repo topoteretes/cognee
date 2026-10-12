@@ -86,13 +86,15 @@ def capture_reset(event_loop, monkeypatch):
     moving past it means replacing this ordering trick (e.g. a loop-scoped
     fixture or an ``asyncio`` ``pytest_fixture_post_finalizer`` hook).
 
-    Also detaches ``CaptureConfig`` from the repo ``.env`` so a developer's
-    ``COGNEE_CAPTURE_*`` settings cannot flip the off-path tests; the tests set
-    the environment they need explicitly.
+    Also clears ``COGNEE_CAPTURE_ENABLED`` (the process ``.env`` is already in the
+    environment) so a developer's setting cannot flip the off-path tests; the
+    tests set the environment they need explicitly.
     """
-    from cognee.modules.observability.capture import CaptureConfig, hook
+    from cognee.modules.observability.capture import hook
 
-    monkeypatch.setitem(CaptureConfig.model_config, "env_file", None)
+    # The process .env was loaded at import: a developer's COGNEE_CAPTURE_ENABLED must
+    # not flip the off-path tests, which set the environment they need explicitly.
+    monkeypatch.delenv("COGNEE_CAPTURE_ENABLED", raising=False)
     hook._reset_for_tests()
     yield
     hook._reset_for_tests()

@@ -56,7 +56,7 @@ class CaptureConfig(BaseSettings):
     # to the atexit hook.
     cognee_capture_drain_timeout_s: float = 5.0
 
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    model_config = SettingsConfigDict(extra="allow")
 
     @pydantic.model_validator(mode="after")
     def fill_derived(self):
