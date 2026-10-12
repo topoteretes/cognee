@@ -354,12 +354,22 @@ def _input_source_fields(data_item: Any) -> dict[str, Any]:
     from cognee.tasks.ingestion.ingest_data import _source_uri_from_input
 
     location = _source_uri_from_input(data_item)
-    name = Path(unquote(urlparse(location).path)).stem if location else None
+    name = Path(unquote(urlparse(location).path)).stem if location else _upload_name(data_item)
     return {
         "data_name": name or None,
         "data_location": location,
         "data_label": data_item.label if isinstance(data_item, DataItemType) else None,
     }
+
+
+def _upload_name(data_item: Any) -> str | None:
+    """An upload's name as the client gave it, without its extension."""
+    from cognee.tasks.ingestion.data_item import DataItem as DataItemType
+
+    if isinstance(data_item, DataItemType):
+        data_item = data_item.data
+    filename = getattr(data_item, "filename", None)
+    return Path(filename).stem if isinstance(filename, str) and filename else None
 
 
 async def run_tasks_data_item_regular(
