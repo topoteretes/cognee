@@ -20,6 +20,7 @@ import lancedb
 from lancedb.pydantic import LanceModel, Vector
 from pydantic import BaseModel
 
+from cognee.infrastructure.background_tasks import register_background_task
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.infrastructure.databases.vector.pgvector.serialize_data import serialize_data
@@ -34,6 +35,17 @@ from cognee.modules.observability.tracing import (
 )
 from cognee.modules.storage.utils import copy_model
 from cognee.shared.logging_utils import get_logger
+from cognee_db_workers.lancedb_compaction import (
+    DEFAULT_MAX_TASKS_PER_RUN,
+    DEFAULT_MAX_VERSIONS_PER_RUN,
+    DEFAULT_RETENTION_SECONDS,
+    DEFAULT_TARGET_ROWS_PER_FRAGMENT,
+    PylanceIncompatibleError,
+    compact_fragments,
+    lance_core_mismatch,
+    open_as_lance,
+    prune_superseded_versions,
+)
 
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..models.ScoredResult import ScoredResult
@@ -42,6 +54,9 @@ from ..vector_db_interface import VectorDBInterface
 
 logger = get_logger("LanceDBAdapter")
 _NO_DEFAULT = object()
+# Anchors the background version prune each adapter starts when it first opens
+# its store (asyncio keeps only weak references to tasks).
+_OPEN_PRUNE_TASKS: set[asyncio.Task] = set()
 _SIMPLE_TYPE_DEFAULTS = {
     str: "",
     int: 0,
@@ -211,8 +226,36 @@ class LanceDBAdapter(VectorDBInterface):
         #   (*,     True)  — closed, not reusable in either mode
         self._subprocess_mode = session is not None
         self._permanently_closed = False
+        # Compaction state (see ``compact``): tables written since their last
+        # pass, a rotation cursor so a shared task budget is not always spent on
+        # the same tables, a lock so concurrent passes do not overlap, and the
+        # reason compaction was turned off for good, if it was.
+        self._compaction_dirty: set[str] = set()
+        self._compaction_cursor = 0
+        self._compaction_lock = asyncio.Lock()
+        self._compaction_unsupported: str | None = None
+        self._lance_core_checked = False
+        # The version prune started when this adapter first opens its store
+        # (see ``_schedule_open_prune``), so a store that receives no more
+        # writes still has its superseded versions reclaimed.
+        self._open_prune_started = False
+        self._open_prune_task: asyncio.Task | None = None
+        # Timer for one more prune once a pass's pending versions have aged
+        # (see ``_schedule_followup_prune``).
+        self._followup_prune_handle: asyncio.TimerHandle | None = None
 
     async def get_connection(self):
+        """
+        Return the connection used by this adapter.
+
+        The first successful call also starts a background prune of superseded
+        table versions (see ``_schedule_open_prune``).
+        """
+        connection = await self._open_connection()
+        self._schedule_open_prune()
+        return connection
+
+    async def _open_connection(self):
         """
         Return the connection used by this adapter.
 
@@ -443,6 +486,7 @@ class LanceDBAdapter(VectorDBInterface):
     async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
         """Upsert DataPoints into `collection_name`, merging belongs_to_set with any prior rows."""
         payload_schema = type(data_points[0])
+        self._mark_written(collection_name)
 
         if not await self.has_collection(collection_name):
             async with self.VECTOR_DB_LOCK:
@@ -630,6 +674,7 @@ class LanceDBAdapter(VectorDBInterface):
                 )
             )
 
+        self._mark_written(collection_name)
         async with self.VECTOR_DB_LOCK:
             await (
                 collection.merge_insert("id")
@@ -637,6 +682,354 @@ class LanceDBAdapter(VectorDBInterface):
                 .when_not_matched_insert_all()
                 .execute(self._records_for_write(raw_points))
             )
+
+    # ------------------------------------------------------------------
+    # Compaction
+    # ------------------------------------------------------------------
+
+    _REMOTE_URL_PREFIXES = ("db://", "http://", "https://", "s3://", "gs://", "az://")
+
+    def _store_url(self) -> str | None:
+        """The LanceDB location: ``self.url`` in local mode, the remote
+        connection's URL in subprocess mode (where ``url`` may be ``None``)."""
+        return self.url or getattr(self.connection, "_url", None)
+
+    def _is_remote_store(self, url: str | None) -> bool:
+        return bool(url) and url.startswith(self._REMOTE_URL_PREFIXES)
+
+    def _mark_written(self, collection_name: str) -> None:
+        """Record a write so the next compaction pass serves this table first."""
+        self._compaction_dirty.add(collection_name)
+
+    def _compaction_options(self) -> dict:
+        return {
+            "target_rows_per_fragment": DEFAULT_TARGET_ROWS_PER_FRAGMENT,
+            "retention_seconds": DEFAULT_RETENTION_SECONDS,
+            "max_tasks": DEFAULT_MAX_TASKS_PER_RUN,
+            "max_versions": DEFAULT_MAX_VERSIONS_PER_RUN,
+        }
+
+    def _compaction_order(self, names: list[str]) -> list[str]:
+        """Tables written since their last pass first, then the rest.
+
+        Each group is rotated by a cursor that advances every pass, so when the
+        budget runs out before the end of the list, the next pass starts with
+        tables this one did not reach. Called under ``_compaction_lock``.
+        """
+        cursor = self._compaction_cursor
+        self._compaction_cursor += 1
+
+        def rotated(group: list[str]) -> list[str]:
+            if len(group) < 2:
+                return group
+            start = cursor % len(group)
+            return group[start:] + group[:start]
+
+        written = [name for name in names if name in self._compaction_dirty]
+        untouched = [name for name in names if name not in self._compaction_dirty]
+        return rotated(written) + rotated(untouched)
+
+    def _compaction_skip_reason(self) -> str | None:
+        """Why no compaction or version prune may run on this (enabled) store, or ``None``."""
+        if self._is_remote_store(self._store_url()):
+            return "remote_store"
+        if not self._lance_core_checked:
+            self._lance_core_checked = True
+            mismatch = lance_core_mismatch()
+            if mismatch:
+                self._compaction_unsupported = "lance_core_mismatch"
+                logger.warning(
+                    "LanceDB compaction turned off: %s. Install the pylance release "
+                    "line matching lancedb's bundled Lance core (see pyproject).",
+                    mismatch,
+                )
+        return self._compaction_unsupported
+
+    def _turn_off_compaction(self, exc: Exception) -> None:
+        # Called from the handlers that caught ``exc``; its message names the
+        # underlying error, which is all a version mismatch needs.
+        self._compaction_unsupported = "pylance_incompatible"
+        logger.warning(
+            "LanceDB compaction turned off: pylance cannot open the tables lancedb "
+            "wrote (%s). Install the pylance release line matching lancedb's "
+            "bundled Lance core.",
+            exc,
+        )
+
+    async def compact(self, collection_name: str | None = None) -> dict:
+        """Fold the fragments cognee's upserts leave behind and prune old versions.
+
+        Every ``merge_insert`` appends a new fragment and leaves the superseded
+        rows on disk; LanceDB never reclaims either on its own, so a store in
+        daily use grows without bound (issue #4684: 136 GB on disk for ~6 GB of
+        live vectors). Called once at the end of every cognify run (see
+        ``compact_vector_store``); a no-op on a compact table.
+
+        Bounded, not whole-store: a pass executes at most
+        ``DEFAULT_MAX_TASKS_PER_RUN`` compaction tasks and deletes
+        at most ``DEFAULT_MAX_VERSIONS_PER_RUN`` old versions IN
+        TOTAL across the store's tables (``0`` = no limit). A task rewrites one
+        group of small fragments into one of at most
+        ``target_rows_per_fragment`` rows; a version is deleted only once its
+        successor has aged past the retention window, so a reader that opened
+        the table a moment ago keeps working. A store with a large backlog
+        therefore drains over several cognify runs instead of stalling one.
+        Both budgets are spent greedily in table order: tables written since
+        their last pass first, each group starting from a cursor that advances
+        every pass, so no table starves. A pass ends once both are spent.
+
+        The files a pass supersedes can only go once the retention window has
+        passed, i.e. in a later pass. So that a store which receives no more
+        writes still gets them back, every pass schedules one more prune for
+        when the window has passed (``_schedule_followup_prune``), and every
+        adapter prunes versions once when it first opens the store
+        (``_schedule_open_prune``), for what a closed adapter left behind.
+
+        Only the fragment rewrite runs under ``VECTOR_DB_LOCK``: its commit is a
+        Lance "rewrite" transaction that conflicts with a concurrent upsert or
+        delete on the same fragments. Version pruning commits nothing and runs
+        outside the lock, so writers are never blocked behind it. Concurrent
+        passes on one adapter do not queue: the second one returns at once.
+
+        Skipped for remote stores (``s3://`` and friends), where every rewrite
+        is network transfer and cleanup is thousands of object deletes, and
+        turned off for the adapter's lifetime when the installed pylance is not
+        on the Lance core lancedb bundles, or cannot open the tables lancedb
+        wrote. Fail-open per collection: a failure is logged and reported in
+        the returned stats, never raised.
+        """
+        options = self._compaction_options()
+        reason = self._compaction_skip_reason()
+        if reason:
+            return {"skipped": reason}
+        # This pass prunes versions itself, so a first-open prune not yet
+        # started is redundant; one already running finishes first.
+        self._open_prune_started = True
+        await self._wait_for_open_prune()
+        if self._compaction_lock.locked():
+            return {"skipped": "in_progress"}
+
+        async with self._compaction_lock:
+            connection = await self.get_connection()
+            if collection_name is not None:
+                names = [collection_name]
+            else:
+                names = self._compaction_order(list(await connection.table_names()))
+
+            task_budget = int(options["max_tasks"])  # 0 = unlimited
+            version_budget = int(options["max_versions"])  # 0 = unlimited
+            tasks_left, versions_left = task_budget, version_budget
+            results: dict = {}
+            for name in names:
+                tasks_spent = task_budget > 0 and tasks_left <= 0
+                versions_spent = version_budget > 0 and versions_left <= 0
+                if tasks_spent and versions_spent:
+                    break
+                # The helpers read 0 as "no limit" and a negative value as "none".
+                max_tasks = -1 if tasks_spent else (tasks_left if task_budget > 0 else 0)
+                max_versions = (
+                    -1 if versions_spent else (versions_left if version_budget > 0 else 0)
+                )
+                if not tasks_spent:
+                    # Cleared before the pass, so a write that lands during it
+                    # marks the table again for the next one. A table whose
+                    # rewrite the budget skipped stays first in line.
+                    self._compaction_dirty.discard(name)
+                try:
+                    stats = await self._compact_collection(name, options, max_tasks, max_versions)
+                except PylanceIncompatibleError as exc:
+                    self._turn_off_compaction(exc)
+                    results[name] = {"error": str(exc)[:200]}
+                    break
+                except Exception as exc:
+                    logger.warning(
+                        "Compaction skipped for collection '%s': %s",
+                        name,
+                        exc,
+                        exc_info=True,
+                    )
+                    results[name] = {"error": str(exc)[:200]}
+                    continue
+                results[name] = stats
+                if task_budget > 0:
+                    tasks_left -= int(stats.get("executed_tasks", 0) or 0)
+                if version_budget > 0:
+                    versions_left -= int(stats.get("old_versions_removed", 0) or 0)
+            self._schedule_followup_prune(options)
+            return results
+
+    async def _compact_collection(
+        self, collection_name: str, options: dict, max_tasks: int, max_versions: int
+    ) -> dict:
+        collection = await self.get_collection(collection_name)
+        target_rows = options["target_rows_per_fragment"]
+
+        async with self.VECTOR_DB_LOCK:
+            if self._subprocess_mode:
+                stats = await collection.compact_fragments(
+                    target_rows_per_fragment=target_rows, max_tasks=max_tasks
+                )
+            else:
+                # Plan against the version current under the lock: a write that
+                # committed after the handle was opened would otherwise make
+                # the rewrite conflict and fail. Hand the table to pylance, do
+                # the I/O off the event loop, then move the handle to the
+                # version the compaction committed.
+                await collection.checkout_latest()
+                dataset = await open_as_lance(collection)
+                stats = await asyncio.to_thread(
+                    compact_fragments,
+                    dataset,
+                    target_rows_per_fragment=target_rows,
+                    max_tasks=max_tasks,
+                )
+                await collection.checkout_latest()
+
+        pruned = await self._prune_collection(
+            collection, options["retention_seconds"], max_versions
+        )
+        return {**(stats or {}), **(pruned or {})}
+
+    async def _prune_collection(self, collection, retention_seconds: int, max_versions: int):
+        if self._subprocess_mode:
+            return await collection.prune_versions(
+                retention_seconds=retention_seconds, max_versions=max_versions
+            )
+        dataset = await open_as_lance(collection)
+        return await asyncio.to_thread(
+            prune_superseded_versions,
+            dataset,
+            retention_seconds=retention_seconds,
+            max_versions=max_versions,
+        )
+
+    # ------------------------------------------------------------------
+    # Version prune on first open
+    # ------------------------------------------------------------------
+
+    def _schedule_open_prune(self) -> None:
+        """Start, once per adapter, a background prune of superseded versions.
+
+        A compaction pass can only delete what it superseded once the retention
+        window has passed, i.e. in a later pass, and passes run only at the end
+        of a cognify. A store that stops receiving writes would keep those
+        files. Every process that opens the store -- server start, an SDK
+        script, an engine re-created after the idle-engine eviction -- reclaims
+        them here instead, within the same ``max_versions_per_run`` budget.
+        Runs in the background so the operation that opened the store is not
+        delayed; never raises.
+        """
+        if self._open_prune_started:
+            return
+        self._open_prune_started = True
+        options = self._compaction_options()
+        if self._compaction_skip_reason():
+            return
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self._start_prune_task(options)
+
+    def _schedule_followup_prune(self, options: dict) -> None:
+        """Prune once more when the versions younger than the retention window at
+        this pass (the writes that preceded it, the files it superseded) have aged.
+
+        Otherwise they wait for the next cognify, which an adapter that stays
+        open (a server) may never see. A later pass replaces the timer; the
+        prune itself schedules nothing, so the timer never chains."""
+        if self._followup_prune_handle is not None:
+            self._followup_prune_handle.cancel()
+            self._followup_prune_handle = None
+        if options["retention_seconds"] > 0:
+            self._followup_prune_handle = asyncio.get_running_loop().call_later(
+                options["retention_seconds"] + 1, self._start_followup_prune, options
+            )
+
+    def _start_followup_prune(self, options: dict) -> None:
+        self._followup_prune_handle = None
+        if self._permanently_closed:
+            return
+        self._start_prune_task(options)
+
+    def _start_prune_task(self, options: dict) -> asyncio.Task:
+        """Start a version prune in the background.
+
+        Every prune -- first-open or follow-up -- goes through here and takes
+        the single ``_open_prune_task`` slot that ``compact``, ``close`` and
+        ``prune`` wait on. A prune that replaces a still-running one in the slot
+        needs no explicit chaining: both take ``_compaction_lock``, which wakes
+        waiters in order, so the newer one finishes last and waiting on it
+        covers both. Registered as a background task, so
+        ``cognee.wait_for_background_tasks()`` and the server's shutdown drain
+        let it finish.
+        """
+        task = asyncio.ensure_future(self._prune_on_open(options))
+        self._open_prune_task = task
+        _OPEN_PRUNE_TASKS.add(task)
+        task.add_done_callback(_OPEN_PRUNE_TASKS.discard)
+        register_background_task(task)
+        return task
+
+    async def _prune_on_open(self, options: dict) -> dict:
+        try:
+            async with self._compaction_lock:
+                return await self._prune_pass(options)
+        except Exception as exc:
+            logger.warning("Version prune on open skipped: %s", exc, exc_info=True)
+            return {"error": str(exc)[:200]}
+
+    async def _wait_for_open_prune(self) -> None:
+        """Let a running version prune (first-open or follow-up, see
+        ``_start_prune_task``) finish -- it is bounded -- before this adapter
+        compacts, prunes or closes, so they never overlap and closing never tears
+        the worker down under it. A prune started on another event loop cannot be
+        awaited from this one and is left alone."""
+        task = self._open_prune_task
+        if task is None or task.done():
+            return
+        try:
+            same_loop = task.get_loop() is asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        if same_loop:
+            await asyncio.wait({task})
+
+    async def _prune_pass(self, options: dict) -> dict:
+        """Prune superseded versions across the store's tables; no fragment rewrites."""
+        connection = await self.get_connection()
+        budget = int(options["max_versions"])  # 0 = unlimited
+        left = budget
+        results: dict = {}
+        for name in list(await connection.table_names()):
+            if budget > 0 and left <= 0:
+                break
+            try:
+                collection = await self.get_collection(name)
+                stats = await self._prune_collection(
+                    collection, options["retention_seconds"], left if budget > 0 else 0
+                )
+            except PylanceIncompatibleError as exc:
+                self._turn_off_compaction(exc)
+                results[name] = {"error": str(exc)[:200]}
+                break
+            except Exception as exc:
+                logger.warning(
+                    "Version prune skipped for collection '%s': %s", name, exc, exc_info=True
+                )
+                results[name] = {"error": str(exc)[:200]}
+                continue
+            results[name] = stats
+            if budget > 0:
+                left -= int(stats.get("old_versions_removed", 0) or 0)
+        removed = sum(
+            int(value.get("old_versions_removed", 0) or 0)
+            for value in results.values()
+            if isinstance(value, dict)
+        )
+        if removed:
+            logger.info("LanceDB version prune on open: %d old version(s) removed", removed)
+        return results
 
     async def _migrate_collection_schema(
         self,
@@ -1244,6 +1637,7 @@ class LanceDBAdapter(VectorDBInterface):
             import pyarrow
 
             arrow_records = pyarrow.Table.from_pylist(records, schema=schema)
+            self._mark_written(collection_name)
             await collection.merge_insert("id").when_matched_update_all().execute(arrow_records)
 
     # Ids per `IN (...)` delete predicate. Each `collection.delete` is a
@@ -1267,12 +1661,19 @@ class LanceDBAdapter(VectorDBInterface):
         # `id` column is a str, so match by string and escape single quotes to
         # keep the predicate injection-safe (mirrors create_data_points). The
         # sequential batches cannot commit-conflict with each other, and a
-        # non-existent id no-ops.
+        # non-existent id no-ops. Each batch takes VECTOR_DB_LOCK like every
+        # other write here: a Lance delete and a compaction rewrite of the same
+        # fragments conflict at commit, and the loser would be this delete
+        # (surfacing as a failed forget() or rollback). Per batch, not around
+        # the loop, so a large delete does not hold off upserts for its whole
+        # duration.
+        self._mark_written(collection_name)
         for start in range(0, len(data_point_ids), self.DELETE_PREDICATE_BATCH_SIZE):
             batch = data_point_ids[start : start + self.DELETE_PREDICATE_BATCH_SIZE]
             escaped_ids = [str(data_point_id).replace("'", "''") for data_point_id in batch]
             id_list = ", ".join(f"'{escaped_id}'" for escaped_id in escaped_ids)
-            await collection.delete(f"id IN ({id_list})")
+            async with self.VECTOR_DB_LOCK:
+                await collection.delete(f"id IN ({id_list})")
 
     async def remove_belongs_to_set_tags(
         self,
@@ -1389,6 +1790,8 @@ class LanceDBAdapter(VectorDBInterface):
                 # collection pays two round-trips at most instead of N.
                 # Ids are UUID strings produced by cognee so no escaping
                 # is needed (mirrors the assumption in `retrieve()`).
+                if rows_to_delete or rows_to_update:
+                    self._mark_written(collection_name)
                 if rows_to_delete:
                     orphan_predicate = (
                         "id IN (" + ", ".join(f"'{row_id}'" for row_id in rows_to_delete) + ")"
@@ -1457,17 +1860,27 @@ class LanceDBAdapter(VectorDBInterface):
         )
 
     async def prune(self):
+        # Everything is about to go, so a first-open version prune is pointless;
+        # one already running, or a compaction pass (whose version cleanup runs
+        # outside VECTOR_DB_LOCK), finishes before the tables are dropped under
+        # it. Same lock order as ``compact``: compaction lock, then the write lock.
+        self._open_prune_started = True
+        if self._followup_prune_handle is not None:
+            self._followup_prune_handle.cancel()
+            self._followup_prune_handle = None
+        await self._wait_for_open_prune()
         connection = await self.get_connection()
-        collection_names = await connection.table_names()
 
-        for collection_name in collection_names:
-            collection = await self.get_collection(collection_name)
-            await collection.delete("id IS NOT NULL")
-            await connection.drop_table(collection_name)
+        async with self._compaction_lock:
+            collection_names = await connection.table_names()
+            async with self.VECTOR_DB_LOCK:
+                for collection_name in collection_names:
+                    collection = await self.get_collection(collection_name)
+                    await collection.delete("id IS NOT NULL")
+                    await connection.drop_table(collection_name)
+            self._compaction_dirty.clear()
 
-        if self.url and not self.url.startswith(
-            ("db://", "http://", "https://", "s3://", "gs://", "az://")
-        ):
+        if self.url and not self._is_remote_store(self.url):
             db_dir_path = path.dirname(self.url)
             db_file_name = path.basename(self.url)
             await get_file_storage(db_dir_path).remove_all(db_file_name)
@@ -1573,6 +1986,10 @@ class LanceDBAdapter(VectorDBInterface):
         concurrent ``get_connection`` that reads the snapshot sees the
         closed state immediately — no new connections after this point.
         """
+        if self._followup_prune_handle is not None:
+            self._followup_prune_handle.cancel()
+            self._followup_prune_handle = None
+        await self._wait_for_open_prune()
         with self._lifecycle_lock:
             if self._permanently_closed:
                 return  # idempotent

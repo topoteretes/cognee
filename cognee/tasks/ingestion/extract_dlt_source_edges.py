@@ -95,6 +95,7 @@ async def extract_dlt_source_edges(
                     "table_name": row.get("table_name", ""),
                     "fk_references": row.get("fk_references", []),
                     "column_values": row.get("column_values") or {},
+                    "timestamps": row.get("timestamps") or {},
                 }
             )
 

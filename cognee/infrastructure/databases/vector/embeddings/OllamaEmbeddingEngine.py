@@ -16,6 +16,10 @@ from tenacity import (
 
 from cognee.infrastructure.databases.exceptions import EmbeddingException
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
+from cognee.infrastructure.databases.vector.embeddings.input_limit import (
+    init_input_limit,
+    sane_limit,
+)
 from cognee.infrastructure.databases.vector.embeddings.retry_config import (
     embedding_retry_condition,
 )
@@ -61,24 +65,27 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
     mock: bool
     huggingface_tokenizer_name: str
 
-    MAX_RETRIES = 5
-
     def __init__(
         self,
         model: str | None = "avr/sfr-embedding-mistral:latest",
         dimensions: int | None = 1024,
-        max_completion_tokens: int = 512,
+        max_completion_tokens: int | None = None,
         endpoint: str | None = "http://localhost:11434/api/embed",
         huggingface_tokenizer: str = "Salesforce/SFR-Embedding-Mistral",
         batch_size: int = 100,
     ):
         self.model = model
         self.dimensions = dimensions
-        self.max_completion_tokens = max_completion_tokens
         self.endpoint = endpoint
         self.huggingface_tokenizer_name = huggingface_tokenizer
         self.batch_size = batch_size
         self.tokenizer = self.get_tokenizer()
+        # Ollama embeds up to the model's context length and, by default, cuts
+        # the rest without an error. The limit comes from /api/show (see
+        # input_limit()), and every embed request below sends truncate=false so
+        # an over-length input is rejected (and then embedded in parts) instead
+        # of silently shortened.
+        init_input_limit(self, max_completion_tokens)
 
         enable_mocking = os.getenv("MOCK_EMBEDDING", "false")
         if isinstance(enable_mocking, bool):
@@ -196,6 +203,13 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
             "input": prompt,
             "dimensions": self.dimensions,
         }
+        if "/api/" in self.endpoint:
+            # Ollama's native API: reject over-length input ("the input length
+            # exceeds the context length") instead of embedding only the head.
+            # The rejection is classified below and embed_text splits the text.
+            # Not sent to an OpenAI-shaped endpoint (a LiteLLM proxy, /v1/...),
+            # which rejects unknown fields.
+            payload["truncate"] = False
 
         headers = {}
         api_key = os.getenv("LLM_API_KEY")
@@ -219,9 +233,16 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
                 # raise TypeError on None, turning a terminal over-length
                 # error into a retryable one that burns the full ladder.
                 error_msg = str(data["error"])
-                logger.error(f"Ollama embedding error: {error_msg}")
                 if "context length" in error_msg or "input length" in error_msg:
+                    # Expected with truncate=false: embed_text embeds the text in
+                    # parts, so this is recovery, not a failure.
+                    logger.debug(
+                        "Ollama rejected an over-length input for %s (%s); embedding it in parts.",
+                        self.model,
+                        error_msg,
+                    )
                     raise ValueError(f"Text too long for embedding model: {error_msg}")
+                logger.error(f"Ollama embedding error: {error_msg}")
                 raise RuntimeError(f"Ollama embedding API error: {error_msg}")
 
             if "embeddings" in data:
@@ -253,6 +274,43 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         """
         return self.batch_size
 
+    input_limit_source = "Ollama /api/show context_length"
+
+    async def input_limit(self) -> int | None:
+        """The model's context length from Ollama's ``/api/show``, or None.
+
+        Ollama embeds up to the model's ``context_length``. Asked asynchronously so
+        a slow server holds up only this request, not the whole event loop; httpx's
+        default timeout bounds the wait. Anything that stops the lookup, from a
+        server that is down to an endpoint that is not Ollama-shaped, gives None:
+        the cap then stands, and ``truncate: false`` on every embed request still
+        turns an over-length input into an error instead of a silent cut.
+        """
+        if not self.endpoint or not self.model or "/api/" not in self.endpoint:
+            return None
+        import httpx
+
+        show_url = f"{self.endpoint.split('/api/', 1)[0]}/api/show"
+        api_key = os.getenv("LLM_API_KEY")
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(show_url, json={"model": self.model}, headers=headers)
+            response.raise_for_status()
+            model_info = response.json().get("model_info") or {}
+        except Exception:
+            logger.debug(
+                "Could not read the context length of %r from %s",
+                self.model,
+                show_url,
+                exc_info=True,
+            )
+            return None
+        for key, value in model_info.items():
+            if key.endswith(".context_length"):
+                return sane_limit(value)
+        return None
+
     def get_tokenizer(self):
         """
         Load and return the tokenizer for the embedding engine.
@@ -270,7 +328,6 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         tokenizer = resolve_embedding_tokenizer(
             provider="ollama",
             model=self.model,
-            max_completion_tokens=self.max_completion_tokens,
             huggingface_tokenizer=self.huggingface_tokenizer_name,
         )
         logger.debug("Tokenizer loaded for OllamaEmbeddingEngine")

@@ -11,6 +11,10 @@ from uuid import uuid4
 
 import pytest
 
+from cognee.modules.improve import (
+    clear_auto_improve_admission,
+    register_auto_improve_admission,
+)
 from cognee.modules.improve.config import ImproveConfig
 from cognee.modules.improve.result import ImproveResult, StageResult
 
@@ -27,6 +31,13 @@ def _no_db_setup(monkeypatch):
     monkeypatch.setattr("cognee.modules.engine.operations.setup.setup", _noop_setup)
     # Defaults: auto-improve on, no debounce.
     monkeypatch.setattr(debounce_module, "get_improve_config", lambda: ImproveConfig())
+
+
+@pytest.fixture(autouse=True)
+def _no_admission_check():
+    clear_auto_improve_admission()
+    yield
+    clear_auto_improve_admission()
 
 
 @pytest.fixture
@@ -268,6 +279,111 @@ async def test_telemetry_never_carries_raw_session_ids(monkeypatch, permanent_pi
         assert "bob-chat" not in blob
 
 
+@pytest.mark.asyncio
+async def test_admission_skip_on_the_permanent_path_runs_no_improve(
+    monkeypatch, permanent_pipeline
+):
+    """The data is added and cognified as usual; only the improve that would
+    follow is left out, and the result carries the host's reason."""
+    calls = {"improve": 0}
+
+    async def counting_improve(**kwargs):
+        calls["improve"] += 1
+        return _completed_improve()
+
+    monkeypatch.setattr(improve_pkg, "improve", counting_improve)
+    asked = []
+
+    async def out_of_credit(**context):
+        asked.append(context)
+        return "insufficient_credits"
+
+    register_auto_improve_admission(out_of_credit)
+    user = SimpleNamespace(id=uuid4())
+    dataset_id = uuid4()
+
+    result = await remember_module.remember(
+        "note", dataset_id=dataset_id, user=user, session_ids=["chat_1"]
+    )
+
+    assert result.status == "completed"
+    assert bool(result) is True
+    assert permanent_pipeline == {"add": 1, "cognify": 1}
+    assert calls["improve"] == 0
+    assert result.improve is None
+    assert result.improve_error is None
+    assert result.improve_skipped == "insufficient_credits"
+    assert result.to_dict()["improve_skipped"] == "insufficient_credits"
+    assert "improve_skipped='insufficient_credits'" in repr(result)
+    # No session is being written on this path; the sessions the improve would
+    # have bridged are passed along.
+    assert asked == [
+        {"user": user, "dataset_id": dataset_id, "session_id": None, "session_ids": ["chat_1"]}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_admission_skip_is_on_a_background_result_before_the_run_finishes(
+    monkeypatch, permanent_pipeline
+):
+    """The check is asked up front, so the reason is already on the result a
+    background remember hands back — what an API response is built from."""
+    calls = {"improve": 0}
+
+    async def counting_improve(**kwargs):
+        calls["improve"] += 1
+        return _completed_improve()
+
+    async def out_of_credit(**context):
+        return "insufficient_credits"
+
+    monkeypatch.setattr(improve_pkg, "improve", counting_improve)
+    register_auto_improve_admission(out_of_credit)
+
+    result = await remember_module.remember(
+        "note",
+        dataset_id=uuid4(),
+        run_in_background=True,
+        user=SimpleNamespace(id=uuid4()),
+    )
+
+    assert result.improve_skipped == "insufficient_credits"
+    assert result.to_dict()["improve_skipped"] == "insufficient_credits"
+
+    await result
+
+    assert result.status == "completed"
+    assert permanent_pipeline == {"add": 1, "cognify": 1}
+    assert calls["improve"] == 0
+    assert result.improve_skipped == "insufficient_credits"
+
+
+@pytest.mark.asyncio
+async def test_failing_admission_check_never_breaks_a_permanent_remember(
+    monkeypatch, permanent_pipeline
+):
+    improve_result = _completed_improve()
+
+    async def fake_improve(**kwargs):
+        return improve_result
+
+    async def broken_check(**context):
+        raise ConnectionError("billing service unreachable")
+
+    monkeypatch.setattr(improve_pkg, "improve", fake_improve)
+    register_auto_improve_admission(broken_check)
+
+    result = await remember_module.remember(
+        "note", dataset_id=uuid4(), user=SimpleNamespace(id=uuid4())
+    )
+
+    # Fail-open: stored, cognified and improved as if no check were registered.
+    assert result.status == "completed"
+    assert result.improve is improve_result
+    assert result.improve_skipped is None
+    assert "improve_skipped" not in result.to_dict()
+
+
 def test_remote_payload_rebuilds_improve_result():
     result = remember_module.RememberResult(status="completed", dataset_name="d")
     payload = {
@@ -279,3 +395,17 @@ def test_remote_payload_rebuilds_improve_result():
     assert isinstance(result.improve, ImproveResult)
     assert result.improve.stage("triplet_enrichment").status == "completed"
     assert result.improve_error == "triplet_enrichment: boom"
+
+
+def test_remote_payload_restores_improve_skipped():
+    """A server whose host declined the improve says so under this key; the
+    client-side result carries it like a local one."""
+    result = remember_module.RememberResult(status="session_stored", dataset_name="d")
+    result._attach_improve_payload({"status": "session_stored"})
+    assert result.improve_skipped is None
+
+    result._attach_improve_payload({"improve_skipped": "insufficient_credits"})
+
+    assert result.improve_skipped == "insufficient_credits"
+    assert result.improve is None
+    assert result.to_dict()["improve_skipped"] == "insufficient_credits"

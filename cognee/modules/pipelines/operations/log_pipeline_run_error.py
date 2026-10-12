@@ -19,6 +19,8 @@ async def log_pipeline_run_error(
     e: Exception,
     *,
     user: User | None = None,
+    user_id: UUID | None = None,
+    tenant_id: UUID | None = None,
     started_at: datetime | None = None,
     tokens_in: int | None = None,
     tokens_out: int | None = None,
@@ -32,6 +34,8 @@ async def log_pipeline_run_error(
     call's own context provides. A writer closing a run on behalf of a process
     that is gone (startup recovery) passes the STARTED row's values instead, so
     the ERRORED row describes the run that died, not the process closing it.
+    ``user_id`` and ``tenant_id`` preserve that stored identity without requiring
+    a live ``User`` model. When ``user`` is supplied, its identity takes precedence.
     """
     if data_info is None:
         data_info = summarize_run_info_data(data)
@@ -48,8 +52,8 @@ async def log_pipeline_run_error(
             # defeat the redaction (and run_info growth is capped, COG-5359).
             "error": scrub_error_message(e),
         },
-        user_id=user.id if user else None,
-        tenant_id=getattr(user, "tenant_id", None) if user else None,
+        user_id=user.id if user is not None else user_id,
+        tenant_id=getattr(user, "tenant_id", None) if user is not None else tenant_id,
         operation_name=pipeline_name,
         started_at=started_at,
         ended_at=datetime.now(timezone.utc),

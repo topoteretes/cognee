@@ -44,9 +44,24 @@ Build memory for Agents and query from any client that speaks MCP – in your t
 - Integrated logging – all actions written to a rotating file (see get_log_file_location()) and mirrored to console in dev
 - Session-aware memory – store fast session cache entries or permanent graph memory through one `remember` tool
 - Focused recall – query memory through one `recall` tool with optional session and search controls
+- **Code graph search** – inspect indexed symbols, dependencies, architecture, and change impact with `code_search`
 - Simple deletion – remove a dataset or all owned memory through one `forget` tool
 
 Please refer to our documentation [here](https://docs.cognee.ai/how-to-guides/deployment/mcp) for further information.
+
+### Code graph search
+
+Use `code_search` for deterministic queries against an indexed code dataset. Select an operation and pass its operation-specific filters in `arguments`:
+
+```json
+{
+  "operation": "query_facts",
+  "arguments": {"kinds": ["module", "symbol"], "limit": 100},
+  "datasets": "sample-code-dataset"
+}
+```
+
+Supported operations are `query_facts`, `explore`, `traverse`, `find_path`, `impact_analysis`, `insights`, `architecture`, and `delta`.
 
 ## 🚀 Quick Start
 

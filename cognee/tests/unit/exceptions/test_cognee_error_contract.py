@@ -49,6 +49,8 @@ PACKAGE_ROOT = Path(cognee.__file__).parent
 SAMPLE_ARGUMENTS = {
     "conflicts": [{"name": "report.txt", "data_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"}],
     "attribute": "sample_attribute",
+    # CapabilityDeniedError builds its message from the capability it refused.
+    "capability": "sample_capability",
     # DatasetNoDataError (search fan-out) wraps a retriever error for one dataset.
     "dataset": SimpleNamespace(
         name="sample_dataset", id="sample-dataset-id", tenant_id="sample-tenant-id"
@@ -75,6 +77,8 @@ SAMPLE_ARGUMENTS = {
     "provider": "sample-provider",
     "search_type": "sample-search",
     "status_code": 400,
+    # GlinerInstallError: which install step failed (lock, metadata, installer, torch, ...).
+    "step": "sample-step",
     # EmbeddingDimensionMismatchError: the model that built a dataset vs the configured one.
     "stored_model": "sample-provider/old-model",
     "stored_dimensions": 384,

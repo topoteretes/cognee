@@ -14,6 +14,8 @@ Environment variables (prefix ``IMPROVE_``)::
     IMPROVE_DEBOUNCE_SECONDS=0         # ... or after T seconds
     IMPROVE_STAGES_DISABLED=a,b        # csv of stage names to skip
     IMPROVE_FEEDBACK_ALPHA=0.1         # learning rate for feedback weights, (0, 1]
+    IMPROVE_REVIEW_CONFLICTS=false     # review source facts and dated conflicts
+    IMPROVE_EFFECTIVE_DATE_KEY=effective_date  # document metadata source-date key
 """
 
 from functools import lru_cache
@@ -29,6 +31,8 @@ class ImproveConfig(BaseSettings):
     """Settings for the self-improvement loop (env prefix ``IMPROVE_``)."""
 
     auto_enabled: bool = True
+    review_conflicts: bool = False
+    effective_date_key: str = "effective_date"
     # Debounce for automatic improves (plan item B6). The defaults mean "no
     # debounce": every trigger runs, exactly as today. With debounce_seconds
     # set and debounce_entries left at this default 1 — which fires on every
@@ -41,7 +45,7 @@ class ImproveConfig(BaseSettings):
     stages_disabled: Annotated[list[str], NoDecode] = []
     feedback_alpha: float = DEFAULT_FEEDBACK_ALPHA
 
-    model_config = SettingsConfigDict(env_prefix="IMPROVE_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="IMPROVE_", extra="ignore")
 
     @field_validator("stages_disabled", mode="before")
     @classmethod

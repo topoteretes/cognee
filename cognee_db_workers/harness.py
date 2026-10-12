@@ -325,6 +325,49 @@ def start_parent_liveness_watchdog(poll_interval: float = 1.0) -> None:
     t.start()
 
 
+def _windows_parent_exited(pid: int) -> bool:
+    """Confirm through a fresh handle that ``pid`` has exited. Unsure means False."""
+    import _winapi
+
+    try:
+        handle = _winapi.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    except OSError as error:
+        return getattr(error, "winerror", None) == 87  # ERROR_INVALID_PARAMETER: no such process
+    try:
+        return _winapi.GetExitCodeProcess(handle) != _winapi.STILL_ACTIVE
+    except OSError:
+        logger.debug("Could not read the parent's exit code", exc_info=True)
+        return False
+    finally:
+        _winapi.CloseHandle(handle)
+
+
+def start_windows_parent_watchdog() -> bool:
+    """Windows: exit when the launching process dies.
+
+    Windows never reparents, so ``os.getppid()`` keeps returning the dead parent's
+    PID and the ppid poll can never fire. multiprocessing's spawn bootstrap already
+    holds a SYNCHRONIZE handle to the parent (``parent_process().sentinel``), opened
+    before any worker code runs, so there is no window between spawn and arming.
+    """
+    if sys.platform != "win32":
+        return False
+    import multiprocessing
+
+    parent = multiprocessing.parent_process()
+    if parent is None:
+        return False
+
+    def _watch() -> None:
+        parent.join()
+        if _windows_parent_exited(parent.pid):
+            os._exit(0)
+        logger.debug("Parent sentinel signalled but the parent still looks alive")
+
+    threading.Thread(target=_watch, name="win32-parent-death-watchdog", daemon=True).start()
+    return True
+
+
 # Serializes all ``spawn_without_main`` enter/exit transitions. The
 # mutation is on a single, process-global object (``sys.modules["__main__"]``),
 # so two threads entering concurrently would race: thread B would capture
@@ -437,13 +480,17 @@ def run_worker_loop(
     """
     _enable_faulthandler()
     # pdeathsig is the authoritative parent-death signal on Linux. Only fall
-    # back to the portable polling watchdog when the kernel hook is
-    # unavailable (macOS, Windows) or failed to arm — that watchdog has no
-    # way to distinguish "legitimate parent happens to be pid 1" from
-    # "reparented to init", so we avoid running it whenever pdeathsig has
-    # us covered.
+    # back to a portable watchdog when the kernel hook is unavailable (macOS,
+    # Windows) or failed to arm — that watchdog has no way to distinguish
+    # "legitimate parent happens to be pid 1" from "reparented to init", so
+    # we avoid running it whenever pdeathsig has us covered. On Windows,
+    # prefer the HANDLE-based watchdog (event-driven, immune to PID reuse)
+    # over the portable ppid-polling one, which can never actually fire on
+    # Windows — see start_windows_parent_watchdog's docstring.
     if not set_pdeathsig():
-        start_parent_liveness_watchdog()
+        windows_watchdog_armed = start_windows_parent_watchdog()
+        if not windows_watchdog_armed:
+            start_parent_liveness_watchdog()
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
