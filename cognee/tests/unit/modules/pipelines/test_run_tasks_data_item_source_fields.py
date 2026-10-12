@@ -6,7 +6,10 @@ entry per file, and a failed file is still named. Raw text has no source of
 its own, so its location is ``None``.
 """
 
+import io
 from types import SimpleNamespace
+
+from starlette.datastructures import UploadFile
 
 from cognee.modules.pipelines.operations.run_tasks_data_item import _source_fields
 from cognee.tasks.ingestion.data_item import DataItem
@@ -50,6 +53,16 @@ def test_an_item_that_failed_before_it_was_stored_is_named_from_its_input(tmp_pa
         "data_name": None,
         "data_location": None,
         "data_label": None,
+    }
+
+
+def test_an_upload_that_failed_is_named_from_its_filename_and_has_no_location():
+    upload = UploadFile(file=io.BytesIO(b"not really a pdf"), filename="report.pdf")
+
+    assert _source_fields(None, DataItem(data=upload, label="q3")) == {
+        "data_name": "report",
+        "data_location": None,
+        "data_label": "q3",
     }
 
 

@@ -107,7 +107,10 @@ def _source_uri_from_input(data_item: Any) -> str | None:
             return None
         return None
 
-    filename = getattr(data_item, "filename", None) or getattr(data_item, "name", None)
+    # A file object's ``name`` is the path it was opened with. An upload's
+    # ``filename`` is only the client's name for it, not a path on this
+    # machine, so an upload has no source location, like raw text.
+    filename = getattr(data_item, "name", None)
     if isinstance(filename, str) and filename and not filename.startswith("<"):
         try:
             return Path(filename).resolve().as_uri()
