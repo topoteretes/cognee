@@ -162,6 +162,7 @@ async def _drive(run_tasks_module_, dataset):
         data=["a"],
         user=SimpleNamespace(id=uuid4(), tenant_id=None),
         pipeline_name="cognify_pipeline",
+        extras={"graph_extractor": "gliner_demo"},  # as cognify passes it
     ):
         events.append(event)
     return events
@@ -219,6 +220,9 @@ async def test_run_tasks_drains_its_events_then_its_manifest_after_the_terminal_
     assert payload["pipeline_name"] == "cognify_pipeline"
     assert payload["outcome"] == "succeeded"
     assert payload["error_class"] is None
+    # The setup the run started under, extractor included.
+    assert payload["setup"]["graph_extractor"] == "gliner_demo"
+    assert payload["setup_fingerprint"].startswith("sha256:")
     # Exact per-run accounting, taken after the run's events were delivered.
     assert payload["events_emitted"] == 1
     assert payload["events_delivered"] == 1

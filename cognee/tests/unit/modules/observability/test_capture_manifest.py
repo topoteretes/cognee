@@ -12,7 +12,9 @@ from cognee.modules.observability.capture import (
     KIND_RETRIEVAL_CANDIDATES,
     KIND_RUN_MANIFEST,
     KIND_SUMMARY_GENERATED,
+    SETUP_FIELDS,
     hook,
+    setup_fingerprint,
 )
 
 pytestmark = pytest.mark.usefixtures("capture_reset")
@@ -60,6 +62,10 @@ async def test_manifest_carries_fields_counters_and_timing(fake_capture_sink):
     assert payload["events_dropped"] == 0
     assert payload["events_delivered"] == 0
     assert payload["capture_complete"] is True
+    # What produced the run: the allowlisted setup and its fingerprint.
+    assert set(payload["setup"]) == {key for key, _path in SETUP_FIELDS}
+    assert payload["setup"]["graph_extractor"] is None  # none handed to run_scope
+    assert payload["setup_fingerprint"] == setup_fingerprint(payload["setup"])
 
 
 @pytest.mark.asyncio

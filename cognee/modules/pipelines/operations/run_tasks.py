@@ -157,7 +157,14 @@ async def run_tasks(
                 stack.enter_context(parent_run_scope(pipeline_run_id))
                 if eval_capture.is_active():
                     capture_scope = stack.enter_context(
-                        eval_capture.run_scope(pipeline_run_id, dataset.id, kind="pipeline")
+                        eval_capture.run_scope(
+                            pipeline_run_id,
+                            dataset.id,
+                            kind="pipeline",
+                            # cognify's resolved extractor (llm / gliner_demo): part of
+                            # the run's setup snapshot, like the telemetry above.
+                            graph_extractor=(extras or {}).get("graph_extractor"),
+                        )
                     )
                     capture_scope.note("pipeline_name", pipeline_name)
                 await stack.enter_async_context(

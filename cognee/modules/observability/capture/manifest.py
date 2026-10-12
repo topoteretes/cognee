@@ -27,6 +27,7 @@ from uuid import UUID
 
 from . import hook
 from .events import KIND_RUN_MANIFEST
+from .setup import capture_setup, setup_fingerprint
 
 
 @dataclass
@@ -50,6 +51,11 @@ class RunScope:
     kind: str = "operation"
     # Decided once at scope entry; retrieval-kind events consult it via should_capture().
     sampled: bool = True
+    # The configuration this run started under and its fingerprint (see
+    # setup.py): models, extractor, structured-output path, backends. None when
+    # the snapshot could not be taken.
+    setup: dict[str, Any] | None = None
+    setup_fingerprint: str | None = None
     started_at: float = field(default_factory=time.time)
     fields: dict[str, Any] = field(default_factory=dict)
     counters: Counter[str] = field(default_factory=Counter)
@@ -111,6 +117,11 @@ class RunScope:
             "dataset_id": None if dataset_id is None else str(dataset_id),
             "kind": self.kind,
             "sampled": self.sampled,
+            # What produced this run: group runs by setup_fingerprint offline; the
+            # stage notes (extraction.*, summarization.*) say which model each
+            # stage actually used.
+            "setup": self.setup,
+            "setup_fingerprint": self.setup_fingerprint,
             "started_at": self.started_at,
             "ended_at": ended_at,
             "duration_s": ended_at - self.started_at,
@@ -174,24 +185,33 @@ def run_scope(
     dataset_id: UUID | str | None = None,
     *,
     kind: str = "operation",
+    graph_extractor: str | None = None,
 ) -> Iterator[RunScope]:
     """Bracket one run; enqueue its manifest on exit when the run is sampled.
 
     Sampling is per run: operation scopes roll ``RETRIEVAL_SAMPLE_RATE`` once here,
-    pipeline scopes are always sampled. Entry also starts the running loop's
+    pipeline scopes are always sampled. ``graph_extractor`` is cognify's resolved
+    extractor for a pipeline run (``llm`` / ``gliner_demo``) and becomes part of
+    the run's setup snapshot. Entry also starts the running loop's
     flusher so emits from worker threads during the run are flushed on the
     interval tick even if nothing ever emits on-loop.
     """
+    # Snapshot the setup first: it describes the run as it starts. Never raises.
+    setup = capture_setup(graph_extractor=graph_extractor)
     scope = RunScope(
         run_id=run_id,
         dataset_id=dataset_id,
         kind=kind,
+        setup=setup,
+        setup_fingerprint=setup_fingerprint(setup),
         sampled=(kind != "operation") or random.random() < hook._runtime.retrieval_sample_rate,
         started_at=time.time(),
         parent=hook._current_scope.get(),
     )
     token = hook._current_scope.set(scope)
     hook.ensure_flusher()
+    # With the scope current, so a setup.changed files under this run.
+    hook._observe_setup(scope)
     try:
         yield scope
     finally:

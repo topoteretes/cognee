@@ -30,6 +30,19 @@ Payloads are plain JSON (dicts/lists of scalars) or back-reference-free pydantic
 models - never graph elements, scored results or DataPoint instances. Consumers
 read the chunk graph at ``payload["graph"]`` next to its join keys.
 
+What produced the events
+------------------------
+Every run manifest carries ``setup`` — the allowlisted provider stack the run
+started under (LLM provider and model and whether it is usable, the
+structured-output path, embedding provider and model, the graph extractor —
+``llm`` or the local ``gliner_demo`` model — and the database providers) — and
+a stable ``setup_fingerprint`` to bucket runs by configuration. A
+``setup.changed`` event marks the first run of a kind that started on a
+different setup than the previous one, with the per-key diff. The exact model
+each stage used is on the manifest too: ``extraction.extractor`` /
+``extraction.model`` (the GLiNER demo's local model id on that path) and
+``summarization.model``. Never a URL or a credential: see ``setup.py``.
+
 What lands on disk, and who may read it
 ----------------------------------------
 Capture writes derived user content, not just metrics. ``extraction.chunk_graph``
@@ -55,6 +68,7 @@ from .events import (
     KIND_EXTRACTION_FUZZY_MATCH,
     KIND_RETRIEVAL_CANDIDATES,
     KIND_RUN_MANIFEST,
+    KIND_SETUP_CHANGED,
     KIND_STORAGE_DELTA,
     KIND_SUMMARY_GENERATED,
     RETRIEVAL_KIND_PREFIX,
@@ -72,6 +86,7 @@ from .hook import (
 )
 from .manifest import RunScope, bump, current_scope, note, run_scope
 from .prompt_hash import prompt_fingerprint
+from .setup import SETUP_FIELDS, capture_setup, setup_diff, setup_fingerprint
 from .sinks import CaptureSink, StorageSink
 
 __all__ = [
@@ -80,15 +95,18 @@ __all__ = [
     "KIND_EXTRACTION_FUZZY_MATCH",
     "KIND_RETRIEVAL_CANDIDATES",
     "KIND_RUN_MANIFEST",
+    "KIND_SETUP_CHANGED",
     "KIND_STORAGE_DELTA",
     "KIND_SUMMARY_GENERATED",
     "RETRIEVAL_KIND_PREFIX",
+    "SETUP_FIELDS",
     "CaptureConfig",
     "CaptureEvent",
     "CaptureSink",
     "RunScope",
     "StorageSink",
     "bump",
+    "capture_setup",
     "current_scope",
     "drain",
     "emit",
@@ -100,6 +118,8 @@ __all__ = [
     "prompt_fingerprint",
     "register_capture_sink",
     "run_scope",
+    "setup_diff",
+    "setup_fingerprint",
     "should_capture",
     "shutdown",
 ]

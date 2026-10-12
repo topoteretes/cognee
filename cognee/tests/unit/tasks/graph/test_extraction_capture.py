@@ -399,6 +399,7 @@ async def test_extract_content_graph_notes_model_and_prompt_fingerprint(
     gateway.assert_awaited_once()
     assert scope.fields["extraction.prompt_fingerprint"] == capture.prompt_fingerprint("be brief")
     assert scope.fields["extraction.model"] == get_llm_context_config().llm_model
+    assert scope.fields["extraction.extractor"] == "llm"
 
 
 @pytest.mark.asyncio

@@ -130,7 +130,13 @@ from uuid import UUID, uuid4
 from cognee.shared.logging_utils import get_logger
 
 from .config import CaptureConfig, get_capture_config
-from .events import CAPTURE_SCHEMA_VERSION, RETRIEVAL_KIND_PREFIX, CaptureEvent
+from .events import (
+    CAPTURE_SCHEMA_VERSION,
+    KIND_SETUP_CHANGED,
+    RETRIEVAL_KIND_PREFIX,
+    CaptureEvent,
+)
+from .setup import setup_diff
 from .sinks import CaptureSink, StorageSink, run_off_loop
 
 if TYPE_CHECKING:
@@ -217,6 +223,12 @@ class CaptureRuntime:
         default_factory=dict
     )
     flushers: dict[asyncio.AbstractEventLoop, _Flusher] = field(default_factory=dict)
+
+    # The last setup observed per run kind ("pipeline" / "operation"), as
+    # (fingerprint, setup): the baseline ``setup.changed`` is emitted against.
+    # Per kind, because a search carries no graph_extractor and would otherwise
+    # register a change against every cognify and back.
+    last_setup: dict[str, tuple[str, dict[str, Any]]] = field(default_factory=dict)
 
 
 _runtime: CaptureRuntime = CaptureRuntime()
@@ -568,6 +580,35 @@ def _emit_manifest(
             ts=time.time(),
             seq=next(_event_seq),
         ),
+    )
+
+
+def _observe_setup(scope: RunScope) -> None:
+    """Emit ``setup.changed`` when this run's setup differs from the last of its kind.
+
+    Called by ``run_scope`` once the scope is current, so the event files under
+    the run that first ran on the new setup and counts toward it. The first
+    setup a process sees for a kind is recorded as the baseline only — it is on
+    that run's manifest already; the event marks a change. Never raises.
+    """
+    runtime = _runtime
+    fingerprint = scope.setup_fingerprint
+    if fingerprint is None:
+        return
+    previous = runtime.last_setup.get(scope.kind)
+    runtime.last_setup[scope.kind] = (fingerprint, scope.setup or {})
+    if previous is None or previous[0] == fingerprint:
+        return
+    emit(
+        KIND_SETUP_CHANGED,
+        {
+            "run_kind": scope.kind,
+            "previous_fingerprint": previous[0],
+            "fingerprint": fingerprint,
+            "changed": setup_diff(previous[1], scope.setup),
+            "setup": scope.setup,
+        },
+        payload_kind="json",
     )
 
 

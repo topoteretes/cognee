@@ -34,6 +34,7 @@ def _note_extraction_config(system_prompt: str) -> None:
 
     if not eval_capture.is_active() or eval_capture.current_scope() is None:
         return
+    eval_capture.note("extraction.extractor", "llm")
     eval_capture.note("extraction.model", get_llm_context_config().llm_model)
     eval_capture.note(
         "extraction.prompt_fingerprint", eval_capture.prompt_fingerprint(system_prompt)

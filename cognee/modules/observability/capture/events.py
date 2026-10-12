@@ -43,6 +43,9 @@ KIND_STORAGE_DELTA = "storage.delta"
 KIND_SUMMARY_GENERATED = "summary.generated"
 KIND_RETRIEVAL_CANDIDATES = "retrieval.candidates"
 KIND_RUN_MANIFEST = "run.manifest"
+# Emitted by run_scope when a run starts on a setup (models, extractor, backends)
+# that differs from the previous run of its kind; payload carries the diff.
+KIND_SETUP_CHANGED = "setup.changed"
 
 # Retrieval kinds are the ones subject to per-run sampling (see should_capture).
 RETRIEVAL_KIND_PREFIX = "retrieval."
