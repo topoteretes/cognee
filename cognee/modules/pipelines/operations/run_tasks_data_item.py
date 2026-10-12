@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
@@ -161,18 +161,15 @@ async def run_tasks_data_item_incremental(
     if not isinstance(data_item, Data):
         # If the DataItem carries a stable data_id (e.g. from DLT), prefer it
         # over the content lookup so lookups stay consistent.
-        from cognee.modules.data.methods import resolve_data_id
         from cognee.tasks.ingestion.data_item import DataItem as DataItemType
 
         if isinstance(data_item, DataItemType) and data_item.data_id is not None:
             # Resolve the pin as ingest_data does: a legacy id names the data
             # item it was forked into, which is where the content is stored.
             pin = data_item.data_id
-            data_id = await resolve_data_id(dataset.id, pin) or pin
             async with db_engine.get_async_session() as session:
-                data_point = (
-                    await session.execute(select(Data).filter(Data.id == data_id))
-                ).scalar_one_or_none()
+                data_point = await _find_pinned_data_item(session, dataset.id, pin)
+            data_id = data_point.id if data_point is not None else pin
         else:
             stored = await save_data_item_to_storage_detailed(data_item)
 
@@ -299,6 +296,23 @@ async def run_tasks_data_item_incremental(
 
         if os.getenv("RAISE_INCREMENTAL_LOADING_ERRORS", "true").lower() == "true":
             raise
+
+
+async def _find_pinned_data_item(session, dataset_id, pin) -> Data | None:
+    """The data item a pinned id names, resolved as ``resolve_data_id`` does.
+
+    Runs in the caller's session, so a pinned item still costs one session.
+    """
+    statement = select(Data).filter(
+        Data.dataset_id == dataset_id, or_(Data.id == pin, Data.legacy_id == pin)
+    )
+    matches = (await session.execute(statement)).scalars().all()
+    if matches:
+        # The exact id wins over a data item forked from a legacy id.
+        return next((match for match in matches if match.id == pin), matches[0])
+
+    # Unknown in this dataset: look the id up alone, as before pins were resolved.
+    return (await session.execute(select(Data).filter(Data.id == pin))).scalar_one_or_none()
 
 
 def _source_fields(data_point: Data | None, data_item: Any) -> dict[str, Any]:
