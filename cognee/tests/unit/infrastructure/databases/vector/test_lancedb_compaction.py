@@ -1128,3 +1128,78 @@ async def test_prune_cancels_a_pending_followup(tmp_path, compaction_settings):
     assert handle.cancelled()
     assert adapter._followup_prune_handle is None
     await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_evicting_an_adapter_during_its_open_prune_leaves_no_worker_alive(
+    tmp_path, monkeypatch, compaction_settings
+):
+    """The engine cache closes an evicted subprocess adapter on a pool thread
+    inside a fresh event loop (``_start_close``), while the first-open prune
+    keeps running on the loop that opened the store. A prune RPC that lands
+    after the session was shut down must be refused, not recovered: the adapter
+    no longer owns the session, so a respawned worker is never closed."""
+    import multiprocessing
+
+    from cognee.infrastructure.databases.utils.closing_lru_cache import _start_close
+    from cognee.infrastructure.databases.vector.config import VectorConfig
+
+    compaction_settings(retention_seconds=0)
+    factory = importlib.import_module("cognee.infrastructure.databases.vector.create_vector_engine")
+    monkeypatch.setattr(factory, "get_embedding_engine", _FakeEmbeddingEngine)
+    config = VectorConfig(
+        vector_db_provider="lancedb",
+        vector_db_url=str(tmp_path / "db"),
+        vector_db_name="evicted_during_prune",
+        vector_db_subprocess_enabled=True,
+    )
+    children_before = {proc.pid for proc in multiprocessing.active_children()}
+    engine = factory.create_vector_engine(**config.to_dict())
+    adapter = getattr(engine, "__wrapped__", engine)  # the cache hands out a proxy
+    assert adapter._subprocess_mode
+
+    prune_started, close_returned = asyncio.Event(), asyncio.Event()
+
+    async def slow_prune_pass(options):
+        # Take the RPC target before the close, as the real prune does, then
+        # issue the RPC only once close() has returned on the other loop.
+        connection = await adapter.get_connection()
+        prune_started.set()
+        await close_returned.wait()
+        return {"tables": list(await connection.table_names())}
+
+    monkeypatch.setattr(adapter, "_prune_pass", slow_prune_pass)
+    await adapter.get_connection()
+    await prune_started.wait()
+    session = adapter._session
+    real_spawn = session._respawn_factory
+    spawned = []
+
+    def counting_spawn():
+        procs = real_spawn()
+        spawned.append(procs[0])
+        return procs
+
+    session._respawn_factory = counting_spawn
+    prune_task = adapter._open_prune_task
+    try:
+        # Evict the way the cache does: close on a pool thread, in a new loop.
+        await asyncio.wrap_future(_start_close(adapter))
+        close_returned.set()
+        result = await prune_task
+
+        assert spawned == [], "the late prune RPC respawned a worker after close()"
+        assert "error" in result, "the late prune RPC must be refused on a closed session"
+        live = [
+            proc
+            for proc in multiprocessing.active_children()
+            if proc.pid not in children_before and proc.is_alive()
+        ]
+        assert live == [], f"worker processes outlived close(): {[p.pid for p in live]}"
+        assert session._closed
+    finally:
+        for proc in spawned:
+            if proc.is_alive():
+                proc.kill()
+                proc.join(timeout=5.0)
+        await asyncio.to_thread(session.shutdown)
