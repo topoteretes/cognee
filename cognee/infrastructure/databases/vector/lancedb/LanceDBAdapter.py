@@ -976,7 +976,13 @@ class LanceDBAdapter(VectorDBInterface):
             async with self._compaction_lock:
                 return await self._prune_pass(options)
         except Exception as exc:
-            logger.warning("Version prune on open skipped: %s", exc, exc_info=True)
+            if self._permanently_closed:
+                # The adapter was closed from another event loop while the
+                # prune ran (an engine-cache eviction); the session refused the
+                # prune's next call. Expected: the next open reclaims the rest.
+                logger.debug("Version prune on open stopped by close(): %s", exc)
+            else:
+                logger.warning("Version prune on open skipped: %s", exc, exc_info=True)
             return {"error": str(exc)[:200]}
 
     async def _wait_for_open_prune(self) -> None:
