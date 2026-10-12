@@ -1,10 +1,24 @@
 """Top-level test config.
 
+Telemetry is off for the whole test tree. ``send_telemetry`` reports unless
+``TELEMETRY_DISABLED`` is set or ``ENV`` is ``test``/``dev``, and a plain
+``pytest`` run sets neither, so every test session — a contributor's laptop,
+a fork's CI — used to count as a real install, and the suite's deliberately
+failing fixture tasks as production task errors (gh #5702). ``setdefault``
+so an explicit value in the environment still wins, and a test that needs
+telemetry on clears the variable itself (see ``test_telemetry_identity``).
+Pinned before ``cognee`` is imported so nothing read at import sees the old
+value.
+
 ``test_subprocess_rss.py`` is a standalone benchmark script, not a pytest
 module — its filename starts with ``test_`` for historical reasons but it
 parses argparse at import time and imports optional deps (psutil). Skip it
 from collection so pytest doesn't crash trying to run it.
 """
+
+import os
+
+os.environ.setdefault("TELEMETRY_DISABLED", "1")
 
 from cognee.shared.logging_utils import get_logger
 
