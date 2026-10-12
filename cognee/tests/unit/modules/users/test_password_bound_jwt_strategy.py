@@ -31,20 +31,17 @@ def _user(hashed_password="hash-v1"):
 
 
 def _manager(user):
-    """A user manager that resolves exactly ``user`` and nothing else."""
+    """A user manager that resolves exactly ``user`` (by its string id) and nothing else."""
 
     async def get(user_id):
         if user_id != user.id:
             raise exceptions.UserNotExists()
         return user
 
-    return SimpleNamespace(get=AsyncMock(side_effect=get), parse_id=lambda value: value)
-
-
-def _manager_by_str(user):
-    manager = _manager(user)
-    manager.parse_id = lambda value: user.id if value == str(user.id) else value
-    return manager
+    return SimpleNamespace(
+        get=AsyncMock(side_effect=get),
+        parse_id=lambda value: user.id if value == str(user.id) else value,
+    )
 
 
 @pytest.fixture(params=[DefaultJWTStrategy, APIJWTStrategy], ids=["cookie", "bearer"])
@@ -56,7 +53,7 @@ def strategy(request):
 async def test_token_is_valid_while_password_is_unchanged(strategy):
     user = _user()
     token = await strategy.write_token(user)
-    assert await strategy.read_token(token, _manager_by_str(user)) is user
+    assert await strategy.read_token(token, _manager(user)) is user
 
 
 @pytest.mark.asyncio
@@ -66,7 +63,7 @@ async def test_password_change_revokes_existing_tokens(strategy):
 
     user.hashed_password = "hash-v2"  # what fastapi-users' update() stores on a password change
 
-    manager = _manager_by_str(user)
+    manager = _manager(user)
     assert await strategy.read_token(first_device, manager) is None
     assert await strategy.read_token(second_device, manager) is None
     # A login after the change issues a token that works again.
@@ -78,7 +75,7 @@ async def test_token_without_fingerprint_is_rejected(strategy):
     """A stock token, as issued before this change, cannot be revoked, so it is refused."""
     user = _user()
     legacy = generate_jwt({"sub": str(user.id), "aud": AUDIENCE}, SECRET, 3600)
-    assert await strategy.read_token(legacy, _manager_by_str(user)) is None
+    assert await strategy.read_token(legacy, _manager(user)) is None
 
 
 @pytest.mark.asyncio
@@ -94,9 +91,9 @@ async def test_fingerprint_does_not_expose_the_password_hash(strategy):
 @pytest.mark.asyncio
 async def test_forged_or_foreign_tokens_are_rejected(strategy):
     user = _user()
-    manager = _manager_by_str(user)
-    other_secret = type(strategy)("another-secret-0123456789abcdef0123", lifetime_seconds=3600)
-    assert await strategy.read_token(await other_secret.write_token(user), manager) is None
+    manager = _manager(user)
+    other_strategy = type(strategy)("another-secret-0123456789abcdef0123", lifetime_seconds=3600)
+    assert await strategy.read_token(await other_strategy.write_token(user), manager) is None
     assert await strategy.read_token("not-a-jwt", manager) is None
     assert await strategy.read_token(None, manager) is None
     stranger = _user()
@@ -107,7 +104,7 @@ async def test_forged_or_foreign_tokens_are_rejected(strategy):
 async def test_cookie_and_bearer_strategies_accept_each_others_tokens():
     """/auth/login writes with the cookie strategy and returns the token as Bearer too."""
     user = _user()
-    manager = _manager_by_str(user)
+    manager = _manager(user)
     cookie = DefaultJWTStrategy(SECRET, lifetime_seconds=3600)
     bearer = APIJWTStrategy(SECRET, lifetime_seconds=3600)
     assert await bearer.read_token(await cookie.write_token(user), manager) is user

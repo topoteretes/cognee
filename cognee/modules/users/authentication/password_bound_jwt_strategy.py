@@ -50,6 +50,9 @@ class PasswordBoundJWTStrategy(JWTStrategy[models.UP, models.ID]):
         }
         return generate_jwt(data, self.encode_key, self.lifetime_seconds, algorithm=self.algorithm)
 
+    # Mirrors fastapi-users 15.0.5 JWTStrategy.read_token, plus the fingerprint check:
+    # the parent discards the decoded claims, so it cannot be called and extended.
+    # Re-check this body against upstream when upgrading fastapi-users.
     async def read_token(
         self, token: str | None, user_manager: BaseUserManager[models.UP, models.ID]
     ) -> models.UP | None:
