@@ -26,6 +26,9 @@ class StoredFile:
 
     file_path: str
     metadata: FileMetadata | None = None
+    # Metadata can also be filled in for pass-through files. Only a successful
+    # write to cognee storage grants permission to load an internal local path.
+    is_internal_storage: bool = False
 
 
 def _storage_key(file_name: str, content_hash: str | None, is_text: bool) -> str:
@@ -100,7 +103,7 @@ async def save_data_to_file_detailed(
     file_metadata["file_path"] = full_file_path
     file_metadata["name"] = _derive_basename(file_name)
 
-    return StoredFile(file_path=full_file_path, metadata=file_metadata)
+    return StoredFile(file_path=full_file_path, metadata=file_metadata, is_internal_storage=True)
 
 
 async def save_data_to_file(

@@ -48,9 +48,15 @@ async def pull_from_s3(file_path, destination_file) -> None:
 async def data_item_to_text_file(
     data_item_path: str,
     preferred_loaders: dict[str, dict[str, Any]] | None = None,
+    *,
+    is_internal_storage: bool = False,
     **loader_kwargs: Any,
 ) -> tuple[str, LoaderInterface]:
     """Run the loader engine on a data item's file.
+
+    ``is_internal_storage`` is set only for files cognee wrote after validating
+    the input. Uploaded bytes and materialized text remain loadable when
+    caller-supplied local paths are disabled.
 
     ``loader_kwargs`` (ingestion context: dataset_name, dataset_id, user,
     original_file_name) is forwarded to the selected loader's ``load()``;
@@ -90,7 +96,7 @@ async def data_item_to_text_file(
 
         # data is local file path
         elif parsed_url.scheme == "file":
-            if settings.accept_local_file_path:
+            if settings.accept_local_file_path or is_internal_storage:
                 loader = get_loader_engine()
                 return await loader.load_file(
                     data_item_path, preferred_loaders, **loader_kwargs
@@ -103,7 +109,7 @@ async def data_item_to_text_file(
             os.name == "nt" and len(data_item_path) > 1 and data_item_path[1] == ":"
         ):
             # Handle both Unix absolute paths (/path) and Windows absolute paths (C:\path)
-            if settings.accept_local_file_path:
+            if settings.accept_local_file_path or is_internal_storage:
                 loader = get_loader_engine()
                 return await loader.load_file(
                     data_item_path, preferred_loaders, **loader_kwargs

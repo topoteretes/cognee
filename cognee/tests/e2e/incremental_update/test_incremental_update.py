@@ -351,3 +351,77 @@ async def test_incremental_update_full_flow(incremental_env):
     assert await _stored_text(user, data_id) == healed_text, (
         "a refused multi-item update must not touch the stored document"
     )
+
+
+@pytest.mark.asyncio
+async def test_multipart_incremental_update_with_local_paths_disabled(incremental_env, monkeypatch):
+    import importlib
+
+    from fastapi import FastAPI
+    from httpx import ASGITransport, AsyncClient
+
+    import cognee
+    from cognee.api.v1.add.routers.get_add_router import get_add_router
+    from cognee.api.v1.update.routers.get_update_router import get_update_router
+    from cognee.modules.data.methods import get_datasets
+    from cognee.modules.data.methods.get_dataset_data import get_dataset_data
+    from cognee.modules.engine.operations.setup import setup
+    from cognee.modules.users.methods import get_authenticated_user, get_default_user
+
+    await reset_backend_state()
+    await setup()
+    pristine = contextvars.copy_context()
+    for module_name in (
+        "cognee.tasks.ingestion.save_data_item_to_storage",
+        "cognee.tasks.ingestion.data_item_to_text_file",
+    ):
+        monkeypatch.setattr(
+            importlib.import_module(module_name).settings, "accept_local_file_path", False
+        )
+
+    user = await get_default_user()
+    app = FastAPI()
+    app.include_router(get_add_router(), prefix="/api/v1/add")
+    app.include_router(get_update_router(), prefix="/api/v1/update")
+    app.dependency_overrides[get_authenticated_user] = lambda: user
+    text_v1 = "".join(_paragraph(i) for i in range(10))
+    text_v2 = text_v1.replace("ENTP4", "ENTREPLACED", 1)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        added = await pristine.copy().run(
+            asyncio.create_task,
+            client.post(
+                "/api/v1/add",
+                files={"data": ("report.txt", text_v1.encode(), "text/plain")},
+                data={"datasetName": "incr_upload_no_local_paths", "run_in_background": "false"},
+            ),
+        )
+        assert added.status_code == 200, added.text
+        dataset = next(
+            d for d in await get_datasets(user.id) if d.name == "incr_upload_no_local_paths"
+        )
+        (row,) = await get_dataset_data(dataset.id)
+        data_id = row.id
+        await cognee.cognify(datasets=[dataset.id], chunk_size=CHUNK_TOKENS)
+        old_nodes = await _doc_chunk_nodes(data_id, text_v1)
+
+        updated = await pristine.copy().run(
+            asyncio.create_task,
+            client.patch(
+                "/api/v1/update",
+                params={"data_id": str(data_id), "dataset_id": str(dataset.id)},
+                files={"data": ("report.txt", text_v2.encode(), "text/plain")},
+            ),
+        )
+
+    assert updated.status_code == 200, updated.text
+    result = updated.json()
+    assert result["status"] == "incremental", result
+    assert result["kept_chunks"] > 0
+    assert result["added_chunks"] > 0
+    assert await _stored_text(user, data_id) == text_v2
+    new_nodes = await _doc_chunk_nodes(data_id, text_v2)
+    assert "".join(node["text"] for node in new_nodes) == text_v2
+    old_ids = {str(node["id"]) for node in old_nodes}
+    new_ids = {str(node["id"]) for node in new_nodes}
+    assert old_ids & new_ids, "the incremental update must retain unaffected chunks"

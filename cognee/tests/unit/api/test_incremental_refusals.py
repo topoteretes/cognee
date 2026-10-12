@@ -34,6 +34,7 @@ from cognee.infrastructure.databases.provenance import (
 )
 from cognee.modules.chunking.chunk_policy import DEFAULT_CHUNK_POLICY
 from cognee.modules.chunking.TextChunker import TextChunker
+from cognee.modules.ingestion import StoredFile
 from cognee.tasks.ingestion.data_item import DataItem
 
 
@@ -149,9 +150,10 @@ async def test_same_name_upload_uses_isolated_staging_path(monkeypatch, tmp_path
         file.seek(0)
         destination.write_bytes(file.read())
         file.seek(0)
-        return destination.as_uri()
+        return StoredFile(file_path=destination.as_uri(), is_internal_storage=True)
 
-    async def _load_staged(path, _preferred_loaders):
+    async def _load_staged(path, _preferred_loaders, *, is_internal_storage=False):
+        assert is_internal_storage is True
         return path, SimpleNamespace(loader_name="text_loader")
 
     upload_file = tempfile.SpooledTemporaryFile()  # noqa: SIM115 - handed to UploadFile, which owns it
@@ -159,7 +161,7 @@ async def test_same_name_upload_uses_isolated_staging_path(monkeypatch, tmp_path
     upload_file.seek(0)
     upload = UploadFile(file=upload_file, filename="report.txt")
 
-    monkeypatch.setattr(incremental, "save_data_to_file", _save_staged)
+    monkeypatch.setattr(incremental, "save_data_to_file_detailed", _save_staged)
     monkeypatch.setattr(incremental, "data_item_to_text_file", _load_staged)
 
     staged = await _stage_new_content(upload, None)
