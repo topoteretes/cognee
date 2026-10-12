@@ -111,6 +111,10 @@ _PRICING_PER_M_TOKENS = {
     "gemini-2.0-flash": (0.10, 0.40),
     "gemini-1.5-pro": (1.25, 5.00),
     "gemini-1.5-flash": (0.075, 0.30),
+    # Embedding models: input-only pricing, no completion side.
+    "text-embedding-3-large": (0.13, 0.0),
+    "text-embedding-3-small": (0.02, 0.0),
+    "text-embedding-ada-002": (0.10, 0.0),
 }
 
 
@@ -186,3 +190,24 @@ async def record_llm_call(
         )
     except Exception as exc:
         logger.debug("record_llm_call: accumulate failed (%s)", exc, exc_info=True)
+
+
+async def record_embedding_call(*, model: str | None, tokens_in: int) -> None:
+    """Accumulate one embedding request's input tokens like an LLM call.
+
+    Embeddings used to be invisible to every usage sink: an operation that
+    only embeds (``recall``, a session ``remember``) measured zero tokens and
+    was indistinguishable from one that did nothing. Routed through
+    ``record_llm_call`` so the operation accumulator and the session tracker
+    see the same number. Embeddings have no completion side, so tokens_out is
+    a measured zero.
+    """
+    if tokens_in <= 0:
+        return
+    await record_llm_call(
+        input_text="",
+        output_text="",
+        model=model,
+        tokens_in_override=int(tokens_in),
+        tokens_out_override=0,
+    )

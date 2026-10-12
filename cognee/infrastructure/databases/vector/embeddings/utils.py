@@ -48,3 +48,37 @@ def handle_embedding_response(
         embeddings[i] if is_embeddable(original_texts[i]) else zero_vector
         for i in range(len(original_texts))
     ]
+
+
+def _usage_prompt_tokens(response) -> int | None:
+    """Prompt/total token count off an embedding response, or None when absent.
+
+    Accepts the litellm ``EmbeddingResponse`` (``usage`` is an object), the
+    openai SDK ``CreateEmbeddingResponse`` (same shape) and plain dicts.
+    """
+    usage = (
+        response.get("usage") if isinstance(response, dict) else getattr(response, "usage", None)
+    )
+    if usage is None:
+        return None
+    for field in ("prompt_tokens", "total_tokens"):
+        value = usage.get(field) if isinstance(usage, dict) else getattr(usage, field, None)
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+    return None
+
+
+async def record_embedding_usage(response, model: str | None) -> None:
+    """Best-effort: feed an embedding response's token usage to the usage sinks.
+
+    Never raises — usage accounting is auxiliary to the embedding itself.
+    """
+    try:
+        tokens = _usage_prompt_tokens(response)
+        if tokens is None:
+            return
+        from cognee.modules.session_lifecycle.usage_tracking import record_embedding_call
+
+        await record_embedding_call(model=model, tokens_in=tokens)
+    except Exception:
+        logger.debug("Ignoring exception in record_embedding_usage", exc_info=True)

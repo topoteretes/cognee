@@ -30,6 +30,7 @@ from cognee.infrastructure.databases.vector.embeddings.retry_config import (
 )
 from cognee.infrastructure.databases.vector.embeddings.utils import (
     handle_embedding_response,
+    record_embedding_usage,
     sanitize_embedding_text_inputs,
 )
 from cognee.infrastructure.llm.exceptions import raise_if_budget_exhausted
@@ -265,6 +266,11 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                         litellm.aembedding(**embedding_kwargs),
                         timeout=300.0,
                     )
+
+                # Count the request's tokens against the active operation and
+                # session, the way LLMGateway does for completions. Without it
+                # an embed-only operation (recall) reads as zero tokens.
+                await record_embedding_usage(response, self.model)
 
                 embedding_response = [data["embedding"] for data in response.data]
                 return handle_embedding_response(text, embedding_response, self.dimensions)

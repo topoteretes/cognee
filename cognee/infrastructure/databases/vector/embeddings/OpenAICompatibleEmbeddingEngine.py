@@ -46,6 +46,7 @@ from cognee.infrastructure.databases.vector.embeddings.retry_config import (
 )
 from cognee.infrastructure.databases.vector.embeddings.utils import (
     handle_embedding_response,
+    record_embedding_usage,
     sanitize_embedding_text_inputs,
 )
 from cognee.infrastructure.llm.exceptions import raise_if_budget_exhausted
@@ -177,6 +178,9 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
                     self._client.embeddings.create(**create_kwargs),
                     timeout=300.0,
                 )
+            # Same accounting as the LiteLLM engine: an embed-only operation
+            # must not read as zero tokens.
+            await record_embedding_usage(response, self.model)
             embeddings = [item.embedding for item in response.data]
 
         except Exception as error:
