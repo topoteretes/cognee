@@ -469,7 +469,7 @@ class LadybugAdapter(GraphDBInterface):
         # without importing cognee. Pass the instance's configured limits
         # so callers that tune ``kuzu_buffer_pool_size`` / ``kuzu_max_db_size``
         # via env or config aren't silently ignored during the install step.
-        from cognee_db_workers._kuzu_helpers import install_json_extension_local
+        from cognee_db_workers._kuzu_helpers import install_json_extension_local, quarantine_wal
 
         install_json_extension_local(
             buffer_pool_size=self.kuzu_buffer_pool_size,
@@ -513,16 +513,7 @@ class LadybugAdapter(GraphDBInterface):
                     )
                 except RuntimeError as e:
                     if "wal" in str(e).lower():
-                        wal_path = self.db_path + ".wal"
-                        logger.warning(
-                            "Corrupted WAL detected at %s — removing to recover. "
-                            "Uncommitted transactions from the previous session will be lost.",
-                            wal_path,
-                        )
-                        try:
-                            os.remove(wal_path)
-                        except FileNotFoundError:
-                            pass
+                        quarantine_wal(self.db_path)
                     else:
                         import ladybug
 

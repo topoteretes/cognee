@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 
-from ._kuzu_helpers import install_json_extension_local, load_json_extension
+from ._kuzu_helpers import install_json_extension_local, load_json_extension, quarantine_wal
 from .harness import (
     DEFAULT_DISPATCH,
     HandleRegistry,
@@ -87,14 +87,7 @@ def _open_database(registry: HandleRegistry, req: Request) -> HandleResult:
             db = _retry_open_locked(ladybug, req.kwargs, e)
         else:
             if "wal" in message:
-                # In case of corrupted WAL file preventing database opening, remove the WAL file and try again
-                wal_path = db_path + ".wal"
-                try:
-                    import os
-
-                    os.remove(wal_path)
-                except FileNotFoundError:
-                    pass
+                quarantine_wal(db_path)
             else:
                 from .ladybug_migrate import ladybug_migration, needs_migration
 
