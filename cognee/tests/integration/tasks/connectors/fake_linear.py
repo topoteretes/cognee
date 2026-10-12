@@ -70,6 +70,9 @@ class FakeLinear:
         # As Linear does: trashing archives the item and leaves updatedAt alone.
         items[key].update(trashed=True, archivedAt=_ts(n))
 
+    def restore(self, items: dict, key: str):
+        items[key].update(trashed=None, archivedAt=None)
+
     # -- transport ---------------------------------------------------------
     def execute(self, query, variables=None):
         variables = variables or {}
@@ -87,9 +90,17 @@ class FakeLinear:
         if "LinearTeamArchivedIssues" in query:
             return {"team": self._archived_issues(variables)}
         if "LinearTeamArchivedProjects" in query:
-            nodes, info = self._page(list(self.projects.values()), variables)
+            items = self._by_id(self.projects.values(), variables)
+            nodes, info = self._page(items, variables)
             return {"team": {"projects": {"nodes": nodes, "pageInfo": info}}}
         raise AssertionError(query)
+
+    @staticmethod
+    def _by_id(items, variables):
+        filter_ = variables.get("filter") or {}
+        if "id" not in filter_:
+            return list(items)
+        return [i for i in items if i["id"] in filter_["id"]["in"]]
 
     @staticmethod
     def _in_window(item, window, field="updatedAt"):
@@ -112,9 +123,7 @@ class FakeLinear:
 
     def _issues(self, variables):
         filter_ = variables.get("filter") or {}
-        items = self._visible(self.issues.values(), variables)
-        if "id" in filter_:
-            items = [i for i in items if i["id"] in filter_["id"]["in"]]
+        items = self._by_id(self._visible(self.issues.values(), variables), variables)
         if "updatedAt" in filter_:
             items = [i for i in items if self._in_window(i, filter_["updatedAt"])]
         nodes, info = self._page(items, variables)
@@ -141,14 +150,16 @@ class FakeLinear:
 
     def _projects(self, variables):
         window = (variables.get("filter") or {}).get("updatedAt", {})
-        visible = self._visible(self.projects.values(), variables)
+        visible = self._by_id(self._visible(self.projects.values(), variables), variables)
         items = [p for p in visible if self._in_window(p, window)]
         nodes, info = self._page(items, variables)
         return {"projects": {"nodes": nodes, "pageInfo": info}}
 
     def _archived_issues(self, variables):
-        window = (variables.get("filter") or {}).get("archivedAt", {})
-        items = [i for i in self.issues.values() if self._in_window(i, window, "archivedAt")]
+        items = self._by_id(self.issues.values(), variables)
+        window = (variables.get("filter") or {}).get("archivedAt")
+        if window is not None:
+            items = [i for i in items if self._in_window(i, window, "archivedAt")]
         nodes, info = self._page(items, variables)
         return {"issues": {"nodes": nodes, "pageInfo": info}}
 

@@ -114,9 +114,17 @@ class FakeLinear:
         if "LinearTeamArchivedIssues" in query:
             return {"team": self._archived_issues(variables)}
         if "LinearTeamArchivedProjects" in query:
-            nodes, info = self._page(list(self.projects.values()), variables)
+            items = self._by_id(self.projects.values(), variables)
+            nodes, info = self._page(items, variables)
             return {"team": {"projects": {"nodes": nodes, "pageInfo": info}}}
         raise AssertionError(query)
+
+    @staticmethod
+    def _by_id(items, variables):
+        filter_ = variables.get("filter") or {}
+        if "id" not in filter_:
+            return list(items)
+        return [i for i in items if i["id"] in filter_["id"]["in"]]
 
     @staticmethod
     def _in_window(item, window, field="updatedAt"):
@@ -139,9 +147,7 @@ class FakeLinear:
 
     def _issues(self, variables):
         filter_ = variables.get("filter") or {}
-        items = self._visible(self.issues.values(), variables)
-        if "id" in filter_:
-            items = [i for i in items if i["id"] in filter_["id"]["in"]]
+        items = self._by_id(self._visible(self.issues.values(), variables), variables)
         if "updatedAt" in filter_:
             items = [i for i in items if self._in_window(i, filter_["updatedAt"])]
         nodes, info = self._page(items, variables)
@@ -168,14 +174,16 @@ class FakeLinear:
 
     def _projects(self, variables):
         window = (variables.get("filter") or {}).get("updatedAt", {})
-        visible = self._visible(self.projects.values(), variables)
+        visible = self._by_id(self._visible(self.projects.values(), variables), variables)
         items = [p for p in visible if self._in_window(p, window)]
         nodes, info = self._page(items, variables)
         return {"projects": {"nodes": nodes, "pageInfo": info}}
 
     def _archived_issues(self, variables):
-        window = (variables.get("filter") or {}).get("archivedAt", {})
-        items = [i for i in self.issues.values() if self._in_window(i, window, "archivedAt")]
+        items = self._by_id(self.issues.values(), variables)
+        window = (variables.get("filter") or {}).get("archivedAt")
+        if window is not None:
+            items = [i for i in items if self._in_window(i, window, "archivedAt")]
         nodes, info = self._page(items, variables)
         return {"issues": {"nodes": nodes, "pageInfo": info}}
 
@@ -418,17 +426,101 @@ def test_a_trashed_issue_with_a_new_comment_is_tombstoned_once(team):
     assert rows == [{"id": "issue:i3", "_deleted": True}]
 
 
-def test_a_restored_issue_comes_back_at_its_next_edit(team):
+def test_a_restored_issue_comes_back_on_the_next_run(team):
+    state: dict = {}
+    _run(team, state)
+    team.trash(team.issues, "i2", 20)
+    _run(team, state)
+    team.restore(team.issues, "i2")  # bumps neither updatedAt nor archivedAt
+
+    rows, stats = _run(team, state)
+    assert rows == [render_issue(team.issues["i2"], [])]
+    assert stats["deleted"] == 0
+    assert _run(team, state)[0] == []
+
+
+def test_a_restored_project_comes_back_on_the_next_run(team):
+    state: dict = {}
+    _run(team, state)
+    team.trash(team.projects, "p1", 20)
+    _run(team, state)
+    team.restore(team.projects, "p1")
+
+    rows, _ = _run(team, state)
+    assert [row["id"] for row in rows] == ["project:p1"] and rows[0]["_deleted"] is False
+    assert _run(team, state)[0] == []
+
+
+def test_an_item_still_in_the_trash_is_checked_again_without_a_new_tombstone(team):
+    state: dict = {}
+    _run(team, state)
+    team.trash(team.issues, "i2", 20)
+    _run(team, state)
+
+    rows, stats = _run(team, state)
+    assert rows == [] and stats["deleted"] == 0
+    assert state["trashed"] == {"issue:i2": True}
+    team.restore(team.issues, "i2")
+    assert [row["id"] for row in _run(team, state)[0]] == ["issue:i2"]
+    assert state["trashed"] == {}
+
+
+def test_an_item_purged_from_the_trash_is_no_longer_checked(team):
+    state: dict = {}
+    _run(team, state)
+    team.trash(team.issues, "i2", 20)
+    _run(team, state)
+    del team.issues["i2"]  # Linear empties its trash after 30 days
+
+    assert _run(team, state)[0] == []
+    assert state["trashed"] == {}
+
+
+def test_a_restored_issue_that_is_still_archived_follows_include_archived(team):
+    state: dict = {}
+    _run(team, state, include_archived=False)
+    team.trash(team.issues, "i2", 20)
+    _run(team, state, include_archived=False)
+    team.restore(team.issues, "i2")
+    team.issues["i2"]["archivedAt"] = _ts(20)  # it was closed and archived before
+
+    assert _run(team, state, include_archived=False)[0] == []
+    assert state["trashed"] == {}
+
+
+def test_a_restored_issue_that_was_also_edited_is_rendered_once(team):
     state: dict = {}
     _run(team, state)
     team.trash(team.issues, "i2", 20)
     _run(team, state)
     team.restore(team.issues, "i2")
-    assert _run(team, state)[0] == []  # restoring does not bump updatedAt either
-
     team.issues["i2"]["updatedAt"] = _ts(30)
+
     rows, _ = _run(team, state)
-    assert [row["id"] for row in rows] == ["issue:i2"] and rows[0]["_deleted"] is False
+    assert [row["id"] for row in rows] == ["issue:i2"]
+
+
+def test_trash_checks_are_chunked_and_survive_a_cut_run():
+    many = FakeLinear()
+    for n in range(30):
+        many.add_issue(f"t{n:02d}", 1)
+    state: dict = {}
+    _run(many, state)
+    for n in range(30):
+        many.trash(many.issues, f"t{n:02d}", 20)
+    _run(many, state)
+    assert len(state["trashed"]) == 30
+    for n in range(30):
+        many.restore(many.issues, f"t{n:02d}")
+
+    back: set[str] = set()
+    for _ in range(10):
+        rows, stats = _run(many, state, max_requests=8)
+        back |= {row["id"] for row in rows}
+        if not stats["failed"]:
+            break
+    assert back == {f"issue:t{n:02d}" for n in range(30)}
+    assert state["trashed"] == {}
 
 
 def test_issues_trashed_across_runs_cut_short_are_all_forgotten(team):

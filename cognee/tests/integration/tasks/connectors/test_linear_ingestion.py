@@ -109,6 +109,27 @@ async def test_trashing_an_issue_or_project_forgets_its_document(clean_environme
 
 
 @pytest.mark.asyncio
+async def test_restoring_from_the_trash_brings_the_documents_back(clean_environment):
+    team = _team()
+    await _sync(team)
+    team.trash(team.issues, "i1", 30)
+    team.trash(team.projects, "p1", 30)
+    await _sync(team)
+    assert {d.system_metadata["external_id"] for d in await _linear_data()} == {"issue:i2"}
+
+    team.restore(team.issues, "i1")  # moves neither updatedAt nor archivedAt
+    team.restore(team.projects, "p1")
+    source = await _sync(team)
+
+    assert source.cognee_sync_stats["failed"] == 0
+    assert {d.system_metadata["external_id"] for d in await _linear_data()} == {
+        "issue:i1",
+        "issue:i2",
+        "project:p1",
+    }
+
+
+@pytest.mark.asyncio
 async def test_an_issue_already_trashed_on_the_first_sync_is_never_stored(clean_environment):
     team = _team()
     team.add_issue("i3", 5)

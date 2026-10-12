@@ -34,6 +34,10 @@ Design
   ``trashed`` and ``archivedAt`` but leaves ``updatedAt`` alone. Two more
   streams walk issues and projects by ``archivedAt`` and emit a trashed one as
   an ``{id, _deleted: True}`` tombstone, so it is forgotten.
+* **Restores.** Restoring an item from the trash changes neither ``updatedAt``
+  nor ``archivedAt``, so no walk sees it. The ids this source forgot are kept
+  in state and looked up again each run; one that is out of the trash is
+  ingested again, and one Linear purged from it is no longer looked up.
 * **A run is bounded and resumable.** On a rate limit, low remaining quota, a
   spent request budget or an expired token the source stops cleanly, keeps the
   state it reached and reports it in ``cognee_sync_stats`` (``failed_rate_limit``).
@@ -45,9 +49,7 @@ Design
 
 .. note::
    Archived issues are included (Linear archives closed issues automatically).
-   Restoring an item from the trash does not bump ``updatedAt`` either, so it
-   comes back at its next edit. Moving an issue to another team leaves it in the
-   old team's table.
+   Moving an issue to another team leaves it in the old team's table.
 
 Privacy
 -------
@@ -170,11 +172,14 @@ query LinearTeamArchivedIssues($teamId: String!, $filter: IssueFilter, $first: I
 }
 """
 
-# ProjectFilter has no archivedAt, so every project is listed and filtered here.
+# ProjectFilter has no archivedAt, so a walk by it lists every project and
+# filters here.
 _ARCHIVED_PROJECTS_QUERY = """
-query LinearTeamArchivedProjects($teamId: String!, $first: Int!, $after: String) {
+query LinearTeamArchivedProjects($teamId: String!, $filter: ProjectFilter, $first: Int!,
+                                 $after: String) {
   team(id: $teamId) {
-    projects(first: $first, after: $after, orderBy: updatedAt, includeArchived: true) {
+    projects(filter: $filter, first: $first, after: $after, orderBy: updatedAt,
+             includeArchived: true) {
       pageInfo { hasNextPage endCursor }
       nodes { id trashed archivedAt }
     }
@@ -466,6 +471,8 @@ class _Walker:
         # comment id -> updatedAt as rendered into an issue this run
         self.rendered_comments: dict[str, str] = {}
         self.deleted_ids: set[str] = set()
+        # Row ids this source forgot and Linear may still restore, kept across runs.
+        self.trashed: dict[str, bool] = state.setdefault("trashed", {})
 
     # -- requests ----------------------------------------------------------
     def _call(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
@@ -616,12 +623,14 @@ class _Walker:
         connection = data.get("comments") or {}
         return connection.get("nodes") or [], connection.get("pageInfo") or {}
 
-    def _fetch_projects(self, filter_: dict, after: str | None) -> tuple[list, dict]:
+    def _fetch_projects(
+        self, filter_: dict, after: str | None, first: int | None = None
+    ) -> tuple[list, dict]:
         team = self._team_query(
             _PROJECTS_QUERY,
             {
                 "filter": filter_ or None,
-                "first": self.page_size,
+                "first": first or self.page_size,
                 "after": after,
                 "archived": self.include_archived,
             },
@@ -629,23 +638,33 @@ class _Walker:
         connection = team.get("projects") or {}
         return connection.get("nodes") or [], connection.get("pageInfo") or {}
 
-    def _fetch_archived_issues(self, filter_: dict, after: str | None) -> tuple[list, dict]:
+    def _fetch_archived_issues(
+        self, filter_: dict, after: str | None, first: int | None = None
+    ) -> tuple[list, dict]:
         team = self._team_query(
             _ARCHIVED_ISSUES_QUERY,
-            {"filter": filter_ or None, "first": self.page_size, "after": after},
+            {"filter": filter_ or None, "first": first or self.page_size, "after": after},
         )
         connection = team.get("issues") or {}
         return connection.get("nodes") or [], connection.get("pageInfo") or {}
 
-    def _fetch_archived_projects(self, filter_: dict, after: str | None) -> tuple[list, dict]:
-        team = self._team_query(_ARCHIVED_PROJECTS_QUERY, {"first": self.page_size, "after": after})
+    def _fetch_archived_projects(
+        self, filter_: dict, after: str | None, first: int | None = None
+    ) -> tuple[list, dict]:
+        server_filter = {key: value for key, value in filter_.items() if key != "archivedAt"}
+        team = self._team_query(
+            _ARCHIVED_PROJECTS_QUERY,
+            {"filter": server_filter or None, "first": first or self.page_size, "after": after},
+        )
         connection = team.get("projects") or {}
-        since = (filter_.get("archivedAt") or {}).get("gte", "")
-        nodes = [
-            node
-            for node in connection.get("nodes") or []
-            if node.get("archivedAt") and str(node["archivedAt"]) >= since
-        ]
+        nodes = connection.get("nodes") or []
+        if "archivedAt" in filter_:
+            since = filter_["archivedAt"].get("gte", "")
+            nodes = [
+                node
+                for node in nodes
+                if node.get("archivedAt") and str(node["archivedAt"]) >= since
+            ]
         return nodes, connection.get("pageInfo") or {}
 
     def _all_comments(self, issue: dict) -> list[dict]:
@@ -675,6 +694,7 @@ class _Walker:
         self.emitted += 1
         self.stats["deleted"] += 1
         self.deleted_ids.add(row_id)
+        self.trashed[row_id] = True
         return {"id": row_id, "_deleted": True}
 
     def _issue_row(self, issue: dict) -> dict:
@@ -684,21 +704,58 @@ class _Walker:
             return self._deleted_row(f"issue:{issue['id']}")
         self.emitted += 1
         self.emitted_issue_ids.add(issue["id"])
+        self.trashed.pop(f"issue:{issue['id']}", None)
         comments = self._all_comments(issue)
         for comment in comments:
             self.rendered_comments[comment["id"]] = str(comment.get("updatedAt") or "")
         return render_issue(issue, comments)
+
+    def _project_row(self, project: dict) -> dict:
+        if project.get("trashed"):
+            return self._deleted_row(f"project:{project['id']}")
+        self.emitted += 1
+        self.trashed.pop(f"project:{project['id']}", None)
+        return render_project(project)
+
+    def _restored_rows(self) -> Iterator[dict]:
+        """Ingest again what was forgotten and has since been restored from the trash.
+
+        Looking ids up costs one request per chunk. A trashed item is archived,
+        so the lookups include archived items; a restored item is then read the
+        way the walks read it, so ``include_archived`` still applies. An id
+        Linear no longer returns was purged from the trash and is not looked up
+        again.
+        """
+        lookups = (
+            ("issue", self._fetch_archived_issues, self._fetch_issues, self._issue_row),
+            ("project", self._fetch_archived_projects, self._fetch_projects, self._project_row),
+        )
+        for kind, fetch_flags, fetch_items, to_row in lookups:
+            prefix = f"{kind}:"
+            ids = [
+                row_id[len(prefix) :]
+                for row_id in self.trashed
+                if row_id.startswith(prefix) and row_id not in self.deleted_ids
+            ]
+            for start in range(0, len(ids), _DIRTY_CHUNK):
+                chunk = ids[start : start + _DIRTY_CHUNK]
+                flags, _ = fetch_flags({"id": {"in": chunk}}, None, first=len(chunk))
+                still_trashed = {node["id"] for node in flags if node.get("trashed")}
+                restored = [node["id"] for node in flags if not node.get("trashed")]
+                if restored:
+                    nodes, _ = fetch_items({"id": {"in": restored}}, None, first=len(restored))
+                    for node in nodes:
+                        yield to_row(node)
+                for item_id in chunk:
+                    if item_id not in still_trashed:
+                        self.trashed.pop(f"{prefix}{item_id}", None)
 
     # -- the run -----------------------------------------------------------
     def rows(self) -> Iterator[dict]:
         # Projects are few and go first, so a team whose issues use the whole run
         # budget cannot starve them.
         for project in self._walk("projects", self._fetch_projects):
-            if project.get("trashed"):
-                yield self._deleted_row(f"project:{project['id']}")
-            else:
-                self.emitted += 1
-                yield render_project(project)
+            yield self._project_row(project)
 
         # The first issue walk renders every comment that exists, so the comment
         # stream only needs what changed since this run began. The margin covers
@@ -750,6 +807,9 @@ class _Walker:
                 row_id = f"{kind}:{node['id']}"
                 if node.get("trashed") and row_id not in self.deleted_ids:
                     yield self._deleted_row(row_id)
+
+        # Restoring from the trash moves no timestamp the walks read either.
+        yield from self._restored_rows()
 
 
 def _iter_rows(

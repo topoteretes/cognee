@@ -44,8 +44,9 @@ document, so asking about a discussion finds the issue it belongs to.
 - Deleting an issue or project in Linear moves it to the trash. The next sync emits it
   as a `{"id": ..., "_deleted": True}` tombstone, so it is forgotten, and counts it in
   `cognee_sync_stats["deleted"]`. This holds with `include_archived=False` too.
-- Restoring an item from the trash does not change its `updatedAt`, so it is ingested
-  again at its next edit (or, for an issue, its next comment).
+- Restoring an item from the trash ingests it again on the next sync, comments written
+  while it was in the trash included. With `include_archived=False`, an issue that is
+  still archived after the restore stays out, like any other archived issue.
 - Linear purges its trash after 30 days, and an admin can delete permanently right
   away: an item that is gone before a sync sees it in the trash is not forgotten.
 - A comment that is deleted in Linear is hard-deleted there, so it is not seen and
@@ -68,6 +69,13 @@ stream lists the team's projects (one request per 50). A quiet run therefore cos
 requests. These streams run last: while a backfill uses whole runs they wait, and catch
 up once it is done. The first run after upgrading from a version without them reads
 every issue archived since the first sync, which can take several runs on a big team.
+
+Restoring moves neither `updatedAt` nor `archivedAt`, so no walk sees it. The source
+keeps the ids it forgot in its state and looks them up at the end of each run, 25 per
+request, with one more request for each 25 that are back. An id stays on that list while
+the item is in the trash and leaves it once the item is back or Linear has purged it, so
+the list holds at most 30 days of deletes. Items forgotten by a version without this
+list are not looked up: they come back at their next edit.
 
 Linear allows 5,000 requests and 2,000,000 complexity points per hour for an OAuth app
 user (2,500 and 3,000,000 for a personal API key), shared by everything that user does,
