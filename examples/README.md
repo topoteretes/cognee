@@ -20,7 +20,7 @@ They double as the smoke-test corpus the team uses to verify behaviour across th
 
 | Folder | What lives there | Count |
 |---|---|---|
-| [`guides/`](guides/) | One feature per script: concise, self-contained how-tos | 38 |
+| [`guides/`](guides/) | One feature per script: concise, self-contained how-tos | 39 |
 | [`advanced_guides/`](advanced_guides/) | Deeper takes on topics a guide already covers | 8 |
 | [`demos/`](demos/) | Multiple features stitched into use cases, grouped by topic | 28 |
 | [`cookbooks/`](cookbooks/) | Applications you build and keep running: ingest, graph model, UI, live sync, an agent | 5 |
@@ -68,6 +68,7 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 | [`custom_data_models.py`](guides/custom_data_models.py) | Custom `DataPoint` subclasses and edges |
 | [`custom_prompts.py`](guides/custom_prompts.py) | Overriding the extraction prompt |
 | [`custom_tasks_and_pipelines.py`](guides/custom_tasks_and_pipelines.py) | Authoring tasks and composing a pipeline |
+| [`cognify_selected_data.py`](guides/cognify_selected_data.py) | `cognify(data=...)`: process selected documents of one dataset |
 | [`ontology_quickstart.py`](guides/ontology_quickstart.py) | Grounding extraction in an OWL ontology |
 | [`entity_deduplication.py`](guides/entity_deduplication.py) | Merging duplicate entities (dry-run, then real) |
 | [`consolidate_entity_descriptions_example.py`](guides/consolidate_entity_descriptions_example.py) | Deprecated: use `review_conflicts.py` for Entity descriptions |
