@@ -3,9 +3,9 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from cognee.infrastructure.llm.config import get_llm_context_config
 from cognee.infrastructure.llm.exceptions import is_structured_output_validation_error
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
-from cognee.infrastructure.llm.config import get_llm_context_config
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.shared.data_models import SummarizedCode
 from cognee.shared.logging_utils import get_logger

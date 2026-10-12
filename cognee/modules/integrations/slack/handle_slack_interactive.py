@@ -26,6 +26,12 @@ from cognee.modules.integrations.slack.handle_cognee_ask import (
     handle_cognee_ask_discard,
     handle_cognee_ask_share,
 )
+from cognee.modules.integrations.slack.handle_history import (
+    HISTORY_SHORTCUT,
+    HISTORY_VIEW,
+    THREAD_SHORTCUT,
+    handle_history_interactive,
+)
 from cognee.modules.integrations.slack.handle_slack_link import NOT_LINKED_MESSAGE
 from cognee.modules.integrations.slack.persistence import (
     get_by_team,
@@ -56,6 +62,15 @@ async def handle_slack_interactive(raw_body: bytes) -> dict[str, Any]:
 
     payload = json.loads(raw_payload)
     payload_type = payload.get("type")
+
+    if (
+        payload_type in {"shortcut", "message_action"}
+        and payload.get("callback_id") in {HISTORY_SHORTCUT, THREAD_SHORTCUT}
+    ) or (
+        payload_type in {"view_submission", "block_suggestion"}
+        and (payload.get("view") or {}).get("callback_id") == HISTORY_VIEW
+    ):
+        return await handle_history_interactive(payload)
 
     if payload_type == "message_action" and payload.get("callback_id") == REMEMBER_THIS_CALLBACK_ID:
         await _handle_remember_this(payload)

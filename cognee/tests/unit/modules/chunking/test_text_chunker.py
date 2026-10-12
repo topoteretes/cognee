@@ -279,3 +279,73 @@ async def test_chunk_indices_and_ids_are_deterministic(chunker_class, make_text_
     assert chunks1[0].id == chunks2[0].id, "First chunk ID should be deterministic"
     assert chunks1[1].id == chunks2[1].id, "Second chunk ID should be deterministic"
     assert chunks1[0].id != chunks1[1].id, "Chunk IDs should be unique within a run"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "document_metadata, expected",
+    [
+        ('{"created_at": "2024-01-15"}', '{"created_at": "2024-01-15"}'),
+        # ingest writes indented JSON; chunks carry the compact canonical form
+        (
+            '{\n    "created_at": "2024-01-15",\n    "node_set": ["a"]\n}',
+            '{"created_at": "2024-01-15", "node_set": ["a"]}',
+        ),
+        (None, None),
+        ("", None),
+        ("{}", None),
+        ("not json", None),
+        ('["a", "b"]', None),
+    ],
+)
+async def test_chunks_carry_the_document_external_metadata(
+    chunker_class, make_text_generator, document_metadata, expected
+):
+    """Every chunk copies the document's external_metadata as canonical JSON text.
+
+    Anything that is not a non-empty JSON object becomes None and never fails
+    chunking. The field stays out of index_fields, so it is never embedded.
+    """
+    document = Document(
+        id=uuid4(),
+        name="test_document",
+        raw_data_location="/test/path",
+        external_metadata=document_metadata,
+        mime_type="text/plain",
+    )
+    chunker = chunker_class(document, make_text_generator("Some text."), max_chunk_size=512)
+    chunks = await collect_chunks(chunker)
+
+    assert len(chunks) >= 1
+    for chunk in chunks:
+        assert chunk.external_metadata == expected
+        assert chunk.metadata["index_fields"] == ["text"]
+
+
+@pytest.mark.asyncio
+async def test_external_metadata_does_not_change_chunk_ids(chunker_class, make_text_generator):
+    """Chunk identity is content-derived; the metadata a document carries is not part of it."""
+    doc_id = uuid4()
+    text = "Same text in both runs."
+
+    def document(metadata):
+        return Document(
+            id=doc_id,
+            name="test_document",
+            raw_data_location="/test/path",
+            external_metadata=metadata,
+            mime_type="text/plain",
+        )
+
+    plain = await collect_chunks(
+        chunker_class(document(None), make_text_generator(text), max_chunk_size=512)
+    )
+    tagged = await collect_chunks(
+        chunker_class(
+            document('{"created_at": "2024-01-15"}'), make_text_generator(text), max_chunk_size=512
+        )
+    )
+
+    assert [chunk.id for chunk in plain] == [chunk.id for chunk in tagged]
+    assert all(chunk.external_metadata is None for chunk in plain)
+    assert all(chunk.external_metadata == '{"created_at": "2024-01-15"}' for chunk in tagged)

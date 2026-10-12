@@ -91,17 +91,20 @@ def _mask_secret(value: str) -> str:
 
 
 def _persist_env_var(env_var_name: str, value) -> tuple[str, bool]:
-    """Write ``env_var_name=value`` into the ``.env`` file in the current
-    working directory, creating it if it doesn't exist yet.
+    """Write ``env_var_name=value`` into the ``.env`` this process loaded, or
+    into ``.env`` in the current working directory when none was loaded,
+    creating it if it doesn't exist yet.
 
-    This is the same file every config class resolves via
-    ``SettingsConfigDict(env_file=".env")``, so a value persisted here is
-    picked up by the next process (CLI invocation or script) started from
-    the same directory. Returns ``(path, created)``.
+    Writing to the loaded file (``cognee.shared.env_file``) means a value
+    persisted here is picked up by the next process that resolves the same
+    file, including a pinned ``COGNEE_ENV_FILE`` or a ``.env`` found in a
+    parent directory. Returns ``(path, created)``.
     """
     import dotenv
 
-    path = os.path.join(os.getcwd(), ".env")
+    from cognee.shared.env_file import load_env_file
+
+    path = load_env_file() or os.path.join(os.getcwd(), ".env")
     created = not os.path.exists(path)
     if created:
         open(path, "a").close()

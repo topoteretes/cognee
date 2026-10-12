@@ -16,9 +16,10 @@ def _resolve_cache_db_url(backend: str, cache_db_url: str | None) -> str:
     """
     Resolve the SQLAlchemy async URL for the SQL cache backends.
 
-    CACHE_DB_URL wins when set. Otherwise "sqlite" mirrors the relational SQLite
-    engine's databases directory (with a dedicated cache.db file), and "postgres"
-    falls back to the relational DB_* settings when DB_PROVIDER=postgres.
+    CACHE_DB_URL wins when set. Otherwise "sqlite" and "turso" mirror the relational
+    engine's databases directory (with a dedicated cache.db file; "turso" opens it on
+    the Turso rewrite engine), and "postgres" falls back to the relational DB_*
+    settings when DB_PROVIDER=postgres.
     """
     if cache_db_url:
         return cache_db_url
@@ -27,14 +28,24 @@ def _resolve_cache_db_url(backend: str, cache_db_url: str | None) -> str:
 
     relational_config = get_relational_config()
 
-    if backend == "sqlite":
+    if backend in ("sqlite", "turso"):
         db_path = relational_config.db_path
         if "s3://" in db_path:
             raise CacheConnectionError(
-                "CACHE_BACKEND=sqlite cannot store cache.db on S3; "
+                f"CACHE_BACKEND={backend} cannot store cache.db on S3; "
                 "set CACHE_DB_URL or CACHE_BACKEND=postgres"
             )
         os.makedirs(db_path, exist_ok=True)
+        if backend == "turso":
+            from cognee.infrastructure.databases.turso import require_turso, turso_url
+
+            try:
+                require_turso()
+            except ImportError as error:
+                raise CacheConnectionError(
+                    f"CACHE_BACKEND=turso requires the turso extra: {error}"
+                ) from error
+            return turso_url(f"{db_path}/cache.db")
         return f"sqlite+aiosqlite:///{db_path}/cache.db"
 
     if relational_config.db_provider == "postgres":
@@ -132,7 +143,7 @@ def create_cache_engine(
                 tapes_model=tapes_model,
                 tapes_request_timeout=tapes_request_timeout,
             )
-        elif config.cache_backend in ("sqlite", "postgres"):
+        elif config.cache_backend in ("sqlite", "turso", "postgres"):
             from cognee.infrastructure.databases.cache.sql.SqlCacheAdapter import (
                 SqlCacheAdapter,
             )
@@ -166,7 +177,7 @@ def create_cache_engine(
         else:
             raise ValueError(
                 f"Unsupported cache backend: '{config.cache_backend}'. "
-                f"Supported backends are: 'redis', 'fs', 'tapes', 'sqlite', 'postgres'"
+                f"Supported backends are: 'redis', 'fs', 'tapes', 'sqlite', 'turso', 'postgres'"
             )
     else:
         return None

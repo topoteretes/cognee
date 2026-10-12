@@ -119,7 +119,7 @@ def _emit_fuzzy_matches(
         )
         eval_capture.bump("extraction.fuzzy_lookups", len(resolutions))
         eval_capture.bump("extraction.fuzzy_matches", matched)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001  # capture never breaks the operation it observes
         logger.debug("fuzzy-match capture skipped (%s)", exc)
 
 

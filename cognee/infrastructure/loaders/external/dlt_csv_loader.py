@@ -1,17 +1,16 @@
 """CSV ingestion through the DLT pipeline, packaged as a loader.
 
 Registered above the plain ``csv_loader`` in the engine's priority order, so
-when the ``dlt`` extra is installed every CSV takes the structured route:
-staging ingestion via dlt, one manifest per file with a stable data_id, and
-the no-LLM DLT cognify route (one DltRow node per row). Without the extra
-this module fails to import, the loader is never registered, and CSVs fall
-back to ``csv_loader``'s text flattening.
+every CSV takes the structured route: staging ingestion via dlt, one manifest
+per file with a stable data_id, and the no-LLM DLT cognify route (one DltRow
+node per row). ``csv_loader``'s text flattening applies only when this loader
+is not registered.
 
 The loader returns a ``LoaderResult`` instead of a plain path: the manifest
 text is the derived file, and the result carries the manifest's stable
 ``data_id`` plus the ``system_metadata`` route stamp that cognify's per-item
 routing keys on. Per-call dlt options (``primary_key``, ``write_disposition``,
-``max_rows_per_table``, ``column_value_columns``) ride the standard
+``max_rows_per_table``, ``column_value_columns``, ``temporal_columns``) ride the standard
 ``preferred_loaders`` config channel:
 ``preferred_loaders={"dlt_csv_loader": {"primary_key": "id"}}``.
 """
@@ -19,7 +18,7 @@ routing keys on. Per-call dlt options (``primary_key``, ``write_disposition``,
 import hashlib
 from typing import Any
 
-import dlt  # ty:ignore[unresolved-import] — hard gate: without the extra this loader must not register
+import dlt
 
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
 from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
@@ -55,6 +54,7 @@ class DltCsvLoader(LoaderInterface):
         write_disposition: str = "replace",
         max_rows_per_table: int | None = None,
         column_value_columns: dict | None = None,
+        temporal_columns: dict | None = None,
         **kwargs: Any,
     ) -> LoaderResult:
         # Task-layer imports are lazy: the loaders package must not depend on
@@ -93,6 +93,7 @@ class DltCsvLoader(LoaderInterface):
             dataset_name,
             user,
             column_value_columns=column_value_columns,
+            temporal_columns=temporal_columns,
         )
         if manifest_item is None:
             raise IngestionError(

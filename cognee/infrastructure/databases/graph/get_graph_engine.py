@@ -198,18 +198,6 @@ async def get_graph_engine() -> GraphDBInterface:
     return handle
 
 
-# def _make_pghybrid_adapter():
-#     """Build the uncached Postgres hybrid adapter used when
-#     ``USE_UNIFIED_PROVIDER=pghybrid``. Not cached — the caller owns it, matching
-#     the original inline behavior."""
-#     from .postgres_demo.adapter import PostgresDemoAdapter
-#     from cognee.infrastructure.databases.relational.get_relational_engine import (
-#         get_relational_engine,
-#     )
-#
-#     return PostgresDemoAdapter(connection_string=get_relational_engine().db_uri)
-
-
 def _resolve_graph_engine_args(params: dict) -> tuple:
     """Normalize the engine parameters and return the positional argument tuple
     passed to ``_create_graph_engine``.
@@ -262,10 +250,6 @@ def create_graph_engine(
     Wrapper function to call create graph engine with caching.
     For a detailed description, see _create_graph_engine.
     """
-    # Check USE_UNIFIED_PROVIDER outside the cache so it's always re-read
-    # if os.environ.get("USE_UNIFIED_PROVIDER", "") == "pghybrid":
-    #     return _make_pghybrid_adapter()
-
     return _create_graph_engine(*_resolve_graph_engine_args(locals()))
 
 
@@ -277,9 +261,6 @@ async def acreate_graph_engine(**kwargs):
     subprocess engine's worker has fully exited (releasing its file lock) before
     a new worker opens the same DB path.
     """
-    # if os.environ.get("USE_UNIFIED_PROVIDER", "") == "pghybrid":
-    #     return _make_pghybrid_adapter()
-
     return await _create_graph_engine.acall(*_resolve_graph_engine_args(kwargs))
 
 
@@ -551,26 +532,27 @@ def _create_graph_engine(
             graph_id=graph_identifier,
         )
     elif graph_database_provider == "turso":
-        # Local libSQL file. A libSQL file is a SQLite file, so cognee talks to it
-        # through the same aiosqlite driver it uses for SQLite. Prefer an explicit
-        # GRAPH_DATABASE_URL (absolute path); otherwise fall back to the
+        # Local Turso database file on the rewrite engine (pyturso). Prefer an
+        # explicit GRAPH_DATABASE_URL (absolute path); otherwise fall back to the
         # auto-derived graph_file_path so Turso works out of the box in
         # single-user mode, like the other file-based backends.
         if graph_database_key:
             raise OSError(
-                "Remote Turso (embedded-replica sync) is not supported yet; "
-                "unset GRAPH_DATABASE_KEY to use the local libSQL backend."
+                "Remote Turso databases are not supported by the Turso graph backend in this "
+                "version; unset GRAPH_DATABASE_KEY to use a local Turso database file."
             )
         db_path = graph_database_url or graph_file_path
         if not db_path:
             raise OSError(
-                "Missing Turso database path (set GRAPH_DATABASE_URL to an absolute libSQL "
-                "file path, or rely on the default graph_file_path)."
+                "Missing Turso database path (set GRAPH_DATABASE_URL to an absolute Turso "
+                "database file path, or rely on the default graph_file_path)."
             )
-        # sqlite+aiosqlite:/// + /abs/path => sqlite+aiosqlite:////abs/path.
+        from cognee.infrastructure.databases.turso import require_turso
+
+        require_turso()
         from .turso.adapter import TursoAdapter
 
-        return TursoAdapter(connection_string=f"sqlite+aiosqlite:///{db_path}")
+        return TursoAdapter(database_path=db_path)
 
     all_providers = list(supported_databases.keys()) + [
         "neo4j",

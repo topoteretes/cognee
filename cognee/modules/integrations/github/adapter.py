@@ -151,3 +151,6 @@ class GithubIntegration(OAuthIntegration):
         initial sync.
         """
         await sync_repositories(credential)
+
+    async def sync_now(self, credential: IntegrationCredential) -> None:
+        await sync_repositories(credential)

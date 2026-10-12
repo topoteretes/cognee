@@ -128,11 +128,13 @@ async def test_nested_operation_inherits_the_enclosing_dataset(fake_capture_sink
 
     # A record_operation-wrapped search executed by a pipeline task: the
     # operation scope has no dataset of its own, the enclosing run knows it.
-    with capture.run_scope(pipeline_run, dataset_id, kind="pipeline"):
-        with capture.run_scope(operation_id, kind="operation") as inner:
-            assert inner.dataset_id is None
-            assert inner.resolved_dataset_id() == dataset_id
-            capture.emit(KIND_RETRIEVAL_CANDIDATES, [{"id": "n1"}], payload_kind="json")
+    with (
+        capture.run_scope(pipeline_run, dataset_id, kind="pipeline"),
+        capture.run_scope(operation_id, kind="operation") as inner,
+    ):
+        assert inner.dataset_id is None
+        assert inner.resolved_dataset_id() == dataset_id
+        capture.emit(KIND_RETRIEVAL_CANDIDATES, [{"id": "n1"}], payload_kind="json")
 
     await capture.drain()
 
@@ -149,9 +151,8 @@ async def test_nested_operation_inherits_the_enclosing_dataset(fake_capture_sink
 
 @pytest.mark.asyncio
 async def test_manifest_is_emitted_even_when_the_body_raises(fake_capture_sink):
-    with pytest.raises(RuntimeError):
-        with capture.run_scope(uuid4(), kind="pipeline"):
-            raise RuntimeError("body failed")
+    with pytest.raises(RuntimeError), capture.run_scope(uuid4(), kind="pipeline"):
+        raise RuntimeError("body failed")
 
     await capture.drain()
     assert len(_manifests(fake_capture_sink)) == 1

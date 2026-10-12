@@ -47,7 +47,9 @@ class BaseConfig(BaseSettings):
     # rated one; at 0.02 a reinforced edge decays out in a few hundred turns.
     preference_beta: float = float(os.getenv("PREFERENCE_BETA", "0.02"))
     # Master switch for per-user preference personalization at retrieval time.
-    # Off by default so a default deployment stays byte-identical to today.
+    # Off by default. It gates only preference consumption (ranking, prompts,
+    # the improve() stage); the per-turn 1-5 rating question belongs to
+    # automatic feedback analysis and follows AUTO_FEEDBACK instead.
     personalization_enabled: bool = os.getenv("PERSONALIZATION_ENABLED", "false").lower() in (
         "true",
         "1",
@@ -152,7 +154,7 @@ class BaseConfig(BaseSettings):
     langfuse_secret_key: str | None = None
     langfuse_host: str | None = None
 
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    model_config = SettingsConfigDict(extra="allow")
 
     def to_dict(self) -> dict:
         return {

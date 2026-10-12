@@ -37,6 +37,12 @@ class TokenizerInterface(Protocol):
         """
         raise NotImplementedError
 
+    @property
+    def model_input_limit(self) -> int | None:
+        """How many tokens the model this tokenizer belongs to accepts, when the
+        tokenizer knows it (a HuggingFace tokenizer does); None otherwise."""
+        return None
+
     @abstractmethod
     def decode_single_token(self, token: int) -> str:
         """

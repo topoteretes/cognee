@@ -1,3 +1,13 @@
+"""Ground extraction in an OWL ontology by passing an RDFLibOntologyResolver config to remember.
+
+Two short product texts are remembered against the bundled
+ontology_input_example/basic_ontology.owl. Nothing is printed; inspect the resulting graph to see
+ontology-grounded entities and types.
+
+Requires: LLM_API_KEY.
+Run: uv run python examples/guides/ontology_quickstart.py
+"""
+
 import asyncio
 import os
 

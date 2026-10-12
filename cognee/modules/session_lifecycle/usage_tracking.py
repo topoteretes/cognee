@@ -59,9 +59,13 @@ def _estimate_tokens(text: str) -> int:
 # Rough per-model pricing for cost estimates. Longest-prefix match (see below),
 # so a model id need only start with a key; unknown models cost $0 and callers
 # warn. USD per 1M tokens (input, output) at each provider's base tier; verified
-# against the official pricing pages July 2026.
+# against the official pricing pages September 2026.
 _PRICING_PER_M_TOKENS = {
     # OpenAI — https://developers.openai.com/api/docs/pricing
+    "gpt-5.6-astra": (10.00, 50.00),
+    "gpt-5.6-sol": (4.00, 20.00),
+    "gpt-5.6-terra": (2.00, 12.00),
+    "gpt-5.6-luna": (0.20, 1.20),
     "gpt-5.5": (5.00, 30.00),
     "gpt-5.5-pro": (30.00, 180.00),
     "gpt-5.4": (2.50, 15.00),

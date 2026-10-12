@@ -133,7 +133,7 @@ async def test_pipeline_name_override(monkeypatch):
 
     assert _counts(result) == {"total": 2, "completed": 1, "pending": 1}
     assert _completed_flags(result) == [True, False]
-    module.get_dataset_data.assert_awaited_once_with(dataset_id)
+    module.get_dataset_data.assert_awaited_once_with(dataset_id, order_by="created_at")
 
 
 @pytest.mark.asyncio

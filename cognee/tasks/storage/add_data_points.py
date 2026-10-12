@@ -488,7 +488,7 @@ def _emit_storage_delta(
             payload_kind="json",
             stage="add_data_points",
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001  # capture never breaks the operation it observes
         logger.debug("storage delta capture skipped (%s)", exc)
 
 

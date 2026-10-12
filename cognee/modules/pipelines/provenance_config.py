@@ -44,7 +44,7 @@ class ProvenanceConfig(BaseSettings):
 
     provenance_mode: str = os.getenv("COGNEE_PROVENANCE_MODE", "lightweight").lower()
 
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    model_config = SettingsConfigDict(extra="allow")
 
     def is_lightweight(self) -> bool:
         return self.provenance_mode == "lightweight"

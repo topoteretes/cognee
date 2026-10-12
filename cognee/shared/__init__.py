@@ -1,6 +1,6 @@
-# Loading LLM Config from data_models.py requires to have dotenv imported first
-# and to have it loaded
+# Load the .env before anything in cognee.shared reads settings (data_models.py
+# builds an LLM config at import). One resolver for the whole process, shared
+# with cognee/__init__.py — see cognee.shared.env_file for the search order.
+from cognee.shared.env_file import load_env_file
 
-import dotenv
-
-dotenv.load_dotenv(override=True)
+load_env_file()

@@ -1,3 +1,13 @@
+"""Recreate the add and cognify pipelines from their tasks with run_custom_pipeline, then search.
+
+resolve_data_directories and ingest_data are run as a custom "add_pipeline", get_default_tasks()
+supplies the cognify task list for a custom "cognify_pipeline", and a GRAPH_COMPLETION search
+over the resulting graph is printed.
+
+Requires: LLM_API_KEY.
+Run: uv run python examples/demos/custom_pipelines/custom_cognify_pipeline_example.py
+"""
+
 import asyncio
 
 import cognee

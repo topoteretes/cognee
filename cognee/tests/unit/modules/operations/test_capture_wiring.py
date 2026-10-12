@@ -10,6 +10,7 @@ stubbed. No LLM, no network, no database.
 """
 
 import importlib
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -377,7 +378,14 @@ def quiet_lifespan_startup(monkeypatch):
 
     monkeypatch.setattr(run_migrations_mod, "run_migrations", AsyncMock())
     monkeypatch.setattr(users_methods, "get_default_user", AsyncMock())
-    monkeypatch.setattr(recovery_mod, "recover_stale_cognify_runs_on_startup", AsyncMock())
+
+    # The recovery service brackets the whole serving period (``async with
+    # pipeline_recovery_service(): yield``) and polls the relational store.
+    @asynccontextmanager
+    async def no_recovery_service():
+        yield
+
+    monkeypatch.setattr(recovery_mod, "pipeline_recovery_service", no_recovery_service)
 
 
 @pytest.mark.asyncio

@@ -66,7 +66,7 @@ except ImportError:
 if os.environ.get("DEMO_USE_OLLAMA") != "1" and os.environ.get("LLM_API_KEY"):
     os.environ["OPENAI_API_KEY"] = os.environ["LLM_API_KEY"]
 
-# Pin a gpt-4o-family model for the OpenAI path. cognee's current default (openai/gpt-5-mini)
+# Pin a gpt-4o-family model for the OpenAI path. cognee's current default (openai/gpt-5.6-luna)
 # forces instructor's json_schema_mode, which calls response_model.model_json_schema() and
 # therefore breaks on cognee's str-returning paths (preflight + recall answer generation):
 #   AttributeError: type object 'str' has no attribute 'model_json_schema'

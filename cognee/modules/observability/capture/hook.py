@@ -121,9 +121,10 @@ import itertools
 import random
 import threading
 import time
+from collections.abc import Awaitable, Callable, Iterable
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Iterable, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 from uuid import UUID, uuid4
 
 from cognee.shared.logging_utils import get_logger

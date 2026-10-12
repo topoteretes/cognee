@@ -1,6 +1,3 @@
-from cognee.shared.logging_utils import get_logger
-
-logger = get_logger()
 """Top-level test config.
 
 ``test_subprocess_rss.py`` is a standalone benchmark script, not a pytest
@@ -9,6 +6,9 @@ parses argparse at import time and imports optional deps (psutil). Skip it
 from collection so pytest doesn't crash trying to run it.
 """
 
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 collect_ignore = ["test_subprocess_rss.py"]
 
 

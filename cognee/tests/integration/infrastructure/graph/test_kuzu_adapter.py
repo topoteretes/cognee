@@ -517,6 +517,19 @@ async def test_get_graph_metrics(adapter):
     assert metrics["num_edges"] == len(kg.edges)
 
 
+@pytest.mark.asyncio
+async def test_get_graph_counts(adapter):
+    assert await adapter.get_graph_counts() == (0, 0)
+
+    kg = _load_demo_kg()
+    await adapter.add_nodes(kg.nodes)
+
+    edge_rows = [(e.source_node_id, e.target_node_id, e.relationship_name, {}) for e in kg.edges]
+    await adapter.add_edges(edge_rows)
+
+    assert await adapter.get_graph_counts() == (len(kg.nodes), len(kg.edges))
+
+
 # ---------------------------------------------------------------------------
 # get_disconnected_nodes
 # Known adapter bug: NOT EXISTS((n)-[]-()) syntax not supported in current Kuzu.

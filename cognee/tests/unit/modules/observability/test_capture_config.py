@@ -82,9 +82,11 @@ def test_the_default_queue_covers_a_default_cognify_batch(clean_capture_env, mon
     assert config.cognee_capture_queue_size >= 2000
 
 
-def test_env_vars_populate_fields(clean_capture_env, monkeypatch):
+def test_env_vars_populate_fields(clean_capture_env, monkeypatch, tmp_path):
+    # tmp_path, not a literal: "/tmp/somewhere" is not an absolute path on Windows.
+    capture_dir = tmp_path / "somewhere"
     monkeypatch.setenv("COGNEE_CAPTURE_ENABLED", "true")
-    monkeypatch.setenv("COGNEE_CAPTURE_DIR", "/tmp/somewhere")
+    monkeypatch.setenv("COGNEE_CAPTURE_DIR", str(capture_dir))
     monkeypatch.setenv("COGNEE_CAPTURE_QUEUE_SIZE", "8")
     monkeypatch.setenv("COGNEE_CAPTURE_BATCH_SIZE", "2")
     monkeypatch.setenv("COGNEE_CAPTURE_FLUSH_INTERVAL_S", "0.5")
@@ -96,8 +98,8 @@ def test_env_vars_populate_fields(clean_capture_env, monkeypatch):
     config = get_capture_config()
 
     assert config.cognee_capture_enabled is True
-    # Normalized like every other storage root (symlinks resolved: /private/tmp on macOS).
-    assert config.cognee_capture_dir == str(Path("/tmp/somewhere").resolve())
+    # Normalized like every other storage root (symlinks resolved, as on macOS /tmp).
+    assert config.cognee_capture_dir == str(capture_dir.resolve())
     assert config.cognee_capture_queue_size == 8
     assert config.cognee_capture_batch_size == 2
     assert config.cognee_capture_flush_interval_s == 0.5
@@ -191,6 +193,7 @@ def test_import_cognee_does_not_import_capture_package():
         [sys.executable, "-c", probe],
         capture_output=True,
         text=True,
+        check=False,
         timeout=300,
         cwd=REPO_ROOT,
     )

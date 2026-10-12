@@ -75,9 +75,6 @@ from .prompt_hash import prompt_fingerprint
 from .sinks import CaptureSink, StorageSink
 
 __all__ = [
-    "CaptureConfig",
-    "CaptureEvent",
-    "CaptureSink",
     "KIND_EXTRACTION_CHUNK_GRAPH",
     "KIND_EXTRACTION_DROPPED_DUPLICATES",
     "KIND_EXTRACTION_FUZZY_MATCH",
@@ -86,6 +83,9 @@ __all__ = [
     "KIND_STORAGE_DELTA",
     "KIND_SUMMARY_GENERATED",
     "RETRIEVAL_KIND_PREFIX",
+    "CaptureConfig",
+    "CaptureEvent",
+    "CaptureSink",
     "RunScope",
     "StorageSink",
     "bump",

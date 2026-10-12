@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 from pydantic import ConfigDict, Field
 
 from cognee import __version__ as cognee_version
-from cognee.api.DTO import InDTO
+from cognee.api.DTO import ErrorResponse, InDTO
 from cognee.exceptions import CogneeApiError
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
@@ -54,7 +54,17 @@ class ForgetPayloadDTO(InDTO):
 def get_forget_router() -> APIRouter:
     router = APIRouter()
 
-    @router.post("")
+    @router.post(
+        "",
+        summary="Forget data: one item, a dataset, its memory only, or everything",
+        response_model=dict,
+        responses={
+            403: {"model": ErrorResponse},
+            404: {"model": ErrorResponse},
+            422: {"model": ErrorResponse},
+            500: {"model": ErrorResponse},
+        },
+    )
     @log_usage(function_name="POST /v1/forget", log_type="api_endpoint")
     async def forget_endpoint(
         payload: ForgetPayloadDTO, user: User = Depends(get_authenticated_user)

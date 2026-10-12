@@ -1110,6 +1110,7 @@ def test_atexit_hook_persists_leftovers_after_asyncio_run(tmp_path):
         [sys.executable, "-c", script],
         capture_output=True,
         text=True,
+        check=False,
         timeout=300,
         cwd=REPO_ROOT,
         env={**os.environ, "TELEMETRY_DISABLED": "1"},

@@ -15,7 +15,6 @@ import os
 import re
 from dataclasses import dataclass, field
 
-from cognee.api.v1.recall.query_router import _is_negated
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("skill_gate")
@@ -42,9 +41,68 @@ _GATE_RULES: list[tuple[re.Pattern, float]] = [
         ),
         2.0,
     ),
+    # Chinese (CJK) rules. These deliberately avoid \b: Chinese is written
+    # without spaces, so a sentence is one continuous \w run and \b can never
+    # match inside it — English-only rules score every Chinese query 0.0.
+    # Tiers mirror the English ones: procedural phrasings that fire on their
+    # own (3.0), strong document nouns (4.0), and weak signals (2.0) that only
+    # fire in combination.
+    # Interrogative + ops verb within a short window ("怎么配置…", "如何部署…",
+    # "怎么排查这个报错"), like "how do I install…".
+    (
+        re.compile(
+            r"(?:怎么|怎样|如何|咋)[^？?！!。]{0,12}?"
+            r"(?:配置|设置|安装|部署|迁移|搭建|排查|调试|升级|接入|集成|运行|启用|卸载|修复)"
+        ),
+        3.0,
+    ),
+    # Request + ops verb ("帮我配置…", "麻烦帮忙排查…"), also firing alone.
+    (
+        re.compile(
+            r"(?:帮我|帮忙|请帮我|麻烦)[^？?！!。]{0,12}?"
+            r"(?:配置|设置|安装|部署|迁移|搭建|排查|调试|升级|接入|集成|运行|修复|检查|卸载)"
+        ),
+        3.0,
+    ),
+    # Strong document nouns, like procedure|playbook|runbook|checklist.
+    (
+        re.compile(
+            r"(?:操作手册|运维手册|运行手册|操作指南|配置指南|安装指南|部署指南"
+            r"|排查指南|使用指南|检查清单|操作流程|操作规范|运维流程)"
+        ),
+        4.0,
+    ),
+    # Bare ops verbs and 步骤 (steps): weak signals, one alone never fires —
+    # mirroring the English verb rule. They stack with each other or with the
+    # phrasing rules above.
+    (
+        re.compile(r"(?:安装|部署|配置|迁移|排查|调试|搭建|升级|卸载|初始化|集成|接入|修复|步骤)"),
+        2.0,
+    ),
 ]
 
 _GATE_THRESHOLD = 3.0
+
+# Suppress a match if a negation word appears within this many characters
+# before the match start.
+# ``n't`` is a suffix, not a word: there is no boundary between the "o" and
+# the "n" of "don't", so it needs its own alternative outside the group.
+# The Chinese alternatives are also boundary-free (CJK text has no word
+# boundaries at all). 没 is deliberately absent: it also occurs inside the
+# affirmative-interrogative 有没有 ("is there…"), which would suppress half
+# of all Chinese questions.
+_NEGATION = re.compile(
+    r"\b(?:not|no|never|without|lack)\b|n't\b|(?:不|别|勿|未|无需|无须)",
+    re.IGNORECASE,
+)
+_NEGATION_WINDOW = 20
+
+
+def _is_negated(query: str, match: re.Match) -> bool:
+    """True if a negation word sits just before this regex match."""
+    start = max(0, match.start() - _NEGATION_WINDOW)
+    prefix = query[start : match.start()]
+    return bool(_NEGATION.search(prefix))
 
 
 @dataclass
@@ -64,9 +122,8 @@ def skill_gate_enabled() -> bool:
 def should_search_skills(query: str) -> GateResult:
     """Decide whether ``query`` warrants a skill lookup. Pure function, no I/O.
 
-    Every rule whose pattern matches (and is not negated, same suppression as
-    the recall query router) adds its weight; the gate fires when the total
-    reaches the threshold.
+    Every rule whose pattern matches (and is not negated) adds its weight;
+    the gate fires when the total reaches the threshold.
     """
     q = (query or "").strip()
     if not q:

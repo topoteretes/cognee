@@ -48,7 +48,8 @@ import itertools
 import json
 import os
 import time
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, TypeVar
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from .events import KIND_RUN_MANIFEST
 

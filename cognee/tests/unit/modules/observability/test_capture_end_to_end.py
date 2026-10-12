@@ -56,7 +56,8 @@ from cognee.modules.ontology.models import AttachedOntologyNode
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
 from cognee.shared.data_models import Edge as KGEdge
-from cognee.shared.data_models import KnowledgeGraph, Node as KGNode, SummarizedContent
+from cognee.shared.data_models import KnowledgeGraph, SummarizedContent
+from cognee.shared.data_models import Node as KGNode
 from cognee.tasks.documents import classify_documents, extract_chunks_from_documents
 from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
 from cognee.tasks.storage.add_data_points import add_data_points
@@ -453,7 +454,7 @@ async def test_one_pipeline_run_and_one_search_yield_every_capture_kind(
     assert payload["node_types"]["DocumentChunk"] == len(chunk_ids)
     assert payload["node_types"]["TextDocument"] == 1
     assert payload["node_types"]["Entity"] == 2 * len(chunk_ids)  # person + org per chunk
-    assert set(s["payload"]["summary_id"] for s in summaries) <= set(payload["node_ids"])
+    assert {s["payload"]["summary_id"] for s in summaries} <= set(payload["node_ids"])
     assert set(chunk_ids) <= set(payload["node_ids"])
     fakes.graph_engine.add_edges.assert_awaited_once()
     assert payload["edge_count"] == len(fakes.graph_engine.add_edges.await_args.args[0])

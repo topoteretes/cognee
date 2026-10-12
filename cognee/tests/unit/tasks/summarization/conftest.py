@@ -7,7 +7,7 @@ loop-ordering subtleties documented on ``capture_reset``. Importing a fixture fu
 into a conftest registers it for this directory.
 """
 
-from cognee.tests.unit.modules.conftest import (  # noqa: F401
+from cognee.tests.unit.modules.conftest import (
     FakeCaptureSink,
     capture_reset,
     fake_capture_sink,

@@ -6,14 +6,16 @@ the remote dataset id, failing with "Dataset not found" while the remote
 document stayed untouched."""
 
 import importlib
+import json
 from contextlib import asynccontextmanager
 from unittest.mock import MagicMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
 from cognee.api.v1.serve import state as state_mod
 from cognee.api.v1.serve.cloud_client import CloudClient
+from cognee.api.v1.update import UpdateResult
 
 # ``cognee.api.v1.update`` re-exports the update() *function* under the same
 # name as its module, so a plain ``from ... import update`` yields the
@@ -96,10 +98,32 @@ async def test_update_remote_is_silent_when_only_routable_parameters_are_given(
 # ----- CloudClient.update wire format -----
 
 
+def _result_payload(**overrides):
+    """A PATCH /update body as the server sends it."""
+    payload = {
+        "status": "incremental",
+        "regions": 1,
+        "deleted_chunks": 1,
+        "added_chunks": 1,
+        "reused_chunks": 0,
+        "kept_chunks": 3,
+        "reindexed_chunks": 0,
+        "total_chunks": 4,
+        "data_id": str(uuid4()),
+        "dataset_id": str(uuid4()),
+        "duration_seconds": 0.8,
+        "pipeline_run_id": str(uuid4()),
+        "fallback": None,
+        "error": None,
+    }
+    payload.update(overrides)
+    return payload
+
+
 class _FakeResponse:
     def __init__(self, status=200, payload=None, text=""):
         self.status = status
-        self._payload = payload or {}
+        self._payload = payload if payload is not None else _result_payload()
         self._text = text
 
     async def json(self):
@@ -134,7 +158,8 @@ def _field_names(form):
 
 @pytest.mark.asyncio
 async def test_cloud_client_update_matches_the_route_contract(monkeypatch):
-    client, captured = _client_with_fake_patch(monkeypatch, _FakeResponse(payload={"ok": 1}))
+    payload = _result_payload()
+    client, captured = _client_with_fake_patch(monkeypatch, _FakeResponse(payload=payload))
     data_id, dataset_id = uuid4(), uuid4()
 
     result = await client.update(
@@ -145,7 +170,9 @@ async def test_cloud_client_update_matches_the_route_contract(monkeypatch):
         chunk_level_diff=False,
     )
 
-    assert result == {"ok": 1}
+    assert result == UpdateResult.model_validate(payload).model_dump()
+    assert (result["status"], result["kept_chunks"]) == ("incremental", 3)
+    assert result["data_id"] == UUID(payload["data_id"]), "remote ids are UUIDs, as locally"
     assert captured["url"] == "http://remote.invalid/api/v1/update"
     assert captured["params"] == {
         "data_id": str(data_id),
@@ -182,3 +209,33 @@ async def test_cloud_client_update_surfaces_remote_errors(monkeypatch):
 
     with pytest.raises(RuntimeError, match=r"Remote update failed \(404\)"):
         await client.update(data_id=uuid4(), data="new text", dataset_id=uuid4())
+
+
+@pytest.mark.asyncio
+async def test_cloud_client_update_returns_a_failed_result_instead_of_raising(monkeypatch):
+    """The route answers a failed rebuild with 500 and the result body; the
+    client hands that result back so the caller can read the error and retry."""
+    failed = _result_payload(
+        status="failed",
+        **dict.fromkeys(
+            (
+                "regions",
+                "deleted_chunks",
+                "added_chunks",
+                "reused_chunks",
+                "kept_chunks",
+                "reindexed_chunks",
+                "total_chunks",
+            ),
+        ),
+        fallback={"reason": "disabled", "detail": "chunk_level_diff=False was requested"},
+        error={"error_class": "RuntimeError", "message": "cognify failed"},
+    )
+    client, _ = _client_with_fake_patch(
+        monkeypatch, _FakeResponse(status=500, text=json.dumps(failed))
+    )
+
+    result = await client.update(data_id=uuid4(), data="new text", dataset_id=uuid4())
+
+    assert result == UpdateResult.model_validate(failed).model_dump()
+    assert (result["status"], result["error"]["message"]) == ("failed", "cognify failed")

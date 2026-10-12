@@ -7,6 +7,7 @@ from cognee.base_config import get_base_config
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.modules.chunking.models.DltRow import DltRow
 from cognee.modules.graph.cognee_graph.CogneeGraph import (
     DEFAULT_TRIPLET_DISTANCE_PENALTY,
     CogneeGraph,
@@ -189,7 +190,7 @@ def _emit_retrieval_candidates(
                 payload_kind="json",
                 stage=_CAPTURE_STAGE,
             )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001  # capture never breaks the operation it observes
         # Capture never breaks the retrieval it observes.
         logger.debug("retrieval candidates capture skipped (%s)", exc)
 
@@ -232,7 +233,14 @@ async def get_memory_fragment(
         properties_to_project = ["id", "description", "name", "type", "text", "importance_weight"]
 
     node_properties_to_project = list(properties_to_project)
-    edge_properties_to_project = ["relationship_name", "edge_text", "edge_object_id"]
+    edge_properties_to_project = [
+        "relationship_name",
+        "edge_text",
+        "edge_object_id",
+        "conflict_marks",
+        "conflict_marks_json",
+        "effective_date",
+    ]
 
     if feedback_influence > 0.0:
         if "feedback_weight" not in node_properties_to_project:
@@ -464,7 +472,7 @@ async def brute_force_triplet_search(
                 "DocumentChunk_text",
                 # DLT rows live in their own collection — chunk search
                 # is documents-only, but graph completion covers row text too.
-                "DltRow_text",
+                DltRow.vector_collection(),
             ]
         else:
             # Copy so the caller's list is never mutated. Callers such as

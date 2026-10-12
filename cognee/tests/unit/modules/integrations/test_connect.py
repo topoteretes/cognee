@@ -6,6 +6,7 @@ checks that complete_installation wires exchange_code -> parse_installation
 upsert_credential parameter.
 """
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
@@ -88,3 +89,50 @@ async def test_propagates_exchange_code_errors():
 
     with pytest.raises(RuntimeError, match="provider rejected the code"):
         await complete_installation(integration, code="bad-code", user_id=USER_ID)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("selection", [None, [], ["INBOX"]])
+async def test_reconnect_does_not_overwrite_existing_resource_selection(selection):
+    installation = OAuthInstallation(
+        provider_account_id="ACC1",
+        token_payload={"access_token": "new-token"},
+        provider_metadata={"email": "person@example.com", "selected_label_ids": []},
+    )
+    integration = _FakeIntegration(installation, [])
+    integration.resource_selection_key = "selected_label_ids"
+    existing = SimpleNamespace(provider_metadata={"selected_label_ids": selection})
+    with (
+        patch(
+            "cognee.modules.integrations.connect.get_credential_by_account",
+            AsyncMock(return_value=existing),
+        ),
+        patch("cognee.modules.integrations.connect.upsert_credential", AsyncMock()) as upsert,
+    ):
+        await complete_installation(integration, code="reconnect-code", user_id=USER_ID)
+
+    assert upsert.await_args.kwargs["provider_metadata"] == {"email": "person@example.com"}
+    assert installation.provider_metadata["selected_label_ids"] == []
+
+
+@pytest.mark.asyncio
+async def test_first_install_keeps_opt_in_selection_default():
+    integration = _FakeIntegration(
+        OAuthInstallation(
+            provider_account_id="ACC1",
+            token_payload={"access_token": "token"},
+            provider_metadata={"selected_label_ids": []},
+        ),
+        [],
+    )
+    integration.resource_selection_key = "selected_label_ids"
+    with (
+        patch(
+            "cognee.modules.integrations.connect.get_credential_by_account",
+            AsyncMock(return_value=None),
+        ),
+        patch("cognee.modules.integrations.connect.upsert_credential", AsyncMock()) as upsert,
+    ):
+        await complete_installation(integration, code="new-code", user_id=USER_ID)
+
+    assert upsert.await_args.kwargs["provider_metadata"] == {"selected_label_ids": []}

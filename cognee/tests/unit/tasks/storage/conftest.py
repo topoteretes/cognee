@@ -7,4 +7,4 @@ available to the ``add_data_points`` tests without a second copy of the
 loop-ordering subtleties documented on ``capture_reset``.
 """
 
-from cognee.tests.unit.modules.conftest import capture_reset, fake_capture_sink  # noqa: F401
+from cognee.tests.unit.modules.conftest import capture_reset, fake_capture_sink

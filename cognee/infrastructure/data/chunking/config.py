@@ -17,7 +17,7 @@ class ChunkConfig(BaseSettings):
     chunk_strategy: ChunkStrategy = ChunkStrategy.PARAGRAPH
     chunk_engine: ChunkEngine = ChunkEngine.DEFAULT_ENGINE
 
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    model_config = SettingsConfigDict(extra="allow")
 
     def to_dict(self) -> dict[str, Any]:
         """
