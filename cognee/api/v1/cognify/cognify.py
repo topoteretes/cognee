@@ -19,6 +19,7 @@ from cognee.modules.cognify.config import (
 )
 from cognee.modules.cognify.rollback import cognify_rollback_handler
 from cognee.modules.cognify.routing import CognifyRoute, cognify_route_for
+from cognee.modules.data.models import Data
 from cognee.modules.observability import (
     COGNEE_PIPELINE_NAME,
     COGNEE_RESULT_SUMMARY,
@@ -129,6 +130,7 @@ async def cognify(
     extractor: Literal["llm", "gliner_demo", "gliner"] | None = None,
     ontology_file_path: str | None = None,
     summary_method: Literal["llm", "from_extraction"] | None = None,
+    data: list[Data] | None = None,
     **kwargs,
 ):
     """
@@ -235,6 +237,10 @@ async def cognify(
                  with no relations gets no summary. The explicit argument wins over
                  the SUMMARY_METHOD setting ("llm" by default). Raises while
                  connected to a remote instance.
+        data: Data rows of one dataset to process instead of every row in it. Pass
+                 that dataset alone in `datasets`. Incremental loading still skips
+                 rows that are already processed. An empty list raises. Raises with
+                 dry_run=True or while connected to a remote instance.
 
     Returns:
         Union[dict, list[PipelineRunInfo], DryRunEstimate]:
@@ -324,6 +330,16 @@ async def cognify(
     # dates as Timestamp nodes, which SearchType.TEMPORAL reads.
     kwargs.pop("temporal_cognify", None)
 
+    if data is not None:
+        if isinstance(datasets, (str, UUID)):
+            datasets = [datasets]
+        if datasets is None or len(datasets) != 1:
+            raise ValueError("data requires exactly one dataset in datasets.")
+        if not data:
+            raise ValueError("data must contain at least one Data row.")
+        if dry_run:
+            raise ValueError("dry_run estimates whole datasets; it does not accept data.")
+
     cognify_config = get_cognify_config()
     # The extractor decision is made once, here, before any branch. Branches
     # that cannot honour it raise below instead of silently running something
@@ -355,6 +371,11 @@ async def cognify(
 
     client = get_remote_client()
     if client is not None:
+        if data is not None:
+            raise ValueError(
+                "data is not supported while connected to a remote Cognee instance. "
+                "Call cognee.disconnect() to process selected data locally."
+            )
         if chunk_attachment is not None:
             raise ValueError(
                 "chunk_attachment is not supported while connected to a remote Cognee "
@@ -508,6 +529,7 @@ async def cognify(
             result = await pipeline_executor_func(
                 pipeline=run_pipeline,
                 datasets=datasets,
+                data=data,
                 tasks=resolve_cognify_tasks,
                 pipeline_name="cognify_pipeline",
                 user=user,
