@@ -190,9 +190,9 @@ def _emit_retrieval_candidates(
                 payload_kind="json",
                 stage=_CAPTURE_STAGE,
             )
-    except Exception as exc:  # noqa: BLE001  # capture never breaks the operation it observes
+    except Exception:
         # Capture never breaks the retrieval it observes.
-        logger.debug("retrieval candidates capture skipped (%s)", exc)
+        logger.debug("retrieval candidates capture skipped", exc_info=True)
 
 
 def format_triplets(edges):

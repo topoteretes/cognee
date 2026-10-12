@@ -104,8 +104,8 @@ async def summarize_text(
                     prompt_fingerprint = eval_capture.prompt_fingerprint(prompt_text)
                     prompt_fingerprints[prompt_text] = prompt_fingerprint
                 source_text_hash = eval_capture.prompt_fingerprint(chunk.text)
-            except Exception as exc:  # noqa: BLE001  # capture never breaks the operation it observes
-                logger.debug("summary provenance capture skipped (%s)", exc)
+            except Exception:
+                logger.debug("summary provenance capture skipped", exc_info=True)
                 prompt_fingerprint = source_text_hash = None
 
         summary = TextSummary(
@@ -161,5 +161,5 @@ def _emit_summary_generated(
             payload_kind="json",
             stage=CAPTURE_STAGE,
         )
-    except Exception as exc:  # noqa: BLE001  # capture never breaks the operation it observes
-        logger.debug("summary capture skipped (%s)", exc)
+    except Exception:
+        logger.debug("summary capture skipped", exc_info=True)

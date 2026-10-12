@@ -71,14 +71,31 @@ def test_search_events_pass_through_when_given():
     assert payload["search_events"] == events
 
 
-def test_semantic_payload_has_no_embeddings_to_lay_out():
+def test_semantic_payload_has_no_embeddings_to_lay_out(monkeypatch):
     """No embedding fetch is wired into this fixture, so the honest answer is
     null/null — not an exception, and not a fabricated layout.
+
+    The engine is stubbed to one with no collections, through the same seam
+    ``test_embedding_join`` uses: the default engine is process-global state, and
+    a store an earlier test populated (or a cached engine pointing at one) would
+    make the fetch re-embed the fixture and fabricate a layout — which is what
+    happened once the unit shards were re-balanced.
 
     Run via asyncio.run rather than the asyncio marker so this file carries
     no plugin dependency beyond what the rest of the suite already uses.
     """
     import asyncio
+
+    import cognee.infrastructure.databases.vector as vector_package
+
+    class _NoCollections:
+        async def has_collection(self, collection_name):
+            return False
+
+    async def _no_engine():
+        return _NoCollections()
+
+    monkeypatch.setattr(vector_package, "get_vector_engine_async", _no_engine)
 
     result = asyncio.run(build_semantic_payload(_alice_like_graph()))
 

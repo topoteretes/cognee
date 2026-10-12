@@ -104,8 +104,8 @@ def _remove_duplicate_extracted_nodes_by_id(
                     stage="extract_graph_from_data",
                 )
                 eval_capture.bump("extraction.dropped_duplicate_nodes", len(dropped_node_ids))
-            except Exception as exc:  # noqa: BLE001  # capture never breaks the operation it observes
-                logger.debug("dropped-duplicates capture skipped (%s)", exc)
+            except Exception:
+                logger.debug("dropped-duplicates capture skipped", exc_info=True)
 
 
 # Yield to the event loop this often while snapshotting a batch: the capture
@@ -167,9 +167,9 @@ async def capture_chunk_graphs(data_chunks: list[DocumentChunk], chunk_graphs: l
                 payload_kind="json",
                 stage="extract_graph_from_data",
             )
-        except Exception as exc:  # noqa: BLE001  # capture never breaks the operation it observes
+        except Exception:
             # emit_lazy swallows a failing builder itself; this covers everything else.
-            logger.debug("chunk graph capture skipped (%s)", exc)
+            logger.debug("chunk graph capture skipped", exc_info=True)
 
 
 def _note_ontology_config(
