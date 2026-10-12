@@ -1,0 +1,18 @@
+You are grading an AI memory system's answer to a question about a long conversation between two people.
+
+Question type: {question_type}
+Question: {question}
+{gold_block}
+Response to grade: {response}
+
+Grading rules:
+- Judge by meaning, not wording. Paraphrases, synonyms, and different word order are fine.
+- Dates and durations are equivalent when they refer to the same moment or span ("7 May 2023" == "May 7th, 2023"; "a week before 9 June" == "around 2 June"). A response that gives only a year when the gold has a full date is WRONG; a response that adds harmless extra precision is CORRECT.
+- Lists: the response must contain every item in the gold answer. Extra correct-sounding items that are not in the gold make it WRONG only if they contradict the gold.
+- Numbers may appear in different formats (3 vs three, $10k vs 10,000 dollars).
+- Extra explanation or hedging around a correct core answer is still CORRECT; a response that offers several alternatives and only one matches is WRONG.
+- If the response says the information is not available but the gold answer is a concrete fact, it is WRONG.
+- For UNANSWERABLE questions, the response is CORRECT only when it declines to give a concrete answer.
+
+Reply with JSON only, in this exact shape:
+{"label": "CORRECT" or "WRONG", "reason": "<one sentence>"}

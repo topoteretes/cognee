@@ -227,6 +227,9 @@ rendered.yaml
 # enola code-graph snapshots (written into any repository enola scans)
 .enola/
 
+# Local benchmark / eval run artifacts (BEAM and LoCoMo default output dirs)
+temp/
+
 # PR body files written by CI workflows (spec_extras_sync, router_docstring_sync); not repo content
 pr_body.md
 
