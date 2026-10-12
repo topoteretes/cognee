@@ -15,6 +15,10 @@ from uuid import uuid4
 
 import pytest
 
+from cognee.modules.improve import (
+    clear_auto_improve_admission,
+    register_auto_improve_admission,
+)
 from cognee.modules.improve.config import ImproveConfig
 from cognee.modules.improve.result import ImproveResult
 
@@ -70,6 +74,13 @@ def fake_sm(monkeypatch):
 
     monkeypatch.setattr("cognee.modules.engine.operations.setup.setup", _noop_setup)
     return sm
+
+
+@pytest.fixture(autouse=True)
+def _no_admission_check():
+    clear_auto_improve_admission()
+    yield
+    clear_auto_improve_admission()
 
 
 @pytest.fixture
@@ -345,6 +356,175 @@ async def test_invalid_improve_config_never_blocks_ingestion(monkeypatch, fake_s
     assert result.status == "session_stored"
     assert fake_sm.qa[(str(user.id), "s-broken-config")] == ["turn"]
     assert improve_calls == []
+
+
+@pytest.mark.asyncio
+async def test_admission_skip_stores_the_entry_and_starts_no_bridge(
+    monkeypatch, fake_sm, improve_calls
+):
+    """The host declines the automatic improve (its tenant is out of LLM
+    budget): the session write still lands, no bridge task is launched, and the
+    result says why."""
+    _config(monkeypatch)  # no debounce: every call would bridge
+    user = SimpleNamespace(id=uuid4())
+    dataset_id = uuid4()
+    asked = []
+
+    async def out_of_credit(**context):
+        asked.append(context)
+        return "insufficient_credits"
+
+    register_auto_improve_admission(out_of_credit)
+
+    result = await remember_module.remember(
+        "turn", dataset_id=dataset_id, session_id="s-skipped", user=user
+    )
+    await result
+
+    assert result.status == "session_stored"
+    assert bool(result) is True
+    assert fake_sm.qa[(str(user.id), "s-skipped")] == ["turn"]
+    assert result._task is None
+    assert improve_calls == []
+    assert result.improve is None
+    assert result.improve_error is None
+    assert result.improve_skipped == "insufficient_credits"
+    assert result.to_dict()["improve_skipped"] == "insufficient_credits"
+    assert "improve_skipped='insufficient_credits'" in repr(result)
+    # The check was told which improve it was deciding about.
+    assert asked == [
+        {
+            "user": user,
+            "dataset_id": dataset_id,
+            "session_id": "s-skipped",
+            "session_ids": ["s-skipped"],
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_admission_skip_does_not_spend_the_debounce_window(
+    monkeypatch, fake_sm, improve_calls
+):
+    """The check runs before the debounce bookkeeping. A bridge that never
+    started must not mark the window as fired, or the entries it left behind
+    would wait out a window nobody used once the host allows improves again."""
+    _config(monkeypatch, debounce_entries=3)
+    user = SimpleNamespace(id=uuid4())
+    dataset_id = uuid4()
+
+    async def out_of_credit(**context):
+        return "insufficient_credits"
+
+    register_auto_improve_admission(out_of_credit)
+
+    skipped = await remember_module.remember(
+        "turn 0", dataset_id=dataset_id, session_id="s-window", user=user
+    )
+    await skipped
+
+    assert skipped.improve_skipped == "insufficient_credits"
+    assert skipped._task is None
+    # The debounce state was neither read nor written.
+    assert fake_sm.reads == 0
+    assert fake_sm.context == {}
+
+    clear_auto_improve_admission()  # the tenant topped up
+    fired = await remember_module.remember(
+        "turn 1", dataset_id=dataset_id, session_id="s-window", user=user
+    )
+    await fired
+
+    # One new entry against a threshold of three: had the skipped call spent
+    # the window, this one would be debounced. It fires as a first run instead.
+    assert fired._task is not None
+    assert len(improve_calls) == 1
+    assert fired.improve_skipped is None
+    assert "improve_skipped" not in fired.to_dict()
+
+
+@pytest.mark.asyncio
+async def test_admission_check_that_allows_leaves_the_bridge_as_it_was(
+    monkeypatch, fake_sm, improve_calls
+):
+    _config(monkeypatch)
+    user = SimpleNamespace(id=uuid4())
+    asked = []
+
+    async def has_credit(**context):
+        asked.append(context["session_id"])  # and returns None: allowed
+
+    register_auto_improve_admission(has_credit)
+
+    result = await remember_module.remember(
+        "turn", dataset_id=uuid4(), session_id="s-allowed", user=user
+    )
+    await result
+
+    assert asked == ["s-allowed"]
+    assert result._task is not None
+    assert len(improve_calls) == 1
+    assert result.improve is not None
+    assert result.improve_skipped is None
+    assert "improve_skipped" not in result.to_dict()
+    assert "improve_skipped" not in repr(result)
+
+
+@pytest.mark.asyncio
+async def test_admission_is_not_asked_when_no_automatic_improve_would_run(
+    monkeypatch, fake_sm, improve_calls
+):
+    """self_improvement=False and IMPROVE_AUTO_ENABLED=false already mean no
+    improve; there is nothing for the host to decide, so it is not asked."""
+    asked = []
+
+    async def out_of_credit(**context):
+        asked.append(context)
+        return "insufficient_credits"
+
+    register_auto_improve_admission(out_of_credit)
+    user = SimpleNamespace(id=uuid4())
+
+    _config(monkeypatch)
+    opted_out = await remember_module.remember(
+        "turn", dataset_id=uuid4(), session_id="s-opted-out", user=user, self_improvement=False
+    )
+    await opted_out
+
+    _config(monkeypatch, auto_enabled=False)
+    switched_off = await remember_module.remember(
+        "turn", dataset_id=uuid4(), session_id="s-switched-off", user=user
+    )
+    await switched_off
+
+    assert asked == []
+    assert improve_calls == []
+    assert opted_out.improve_skipped is None
+    assert switched_off.improve_skipped is None
+
+
+@pytest.mark.asyncio
+async def test_failing_admission_check_never_breaks_the_session_write(
+    monkeypatch, fake_sm, improve_calls
+):
+    _config(monkeypatch)
+    user = SimpleNamespace(id=uuid4())
+
+    async def broken_check(**context):
+        raise ConnectionError("billing service unreachable")
+
+    register_auto_improve_admission(broken_check)
+
+    result = await remember_module.remember(
+        "turn", dataset_id=uuid4(), session_id="s-broken-check", user=user
+    )
+    await result
+
+    assert result.status == "session_stored"
+    assert fake_sm.qa[(str(user.id), "s-broken-check")] == ["turn"]
+    # Fail-open: the bridge runs as if no check were registered.
+    assert len(improve_calls) == 1
+    assert result.improve_skipped is None
 
 
 def test_env_typo_in_stages_disabled_fails_the_first_config_read(monkeypatch):

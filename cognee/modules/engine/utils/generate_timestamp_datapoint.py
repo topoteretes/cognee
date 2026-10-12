@@ -26,7 +26,9 @@ def generate_timestamp_datapoint(ts: Timestamp) -> Timestamp:
     )
     return Timestamp(
         id=generate_node_id(str(time_at)),
+        name=timestamp_str,
         time_at=time_at,
+        time_until=time_at + 1000,
         year=ts.year,
         month=ts.month,
         day=ts.day,

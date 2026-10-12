@@ -56,10 +56,14 @@ def _make_message(msg_id, *, subject="", sender="", body="", labels=None, histor
 
 
 class _HttpError(Exception):
-    """Mimics googleapiclient.errors.HttpError enough for the 404 branch."""
+    """Mimics googleapiclient.errors.HttpError, whose text embeds the request URI."""
 
-    def __init__(self, status):
-        super().__init__(f"HTTP {status}")
+    def __init__(self, status, uri=None):
+        super().__init__(
+            f'<HttpError {status} when requesting {uri} returned "error">'
+            if uri
+            else f"HTTP {status}"
+        )
         self.resp = type("Resp", (), {"status": status})()
 
 
@@ -405,6 +409,37 @@ def test_incremental_fetch_expired_history_id_falls_back_to_backfill():
     rows = list(incremental_fetch(svc, state))
 
     assert {r["id"] for r in rows} == {"a", "b"}  # recovered via full backfill
+    assert state["last_history_id"] == "2000"
+
+
+@pytest.mark.parametrize("status", [429, 500, 503])
+def test_incremental_fetch_transient_history_error_keeps_cursor_despite_404_in_uri(status):
+    # str(HttpError) embeds the request URI, so a transient error for
+    # startHistoryId=1404 contains "404". Only the real status may decide:
+    # the error propagates, no backfill runs and the cursor is kept.
+    uri = "https://gmail.googleapis.com/gmail/v1/users/me/history?startHistoryId=1404"
+    svc = FakeGmailService(
+        messages=[_make_message("a")],
+        profile_history_id="2000",
+        history_response=_HttpError(status, uri=uri),
+    )
+    state = {"last_history_id": "1404"}
+    with pytest.raises(_HttpError):
+        list(incremental_fetch(svc, state))
+    assert state["last_history_id"] == "1404"
+
+
+def test_incremental_fetch_expired_history_id_with_404_in_uri_still_backfills():
+    uri = "https://gmail.googleapis.com/gmail/v1/users/me/history?startHistoryId=1404"
+    svc = FakeGmailService(
+        messages=[_make_message("a")],
+        profile_history_id="2000",
+        history_response=_HttpError(404, uri=uri),
+    )
+    state = {"last_history_id": "1404"}
+    rows = list(incremental_fetch(svc, state))
+
+    assert {r["id"] for r in rows} == {"a"}
     assert state["last_history_id"] == "2000"
 
 

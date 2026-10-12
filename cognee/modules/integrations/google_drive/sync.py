@@ -4,16 +4,12 @@ Core owns OAuth, resource selection and dataset ownership. The bundled
 connector owns listing, document extraction, cursors and delete tombstones.
 """
 
-import logging
 import re
 from hashlib import sha256
 
-from cognee.modules.integrations.credentials import CredentialInactiveError
-from cognee.modules.integrations.google import ingestion
+from cognee.modules.integrations import ingestion
 from cognee.modules.integrations.google_drive import client
 from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
-
-logger = logging.getLogger(__name__)
 
 GOOGLE_DRIVE_DATASET_PREFIX = "google_drive"
 SYNC_STATUS_OK = "ok"
@@ -40,9 +36,7 @@ async def sync_drive(credential: IntegrationCredential) -> None:
 async def _sync_source(
     credential: IntegrationCredential, counts: dict[str, int]
 ) -> tuple[str, dict[str, int]]:
-    from cognee.api.v1.remember.remember import remember
     from cognee.modules.integrations.google_drive.adapter import access_token_for
-    from cognee.modules.users.methods import get_user
 
     selected = (credential.provider_metadata or {}).get("selected_folder_ids")
     if selected == []:
@@ -71,46 +65,26 @@ async def _sync_source(
         if not page_token:
             break
     folder_ids = list(dict.fromkeys(selected or ["root", *sorted(shared_drive_ids)]))
-    owner = await get_user(credential.user_id)
-    retained = set()
-    for folder_id in folder_ids:
-        await ingestion.require_active_credential(credential)
-        source = None
-        try:
-            source_kwargs = {
-                "folder_id": folder_id,
-                "resource_name": ingestion.resource_name("google_drive", credential, folder_id),
-                "service": service,
-                "check_active": ingestion.extraction_checkpoint(credential),
-            }
-            if folder_id in shared_drive_ids:
-                source_kwargs["shared_drive_id"] = folder_id
-            source = source_factory(**source_kwargs)
-            retained.add(source_kwargs["resource_name"])
-            result = await remember(
-                source,
-                dataset_name=_dataset_name(credential),
-                user=owner,
-                write_disposition="merge",
-                primary_key="id",
-                max_rows_per_table=0,
-                self_improvement=False,
-            )
-            if getattr(result, "status", None) == "errored":
-                counts["failed"] += 1
-                counts["failed_ingestion"] = counts.get("failed_ingestion", 0) + 1
-        except CredentialInactiveError:
-            raise
-        except Exception:
-            counts["failed"] += 1
-            counts["failed_ingestion"] = counts.get("failed_ingestion", 0) + 1
-            logger.exception(
-                "Google Drive sync failed for account %s folder %s",
-                credential.provider_account_id,
-                folder_id,
-            )
-        finally:
-            ingestion.add_source_counts(counts, source)
+
+    def make_source(folder_id: str, resource_name: str, check_active):
+        source_kwargs = {
+            "folder_id": folder_id,
+            "resource_name": resource_name,
+            "service": service,
+            "check_active": check_active,
+        }
+        if folder_id in shared_drive_ids:
+            source_kwargs["shared_drive_id"] = folder_id
+        return source_factory(**source_kwargs)
+
+    retained = await ingestion.sync_scopes(
+        "google_drive",
+        credential,
+        counts,
+        scopes=folder_ids,
+        dataset_name=_dataset_name(credential),
+        make_source=make_source,
+    )
     if not counts["failed"]:
         await ingestion.retire_resources(
             "google_drive", credential, _dataset_name(credential), retained

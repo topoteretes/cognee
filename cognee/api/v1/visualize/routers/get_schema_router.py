@@ -75,16 +75,17 @@ async def _provenance_scope(user: User) -> tuple[list | None, list | None, list 
     from cognee.modules.users.permissions.methods import get_all_user_permission_datasets
 
     tenant_id = getattr(user, "tenant_id", None)
-    if tenant_id is None:
-        # No tenant: the OSS/single-user path, where "the caller" is the whole
-        # scope and ownership is already the filter.
-        return None, [user.id], None
-
-    if await _administers_tenant(user, tenant_id):
+    if tenant_id is not None and await _administers_tenant(user, tenant_id):
         return [tenant_id], None, None
 
+    # Everyone else, tenant or not, sees exactly what `/datasets` lists: the
+    # datasets they hold a read grant on. Ownership is not a substitute — a
+    # user removed from a tenant keeps `owner_id` on what they created there
+    # but loses the grants, and must not see that tenant's roles and members
+    # through it.
     readable = await get_all_user_permission_datasets(user, "read")
-    return [tenant_id], None, [dataset.id for dataset in readable]
+    tenant_scope = [tenant_id] if tenant_id is not None else None
+    return tenant_scope, None, [dataset.id for dataset in readable]
 
 
 async def _administers_tenant(user: User, tenant_id) -> bool:
@@ -93,7 +94,7 @@ async def _administers_tenant(user: User, tenant_id) -> bool:
     Defers to ``has_user_management_permission``, the same check the rest of
     the read-side API (``get_tenant_roles``, ``get_users_in_tenant``, ...)
     already uses to decide who sees a whole tenant versus their own slice of
-    it: its owner, plus the role names in ``USER_MANAGEMENT_ALLOWED_ROLE_NAMES``.
+    it: its owner, plus the role names in ``LEGACY_ALL_CAPABILITY_ROLE_NAMES``.
     (A handful of tenant-mutation call sites still check ``tenant.owner_id``
     directly rather than this helper; that is a narrower, pre-existing split
     on the write side, not something this endpoint needs to resolve.) That
@@ -267,8 +268,8 @@ def get_schema_router() -> APIRouter:
         """Return a caller-scoped memory-provenance graph as a JSON-safe dict.
 
         Same scoping as `GET /schema/provenance` (the whole tenant for its
-        administrators, the caller's readable datasets for any other member,
-        just the caller when there is no tenant) and the same underlying graph —
+        administrators, the caller's readable datasets for anyone else,
+        tenant or not) and the same underlying graph —
         packaged as a dict instead of an HTML page.
 
         Query parameters:

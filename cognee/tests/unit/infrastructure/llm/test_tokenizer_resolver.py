@@ -179,6 +179,25 @@ def test_mistral_missing_dependency_falls_back_without_raising(caplog):
     assert any("Falling back" in r.message for r in caplog.records)
 
 
+def test_missing_transformers_names_the_extra(caplog):
+    # Without transformers, HUGGINGFACE_TOKENIZER cannot help; the warning must
+    # name the extra to install instead.
+    tik = patch(
+        f"{_MODULE}.TikTokenTokenizer", side_effect=lambda **kw: _FakeTokenizer("tiktoken", **kw)
+    )
+    hf = patch(
+        f"{_MODULE}.HuggingFaceTokenizer",
+        side_effect=ModuleNotFoundError("No module named 'transformers'", name="transformers"),
+    )
+    mis = patch(f"{_MODULE}.MistralTokenizer")
+    with caplog.at_level(logging.WARNING), tik, hf, mis:
+        tok = resolve_embedding_tokenizer(provider="openai_compatible", model="BAAI/bge-m3")
+    assert tok.kind == "tiktoken"
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("cognee[huggingface]" in m for m in messages)
+    assert not any("Set HUGGINGFACE_TOKENIZER" in m for m in messages)
+
+
 def test_bare_model_strips_one_provider_tag():
     assert resolver._bare_model("openai/text-embedding-3-large") == "text-embedding-3-large"
     # Splits once, so a multi-segment repo after the provider tag survives.

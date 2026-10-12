@@ -2,9 +2,13 @@ from typing import Any
 
 from cognee.context_global_variables import session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
+from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
 from cognee.infrastructure.session.get_session_manager import get_session_manager
+from cognee.modules.engine.models.node_set import NodeSet
+from cognee.modules.engine.utils import generate_node_id
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.utils.completion import generate_completion
@@ -55,7 +59,8 @@ class TripletRetriever(BaseRetriever):
         """
         Retrieves relevant triplets.
 
-        Fetches triplets based on a query from a vector engine.
+        Fetches triplets based on a query from a vector engine. With ``node_name`` set,
+        only triplets whose edge lies inside those node sets are ranked.
         Returns empty list if no triplets are found. Raises NoDataError if the collection is not
         found.
 
@@ -78,14 +83,15 @@ class TripletRetriever(BaseRetriever):
                     "In order to use TRIPLET_COMPLETION first use the create_triplet_embeddings memify pipeline. "
                 )
 
-            found_triplets = await vector_engine.search(
-                "Triplet_text",
-                query,
-                limit=self.top_k,
-                include_payload=True,
-                node_name=self.node_name,
-                node_name_filter_operator=self.node_name_filter_operator,
-            )
+            if self.node_name:
+                found_triplets = await self._search_node_set_triplets(vector_engine, query)
+            else:
+                found_triplets = await vector_engine.search(
+                    "Triplet_text",
+                    query,
+                    limit=self.top_k,
+                    include_payload=True,
+                )
 
             if len(found_triplets) == 0:
                 return []
@@ -94,6 +100,43 @@ class TripletRetriever(BaseRetriever):
         except CollectionNotFoundError as error:
             logger.error("Triplet_text collection not found")
             raise NoDataError("No data found in the system, please add data first.") from error
+
+    async def _search_node_set_triplets(self, vector_engine, query: str) -> list[ScoredResult]:
+        """Rank only the triplets whose edge lies inside the requested node sets.
+
+        Node-set scope is the graph's call, as in graph completion: an edge is in scope
+        when both of its endpoints are. Triplets carry no node-set membership of their
+        own, so the in-scope triplets are found through their edges and scored by id.
+        """
+        graph_engine = await get_graph_engine()
+        _, edges = await graph_engine.get_nodeset_subgraph(
+            node_type=NodeSet,
+            node_name=self.node_name,
+            node_name_filter_operator=self.node_name_filter_operator,
+        )
+        triplet_ids = list(
+            dict.fromkeys(
+                # Same id _create_triplets_from_graph and get_triplet_datapoints write.
+                str(generate_node_id(str(source_id) + relationship_name + str(target_id)))
+                for source_id, target_id, relationship_name, _ in edges
+            )
+        )
+        if not triplet_ids:
+            return []
+
+        query_vector = (await vector_engine.embedding_engine.embed_text([query]))[0]
+        scored = await vector_engine.score_by_ids("Triplet_text", triplet_ids, query_vector)
+        top = sorted(scored, key=lambda result: result.score)[: self.top_k]
+        if not top:
+            return []
+
+        stored = await vector_engine.retrieve("Triplet_text", [str(result.id) for result in top])
+        payload_by_id = {str(result.id): result.payload for result in stored}
+        return [
+            ScoredResult(id=result.id, score=result.score, payload=payload_by_id[str(result.id)])
+            for result in top
+            if str(result.id) in payload_by_id
+        ]
 
     def merge_retrieved_objects(self, primary: Any, secondary: Any) -> Any:
         return merge_ranked(

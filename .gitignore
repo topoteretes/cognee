@@ -193,8 +193,14 @@ cognee/cache/
 .data_storage/
 .cognee_cache/
 
-# Storage for the company-brain demo (examples/demos/company_brain/docs_code_conversations/)
+# Storage for the company-brain demo (examples/cookbooks/company_brain/docs_code_conversations/)
 .cognee-readme-demo/
+
+# Account credentials for the cookbooks (examples/cookbooks/)
+examples/cookbooks/**/credentials.json
+examples/cookbooks/**/token.json
+# Sample data each cookbook's setup.py writes
+examples/cookbooks/**/sample/
 .artifacts/
 .anon_id
 
@@ -226,4 +232,5 @@ pr_body.md
 
 # Scratch data/system dirs written by the keyless e2e script
 cognee/tests/e2e/keyless/.keyless_run/
+cognee/tests/e2e/keyless/.chunk_budget_run/
 cognee/tests/e2e/keyless/.crash_run/

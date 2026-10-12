@@ -3,7 +3,7 @@
 import re
 from hashlib import sha256
 
-from cognee.modules.integrations.google import ingestion
+from cognee.modules.integrations import ingestion
 from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
 
 GMAIL_DATASET_PREFIX = "gmail"

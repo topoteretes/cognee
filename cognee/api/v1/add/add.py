@@ -27,6 +27,7 @@ from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion import ingest_data, resolve_data_directories
 from cognee.tasks.ingestion.data_item import DataItem
+from cognee.tasks.ingestion.dlt_config import resolve_dlt_options, with_csv_loader_options
 from cognee.tasks.ingestion.refuse_changed_existing_documents import (
     refuse_changed_existing_documents,
 )
@@ -45,6 +46,7 @@ async def add(
     graph_db_config: dict | None = None,
     dataset_id: UUID | None = None,
     preferred_loaders: list[str | dict[str, dict[str, Any]]] | None = None,
+    dlt_config: dict | None = None,
     incremental_loading: bool = True,
     data_per_batch: int | None = 20,
     importance_weight: float | None = 0.5,
@@ -118,11 +120,19 @@ async def add(
         user: User object for authentication and permissions. Uses default user if None.
               Default user: "default_user@example.com" (created automatically on first use).
               Users can only access datasets they have permissions for.
-        node_set: Optional list of node identifiers for graph organization and access control.
-                 Used for grouping related data points in the knowledge graph.
+        node_set: Optional list of node identifiers used to organize and filter data points
+                 in the knowledge graph. Not an access-control mechanism.
         vector_db_config: Optional configuration for vector database (for custom setups).
         graph_db_config: Optional configuration for graph database (for custom setups).
         dataset_id: Optional specific dataset UUID to use instead of dataset_name.
+        preferred_loaders: Loader names to try first, each optionally with that loader's
+                           options: ``["csv_loader"]`` or ``[{"dlt_csv_loader": {...}}]``.
+        dlt_config: Options that apply only to dlt sources (connection strings, dlt
+                    resources, CSV files): ``primary_key``, ``write_disposition``,
+                    ``query``, ``max_rows_per_table``, ``column_value_columns``,
+                    ``temporal_columns``. See ``cognee.tasks.ingestion.dlt_config``.
+                    The same options are still accepted as bare keyword arguments;
+                    giving one both ways raises.
         run_in_background: If True, starts ingestion asynchronously and returns immediately.
                            DLT orphan cleanup is skipped; propagating upstream deletions
                            requires a successful foreground sync.
@@ -235,6 +245,12 @@ async def add(
                 transformed[item] = {}
         preferred_loaders = transformed
 
+    # DLT options, from dlt_config and the bare keyword arguments. The CSV
+    # route reads them from the loader's preferred_loaders entry; the
+    # DB-source route from resolve_dlt_sources below.
+    dlt_options = resolve_dlt_options(dlt_config, kwargs)
+    preferred_loaders = with_csv_loader_options(preferred_loaders, dlt_options)
+
     # add() stages data and makes no LLM call of its own, so it validates the
     # embedding side of the provider config only. Whether the run needs an LLM
     # is decided where the LLM is used: remember() and cognify() from their
@@ -302,7 +318,7 @@ async def add(
         dataset_name=authorized_dataset.name,
         user=user,
         dataset_id=authorized_dataset.id,
-        **kwargs,
+        **dlt_options,
     )
 
     # A file the dataset already holds with other content is an update in

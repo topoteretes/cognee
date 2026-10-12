@@ -39,6 +39,8 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
+from cognee.modules.chunking.external_metadata import decode_external_metadata
+from cognee.modules.engine.models.node_set import validate_node_set_names
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.code_graph.resolve_repo import (
     CodeRepositoryError,
@@ -407,6 +409,14 @@ async def extract_code_repo_graph(
     graph tasks on the ORIGINAL directory (enola writes its .enola snapshot
     there, exactly like remember(content_type="code")). One repository node,
     cross-file edges, one graph read per repo. No LLM, no embeddings.
+
+    A call-level node_set (add()/remember()'s ``node_set`` argument) reaches
+    every document this manifest's repo carries, but not the code nodes
+    themselves -- add_data_points only tags the DataPoints it is given, and
+    the code graph tasks build their own DataPoints straight from the enola
+    snapshot. This reads the same tag back off the manifest row's
+    external_metadata (identical shape to classify_documents) and passes it
+    down so every code node -- CodeRepository included -- carries it too.
     """
     from cognee.infrastructure.files.utils.open_data_file import open_data_file
     from cognee.tasks.code_graph.extract_code_graph import (
@@ -433,9 +443,12 @@ async def extract_code_repo_graph(
                 "its current location."
             )
 
-        data_points = await extract_code_graph(repo_path=repo_path)
+        metadata = decode_external_metadata(data_item.external_metadata)
+        node_set = validate_node_set_names(metadata.get("node_set")) if metadata else None
+
+        data_points = await extract_code_graph(repo_path=repo_path, node_set=node_set)
         state = await add_code_graph_data_points(data_points, ctx=ctx, graph_only=True)
-        await add_code_graph_edges(state, repo_path=repo_path, ctx=ctx)
+        await add_code_graph_edges(state, repo_path=repo_path, ctx=ctx, node_set=node_set)
 
         logger.info("Code repo graph extracted for %s (%s).", repo_path, data_item.id)
 

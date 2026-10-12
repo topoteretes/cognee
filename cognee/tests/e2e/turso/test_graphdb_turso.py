@@ -1,12 +1,12 @@
-"""End-to-end graph database test using the Turso (libSQL) backend.
+"""End-to-end graph database test using the Turso (rewrite engine) backend.
 
-Exercises the full add -> cognify -> search pipeline against a local libSQL file.
-Requires:
+Exercises the full add -> cognify -> search pipeline against a local Turso database
+file. Requires:
   - LLM_API_KEY set for cognify
   - A working vector database (default LanceDB is fine)
+  - the turso extra (pip install cognee"[turso]")
 
-Turso is local and needs no server or extra dependency (a libSQL file is a SQLite
-file, read through the aiosqlite driver), so no connection setup is required.
+Turso is local and needs no server, so no connection setup is required.
 """
 
 import asyncio

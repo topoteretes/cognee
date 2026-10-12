@@ -3,9 +3,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
 from cognee.infrastructure.session.session_manager import SessionTurnPreparation
+from cognee.modules.engine.models import Entity
+from cognee.modules.engine.models.node_set import NodeSet
+from cognee.modules.engine.utils import generate_node_id
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.triplet_retriever import TripletRetriever
+from cognee.tasks.storage.add_data_points import _create_triplets_from_graph
 
 
 @pytest.fixture(autouse=True)
@@ -59,8 +64,6 @@ async def test_get_context_success(mock_vector_engine):
         "test query",
         limit=5,
         include_payload=True,
-        node_name=None,
-        node_name_filter_operator="OR",
     )
 
 
@@ -188,31 +191,82 @@ async def test_init_custom_params():
     assert retriever.node_name_filter_operator == "AND"
 
 
+def _edge(source_id, target_id, relationship_name):
+    return (source_id, target_id, relationship_name, {})
+
+
+def _triplet_id(source_id, relationship_name, target_id):
+    return str(generate_node_id(source_id + relationship_name + target_id))
+
+
 @pytest.mark.asyncio
-async def test_get_context_forwards_nodeset_filter_to_vector_search(mock_vector_engine):
-    """node_set filtering must be passed through to the vector engine (TRIPLET_COMPLETION)."""
-    mock_vector_engine.search.return_value = []
-
-    retriever = TripletRetriever(
-        top_k=30,
-        node_name=["KEN", "src_type:figure"],
-        node_name_filter_operator="AND",
+async def test_node_set_scope_ranks_only_triplets_of_in_scope_edges(mock_vector_engine):
+    """A node-set search scores the triplets of the subgraph's edges instead of filtering
+    Triplet_text by a payload tag triplets never carry (gh #4822)."""
+    near, far = _triplet_id("a", "works_at", "b"), _triplet_id("b", "located_in", "c")
+    graph_engine = AsyncMock()
+    graph_engine.get_nodeset_subgraph = AsyncMock(
+        return_value=([], [_edge("a", "b", "works_at"), _edge("b", "c", "located_in")])
+    )
+    mock_vector_engine.embedding_engine = AsyncMock()
+    mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2]])
+    mock_vector_engine.score_by_ids = AsyncMock(
+        return_value=[
+            ScoredResult(id=far, score=0.9, payload=None),
+            ScoredResult(id=near, score=0.1, payload=None),
+        ]
+    )
+    mock_vector_engine.retrieve = AsyncMock(
+        return_value=[ScoredResult(id=near, score=0, payload={"text": "a works at b"})]
     )
 
-    with patch(
-        "cognee.modules.retrieval.triplet_retriever.get_vector_engine_async",
-        return_value=mock_vector_engine,
+    retriever = TripletRetriever(top_k=1, node_name=["A"], node_name_filter_operator="AND")
+
+    with (
+        patch(
+            "cognee.modules.retrieval.triplet_retriever.get_vector_engine_async",
+            return_value=mock_vector_engine,
+        ),
+        patch(
+            "cognee.modules.retrieval.triplet_retriever.get_graph_engine",
+            AsyncMock(return_value=graph_engine),
+        ),
     ):
-        await retriever.get_retrieved_objects("land cover")
+        objects = await retriever.get_retrieved_objects("where does a work?")
 
-    mock_vector_engine.search.assert_awaited_once_with(
-        "Triplet_text",
-        "land cover",
-        limit=30,
-        include_payload=True,
-        node_name=["KEN", "src_type:figure"],
-        node_name_filter_operator="AND",
+    graph_engine.get_nodeset_subgraph.assert_awaited_once_with(
+        node_type=NodeSet, node_name=["A"], node_name_filter_operator="AND"
     )
+    assert sorted(mock_vector_engine.score_by_ids.await_args.args[1]) == sorted([near, far])
+    mock_vector_engine.retrieve.assert_awaited_once_with("Triplet_text", [near])
+    mock_vector_engine.search.assert_not_awaited()
+    assert [(str(o.id), o.score, o.payload["text"]) for o in objects] == [
+        (near, 0.1, "a works at b")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_node_set_scope_with_empty_subgraph_returns_nothing(mock_vector_engine):
+    graph_engine = AsyncMock()
+    graph_engine.get_nodeset_subgraph = AsyncMock(return_value=([], []))
+    mock_vector_engine.score_by_ids = AsyncMock()
+
+    retriever = TripletRetriever(node_name=["missing"])
+
+    with (
+        patch(
+            "cognee.modules.retrieval.triplet_retriever.get_vector_engine_async",
+            return_value=mock_vector_engine,
+        ),
+        patch(
+            "cognee.modules.retrieval.triplet_retriever.get_graph_engine",
+            AsyncMock(return_value=graph_engine),
+        ),
+    ):
+        assert await retriever.get_retrieved_objects("anything") == []
+
+    mock_vector_engine.score_by_ids.assert_not_awaited()
+    mock_vector_engine.search.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -396,3 +450,33 @@ async def test_init_none_top_k():
     retriever = TripletRetriever(top_k=None)
 
     assert retriever.top_k == 5
+
+
+@pytest.mark.asyncio
+async def test_node_set_scope_derives_the_triplet_id_the_writer_stores(mock_vector_engine):
+    """The scoped search finds triplets only by recomputing their ids from the edges, so its
+    id must match the one _create_triplets_from_graph writes for the same edge."""
+    alice = Entity(name="Alice", description="person")
+    acme = Entity(name="Acme", description="company")
+    edge = (str(alice.id), str(acme.id), "works_at", {"edge_text": "Alice works at Acme"})
+    [written] = _create_triplets_from_graph([alice, acme], [edge])
+
+    graph_engine = AsyncMock()
+    graph_engine.get_nodeset_subgraph = AsyncMock(return_value=([], [edge]))
+    mock_vector_engine.embedding_engine = AsyncMock()
+    mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2]])
+    mock_vector_engine.score_by_ids = AsyncMock(return_value=[])
+
+    with (
+        patch(
+            "cognee.modules.retrieval.triplet_retriever.get_vector_engine_async",
+            return_value=mock_vector_engine,
+        ),
+        patch(
+            "cognee.modules.retrieval.triplet_retriever.get_graph_engine",
+            AsyncMock(return_value=graph_engine),
+        ),
+    ):
+        await TripletRetriever(node_name=["A"]).get_retrieved_objects("where does Alice work?")
+
+    assert mock_vector_engine.score_by_ids.await_args.args[1] == [str(written.id)]
