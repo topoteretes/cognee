@@ -28,7 +28,7 @@ no longer a cognify option. The dlt route adds
 
 | Package | What its tasks do | Key exports |
 |---|---|---|
-| `chunks/` | Split text into chunks and manage chunk relations | `chunk_by_paragraph`, `chunk_by_sentence`, `chunk_by_word`, `chunk_by_row`, `remove_disconnected_chunks`, `create_chunk_associations` |
+| `chunks/` | Split text into chunks and manage chunk relations | `chunk_by_paragraph`, `chunk_by_sentence`, `chunk_by_word`, `chunk_by_row`, `create_chunk_associations` |
 | `cleanup/` | Remove data that no dataset references any more | `cleanup_unused_data` |
 | `code_graph/` | Build the deterministic code graph with the bundled enola CLI (no LLM): `CodeSymbol`/`CodeModule` nodes, `calls`/`imports` edges | `extract_code_graph`, `extract_code_files_graph` |
 | `codingagents/` | Distil coding-agent traces into reusable coding rules (`CODING_RULES` search) | see its `README.md` |
