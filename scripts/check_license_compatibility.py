@@ -22,8 +22,12 @@ Not flagged, because they leave cognee's license unchanged:
   ``pypandoc-binary``'s GPL ``pandoc``: that is aggregation, not a combined
   work. Only libraries are scanned.
 - GPL with a linking exception (``GPL-3.0-or-later WITH GCC-exception-3.1``,
-  the libgfortran runtime numpy and scipy vendor) or with a permissive ``OR``
-  alternative (matplotlib's FreeType, ``FTL OR GPL-2.0-or-later``).
+  the libgfortran runtime numpy and scipy vendor) or with a recognised
+  permissive or weak-copyleft ``OR`` alternative (matplotlib's FreeType,
+  ``FTL OR GPL-2.0-or-later``). An alternative that is not a recognised open
+  license -- a commercial license, ``LicenseRef-*``, anything unknown -- does
+  not excuse the copyleft: it is not a choice an Apache-2.0 distribution can
+  make (PyMuPDF, ``GNU AFFERO GPL 3.0 or Artifex Commercial License``).
 - Proprietary terms (NVIDIA's CUDA wheels): they restrict those files, not
   cognee's license.
 
@@ -43,6 +47,7 @@ from pathlib import Path
 # License titles, as classifiers spell them and native libraries embed them.
 TITLES = {
     "GNU AFFERO GENERAL PUBLIC LICENSE": "AGPL",
+    "GNU AFFERO GPL": "AGPL",  # PyMuPDF's License field
     "GNU LESSER GENERAL PUBLIC LICENSE": "LGPL",
     "GNU LIBRARY GENERAL PUBLIC LICENSE": "LGPL",  # LGPL v2.0 title
     "GNU LIBRARY OR LESSER GENERAL PUBLIC LICENSE": "LGPL",  # classifier wording
@@ -50,14 +55,26 @@ TITLES = {
 }
 
 # GNU identifiers as SPDX ids, classifiers and manifests spell them
-# ("GPL-2.0-only", "(AGPLv3)", "GPLv2+"), but not "GPL-compatible".
-GNU_ID = re.compile(r"(?<![A-Z])(AGPL|LGPL|GPL)(?=V?\d|-\d|[\s)\],;+.]|$)")
+# ("GPL-2.0-only", "(AGPLv3)", "GPLv2+"), but not "GPL-compatible", and not
+# the "GPL" inside "AFFERO GPL", which TITLES reports as AGPL.
+GNU_ID = re.compile(r"(?<![A-Z])(?<!AFFERO )(AGPL|LGPL|GPL)(?=V?\d|-\d|[\s)\],;+.]|$)")
 
 # The licenses whose terms extend to code that imports or links them.
 STRONG_COPYLEFT = {"GPL", "AGPL"}
 
 # Exceptions that let code under another license link the library.
 LINKING_EXCEPTION = re.compile(r"\bWITH\s+(GCC|LLVM|CLASSPATH)-EXCEPTION")
+
+# Open licenses an Apache-2.0 distribution can choose when a package offers
+# them as an ``OR`` alternative to strong copyleft: permissive and weak
+# copyleft, as SPDX ids and as classifiers and License fields spell them.
+# Anything else offered as the alternative (a commercial license,
+# ``LicenseRef-*``, free text) is not a choice this distribution can make.
+OPEN_ALTERNATIVE = re.compile(
+    r"\b(MIT|BSD|APACHE|ISC|MPL|MOZILLA|LGPL|PSF|PYTHON SOFTWARE FOUNDATION|ZLIB|UNLICENSE"
+    r"|CC0|BSL|BOOST|0BSD|FTL|FREETYPE|HPND|EPL|ECLIPSE|CDDL|ARTISTIC|WTFPL|OFL|SIL OPEN FONT"
+    r"|ZPL|ZOPE|PUBLIC DOMAIN)\b"
+)
 
 # A license line inside a bundled license manifest ("License: GPL-2.0-only").
 MANIFEST_LICENSE_LINE = re.compile(r"^\s*LICENSE:\s*(.+)$", re.IGNORECASE | re.MULTILINE)
@@ -87,8 +104,10 @@ CHUNK = 1 << 20
 def strong_copyleft(alternatives: list[str]) -> set[str]:
     """Strong copyleft licenses that apply when any one of ``alternatives`` may be chosen.
 
-    Empty when some alternative is free of strong copyleft or carries a
-    linking exception. Each alternative may itself be an ``OR`` expression.
+    Empty when some alternative carries a linking exception or is a recognised
+    open license (``OPEN_ALTERNATIVE``) free of strong copyleft. An alternative
+    that is neither -- a commercial license, ``LicenseRef-*``, unknown text --
+    excuses nothing. Each alternative may itself be an ``OR`` expression.
     """
     required: set[str] = set()
     for expression in alternatives:
@@ -97,9 +116,10 @@ def strong_copyleft(alternatives: list[str]) -> set[str]:
                 return set()
             terms = set(GNU_ID.findall(alternative))
             terms |= {name for title, name in TITLES.items() if title in alternative}
-            if not terms & STRONG_COPYLEFT:
+            if terms & STRONG_COPYLEFT:
+                required |= terms & STRONG_COPYLEFT
+            elif OPEN_ALTERNATIVE.search(alternative):
                 return set()
-            required |= terms & STRONG_COPYLEFT
     return required
 
 
@@ -187,14 +207,27 @@ def canonical(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
+def has_license_metadata(dist: Distribution) -> bool:
+    """Whether the distribution declares a license name anywhere (a License field
+    holding full license text instead of a name does not count, see
+    ``declared_licenses``)."""
+    return any(alternatives and all(alternatives) for _, alternatives in declared_licenses(dist))
+
+
 def main() -> int:
-    checked, flagged = 0, set()
+    checked, flagged, undeclared = 0, set(), []
     for dist in distributions():
         checked += 1
         name = canonical(dist.metadata["Name"])
         flagged |= {(name, where, what) for where, what in findings(dist)}
+        if not has_license_metadata(dist):
+            undeclared.append(name)
 
     print(f"Checked {checked} installed distributions.", flush=True)
+    if undeclared:
+        # Not a failure: nothing to check against. Listed so the blind spot is
+        # visible in the job output instead of silent.
+        print(f"No license name declared ({len(undeclared)}): {', '.join(sorted(undeclared))}")
     failures = 0
     for name, where, what in sorted(flagged):
         if name in REVIEWED:

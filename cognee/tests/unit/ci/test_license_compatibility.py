@@ -44,6 +44,11 @@ def make_dist(root, name, metadata="", files=None):
         ("LGPL with exceptions", set()),
         ("MIT OR GPL-2.0-only", set()),
         ("FTL OR GPL-2.0-or-later", set()),
+        # A commercial or unrecognised alternative is not a choice an Apache-2.0
+        # distribution can make, so the copyleft side stands.
+        ("GPL-3.0-only OR LicenseRef-Commercial", {"GPL"}),
+        ("Dual Licensed - GNU AFFERO GPL 3.0 or Artifex Commercial License", {"AGPL"}),
+        ("GPL v3", {"GPL"}),
         ("GPL-3.0-or-later WITH GCC-exception-3.1", set()),
         ("GPL-compatible", set()),
         ("MPL-2.0", set()),
@@ -190,3 +195,13 @@ def test_main_fails_on_findings_and_honours_reviewed(tmp_path, monkeypatch, caps
     monkeypatch.setattr(check, "distributions", lambda: [clean])
     monkeypatch.setattr(check, "REVIEWED", {})
     assert check.main() == 0
+
+
+def test_main_lists_packages_without_a_license_name_but_passes(tmp_path, monkeypatch, capsys):
+    bare = make_dist(tmp_path, "bare-pkg", "")
+    clean = make_dist(tmp_path, "clean-pkg", "License-Expression: MIT\n")
+    monkeypatch.setattr(check, "distributions", lambda: [bare, clean])
+
+    assert check.main() == 0
+    out = capsys.readouterr().out
+    assert "No license name declared (1): bare-pkg" in out
