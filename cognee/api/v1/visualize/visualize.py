@@ -605,7 +605,11 @@ async def get_live_events(
         ]
 
     if events:
-        cursor = events[-1]["time"]
+        # Newest by parsed time, not list position: events arrive sorted by
+        # their raw strings, which misorders entries with differing offsets.
+        timed = [event for event in events if _event_time(event) is not None]
+        newest = max(timed, key=_event_time, default=events[-1])
+        cursor = newest["time"]
     else:
         cursor = since.isoformat() if since is not None else None
 

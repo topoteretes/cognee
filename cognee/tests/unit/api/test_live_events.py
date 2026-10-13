@@ -153,6 +153,27 @@ async def test_naive_and_aware_events_are_compared_on_one_scale():
 
 
 @pytest.mark.asyncio
+async def test_cursor_is_the_newest_event_by_time_not_by_string_order():
+    """Events arrive sorted by their raw strings, so an offset entry can sort
+    after a later naive one. The cursor must still be the newest by time, or
+    feeding it back as ``since`` delivers that later event a second time."""
+    later_naive = _event("2026-08-03T09:00:20.000000")
+    earlier_offset = _event("2026-08-03T11:00:10.000000+02:00")  # 09:00:10 UTC
+    events = sorted([later_naive, earlier_offset], key=lambda event: event["time"])
+    since = datetime(2026, 8, 3, 9, 0, 0)  # noqa: DTZ001 - naive like an older writer's cursor
+
+    ctx_a, ctx_b = _patches(events)
+    with ctx_a, ctx_b:
+        first = await visualize_module.get_live_events(DATASET_ID, since=since)
+        second = await visualize_module.get_live_events(
+            DATASET_ID, since=datetime.fromisoformat(first["cursor"])
+        )
+
+    assert first["cursor"] == later_naive["time"]
+    assert second["events"] == []
+
+
+@pytest.mark.asyncio
 async def test_unauthorized_dataset_raises_permission_denied():
     ctx_a, ctx_b = _patches([], authorized=False)
     with ctx_a, ctx_b, pytest.raises(PermissionDeniedError):
