@@ -186,3 +186,10 @@ async def record_llm_call(
         )
     except Exception as exc:
         logger.debug("record_llm_call: accumulate failed (%s)", exc, exc_info=True)
+
+
+async def record_embedding_call(*, model: str | None, tokens: int) -> None:
+    """Accumulate one embedding call's input tokens, kept separate from LLM tokens.
+
+    Placeholder: the operation and session sinks for embedding tokens come next (SDK-1077).
+    """

@@ -45,7 +45,7 @@ async def test_embed_text_filters_invalid_inputs(monkeypatch):
     monkeypatch.setattr(mod.litellm, "aembedding", fake_aembedding)
 
     inputs = ["", "(", "valid", "   ", "ok!"]
-    result = await engine.embed_text(inputs)
+    result = (await engine.embed_text(inputs)).vectors
 
     # Output length must match input length
     assert len(result) == len(inputs)
@@ -109,7 +109,7 @@ async def test_embed_text_sets_encoding_format_only_for_openrouter(
 
     monkeypatch.setattr(mod.litellm, "aembedding", mock_aembedding)
 
-    result = await engine.embed_text(["hello"])
+    result = (await engine.embed_text(["hello"])).vectors
 
     expected_kwargs = {
         "model": model,

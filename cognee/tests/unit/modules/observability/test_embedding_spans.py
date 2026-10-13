@@ -29,7 +29,7 @@ async def test_embed_text_emits_genai_embeddings_span(monkeypatch):
             provider="openai",
             dimensions=32,
         )
-        vecs = await engine.embed_text(["hello world", "second doc"])
+        vecs = (await engine.embed_text(["hello world", "second doc"])).vectors
         assert len(vecs) == 2
 
         exporter = get_exporter()

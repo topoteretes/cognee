@@ -109,10 +109,10 @@ def _install_embedding_recorder(store: dict[str, list[float]]) -> dict:
     original = engine_cls.embed_text
 
     async def recording_embed(self, text):
-        vectors = await original(self, text)
-        for item, vector in zip(text, vectors):
+        result = await original(self, text)
+        for item, vector in zip(text, result.vectors):
             store[item] = vector
-        return vectors
+        return result
 
     engine_cls.embed_text = recording_embed
     return {

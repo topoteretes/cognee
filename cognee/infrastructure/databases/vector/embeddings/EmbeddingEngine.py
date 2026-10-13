@@ -1,4 +1,17 @@
-from typing import Protocol
+from dataclasses import dataclass
+from typing import Protocol, TypeAlias
+
+# One embedding: the model's vector for one input text.
+Vector: TypeAlias = list[float]
+
+
+@dataclass
+class EmbeddingResult:
+    """What an engine returns for one embed_text() call: a vector per input text and
+    the input tokens the provider consumed (embeddings have no output tokens)."""
+
+    vectors: list[Vector]
+    tokens: int
 
 
 class EmbeddingEngine(Protocol):
@@ -7,9 +20,12 @@ class EmbeddingEngine(Protocol):
     vector size.
     """
 
-    async def embed_text(self, text: list[str]) -> list[list[float]]:
+    async def embed_text(self, text: list[str]) -> EmbeddingResult:
         """
-        Embed the provided text and return a list of embedded vectors.
+        Embed the provided text and report the input tokens it consumed.
+
+        Called by EmbeddingGateway, which records the tokens; everything
+        else embeds through its embed_text.
 
         Parameters:
         -----------
@@ -19,8 +35,7 @@ class EmbeddingEngine(Protocol):
         Returns:
         --------
 
-            - list[list[float]]: A list of lists, where each sublist contains the encoded
-              representation of the corresponding text input.
+            - EmbeddingResult: One vector per input text, plus the token count.
         """
         raise NotImplementedError("Subclasses must implement embed_text()")
 

@@ -114,7 +114,7 @@ async def test_fastembed_embeds_over_length_text_in_parts_instead_of_cutting_it(
     engine.embedding_model.model.tokenizer.encode_batch = encode_batch
     engine.embedding_model.embed = embed
 
-    (vector,) = await engine.embed_text([long_text])
+    (vector,) = (await engine.embed_text([long_text])).vectors
 
     assert long_text not in embedded, "the over-length text must never reach the model whole"
     assert len(embedded) == 2 and all(len(part) <= 2000 for part in embedded)
@@ -130,7 +130,7 @@ async def test_fastembed_batch_with_one_over_length_item_returns_one_vector_per_
     ]
     engine.embedding_model.embed = lambda texts, **kwargs: [np.ones(4) for _ in texts]
 
-    vectors = await engine.embed_text(["short", "y" * 3000, "short too"])
+    vectors = (await engine.embed_text(["short", "y" * 3000, "short too"])).vectors
 
     assert len(vectors) == 3 and all(len(vector) == 4 for vector in vectors)
 
@@ -141,7 +141,7 @@ async def test_fastembed_length_check_failure_does_not_break_embedding(monkeypat
     engine.embedding_model.model.tokenizer.encode_batch = MagicMock(side_effect=RuntimeError("no"))
     engine.embedding_model.embed = lambda texts, **kwargs: [np.ones(4) for _ in texts]
 
-    assert len(await engine.embed_text(["hello"])) == 1
+    assert len((await engine.embed_text(["hello"])).vectors) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -360,7 +360,7 @@ async def test_ollama_over_length_rejection_is_embedded_in_parts_without_an_erro
     monkeypatch.setattr(aiohttp.ClientSession, "post", _fake_post)
 
     with caplog.at_level(logging.INFO):
-        (vector,) = await engine.embed_text(["z" * 3000])
+        (vector,) = (await engine.embed_text(["z" * 3000])).vectors
 
     assert len(vector) == 4 and rejected["count"] == 1
     assert not any(r.levelno >= logging.ERROR for r in caplog.records)
