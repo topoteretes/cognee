@@ -1252,14 +1252,16 @@ class LanceDBAdapter(VectorDBInterface):
 
             checked_collections.append(collection_name)
             collection = await self.get_collection(collection_name)
-            table = await collection.to_arrow()
-            payload_field_index = table.schema.get_field_index("payload")
+            # schema() reads table metadata only; to_arrow() would load every row,
+            # embeddings included, just to look at the schema.
+            schema = await collection.schema()
+            payload_field_index = schema.get_field_index("payload")
 
             if payload_field_index < 0:
                 skipped_collections.append(collection_name)
                 continue
 
-            payload_field_type = table.schema.field(payload_field_index).type
+            payload_field_type = schema.field(payload_field_index).type
             if not hasattr(payload_field_type, "num_fields"):
                 skipped_collections.append(collection_name)
                 continue
@@ -1500,11 +1502,11 @@ class LanceDBAdapter(VectorDBInterface):
                 otel_span.set_attribute(COGNEE_VECTOR_RESULT_COUNT, 0)
                 return []
 
-            # Note: Exclude payload if not needed to optimize performance
+            # Never select the vector column: results carry only id, payload and
+            # distance. A limit=None search (node-set filtered retrieval reads whole
+            # collections) would otherwise materialize every stored embedding.
             select_columns = (
-                ["id", "vector", "payload", "_distance"]
-                if include_payload
-                else ["id", "vector", "_distance"]
+                ["id", "payload", "_distance"] if include_payload else ["id", "_distance"]
             )
 
             if node_name:
@@ -1717,7 +1719,7 @@ class LanceDBAdapter(VectorDBInterface):
                 continue
 
             try:
-                arrow_schema = (await collection.to_arrow()).schema
+                arrow_schema = await collection.schema()
             except Exception as e:
                 logger.debug(
                     "remove_belongs_to_set_tags: schema read failed for '%s': %s",
