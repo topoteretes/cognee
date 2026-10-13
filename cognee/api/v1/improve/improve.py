@@ -32,8 +32,11 @@ from typing_extensions import TypedDict, Unpack
 from cognee.api.v1.serve.state import get_remote_client
 from cognee.infrastructure.background_tasks import register_background_task
 from cognee.infrastructure.locks.session_lock import (
+    DeferredImproveRequest,
+    defer_improve_request,
     has_pending_improve_rerun,
     improve_lock_keys,
+    pop_released_deferred_improves,
     release_improve_lock_many,
     release_or_rerun_improve_lock_many,
     request_improve_rerun_many,
@@ -88,6 +91,37 @@ def _session_lock_keys(lock_keys: tuple[str, ...]) -> list[str]:
     one enrichment and the rest waits for the next improve.
     """
     return [key for key in lock_keys if key.startswith("session:")]
+
+
+
+async def _schedule_deferred_improves(
+    requests: list[DeferredImproveRequest] | None,
+) -> None:
+    if not requests:
+        return
+    for request in requests:
+
+        async def run_deferred(
+            request: DeferredImproveRequest = request,
+        ) -> None:
+            try:
+                await improve(
+                    dataset=request.dataset,
+                    node_name=request.node_name,
+                    session_ids=list(request.session_ids),
+                    feedback_alpha=request.feedback_alpha,
+                    build_global_context_index=request.build_global_context_index,
+                    build_truth_subspace=request.build_truth_subspace,
+                    review_conflicts=request.review_conflicts,
+                    **request.overrides,
+                )
+            except Exception:
+                logger.exception(
+                    "improve: deferred dataset run failed for %s",
+                    request.dataset,
+                )
+
+        register_background_task(asyncio.create_task(run_deferred()))
 
 
 class ImproveKwargs(TypedDict, total=False):
@@ -280,8 +314,13 @@ async def improve(
                             ", ".join(session_keys),
                         )
                     break
-                if await release_or_rerun_improve_lock_many(lock_keys, rerun_keys=session_keys):
+                if await release_or_rerun_improve_lock_many(
+                    lock_keys,
+                    rerun_keys=session_keys,
+                ):
                     released = True
+                    deferred = await pop_released_deferred_improves(lock_keys)
+                    await _schedule_deferred_improves(deferred)
                     break
                 logger.info(
                     "improve: rerun requested on %s while running; starting pass %d",
@@ -302,7 +341,8 @@ async def improve(
                 # row out of the stage watermark queries.
                 operation.set_outcome(OperationOutcome.NOOP)
             if not released:
-                await release_improve_lock_many(lock_keys)
+                deferred = await release_improve_lock_many(lock_keys)
+                await _schedule_deferred_improves(deferred)
 
     session_ids = [session_id for session_id in (session_ids or []) if session_id]
     _send_improve_telemetry(
@@ -354,14 +394,62 @@ async def improve(
                 # Session-keyed only: ask the holder of our sessions for one
                 # more pass, so this run's newer entries are covered without a
                 # retry. A dataset-only collision has no such promise.
-                rerun_requested = await request_improve_rerun_many(_session_lock_keys(lock_keys))
-                return report(
-                    _skip_lock_held_run(
-                        operation, inputs, lock_keys, rerun_requested=rerun_requested
-                    )
+                rerun_requested = await request_improve_rerun_many(
+
+                    _session_lock_keys(lock_keys)
+
                 )
 
-            # The claim is owned here until it is handed to execute_stages,
+
+                rerun_scheduled = False
+
+                if not rerun_requested and inputs.session_ids:
+
+                    rerun_scheduled = await defer_improve_request(
+
+                        DeferredImproveRequest(
+
+                            dataset=inputs.dataset_id,
+
+                            session_ids=tuple(inputs.session_ids),
+
+                            node_name=inputs.node_name,
+
+                            feedback_alpha=inputs.feedback_alpha,
+
+                            build_global_context_index=inputs.build_global_context_index,
+
+                            build_truth_subspace=inputs.build_truth_subspace,
+
+                            review_conflicts=inputs.review_conflicts,
+
+                            overrides=dict(inputs.memify_kwargs) | {"user": inputs.user},
+
+                        ),
+
+                        _session_lock_keys(lock_keys),
+
+                    )
+
+
+                return report(
+
+                    _skip_lock_held_run(
+
+                        operation,
+
+                        inputs,
+
+                        lock_keys,
+
+                        rerun_requested=rerun_requested,
+
+                        rerun_scheduled=rerun_scheduled,
+
+                    )
+
+                )
+# The claim is owned here until it is handed to execute_stages,
             # whose finally releases it. The probe below awaits real engine
             # setup and cancellation is not an Exception, so a raise before
             # the handoff must release or the keys leak for the process
@@ -411,7 +499,8 @@ async def improve(
                 return report(result)
             except BaseException:
                 if claim_owned:
-                    await release_improve_lock_many(lock_keys)
+                    deferred = await release_improve_lock_many(lock_keys)
+                await _schedule_deferred_improves(deferred)
                 raise
 
 
@@ -526,6 +615,7 @@ def _skip_lock_held_run(
     lock_keys: tuple[str, ...],
     *,
     rerun_requested: bool = False,
+    rerun_scheduled: bool = False,
 ) -> ImproveResult:
     """React to a lost lock claim: log it, record a no-op run, skip every stage.
 
@@ -550,6 +640,7 @@ def _skip_lock_held_run(
         session_ids=inputs.session_id_list,
     )
     result.rerun_requested = rerun_requested
+    result.rerun_scheduled = rerun_scheduled
     return result
 
 
