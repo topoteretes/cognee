@@ -7,6 +7,7 @@ from typing import Any
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
+from cognee.modules.retrieval.utils.evidence import chunk_context_evidence
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("LexicalRetriever")
@@ -93,6 +94,13 @@ class LexicalRetriever(BaseRetriever):
 
             self._initialized = True
             logger.info("Initialized with %d document chunks", len(self.chunks))
+
+    def get_context_evidence(self, retrieved_objects: Any, dataset_id: Any = None):
+        payloads = [
+            {**value[0], "score": value[1]} if isinstance(value, tuple) else value
+            for value in retrieved_objects or []
+        ]
+        return chunk_context_evidence(payloads, dataset_id=dataset_id)
 
     async def get_retrieved_objects(self, query: str) -> Any:
         """Retrieves relevant chunks for the given query."""

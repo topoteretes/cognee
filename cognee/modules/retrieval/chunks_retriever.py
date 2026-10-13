@@ -4,6 +4,7 @@ from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
+from cognee.modules.retrieval.utils.evidence import chunk_context_evidence
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("ChunksRetriever")
@@ -103,6 +104,9 @@ class ChunksRetriever(BaseRetriever):
             return "\n".join(chunk_payload_texts)
         else:
             return ""
+
+    def get_context_evidence(self, retrieved_objects: Any, dataset_id: Any = None):
+        return chunk_context_evidence(retrieved_objects, dataset_id=dataset_id)
 
     async def get_retrieved_objects(self, query: str) -> Any:
         """

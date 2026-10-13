@@ -1,7 +1,8 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import Field
@@ -12,6 +13,7 @@ from cognee.api.sse import SSE_MEDIA_TYPE, sse_headers, wants_event_stream
 from cognee.api.v1.recall.recall import RecallResponse
 from cognee.api.v1.recall.recall_stream import begin_recall_stream
 from cognee.exceptions import CogneeApiError
+from cognee.modules.recall.evidence.models import EvidenceBatch, EvidenceIndex, EvidenceItem
 from cognee.modules.search.operations import get_history
 from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.users.methods import get_authenticated_user
@@ -80,6 +82,11 @@ class RecallPayloadDTO(InDTO):
         ),
     )
     verbose: bool = Field(default=False)
+    evidence_mode: Literal["context", "index"] | None = Field(
+        default=None,
+        description="Opt-in evidence: context attaches versioned artifacts; index returns at most "
+        "20 body-free references. Both force only_context and include_references. JSON only.",
+    )
     include_references: bool = Field(
         default=False,
         description="Include source/provenance references in completion results.",
@@ -211,7 +218,7 @@ def get_recall_router() -> APIRouter:
     @router.post(
         "",
         summary="Recall: query memory with auto-routed search type and session-first lookup",
-        response_model=list[RecallResponse],
+        response_model=list[RecallResponse] | EvidenceIndex,
     )
     @log_usage(function_name="POST /v1/recall", log_type="api_endpoint")
     async def recall(
@@ -303,7 +310,7 @@ def get_recall_router() -> APIRouter:
             from cognee.modules.session_lifecycle.usage_tracking import track_session_usage
 
             async with track_session_usage(payload.session_id, user.id):
-                return await cognee_recall(
+                results = await cognee_recall(
                     query_text=payload.query,
                     query_type=payload.search_type,
                     user=user,
@@ -313,19 +320,34 @@ def get_recall_router() -> APIRouter:
                     node_name=payload.node_name,
                     top_k=payload.top_k,
                     verbose=payload.verbose,
-                    only_context=payload.only_context,
+                    only_context=payload.only_context or payload.evidence_mode is not None,
                     session_id=payload.session_id,
                     scope=payload.scope,
                     context_profile=payload.context_profile,
                     record_context_usage=payload.record_context_usage,
-                    include_references=payload.include_references,
+                    include_references=payload.include_references
+                    or payload.evidence_mode is not None,
                     response_model=response_model,
                     tool_connections=payload.tool_connections,
                     tools_trigger=payload.tools_trigger,
                     code_query=payload.code_query,
                 )
 
+                if payload.evidence_mode:
+                    from cognee.modules.recall.evidence.service import (
+                        attach_evidence,
+                        evidence_index,
+                    )
+
+                    if payload.evidence_mode == "index":
+                        return await evidence_index(results, user)
+                    return await attach_evidence(results, user)
+                return results
+
         streaming = wants_event_stream(request.headers.get("accept"), payload.stream)
+
+        if streaming and payload.evidence_mode:
+            raise HTTPException(status_code=422, detail="Evidence modes require JSON transport")
 
         try:
             if streaming:
@@ -373,5 +395,17 @@ def get_recall_router() -> APIRouter:
                 status_code=409,
                 content={"error": "An error occurred during recall."},
             )
+
+    @router.post(
+        "/evidence",
+        response_model=list[EvidenceItem],
+        summary="Expand up to five versioned evidence references with current read permissions",
+    )
+    async def expand_references(
+        payload: EvidenceBatch, user: User = Depends(get_authenticated_user)
+    ):
+        from cognee.modules.recall.evidence.service import expand_evidence
+
+        return await expand_evidence(payload.references, user)
 
     return router
