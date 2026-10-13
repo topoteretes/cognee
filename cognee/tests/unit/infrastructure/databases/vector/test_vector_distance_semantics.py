@@ -45,6 +45,7 @@ class _FakeLanceQuery:
         self.results = results
         self.distance_type_value = None
         self.where_value = None
+        self.select_value = None
 
     def distance_type(self, value):
         self.distance_type_value = value
@@ -54,7 +55,8 @@ class _FakeLanceQuery:
         self.where_value = value
         return self
 
-    def select(self, _columns):
+    def select(self, columns):
+        self.select_value = columns
         return self
 
     def limit(self, _limit):
@@ -147,6 +149,34 @@ async def test_lancedb_search_with_nodeset_filter_uses_cosine():
     assert [result.score for result in results] == [1.11]
     assert collection.queries[0].distance_type_value == "cosine"
     assert "array_has_any" in collection.queries[0].where_value
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb extra is not installed")
+@pytest.mark.parametrize("include_payload", [False, True])
+@pytest.mark.parametrize("node_name", [None, ["A"]])
+async def test_lancedb_search_never_selects_vector_column(include_payload, node_name):
+    # A limit=None search reads a whole collection; selecting the vector column
+    # there would materialize every stored embedding.
+    adapter = LanceDBAdapter(
+        url="memory://", api_key=None, embedding_engine=_DummyEmbeddingEngine()
+    )
+    collection = _FakeLanceCollection(
+        [{"id": str(uuid4()), "payload": {"belongs_to_set": ["A"]}, "_distance": 0.3}]
+    )
+    adapter.get_collection = AsyncMock(return_value=collection)
+
+    results = await adapter.search(
+        collection_name="EdgeType_relationship_name",
+        query_vector=[0.1, 0.2, 0.3],
+        limit=None,
+        include_payload=include_payload,
+        node_name=node_name,
+    )
+
+    assert len(results) == 1
+    expected = ["id", "payload", "_distance"] if include_payload else ["id", "_distance"]
+    assert collection.queries[0].select_value == expected
 
 
 @pytest.mark.asyncio
