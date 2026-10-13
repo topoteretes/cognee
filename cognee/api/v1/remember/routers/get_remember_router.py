@@ -682,6 +682,11 @@ def get_remember_router() -> APIRouter:
         )
         skill_improvement: dict | None = None
 
+        client_event_id: UUID | None = Field(
+            default=None,
+            description="Stable capture event ID for QA/trace retries. Requires capture_idempotency_v1.",
+        )
+
     @router.post(
         "/entry",
         summary="Remember a session entry (QA, trace, feedback) into the session cache",
@@ -729,6 +734,29 @@ def get_remember_router() -> APIRouter:
         from cognee.api.v1.remember import remember as cognee_remember
 
         try:
+            if payload.client_event_id is not None:
+                from cognee.infrastructure.databases.cache.sql.capture import CaptureConflictError
+                from cognee.infrastructure.session.capture import remember_capture
+
+                if payload.skill_improvement is not None:
+                    raise ValueError("skill_improvement is not supported for idempotent capture")
+                try:
+                    return await remember_capture(
+                        entry=payload.entry,
+                        client_event_id=payload.client_event_id,
+                        dataset_name=payload.dataset_name,
+                        dataset_id=payload.dataset_id,
+                        session_id=payload.session_id,
+                        user=user,
+                    )
+                except CaptureConflictError:
+                    return JSONResponse(
+                        status_code=409,
+                        content={
+                            "error": "client_event_id already belongs to another payload",
+                            "code": "capture_payload_conflict",
+                        },
+                    )
             result = await cognee_remember(
                 payload.entry,
                 dataset_name=payload.dataset_name,
