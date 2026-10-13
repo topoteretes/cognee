@@ -86,7 +86,9 @@ def _open_database(registry: HandleRegistry, req: Request) -> HandleResult:
             # rather than treating it as corruption/migration.
             db = _retry_open_locked(ladybug, req.kwargs, e)
         else:
-            if "wal" in message:
+            from ._kuzu_helpers import is_wal_replay_failure
+
+            if is_wal_replay_failure(str(e), db_path):
                 quarantine_wal(db_path)
             else:
                 from .ladybug_migrate import ladybug_migration, needs_migration

@@ -237,3 +237,26 @@ def install_json_extension_local(
         finally:
             _safe_close(conn)
             _safe_close(tmp_db)
+
+
+# Ladybug's own WAL replay-failure messages. Only these mean the WAL cannot be
+# replayed. Other open errors can name the .wal file too (permission denied on
+# it, or a lock error whose path happens to contain "wal"); treating those as
+# corruption would discard a healthy WAL.
+_WAL_REPLAY_FAILURE_MARKERS = (
+    "corrupted wal file",
+    "the wal file is corrupted",
+    "wal replay encountered",
+    "replay in wal record",
+)
+
+
+def is_wal_replay_failure(message: str, db_path: str = "") -> bool:
+    """Return True when a database-open error means the WAL cannot be replayed.
+
+    The database path is removed before matching, so a directory name can
+    never make an unrelated error look like a WAL failure.
+    """
+    text = message.replace(db_path, "") if db_path else message
+    text = text.lower()
+    return any(marker in text for marker in _WAL_REPLAY_FAILURE_MARKERS)

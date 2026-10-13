@@ -512,7 +512,9 @@ class LadybugAdapter(GraphDBInterface):
                         max_db_size=self.kuzu_max_db_size,
                     )
                 except RuntimeError as e:
-                    if "wal" in str(e).lower():
+                    from cognee_db_workers._kuzu_helpers import is_wal_replay_failure
+
+                    if is_wal_replay_failure(str(e), self.db_path):
                         quarantine_wal(self.db_path)
                     else:
                         import ladybug
