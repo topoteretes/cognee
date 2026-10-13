@@ -149,6 +149,17 @@ def test_aggregate_run_dir(tmp_path):
     assert "| single_hop |" in markdown
 
 
+def test_find_metric_files_reads_one_run_only(tmp_path):
+    rows = [_metrics_entry("single_hop", 1.0)]
+    layout = {"qa": 0, "conv_01/qa": 1, "other_run/qa": 2, "other_run/conv_03/qa": 3}
+    for folder, conv in layout.items():
+        name = f"locomo_metrics_conv{conv}_hybrid_run0.json"
+        aggregate.write_json(str(tmp_path / folder / name), rows)
+    found = aggregate.find_metric_files(tmp_path)
+    # the top-level qa/ and conv_NN/qa/ belong to this run; nested folders are other runs
+    assert sorted(f["conversation_index"] for f in found) == [0, 1]
+
+
 def test_aggregate_gold_variants(tmp_path):
     qa = tmp_path / "conv_03" / "qa"
     qa.mkdir(parents=True)
