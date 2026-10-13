@@ -47,6 +47,7 @@ def _session_manager(pinned: list[str] | None = None) -> MagicMock:
     manager.is_available = True
     manager.get_session_context_entries = AsyncMock(return_value=rows)
     manager.create_session_context_entry = AsyncMock(return_value=True)
+    manager.update_session_context_entry = AsyncMock(return_value=True)
     manager.add_qa = AsyncMock(return_value="qa-1")
     manager.add_agent_trace_step = AsyncMock(return_value="trace-1")
     return manager
@@ -112,13 +113,15 @@ async def test_first_qa_entry_with_a_node_set_pins_the_session_then_stores(dispa
 
 
 @pytest.mark.asyncio
-async def test_trace_entry_with_the_pinned_set_stores_without_rewriting_the_pin(dispatch):
+async def test_trace_entry_with_the_pinned_set_stores_without_adding_a_pin(dispatch):
     manager = _session_manager(pinned=["project-a"])
 
     result = await dispatch(TraceEntry(origin_function="f", node_set=["project-a"]), manager)
 
     assert result.status == "session_stored"
     manager.create_session_context_entry.assert_not_awaited()
+    # The matching repeat only refreshes the pin row's expiry.
+    manager.update_session_context_entry.assert_awaited_once()
     manager.add_agent_trace_step.assert_awaited_once()
 
 
@@ -358,3 +361,132 @@ async def test_plain_text_refuses_an_invalid_node_set_and_writes_nothing(monkeyp
 
     manager.create_session_context_entry.assert_not_awaited()
     manager.add_qa.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_plain_text_tagging_each_turn_differently_is_refused_on_the_second_turn(
+    monkeypatch,
+):
+    """Deliberate break: before SDK-336 this path accepted and dropped node_set.
+
+    A caller that tagged each message of one session differently stored every
+    turn untagged. The first set now pins the session and a different set on a
+    later turn is a 409, so the second turn is never stored.
+    """
+    gsm = sys.modules["cognee.infrastructure.session.get_session_manager"]
+    setup_module = sys.modules["cognee.modules.engine.operations.setup"]
+    rows: list[dict] = []
+    manager = _session_manager()
+    manager.get_session_context_entries = AsyncMock(side_effect=lambda **kw: list(rows))
+    manager.create_session_context_entry = AsyncMock(
+        side_effect=lambda **kw: rows.append(kw["entry_dump"]) or True
+    )
+    monkeypatch.setattr(gsm, "get_session_manager", lambda: manager)
+    monkeypatch.setattr(setup_module, "setup", AsyncMock())
+    user = SimpleNamespace(id=uuid4())
+    dataset_id = uuid4()
+
+    first = await remember_module.remember(
+        "billing note",
+        dataset_id=dataset_id,
+        session_id="s",
+        node_set=["billing"],
+        user=user,
+        self_improvement=False,
+    )
+    assert first.status == "session_stored"
+
+    with pytest.raises(SessionNodeSetConflictError) as raised:
+        await remember_module.remember(
+            "auth note",
+            dataset_id=dataset_id,
+            session_id="s",
+            node_set=["auth"],
+            user=user,
+            self_improvement=False,
+        )
+
+    assert raised.value.status_code == 409
+    assert manager.add_qa.await_count == 1
+
+
+# ------------------------------------------- the HTTP status tells conflict from outage
+
+
+@pytest.fixture
+def http_client(monkeypatch):
+    """Both remember routes with cognee's global CogneeApiError handler."""
+    import importlib
+
+    from fastapi import FastAPI
+    from fastapi.responses import JSONResponse
+    from fastapi.testclient import TestClient
+
+    from cognee.api.v1.remember.routers.get_remember_router import get_remember_router
+    from cognee.exceptions import CogneeApiError
+    from cognee.modules.users.methods import get_authenticated_user
+
+    app = FastAPI()
+    app.include_router(get_remember_router(), prefix="/remember")
+    user = SimpleNamespace(id=uuid4(), email="u@example.com", is_active=True, tenant_id=uuid4())
+
+    async def override_user():
+        return user
+
+    app.dependency_overrides[get_authenticated_user] = override_user
+
+    # Mirrors the handler registered in cognee/api/client.py.
+    @app.exception_handler(CogneeApiError)
+    async def cognee_error_handler(_, exc: CogneeApiError):
+        return JSONResponse(
+            status_code=exc.status_code, content={"detail": f"{exc.message} [{exc.name}]"}
+        )
+
+    remember_pkg = importlib.import_module("cognee.api.v1.remember")
+
+    def raising(error):
+        monkeypatch.setattr(remember_pkg, "remember", AsyncMock(side_effect=error))
+
+    return TestClient(app), raising
+
+
+def _post_entry(client):
+    return client.post(
+        "/remember/entry",
+        json={
+            "entry": {"type": "qa", "question": "q", "answer": "a", "node_set": ["project-a"]},
+            "session_id": "s",
+        },
+    )
+
+
+def _post_form(client):
+    return client.post(
+        "/remember",
+        data={"datasetName": "docs", "session_id": "s", "node_set": ["project-a"]},
+        files={"data": ("x.txt", b"hello", "text/plain")},
+    )
+
+
+@pytest.mark.parametrize("post", [_post_entry, _post_form], ids=["entry-route", "form-route"])
+def test_a_cache_outage_while_pinning_is_a_503_on_both_routes(http_client, post):
+    from cognee.infrastructure.session.session_node_set import SessionNodeSetUnavailableError
+
+    client, raising = http_client
+    raising(SessionNodeSetUnavailableError("the session cache is unavailable"))
+
+    response = post(client)
+
+    assert response.status_code == 503
+    assert "[SessionNodeSetUnavailableError]" in response.json()["detail"]
+
+
+@pytest.mark.parametrize("post", [_post_entry, _post_form], ids=["entry-route", "form-route"])
+def test_a_node_set_conflict_is_a_named_409_on_both_routes(http_client, post):
+    client, raising = http_client
+    raising(SessionNodeSetConflictError(("project-a",), ["project-b"]))
+
+    response = post(client)
+
+    assert response.status_code == 409
+    assert "[SessionNodeSetConflictError]" in response.json()["detail"]

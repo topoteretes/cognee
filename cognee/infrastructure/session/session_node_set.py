@@ -4,8 +4,10 @@ A typed QA or trace entry may carry ``node_set`` (``cognee/memory/entries.py``),
 the same node-set names ``add()`` takes and ``recall(node_name=...)`` filters
 on; the call-level ``remember(..., session_id=..., node_set=[...])`` is the same
 thing. The first write that carries one pins it on the session; later writes
-must repeat it or omit it, and a different set is rejected with HTTP 409, so
-one session is never split across node sets. The pinned set lives in an
+must repeat it or omit it, and a different set is rejected with
+``SessionNodeSetConflictError`` (HTTP 409), so one session is never split
+across node sets. Identify the conflict by that error name, not the status: the
+remember routes answer other failures with 409 too. The pinned set lives in an
 internal session-context row, like the improve watermarks, and the stages
 that bridge the session into the graph (Q&A, traces, distilled lessons)
 append it to their own node set (``bridge_node_set``), so a
@@ -20,21 +22,30 @@ infrastructure errors; here neither direction may. A pin that cannot be
 written is refused instead of being silently dropped, and every read asks the
 manager to re-raise, so an unreadable session is never mistaken for an
 unpinned one: that would let a conflicting set through at pin time, and let
-the bridging stages add a pinned session's text to the graph untagged.
+the bridging stages add a pinned session's text to the graph untagged. When
+pinning, either failure raises ``SessionNodeSetUnavailableError`` (HTTP 503),
+so a cache outage is never reported as a conflict.
 
-Concurrency: the pin's read-check-write runs under the session turn lock, an
-in-process ``asyncio.Lock``. It makes the one-set-per-session guarantee hold
-within one worker process. Across processes there is no lock today: two
-workers taking the first write of the same session at the same moment can
-each see no pin and each write one, and the cache keeps the last write.
+Lifetime: the pin row expires with the session's other context rows. Writing
+Q&A or traces refreshes only their own rows, so a matching repeat of the pin
+rewrites the pin row to keep its expiry moving with tagged traffic.
+
+Concurrency: the pin's read-check-write runs under an in-process
+``asyncio.Lock`` of its own (``session_lock``), not the session turn lock, so a
+tagged write never waits behind a recall's LLM answer. It makes the
+one-set-per-session guarantee hold within one worker process. Across processes
+there is no lock today: two workers taking the first write of the same session
+at the same moment can each see no pin and each write one. Readers take the
+last pin row, which is the last write on every cache backend (SQL upserts the
+row; Redis and the filesystem cache append).
 """
 
 from collections.abc import Iterable
 
 from fastapi import status
 
-from cognee.exceptions import CogneeApiError
-from cognee.infrastructure.locks.session_lock import session_turn_lock
+from cognee.exceptions import CogneeApiError, CogneeTransientError
+from cognee.infrastructure.locks.session_lock import session_lock
 
 SESSION_NODE_SET_STATE_ID = "session_node_set"
 SESSION_NODE_SET_STATE_KIND = "session_node_set_state"
@@ -53,6 +64,13 @@ class SessionNodeSetConflictError(CogneeApiError):
             status_code=status.HTTP_409_CONFLICT,
             log=False,
         )
+
+
+class SessionNodeSetUnavailableError(CogneeTransientError):
+    """The session cache could not be read or written while pinning ``node_set``."""
+
+    def __init__(self, message: str):
+        super().__init__(message=message, name="SessionNodeSetUnavailableError")
 
 
 def normalize_node_set(value) -> list[str] | None:
@@ -97,15 +115,17 @@ def bridge_node_set(stage_node_sets: Iterable[str], pinned: Iterable[str]) -> li
 
 
 def node_set_from_rows(rows: Iterable | None) -> tuple[str, ...]:
-    """Parse the pinned ``node_set`` out of already-loaded session-context rows."""
-    row = next(
-        (
-            row
-            for row in rows or []
-            if isinstance(row, dict) and row.get("id") == SESSION_NODE_SET_STATE_ID
-        ),
-        None,
-    )
+    """Parse the pinned ``node_set`` out of already-loaded session-context rows.
+
+    Takes the last pin row: Redis and the filesystem cache append instead of
+    replacing, so after a cross-process race the last row is the last write.
+    """
+    pins = [
+        row
+        for row in rows or []
+        if isinstance(row, dict) and row.get("id") == SESSION_NODE_SET_STATE_ID
+    ]
+    row = pins[-1] if pins else None
     return tuple(sorted(row.get("node_set") or [])) if row else ()
 
 
@@ -138,17 +158,38 @@ async def pin_session_node_set(session_manager, user_id: str, session_id: str, n
     ``node_set`` goes through ``normalize_node_set`` first. An empty list pins
     nothing: it means the same as an entry without ``node_set``, so a client
     that sends ``node_set: []`` on its first turn can still pin one later. Runs
-    under the session turn lock so two first entries in this process cannot
-    both pin (see the module docstring for the cross-process gap).
+    under a per-session lock so two first entries in this process cannot both
+    pin (see the module docstring for the cross-process gap).
+
+    Raises ``SessionNodeSetConflictError`` (409) for a different pinned set and
+    ``SessionNodeSetUnavailableError`` (503) when the cache cannot be read or
+    rejects the pin.
     """
     requested = normalize_node_set(node_set)
     if not requested:
         return
-    async with session_turn_lock(user_id, session_id):
-        pinned = await get_session_node_set(session_manager, user_id, session_id)
+    async with session_lock(f"{user_id}:{session_id}", "node_set"):
+        try:
+            pinned = await get_session_node_set(session_manager, user_id, session_id)
+        except CogneeApiError:
+            raise
+        except Exception as error:
+            raise SessionNodeSetUnavailableError(
+                f"Could not read the node_set pinned on session {session_id}: "
+                "the session cache is unavailable"
+            ) from error
         if pinned:
             if list(pinned) != requested:
                 raise SessionNodeSetConflictError(pinned, requested)
+            # Rewrite the pin so its expiry slides with tagged traffic; Q&A and
+            # trace writes refresh only their own rows. Best effort: the pin is
+            # still there, so a failed refresh must not fail the write.
+            await session_manager.update_session_context_entry(
+                user_id=user_id,
+                session_id=session_id,
+                entry_id=SESSION_NODE_SET_STATE_ID,
+                merge={"node_set": requested},
+            )
             return
         written = await session_manager.create_session_context_entry(
             user_id=user_id,
@@ -160,7 +201,7 @@ async def pin_session_node_set(session_manager, user_id: str, session_id: str, n
             },
         )
         if not written:
-            raise RuntimeError(
+            raise SessionNodeSetUnavailableError(
                 f"Could not pin node_set {requested} on session {session_id}: "
                 "the session cache rejected the write"
             )

@@ -1,13 +1,18 @@
 """A session's node_set is pinned once and read back sorted (SDK-336)."""
 
+import asyncio
+
 import pytest
 
+from cognee.infrastructure.locks.session_lock import session_turn_lock
 from cognee.infrastructure.session.session_node_set import (
     SESSION_NODE_SET_STATE_ID,
     SESSION_NODE_SET_STATE_KIND,
     SessionNodeSetConflictError,
+    SessionNodeSetUnavailableError,
     bridge_node_set,
     get_session_node_set,
+    node_set_from_rows,
     normalize_node_set,
     pin_session_node_set,
 )
@@ -25,6 +30,7 @@ class FakeSessionManager:
         self.accept_writes = accept_writes
         self.reads_fail = reads_fail
         self.read_kwargs: list[dict] = []
+        self.updates: list[dict] = []
 
     async def get_session_context_entries(self, *, user_id, session_id=None, raise_on_error=False):
         self.read_kwargs.append({"raise_on_error": raise_on_error})
@@ -38,6 +44,10 @@ class FakeSessionManager:
         if not self.accept_writes:
             return False
         self.rows.append(dict(entry_dump))
+        return True
+
+    async def update_session_context_entry(self, *, user_id, entry_id, merge, session_id=None):
+        self.updates.append({"entry_id": entry_id, "merge": dict(merge)})
         return True
 
 
@@ -58,13 +68,30 @@ async def test_first_entry_with_a_node_set_pins_a_sorted_deduplicated_set():
 
 
 @pytest.mark.asyncio
-async def test_repeating_the_pinned_set_writes_nothing():
+async def test_repeating_the_pinned_set_refreshes_the_pin_row_without_adding_one():
+    """Q&A writes refresh only their own rows, so the repeat keeps the pin's expiry moving."""
     manager = FakeSessionManager()
     await pin_session_node_set(manager, "u", "s", ["project-a"])
 
     await pin_session_node_set(manager, "u", "s", ["project-a"])
 
     assert len(manager.rows) == 1
+    assert manager.updates == [
+        {"entry_id": SESSION_NODE_SET_STATE_ID, "merge": {"node_set": ["project-a"]}}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_refresh_does_not_fail_the_write():
+    manager = FakeSessionManager()
+    await pin_session_node_set(manager, "u", "s", ["project-a"])
+
+    async def refresh_fails(**kwargs):
+        return False
+
+    manager.update_session_context_entry = refresh_fails
+
+    await pin_session_node_set(manager, "u", "s", ["project-a"])
 
 
 @pytest.mark.asyncio
@@ -93,11 +120,13 @@ async def test_an_empty_set_pins_nothing_and_a_later_entry_still_can():
 
 
 @pytest.mark.asyncio
-async def test_a_rejected_write_is_an_error_not_a_silently_unpinned_session():
+async def test_a_rejected_write_is_a_503_not_a_silently_unpinned_session():
     manager = FakeSessionManager(accept_writes=False)
 
-    with pytest.raises(RuntimeError, match="Could not pin node_set"):
+    with pytest.raises(SessionNodeSetUnavailableError, match="Could not pin node_set") as raised:
         await pin_session_node_set(manager, "u", "s", ["project-a"])
+
+    assert raised.value.status_code == 503
 
 
 @pytest.mark.asyncio
@@ -110,9 +139,12 @@ async def test_the_pin_reads_strictly_so_an_unreadable_session_is_not_an_unpinne
     """
     manager = FakeSessionManager(reads_fail=True)
 
-    with pytest.raises(ConnectionError):
+    with pytest.raises(SessionNodeSetUnavailableError) as raised:
         await pin_session_node_set(manager, "u", "s", ["project-b"])
 
+    # A cache outage is a 503, never the 409 a client reads as "pinned elsewhere".
+    assert raised.value.status_code == 503
+    assert isinstance(raised.value.__cause__, ConnectionError)
     assert manager.rows == []
     assert manager.read_kwargs == [{"raise_on_error": True}]
 
@@ -124,6 +156,28 @@ async def test_reading_the_pinned_set_raises_on_a_failed_read():
 
     with pytest.raises(ConnectionError):
         await get_session_node_set(manager, "u", "s")
+
+
+def test_the_last_pin_row_wins_like_the_last_write():
+    """Redis and the filesystem cache append; after a race both rows stay."""
+    rows = [
+        {"id": SESSION_NODE_SET_STATE_ID, "node_set": ["project-a"]},
+        {"id": "other", "node_set": ["ignored"]},
+        {"id": SESSION_NODE_SET_STATE_ID, "node_set": ["project-b"]},
+    ]
+
+    assert node_set_from_rows(rows) == ("project-b",)
+
+
+@pytest.mark.asyncio
+async def test_pinning_does_not_wait_behind_a_session_turn():
+    """A recall holds the turn lock through its LLM answer; the pin must not queue on it."""
+    manager = FakeSessionManager()
+
+    async with session_turn_lock("u", "s"):
+        await asyncio.wait_for(pin_session_node_set(manager, "u", "s", ["project-a"]), 1)
+
+    assert await get_session_node_set(manager, "u", "s") == ("project-a",)
 
 
 # ------------------------------------------------- the one rule every path shares

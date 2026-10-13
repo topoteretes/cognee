@@ -43,6 +43,70 @@ async def test_api_session_mode_puts_node_set_on_the_typed_entry():
     assert seen["body"]["entry"]["node_set"] == ["project-a"]
 
 
+def _openapi(qa_properties: dict) -> dict:
+    return {"components": {"schemas": {"QAEntry": {"properties": qa_properties}}}}
+
+
+@pytest.mark.asyncio
+async def test_api_session_mode_refuses_node_set_against_a_server_without_it():
+    """An older server drops the unknown field and stores the entry untagged."""
+    posted = []
+
+    async def handler(request):
+        if request.url.path == "/openapi.json":
+            return httpx.Response(200, json=_openapi({"question": {}, "answer": {}}))
+        posted.append(request.url.path)
+        return httpx.Response(200, json={"status": "session_stored"})
+
+    client = CogneeClient(api_url="http://localhost:8000", api_token="test-token")
+    await client.client.aclose()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client.client:
+        with pytest.raises(ValueError, match="does not support node_set"):
+            await client.remember("hello", session_id="s", node_set=["project-a"])
+        # Untagged writes still go through against the same server.
+        await client.remember("hello", session_id="s")
+
+    assert posted == ["/api/v1/remember/entry"]
+
+
+@pytest.mark.asyncio
+async def test_api_session_mode_probes_the_server_schema_once():
+    probes = []
+
+    async def handler(request):
+        if request.url.path == "/openapi.json":
+            probes.append(1)
+            return httpx.Response(200, json=_openapi({"node_set": {}}))
+        return httpx.Response(200, json={"status": "session_stored"})
+
+    client = CogneeClient(api_url="http://localhost:8000", api_token="test-token")
+    await client.client.aclose()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client.client:
+        await client.remember("one", session_id="s", node_set=["project-a"])
+        await client.remember("two", session_id="s", node_set=["project-a"])
+
+    assert len(probes) == 1
+
+
+@pytest.mark.asyncio
+async def test_api_session_mode_sends_node_set_when_the_schema_is_not_served():
+    """No schema (docs disabled) is unknown, not unsupported: the write goes through."""
+    seen = {}
+
+    async def handler(request):
+        if request.url.path == "/openapi.json":
+            return httpx.Response(404)
+        seen["body"] = json.loads(await request.aread())
+        return httpx.Response(200, json={"status": "session_stored"})
+
+    client = CogneeClient(api_url="http://localhost:8000", api_token="test-token")
+    await client.client.aclose()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client.client:
+        await client.remember("hello", session_id="s", node_set=["project-a"])
+
+    assert seen["body"]["entry"]["node_set"] == ["project-a"]
+
+
 @pytest.mark.asyncio
 async def test_api_session_mode_omits_the_field_without_a_node_set():
     seen = {}
