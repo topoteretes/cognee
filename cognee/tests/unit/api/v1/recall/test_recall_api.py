@@ -192,9 +192,12 @@ async def test_recall_session_context_scope_threads_profile(monkeypatch, api_rec
     user = _make_user()
     captured = {}
 
-    async def dummy_fetch_session_context(query_text, session_id, context_profile, user=None):
+    async def dummy_fetch_session_context(
+        query_text, session_id, context_profile, user=None, record_context_usage=False
+    ):
         captured["context_profile"] = context_profile
         captured["session_id"] = session_id
+        assert record_context_usage is False
         return [
             ResponseSessionContextEntry(
                 content="block", context_profile=context_profile, source="session_context"
@@ -466,3 +469,26 @@ async def test_cloud_client_recall_payload_includes_context_profile(monkeypatch)
     )
 
     assert fake.last_json.get("context_profile") == "agent"
+
+
+@pytest.mark.asyncio
+async def test_context_usage_is_opt_in_and_summary_is_returned(monkeypatch, api_recall_mod):
+    from unittest.mock import AsyncMock
+
+    from cognee.infrastructure.session import session_context_builder
+    from cognee.modules.session_distillation import summary
+
+    manager = types.SimpleNamespace(is_available=True)
+    gsm_mod = importlib.import_module("cognee.infrastructure.session.get_session_manager")
+    monkeypatch.setattr(gsm_mod, "get_session_manager", lambda: manager)
+    monkeypatch.setattr(
+        api_recall_mod, "_resolve_session_cache_user_id", AsyncMock(return_value="u")
+    )
+    builder = AsyncMock(return_value=("project fact", ["e"]))
+    monkeypatch.setattr(session_context_builder, "build_active_context_block", builder)
+    monkeypatch.setattr(summary, "latest_session_summary", AsyncMock(return_value={"goal": "ship"}))
+    output = await api_recall_mod._fetch_session_context(
+        "q", "s", "agent", user=_make_user(), record_context_usage=True
+    )
+    assert builder.await_args.kwargs["stamp_served"] is True
+    assert output[0].session_summary == {"goal": "ship"}

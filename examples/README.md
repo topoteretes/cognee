@@ -45,6 +45,7 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 |---|---|
 | [`sessions.py`](guides/sessions.py) | Session-scoped memory via `session_id` |
 | [`session_distillation.py`](guides/session_distillation.py) | Distilling a session into durable preferences |
+| [`session_project_memory.py`](guides/session_project_memory.py) | Evidence-backed project guidance, structured summaries and opt-in usage tracking |
 | [`global_context_index.py`](guides/global_context_index.py) | Building the index with `improve(build_global_context_index=True)` and updating it incrementally |
 | [`global_context_index_recall.py`](guides/global_context_index_recall.py) | What `include_global_context_index` adds to `GRAPH_COMPLETION` retrieval |
 | [`importance_weight.py`](guides/importance_weight.py) | Boosting specific memories in retrieval ranking |

@@ -119,7 +119,13 @@ def build_live_agent_candidates(
     if status != "error" or not error_message.strip():
         return []
     content = _failure_lesson_content(origin_function, error_message)
-    return [CandidateFailureLessonUpdate(content=content, confidence=LIVE_FAILURE_CONFIDENCE)]
+    return [
+        CandidateFailureLessonUpdate(
+            content=content,
+            confidence=LIVE_FAILURE_CONFIDENCE,
+            evidence=content,
+        )
+    ]
 
 
 async def extract_live_agent_context(

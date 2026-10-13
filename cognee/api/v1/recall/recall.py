@@ -301,11 +301,12 @@ async def _fetch_session_context(
     session_id: str,
     context_profile: str,
     user: str | None = None,
+    record_context_usage: bool = False,
 ) -> list[ResponseSessionContextEntry]:
     """Render active session-context lessons for one profile as a one-item list.
 
-    Read-only: uses the deterministic builder with ``stamp_served=False`` so it never updates
-    served metadata. Returns an empty list when no lessons match the profile.
+    Read-only by default. ``record_context_usage`` opts into stamping returned guidance;
+    published structured summaries are included without raw transcript fallback.
     """
     from cognee.infrastructure.session.get_session_manager import get_session_manager
     from cognee.infrastructure.session.session_context_builder import build_active_context_block
@@ -327,14 +328,20 @@ async def _fetch_session_context(
         session_id=session_id,
         query=query_text,
         context_profile=context_profile,
-        stamp_served=False,
+        stamp_served=record_context_usage,
     )
-    if not block:
+    from cognee.modules.session_distillation.summary import latest_session_summary
+
+    summary = await latest_session_summary(sm, cache_user_id, session_id)
+    if not block and not summary:
         return []
 
     return [
         ResponseSessionContextEntry(
-            content=block, context_profile=context_profile, source="session_context"
+            content=block,
+            context_profile=context_profile,
+            source="session_context",
+            session_summary=summary,
         )
     ]
 
@@ -365,6 +372,7 @@ async def recall(
     only_context: bool = False,
     session_id: str | None = None,
     context_profile: str = "qa",
+    record_context_usage: bool = False,
     wide_search_top_k: int | None = None,
     triplet_distance_penalty: float | None = None,
     feedback_influence: float = get_base_config().default_feedback_influence,
@@ -562,6 +570,7 @@ async def recall(
                 only_context=only_context,
                 session_id=session_id,
                 context_profile=context_profile,
+                record_context_usage=record_context_usage,
                 verbose=verbose,
                 include_references=include_references,
                 response_schema=(
@@ -613,6 +622,7 @@ async def recall(
                         session_id=session_id,
                         context_profile=context_profile,
                         user=user,
+                        record_context_usage=record_context_usage,
                     )
                 )
 

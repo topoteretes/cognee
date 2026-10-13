@@ -244,8 +244,10 @@ class DistillSessionsStage(BaseStage):
 
     async def run(self, inputs: ImproveRunInputs) -> StageResult:
         from cognee.modules.session_distillation import distill_session
+        from cognee.modules.session_distillation.summary import publish_session_summary
 
         distilled = 0
+        summaries = 0
         completed = 0
         failed = 0
         last_error: BaseException | None = None
@@ -255,6 +257,11 @@ class DistillSessionsStage(BaseStage):
                     session_id, dataset=inputs.dataset_id, user=inputs.user
                 )
                 distilled += len(result.documents)
+                summaries += int(
+                    await publish_session_summary(
+                        session_id, dataset=inputs.dataset_id, user=inputs.user
+                    )
+                )
                 if result.status == "completed":
                     completed += 1
                 logger.info(
@@ -274,6 +281,7 @@ class DistillSessionsStage(BaseStage):
                 )
         counts = {
             "documents": distilled,
+            "summaries": summaries,
             "sessions_completed": completed,
             "sessions_failed": failed,
         }

@@ -145,6 +145,10 @@ class RecallPayloadDTO(InDTO):
             "failing the recall."
         ),
     )
+    record_context_usage: bool = Field(
+        default=False,
+        description="Opt in to stamping returned guidance as used; default recall is read-only.",
+    )
     context_profile: str = Field(
         default="qa",
         description=(
@@ -310,6 +314,7 @@ def get_recall_router() -> APIRouter:
                 session_id=payload.session_id,
                 scope=payload.scope,
                 context_profile=payload.context_profile,
+                record_context_usage=payload.record_context_usage,
                 include_references=payload.include_references,
                 response_model=response_model,
                 tool_connections=payload.tool_connections,
