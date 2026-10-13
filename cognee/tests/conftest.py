@@ -23,9 +23,21 @@ def pytest_sessionfinish(session, exitstatus):
     """
     import multiprocessing
 
+    reaped = []
     for child in multiprocessing.active_children():
         try:
             child.terminate()
             child.join(timeout=5)
+            reaped.append(child.pid)
         except Exception:
             logger.debug("Ignoring exception in pytest_sessionfinish", exc_info=True)
+    if reaped:
+        # Say so: a worker alive here outlived every test that could have
+        # closed it. The per-test guard in unit/infrastructure/databases/
+        # names the test; this is the last line of defence for the rest.
+        reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+        if reporter is not None:
+            reporter.write_line(
+                f"Reaped {len(reaped)} leftover subprocess worker(s) at session end: {reaped}",
+                yellow=True,
+            )
