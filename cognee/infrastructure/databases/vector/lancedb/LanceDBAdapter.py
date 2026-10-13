@@ -1500,11 +1500,11 @@ class LanceDBAdapter(VectorDBInterface):
                 otel_span.set_attribute(COGNEE_VECTOR_RESULT_COUNT, 0)
                 return []
 
-            # Note: Exclude payload if not needed to optimize performance
+            # Never select the vector column: results carry only id, payload and
+            # distance. A limit=None search reads the whole collection, and fetching
+            # vectors there materializes every stored embedding (see PGVectorAdapter).
             select_columns = (
-                ["id", "vector", "payload", "_distance"]
-                if include_payload
-                else ["id", "vector", "_distance"]
+                ["id", "payload", "_distance"] if include_payload else ["id", "_distance"]
             )
 
             if node_name:
