@@ -669,11 +669,14 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         # NOTE: This needs to be initialized in case search doesn't return a value
         closest_items = []
 
-        # Note: Exclude payload from returned columns if not needed to optimize performance
+        # Never select the vector column: results carry only id, payload and distance,
+        # and the distance is computed in the database. Fetching vectors made a
+        # limit=None search (node-set filtered retrieval reads whole collections)
+        # decode every stored embedding in Python - several GB for ~25k 3072-dim rows.
         select_columns = (
-            [PGVectorDataPoint]
+            [PGVectorDataPoint.c.id, PGVectorDataPoint.c.payload]
             if include_payload
-            else [PGVectorDataPoint.c.id, PGVectorDataPoint.c.vector]
+            else [PGVectorDataPoint.c.id]
         )
         # Use async session to connect to the database
         async with self.get_async_session() as session:
