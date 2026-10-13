@@ -20,7 +20,6 @@ import os
 import re
 import sys
 import tempfile
-import time
 from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
@@ -33,26 +32,6 @@ def _safe_close(obj) -> None:
         obj.close()
     except Exception:
         logger.debug("Ignoring exception in _safe_close", exc_info=True)
-
-
-def quarantine_wal(db_path: str) -> None:
-    """Move ``<db_path>.wal`` aside so the database can reopen without it.
-
-    The WAL holds committed transactions that are not yet checkpointed, so it
-    is kept for manual recovery instead of deleted.
-    """
-    wal_path = db_path + ".wal"
-    quarantine_path = f"{wal_path}.corrupt-{time.time_ns()}"
-    try:
-        os.replace(wal_path, quarantine_path)
-    except FileNotFoundError:
-        return
-    logger.warning(
-        "Could not replay WAL %s; moved it to %s and reopened without it. "
-        "Transactions committed after the last checkpoint are not in the database.",
-        wal_path,
-        quarantine_path,
-    )
 
 
 # --- Bundled JSON extension -------------------------------------------------
