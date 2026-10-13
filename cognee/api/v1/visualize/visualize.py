@@ -517,13 +517,14 @@ async def build_brains_summary_payload(user: User | None = None) -> dict:
 
 
 def _as_naive_utc(value: datetime) -> datetime:
-    """Normalize to match the write side.
+    """Normalize to naive UTC so the cutoff and event times share one scale.
 
-    ``SessionQAEntry.time`` is always ``datetime.utcnow().isoformat()`` —
-    naive, UTC. A ``since`` sent with a timezone offset compares fine against
-    another aware datetime, but not against those naive strings once parsed
-    back, so it is converted here rather than left to fail the comparison
-    below with a raised ``TypeError`` at an unexpected place.
+    The cache adapters stamp ``SessionQAEntry.time`` with
+    ``datetime.now(timezone.utc).isoformat()`` — aware, UTC — while entries
+    written before that change hold naive ``utcnow()`` strings, and a client
+    may send ``since`` either way. Python refuses to order a naive datetime
+    against an aware one, so both sides of the comparison in
+    ``get_live_events`` go through here.
     """
     if value.tzinfo is not None:
         return value.astimezone(timezone.utc).replace(tzinfo=None)
@@ -535,7 +536,7 @@ def _event_time(event: dict[str, Any]) -> datetime | None:
     if not raw:
         return None
     try:
-        return datetime.fromisoformat(raw)
+        return _as_naive_utc(datetime.fromisoformat(raw))
     except ValueError:
         return None
 
