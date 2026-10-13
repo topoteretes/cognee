@@ -190,13 +190,18 @@ def _encode_provenance_row(row: dict) -> dict:
 
 
 def _parse_properties_blob(raw: Any) -> dict[str, Any]:
-    """Decode a node/edge JSON ``properties`` blob, tolerating empty/invalid input."""
+    """Decode a node/edge JSON ``properties`` blob, tolerating empty/invalid input.
+
+    Anything that does not decode to a JSON object (``None``, ``""``, malformed
+    JSON, or a non-object value such as ``"null"`` or a list) yields ``{}``.
+    """
     if not raw:
         return {}
     try:
-        return json.loads(raw)
+        parsed = json.loads(raw)
     except json.JSONDecodeError:
         return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 cache_config = get_cache_config()
@@ -464,7 +469,7 @@ class LadybugAdapter(GraphDBInterface):
         # without importing cognee. Pass the instance's configured limits
         # so callers that tune ``kuzu_buffer_pool_size`` / ``kuzu_max_db_size``
         # via env or config aren't silently ignored during the install step.
-        from cognee_db_workers._kuzu_helpers import install_json_extension_local
+        from cognee_db_workers._kuzu_helpers import install_json_extension_local, quarantine_wal
 
         install_json_extension_local(
             buffer_pool_size=self.kuzu_buffer_pool_size,
@@ -508,16 +513,7 @@ class LadybugAdapter(GraphDBInterface):
                     )
                 except RuntimeError as e:
                     if "wal" in str(e).lower():
-                        wal_path = self.db_path + ".wal"
-                        logger.warning(
-                            "Corrupted WAL detected at %s — removing to recover. "
-                            "Uncommitted transactions from the previous session will be lost.",
-                            wal_path,
-                        )
-                        try:
-                            os.remove(wal_path)
-                        except FileNotFoundError:
-                            pass
+                        quarantine_wal(self.db_path)
                     else:
                         import ladybug
 
@@ -3754,7 +3750,9 @@ class LadybugAdapter(GraphDBInterface):
             return [{"events": events}]
 
         for node in result[0][0]:
-            props = json.loads(node["properties"])
+            # ``properties`` is a raw JSON string that can be None, empty or
+            # malformed; one bad Event node must not abort the TEMPORAL search.
+            props = _parse_properties_blob(node.get("properties"))
 
             event = {
                 "id": node["id"],
@@ -3904,7 +3902,7 @@ class LadybugAdapter(GraphDBInterface):
         chunk_list = sorted({str(node_id) for node_id in chunk_ids})
         entity_list = sorted({str(node_id) for node_id in entity_ids})
         if not chunk_list and not entity_list:
-            return temporal_anchors_from_rows([], [])
+            return temporal_anchors_from_rows([], [], [])
         conditions = ["time_at IS NOT NULL"]
         params: dict[str, Any] = {}
         if end is not None:
@@ -3930,7 +3928,7 @@ class LadybugAdapter(GraphDBInterface):
             MATCH (c:Node)-[r:EDGE]->(t:Node)
             WHERE c.id IN $candidate_ids AND t.type = 'Timestamp'
             {window.format(carry="c")}
-            RETURN DISTINCT c.id, c.type, t.id
+            RETURN DISTINCT c.id, t.id
             """,
             {**params, "candidate_ids": chunk_list + entity_list},
         )
@@ -3947,8 +3945,9 @@ class LadybugAdapter(GraphDBInterface):
                 {**params, "chunk_ids": chunk_list},
             )
         return temporal_anchors_from_rows(
-            [(row[0], row[1], row[2]) for row in direct_rows],
+            [(row[0], row[1]) for row in direct_rows],
             [(row[0], row[1], row[2]) for row in via_rows],
+            chunk_list,
         )
 
     async def get_triplets_batch(self, offset: int, limit: int) -> list[dict[str, Any]]:

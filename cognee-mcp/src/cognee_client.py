@@ -206,14 +206,27 @@ class CogneeClient:
     ) -> dict[str, tuple[str, Any, str]]:
         """Pick the multipart upload for an API-mode ingestion payload.
 
-        Base64 uploads and real filesystem paths keep their original
+        Base64 uploads and readable local files keep their original
         basename; anything else is uploaded as content-addressed
         text so repeated writes don't collide.
         """
         if content_base64:
             return CogneeClient._file_upload(filename, content_base64)
         if isinstance(data, (str, Path)) and os.path.isfile(data):
-            return CogneeClient._path_upload(data)
+            # The file is read here, on the MCP host, so it has to pass the same
+            # guards direct-mode ingestion applies to this string: a path outside
+            # COGNEE_ALLOWED_LOCAL_FILE_ROOTS is stored as text, and with
+            # ACCEPT_LOCAL_FILE_PATH=false a local file is refused outright.
+            from cognee.modules.ingestion.exceptions import IngestionError
+            from cognee.tasks.ingestion.save_data_item_to_storage import (
+                _resolve_local_file_uri,
+                settings,
+            )
+
+            if _resolve_local_file_uri(data) is not None:
+                if not settings.accept_local_file_path:
+                    raise IngestionError(message="Local files are not accepted.")
+                return CogneeClient._path_upload(data)
         return CogneeClient._text_upload(data)
 
     async def add(

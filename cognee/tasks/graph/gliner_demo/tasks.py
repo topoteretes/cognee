@@ -15,7 +15,6 @@ enterprise GLiNER extraction — see the package docstring.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Collection
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -34,10 +33,8 @@ from cognee.modules.pipelines.tasks.task import Task, task_summary
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.documents import classify_documents, extract_chunks_from_documents
-from cognee.tasks.graph import detect_contradictions
 from cognee.tasks.graph.exceptions import InvalidDataChunksError
 from cognee.tasks.graph.extract_graph_from_data import extract_graph_from_data
-from cognee.tasks.graph.resolve_temporal_contradictions import resolve_temporal_contradictions
 from cognee.tasks.provenance import record_provenance
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization.models import TextSummary
@@ -300,8 +297,6 @@ async def get_gliner_demo_tasks(
     chunk_attachment: Literal["direct", "all"] | None = None,
     embed_triplets: bool = False,
     track_provenance: bool = False,
-    check_contradictions: bool = False,
-    functional_relationships: Collection[str] | None = None,
     stats: GlinerRunStats | None = None,
 ) -> list[Task]:
     """Build the GLiNER cognify task list.
@@ -314,8 +309,8 @@ async def get_gliner_demo_tasks(
     document sketch. ``stats`` is filled in as the run progresses.
 
     Embeddings in ``add_data_points`` still run; graph extraction and summaries
-    are LLM-free. Optional contradiction detection still uses the LLM. Raises
-    :class:`GlinerNotInstalledError` when ``gliner2`` is not installed.
+    are LLM-free. Raises :class:`GlinerNotInstalledError` when ``gliner2`` is
+    not installed.
     """
     if chunks_per_batch is None:
         configured = get_cognify_config().chunks_per_batch
@@ -373,19 +368,6 @@ async def get_gliner_demo_tasks(
     if track_provenance:
         tasks.append(
             Task(record_provenance, task_config={"batch_size": chunks_per_batch}, needs_llm=False)
-        )
-
-    if check_contradictions:
-        tasks.append(Task(detect_contradictions, task_config={"batch_size": chunks_per_batch}))
-
-    if functional_relationships:
-        tasks.append(
-            Task(
-                resolve_temporal_contradictions,
-                functional_relationships=functional_relationships,
-                task_config={"batch_size": chunks_per_batch},
-                needs_llm=False,
-            )
         )
 
     return tasks

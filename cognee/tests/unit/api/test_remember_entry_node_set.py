@@ -58,7 +58,6 @@ def dispatch(monkeypatch):
     # The dispatcher imports these lazily by module path; the packages re-export
     # each function under its module's name, so patch the module objects.
     import cognee.infrastructure.session.get_session_manager
-    import cognee.modules.data.methods.get_authorized_dataset
     import cognee.modules.engine.operations.setup
     import cognee.modules.session_lifecycle.metrics
 
@@ -66,19 +65,25 @@ def dispatch(monkeypatch):
         name: sys.modules[name]
         for name in (
             "cognee.infrastructure.session.get_session_manager",
-            "cognee.modules.data.methods.get_authorized_dataset",
             "cognee.modules.engine.operations.setup",
             "cognee.modules.session_lifecycle.metrics",
         )
     }
+    user = SimpleNamespace(id=uuid4())
+    dataset = SimpleNamespace(id=uuid4(), name="d")
     monkeypatch.setattr(modules["cognee.modules.engine.operations.setup"], "setup", AsyncMock())
     monkeypatch.setattr(
-        modules["cognee.modules.data.methods.get_authorized_dataset"],
-        "get_authorized_dataset",
-        AsyncMock(return_value=None),
+        remember_module,
+        "resolve_authorized_user_datasets",
+        AsyncMock(return_value=(user, [dataset])),
     )
     monkeypatch.setattr(
         modules["cognee.modules.session_lifecycle.metrics"], "ensure_and_touch_session", AsyncMock()
+    )
+    monkeypatch.setattr(
+        modules["cognee.modules.session_lifecycle.metrics"],
+        "get_session_row",
+        AsyncMock(return_value=SimpleNamespace(dataset_id=dataset.id)),
     )
 
     async def run(entry, manager):
@@ -88,7 +93,7 @@ def dispatch(monkeypatch):
             lambda: manager,
         )
         return await remember_module._dispatch_session_entry(
-            entry, dataset_name="d", session_id="s", user=SimpleNamespace(id=uuid4())
+            entry, dataset_name="d", session_id="s", user=user
         )
 
     return run

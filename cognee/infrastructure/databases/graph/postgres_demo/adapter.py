@@ -511,7 +511,7 @@ class PostgresDemoAdapter(GraphDBInterface):
         chunk_list = sorted({str(node_id) for node_id in chunk_ids})
         entity_list = sorted({str(node_id) for node_id in entity_ids})
         if not chunk_list and not entity_list:
-            return temporal_anchors_from_rows([], [])
+            return temporal_anchors_from_rows([], [], [])
         conditions = ["t.type = 'Timestamp'"]
         params: dict[str, Any] = {}
         if end is not None:
@@ -526,17 +526,15 @@ class PostgresDemoAdapter(GraphDBInterface):
         async with self.sessionmaker() as session:
             direct = await session.execute(
                 text(
-                    "SELECT DISTINCT c.id AS candidate_id, c.type AS candidate_type, t.id AS timestamp_id "
+                    "SELECT DISTINCT e.source_id AS candidate_id, t.id AS timestamp_id "
                     "FROM graph_edge e "
-                    "JOIN graph_node c ON c.id = e.source_id "
                     "JOIN graph_node t ON t.id = e.target_id "
                     f"WHERE e.source_id = ANY(:candidate_ids) AND {where}"
                 ),
                 {**params, "candidate_ids": chunk_list + entity_list},
             )
             direct_rows = [
-                (row["candidate_id"], row["candidate_type"], row["timestamp_id"])
-                for row in direct.mappings().all()
+                (row["candidate_id"], row["timestamp_id"]) for row in direct.mappings().all()
             ]
             via_rows = []
             if chunk_list:
@@ -556,7 +554,7 @@ class PostgresDemoAdapter(GraphDBInterface):
                     (row["chunk_id"], row["entity_id"], row["timestamp_id"])
                     for row in via.mappings().all()
                 ]
-        return temporal_anchors_from_rows(direct_rows, via_rows)
+        return temporal_anchors_from_rows(direct_rows, via_rows, chunk_list)
 
     async def add_edge(
         self,

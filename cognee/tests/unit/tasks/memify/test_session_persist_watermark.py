@@ -285,8 +285,9 @@ async def test_multi_run_completeness_without_reingestion(user, manager, monkeyp
     user_id = str(user.id)
     ingested_texts: list[str] = []
 
-    async def fake_add(text, *args, **kwargs):
-        ingested_texts.append(text)
+    async def fake_add(content, *args, **kwargs):
+        # A window with a known last entry time is added as a dated DataItem.
+        ingested_texts.append(getattr(content, "data", content))
 
     async def fake_cognify(*args, **kwargs):
         return None

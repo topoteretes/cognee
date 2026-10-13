@@ -2579,7 +2579,7 @@ class Neo4jAdapter(GraphDBInterface):
         chunk_list = sorted({str(node_id) for node_id in chunk_ids})
         entity_list = sorted({str(node_id) for node_id in entity_ids})
         if not chunk_list and not entity_list:
-            return temporal_anchors_from_rows([], [])
+            return temporal_anchors_from_rows([], [], [])
         conditions = ["t.type = 'Timestamp'"]
         params: dict[str, Any] = {}
         if end is not None:
@@ -2593,7 +2593,7 @@ class Neo4jAdapter(GraphDBInterface):
             f"""
             MATCH (c:`{BASE_LABEL}`)-[]->(t:`{BASE_LABEL}`)
             WHERE c.id IN $candidate_ids AND {where}
-            RETURN DISTINCT c.id AS candidate_id, c.type AS candidate_type, t.id AS timestamp_id
+            RETURN DISTINCT c.id AS candidate_id, t.id AS timestamp_id
             """,
             {**params, "candidate_ids": chunk_list + entity_list},
         )
@@ -2608,11 +2608,9 @@ class Neo4jAdapter(GraphDBInterface):
                 {**params, "chunk_ids": chunk_list},
             )
         return temporal_anchors_from_rows(
-            [
-                (row["candidate_id"], row["candidate_type"], row["timestamp_id"])
-                for row in direct_rows
-            ],
+            [(row["candidate_id"], row["timestamp_id"]) for row in direct_rows],
             [(row["chunk_id"], row["entity_id"], row["timestamp_id"]) for row in via_rows],
+            chunk_list,
         )
 
     async def get_triplets_batch(self, offset: int, limit: int) -> list[dict[str, Any]]:

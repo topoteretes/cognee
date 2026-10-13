@@ -66,7 +66,7 @@ def get_update_router() -> APIRouter:
         node_set: list[str] | None = Form(
             default=[""],
             examples=[["user_memories"]],
-            description="Node identifiers for graph organization and access control.",
+            description="Node identifiers used to organize and filter data points in the graph.",
         ),
         chunk_level_diff: bool = Query(
             default=True,
@@ -89,8 +89,8 @@ def get_update_router() -> APIRouter:
         - **data_id** (UUID, required, query): UUID of the existing document to update (returned by GET /api/v1/datasets/{dataset_id}/data)
         - **dataset_id** (UUID, required, query): UUID of the dataset containing the document to update
         - **data** (List[UploadFile]): New version of the document that replaces the existing one.
-        - **node_set** (Optional[List[str]]): List of node identifiers for graph organization and access control.
-                 Used for grouping related data points in the knowledge graph.
+        - **node_set** (Optional[List[str]]): List of node identifiers used to organize and filter
+          data points in the knowledge graph. Not an access-control mechanism.
         - **chunk_level_diff** (bool, query, default true): Replace only the chunks affected
                  by the edit instead of re-ingesting the whole document.
 

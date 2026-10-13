@@ -212,6 +212,7 @@ class SessionPersistWindow:
     # The session's pinned node set (``session_node_set``); appended to the
     # node set the window is added under.
     node_set: tuple[str, ...] = ()
+    last_entry_time: str | None = None
 
 
 async def get_persisted_qa_count(session_manager, user_id: str, session_id: str) -> int:

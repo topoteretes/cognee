@@ -43,6 +43,7 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 ### Sessions & self-improvement
 | Script | Demonstrates |
 |---|---|
+| [`review_conflicts.py`](guides/review_conflicts.py) | Review dated source facts, print stored conflicts and fact status marks |
 | [`sessions.py`](guides/sessions.py) | Session-scoped memory via `session_id` |
 | [`session_node_sets.py`](guides/session_node_sets.py) | Per-project session memory: pin a `node_set` on a session, bridge it with `improve()`, recall with `node_name` |
 | [`session_distillation.py`](guides/session_distillation.py) | Distilling a session into durable preferences |
@@ -58,7 +59,6 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 | [`references_example.py`](guides/references_example.py) | `include_references` — answers with evidence |
 | [`nodeset_grouping_example.py`](guides/nodeset_grouping_example.py) | `node_set` grouping for filtered retrieval |
 | [`hybrid_retrieval_recall.py`](guides/hybrid_retrieval_recall.py) | `HYBRID_COMPLETION` — passage-focused vs graph-focused context for the same question |
-| [`fact_validity.py`](guides/fact_validity.py) | Fact validity windows: closing a fact with `close_node`, checking it with `is_valid` |
 
 ### Graph modeling & extraction
 | Script | Demonstrates |
@@ -71,7 +71,7 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 | [`custom_tasks_and_pipelines.py`](guides/custom_tasks_and_pipelines.py) | Authoring tasks and composing a pipeline |
 | [`ontology_quickstart.py`](guides/ontology_quickstart.py) | Grounding extraction in an OWL ontology |
 | [`entity_deduplication.py`](guides/entity_deduplication.py) | Merging duplicate entities (dry-run, then real) |
-| [`consolidate_entity_descriptions_example.py`](guides/consolidate_entity_descriptions_example.py) | LLM rewrite of Entity descriptions and EntityType summaries from graph neighborhood |
+| [`consolidate_entity_descriptions_example.py`](guides/consolidate_entity_descriptions_example.py) | Deprecated: use `review_conflicts.py` for Entity descriptions |
 | [`low_level_llm.py`](guides/low_level_llm.py) | Direct LLM-gateway structured output |
 
 ### Ingestion
@@ -99,6 +99,7 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 |---|---|
 | [`neptune_analytics_example.py`](guides/neptune_analytics_example.py) | AWS account + provisioned Neptune Analytics graph |
 | [`local_ollama_example.py`](guides/local_ollama_example.py) | `ollama serve` + two pulled models — fully local |
+| [`turso_local_example.py`](guides/turso_local_example.py) | Relational, graph, vector and session cache all on the Turso rewrite engine (`cognee[turso]`); `ingest` / `verify` / `cleanup` phases show persistence across a restart |
 | [`s3_storage.py`](guides/s3_storage.py) | Your S3 bucket + AWS credentials |
 
 ## 🎓 `advanced_guides/` — the same topic, deeper
@@ -162,9 +163,13 @@ Every demo lives in a topic folder.
 ### [`feedback/`](demos/feedback/) — feedback signals and what they do to the graph/ranking
 | Script | Demonstrates |
 |---|---|
-| [`contradiction_feedback_demo.py`](demos/feedback/contradiction_feedback_demo.py) | Contradiction detection + feedback, visualized step by step |
 | [`feedback_score_shifting_example.py`](demos/feedback/feedback_score_shifting_example.py) | Feedback nudging retrieval scores, with a beta sweep |
 | [`skill_feedback_loop/`](demos/feedback/skill_feedback_loop/) | Skills scored, improved, and re-applied in a loop |
+
+### [`conflicts/`](demos/conflicts/) — dated fact review and recall
+| Script | Demonstrates |
+|---|---|
+| [`review_conflicts_demo.py`](demos/conflicts/review_conflicts_demo.py) | Recall before and after conflict review, then restore an earlier value with newer evidence and inspect the stored marks |
 
 ### [`ingestion_and_migration/`](demos/ingestion_and_migration/) — getting external data in
 | Script | Demonstrates |
@@ -241,7 +246,7 @@ while staying on that one topic. May be long and may read bundled files, but the
 name the basic guide it builds on and state what it adds.
 
 **`demos/`** — multiple cognee features stitched together, or a realistic scenario/use case.
-Lives in a topic subfolder (`agentic/`, `sessions/`, `feedback/`, `ingestion_and_migration/`,
+Lives in a topic subfolder (`agentic/`, `sessions/`, `feedback/`, `conflicts/`, `ingestion_and_migration/`,
 `custom_pipelines/`, `permissions/`) — never loose at the `demos/` root. Scenario folders keep
 their own `data/`. If your demo really demonstrates one feature and its length is padding,
 it's a guide that grew — trim it.
