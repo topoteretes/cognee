@@ -101,8 +101,11 @@ def _material(ref, nodes, documents):
 
 def _item(ref, material, include_text):
     title, body, source = material
+    # Data.updated_at can move when access/importance bookkeeping changes.
+    # Only content/identity metadata participates in the citation's version.
+    version_source = {k: v for k, v in source.items() if k not in {"updated_at", "created_at"}}
     version = hashlib.sha256(
-        json.dumps([title, body, source], sort_keys=True, ensure_ascii=False).encode()
+        json.dumps([title, body, version_source], sort_keys=True, ensure_ascii=False).encode()
     ).hexdigest()
     current = ref.model_copy(update={"version": version})
     changed = bool(ref.version and ref.version != version)

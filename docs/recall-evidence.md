@@ -36,7 +36,7 @@ Raw downloads serve the current document, not an immutable historical copy.
 Edge citations carry URL-encoded endpoint/relationship parameters. Clients may
 parse the URI into a locator or pass the index's reference object directly.
 The SHA-256 version covers the full projected artifact text, title and source
-metadata, before excerpt limits. It is not a Git revision or historical snapshot.
+content/identity metadata, before excerpt limits. Access timestamps are excluded. It is not a Git revision or historical snapshot.
 
 - `available`: the requested version still matches (or no version was supplied).
   Detail text is capped at 12,000 characters and reports truncation.

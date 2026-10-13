@@ -307,3 +307,13 @@ def test_vector_and_lexical_retrieval_expose_actual_chunk_identities():
         assert len(refs) == 1
         assert refs[0].artifact_id == str(chunk) and refs[0].data_id == str(document)
         assert refs[0].dataset_id == str(dataset)
+
+
+@pytest.mark.asyncio
+async def test_access_timestamps_do_not_invalidate_a_citation(store):
+    old = (await service.expand_evidence([store.ref], store.user))[0]
+    source = store.docs.return_value[next(iter(store.docs.return_value))]
+    source["updated_at"] = "2026-10-13T12:00:00Z"
+    source["created_at"] = "2026-10-01T12:00:00Z"
+    current = (await service.expand_evidence([old.reference], store.user))[0]
+    assert current.status == "available" and current.current_version == old.current_version
