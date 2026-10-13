@@ -299,28 +299,31 @@ def get_recall_router() -> APIRouter:
 
         # One call, two transports: the streaming path must not build its own
         # argument list, or the two drift the moment a parameter is added.
-        def _run_recall():
-            return cognee_recall(
-                query_text=payload.query,
-                query_type=payload.search_type,
-                user=user,
-                datasets=payload.datasets,
-                dataset_ids=payload.dataset_ids,
-                system_prompt=payload.system_prompt,
-                node_name=payload.node_name,
-                top_k=payload.top_k,
-                verbose=payload.verbose,
-                only_context=payload.only_context,
-                session_id=payload.session_id,
-                scope=payload.scope,
-                context_profile=payload.context_profile,
-                record_context_usage=payload.record_context_usage,
-                include_references=payload.include_references,
-                response_model=response_model,
-                tool_connections=payload.tool_connections,
-                tools_trigger=payload.tools_trigger,
-                code_query=payload.code_query,
-            )
+        async def _run_recall():
+            from cognee.modules.session_lifecycle.usage_tracking import track_session_usage
+
+            async with track_session_usage(payload.session_id, user.id):
+                return await cognee_recall(
+                    query_text=payload.query,
+                    query_type=payload.search_type,
+                    user=user,
+                    datasets=payload.datasets,
+                    dataset_ids=payload.dataset_ids,
+                    system_prompt=payload.system_prompt,
+                    node_name=payload.node_name,
+                    top_k=payload.top_k,
+                    verbose=payload.verbose,
+                    only_context=payload.only_context,
+                    session_id=payload.session_id,
+                    scope=payload.scope,
+                    context_profile=payload.context_profile,
+                    record_context_usage=payload.record_context_usage,
+                    include_references=payload.include_references,
+                    response_model=response_model,
+                    tool_connections=payload.tool_connections,
+                    tools_trigger=payload.tools_trigger,
+                    code_query=payload.code_query,
+                )
 
         streaming = wants_event_stream(request.headers.get("accept"), payload.stream)
 

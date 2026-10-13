@@ -145,6 +145,7 @@ async def record_llm_call(
     model: str | None = None,
     tokens_in_override: int | None = None,
     tokens_out_override: int | None = None,
+    cost_usd_override: float | None = None,
 ) -> None:
     """If there's an active session, accumulate this call's usage into it.
 
@@ -171,7 +172,11 @@ async def record_llm_call(
         return
     session_id, user_id = target
 
-    cost = _estimate_cost_usd(model, tokens_in, tokens_out)
+    cost = (
+        cost_usd_override
+        if cost_usd_override is not None
+        else _estimate_cost_usd(model, tokens_in, tokens_out)
+    )
 
     try:
         from cognee.modules.session_lifecycle.metrics import accumulate_usage
@@ -186,3 +191,36 @@ async def record_llm_call(
         )
     except Exception as exc:
         logger.debug("record_llm_call: accumulate failed (%s)", exc, exc_info=True)
+
+
+async def record_embedding_call(response, *, model: str, input_text: str) -> None:
+    """Include embedding usage in session/operation totals, without billing it twice.
+
+    Provider token counts are preferred. Price comes from LiteLLM's model price
+    metadata; this is an estimate, and an unknown model retains the existing
+    unpriced-cost fallback. No instrumentation failure may retry a paid request.
+    """
+    try:
+        usage = getattr(response, "usage", None)
+        tokens = (
+            usage.get("prompt_tokens")
+            if isinstance(usage, dict)
+            else getattr(usage, "prompt_tokens", None)
+        )
+        cost = None
+        try:
+            import litellm
+
+            cost = litellm.completion_cost(completion_response=response, model=model)
+        except Exception:
+            logger.debug("Embedding price unavailable", exc_info=True)
+        await record_llm_call(
+            input_text=input_text,
+            output_text="",
+            model=model,
+            tokens_in_override=tokens,
+            tokens_out_override=0,
+            cost_usd_override=cost,
+        )
+    except Exception:
+        logger.debug("Embedding usage unavailable", exc_info=True)
