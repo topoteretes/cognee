@@ -22,10 +22,16 @@ class StoredFile:
     type or name. It is ``None`` only for items cognee did not write — an
     ``s3://`` URL or a local path handed straight through — where the bytes
     were never in this process to begin with.
+
+    ``is_internal_storage`` indicates whether the file was written to cognee's
+    managed data storage (True) or is a caller-supplied local/remote path (False).
+    This provenance allows loaders to distinguish cognee's internal storage
+    from external paths when ``settings.accept_local_file_path`` is disabled.
     """
 
     file_path: str
     metadata: FileMetadata | None = None
+    is_internal_storage: bool = False
 
 
 def _storage_key(file_name: str, content_hash: str | None, is_text: bool) -> str:
@@ -100,7 +106,11 @@ async def save_data_to_file_detailed(
     file_metadata["file_path"] = full_file_path
     file_metadata["name"] = _derive_basename(file_name)
 
-    return StoredFile(file_path=full_file_path, metadata=file_metadata)
+    return StoredFile(
+        file_path=full_file_path,
+        metadata=file_metadata,
+        is_internal_storage=True,
+    )
 
 
 async def save_data_to_file(

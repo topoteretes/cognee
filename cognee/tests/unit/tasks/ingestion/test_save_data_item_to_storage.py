@@ -8,7 +8,11 @@ import pytest
 
 from cognee.modules.ingestion import StoredFile
 from cognee.modules.ingestion.exceptions import IngestionError
-from cognee.tasks.ingestion.save_data_item_to_storage import save_data_item_to_storage
+from io import BytesIO
+from cognee.tasks.ingestion.save_data_item_to_storage import (
+    save_data_item_to_storage,
+    save_data_item_to_storage_detailed,
+)
 
 # The package __init__ rebinds the name ``save_data_item_to_storage`` to the
 # function, so ``import ... as mod`` would yield the function, not the module.
@@ -132,3 +136,37 @@ async def test_genuine_windows_absolute_path_returns_file_uri(tmp_path):
     result = await save_data_item_to_storage(str(file_path))
 
     assert result == file_path.as_uri()
+
+
+@pytest.mark.asyncio
+async def test_save_data_item_to_storage_detailed_upload_provenance(monkeypatch):
+    """Multipart upload data items (hasattr .file) must carry is_internal_storage=True."""
+    upload_item = SimpleNamespace(
+        file=BytesIO(b"upload bytes"),
+        filename="report.pdf",
+    )
+    fake_stored = StoredFile(file_path="mock/path/report.pdf", is_internal_storage=True)
+    monkeypatch.setattr(mod, "save_data_to_file_detailed", AsyncMock(return_value=fake_stored))
+
+    stored = await save_data_item_to_storage_detailed(upload_item)
+    assert stored.is_internal_storage is True
+    assert stored.file_path == "mock/path/report.pdf"
+
+
+@pytest.mark.asyncio
+async def test_save_data_item_to_storage_detailed_passthrough_provenance(tmp_path):
+    """Pass-through existing local file items must carry is_internal_storage=False."""
+    file_path = tmp_path / "local_note.txt"
+    file_path.write_text("hello world", encoding="utf-8")
+
+    stored = await save_data_item_to_storage_detailed(str(file_path))
+    assert stored.is_internal_storage is False
+    assert stored.file_path == file_path.as_uri()
+
+
+@pytest.mark.asyncio
+async def test_save_data_item_to_storage_detailed_s3_provenance():
+    """S3 URIs must carry is_internal_storage=False."""
+    stored = await save_data_item_to_storage_detailed("s3://bucket/data.txt")
+    assert stored.is_internal_storage is False
+    assert stored.file_path == "s3://bucket/data.txt"
