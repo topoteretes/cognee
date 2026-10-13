@@ -61,7 +61,7 @@ async def test_since_filters_strictly_greater_so_the_cursor_event_never_repeats(
     with ctx_a, ctx_b:
         result = await visualize_module.get_live_events(
             DATASET_ID,
-            since=datetime(2026, 8, 3, 9, 0, 5),  # noqa: DTZ001 - naive by contract: event cursors are naive ISO strings
+            since=datetime(2026, 8, 3, 9, 0, 5),  # noqa: DTZ001 - naive cursor, as older event timestamps are
         )
 
     # The event AT the cursor is excluded — only strictly newer ones return.
@@ -72,7 +72,7 @@ async def test_since_filters_strictly_greater_so_the_cursor_event_never_repeats(
 @pytest.mark.asyncio
 async def test_nothing_new_echoes_the_given_since_back_as_cursor():
     events = [_event("2026-08-03T09:00:00.000000")]
-    since = datetime(2026, 8, 3, 9, 30, 0)  # noqa: DTZ001 - naive by contract: event cursors are naive ISO strings
+    since = datetime(2026, 8, 3, 9, 30, 0)  # noqa: DTZ001 - naive cursor, as older event timestamps are
 
     ctx_a, ctx_b = _patches(events)
     with ctx_a, ctx_b:
@@ -93,8 +93,8 @@ async def test_first_call_with_nothing_available_has_a_null_cursor():
 
 @pytest.mark.asyncio
 async def test_timezone_aware_since_is_normalized_before_comparing():
-    """The write side stamps naive UTC strings; an aware `since` (a client
-    that includes an offset) must not raise trying to compare against them."""
+    """Older entries hold naive UTC strings; an aware `since` (a client that
+    includes an offset) must not raise trying to compare against them."""
     events = [_event("2026-08-03T09:00:10.000000")]
     aware_since = datetime(2026, 8, 3, 9, 0, 5, tzinfo=timezone.utc)
 
@@ -106,71 +106,39 @@ async def test_timezone_aware_since_is_normalized_before_comparing():
 
 
 @pytest.mark.asyncio
-async def test_timezone_aware_event_string_is_normalized_before_comparing():
-    """The cache adapters now stamp ``SessionQAEntry.time`` with
-    ``datetime.now(timezone.utc).isoformat()`` — offset-aware. Compared raw
-    against the naive cutoff it raises ``TypeError: can't compare offset-naive
-    and offset-aware datetimes``, which fails the whole live-events payload."""
-    aware_event = _event("2026-08-03T09:00:10.000000+00:00")
-    since = datetime(2026, 8, 3, 9, 0, 5)  # noqa: DTZ001 - naive by contract: event cursors are naive ISO strings
+async def test_timezone_aware_event_times_are_normalized_before_comparing():
+    """The cache adapters stamp entries with an offset; compared raw against the
+    naive cutoff they raised TypeError and failed every live-events poll."""
+    events = [_event("2026-08-03T09:00:10.000000+00:00")]
 
-    ctx_a, ctx_b = _patches([aware_event])
-    with ctx_a, ctx_b:
-        result = await visualize_module.get_live_events(DATASET_ID, since=since)
+    for since in (
+        datetime(2026, 8, 3, 9, 0, 5),  # noqa: DTZ001 - naive cursor from an older client
+        datetime(2026, 8, 3, 9, 0, 5, tzinfo=timezone.utc),
+    ):
+        ctx_a, ctx_b = _patches(events)
+        with ctx_a, ctx_b:
+            result = await visualize_module.get_live_events(DATASET_ID, since=since)
 
-    assert result["events"] == [aware_event]
-
-
-@pytest.mark.asyncio
-async def test_offset_event_is_normalized_to_utc_rather_than_dropped():
-    """A non-UTC offset must be converted, not ignored: 11:00+02:00 is 09:00 UTC
-    and survives the cutoff, 10:59+02:00 is 08:59 UTC and does not."""
-    older = _event("2026-08-03T10:59:00+02:00")
-    newer = _event("2026-08-03T11:00:10+02:00")
-    since = datetime(2026, 8, 3, 9, 0, 5)  # noqa: DTZ001 - naive by contract: event cursors are naive ISO strings
-
-    ctx_a, ctx_b = _patches([older, newer])
-    with ctx_a, ctx_b:
-        result = await visualize_module.get_live_events(DATASET_ID, since=since)
-
-    assert result["events"] == [newer]
+        assert result["events"] == events
+        assert result["cursor"] == "2026-08-03T09:00:10.000000+00:00"
 
 
 @pytest.mark.asyncio
-async def test_naive_and_aware_events_are_compared_on_one_scale():
-    """Rows written by the older (naive) and current (aware) writers can land in
-    the same payload; both must be ordered against a single cutoff."""
-    before_cutoff = _event("2026-08-03T09:00:04.000000+00:00")
-    naive = _event("2026-08-03T09:00:06.000000")
-    aware = _event("2026-08-03T09:00:07.000000+00:00")
-    since = datetime(2026, 8, 3, 9, 0, 5)  # noqa: DTZ001 - naive by contract: event cursors are naive ISO strings
+async def test_event_offsets_are_converted_to_utc_and_mixed_entries_share_one_scale():
+    """A non-UTC offset is converted, not ignored, and naive entries from older
+    writers sit on the same scale as aware ones from current writers."""
+    before_cutoff = _event("2026-08-03T10:59:00+02:00")  # 08:59 UTC
+    naive_after = _event("2026-08-03T09:00:06.000000")
+    offset_after = _event("2026-08-03T11:00:10+02:00")  # 09:00:10 UTC
 
-    ctx_a, ctx_b = _patches([before_cutoff, naive, aware])
+    ctx_a, ctx_b = _patches([before_cutoff, naive_after, offset_after])
     with ctx_a, ctx_b:
-        result = await visualize_module.get_live_events(DATASET_ID, since=since)
-
-    assert result["events"] == [naive, aware]
-
-
-@pytest.mark.asyncio
-async def test_cursor_is_the_newest_event_by_time_not_by_string_order():
-    """Events arrive sorted by their raw strings, so an offset entry can sort
-    after a later naive one. The cursor must still be the newest by time, or
-    feeding it back as ``since`` delivers that later event a second time."""
-    later_naive = _event("2026-08-03T09:00:20.000000")
-    earlier_offset = _event("2026-08-03T11:00:10.000000+02:00")  # 09:00:10 UTC
-    events = sorted([later_naive, earlier_offset], key=lambda event: event["time"])
-    since = datetime(2026, 8, 3, 9, 0, 0)  # noqa: DTZ001 - naive like an older writer's cursor
-
-    ctx_a, ctx_b = _patches(events)
-    with ctx_a, ctx_b:
-        first = await visualize_module.get_live_events(DATASET_ID, since=since)
-        second = await visualize_module.get_live_events(
-            DATASET_ID, since=datetime.fromisoformat(first["cursor"])
+        result = await visualize_module.get_live_events(
+            DATASET_ID,
+            since=datetime(2026, 8, 3, 9, 0, 5),  # noqa: DTZ001 - naive cursor, as older event timestamps are
         )
 
-    assert first["cursor"] == later_naive["time"]
-    assert second["events"] == []
+    assert result["events"] == [naive_after, offset_after]
 
 
 @pytest.mark.asyncio
@@ -188,7 +156,7 @@ async def test_an_event_with_no_time_is_dropped_by_a_since_filter_rather_than_cr
     with ctx_a, ctx_b:
         result = await visualize_module.get_live_events(
             DATASET_ID,
-            since=datetime(2026, 8, 3, 9, 0, 0),  # noqa: DTZ001 - naive by contract: event cursors are naive ISO strings
+            since=datetime(2026, 8, 3, 9, 0, 0),  # noqa: DTZ001 - naive cursor, as older event timestamps are
         )
 
     assert result["events"] == [_event("2026-08-03T09:00:10.000000")]
