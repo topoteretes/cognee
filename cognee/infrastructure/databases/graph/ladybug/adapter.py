@@ -469,7 +469,7 @@ class LadybugAdapter(GraphDBInterface):
         # without importing cognee. Pass the instance's configured limits
         # so callers that tune ``kuzu_buffer_pool_size`` / ``kuzu_max_db_size``
         # via env or config aren't silently ignored during the install step.
-        from cognee_db_workers._kuzu_helpers import install_json_extension_local, quarantine_wal
+        from cognee_db_workers._kuzu_helpers import install_json_extension_local
 
         install_json_extension_local(
             buffer_pool_size=self.kuzu_buffer_pool_size,
@@ -513,7 +513,16 @@ class LadybugAdapter(GraphDBInterface):
                     )
                 except RuntimeError as e:
                     if "wal" in str(e).lower():
-                        quarantine_wal(self.db_path)
+                        wal_path = self.db_path + ".wal"
+                        logger.warning(
+                            "Corrupted WAL detected at %s — removing to recover. "
+                            "Uncommitted transactions from the previous session will be lost.",
+                            wal_path,
+                        )
+                        try:
+                            os.remove(wal_path)
+                        except FileNotFoundError:
+                            pass
                     else:
                         import ladybug
 
@@ -1130,6 +1139,7 @@ class LadybugAdapter(GraphDBInterface):
             ON CREATE SET n += {{{", ".join(fields)}}}
             """
             await self.query(merge_query, params)
+            await self.checkpoint()
 
         except Exception as e:
             logger.error(f"Failed to add node: {e}")
@@ -1276,6 +1286,7 @@ class LadybugAdapter(GraphDBInterface):
         """
         query_str = "MATCH (n:Node) WHERE n.id = $id DETACH DELETE n"
         await self.query(query_str, {"id": node_id})
+        await self.checkpoint()
 
     async def delete_nodes(self, node_ids: list[str]) -> None:
         """
@@ -1292,6 +1303,7 @@ class LadybugAdapter(GraphDBInterface):
         """
         query_str = "MATCH (n:Node) WHERE n.id IN $ids DETACH DELETE n"
         await self.query(query_str, {"ids": node_ids})
+        await self.checkpoint()
 
     # ------------------------------------------------------------------
     # Graph provenance (COG-5522 Part 1)
@@ -2025,6 +2037,7 @@ class LadybugAdapter(GraphDBInterface):
                 from_node, to_node, relationship_name, edge_properties
             )
             await self.query(query, params)
+            await self.checkpoint()
         except Exception as e:
             logger.error(f"Failed to add edge: {e}")
             raise
@@ -2380,6 +2393,7 @@ class LadybugAdapter(GraphDBInterface):
         RETURN n.id AS node_id
         """
         result = await self.query(query, {"items": updates, "updated_at": now})
+        await self.checkpoint()
         rows_dicts = self._rows_to_dicts(result, ["node_id"])
         return {str(r["node_id"]) for r in rows_dicts if r.get("node_id") is not None}
 
@@ -2422,6 +2436,7 @@ class LadybugAdapter(GraphDBInterface):
         RETURN n.id AS node_id
         """
         result = await self.query(query, {"items": updates, "updated_at": now})
+        await self.checkpoint()
         rows_dicts = self._rows_to_dicts(result, ["node_id"])
         return {str(r["node_id"]) for r in rows_dicts if r.get("node_id") is not None}
 
@@ -2473,6 +2488,7 @@ class LadybugAdapter(GraphDBInterface):
         RETURN item.edge_object_id AS edge_object_id
         """
         result = await self.query(query, {"items": edge_updates, "updated_at": now})
+        await self.checkpoint()
         rows_dicts = self._rows_to_dicts(result, ["edge_object_id"])
         return {str(r["edge_object_id"]) for r in rows_dicts if r.get("edge_object_id") is not None}
 
@@ -2585,6 +2601,8 @@ class LadybugAdapter(GraphDBInterface):
             query,
             {"id": node_id, "properties": json.dumps(properties, cls=JSONEncoder)},
         )
+        if result:
+            await self.checkpoint()
         return bool(result)
 
     async def get_edge_feedback_weights(self, edge_object_ids: list[str]) -> dict[str, float]:
@@ -2823,6 +2841,7 @@ class LadybugAdapter(GraphDBInterface):
         DELETE r
         """
         await self.query(query_str, {"node_ids": node_ids, "edge_label": edge_label})
+        await self.checkpoint()
 
     async def remove_connection_to_successors_of(
         self, node_ids: list[str], edge_label: str
@@ -2846,6 +2865,7 @@ class LadybugAdapter(GraphDBInterface):
         DELETE r
         """
         await self.query(query_str, {"node_ids": node_ids, "edge_label": edge_label})
+        await self.checkpoint()
 
     # Graph-wide Operations
 
