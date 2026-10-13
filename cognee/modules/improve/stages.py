@@ -84,6 +84,38 @@ async def _watermarks_show_nothing_new(inputs: ImproveRunInputs, *, kind: str) -
         return False
 
 
+async def _pending_trace_watermarks(inputs: ImproveRunInputs) -> dict[str, int] | None:
+    """The trace persist watermark of each session with unpersisted steps.
+
+    None when the session store cannot be read.
+    """
+    try:
+        from cognee.infrastructure.session.get_session_manager import get_session_manager
+        from cognee.infrastructure.session.session_persist_watermark import (
+            TRACE_PERSIST_WATERMARK,
+        )
+        from cognee.tasks.memify.extract_agent_trace_feedbacks import resolve_trace_window
+
+        session_manager = get_session_manager()
+        if not session_manager.is_available:
+            return None
+        user_id = str(inputs.user.id)
+        pending = {}
+        for session_id in inputs.session_id_list:
+            total = await session_manager.get_agent_trace_count(
+                user_id=user_id, session_id=session_id
+            )
+            persisted = await TRACE_PERSIST_WATERMARK.read_count(
+                session_manager, user_id, session_id
+            )
+            if total and resolve_trace_window(total, persisted, None, session_id=session_id)[1]:
+                pending[session_id] = persisted
+        return pending
+    except Exception as error:
+        logger.debug("improve: trace watermarks unreadable: %s", error, exc_info=True)
+        return None
+
+
 class FeedbackWeightsStage(BaseStage):
     """Stage 1: move ``feedback_weight`` on the graph elements scored answers used."""
 
@@ -154,22 +186,57 @@ class PersistAgentTracesStage(BaseStage):
             persist_agent_trace_feedbacks_in_knowledge_graph_pipeline,
         )
 
+        from .config import get_improve_config
+
         if await _watermarks_show_nothing_new(inputs, kind="traces"):
             return _already_completed(self.name, REASON_NO_NEW_TRACE_STEPS)
 
-        result = await persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
-            user=inputs.user,
-            session_ids=inputs.session_id_list,
-            dataset=inputs.dataset_id,
-            node_set_name=AGENT_TRACE_FEEDBACKS_NODE_SET,
-            raw_trace_content=False,
-            last_n_steps=None,  # persist all stored steps on demand
-            run_in_background=False,
-        )
+        # Each pipeline call cognifies the OLDEST trace_window_steps pending steps
+        # of each pending session and advances their watermarks, so a failure
+        # repeats one bounded window, not the whole backlog.
+        config = get_improve_config()
+        sessions = len(inputs.session_ids)
+        windows = 0
+        stage_result = None
+        pending = await _pending_trace_watermarks(inputs)
+        while pending and windows < config.trace_windows_per_run:
+            batch = dict(list(pending.items())[: config.trace_windows_per_run - windows])
+            result = await persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
+                user=inputs.user,
+                session_ids=list(batch),
+                dataset=inputs.dataset_id,
+                node_set_name=AGENT_TRACE_FEEDBACKS_NODE_SET,
+                raw_trace_content=False,
+                last_n_steps=config.trace_window_steps,
+                run_in_background=False,
+            )
+            windows += len(batch)
+            stage_result = StageResult.from_pipeline_run(
+                self.name, result, sessions=sessions, windows=windows
+            )
+            if stage_result.status == "errored":
+                break
+            # A failed window build is logged, not raised, so the pipeline still
+            # reports completed. Only an unmoved watermark shows the failure.
+            pending = await _pending_trace_watermarks(inputs)
+            if pending is None or any(pending.get(sid) == mark for sid, mark in batch.items()):
+                stage_result = StageResult.errored(
+                    self.name,
+                    "an agent trace window did not advance its persist watermark",
+                    sessions=sessions,
+                    windows=windows,
+                )
+                break
         logger.info(
-            "improve: agent trace steps persisted from %d session(s)", len(inputs.session_ids)
+            "improve: persisted %d agent trace window(s) from %d session(s)", windows, sessions
         )
-        return StageResult.from_pipeline_run(self.name, result, sessions=len(inputs.session_ids))
+        if stage_result is not None:
+            return stage_result
+        if pending is None:
+            return StageResult.errored(
+                self.name, "agent trace watermarks could not be read", sessions=sessions
+            )
+        return _already_completed(self.name, REASON_NO_NEW_TRACE_STEPS)
 
 
 class ExtractAgentContextStage(BaseStage):
