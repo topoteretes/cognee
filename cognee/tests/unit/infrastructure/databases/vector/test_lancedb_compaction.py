@@ -910,3 +910,68 @@ async def test_prune_waits_for_a_running_compaction_pass(tmp_path, compaction_se
 
     assert events == ["pass_done", "pruned"]
     await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_an_rpc_after_the_cache_evicted_the_adapter_spawns_no_worker(
+    tmp_path, monkeypatch, compaction_settings
+):
+    """The engine cache closes an evicted subprocess adapter through
+    ``_start_close`` while a caller on the loop that opened the store may
+    still hold the connection. An RPC that lands after the session was shut
+    down must be refused, not recovered: the adapter no longer owns the
+    session, so a respawned worker is never closed (#5710 reached this through
+    the first-open prune, since removed; the contract holds for any late
+    caller, so a compaction pass or a read racing an eviction is covered)."""
+    import multiprocessing
+
+    from cognee.infrastructure.databases.utils.closing_lru_cache import _start_close
+    from cognee.infrastructure.databases.vector.config import VectorConfig
+    from cognee_db_workers.harness import SubprocessTransportError
+
+    compaction_settings(retention_seconds=0)
+    factory = importlib.import_module("cognee.infrastructure.databases.vector.create_vector_engine")
+    monkeypatch.setattr(factory, "get_embedding_engine", _FakeEmbeddingEngine)
+    config = VectorConfig(
+        vector_db_provider="lancedb",
+        vector_db_url=str(tmp_path / "db"),
+        vector_db_name="evicted_under_a_caller",
+        vector_db_subprocess_enabled=True,
+    )
+    children_before = {proc.pid for proc in multiprocessing.active_children()}
+    engine = factory.create_vector_engine(**config.to_dict())
+    adapter = getattr(engine, "__wrapped__", engine)  # the cache hands out a proxy
+    assert adapter._subprocess_mode
+
+    # Take the RPC target before the close, as any in-flight caller would.
+    connection = await adapter.get_connection()
+    session = adapter._session
+    real_spawn = session._respawn_factory
+    spawned = []
+
+    def counting_spawn():
+        procs = real_spawn()
+        spawned.append(procs[0])
+        return procs
+
+    session._respawn_factory = counting_spawn
+    try:
+        await asyncio.wrap_future(_start_close(adapter))
+
+        with pytest.raises(SubprocessTransportError):
+            await connection.table_names()
+
+        assert spawned == [], "the late RPC respawned a worker after close()"
+        live = [
+            proc
+            for proc in multiprocessing.active_children()
+            if proc.pid not in children_before and proc.is_alive()
+        ]
+        assert live == [], f"worker processes outlived close(): {[p.pid for p in live]}"
+        assert session._closed
+    finally:
+        for proc in spawned:
+            if proc.is_alive():
+                proc.kill()
+                proc.join(timeout=5.0)
+        await asyncio.to_thread(session.shutdown)
