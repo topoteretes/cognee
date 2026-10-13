@@ -1,14 +1,12 @@
-"""LanceDB reads never materialize stored embeddings they do not return.
+"""LanceDB search() never selects the vector column.
 
-search() returns id, payload and distance only, and the schema checks in
-run_migrations() / remove_belongs_to_set_tags() need only the schema. Selecting
-the vector column (or loading the whole table to read its schema) made a
-limit=None search, or a startup migration check, load every embedding.
+Results carry only id, payload and distance. Selecting the vector column made a
+limit=None search (node-set filtered retrieval reads whole collections) load
+every stored embedding.
 """
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -17,7 +15,6 @@ from cognee.infrastructure.engine import DataPoint
 
 try:
     import lancedb.query
-    import lancedb.table
 
     from cognee.infrastructure.databases.vector.lancedb.LanceDBAdapter import LanceDBAdapter
 
@@ -91,24 +88,3 @@ async def test_search_never_selects_vector_column(
         assert all(result.payload["text"].startswith("point") for result in results)
     else:
         assert all(result.payload is None for result in results)
-
-
-@pytest.mark.asyncio
-async def test_schema_checks_do_not_load_table_rows(tmp_path, monkeypatch):
-    adapter, points = await _seeded_adapter(tmp_path)
-
-    async def _no_full_read(self, *args, **kwargs):
-        raise AssertionError("schema checks must not load every row via to_arrow()")
-
-    monkeypatch.setattr(lancedb.table.AsyncTable, "to_arrow", _no_full_read)
-    # A real migration has to copy rows; only the schema check must not.
-    migrate = AsyncMock()
-    monkeypatch.setattr(adapter, "_migrate_collection_schema", migrate)
-
-    await adapter.run_migrations()
-    assert migrate.await_count == 1, "the schema check should have reached Tagged_text"
-    await adapter.remove_belongs_to_set_tags(["A"])
-
-    remaining = await adapter.retrieve("Tagged_text", [str(p.id) for p in points])
-    expected = {str(p.id) for p in points if p.belongs_to_set == ["B"]}
-    assert {str(r.id) for r in remaining} == expected

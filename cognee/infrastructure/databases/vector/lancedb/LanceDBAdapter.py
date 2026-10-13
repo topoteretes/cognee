@@ -1252,16 +1252,14 @@ class LanceDBAdapter(VectorDBInterface):
 
             checked_collections.append(collection_name)
             collection = await self.get_collection(collection_name)
-            # schema() reads table metadata only; to_arrow() would load every row,
-            # embeddings included, just to look at the schema.
-            schema = await collection.schema()
-            payload_field_index = schema.get_field_index("payload")
+            table = await collection.to_arrow()
+            payload_field_index = table.schema.get_field_index("payload")
 
             if payload_field_index < 0:
                 skipped_collections.append(collection_name)
                 continue
 
-            payload_field_type = schema.field(payload_field_index).type
+            payload_field_type = table.schema.field(payload_field_index).type
             if not hasattr(payload_field_type, "num_fields"):
                 skipped_collections.append(collection_name)
                 continue
@@ -1719,7 +1717,7 @@ class LanceDBAdapter(VectorDBInterface):
                 continue
 
             try:
-                arrow_schema = await collection.schema()
+                arrow_schema = (await collection.to_arrow()).schema
             except Exception as e:
                 logger.debug(
                     "remove_belongs_to_set_tags: schema read failed for '%s': %s",
