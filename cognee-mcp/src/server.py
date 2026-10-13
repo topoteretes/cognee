@@ -364,6 +364,7 @@ async def remember(
     background: bool = False,
     ontology_key: str | list[str] | None = None,
     self_improvement: bool = True,
+    dataset_id: str | None = None,
 ) -> list:
     """Store data in memory.
 
@@ -395,7 +396,13 @@ async def remember(
     dataset_name : str, optional
         Target dataset name. Defaults to the current MCP client's
         agent-scoped dataset (e.g. "cursor_vscode_memory"), or
-        "main_dataset" if no client identity is detected.
+        "main_dataset" if no client identity is detected. Names resolve only
+        to datasets you own; use dataset_id for a dataset shared with you.
+    dataset_id : str, optional
+        UUID of an existing dataset to write into. Takes precedence over
+        dataset_name. Datasets are shared across users only by id, so this is
+        required to write into a dataset another user shared with you (you
+        need write permission on it).
     session_id : str, optional
         Session ID. Stores in cache; direct mode may also bridge to the graph
         unless self_improvement is False.
@@ -454,7 +461,22 @@ async def remember(
                 )
             ]
 
-    dataset_name = dataset_name or _agent_scoped_default_dataset()
+    # The caller passes ids as strings over JSON; the client wants a UUID. Parse
+    # here so a malformed id is a clear message, as forget does.
+    from uuid import UUID
+
+    try:
+        parsed_dataset_id = UUID(dataset_id) if dataset_id else None
+    except ValueError as e:
+        return [types.TextContent(type="text", text=f"Error: invalid UUID ({e}).")]
+
+    if parsed_dataset_id is None:
+        dataset_name = dataset_name or _agent_scoped_default_dataset()
+    # An explicit id names the target (it wins over a name), so it is also the
+    # label used for background bookkeeping and the result text.
+    dataset_label = str(parsed_dataset_id) if parsed_dataset_id else dataset_name
+    # Forward the id only when given, so calls without one are unchanged.
+    id_kwargs = {"dataset_id": parsed_dataset_id} if parsed_dataset_id else {}
 
     # Permanent-memory ingestion runs add + cognify (+ improve), which routinely
     # outruns an MCP host's per-request deadline — the same constraint the
@@ -469,8 +491,8 @@ async def remember(
             try:
                 await cognee_client.remember(**kwargs)
             except Exception as e:
-                _record_task_error(dataset_name, str(e))
-                logger.exception(f"Background remember task failed for dataset '{dataset_name}'")
+                _record_task_error(dataset_label, str(e))
+                logger.exception(f"Background remember task failed for dataset '{dataset_label}'")
 
         _track_background(
             remember_task_wrapper(
@@ -482,8 +504,9 @@ async def remember(
                 custom_prompt=custom_prompt,
                 ontology_key=ontology_key,
                 self_improvement=self_improvement,
+                **id_kwargs,
             ),
-            dataset=dataset_name,
+            dataset=dataset_label,
         )
         queued = f"'{filename}'" if content_base64 else "text"
         return [
@@ -491,7 +514,7 @@ async def remember(
                 type="text",
                 text=(
                     f"Background process launched due to MCP timeout limitations.\n"
-                    f"Queued {queued} for dataset '{dataset_name}'.\n"
+                    f"Queued {queued} for dataset '{dataset_label}'.\n"
                     f"Check progress with cognify_status, or the log file at: "
                     f"{get_log_file_location()}"
                 ),
@@ -509,6 +532,7 @@ async def remember(
                 custom_prompt=custom_prompt,
                 ontology_key=ontology_key,
                 self_improvement=self_improvement,
+                **id_kwargs,
             )
             status = result.get("status", "completed")
             if session_id:
@@ -516,10 +540,10 @@ async def remember(
             elif content_base64:
                 text = (
                     f"Ingested '{filename}' ({len(decoded):,} bytes) into dataset "
-                    f"'{dataset_name}' (status={status})."
+                    f"'{dataset_label}' (status={status})."
                 )
             else:
-                text = f"Stored permanently in knowledge graph (dataset={dataset_name}, status={status})."
+                text = f"Stored permanently in knowledge graph (dataset={dataset_label}, status={status})."
             return [types.TextContent(type="text", text=text)]
         except Exception as e:
             error_msg = _tool_error_text("Remember failed", e)
@@ -537,6 +561,7 @@ async def recall(
     top_k: int = 15,
     scope: str | None = None,
     code_query: dict | None = None,
+    dataset_ids: str | None = None,
 ) -> list:
     """Search memory with auto-routing and session awareness.
 
@@ -562,7 +587,12 @@ async def recall(
         NATURAL_LANGUAGE, CODING_RULES, GRAPH_REPORT, FEELING_LUCKY.
         An unknown name is rejected with a validation error.
     datasets : str, optional
-        Comma-separated dataset names to search within.
+        Comma-separated dataset names to search within. Names resolve only to
+        datasets you own; use dataset_ids for datasets shared with you.
+    dataset_ids : str, optional
+        Comma-separated dataset UUIDs to search within. Takes precedence over
+        datasets. Datasets are shared across users only by id, so this is
+        required to search a dataset another user shared with you.
     session_id : str, optional
         Session ID for session-first search.
     system_prompt : str, optional
@@ -597,6 +627,18 @@ async def recall(
             scope_list = parse_csv_list(scope)
             if code_query is not None and not isinstance(code_query, dict):
                 raise ValueError("code_query must be a JSON object (dict).")
+
+            # The caller passes ids as strings over JSON; the client wants UUIDs.
+            # Parse here so a malformed id is a clear message, as forget does.
+            from uuid import UUID
+
+            try:
+                dataset_id_list = [UUID(value) for value in parse_csv_list(dataset_ids) or []]
+            except ValueError as e:
+                return [types.TextContent(type="text", text=f"Error: invalid UUID ({e}).")]
+            # Forward ids only when given, so calls without them are unchanged.
+            id_kwargs = {"dataset_ids": dataset_id_list} if dataset_id_list else {}
+
             results = await cognee_client.recall(
                 query_text=query,
                 search_type=search_type,
@@ -606,11 +648,15 @@ async def recall(
                 top_k=normalized_top_k,
                 scope=scope_list or None,
                 code_query=code_query,
+                **id_kwargs,
             )
             empty_state = recall_marker_state(results)
             items = recall_items(results)
+            # Background tasks are labelled by dataset name, or by id when the
+            # remember call targeted an id; ids win over names, as in the recall.
+            scoped_to = [str(value) for value in dataset_id_list] or dataset_list
             queued = any(
-                not task.done() and (not dataset_list or dataset in dataset_list)
+                not task.done() and (not scoped_to or dataset in scoped_to)
                 for task, dataset in _background_task_datasets.items()
             )
             if not items and queued:
@@ -619,7 +665,9 @@ async def recall(
                 try:
                     deadline = asyncio.get_running_loop().time() + _RECALL_STATE_TIMEOUT_SECONDS
                     empty_state = await asyncio.wait_for(
-                        cognee_client.get_recall_state(dataset_list, deadline=deadline),
+                        cognee_client.get_recall_state(
+                            dataset_list, deadline=deadline, **id_kwargs
+                        ),
                         timeout=_RECALL_STATE_TIMEOUT_SECONDS,
                     )
                 except Exception:

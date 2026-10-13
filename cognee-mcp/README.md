@@ -530,8 +530,8 @@ The MCP server exposes its functionality through tools. Call them from any MCP c
 
 The MCP server exposes four tools (three memory tools pinned in `tools/list`, plus `cognify_status`):
 
-- **remember**: Store data in memory. Pass `data` for text, or `filename` + `content_base64` to ingest an uploaded file (up to 10 MB). With `session_id`: fast session cache (text only). Without `session_id`: permanent graph memory
-- **recall**: Search memory with auto-routing. Searches session cache first when `session_id` is provided, then falls through to the permanent graph
+- **remember**: Store data in memory. Pass `data` for text, or `filename` + `content_base64` to ingest an uploaded file (up to 10 MB). With `session_id`: fast session cache (text only). Without `session_id`: permanent graph memory. Target a dataset by `dataset_name`, or by `dataset_id` for a dataset shared with you
+- **recall**: Search memory with auto-routing. Searches session cache first when `session_id` is provided, then falls through to the permanent graph. Scope by `datasets` (names) or `dataset_ids` (UUIDs, needed for datasets shared with you)
 - **forget**: Delete memory by dataset name or id, a single data item by `data_id`, or delete all owned memory with `everything=True`
 - **cognify_status**: Check the progress of background ingestion started by `remember(background=True)`. Unadvertised by default; discoverable via `search_tools` and callable by name
 
@@ -607,6 +607,8 @@ By default, each MCP client gets its own auto-named dataset (e.g. Cursor → `cu
 
 `remember` and `cognify_status` route to the agent-scoped dataset when `dataset_name` is omitted (the internal `cognify`/`improve` helpers, which are not exposed as tools, do the same). Pass `dataset_name` explicitly to override (e.g. `dataset_name="main_dataset"` still works).
 
+Dataset names resolve only to datasets the caller owns; cognee shares datasets between users by id. To read or write a dataset another user shared with you, pass `dataset_ids` to `recall` or `dataset_id` to `remember`. An id takes precedence over a name, and `remember` skips the agent-scoped default when an id is given.
+
 To disable agent scoping and have all clients share `main_dataset` as the default, set in `.env`:
 
 ```bash
@@ -649,6 +651,10 @@ remember(data="Temporary working note", session_id="agent-session-1", self_impro
 
 # Recall from memory
 recall(query="What changed in the MCP server?", session_id="agent-session-1")
+
+# Read and write a dataset shared with you, by id
+recall(query="What does the team know about Acme?", dataset_ids="<dataset-uuid>")
+remember(data="Acme renewed for 2027.", dataset_id="<dataset-uuid>")
 
 # Delete one dataset
 forget(dataset="main_dataset")
