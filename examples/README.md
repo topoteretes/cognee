@@ -261,3 +261,5 @@ Then: make sure it runs with `uv run python <path>` after `uv sync` and a config
 and add a row to the matching table in this README.
 
 See [`CONTRIBUTING.md`](../CONTRIBUTING.md) for the broader contribution flow.
+
+- [Inspectable recall evidence](guides/recall_evidence.py): compact source index, versioned citations and batch expansion through the HTTP API.

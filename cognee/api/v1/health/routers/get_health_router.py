@@ -20,7 +20,7 @@ def get_health_router():
             status_code = 503 if health_status.status == HealthStatus.UNHEALTHY else 200
             from cognee.infrastructure.session.capture import CAPABILITY, supported
 
-            capabilities = ["session_summary_v1", "context_usage_v1"]
+            capabilities = ["session_summary_v1", "context_usage_v1", "recall_evidence_v1"]
             if supported():
                 capabilities.append(CAPABILITY)
 
