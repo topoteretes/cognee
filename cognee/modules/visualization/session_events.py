@@ -15,6 +15,7 @@ Two event kinds are emitted per the renderer's contract:
   ``apply_feedback_weights`` (reinforcement overlay).
 """
 
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
@@ -24,6 +25,32 @@ logger = get_logger("visualization.session_events")
 
 # Bound the number of sessions scanned when none are specified explicitly.
 MAX_SESSIONS_SCANNED = 10
+
+
+def as_naive_utc(value: datetime) -> datetime:
+    """Normalize to naive UTC so event times and cursors share one scale.
+
+    The cache adapters stamp ``SessionQAEntry.time`` with
+    ``datetime.now(timezone.utc).isoformat()`` — aware, UTC — while entries
+    written before that change hold naive ``utcnow()`` strings, and a client
+    may send a ``since`` cursor either way. Python refuses to order a naive
+    datetime against an aware one, so every comparison of event times goes
+    through here.
+    """
+    if value.tzinfo is not None:
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
+
+
+def parse_event_time(event: dict[str, Any]) -> datetime | None:
+    """An event's ``time`` as naive UTC, or None when missing or unparsable."""
+    raw = event.get("time")
+    if not raw:
+        return None
+    try:
+        return as_naive_utc(datetime.fromisoformat(raw))
+    except ValueError:
+        return None
 
 
 def map_session_entries_to_events(session_id: str, entries: list[Any]) -> list[dict[str, Any]]:
@@ -188,7 +215,14 @@ async def collect_session_events(
             if isinstance(entries, list) and entries:
                 events.extend(map_session_entries_to_events(session_id, entries))
 
-        events.sort(key=lambda event: (event.get("time") or "", event["kind"] == "improve"))
+        # By parsed time, not the raw string: string order misplaces entries
+        # whose offsets differ. Events without a usable time sort first.
+        events.sort(
+            key=lambda event: (
+                parse_event_time(event) or datetime.min,  # noqa: DTZ901 - times are naive UTC
+                event["kind"] == "improve",
+            )
+        )
         if events:
             logger.info("Collected %d session operation events for the Memory tab.", len(events))
         return events
