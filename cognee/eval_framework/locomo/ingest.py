@@ -23,13 +23,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-# Env that must be in place before cognee is imported (settings are read at import time).
-os.environ.setdefault("CACHING", "true")
-os.environ.setdefault("AUTO_FEEDBACK", "false")
-os.environ.setdefault("ENABLE_BACKEND_ACCESS_CONTROL", "false")
-os.environ.setdefault("LOG_LEVEL", "ERROR")
-os.environ.setdefault("COGNEE_LOG_FILE", "false")
-
 from cognee.eval_framework.benchmark_adapters.locomo_adapter import LocomoAdapter
 from cognee.eval_framework.locomo.preprocess import (
     DEFAULT_WINDOW_TURNS,
@@ -164,7 +157,22 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _apply_env_defaults() -> None:
+    """Benchmark settings for a standalone run, set before cognee reads its (cached) config.
+
+    Only the entry point applies them: setting them at import time would change the settings of
+    every process that imports this module, the test suite included, and turn off access control
+    for it. ``run_locomo_eval.py`` passes the same values to its child processes explicitly.
+    """
+    os.environ.setdefault("CACHING", "true")
+    os.environ.setdefault("AUTO_FEEDBACK", "false")
+    os.environ.setdefault("ENABLE_BACKEND_ACCESS_CONTROL", "false")
+    os.environ.setdefault("LOG_LEVEL", "ERROR")
+    os.environ.setdefault("COGNEE_LOG_FILE", "false")
+
+
 def main() -> None:
+    _apply_env_defaults()
     args = _parse_args()
     try:
         asyncio.run(ingest_conversation(args))
