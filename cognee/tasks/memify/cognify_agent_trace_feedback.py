@@ -11,6 +11,7 @@ from cognee.modules.improve.constants import AGENT_TRACE_FEEDBACKS_NODE_SET
 from cognee.modules.pipelines.models.PipelineRunInfo import get_errored_run_info
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.ingestion.data_item import DataItem
 
 logger = get_logger("cognify_agent_trace_feedback")
 
@@ -73,7 +74,18 @@ async def cognify_agent_trace_feedback(
     try:
         for item in items:
             window = item if isinstance(item, TracePersistWindow) else None
-            text = window.text if window is not None else item
+            # A window is a named document ("Agent trace <session>"), so the
+            # dataset lists it by session instead of text_<md5>; raw text handed
+            # in directly has no session to name it after and is added as is.
+            text = (
+                DataItem(
+                    data=window.text,
+                    name=f"Agent trace {window.session_id}",
+                    literal_text=True,
+                )
+                if window is not None
+                else item
+            )
 
             logger.info("Processing agent trace content for cognification")
             await cognee.add(text, dataset_id=dataset_id, node_set=[node_set_name], user=user)
