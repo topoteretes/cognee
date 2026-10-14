@@ -5,13 +5,16 @@ from cognee.api.v1.datasets.dto import DataDTO
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.locks import dataset_lock
+from cognee.modules.data.content_hash import compute_content_hash
 from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
 from cognee.modules.data.methods import (
     get_authorized_dataset,
     get_authorized_existing_datasets,
     get_dataset_data,
+    get_dataset_data_by_content_hash,
     has_dataset_data,
 )
+from cognee.modules.data.models import Data
 from cognee.modules.graph.methods import (
     delete_data_nodes_and_edges,
     delete_dataset_nodes_and_edges,
@@ -155,6 +158,39 @@ class datasets:
         dataset = await get_authorized_dataset(user, dataset_id)
 
         return await get_dataset_data(dataset.id, order_by="created_at")
+
+    @staticmethod
+    async def find_data(
+        dataset_id: UUID,
+        *,
+        content: str | bytes | None = None,
+        content_hash: str | None = None,
+        user: User | None = None,
+    ) -> list[Data]:
+        """Find the data items in a dataset that hold a given piece of content.
+
+        Pass exactly one of ``content`` (the text or bytes that were added —
+        hashed locally with ``compute_content_hash``) or ``content_hash`` (a
+        hash computed earlier, or read off another ``Data`` row). A row
+        matches on its ``content_hash`` (the ingested payload) or its
+        ``raw_content_hash`` (the stored file). Newest first; an empty list
+        means the dataset holds no such content — callers can act on that
+        without listing the whole dataset and comparing hashes themselves.
+
+        Requires read access to the dataset.
+        """
+        if (content is None) == (content_hash is None):
+            raise ValueError("find_data takes exactly one of `content` or `content_hash`.")
+
+        if content_hash is None:
+            content_hash = compute_content_hash(content)
+
+        if not user:
+            user = await get_default_user()
+
+        dataset = await get_authorized_dataset(user, dataset_id)
+
+        return await get_dataset_data_by_content_hash(dataset.id, content_hash)
 
     @staticmethod
     async def has_data(dataset_id: str, user: User | None = None) -> bool:
