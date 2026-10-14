@@ -1,5 +1,6 @@
 import asyncio
 import re
+from contextlib import nullcontext
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -44,6 +45,7 @@ from cognee.modules.retrieval.exceptions import SearchTypeNotSupported
 from cognee.modules.search.exceptions import UnsupportedSearchTypeError
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.types import SearchResult, SearchType
+from cognee.modules.session_lifecycle.usage_tracking import track_session_usage
 from cognee.modules.users.exceptions.exceptions import UserNotFoundError
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
@@ -352,6 +354,23 @@ def _scope_should_forward_resolved(scope: str | list[str] | None) -> bool:
     return bool(scope and {"all", "graph_context"}.intersection(scope))
 
 
+async def _session_usage_scope(session_id: str | None, user):
+    """Bind an explicit session as the usage target for the whole recall.
+
+    Covers retrieval-stage LLM and embedding calls, not just the answer the
+    session turn already records. Without a session_id, or before cognee has a
+    default user, usage stays where it was attributed before.
+    """
+    if not session_id:
+        return nullcontext()
+    if user is None:
+        try:
+            user = await get_default_user()
+        except (DatabaseNotCreatedError, UserNotFoundError):
+            return nullcontext()
+    return track_session_usage(session_id, user.id)
+
+
 @telemetry_on_error("cognee.recall ERRORED")
 async def recall(
     query_text: str,
@@ -586,7 +605,8 @@ async def recall(
             span.set_attribute(COGNEE_RESULT_COUNT, len(results) if results else 0)
             return results
 
-        async with record_operation("recall", user=user, session_id=session_id):
+        usage_scope = await _session_usage_scope(session_id, user)
+        async with usage_scope, record_operation("recall", user=user, session_id=session_id):
             merged: list[RecallResponse] = []
 
             async def _run_session() -> list[RecallResponse]:

@@ -266,6 +266,11 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                         timeout=300.0,
                     )
 
+                from cognee.modules.session_lifecycle.usage_tracking import record_embedding_call
+
+                await record_embedding_call(
+                    response, model=self.model, input_text="\n".join(sanitized_text_input)
+                )
                 embedding_response = [data["embedding"] for data in response.data]
                 return handle_embedding_response(text, embedding_response, self.dimensions)
 

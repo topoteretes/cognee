@@ -67,6 +67,7 @@ from cognee.modules.operations import finish_operation, record_operation
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
 )
+from cognee.modules.session_lifecycle.usage_tracking import track_session_usage
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
@@ -194,6 +195,9 @@ async def improve(
         """
         stages = list(DEFAULT_STAGES)
         session_keys = _session_lock_keys(lock_keys)
+        # A single-session run bills its model work to that session; a
+        # multi-session run has no one target, so it stays unattributed.
+        usage_session = inputs.session_ids[0] if len(inputs.session_ids) == 1 else None
         # The claim is released exactly once: either by the combined
         # check-and-release below (set ``released``) or by the finally. A second
         # release is not holder-scoped and would drop a claim a contender won in
@@ -207,7 +211,8 @@ async def improve(
                     result.start_rerun_pass()
                 budget_exhausted = False
                 for index, stage in enumerate(stages):
-                    stage_result = await execute_stage(stage, inputs)
+                    async with track_session_usage(usage_session, inputs.user.id):
+                        stage_result = await execute_stage(stage, inputs)
                     result.record(stage_result)
                     if stage_result.run_info_stamp:
                         # The stage decides when and what it stamps; the row's
