@@ -1,8 +1,10 @@
 import asyncio
 
 from .get_relational_engine import get_relational_engine
+from cognee.infrastructure.locks.loop_agnostic_lock import LoopAgnosticLock
 
-_create_db_lock = asyncio.Lock()
+# Loop-agnostic: module-level, so it outlives any single event loop.
+_create_db_lock = LoopAgnosticLock()
 
 
 async def create_db_and_tables():
