@@ -111,6 +111,7 @@ async def improve(
     session_ids: list[str] | None = None,
     build_global_context_index: bool = False,
     build_truth_subspace: bool = False,
+    review_conflicts: bool = False,
     **kwargs: Unpack[ImproveKwargs],
 ) -> ImproveResult:
     """Run the self-improvement loop over a dataset and report what each stage did.
@@ -118,16 +119,17 @@ async def improve(
     The stages are ``cognee.modules.improve.DEFAULT_STAGES``, in order:
     ``feedback_weights``, ``persist_session_qa``, ``persist_agent_traces``,
     ``extract_agent_context``, ``distill_sessions``, ``update_user_preferences``,
-    ``build_truth_subspace``, ``triplet_enrichment``, ``global_context_index``.
+    ``build_truth_subspace``, ``review_conflicts``, ``triplet_enrichment``,
+    ``global_context_index``.
     Each stage first *gates* — declines work it cannot do under the current
     settings, with zero LLM calls — and only then runs. That registry is the
     authoritative description of what runs.
 
-    Every stage but the last two is session-fed and is skipped with
+    The first seven stages are session-fed and are skipped with
     ``no_session_ids`` when no ``session_ids`` were given. Stages named in
     ``IMPROVE_STAGES_DISABLED`` are skipped with ``disabled_by_config``. The
     stages that draft text with an LLM (``extract_agent_context``,
-    ``distill_sessions``, ``global_context_index``) are skipped with
+    ``distill_sessions``, ``review_conflicts``, ``global_context_index``) are skipped with
     ``no_llm_configured`` when no usable LLM is configured, so a keyless
     install still bridges sessions and traces into the graph. A run
     that loses the improve lock — another run is already touching the same
@@ -164,6 +166,8 @@ async def improve(
             per-dataset and unaffected.)
         build_global_context_index: Opt in to ``global_context_index``.
         build_truth_subspace: Opt in to ``build_truth_subspace``.
+        review_conflicts: Review dated source facts and update conflict descriptions.
+            Also enabled by ``IMPROVE_REVIEW_CONFLICTS=true``.
         **kwargs: Additional options — see ``ImproveKwargs``.
 
     Returns:
@@ -295,7 +299,7 @@ async def improve(
                 operation.set_outcome(OperationOutcome.FAILED)
             elif result.status == "skipped":
                 # Nothing ran: record that truthfully, and keep the stamp-less
-                # row out of the bounded scan stamp readers do.
+                # row out of the stage watermark queries.
                 operation.set_outcome(OperationOutcome.NOOP)
             if not released:
                 await release_improve_lock_many(lock_keys)
@@ -308,6 +312,7 @@ async def improve(
         run_in_background=run_in_background,
         build_global_context_index=build_global_context_index,
         build_truth_subspace=build_truth_subspace,
+        review_conflicts=review_conflicts,
     )
 
     with _improve_span(dataset, session_ids) as report:
@@ -320,6 +325,7 @@ async def improve(
                 session_ids=session_ids,
                 build_global_context_index=build_global_context_index,
                 build_truth_subspace=build_truth_subspace,
+                review_conflicts=review_conflicts,
                 run_in_background=run_in_background,
                 overrides=kwargs,
             )
@@ -337,6 +343,7 @@ async def improve(
                 node_name=node_name,
                 build_global_context_index=build_global_context_index,
                 build_truth_subspace=build_truth_subspace,
+                review_conflicts=review_conflicts,
                 overrides=kwargs,
             )
             # One claim per session id plus one for the dataset, so bridge
@@ -449,6 +456,7 @@ async def _resolve_inputs(
     node_name: list[str] | None,
     build_global_context_index: bool,
     build_truth_subspace: bool,
+    review_conflicts: bool,
     overrides: dict,
 ) -> ImproveRunInputs:
     """Resolve everything a stage may read into the frozen ``ImproveRunInputs``.
@@ -489,6 +497,8 @@ async def _resolve_inputs(
     feedback_alpha = overrides.get("feedback_alpha")
     if feedback_alpha is None:
         feedback_alpha = config.feedback_alpha
+    # Argument and IMPROVE_REVIEW_CONFLICTS are both opt-ins: either turns the stage on.
+    review_conflicts = review_conflicts or config.review_conflicts
 
     return ImproveRunInputs(
         user=user,
@@ -505,6 +515,7 @@ async def _resolve_inputs(
         feedback_alpha=feedback_alpha,
         build_global_context_index=build_global_context_index,
         build_truth_subspace=build_truth_subspace,
+        review_conflicts=review_conflicts,
         memify_kwargs={key: overrides[key] for key in MEMIFY_PASSTHROUGH_KEYS if key in overrides},
     )
 
@@ -634,6 +645,7 @@ async def _improve_remotely(
     session_ids: list[str],
     build_global_context_index: bool,
     build_truth_subspace: bool,
+    review_conflicts: bool,
     run_in_background: bool,
     overrides: dict,
 ) -> ImproveResult:
@@ -651,6 +663,7 @@ async def _improve_remotely(
         session_ids=session_ids or None,
         build_global_context_index=build_global_context_index,
         build_truth_subspace=build_truth_subspace,
+        review_conflicts=review_conflicts,
         run_in_background=run_in_background,
         **overrides,
     )
@@ -665,6 +678,7 @@ def _send_improve_telemetry(
     run_in_background: bool,
     build_global_context_index: bool,
     build_truth_subspace: bool,
+    review_conflicts: bool,
 ) -> None:
     # cognee/__init__.py imports this module, so the version has to be read at
     # call time; its own NOTE explains why __version__ sits at the top there.
@@ -682,6 +696,7 @@ def _send_improve_telemetry(
             "run_in_background": run_in_background,
             "build_global_context_index": build_global_context_index,
             "build_truth_subspace": build_truth_subspace,
+            "review_conflicts": review_conflicts,
             "cognee_version": cognee_version,
         },
     )

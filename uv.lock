@@ -1332,7 +1332,6 @@ dependencies = [
     { name = "pympler" },
     { name = "pypdf" },
     { name = "python-dotenv" },
-    { name = "python-magic-bin", marker = "sys_platform == 'win32'" },
     { name = "python-multipart" },
     { name = "rdflib" },
     { name = "sqlalchemy" },
@@ -1619,7 +1618,6 @@ requires-dist = [
     { name = "pytest-split", marker = "extra == 'dev'", specifier = ">=0.11.0,<0.12" },
     { name = "pytest-timeout", marker = "extra == 'dev'", specifier = ">=2.3.1,<3" },
     { name = "python-dotenv", specifier = ">=1.0.1,<2.0.0" },
-    { name = "python-magic-bin", marker = "sys_platform == 'win32'", specifier = "<0.5" },
     { name = "python-multipart", specifier = ">=0.0.22,<1.0.0" },
     { name = "pyturso", marker = "extra == 'turso'", specifier = ">=0.7.2,<0.8" },
     { name = "rapidocr-onnxruntime", marker = "extra == 'rapidocr'", specifier = ">=1.3.0,<2" },
@@ -9370,15 +9368,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/da/db/0b3e28ac047452d079d375ec6798bf76a036a08182dbb39ed38116a49130/python-magic-0.4.27.tar.gz", hash = "sha256:c1ba14b08e4a5f5c31a302b7721239695b2f0f058d125bd5ce1ee36b9d9d3c3b", size = 14677, upload-time = "2022-06-07T20:16:59.508Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/6c/73/9f872cb81fc5c3bb48f7227872c28975f998f3e7c2b1c16e95e6432bbb90/python_magic-0.4.27-py2.py3-none-any.whl", hash = "sha256:c212960ad306f700aa0d01e5d7a325d20548ff97eb9920dcd29513174f0294d3", size = 13840, upload-time = "2022-06-07T20:16:57.763Z" },
-]
-
-[[package]]
-name = "python-magic-bin"
-version = "0.4.14"
-source = { registry = "https://pypi.org/simple" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/5a/5d/10b9ac745d9fd2f7151a2ab901e6bb6983dbd70e87c71111f54859d1ca2e/python_magic_bin-0.4.14-py2.py3-none-win32.whl", hash = "sha256:34a788c03adde7608028203e2dbb208f1f62225ad91518787ae26d603ae68892", size = 397784, upload-time = "2017-10-02T16:30:15.806Z" },
-    { url = "https://files.pythonhosted.org/packages/07/c2/094e3d62b906d952537196603a23aec4bcd7c6126bf80eb14e6f9f4be3a2/python_magic_bin-0.4.14-py2.py3-none-win_amd64.whl", hash = "sha256:90be6206ad31071a36065a2fc169c5afb5e0355cbe6030e87641c6c62edc2b69", size = 409299, upload-time = "2017-10-02T16:30:18.545Z" },
 ]
 
 [[package]]

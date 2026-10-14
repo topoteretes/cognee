@@ -20,7 +20,7 @@ print(estimate)  # per-stage token counts and approximate cost; no LLM calls
 ```
 
 The estimate covers graph extraction and summarization only, not
-`improve()`, embeddings, or contradiction detection. Not available with
+`improve()` or embeddings. Not available with
 GLiNER or a remote instance.
 
 ### 2. Ingestion knobs
