@@ -18,6 +18,11 @@ def get_health_router():
         try:
             health_status = await health_checker.get_health_status(detailed=False)
             status_code = 503 if health_status.status == HealthStatus.UNHEALTHY else 200
+            from cognee.infrastructure.session.capture import CAPABILITY, supported
+
+            capabilities = ["session_summary_v1", "context_usage_v1"]
+            if supported():
+                capabilities.append(CAPABILITY)
 
             return JSONResponse(
                 status_code=status_code,
@@ -25,7 +30,7 @@ def get_health_router():
                     "status": "ready" if status_code == 200 else "not ready",
                     "health": health_status.status,
                     "version": health_status.version,
-                    "capabilities": ["session_summary_v1", "context_usage_v1"],
+                    "capabilities": capabilities,
                 },
             )
         except Exception:
