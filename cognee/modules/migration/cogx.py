@@ -9,6 +9,7 @@ An archive is a directory containing ``manifest.json`` plus one JSONL file per
 record kind. Records are Pydantic models discriminated by their ``kind`` field.
 """
 
+import hashlib
 import json
 import math
 from collections.abc import Iterator
@@ -16,10 +17,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, TypeAdapter
+from pydantic import BaseModel, Field, TypeAdapter, model_validator
 from typing_extensions import Self
 
-COGX_VERSION = "0.1"
+COGX_VERSION = "0.2"
 
 
 def parse_timestamp(value: Any) -> datetime | None:
@@ -66,6 +67,84 @@ class COGXScope(BaseModel):
     run_id: str | None = None
 
 
+# ── OMP header (COGX 0.2) ──────────────────────────────────────────────────
+# The fields below implement the header proposed to the Open Memory Protocol
+# exchange-and-runtime group (common-ground notes, Oct 14 amendments): an
+# origin kept across copies, a body hash for dedupe, the memory's subject,
+# its semantic kind, a validity interval with a supersession pointer, typed
+# evidence, and a measured accuracy record. Every field is optional so 0.1
+# archives and external importers keep working unchanged.
+
+SEMANTIC_KINDS = (
+    "fact",
+    "decision",
+    "commitment",
+    "procedure",
+    "preference",
+    "observation",
+    "other",
+)
+SemanticKind = Literal[
+    "fact", "decision", "commitment", "procedure", "preference", "observation", "other"
+]
+EvidenceRole = Literal["observed", "stated", "inferred", "derived"]
+AccuracyOutcome = Literal["unverified", "confirmed", "corrected", "contradicted"]
+Verifier = Literal["human", "agent", "automatic"]
+
+
+def content_hash_of(text: str) -> str:
+    """Hash of the body alone (``sha256:<hex>``): "do I already have this?".
+
+    Distinct from any integrity checksum of the exported record, which answers
+    "did it arrive intact?". Identical bodies hash identically regardless of
+    header differences, which is what dedupe across copies needs.
+    """
+    return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+class COGXOrigin(BaseModel):
+    """Where a record first came from, kept across copies and re-exports.
+
+    ``external_system``/``external_id`` describe the system that wrote *this*
+    archive; ``origin`` names the first system, so a memory imported from Mem0
+    into Cognee and exported again still says it came from Mem0.
+    """
+
+    system: str
+    id: str
+    version: str | None = None
+
+
+class COGXEvidence(BaseModel):
+    """One piece of support for a record.
+
+    ``role`` says how the record relates to its support: ``observed`` (seen in a
+    source), ``stated`` (asserted by an actor), ``inferred`` (a model's
+    conclusion) or ``derived`` (consolidated from other memories). ``ref`` is
+    another record's identifier, a source locator, or an actor. ``confidence``
+    is the writer's belief at write time; see :class:`COGXAccuracy` for what
+    happened afterwards.
+    """
+
+    role: EvidenceRole
+    ref: str
+    confidence: float | None = None
+
+
+class COGXAccuracy(BaseModel):
+    """How a memory held up after it was written: the measured counterpart to
+    evidence confidence. ``outcome`` records whether a later check confirmed,
+    corrected or contradicted it; ``verified_by`` says whether a human, an
+    agent or an automatic rule did so; ``score`` is an optional feedback-derived
+    value in [0, 1] on an implementation-defined scale.
+    """
+
+    outcome: AccuracyOutcome = "unverified"
+    verified_at: datetime | None = None
+    verified_by: Verifier | None = None
+    score: float | None = None
+
+
 class COGXRecordBase(BaseModel):
     external_system: str = "unknown"
     external_id: str
@@ -73,6 +152,28 @@ class COGXRecordBase(BaseModel):
     created_at: datetime | None = None
     updated_at: datetime | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # OMP header (0.2). All optional.
+    origin: COGXOrigin | None = None
+    content_hash: str | None = None
+    subject: list[str] = Field(default_factory=list)
+    semantic_kind: SemanticKind | None = None
+    valid_from: datetime | None = None
+    valid_to: datetime | None = None
+    invalidated_by: str | None = None
+    evidence: list[COGXEvidence] = Field(default_factory=list)
+    accuracy: COGXAccuracy | None = None
+
+    def body_text(self) -> str | None:
+        """The text the content hash covers; None for records without a body."""
+        return None
+
+    @model_validator(mode="after")
+    def _stamp_content_hash(self) -> Self:
+        if self.content_hash is None:
+            body = self.body_text()
+            if body:
+                self.content_hash = content_hash_of(body)
+        return self
 
 
 class COGXDocument(COGXRecordBase):
@@ -82,6 +183,9 @@ class COGXDocument(COGXRecordBase):
     content: str
     title: str | None = None
     mime_type: str | None = None
+
+    def body_text(self) -> str | None:
+        return self.content
 
 
 class COGXTurn(BaseModel):
@@ -96,6 +200,9 @@ class COGXEpisode(COGXRecordBase):
     kind: Literal["episode"] = "episode"
     turns: list[COGXTurn] = Field(default_factory=list)
     title: str | None = None
+
+    def body_text(self) -> str | None:
+        return "\n".join(f"{turn.role}: {turn.content}" for turn in self.turns) or None
 
 
 class COGXEntity(COGXRecordBase):
@@ -127,6 +234,23 @@ class COGXFact(COGXRecordBase):
     confidence: float | None = None
     provenance: list[str] = Field(default_factory=list)
 
+    def body_text(self) -> str | None:
+        return self.fact_text
+
+    @model_validator(mode="after")
+    def _sync_validity(self) -> Self:
+        """``valid_at``/``invalid_at`` (0.1) and ``valid_from``/``valid_to`` (0.2)
+        are the same interval; whichever side is set fills the other."""
+        if self.valid_from is None and self.valid_at is not None:
+            self.valid_from = self.valid_at
+        elif self.valid_at is None and self.valid_from is not None:
+            self.valid_at = self.valid_from
+        if self.valid_to is None and self.invalid_at is not None:
+            self.valid_to = self.invalid_at
+        elif self.invalid_at is None and self.valid_to is not None:
+            self.invalid_at = self.valid_to
+        return self
+
 
 class COGXMemory(COGXRecordBase):
     """An atomic derived memory (Mem0-style short fact text)."""
@@ -134,6 +258,9 @@ class COGXMemory(COGXRecordBase):
     kind: Literal["memory"] = "memory"
     content: str
     categories: list[str] = Field(default_factory=list)
+
+    def body_text(self) -> str | None:
+        return self.content
 
 
 class COGXMemoryBlock(COGXRecordBase):
@@ -143,6 +270,9 @@ class COGXMemoryBlock(COGXRecordBase):
     label: str
     value: str
     limit: int | None = None
+
+    def body_text(self) -> str | None:
+        return self.value
 
 
 class COGXRawNode(BaseModel):
@@ -160,6 +290,106 @@ class COGXRawNode(BaseModel):
 COGXRecord = (
     COGXDocument | COGXEpisode | COGXEntity | COGXFact | COGXMemory | COGXMemoryBlock | COGXRawNode
 )
+
+HEADER_FIELDS = (
+    "origin",
+    "content_hash",
+    "subject",
+    "semantic_kind",
+    "valid_from",
+    "valid_to",
+    "invalidated_by",
+    "evidence",
+    "accuracy",
+)
+
+
+def header_to_properties(record: COGXRecordBase) -> dict[str, Any]:
+    """The OMP header as flat, JSON-safe node/edge properties.
+
+    Graph backends store scalars; nested values (origin, evidence, accuracy)
+    are serialized as JSON strings and lists as JSON arrays so the header
+    survives a round trip through the graph and comes back on re-export.
+    """
+    properties: dict[str, Any] = {}
+    if record.origin is not None:
+        properties["origin"] = json.dumps(record.origin.model_dump(exclude_none=True))
+    if record.content_hash:
+        properties["content_hash"] = record.content_hash
+    if record.subject:
+        properties["subject"] = json.dumps(record.subject)
+    if record.semantic_kind:
+        properties["semantic_kind"] = record.semantic_kind
+    if record.valid_from:
+        properties["valid_from"] = record.valid_from.isoformat()
+    if record.valid_to:
+        properties["valid_to"] = record.valid_to.isoformat()
+    if record.invalidated_by:
+        properties["invalidated_by"] = record.invalidated_by
+    if record.evidence:
+        properties["evidence"] = json.dumps(
+            [item.model_dump(exclude_none=True) for item in record.evidence]
+        )
+    if record.accuracy is not None:
+        properties["accuracy"] = json.dumps(
+            record.accuracy.model_dump(mode="json", exclude_none=True)
+        )
+    return properties
+
+
+def _loads(value: Any) -> Any:
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except ValueError:
+            return value
+    return value
+
+
+def header_from_properties(properties: dict[str, Any]) -> dict[str, Any]:
+    """Read the OMP header back from node/edge properties (inverse of
+    :func:`header_to_properties`). Unknown or malformed values are dropped,
+    never guessed: an absent header field means "not stated"."""
+    header: dict[str, Any] = {}
+    origin = _loads(properties.get("origin"))
+    if isinstance(origin, dict) and origin.get("system") and origin.get("id"):
+        header["origin"] = COGXOrigin(
+            system=str(origin["system"]), id=str(origin["id"]), version=origin.get("version")
+        )
+    if properties.get("content_hash"):
+        header["content_hash"] = str(properties["content_hash"])
+    subject = _loads(properties.get("subject"))
+    if isinstance(subject, list):
+        header["subject"] = [str(item) for item in subject]
+    kind = properties.get("semantic_kind") or properties.get("lesson_kind")
+    if kind in SEMANTIC_KINDS:
+        header["semantic_kind"] = kind
+    for key in ("valid_from", "valid_to"):
+        parsed = parse_timestamp(properties.get(key))
+        if parsed is not None:
+            header[key] = parsed
+    invalidated_by = properties.get("invalidated_by") or properties.get("superseded_by")
+    if invalidated_by:
+        header["invalidated_by"] = str(invalidated_by)
+    evidence = _loads(properties.get("evidence"))
+    if isinstance(evidence, list):
+        items = []
+        for item in evidence:
+            if isinstance(item, dict) and item.get("role") and item.get("ref"):
+                try:
+                    items.append(COGXEvidence.model_validate(item))
+                except ValueError:
+                    continue
+        if items:
+            header["evidence"] = items
+    accuracy = _loads(properties.get("accuracy"))
+    if isinstance(accuracy, dict):
+        try:
+            header["accuracy"] = COGXAccuracy.model_validate(accuracy)
+        except ValueError:
+            pass
+    return header
+
 
 _record_adapter: TypeAdapter = TypeAdapter(COGXRecord)
 
@@ -189,6 +419,9 @@ class COGXManifest(BaseModel):
     # actually has (None = unknown; the import keeps its own stamp).
     migration_revision: str | None = None
     notes: list[str] = Field(default_factory=list)
+    # COGX 0.2: what the exporter could state for each OMP header field, so an
+    # importer reads absence as "not populated" rather than "not true".
+    coverage: dict[str, str] = Field(default_factory=dict)
 
 
 def parse_record(data: dict[str, Any]) -> COGXRecord:
@@ -227,6 +460,7 @@ class COGXArchiveWriter:
         self.notes: list[str] = []
         self.embedding_model: str | None = None
         self.migration_revision: str | None = None
+        self.coverage: dict[str, str] = {}
         self._handles: dict[str, Any] = {}
 
     def __enter__(self) -> Self:
@@ -268,6 +502,7 @@ class COGXArchiveWriter:
                 embedding_model=self.embedding_model,
                 migration_revision=self.migration_revision,
                 notes=self.notes,
+                coverage=self.coverage,
             )
             manifest_path = self.directory / MANIFEST_FILE
             manifest_path.write_text(manifest.model_dump_json(indent=2), encoding="utf-8")

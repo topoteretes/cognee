@@ -21,11 +21,13 @@ from uuid import NAMESPACE_OID, UUID, uuid5
 
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.migration.cogx import (
+    HEADER_FIELDS,
     COGXEntity,
     COGXEpisode,
     COGXFact,
     COGXRawNode,
     COGXRecord,
+    header_to_properties,
 )
 from cognee.modules.migration.snapshot import rehydrate_node
 from cognee.shared.logging_utils import get_logger
@@ -74,6 +76,16 @@ def _record_external_metadata(record: COGXRecord) -> dict[str, Any]:
         metadata["external_updated_at"] = _iso(record.updated_at)
     if record.metadata:
         metadata.update(record.metadata)
+    header = {
+        key: value
+        for key, value in record.model_dump(mode="json", exclude_none=True).items()
+        if key in HEADER_FIELDS and value not in (None, [], {})
+    }
+    if header:
+        # OMP header (COGX 0.2): retained verbatim so origin, body hash,
+        # subject, validity, evidence and accuracy survive the import and
+        # travel again on re-export.
+        metadata["header"] = header
     return metadata
 
 
@@ -151,6 +163,10 @@ def _fact_edge_properties(fact: COGXFact) -> dict[str, Any]:
         properties["invalid_at"] = _iso(fact.invalid_at)
     if fact.confidence is not None:
         properties["confidence"] = fact.confidence
+    # OMP header (COGX 0.2) as flat edge properties; origin is re-stamped on
+    # export from the edge itself unless the fact carried its own.
+    for key, value in header_to_properties(fact).items():
+        properties.setdefault(key, value)
     return properties
 
 
