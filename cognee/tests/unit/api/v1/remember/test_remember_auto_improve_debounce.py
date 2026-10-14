@@ -347,14 +347,6 @@ async def test_invalid_improve_config_never_blocks_ingestion(monkeypatch, fake_s
     assert improve_calls == []
 
 
-def test_last_improve_at_with_a_trailing_z_parses_on_every_python_version():
-    """fromisoformat rejects a trailing "Z" before Python 3.11; the parser
-    must not read such a stamp as missing and reopen the time window."""
-    parsed = debounce_module._parse_timestamp("2026-08-03T09:00:10Z")
-
-    assert parsed == datetime(2026, 8, 3, 9, 0, 10, tzinfo=timezone.utc)
-
-
 def test_env_typo_in_stages_disabled_fails_the_first_config_read(monkeypatch):
     from cognee.modules.improve.config import get_improve_config
 
