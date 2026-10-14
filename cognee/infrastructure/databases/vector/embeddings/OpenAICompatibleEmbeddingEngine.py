@@ -36,7 +36,6 @@ from cognee.infrastructure.databases.exceptions import (
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
     EmbeddingEngine,
     EmbeddingResult,
-    embedding_tokens,
 )
 from cognee.infrastructure.databases.vector.embeddings.input_limit import (
     init_input_limit,
@@ -215,7 +214,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
                         vectors=handle_embedding_response(
                             original_texts, embeddings, self.dimensions
                         ),
-                        tokens=embedding_tokens(left_result) + embedding_tokens(right_result),
+                        tokens=left_result.tokens + right_result.tokens,
                     )
 
                 if isinstance(original_texts, list) and len(original_texts) == 1:
@@ -235,7 +234,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
                         vectors=handle_embedding_response(
                             original_texts, embeddings, self.dimensions
                         ),
-                        tokens=embedding_tokens(left_result) + embedding_tokens(right_result),
+                        tokens=left_result.tokens + right_result.tokens,
                     )
 
             if isinstance(error, asyncio.TimeoutError):

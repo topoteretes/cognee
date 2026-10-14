@@ -31,7 +31,6 @@ from cognee.infrastructure.databases.exceptions import (
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
     EmbeddingEngine,
     EmbeddingResult,
-    embedding_tokens,
 )
 from cognee.infrastructure.databases.vector.embeddings.input_limit import (
     init_input_limit,
@@ -280,7 +279,7 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
                 vectors=handle_embedding_response(
                     original_texts, left_result + right_result, self.dimensions
                 ),
-                tokens=embedding_tokens(left_result) + embedding_tokens(right_result),
+                tokens=left_result.tokens + right_result.tokens,
             )
 
         s = original_texts[0]
@@ -306,7 +305,7 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
         # this can be several times the text's own count.
         return EmbeddingResult(
             vectors=handle_embedding_response(original_texts, [pooled.tolist()], self.dimensions),
-            tokens=embedding_tokens(left_result) + embedding_tokens(right_result),
+            tokens=left_result.tokens + right_result.tokens,
         )
 
     def get_vector_size(self) -> int:

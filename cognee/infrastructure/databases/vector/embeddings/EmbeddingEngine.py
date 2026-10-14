@@ -9,21 +9,20 @@ class EmbeddingResult(list[Vector]):
     text, which also carries the input tokens the provider consumed in ``tokens``
     (embeddings have no output tokens).
 
-    Callers that only want the vectors use it as the list it is, exactly as before
-    token counting existed; EmbeddingGateway reads ``tokens`` to record usage. An
-    engine that returns a plain list reports 0 tokens. Anything that builds a new
-    list from it (slicing, ``+``, ``list()``) is a plain list again, so an engine
-    combining partial results must wrap them in a new EmbeddingResult.
+    Reading ``tokens`` raises when no count was given. Anything that builds a new list
+    from it (slicing, ``+``, ``list()``) is a plain list without ``tokens``, so an
+    engine combining partial results must wrap them in a new EmbeddingResult.
     """
 
-    def __init__(self, vectors=(), tokens: int = 0):
+    def __init__(self, vectors=(), tokens: int | None = None):
         super().__init__(vectors)
-        self.tokens = tokens
+        self._tokens = tokens
 
-
-def embedding_tokens(vectors: list[Vector]) -> int:
-    """The input tokens an embed_text() result carries; 0 for a plain list."""
-    return getattr(vectors, "tokens", 0)
+    @property
+    def tokens(self) -> int:
+        if self._tokens is None:
+            raise ValueError("The token count of these embeddings was not reported.")
+        return self._tokens
 
 
 class EmbeddingEngine(Protocol):
