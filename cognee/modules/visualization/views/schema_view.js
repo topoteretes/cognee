@@ -97,12 +97,20 @@
     // Transformation impact-layer (operations → schema types).
     window._schemaOperations = (schemaGraphData && schemaGraphData.operations) || [];
     window._schemaOperationLinks = (schemaGraphData && schemaGraphData.operation_links) || [];
+    const nodeNameById = {};
     schemaGraphData.nodes.forEach(function(n) {
-      if (n.type === 'GraphNodeType') {
+      if (n && n.id) {
+        nodeNameById[String(n.id)] = String(n.name || n.id);
+      }
+    });
+
+    schemaGraphData.nodes.forEach(function(n) {
+      if (n.type === 'GraphNodeType' || n.type === 'SchemaTable' || n.type === 'TableType' || n.type === 'DatabaseSchema') {
         var t = {
           id: String(n.id),
           name: String(n.name || n.id),
-          rank: Number.isFinite(Number(n.rank)) ? Number(n.rank) : 4,
+          accentType: n.type || 'SchemaTable',
+          rank: Number.isFinite(Number(n.rank)) ? Number(n.rank) : (n.type === 'SchemaTable' ? 1 : 4),
           fields: Array.isArray(n.fields) ? n.fields : [],
           instance_count: n.instance_count != null ? n.instance_count : null,
           source_pipeline: n.source_pipeline || null,
@@ -127,8 +135,30 @@
           relationship_label: n.relationship_label || '',
           edge_count: n.edge_count || 0,
         });
+      } else if (n.type === 'SchemaRelationship') {
+        edgeTypes.push({
+          id: String(n.id),
+          source_type: n.source_table || n.source_type || '',
+          target_type: n.target_table || n.target_type || '',
+          relationship_label: n.relationship_label || n.relationship_type || 'references',
+          edge_count: n.edge_count || 1,
+        });
       }
     });
+
+    if (Array.isArray(schemaGraphData.links)) {
+      schemaGraphData.links.forEach(function(l, idx) {
+        const srcName = nodeNameById[String(l.source)] || String(l.source);
+        const tgtName = nodeNameById[String(l.target)] || String(l.target);
+        edgeTypes.push({
+          id: 'schema_link_' + idx,
+          source_type: srcName,
+          target_type: tgtName,
+          relationship_label: l.label || 'references',
+          edge_count: 1,
+        });
+      });
+    }
     // Sort node types by rank, then name; gives stable Story order
     nodeTypes.sort(function(a, b) {
       if (a.rank !== b.rank) return a.rank - b.rank;
@@ -164,7 +194,15 @@
   // A type box grows to fit its instance mini-cards (capped at MAX_CARDS unless
   // expanded); a lensed single-instance box stays compact.
   function boxHeight(t) {
-    if (t.instance_count == null) return LAYOUT.LENS_H;
+    if (t.instance_count == null) {
+      if (t.fields && t.fields.length) {
+        const count = Math.min(t.fields.length, LAYOUT.MAX_CARDS);
+        let h = LAYOUT.HEADER_H + count * LAYOUT.CARD_H + LAYOUT.BOTTOM_PAD;
+        if (t.fields.length > LAYOUT.MAX_CARDS) h += LAYOUT.MORE_H;
+        return h;
+      }
+      return LAYOUT.LENS_H;
+    }
     const insts = instancesForType(t.name);
     const total = t.instance_count || insts.length || 0;
     if (!total) return LAYOUT.LENS_H;
@@ -490,11 +528,61 @@
         .attr('filter', 'url(#sd-card-shadow)');
 
       if (t.instance_count == null) {
-        // Single-instance card: the instance name is the headline.
-        g.append('circle').attr('cx', 21).attr('cy', 25).attr('r', 5).attr('fill', accent);
-        g.append('text').attr('x', 34).attr('y', 30)
-          .attr('font-size', 14.5).attr('font-weight', 700).attr('fill', P.title)
-          .text(truncate(name, 15));
+        if (!t.fields || !t.fields.length) {
+          // Single-instance card: the instance name is the headline.
+          g.append('circle').attr('cx', 21).attr('cy', 25).attr('r', 5).attr('fill', accent);
+          g.append('text').attr('x', 34).attr('y', 30)
+            .attr('font-size', 14.5).attr('font-weight', 700).attr('fill', P.title)
+            .text(truncate(name, 15));
+          return;
+        }
+
+        // Schema table card with column fields
+        g.append('circle').attr('cx', 18).attr('cy', 22).attr('r', 4).attr('fill', accent);
+        g.append('text').attr('x', 30).attr('y', 25.5)
+          .attr('font-size', 12).attr('font-weight', 700).attr('fill', P.title)
+          .text(truncate(String(name), 16));
+
+        // Column count pill (top-right)
+        const colStr = String(t.fields.length) + (t.fields.length === 1 ? ' col' : ' cols');
+        const pw = 16 + colStr.length * 7;
+        g.append('rect')
+          .attr('x', p.w - 14 - pw).attr('y', 13)
+          .attr('width', pw).attr('height', 19).attr('rx', 9.5)
+          .attr('fill', P.pill);
+        g.append('text')
+          .attr('x', p.w - 14 - pw / 2).attr('y', 26.5)
+          .attr('text-anchor', 'middle')
+          .attr('font-size', 10.5).attr('font-weight', 600).attr('fill', P.pillText)
+          .text(colStr);
+
+        const limit = Math.min(t.fields.length, LAYOUT.MAX_CARDS);
+        t.fields.slice(0, limit).forEach(function(f, i) {
+          const cy = LAYOUT.HEADER_H + i * LAYOUT.CARD_H;
+          const card = g.append('g').attr('class', 'sd-mini-card');
+          card.append('rect')
+            .attr('x', 13).attr('y', cy)
+            .attr('width', p.w - 26).attr('height', LAYOUT.CARD_H - 6)
+            .attr('rx', 7)
+            .attr('fill', P.mini)
+            .attr('stroke', P.miniBorder)
+            .attr('stroke-width', 1);
+          const fText = f.name + (f.type ? ' : ' + f.type : '');
+          card.append('text')
+            .attr('x', 23).attr('y', cy + (LAYOUT.CARD_H - 6) / 2 + 4)
+            .attr('font-size', 11)
+            .attr('fill', P.miniText)
+            .text(truncate(fText, 24));
+        });
+
+        if (t.fields.length > LAYOUT.MAX_CARDS) {
+          const my = LAYOUT.HEADER_H + limit * LAYOUT.CARD_H;
+          const toggle = g.append('g').attr('class', 'sd-expand-toggle');
+          toggle.append('text')
+            .attr('x', 21).attr('y', my + 12)
+            .attr('font-size', 11).attr('font-weight', 600).attr('fill', '#7C5CFC')
+            .text('+ ' + (t.fields.length - LAYOUT.MAX_CARDS) + ' more cols');
+        }
         return;
       }
 
@@ -1113,7 +1201,8 @@
     });
   })();
 
-  if (!schemaData && (!schemaGraphData || !schemaGraphData.nodes || !schemaGraphData.nodes.length)) {
+  const initialModel = buildSchemaModel();
+  if (!schemaData && (!initialModel.nodeTypes || !initialModel.nodeTypes.length)) {
     setSchemaEmpty('No schema configured for this dataset.');
   }
 })();
