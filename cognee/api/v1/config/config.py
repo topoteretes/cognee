@@ -12,7 +12,7 @@ from cognee.infrastructure.databases.vector.embeddings.config import get_embeddi
 from cognee.infrastructure.llm.config import (
     get_llm_config,
 )
-from cognee.modules.cognify.config import get_cognify_config
+from cognee.modules.cognify.config import get_cognify_config, override_cognify_config
 from cognee.modules.recall.config import get_recall_config
 from cognee.tasks.translation.config import get_translation_config
 
@@ -251,8 +251,7 @@ class config:
         classification_model : object
             The classification model to use.
         """
-        cognify_config = get_cognify_config()
-        cognify_config.classification_model = classification_model
+        override_cognify_config(classification_model=classification_model)
 
     @staticmethod
     def set_summarization_model(summarization_model: object):
@@ -263,8 +262,7 @@ class config:
         summarization_model : object
             The summarization model to use.
         """
-        cognify_config = get_cognify_config()
-        cognify_config.summarization_model = summarization_model
+        override_cognify_config(summarization_model=summarization_model)
 
     @staticmethod
     def set_graph_model(graph_model: object):

@@ -47,24 +47,27 @@ async def test_removed_keyword_raises_before_setup():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("value", ["true", "false", ""])
-async def test_removed_setting_warns_once_per_cache_fill_and_leaves_tasks_unchanged(
+async def test_removed_setting_warns_once_per_process_and_leaves_tasks_unchanged(
     monkeypatch, value
 ):
     monkeypatch.delenv("CONTRADICTION_DETECTION", raising=False)
     monkeypatch.setenv("PROVENANCE_TRACKING", "false")
     unset_tasks = await _task_name_sequence(CognifyConfig())
     monkeypatch.setenv("CONTRADICTION_DETECTION", value)
-    get_cognify_config.cache_clear()
+    # get_cognify_config() re-reads the environment on every call since issue
+    # #5771, so the warning no longer rides on the config lookup's cache: it
+    # carries its own once-per-process cache instead.
+    config_module._warn_if_contradiction_detection_is_set.cache_clear()
     try:
         with patch.object(config_module.logger, "warning") as warning:
             config = get_cognify_config()
-            assert get_cognify_config() is config
+            assert get_cognify_config() is not config
             warning.assert_called_once()
             assert "improve(review_conflicts=True)" in warning.call_args.args[0]
             assert "IMPROVE_REVIEW_CONFLICTS" in warning.call_args.args[0]
             assert await _task_name_sequence(config) == unset_tasks == _BASE_SEQUENCE
-            get_cognify_config.cache_clear()
+            config_module._warn_if_contradiction_detection_is_set.cache_clear()
             get_cognify_config()
             assert warning.call_count == 2
     finally:
-        get_cognify_config.cache_clear()
+        config_module._warn_if_contradiction_detection_is_set.cache_clear()
