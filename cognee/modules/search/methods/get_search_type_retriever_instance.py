@@ -43,6 +43,24 @@ from cognee.modules.retrieval.triplet_retriever import TripletRetriever
 from cognee.modules.search.exceptions import UnsupportedSearchTypeError
 from cognee.modules.search.operations import select_search_type
 from cognee.modules.search.types import SearchType
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
+
+CYPHER_SEARCH_TYPES = (SearchType.CYPHER, SearchType.NATURAL_LANGUAGE)
+
+CYPHER_DISABLED_MESSAGE = (
+    "{search_type} search is disabled by default. It runs Cypher queries directly against "
+    "the graph database, which lets any user with read access to a dataset execute arbitrary "
+    "queries, up to remote code execution on the server. To use it, explicitly enable it by "
+    "setting the environment variable ALLOW_CYPHER_QUERY=true, and only do so when every "
+    "user of this deployment is trusted."
+)
+
+
+def cypher_queries_allowed() -> bool:
+    """Raw Cypher (CYPHER, NATURAL_LANGUAGE) is opt-in through ALLOW_CYPHER_QUERY=true."""
+    return os.getenv("ALLOW_CYPHER_QUERY", "false").strip().lower() in ("true", "1", "yes")
 
 
 def _hybrid_lane_top_k(config: dict, key: str, search_top_k: int | None) -> int | None:
@@ -434,11 +452,10 @@ async def get_search_type_retriever_instance(
     if query_type is SearchType.FEELING_LUCKY:
         query_type = await select_search_type(query_text)
 
-    if (
-        query_type in [SearchType.CYPHER, SearchType.NATURAL_LANGUAGE]
-        and os.getenv("ALLOW_CYPHER_QUERY", "true").lower() == "false"
-    ):
-        raise UnsupportedSearchTypeError("Cypher query search types are disabled.")
+    if query_type in CYPHER_SEARCH_TYPES and not cypher_queries_allowed():
+        message = CYPHER_DISABLED_MESSAGE.format(search_type=query_type.value)
+        logger.warning(message)
+        raise UnsupportedSearchTypeError(message)
 
     from cognee.modules.retrieval.registered_community_retrievers import (
         registered_community_retrievers,

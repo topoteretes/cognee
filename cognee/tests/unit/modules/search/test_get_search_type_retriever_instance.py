@@ -68,6 +68,17 @@ async def test_disallowed_cypher_search_types_raise(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("search_type", [SearchType.CYPHER, SearchType.NATURAL_LANGUAGE])
+async def test_cypher_search_types_are_disabled_by_default(monkeypatch, search_type):
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+
+    monkeypatch.delenv("ALLOW_CYPHER_QUERY", raising=False)
+
+    with pytest.raises(UnsupportedSearchTypeError, match="ALLOW_CYPHER_QUERY=true"):
+        await mod.get_search_type_retriever_instance(search_type, query_text="q")
+
+
+@pytest.mark.asyncio
 async def test_allowed_cypher_search_types_return_tools(monkeypatch):
     import cognee.modules.search.methods.get_search_type_retriever_instance as mod
     from cognee.modules.retrieval.cypher_search_retriever import CypherSearchRetriever

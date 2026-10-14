@@ -288,7 +288,7 @@ Available search types (from `cognee/modules/search/types/SearchType.py`), passe
 - **CHUNKS** - Vector similarity search over chunks
 - **CHUNKS_LEXICAL** - Lexical (keyword) search over chunks
 - **SUMMARIES** - Search pre-computed document summaries
-- **CYPHER** - Direct Cypher query execution (enabled by default; `ALLOW_CYPHER_QUERY=false` disables it)
+- **CYPHER** - Direct Cypher query execution (disabled by default; `ALLOW_CYPHER_QUERY=true` enables it)
 - **NATURAL_LANGUAGE** - Natural language to structured query
 - **TEMPORAL** - Hybrid retrieval reranked by time: the `Timestamp` nodes overlapping the window the LLM extracts from the question ("what happened in 1969?") are looked up natively (`get_timestamps_in_range` on Ladybug, Neo4j, Postgres demo; a scan elsewhere), the chunks attached to them join the hybrid candidates (similarity alone misses most rows dated inside a window), and the anchored candidates move to the front, ranked by how tightly their matched timestamp fits the window (a chunk dated to the day before one that only names the year); nothing is dropped, and a question with no time or no overlap gets plain hybrid
 - **FEELING_LUCKY** - Automatic search type selection
@@ -788,7 +788,7 @@ Several security environment variables in `.env`:
 - `ACCEPT_LOCAL_FILE_PATH` - Allow local file paths (default: True)
 - `COGNEE_ALLOWED_LOCAL_FILE_ROOTS` - Optional `os.pathsep`-separated allowlist of directories local paths may be read from. Unset (default) means any local path is accepted, so a local repo or document tree can be ingested from anywhere; a path-looking string that does not exist is still ingested as text. When set, paths outside the listed roots are rejected (or ingested as text on the non-strict `add()` path); cognee's own data/system/cache/logs/repos roots are always allowed. Set it for servers reachable by untrusted callers.
 - `ALLOW_HTTP_REQUESTS` - Allow HTTP requests from Cognee (default: True)
-- `ALLOW_CYPHER_QUERY` - Allow raw Cypher queries (default: True)
+- `ALLOW_CYPHER_QUERY` - Allow raw Cypher queries, the CYPHER and NATURAL_LANGUAGE search types (default: False). Off by default because raw Cypher lets any user with read access run arbitrary queries, up to remote code execution; enable only when all users are trusted
 - `ENABLE_BACKEND_ACCESS_CONTROL` - Multi-tenant isolation (default: True). When `true`, API auth is required and per-user/dataset DB isolation is enabled. When `false`, single-user mode: shared DBs and auth off unless overridden.
 - `REQUIRE_AUTHENTICATION` - Explicit auth override. Unset (default): follows `ENABLE_BACKEND_ACCESS_CONTROL`. `false` is ignored when `ENABLE_BACKEND_ACCESS_CONTROL=true`. For a single-user deployment with auth off, set `ENABLE_BACKEND_ACCESS_CONTROL=false` (and optionally `REQUIRE_AUTHENTICATION=false`).
 
