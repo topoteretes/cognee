@@ -16,6 +16,8 @@ Environment variables (prefix ``IMPROVE_``)::
     IMPROVE_FEEDBACK_ALPHA=0.1         # learning rate for feedback weights, (0, 1]
     IMPROVE_REVIEW_CONFLICTS=false     # review source facts and dated conflicts
     IMPROVE_EFFECTIVE_DATE_KEY=effective_date  # document metadata source-date key
+    IMPROVE_TRACE_WINDOW_STEPS=30      # max agent trace steps per persisted document
+    IMPROVE_TRACE_WINDOWS_PER_RUN=10   # max agent trace documents per stage pass
 """
 
 from functools import lru_cache
@@ -44,6 +46,12 @@ class ImproveConfig(BaseSettings):
     # ``disabled_by_config``. Read as a comma-separated string.
     stages_disabled: Annotated[list[str], NoDecode] = []
     feedback_alpha: float = DEFAULT_FEEDBACK_ALPHA
+    # Agent trace persistence cognifies a session's pending steps in windows of
+    # at most this many steps, so no single LLM call grows with the backlog.
+    trace_window_steps: int = 30
+    # Windows one persist_agent_traces pass may cognify; the rest of a backlog
+    # waits for the next improve().
+    trace_windows_per_run: int = 10
 
     model_config = SettingsConfigDict(env_prefix="IMPROVE_", extra="ignore")
 
@@ -61,6 +69,13 @@ class ImproveConfig(BaseSettings):
     def _alpha_in_unit_interval(cls, value: float) -> float:
         if value <= 0 or value > 1:
             raise ValueError("feedback_alpha must be in range (0, 1]")
+        return value
+
+    @field_validator("trace_window_steps", "trace_windows_per_run")
+    @classmethod
+    def _positive(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("trace window settings must be >= 1")
         return value
 
     @field_validator("debounce_entries")
