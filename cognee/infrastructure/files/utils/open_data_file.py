@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from os import path
 from urllib.parse import urlparse
 
+from cognee.infrastructure.files.encryption import wrap_storage_if_encrypted
 from cognee.infrastructure.files.storage.FileBufferedReader import FileBufferedReader
 from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
 from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
@@ -26,7 +27,9 @@ async def open_data_file(
         file_dir_path = path.dirname(actual_fs_path)
         file_name = path.basename(actual_fs_path)
 
-        file_storage = LocalFileStorage(file_dir_path)
+        # Sealed when the directory is under the data root and encryption is on;
+        # a plain user path, or a plaintext object, comes back unchanged.
+        file_storage = wrap_storage_if_encrypted(LocalFileStorage(file_dir_path))
 
         async with file_storage.open(file_name, mode=mode, encoding=encoding, **kwargs) as file:
             yield file
@@ -43,7 +46,7 @@ async def open_data_file(
         s3_dir_path = os.path.dirname(normalized_url)
         s3_filename = os.path.basename(normalized_url)
 
-        file_storage = S3FileStorage(s3_dir_path)
+        file_storage = wrap_storage_if_encrypted(S3FileStorage(s3_dir_path))
 
         async with file_storage.open(s3_filename, mode=mode, **kwargs) as file:
             yield file
@@ -63,7 +66,9 @@ async def open_data_file(
         if not file_name or file_name == "." or file_name == "..":
             raise ValueError(f"Invalid filename extracted: '{file_name}' from path: '{file_path}'")
 
-        file_storage = LocalFileStorage(file_dir_path)
+        # Sealed when the directory is under the data root and encryption is on;
+        # a plain user path, or a plaintext object, comes back unchanged.
+        file_storage = wrap_storage_if_encrypted(LocalFileStorage(file_dir_path))
 
         async with file_storage.open(file_name, mode=mode, encoding=encoding, **kwargs) as file:
             yield file
