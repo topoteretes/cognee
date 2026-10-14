@@ -29,6 +29,7 @@ from cognee.tasks.code_graph.models import (
     CodeAssociation,
     CodeExtractionAccount,
     CodeFileReference,
+    CodeFlow,
     CodeInsight,
     CodeIntent,
     CodeLintFinding,
@@ -56,11 +57,16 @@ KIND_TO_MODEL = {
     "test_ref": CodeTestReference,
     "file_ref": CodeFileReference,
     "insight": CodeInsight,
+    "flow": CodeFlow,
     "intent": CodeIntent,
     "extraction": CodeExtractionAccount,
     "association": CodeAssociation,
     "lint": CodeLintFinding,
 }
+
+# The prop holding the prose a synthesized kind is described by: an insight's
+# explainer text, a flow's summary.
+_PROSE_PROPS = {"insight": "description", "flow": "summary"}
 
 # receipt.json fields worth keeping on the repository node. repo_path,
 # duration and generated_at-style run specifics that describe the machine
@@ -211,6 +217,10 @@ def map_facts_to_data_points(
         line = fact.get("line")
         end_line = fact.get("end_line")
         enola_id = fact.get("id")
+        doc = props.get("doc")
+        if kind == "insight" or not isinstance(doc, str) or not doc.strip():
+            doc = None
+        prose = props.get(_PROSE_PROPS[kind]) if kind in _PROSE_PROPS else doc
 
         fields: dict[str, Any] = {
             "id": node_id,
@@ -224,15 +234,18 @@ def map_facts_to_data_points(
             "repo": repo,
             "enola_id": enola_id if is_enola_id(enola_id) else None,
             # Insights carry prose from the explainer; use it verbatim instead
-            # of the generic "kind: k=v, ..." property summary.
-            "description": props.get("description")
-            if kind == "insight" and isinstance(props.get("description"), str)
-            else _describe_fact(kind, props),
+            # of the generic "kind: k=v, ..." property summary. So do flows
+            # (their summary) and documented facts (the author's doc comment).
+            "description": prose if isinstance(prose, str) else _describe_fact(kind, props),
             "fact_properties": props,
             "part_of": _get_repository(repo),
         }
         if model is CodeSymbol:
             fields["symbol_kind"] = props.get("symbol_kind")
+        if doc is not None:
+            # Only a documented fact gains the key, so an undocumented fact's
+            # fact_hash stays byte-identical to before docs were read.
+            fields["doc"] = doc
 
         # node_set only enters the hash input when the call is tagged, so an
         # untagged repo's fact_hash stays byte-identical to before node_set
@@ -386,9 +399,13 @@ def build_code_graph_edges(
             continue
         repo = _fact_repo(fact, fallback_repo)
         valid_facts.append((fact, repo))
-        name_index.setdefault(name, set()).add((repo, kind))
-        for short_form in _short_target_names(name):
-            short_name_index.setdefault(short_form, set()).add((repo, kind, name))
+        if kind != "flow":
+            # No relation targets a flow, and a flow is named after its entry
+            # symbol or route: indexing its name would make those names
+            # ambiguous for every relation that resolves by name.
+            name_index.setdefault(name, set()).add((repo, kind))
+            for short_form in _short_target_names(name):
+                short_name_index.setdefault(short_form, set()).add((repo, kind, name))
         fact_id = fact.get("id")
         if is_enola_id(fact_id):
             # Records sharing an id share (repo, kind, name, file), hence the node.

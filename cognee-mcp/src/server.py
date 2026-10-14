@@ -582,9 +582,10 @@ async def recall(
         deterministic code-graph query, e.g. {"operation": "query_facts",
         "property": "language", "limit": 500}. Supported operations:
         query_facts, explore, traverse, find_path, impact_analysis, insights,
-        architecture, delta. When omitted, 'code' scope runs an 'explore'
-        seeded with the query text. Requires exact node names/IDs or
-        structured filters, not natural-language questions.
+        architecture, delta, capabilities, search, neighbors, subgraph, flows,
+        hubs, ask. When omitted, 'code' scope runs an 'explore' seeded with the
+        query text. Most operations take exact node names/IDs or structured
+        filters; search and ask take natural-language text.
 
     Returns a one-line memory-hit or empty-state summary followed by the original
     result text. Status markers do not count as hits. Empty-state checks are
@@ -661,6 +662,13 @@ async def code_search(
         "insights",
         "architecture",
         "delta",
+        "capabilities",
+        "search",
+        "neighbors",
+        "subgraph",
+        "flows",
+        "hubs",
+        "ask",
     ],
     arguments: dict | None = None,
     datasets: str | None = None,
@@ -675,20 +683,24 @@ async def code_search(
     ``arguments``. For example, use operation="query_facts" with
     arguments={"kinds": ["module", "symbol"], "limit": 100}, or
     operation="impact_analysis" with arguments={"seeds": ["UserService"]}.
+    For a question in plain words ("how does checkout work?"), use
+    operation="ask" with the question as ``query``: it returns matching
+    symbols, entry-point flows, their neighbourhood and file:line citations.
 
     Parameters
     ----------
     operation : str
         Code-graph operation: query_facts, explore, traverse, find_path,
-        impact_analysis, insights, architecture, or delta.
+        impact_analysis, insights, architecture, delta, capabilities, search,
+        neighbors, subgraph, flows, hubs, or ask.
     arguments : dict, optional
         Operation-specific structured arguments. Do not include an "operation"
         key here; select it with the operation parameter.
     datasets : str, optional
         Comma-separated Cognee dataset names containing indexed code.
     query : str
-        Optional seed text, primarily used by explore when no explicit seed is
-        supplied in arguments.
+        Optional seed text, used by explore when no explicit seed is supplied
+        in arguments, and the text or question for search and ask.
     top_k : int
         Maximum number of results to return (default: 15).
     """

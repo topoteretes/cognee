@@ -348,6 +348,14 @@ async def exception_handler(request: Request, exc: CogneeApiError) -> JSONRespon
         improperly_defined=improperly_defined,
     )
     content = {"detail": detail["message"]}
+    # A stable, machine-readable reason and the argument it concerns, for errors
+    # that carry them (SearchType.CODE's CodeSearchValidationError family), so a
+    # client can branch on `code` instead of parsing `detail`. Strings only: other
+    # exceptions may use an `error_code` attribute for something else.
+    for key, attribute in (("code", "error_code"), ("param", "error_param")):
+        value = getattr(exc, attribute, None)
+        if isinstance(value, str) and value:
+            content[key] = value
     # A hint the caller can act on: the exception's own remediation first, else the
     # shared first-run table. Only present when a fix is known, so existing clients
     # that read only `detail` are unaffected.
