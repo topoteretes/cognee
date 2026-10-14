@@ -62,6 +62,11 @@ def resolve_fastembed_cache_dir() -> str:
     downloaded again each time. When the hub cache cannot be created or written
     to (a read-only home, a sandbox) the temp location is used after all, with a
     warning, so an embed never fails over where its model is kept.
+
+    Sharing the hub cache has one side effect: when a hub download fails,
+    fastembed falls back to its own bucket and unpacks into ``tmp/`` and
+    ``fast-<name>/`` at the cache root, which ``hf cache scan`` lists as invalid
+    repos. Both belong to fastembed and are safe to leave or delete.
     """
     explicit = os.getenv("FASTEMBED_CACHE_PATH")
     if explicit:
@@ -175,7 +180,11 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
             cached=cached,
             cache_dir=cache_dir,
             size_hint=size_hint,
-            location_var="HF_HOME (or FASTEMBED_CACHE_PATH)",
+            # Name the variable that decided the location: HF_HOME has no effect
+            # while FASTEMBED_CACHE_PATH is set.
+            location_var=(
+                "FASTEMBED_CACHE_PATH" if os.getenv("FASTEMBED_CACHE_PATH") else "HF_HOME"
+            ),
         )
         # Passed explicitly: fastembed's own default is the system temp directory.
         self.embedding_model = TextEmbedding(model_name=model, cache_dir=cache_dir)

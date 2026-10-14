@@ -125,6 +125,25 @@ def test_engine_announces_a_first_use_download(tmp_path, monkeypatch, caplog):
     message = _event_text(warnings[0])
     assert "Downloading local model BAAI/bge-small-en-v1.5 (about 67 MB)" in message
     assert str(tmp_path) in message and "FASTEMBED_CACHE_PATH" in message
+    # HF_HOME cannot move the cache while FASTEMBED_CACHE_PATH is set.
+    assert "HF_HOME" not in message
+
+
+def test_engine_download_notice_names_hf_home_for_the_hub_cache(tmp_path, monkeypatch, caplog):
+    _hub_cache(monkeypatch, tmp_path / "hub")
+    with (
+        caplog.at_level(logging.INFO, logger="FastembedEmbeddingEngine"),
+        patch.object(engine_module, "TextEmbedding") as text_embedding,
+        patch.object(FastembedEmbeddingEngine, "get_tokenizer", return_value=MagicMock()),
+    ):
+        text_embedding.list_supported_models.return_value = REGISTRY
+        FastembedEmbeddingEngine(model=MODEL, dimensions=384)
+
+    warnings = [record for record in caplog.records if record.levelno == logging.WARNING]
+    assert len(warnings) == 1, [record.getMessage() for record in caplog.records]
+    message = _event_text(warnings[0])
+    assert "Set HF_HOME to change the location" in message
+    assert "FASTEMBED_CACHE_PATH" not in message
 
 
 def test_engine_loads_a_cached_model_quietly(tmp_path, monkeypatch, caplog):
