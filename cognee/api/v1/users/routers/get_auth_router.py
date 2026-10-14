@@ -1,7 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.security import OAuth2PasswordRequestForm
 
-from cognee.modules.users.authentication.default.default_transport import default_transport
+from cognee.modules.users.authentication.default.default_transport import (
+    cookie_secure_for,
+    default_transport,
+)
 from cognee.modules.users.authentication.get_client_auth_backend import get_client_auth_backend
 from cognee.modules.users.authentication.methods.authenticate_user import authenticate_user
 from cognee.modules.users.methods import get_authenticated_user
@@ -13,6 +16,7 @@ def get_auth_router():
 
     @router.post("/login")
     async def login(
+        request: Request,
         response: Response,
         credentials: OAuth2PasswordRequestForm = Depends(),
     ):
@@ -32,7 +36,7 @@ def get_auth_router():
             max_age=default_transport.cookie_max_age,
             path=default_transport.cookie_path,
             domain=default_transport.cookie_domain,
-            secure=default_transport.cookie_secure,
+            secure=cookie_secure_for(request),
             httponly=default_transport.cookie_httponly,
             samesite=default_transport.cookie_samesite,
         )
@@ -40,11 +44,20 @@ def get_auth_router():
         return {"access_token": token, "token_type": "bearer"}
 
     @router.post("/logout")
-    async def logout(response: Response, user: User = Depends(get_authenticated_user)):
+    async def logout(
+        request: Request, response: Response, user: User = Depends(get_authenticated_user)
+    ):
         """Logout — POST /api/v1/auth/logout."""
+        # A deletion is itself a Set-Cookie with an expiry in the past; browsers
+        # match it against the stored cookie by name, path and domain, and some
+        # drop it when Secure or SameSite disagree, so it mirrors the login.
         response.delete_cookie(
             key=default_transport.cookie_name,
+            path=default_transport.cookie_path,
             domain=default_transport.cookie_domain,
+            secure=cookie_secure_for(request),
+            httponly=default_transport.cookie_httponly,
+            samesite=default_transport.cookie_samesite,
         )
 
         return {}
