@@ -12,7 +12,6 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import cognee.base_config as base_config_module
 import cognee.infrastructure.databases.vector.embeddings.FastembedEmbeddingEngine as engine_module
 from cognee.infrastructure.databases.vector.embeddings.FastembedEmbeddingEngine import (
     FastembedEmbeddingEngine,
@@ -44,36 +43,37 @@ def test_cache_lookup_uses_fastembeds_own_location_rule(tmp_path, monkeypatch):
         assert fastembed_model_cached(MODEL)[0] is True
 
 
-def _models_root(monkeypatch, path) -> None:
-    """Serve a BaseConfig whose models root is ``path`` (COGNEE_MODELS_DIR is read
-    at import time, so the field is set directly) and drop any FASTEMBED_CACHE_PATH."""
+def _hub_cache(monkeypatch, path) -> None:
+    """Point the Hugging Face hub cache at ``path`` (huggingface_hub reads HF_HOME at
+    import time, so the constant is set directly) and drop any FASTEMBED_CACHE_PATH."""
+    from huggingface_hub import constants
+
     monkeypatch.delenv("FASTEMBED_CACHE_PATH", raising=False)
-    config = base_config_module.BaseConfig(models_root_directory=str(path))
-    monkeypatch.setattr(base_config_module, "get_base_config", lambda: config)
+    monkeypatch.setattr(constants, "HF_HUB_CACHE", str(path))
 
 
-def test_cache_defaults_under_cognee_models_dir(tmp_path, monkeypatch):
-    _models_root(monkeypatch, tmp_path / "models")
+def test_cache_defaults_to_the_hugging_face_hub_cache(tmp_path, monkeypatch):
+    _hub_cache(monkeypatch, tmp_path / "hub")
 
     cache_dir = resolve_fastembed_cache_dir()
 
-    assert Path(cache_dir).resolve() == (tmp_path / "models" / "fastembed").resolve()
-    assert (tmp_path / "models" / "fastembed").is_dir()
+    assert Path(cache_dir).resolve() == (tmp_path / "hub").resolve()
+    assert (tmp_path / "hub").is_dir()
 
 
-def test_fastembed_cache_path_wins_over_models_dir(tmp_path, monkeypatch):
-    _models_root(monkeypatch, tmp_path / "models")
+def test_fastembed_cache_path_wins_over_the_hub_cache(tmp_path, monkeypatch):
+    _hub_cache(monkeypatch, tmp_path / "hub")
     monkeypatch.setenv("FASTEMBED_CACHE_PATH", str(tmp_path / "explicit"))
 
     # Taken as given: not created, not checked.
     assert resolve_fastembed_cache_dir() == str(tmp_path / "explicit")
-    assert not (tmp_path / "models").exists()
+    assert not (tmp_path / "hub").exists()
 
 
-def test_unusable_models_dir_falls_back_to_temp_with_a_warning(tmp_path, monkeypatch, caplog):
-    blocker = tmp_path / "models"
-    blocker.write_text("a file where the models directory should be")
-    _models_root(monkeypatch, blocker)
+def test_unusable_hub_cache_falls_back_to_temp_with_a_warning(tmp_path, monkeypatch, caplog):
+    blocker = tmp_path / "hub"
+    blocker.write_text("a file where the hub cache should be")
+    _hub_cache(monkeypatch, blocker)
 
     with caplog.at_level(logging.WARNING, logger="FastembedEmbeddingEngine"):
         cache_dir = resolve_fastembed_cache_dir()
@@ -82,7 +82,7 @@ def test_unusable_models_dir_falls_back_to_temp_with_a_warning(tmp_path, monkeyp
     warnings = [
         _event_text(record) for record in caplog.records if record.levelno == logging.WARNING
     ]
-    assert len(warnings) == 1 and "COGNEE_MODELS_DIR" in warnings[0]
+    assert len(warnings) == 1 and "HF_HOME" in warnings[0]
 
 
 def test_unknown_model_has_no_size_hint(tmp_path, monkeypatch):

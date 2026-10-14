@@ -33,15 +33,6 @@ class BaseConfig(BaseSettings):
     repos_root_directory: str = os.getenv(
         "COGNEE_REPOS_DIR", str(Path.home() / ".cognee" / "repos")
     )
-    # Where locally run models are cached (the fastembed embedder today), next
-    # to the logs and repos directories under ~/.cognee, so a model downloaded
-    # on first use survives restarts instead of landing in the system temp
-    # directory. One library's own location variable still wins for that
-    # library (FASTEMBED_CACHE_PATH for fastembed); this is the default beneath
-    # it.
-    models_root_directory: str = os.getenv(
-        "COGNEE_MODELS_DIR", str(Path.home() / ".cognee" / "models")
-    )
     monitoring_tool: object = Observer.NONE
     # Default blend weight for the learned feedback signal during graph search.
     # Opt-in by default to preserve existing retrieval behavior.
@@ -105,7 +96,6 @@ class BaseConfig(BaseSettings):
         self.system_root_directory = ensure_absolute_path(self.system_root_directory)
         self.cache_root_directory = ensure_absolute_path(self.cache_root_directory)
         self.logs_root_directory = ensure_absolute_path(self.logs_root_directory)
-        self.models_root_directory = ensure_absolute_path(self.models_root_directory)
 
         # Langfuse rides the existing OTLP pipeline as just another destination.
         # When LANGFUSE_* keys are set, derive the OTLP endpoint + Basic-auth header
@@ -174,7 +164,6 @@ class BaseConfig(BaseSettings):
             "cache_root_directory": self.cache_root_directory,
             "logs_root_directory": self.logs_root_directory,
             "repos_root_directory": self.repos_root_directory,
-            "models_root_directory": self.models_root_directory,
         }
 
 

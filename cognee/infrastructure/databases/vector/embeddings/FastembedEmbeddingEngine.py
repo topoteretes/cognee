@@ -53,22 +53,23 @@ def resolve_fastembed_cache_dir() -> str:
     """The directory fastembed keeps its models in, created if it can be.
 
     Precedence: ``FASTEMBED_CACHE_PATH`` (fastembed's own variable, taken as
-    given) over ``<models_root_directory>/fastembed`` (``COGNEE_MODELS_DIR``,
-    default ``~/.cognee/models``). Left to itself fastembed would use
-    ``fastembed_cache`` under the system temp directory, which is emptied on
-    many hosts at every restart, so the model was downloaded again each time;
-    the default now lives next to cognee's logs and repos. When that directory
-    cannot be created or written to (a read-only home, a sandbox) the temp
-    location is used after all, with a warning, so an embed never fails over
-    where its model is kept.
+    given) over the Hugging Face hub cache (``HF_HUB_CACHE``, else
+    ``$HF_HOME/hub``, default ``~/.cache/huggingface/hub``), where the GLiNER
+    model is kept too. fastembed downloads through the hub in the same layout,
+    so both local models share one cache and one variable moves both. Left to
+    itself fastembed would use ``fastembed_cache`` under the system temp
+    directory, which is emptied on many hosts at every restart, so the model was
+    downloaded again each time. When the hub cache cannot be created or written
+    to (a read-only home, a sandbox) the temp location is used after all, with a
+    warning, so an embed never fails over where its model is kept.
     """
     explicit = os.getenv("FASTEMBED_CACHE_PATH")
     if explicit:
         return explicit
 
-    from cognee.base_config import get_base_config
+    from huggingface_hub import constants
 
-    cache_dir = Path(get_base_config().models_root_directory) / "fastembed"
+    cache_dir = Path(constants.HF_HUB_CACHE)
     try:
         cache_dir.mkdir(parents=True, exist_ok=True)
         if os.access(cache_dir, os.W_OK):
@@ -80,8 +81,8 @@ def resolve_fastembed_cache_dir() -> str:
     fallback = os.path.join(tempfile.gettempdir(), "fastembed_cache")
     logger.warning(
         "fastembed model cache %s is unusable (%s); using %s instead. The model will be "
-        "downloaded again after a restart that clears the temp directory. Set "
-        "COGNEE_MODELS_DIR or FASTEMBED_CACHE_PATH to a writable location.",
+        "downloaded again after a restart that clears the temp directory. Set HF_HOME "
+        "or FASTEMBED_CACHE_PATH to a writable location.",
         cache_dir,
         reason,
         fallback,
@@ -174,7 +175,7 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
             cached=cached,
             cache_dir=cache_dir,
             size_hint=size_hint,
-            location_var="COGNEE_MODELS_DIR (or FASTEMBED_CACHE_PATH)",
+            location_var="HF_HOME (or FASTEMBED_CACHE_PATH)",
         )
         # Passed explicitly: fastembed's own default is the system temp directory.
         self.embedding_model = TextEmbedding(model_name=model, cache_dir=cache_dir)
