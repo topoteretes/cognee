@@ -21,6 +21,7 @@ from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.migration.cogx import (
     COGXAccuracy,
     COGXArchiveWriter,
+    COGXContributor,
     COGXDocument,
     COGXEntity,
     COGXEvidence,
@@ -148,8 +149,33 @@ COGX_EXPORT_COVERAGE = {
     "validity": "valid_from/valid_to and invalidated_by read from node and edge properties when present",
     "evidence": "derived: the chunks whose contains edges reach the record; no source spans",
     "accuracy": "contradicted for endpoints of contradicts edges; otherwise not stated",
-    "provenance": "not exported",
+    "version": "DataPoint version from node properties",
+    "content_type": "text/plain for every body; documents keep their mime type",
+    "checksum": "sha256 over each exported record, header and body",
+    "tags": "node property only",
+    "contributors": "pipeline, task and user stamps on the node (source_pipeline, source_task, source_user)",
+    "accountable": "the user stamped on the node (source_user); otherwise not stated",
+    "ai_involvement": "full for extracted entities and facts; none for source chunks",
 }
+
+
+def _contributors(properties: dict, *, extracted: bool) -> dict:
+    """Provenance list and AI-involvement from a node's pipeline stamps."""
+    header: dict = {}
+    contributors = []
+    user = properties.get("source_user")
+    if user:
+        contributors.append(COGXContributor(role="initiator", actor=str(user), kind="human"))
+        header["accountable"] = str(user)
+    pipeline = properties.get("source_pipeline") or properties.get("source_task")
+    if pipeline:
+        contributors.append(
+            COGXContributor(role="system", actor=f"cognee:{pipeline}", kind="agent")
+        )
+    if contributors:
+        header["contributors"] = contributors
+    header["ai_involvement"] = "full" if extracted else "none"
+    return header
 
 
 def _header_kwargs(properties: dict, node_id, *, default_origin: bool = True) -> dict:
@@ -205,6 +231,12 @@ def _write_cogx(
             node_id = str(node_id)
             node_type = properties.get("type")
             header = _header_kwargs(properties, node_id)
+            if isinstance(properties.get("version"), int) and "version" not in header:
+                header["version"] = properties["version"]
+            for key, value in _contributors(
+                properties, extracted=node_type != "DocumentChunk"
+            ).items():
+                header.setdefault(key, value)
             if node_type == "Entity" and properties.get("name"):
                 header.setdefault("subject", [properties["name"]])
                 header.setdefault(
@@ -259,6 +291,8 @@ def _write_cogx(
             source, target = str(source), str(target)
             external_id = f"{source}:{relationship}:{target}"
             header = _header_kwargs(properties, external_id)
+            for key, value in _contributors(properties, extracted=True).items():
+                header.setdefault(key, value)
             if "evidence" not in header and relationship not in {"contains", "contradicts"}:
                 # A fact between two entities is derived from the chunks that
                 # mention both; fall back to chunks mentioning either side.

@@ -90,6 +90,9 @@ SemanticKind = Literal[
 EvidenceRole = Literal["observed", "stated", "inferred", "derived"]
 AccuracyOutcome = Literal["unverified", "confirmed", "corrected", "contradicted"]
 Verifier = Literal["human", "agent", "automatic"]
+ContributorRole = Literal["initiator", "author", "approver", "system"]
+ActorKind = Literal["human", "agent", "unknown"]
+AIInvolvement = Literal["none", "draft", "mixed", "full"]
 
 
 def content_hash_of(text: str) -> str:
@@ -145,6 +148,36 @@ class COGXAccuracy(BaseModel):
     score: float | None = None
 
 
+class COGXContributor(BaseModel):
+    """One entry of the provenance list: who took part, in what role.
+
+    ``initiator`` asked for the write, ``author`` produced the body,
+    ``approver`` signed it off, ``system`` is the pipeline or model that ran.
+    The accountable human is named separately on the record so an auditor
+    never has to infer it from this list.
+    """
+
+    role: ContributorRole
+    actor: str
+    kind: ActorKind = "unknown"
+    at: datetime | None = None
+
+
+def checksum_of(record: BaseModel) -> str:
+    """Integrity hash of the exported record, header and body, minus the
+    checksum itself: "did it arrive intact?". Not the body hash."""
+    payload = record.model_dump_json(exclude={"checksum"}, exclude_none=True)
+    return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def verify_checksum(record: BaseModel) -> bool | None:
+    """True/False when the record carries a checksum; None when it does not."""
+    stored = getattr(record, "checksum", None)
+    if not stored:
+        return None
+    return checksum_of(record) == stored
+
+
 class COGXRecordBase(BaseModel):
     external_system: str = "unknown"
     external_id: str
@@ -154,7 +187,14 @@ class COGXRecordBase(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     # OMP header (0.2). All optional.
     origin: COGXOrigin | None = None
+    version: int | None = None
+    content_type: str | None = None  # body format, e.g. text/plain, text/markdown
     content_hash: str | None = None
+    checksum: str | None = None  # stamped by the writer over the whole record
+    tags: list[str] = Field(default_factory=list)
+    contributors: list[COGXContributor] = Field(default_factory=list)
+    accountable: str | None = None  # the one human an auditor needs
+    ai_involvement: AIInvolvement | None = None
     subject: list[str] = Field(default_factory=list)
     semantic_kind: SemanticKind | None = None
     valid_from: datetime | None = None
@@ -168,11 +208,12 @@ class COGXRecordBase(BaseModel):
         return None
 
     @model_validator(mode="after")
-    def _stamp_content_hash(self) -> Self:
-        if self.content_hash is None:
-            body = self.body_text()
-            if body:
-                self.content_hash = content_hash_of(body)
+    def _stamp_body_fields(self) -> Self:
+        body = self.body_text()
+        if self.content_hash is None and body:
+            self.content_hash = content_hash_of(body)
+        if self.content_type is None and body:
+            self.content_type = "text/plain"
         return self
 
 
@@ -186,6 +227,12 @@ class COGXDocument(COGXRecordBase):
 
     def body_text(self) -> str | None:
         return self.content
+
+    @model_validator(mode="after")
+    def _content_type_from_mime(self) -> Self:
+        if self.content_type in (None, "text/plain") and self.mime_type:
+            self.content_type = self.mime_type
+        return self
 
 
 class COGXTurn(BaseModel):
@@ -214,6 +261,9 @@ class COGXEntity(COGXRecordBase):
     description: str | None = None
     aliases: list[str] = Field(default_factory=list)
     attributes: dict[str, Any] = Field(default_factory=dict)
+
+    def body_text(self) -> str | None:
+        return f"{self.name}: {self.description}" if self.description else self.name
 
 
 class COGXFact(COGXRecordBase):
@@ -293,7 +343,14 @@ COGXRecord = (
 
 HEADER_FIELDS = (
     "origin",
+    "version",
+    "content_type",
     "content_hash",
+    "checksum",
+    "tags",
+    "contributors",
+    "accountable",
+    "ai_involvement",
     "subject",
     "semantic_kind",
     "valid_from",
@@ -314,8 +371,22 @@ def header_to_properties(record: COGXRecordBase) -> dict[str, Any]:
     properties: dict[str, Any] = {}
     if record.origin is not None:
         properties["origin"] = json.dumps(record.origin.model_dump(exclude_none=True))
+    if record.version is not None:
+        properties["version"] = record.version
+    if record.content_type:
+        properties["content_type"] = record.content_type
     if record.content_hash:
         properties["content_hash"] = record.content_hash
+    if record.tags:
+        properties["tags"] = json.dumps(record.tags)
+    if record.contributors:
+        properties["contributors"] = json.dumps(
+            [item.model_dump(mode="json", exclude_none=True) for item in record.contributors]
+        )
+    if record.accountable:
+        properties["accountable"] = record.accountable
+    if record.ai_involvement:
+        properties["ai_involvement"] = record.ai_involvement
     if record.subject:
         properties["subject"] = json.dumps(record.subject)
     if record.semantic_kind:
@@ -356,8 +427,31 @@ def header_from_properties(properties: dict[str, Any]) -> dict[str, Any]:
         header["origin"] = COGXOrigin(
             system=str(origin["system"]), id=str(origin["id"]), version=origin.get("version")
         )
+    version = properties.get("version")
+    if isinstance(version, int) and not isinstance(version, bool):
+        header["version"] = version
+    if properties.get("content_type"):
+        header["content_type"] = str(properties["content_type"])
     if properties.get("content_hash"):
         header["content_hash"] = str(properties["content_hash"])
+    tags = _loads(properties.get("tags"))
+    if isinstance(tags, list):
+        header["tags"] = [str(item) for item in tags]
+    contributors = _loads(properties.get("contributors"))
+    if isinstance(contributors, list):
+        items = []
+        for item in contributors:
+            if isinstance(item, dict) and item.get("role") and item.get("actor"):
+                try:
+                    items.append(COGXContributor.model_validate(item))
+                except ValueError:
+                    continue
+        if items:
+            header["contributors"] = items
+    if properties.get("accountable"):
+        header["accountable"] = str(properties["accountable"])
+    if properties.get("ai_involvement") in ("none", "draft", "mixed", "full"):
+        header["ai_involvement"] = properties["ai_involvement"]
     subject = _loads(properties.get("subject"))
     if isinstance(subject, list):
         header["subject"] = [str(item) for item in subject]
@@ -475,6 +569,7 @@ class COGXArchiveWriter:
         if handle is None:
             handle = open(self.directory / file_name, "a", encoding="utf-8")  # noqa: SIM115 - kept in self._handles, closed by __exit__
             self._handles[file_name] = handle
+        record.checksum = checksum_of(record)
         handle.write(record.model_dump_json(exclude_none=True) + "\n")
         self.counts[record.kind] = self.counts.get(record.kind, 0) + 1
 

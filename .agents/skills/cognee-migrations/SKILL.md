@@ -93,7 +93,10 @@ and id, kept across copies), `content_hash` (sha256 of the body, for dedupe;
 distinct from an integrity checksum), `subject`, `semantic_kind` (fact,
 decision, commitment, procedure, preference, observation, other),
 `valid_from`/`valid_to` with `invalidated_by`, `evidence[]` (role, ref,
-confidence) and `accuracy` (outcome, verified_at, verified_by, score). The
+confidence), `accuracy` (outcome, verified_at, verified_by, score),
+`version`, `content_type` (the body's format), `tags`, a record `checksum`
+stamped by the writer, and provenance as `contributors[]` (role, actor,
+kind, at) with the `accountable` human and `ai_involvement`. The
 cognee exporter fills what it can read from the graph and declares the rest
 in the manifest's `coverage` map; the loader keeps the header in each
 record's external metadata and on fact edges, so a re-export preserves it.

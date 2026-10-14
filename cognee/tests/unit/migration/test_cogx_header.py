@@ -11,16 +11,19 @@ from datetime import datetime, timezone
 from cognee.modules.migration.cogx import (
     COGX_VERSION,
     COGXAccuracy,
+    COGXContributor,
     COGXDocument,
     COGXEntity,
     COGXEvidence,
     COGXFact,
     COGXOrigin,
+    checksum_of,
     content_hash_of,
     header_from_properties,
     header_to_properties,
     read_archive,
     read_manifest,
+    verify_checksum,
 )
 from cognee.modules.migration.export import COGX_EXPORT_COVERAGE, _write_cogx
 from cognee.modules.migration.loader import translate_records
@@ -35,7 +38,18 @@ TEXT = "Alice lives in Berlin."
 
 def graph():
     nodes = [
-        (ALICE, {"type": "Entity", "name": "Alice", "description": "A person"}),
+        (
+            ALICE,
+            {
+                "type": "Entity",
+                "name": "Alice",
+                "description": "A person",
+                "version": 3,
+                "tags": json.dumps(["person", "team"]),
+                "source_user": "user-1",
+                "source_pipeline": "cognify_pipeline",
+            },
+        ),
         (
             BERLIN,
             {
@@ -49,7 +63,7 @@ def graph():
             },
         ),
         (PARIS, {"type": "Entity", "name": "Paris", "description": "A city"}),
-        (CHUNK, {"type": "DocumentChunk", "text": TEXT, "chunk_index": 0}),
+        (CHUNK, {"type": "DocumentChunk", "text": TEXT, "chunk_index": 0, "source_user": "user-1"}),
         (CHUNK_2, {"type": "DocumentChunk", "text": "Paris is lovely.", "chunk_index": 1}),
     ]
     edges = [
@@ -83,7 +97,10 @@ class TestModels:
         # Header differences do not change the body hash: that is what dedupe needs.
         other = COGXDocument(external_id="other", content=TEXT, subject=["Alice"])
         assert other.content_hash == document.content_hash
-        assert COGXEntity(external_id="e", name="Alice").content_hash is None
+        # Entities render a body too, so every record kind has a hash and a type.
+        entity = COGXEntity(external_id="e", name="Alice", description="A person")
+        assert entity.content_hash == content_hash_of("Alice: A person")
+        assert entity.content_type == "text/plain"
 
     def test_fact_validity_aliases_sync_both_ways(self):
         when = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -143,7 +160,7 @@ class TestExportHeader:
         manifest = read_manifest(destination)
         assert manifest.cogx_version == COGX_VERSION == "0.2"
         assert manifest.coverage == COGX_EXPORT_COVERAGE
-        assert "provenance" in manifest.coverage
+        assert {"contributors", "accountable", "checksum"} <= set(manifest.coverage)
 
     def test_legacy_0_1_archive_still_reads(self, tmp_path):
         destination, _ = export(tmp_path)
@@ -243,3 +260,76 @@ class TestLoaderRetention:
         assert fact.origin == COGXOrigin(system="cognee", id=f"{ALICE}:lives_in:{BERLIN}")
         assert fact.evidence == [COGXEvidence(role="derived", ref=CHUNK, confidence=0.8)]
         assert fact.valid_from is None
+
+
+class TestRemainingHeaderRows:
+    def test_writer_stamps_record_checksum_and_tamper_is_detected(self, tmp_path):
+        _, records = export(tmp_path)
+        document = by_id(records, "document", CHUNK)
+        assert document.checksum and document.checksum.startswith("sha256:")
+        assert verify_checksum(document) is True
+        assert document.checksum != document.content_hash  # record hash is not the body hash
+        document.subject = ["someone else"]
+        assert verify_checksum(document) is False
+        assert verify_checksum(COGXDocument(external_id="x", content="y")) is None
+
+    def test_content_type_declares_body_format(self, tmp_path):
+        assert (
+            COGXDocument(external_id="d", content="# hi", mime_type="text/markdown").content_type
+            == "text/markdown"
+        )
+        _, records = export(tmp_path)
+        assert by_id(records, "document", CHUNK).content_type == "text/plain"
+        assert by_id(records, "fact", f"{ALICE}:lives_in:{BERLIN}").content_type == "text/plain"
+
+    def test_version_and_tags_from_node_properties(self, tmp_path):
+        _, records = export(tmp_path)
+        alice = by_id(records, "entity", ALICE)
+        assert alice.version == 3
+        assert alice.tags == ["person", "team"]
+        assert by_id(records, "entity", PARIS).version is None
+
+    def test_provenance_names_accountable_human_and_ai_involvement(self, tmp_path):
+        _, records = export(tmp_path)
+        alice = by_id(records, "entity", ALICE)
+        assert alice.accountable == "user-1"
+        assert alice.ai_involvement == "full"  # extracted by the pipeline
+        assert alice.contributors == [
+            COGXContributor(role="initiator", actor="user-1", kind="human"),
+            COGXContributor(role="system", actor="cognee:cognify_pipeline", kind="agent"),
+        ]
+        chunk = by_id(records, "document", CHUNK)
+        assert chunk.ai_involvement == "none"  # a source artifact
+        assert chunk.accountable == "user-1"
+        # No stamps on the node: nothing is invented.
+        paris = by_id(records, "entity", PARIS)
+        assert paris.contributors == [] and paris.accountable is None
+
+    def test_remaining_rows_survive_property_roundtrip(self):
+        record = COGXEntity(
+            external_id="e",
+            name="Alice",
+            version=2,
+            tags=["a", "b"],
+            contributors=[COGXContributor(role="approver", actor="misha", kind="human")],
+            accountable="misha",
+            ai_involvement="mixed",
+        )
+        back = header_from_properties(header_to_properties(record))
+        assert back["version"] == 2
+        assert back["tags"] == ["a", "b"]
+        assert back["contributors"] == record.contributors
+        assert back["accountable"] == "misha"
+        assert back["ai_involvement"] == "mixed"
+        assert back["content_type"] == "text/plain"
+        assert "checksum" not in back  # per-record integrity does not travel on graph properties
+
+    def test_loader_retains_remaining_rows(self, tmp_path):
+        _, records = export(tmp_path)
+        result = translate_records(records, "preserve")
+        document = next(item for item in result.data_items if TEXT in item.data)
+        header = document.external_metadata["header"]
+        assert header["checksum"].startswith("sha256:")
+        assert header["content_type"] == "text/plain"
+        assert header["accountable"] == "user-1"
+        assert header["ai_involvement"] == "none"
