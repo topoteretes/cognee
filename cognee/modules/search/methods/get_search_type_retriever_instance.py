@@ -40,7 +40,7 @@ from cognee.modules.retrieval.skills_retriever import SkillsRetriever
 from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
 from cognee.modules.retrieval.temporal_hybrid_retriever import TemporalHybridRetriever
 from cognee.modules.retrieval.triplet_retriever import TripletRetriever
-from cognee.modules.search.exceptions import UnsupportedSearchTypeError
+from cognee.modules.search.exceptions import SearchTypeDisabledError, UnsupportedSearchTypeError
 from cognee.modules.search.operations import select_search_type
 from cognee.modules.search.types import SearchType
 from cognee.shared.logging_utils import get_logger
@@ -49,12 +49,19 @@ logger = get_logger()
 
 CYPHER_SEARCH_TYPES = (SearchType.CYPHER, SearchType.NATURAL_LANGUAGE)
 
+# Returned to the caller: says what to change, without detailing the risk.
 CYPHER_DISABLED_MESSAGE = (
-    "{search_type} search is disabled by default. It runs Cypher queries directly against "
-    "the graph database, which lets any user with read access to a dataset execute arbitrary "
-    "queries, up to remote code execution on the server. To use it, explicitly enable it by "
-    "setting the environment variable ALLOW_CYPHER_QUERY=true, and only do so when every "
-    "user of this deployment is trusted."
+    "{search_type} search is disabled by default for security reasons. To enable it, set "
+    "the environment variable ALLOW_CYPHER_QUERY=true, and only do so when every user of "
+    "this deployment is trusted."
+)
+
+# Logged on the server only.
+CYPHER_DISABLED_LOG_MESSAGE = (
+    "Rejected a {search_type} search because ALLOW_CYPHER_QUERY is not enabled. Raw Cypher "
+    "lets any user with read access to a dataset run arbitrary queries against the graph "
+    "database, up to remote code execution on the server. Set ALLOW_CYPHER_QUERY=true only "
+    "when every user of this deployment is trusted."
 )
 
 
@@ -453,9 +460,12 @@ async def get_search_type_retriever_instance(
         query_type = await select_search_type(query_text)
 
     if query_type in CYPHER_SEARCH_TYPES and not cypher_queries_allowed():
-        message = CYPHER_DISABLED_MESSAGE.format(search_type=query_type.value)
-        logger.warning(message)
-        raise UnsupportedSearchTypeError(message)
+        logger.warning(CYPHER_DISABLED_LOG_MESSAGE.format(search_type=query_type.value))
+        raise SearchTypeDisabledError(
+            query_type.value,
+            message=CYPHER_DISABLED_MESSAGE.format(search_type=query_type.value),
+            log=False,
+        )
 
     from cognee.modules.retrieval.registered_community_retrievers import (
         registered_community_retrievers,
