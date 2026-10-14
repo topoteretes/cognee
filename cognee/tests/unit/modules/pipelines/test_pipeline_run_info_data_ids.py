@@ -75,6 +75,22 @@ def test_data_ids_are_serialized_with_the_model():
     assert [UUID(value) for value in json.loads(run.model_dump_json())["data_ids"]] == [data_id]
 
 
+def test_run_infos_without_per_item_results_leave_data_ids_out_of_the_output():
+    """Nested run infos and runs that just started carry no "data_ids": []."""
+    run = _run_info(
+        PipelineRunCompleted,
+        data_ingestion_info=[{"run_info": _run_info(PipelineRunCompleted), "data_id": uuid4()}],
+    )
+
+    assert "data_ids" not in json.loads(run.model_dump_json())["data_ingestion_info"][0]["run_info"]
+    assert "data_ids" not in json.loads(_run_info(PipelineRunStarted).model_dump_json())
+    # Per-item results without ids (incremental_loading=False) still say so.
+    no_ids = _run_info(PipelineRunCompleted, data_ingestion_info=[])
+    assert json.loads(no_ids.model_dump_json())["data_ids"] == []
+    # The serializer must not hide the computed field from the OpenAPI schema.
+    assert "data_ids" in PipelineRunInfo.model_json_schema(mode="serialization")["properties"]
+
+
 def test_data_ids_skip_errored_items_after_a_json_round_trip():
     """A run info rebuilt from JSON has dict run_infos and string ids."""
     stored, failed = uuid4(), uuid4()

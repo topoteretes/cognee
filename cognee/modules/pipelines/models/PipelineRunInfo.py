@@ -63,14 +63,15 @@ class PipelineRunInfo(BaseModel):
         """
         return extract_data_ids(self.data_ingestion_info)
 
-    # Leave data_ids out unless add() filled it, so the run infos nested in
-    # data_ingestion_info, progress ticks and other pipelines' results don't
-    # each carry "data_ids": null. No return annotation on purpose: with one,
-    # pydantic replaces the model's serialization schema (OpenAPI) with a dict.
+    # Leave data_ids out of run infos that carry no per-item results, so the
+    # ones nested in data_ingestion_info, progress ticks and runs that just
+    # started don't each carry "data_ids": []. No return annotation on purpose:
+    # with one, pydantic replaces the model's serialization schema (OpenAPI)
+    # with a dict.
     @model_serializer(mode="wrap")
-    def _omit_unset_data_ids(self, handler):
+    def _omit_data_ids_without_results(self, handler):
         serialized = handler(self)
-        if self.data_ids is None and isinstance(serialized, dict):
+        if self.data_ingestion_info is None and isinstance(serialized, dict):
             serialized.pop("data_ids", None)
         return serialized
 
