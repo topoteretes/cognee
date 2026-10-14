@@ -1,3 +1,4 @@
+import asyncio
 import importlib
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -275,3 +276,46 @@ async def test_errors_are_swallowed_and_input_returned():
         result = await detect_contradictions(chunks)
 
     assert result == chunks
+
+
+@pytest.mark.asyncio
+async def test_keyboard_interrupt_is_not_swallowed():
+    chunks = [_summary([_entity("alice"), _entity("1990")])]
+
+    with patch.object(
+        dc_module,
+        "get_graph_engine",
+        new_callable=AsyncMock,
+        side_effect=KeyboardInterrupt(),
+    ):
+        with pytest.raises(KeyboardInterrupt):
+            await detect_contradictions(chunks)
+
+
+@pytest.mark.asyncio
+async def test_system_exit_is_not_swallowed():
+    chunks = [_summary([_entity("alice"), _entity("1990")])]
+
+    with patch.object(
+        dc_module,
+        "get_graph_engine",
+        new_callable=AsyncMock,
+        side_effect=SystemExit(1),
+    ):
+        with pytest.raises(SystemExit):
+            await detect_contradictions(chunks)
+
+
+@pytest.mark.asyncio
+async def test_asyncio_cancelled_error_is_not_swallowed():
+    chunks = [_summary([_entity("alice"), _entity("1990")])]
+
+    with patch.object(
+        dc_module,
+        "get_graph_engine",
+        new_callable=AsyncMock,
+        side_effect=asyncio.CancelledError(),
+    ):
+        with pytest.raises(asyncio.CancelledError):
+            await detect_contradictions(chunks)
+
