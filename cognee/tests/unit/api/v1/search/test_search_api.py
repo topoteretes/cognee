@@ -239,4 +239,3 @@ async def test_api_search_rejects_invalid_timeout(api_search_mod):
             user=_make_user(),
             timeout=-2.0,
         )
-
