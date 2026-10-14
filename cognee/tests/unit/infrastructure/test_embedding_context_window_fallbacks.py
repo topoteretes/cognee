@@ -33,10 +33,11 @@ async def test_ollama_embedding_splits_batch_on_context_window_error():
             "ok 1": [1.0, 1.0],
             "ok 2": [2.0, 2.0],
         }
-        return EmbeddingResult(vectors=[mapping[prompt]], tokens=0)
+        # _get_embedding returns the prompt's one vector with its token count.
+        return EmbeddingResult([mapping[prompt]])
 
     with patch.object(engine, "_get_embedding", side_effect=fake_get_embedding):
-        result = (await engine.embed_text(["too long", "ok 1", "ok 2"])).vectors
+        result = await engine.embed_text(["too long", "ok 1", "ok 2"])
 
     # "too long" → pooled([1.0,1.0], [2.0,2.0]) = [1.5,1.5]; others pass through
     assert result == [[1.5, 1.5], [1.0, 1.0], [2.0, 2.0]]
@@ -108,7 +109,7 @@ async def test_fastembed_splits_batch_on_context_window_error():
         )
 
         engine = FastembedEmbeddingEngine(model="test-model", dimensions=2)
-        result = (await engine.embed_text(["too long", "ok 1", "ok 2"])).vectors
+        result = await engine.embed_text(["too long", "ok 1", "ok 2"])
 
     assert result == [[1.5, 1.5], [3.0, 3.0], [4.0, 4.0]]
 
@@ -221,7 +222,7 @@ async def test_litellm_embedding_splits_batch_on_vertex_instance_limit_error():
         return Mock(data=[{"embedding": [1.0, 1.0]} for _ in kwargs["input"]])
 
     with patch("litellm.aembedding", AsyncMock(side_effect=fake_aembedding)) as embed_mock:
-        result = (await engine.embed_text(["a", "b", "c", "d"])).vectors
+        result = await engine.embed_text(["a", "b", "c", "d"])
 
     assert result == [[1.0, 1.0]] * 4
     assert embed_mock.await_count > 1
@@ -264,7 +265,7 @@ async def test_litellm_embedding_splits_batch_on_vertex_model_batch_limit_error(
         return Mock(data=[{"embedding": [1.0, 1.0]} for _ in kwargs["input"]])
 
     with patch("litellm.aembedding", AsyncMock(side_effect=fake_aembedding)) as embed_mock:
-        result = (await engine.embed_text(["a", "b", "c", "d"])).vectors
+        result = await engine.embed_text(["a", "b", "c", "d"])
 
     assert result == [[1.0, 1.0]] * 4
     assert embed_mock.await_count > 1

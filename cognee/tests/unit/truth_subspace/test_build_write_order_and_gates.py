@@ -17,7 +17,6 @@ from uuid import uuid4
 import pytest
 
 import cognee.modules.truth_subspace.build as build_module
-from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingResult
 from cognee.modules.truth_subspace.build import (
     REASON_BACKEND_UNSUPPORTED,
     STATUS_COMPLETED,
@@ -53,7 +52,7 @@ class RecordingEmbeddingEngine:
         self.calls.append(list(texts))
         if self.fail_on.intersection(texts):
             raise RuntimeError("embedding provider down")
-        return EmbeddingResult(vectors=[VECTORS[text] for text in texts], tokens=0)
+        return [VECTORS[text] for text in texts]
 
 
 def _graph_engine(chunks, *, supports_truth_state=None):

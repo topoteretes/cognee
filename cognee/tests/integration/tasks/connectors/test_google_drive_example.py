@@ -16,7 +16,6 @@ import pytest
 import pytest_asyncio
 
 import cognee
-from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingResult
 from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
     LiteLLMEmbeddingEngine,
 )
@@ -142,7 +141,7 @@ async def clean_environment(tmp_path, monkeypatch):
     monkeypatch.setattr(LLMGateway, "acreate_structured_output", _mock_structured_output)
 
     async def _mock_embed_text(self, text):
-        return EmbeddingResult(vectors=[[0.0] * self.get_vector_size() for _ in text], tokens=0)
+        return [[0.0] * self.get_vector_size() for _ in text]
 
     monkeypatch.setattr(LiteLLMEmbeddingEngine, "embed_text", _mock_embed_text)
 

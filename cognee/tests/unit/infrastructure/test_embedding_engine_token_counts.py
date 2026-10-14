@@ -1,4 +1,4 @@
-"""Each engine's embed() reports the input tokens of the requests that actually
+"""Each engine's embed_text() reports the input tokens of the requests that actually
 succeeded, through its split, pool and per-prompt paths."""
 
 from types import SimpleNamespace
@@ -40,7 +40,7 @@ async def test_litellm_split_counts_only_the_requests_that_succeeded():
     with patch("litellm.aembedding", side_effect=fake_aembedding):
         result = await _litellm_engine().embed_text(["a", "b", "c"])
 
-    assert len(result.vectors) == 3
+    assert len(result) == 3
     assert result.tokens == 30
 
 
@@ -58,7 +58,7 @@ async def test_litellm_pool_counts_both_overlapping_parts():
     with patch("litellm.aembedding", side_effect=fake_aembedding):
         result = await _litellm_engine().embed_text([long_text])
 
-    assert len(result.vectors) == 1
+    assert len(result) == 1
     assert result.tokens == 14
 
 
@@ -84,7 +84,7 @@ async def test_openai_compatible_uses_the_reported_usage():
     engine._client.embeddings.create = fake_create
     result = await engine.embed_text(["a", "b"])
 
-    assert len(result.vectors) == 2
+    assert len(result) == 2
     assert result.tokens == 9
 
 
@@ -120,7 +120,7 @@ async def test_ollama_sums_the_per_prompt_counts(monkeypatch):
     monkeypatch.setattr(aiohttp.ClientSession, "post", fake_post)
     result = await engine.embed_text(["a", "b", "c"])
 
-    assert len(result.vectors) == 3
+    assert len(result) == 3
     assert result.tokens == 12
 
 
@@ -146,7 +146,7 @@ async def test_fastembed_counts_with_its_own_tokenizer(monkeypatch):
         engine = FastembedEmbeddingEngine(model="test-model", dimensions=2)
         result = await engine.embed_text(["two words", "one"])
 
-    assert len(result.vectors) == 2
+    assert len(result) == 2
     assert result.tokens == 3
 
 
@@ -156,5 +156,18 @@ async def test_mock_embeddings_consume_no_tokens(monkeypatch):
 
     result = await _litellm_engine().embed_text(["a", "b"])
 
-    assert len(result.vectors) == 2
+    assert len(result) == 2
+    assert result.tokens == 0
+
+
+@pytest.mark.asyncio
+async def test_embed_text_still_returns_a_plain_list_of_vectors(monkeypatch):
+    """Direct callers of an engine keep the pre-token-counting contract: a list of
+    vectors, one per text, with the token count only as an extra attribute."""
+    monkeypatch.setenv("MOCK_EMBEDDING", "true")
+
+    result = await _litellm_engine().embed_text(["a", "b"])
+
+    assert isinstance(result, list)
+    assert result == [[0.0, 0.0], [0.0, 0.0]]
     assert result.tokens == 0

@@ -18,7 +18,6 @@ import pytest_asyncio
 
 import cognee
 from cognee.context_global_variables import graph_db_config, vector_db_config
-from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingResult
 from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
     LiteLLMEmbeddingEngine,
 )
@@ -35,8 +34,7 @@ COMPLETION_TIMEOUT_SECONDS = 120
 
 
 async def _mock_embed_text(self, texts):
-    vectors = [[float(len(t) % 7) / 10.0] * self.dimensions for t in texts]
-    return EmbeddingResult(vectors=vectors, tokens=0)
+    return [[float(len(t) % 7) / 10.0] * self.dimensions for t in texts]
 
 
 async def _mock_acreate(text_input, system_prompt, response_model, **kwargs):

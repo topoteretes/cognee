@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingResult
 from cognee.infrastructure.llm.config import LLMConfig
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.ollama_support import (
@@ -110,7 +109,7 @@ async def test_local_ollama_example_executes_offline(monkeypatch):
     # over the network. Patch embed_text at the class so every engine, cached or
     # fresh, stays offline.
     async def _mock_embed_text(self, texts):
-        return EmbeddingResult(vectors=[[0.1] * self.dimensions for _ in texts], tokens=0)
+        return [[0.1] * self.dimensions for _ in texts]
 
     @staticmethod
     async def _mock_acreate(text_input, system_prompt, response_model, **kwargs):

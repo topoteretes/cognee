@@ -22,6 +22,7 @@ from cognee.infrastructure.databases.exceptions import (
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
     EmbeddingEngine,
     EmbeddingResult,
+    embedding_tokens,
 )
 from cognee.infrastructure.databases.vector.embeddings.input_limit import (
     init_input_limit,
@@ -311,8 +312,8 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                     self.embed_text(right),
                 )
                 return EmbeddingResult(
-                    vectors=left_result.vectors + right_result.vectors,
-                    tokens=left_result.tokens + right_result.tokens,
+                    vectors=left_result + right_result,
+                    tokens=embedding_tokens(left_result) + embedding_tokens(right_result),
                 )
 
                 # If caller passed ONE oversize string split the string itself into
@@ -332,12 +333,13 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                     self.embed_text([left_part]),
                     self.embed_text([right_part]),
                 )
-                (left_vec,), (right_vec,) = left_result.vectors, right_result.vectors
+                (left_vec,), (right_vec,) = left_result, right_result
 
                 # POOL the two embeddings into one
                 pooled = (np.array(left_vec) + np.array(right_vec)) / 2
                 return EmbeddingResult(
-                    vectors=[pooled.tolist()], tokens=left_result.tokens + right_result.tokens
+                    vectors=[pooled.tolist()],
+                    tokens=embedding_tokens(left_result) + embedding_tokens(right_result),
                 )
 
             logger.error("Embedding input exceeds the model's max length: %s", str(error))

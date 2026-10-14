@@ -18,6 +18,7 @@ from cognee.infrastructure.databases.exceptions import EmbeddingException
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
     EmbeddingEngine,
     EmbeddingResult,
+    embedding_tokens,
 )
 from cognee.infrastructure.databases.vector.embeddings.input_limit import (
     init_input_limit,
@@ -128,10 +129,10 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
             results = await asyncio.gather(
                 *[self._get_embedding(prompt) for prompt in sanitized_text]
             )
-            embeddings = [result.vectors[0] for result in results]
+            embeddings = [result[0] for result in results]
             return EmbeddingResult(
                 vectors=handle_embedding_response(original_texts, embeddings, self.dimensions),
-                tokens=sum(result.tokens for result in results),
+                tokens=sum(embedding_tokens(result) for result in results),
             )
         except Exception as error:
             # A spend cap is terminal and is neither a context-window nor a
@@ -156,12 +157,12 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
                         self.embed_text(original_texts[:mid]),
                         self.embed_text(original_texts[mid:]),
                     )
-                    embeddings = left_result.vectors + right_result.vectors
+                    embeddings = left_result + right_result
                     return EmbeddingResult(
                         vectors=handle_embedding_response(
                             original_texts, embeddings, self.dimensions
                         ),
-                        tokens=left_result.tokens + right_result.tokens,
+                        tokens=embedding_tokens(left_result) + embedding_tokens(right_result),
                     )
 
                 if len(original_texts) == 1:
@@ -176,14 +177,14 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
                         self.embed_text([left_part]),
                         self.embed_text([right_part]),
                     )
-                    (left_vec,), (right_vec,) = left_result.vectors, right_result.vectors
+                    (left_vec,), (right_vec,) = left_result, right_result
                     pooled = (np.array(left_vec) + np.array(right_vec)) / 2
                     embeddings = [pooled.tolist()]
                     return EmbeddingResult(
                         vectors=handle_embedding_response(
                             original_texts, embeddings, self.dimensions
                         ),
-                        tokens=left_result.tokens + right_result.tokens,
+                        tokens=embedding_tokens(left_result) + embedding_tokens(right_result),
                     )
 
                 return EmbeddingResult(

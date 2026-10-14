@@ -31,6 +31,7 @@ from cognee.infrastructure.databases.exceptions import (
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
     EmbeddingEngine,
     EmbeddingResult,
+    embedding_tokens,
 )
 from cognee.infrastructure.databases.vector.embeddings.input_limit import (
     init_input_limit,
@@ -277,9 +278,9 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
             )
             return EmbeddingResult(
                 vectors=handle_embedding_response(
-                    original_texts, left_result.vectors + right_result.vectors, self.dimensions
+                    original_texts, left_result + right_result, self.dimensions
                 ),
-                tokens=left_result.tokens + right_result.tokens,
+                tokens=embedding_tokens(left_result) + embedding_tokens(right_result),
             )
 
         s = original_texts[0]
@@ -298,14 +299,14 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
             self.embed_text([left_part]),
             self.embed_text([right_part]),
         )
-        (left_vec,), (right_vec,) = left_result.vectors, right_result.vectors
+        (left_vec,), (right_vec,) = left_result, right_result
         pooled = (np.array(left_vec) + np.array(right_vec)) / 2
         # Tokens are what the model processed, overlaps included - as the hosted
         # engines that count what they were billed for; with recursive splitting
         # this can be several times the text's own count.
         return EmbeddingResult(
             vectors=handle_embedding_response(original_texts, [pooled.tolist()], self.dimensions),
-            tokens=left_result.tokens + right_result.tokens,
+            tokens=embedding_tokens(left_result) + embedding_tokens(right_result),
         )
 
     def get_vector_size(self) -> int:
