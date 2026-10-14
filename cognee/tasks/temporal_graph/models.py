@@ -1,4 +1,6 @@
-from pydantic import BaseModel, Field
+from datetime import datetime
+from typing import Any
+from pydantic import BaseModel, Field, model_validator
 
 
 class Timestamp(BaseModel):
@@ -23,6 +25,42 @@ class Interval(BaseModel):
 class QueryInterval(BaseModel):
     starts_at: Timestamp | None = None
     ends_at: Timestamp | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_strings_to_timestamps(cls, data: Any) -> Any:
+        def _parse(val: Any) -> Any:
+            if val is None or isinstance(val, dict) or isinstance(val, Timestamp):
+                return val
+            if isinstance(val, str):
+                try:
+                    val = val.replace("Z", "+00:00")
+                    dt = datetime.fromisoformat(val)
+                    return {
+                        "year": dt.year,
+                        "month": dt.month,
+                        "day": dt.day,
+                        "hour": dt.hour,
+                        "minute": dt.minute,
+                        "second": dt.second,
+                    }
+                except ValueError as e:
+                    raise ValueError(f"Could not parse ISO datetime string {val!r}: {e}") from e
+            raise ValueError(
+                f"Input should be an object or an ISO date string, got {type(val).__name__}"
+            )
+
+        if isinstance(data, str):
+            data = {"starts_at": data}
+
+        if isinstance(data, dict):
+            new_data = data.copy()
+            for field in ("starts_at", "ends_at"):
+                if field in new_data:
+                    new_data[field] = _parse(new_data[field])
+            return new_data
+
+        return data
 
 
 class Event(BaseModel):

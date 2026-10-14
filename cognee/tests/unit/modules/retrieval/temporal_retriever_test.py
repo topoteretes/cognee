@@ -794,3 +794,64 @@ async def test_extract_time_from_query_with_none_values():
 
     assert time_from is None
     assert time_to is None
+
+
+@pytest.mark.asyncio
+async def test_extract_time_from_query_validation_error_fallback():
+    """Test extract_time_from_query returns (None, None) when validation fails."""
+    from pydantic import ValidationError
+
+    retriever = TemporalRetriever()
+
+    # Build a real ValidationError by validating bad data
+    try:
+        QueryInterval.model_validate("not-a-date")
+        validation_error = Exception("Should have raised ValidationError")
+    except ValidationError as e:
+        validation_error = e
+
+    with (
+        patch("cognee.modules.retrieval.temporal_retriever.os.path.isabs", return_value=False),
+        patch("cognee.modules.retrieval.temporal_retriever.datetime") as mock_datetime,
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.render_prompt",
+            return_value="System prompt",
+        ),
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.LLMGateway.acreate_structured_output",
+            new_callable=AsyncMock,
+            side_effect=validation_error,
+        ),
+    ):
+        mock_datetime.now.return_value.strftime.return_value = "11-12-2024"
+
+        time_from, time_to = await retriever.extract_time_from_query("What happened?")
+
+    assert time_from is None
+    assert time_to is None
+
+
+@pytest.mark.asyncio
+async def test_extract_time_from_query_propagates_payment_error():
+    """Test extract_time_from_query lets LLMPaymentRequiredError propagate."""
+    from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
+
+    retriever = TemporalRetriever()
+
+    with (
+        patch("cognee.modules.retrieval.temporal_retriever.os.path.isabs", return_value=False),
+        patch("cognee.modules.retrieval.temporal_retriever.datetime") as mock_datetime,
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.render_prompt",
+            return_value="System prompt",
+        ),
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.LLMGateway.acreate_structured_output",
+            new_callable=AsyncMock,
+            side_effect=LLMPaymentRequiredError("Payment required"),
+        ),
+    ):
+        mock_datetime.now.return_value.strftime.return_value = "11-12-2024"
+
+        with pytest.raises(LLMPaymentRequiredError):
+            await retriever.extract_time_from_query("What happened?")

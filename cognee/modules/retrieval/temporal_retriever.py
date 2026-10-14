@@ -3,6 +3,8 @@ import os
 from datetime import datetime, timezone
 from operator import itemgetter
 from typing import Any
+import json
+from pydantic import ValidationError
 
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.unified import get_unified_engine
@@ -98,10 +100,17 @@ class TemporalRetriever(GraphCompletionRetriever):
             prompt_path, {"time_now": time_now}, base_directory=base_directory
         )
 
-        interval = await LLMGateway.acreate_structured_output(query, system_prompt, QueryInterval)
-
-        time_from = interval.starts_at
-        time_to = interval.ends_at
+        try:
+            interval = await LLMGateway.acreate_structured_output(
+                query, system_prompt, QueryInterval
+            )
+            time_from = interval.starts_at
+            time_to = interval.ends_at
+        except (ValidationError, json.JSONDecodeError) as e:
+            # an invalid LLM interval is treated as "no time found" so retrieval falls back to triplet search instead of failing the query.
+            logger.warning("Failed to extract time from query. LLM output: %s", str(e)[:200])
+            time_from = None
+            time_to = None
 
         return time_from, time_to
 
