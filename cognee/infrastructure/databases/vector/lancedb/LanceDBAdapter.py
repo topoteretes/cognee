@@ -40,7 +40,6 @@ from cognee_db_workers.lancedb_compaction import (
     DEFAULT_MAX_VERSIONS_PER_RUN,
     DEFAULT_RETENTION_SECONDS,
     DEFAULT_TARGET_ROWS_PER_FRAGMENT,
-    PylanceIncompatibleError,
     compact_fragments,
     lance_core_mismatch,
     open_as_lance,
@@ -745,17 +744,6 @@ class LanceDBAdapter(VectorDBInterface):
                 )
         return self._compaction_unsupported
 
-    def _turn_off_compaction(self, exc: Exception) -> None:
-        # Called from the handlers that caught ``exc``; its message names the
-        # underlying error, which is all a version mismatch needs.
-        self._compaction_unsupported = "pylance_incompatible"
-        logger.warning(
-            "LanceDB compaction turned off: pylance cannot open the tables lancedb "
-            "wrote (%s). Install the pylance release line matching lancedb's "
-            "bundled Lance core.",
-            exc,
-        )
-
     async def compact(self, collection_name: str | None = None) -> dict:
         """Fold the fragments cognee's upserts leave behind and prune old versions.
 
@@ -794,9 +782,7 @@ class LanceDBAdapter(VectorDBInterface):
         Skipped for remote stores (``s3://`` and friends), where every rewrite
         is network transfer and cleanup is thousands of object deletes, and
         turned off for the adapter's lifetime when the installed pylance is not
-        on the Lance core lancedb bundles, or cannot open the tables lancedb
-        wrote. Fail-open per collection: a failure is logged and reported in
-        the returned stats, never raised.
+        on the Lance core lancedb bundles. A failure on any collection raises.
         """
         options = self._compaction_options()
         reason = self._compaction_skip_reason()
@@ -805,7 +791,9 @@ class LanceDBAdapter(VectorDBInterface):
         # This pass prunes versions itself, so a first-open prune not yet
         # started is redundant; one already running finishes first.
         self._open_prune_started = True
-        await self._wait_for_open_prune()
+        prune_error = await self._wait_for_open_prune()
+        if prune_error is not None:
+            raise prune_error
         if self._compaction_lock.locked():
             return {"skipped": "in_progress"}
 
@@ -835,21 +823,7 @@ class LanceDBAdapter(VectorDBInterface):
                     # marks the table again for the next one. A table whose
                     # rewrite the budget skipped stays first in line.
                     self._compaction_dirty.discard(name)
-                try:
-                    stats = await self._compact_collection(name, options, max_tasks, max_versions)
-                except PylanceIncompatibleError as exc:
-                    self._turn_off_compaction(exc)
-                    results[name] = {"error": str(exc)[:200]}
-                    break
-                except Exception as exc:
-                    logger.warning(
-                        "Compaction skipped for collection '%s': %s",
-                        name,
-                        exc,
-                        exc_info=True,
-                    )
-                    results[name] = {"error": str(exc)[:200]}
-                    continue
+                stats = await self._compact_collection(name, options, max_tasks, max_versions)
                 results[name] = stats
                 if task_budget > 0:
                     tasks_left -= int(stats.get("executed_tasks", 0) or 0)
@@ -917,7 +891,8 @@ class LanceDBAdapter(VectorDBInterface):
         script, an engine re-created after the idle-engine eviction -- reclaims
         them here instead, within the same ``max_versions_per_run`` budget.
         Runs in the background so the operation that opened the store is not
-        delayed; never raises.
+        delayed; a failure surfaces from the next ``compact``, ``close`` or
+        ``prune`` (see ``_wait_for_open_prune``).
         """
         if self._open_prune_started:
             return
@@ -972,28 +947,34 @@ class LanceDBAdapter(VectorDBInterface):
         return task
 
     async def _prune_on_open(self, options: dict) -> dict:
-        try:
-            async with self._compaction_lock:
-                return await self._prune_pass(options)
-        except Exception as exc:
-            logger.warning("Version prune on open skipped: %s", exc, exc_info=True)
-            return {"error": str(exc)[:200]}
+        async with self._compaction_lock:
+            return await self._prune_pass(options)
 
-    async def _wait_for_open_prune(self) -> None:
+    async def _wait_for_open_prune(self) -> BaseException | None:
         """Let a running version prune (first-open or follow-up, see
         ``_start_prune_task``) finish -- it is bounded -- before this adapter
         compacts, prunes or closes, so they never overlap and closing never tears
         the worker down under it. A prune started on another event loop cannot be
-        awaited from this one and is left alone."""
+        awaited from this one and is left alone.
+
+        Returns the error the prune failed with, for the caller to raise: a
+        background prune has no caller of its own. It is handed out once."""
         task = self._open_prune_task
-        if task is None or task.done():
-            return
-        try:
-            same_loop = task.get_loop() is asyncio.get_running_loop()
-        except RuntimeError:
-            return
-        if same_loop:
+        if task is None:
+            return None
+        if not task.done():
+            try:
+                same_loop = task.get_loop() is asyncio.get_running_loop()
+            except RuntimeError:
+                return None
+            if not same_loop:
+                return None
             await asyncio.wait({task})
+        if task.cancelled() or task.exception() is None:
+            return None
+        if self._open_prune_task is task:
+            self._open_prune_task = None
+        return task.exception()
 
     async def _prune_pass(self, options: dict) -> dict:
         """Prune superseded versions across the store's tables; no fragment rewrites."""
@@ -1004,21 +985,10 @@ class LanceDBAdapter(VectorDBInterface):
         for name in list(await connection.table_names()):
             if budget > 0 and left <= 0:
                 break
-            try:
-                collection = await self.get_collection(name)
-                stats = await self._prune_collection(
-                    collection, options["retention_seconds"], left if budget > 0 else 0
-                )
-            except PylanceIncompatibleError as exc:
-                self._turn_off_compaction(exc)
-                results[name] = {"error": str(exc)[:200]}
-                break
-            except Exception as exc:
-                logger.warning(
-                    "Version prune skipped for collection '%s': %s", name, exc, exc_info=True
-                )
-                results[name] = {"error": str(exc)[:200]}
-                continue
+            collection = await self.get_collection(name)
+            stats = await self._prune_collection(
+                collection, options["retention_seconds"], left if budget > 0 else 0
+            )
             results[name] = stats
             if budget > 0:
                 left -= int(stats.get("old_versions_removed", 0) or 0)
@@ -1868,7 +1838,9 @@ class LanceDBAdapter(VectorDBInterface):
         if self._followup_prune_handle is not None:
             self._followup_prune_handle.cancel()
             self._followup_prune_handle = None
-        await self._wait_for_open_prune()
+        prune_error = await self._wait_for_open_prune()
+        if prune_error is not None:
+            raise prune_error
         connection = await self.get_connection()
 
         async with self._compaction_lock:
@@ -1989,9 +1961,11 @@ class LanceDBAdapter(VectorDBInterface):
         if self._followup_prune_handle is not None:
             self._followup_prune_handle.cancel()
             self._followup_prune_handle = None
-        await self._wait_for_open_prune()
+        prune_error = await self._wait_for_open_prune()
         with self._lifecycle_lock:
             if self._permanently_closed:
+                if prune_error is not None:
+                    raise prune_error
                 return  # idempotent
             self._permanently_closed = True
             connection = self.connection
@@ -2019,3 +1993,6 @@ class LanceDBAdapter(VectorDBInterface):
                 await asyncio.to_thread(session.shutdown)
             except Exception as e:
                 logger.warning("Error shutting down LanceDB subprocess: %s", e, exc_info=True)
+        # Raised only now, so a failed background prune never leaves the store open.
+        if prune_error is not None:
+            raise prune_error
