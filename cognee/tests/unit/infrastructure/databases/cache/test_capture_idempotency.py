@@ -1,6 +1,7 @@
 """Real SQL transactions: concurrent writers, lost ACKs, conflicts and crash recovery."""
 
 import asyncio
+import os
 from uuid import uuid4
 
 import pytest
@@ -16,10 +17,17 @@ from cognee.infrastructure.databases.cache.sql.tables import (
 )
 
 
-@pytest_asyncio.fixture
-async def adapter(tmp_path):
-    instance = SqlCacheAdapter(f"sqlite+aiosqlite:///{tmp_path}/cache.db")
+@pytest_asyncio.fixture(params=["sqlite", "postgres"])
+async def adapter(tmp_path, request):
+    if request.param == "postgres":
+        uri = os.environ.get("COGNEE_TEST_CAPTURE_POSTGRES_URL")
+        if not uri:
+            pytest.skip("Set COGNEE_TEST_CAPTURE_POSTGRES_URL to a disposable Postgres database")
+    else:
+        uri = f"sqlite+aiosqlite:///{tmp_path}/cache.db"
+    instance = SqlCacheAdapter(uri)
     await instance._ensure_initialized()
+    await instance.prune()
     yield instance
     await instance.close()
 
@@ -235,3 +243,75 @@ async def test_embedding_does_not_block_an_independent_writer(adapter):
         release.set()
         await task
     assert await count(adapter, cache_qa_entries) == 2
+
+
+@pytest.mark.asyncio
+async def test_prune_clears_receipts_and_allows_fresh_admission(adapter):
+    event_id, builds = str(uuid4()), []
+    await request(adapter, event_id, builds=builds)
+    await adapter.prune()
+    assert await count(adapter, cache_capture_receipts) == 0
+    assert await count(adapter, cache_qa_entries) == 0
+    await request(adapter, event_id, builds=builds)
+    assert len(builds) == 2
+
+
+@pytest.mark.asyncio
+async def test_retention_sweep_keeps_recent_receipts_and_active_leases(adapter):
+    import time
+    from datetime import timedelta
+
+    for event in ("old", "recent", "leased"):
+        await request(adapter, event)
+    async with adapter.sessionmaker() as session, session.begin():
+        await session.execute(
+            update(cache_capture_receipts)
+            .where(cache_capture_receipts.c.client_event_id.in_(["old", "leased"]))
+            .values(created_at=adapter._now() - timedelta(days=91))
+        )
+        await session.execute(
+            update(cache_capture_receipts)
+            .where(cache_capture_receipts.c.client_event_id == "leased")
+            .values(index_lease_until=time.time() + 120)
+        )
+    adapter._last_purge = 0
+    await adapter._maybe_purge_expired()
+    async with adapter.sessionmaker() as session:
+        assert set(
+            (await session.execute(select(cache_capture_receipts.c.client_event_id))).scalars()
+        ) == {"recent", "leased"}
+
+
+@pytest.mark.asyncio
+async def test_account_cleanup_removes_only_that_users_receipts(adapter):
+    await request(adapter, "one", user="deleted")
+    await request(adapter, "two", user="other")
+    await adapter.delete_capture_receipts_for_user("deleted")
+    async with adapter.sessionmaker() as session:
+        assert list(
+            (await session.execute(select(cache_capture_receipts.c.user_id))).scalars()
+        ) == ["other"]
+
+
+@pytest.mark.asyncio
+async def test_receipt_lookup_uses_original_selector_and_authenticated_scope(adapter):
+    from cognee.infrastructure.databases.cache.sql.capture import find_capture
+
+    receipt = await request(adapter, "event")
+    args = {
+        "tenant_id": "tenant",
+        "user_id": "user",
+        "dataset_id": None,
+        "dataset_name": "name",
+        "session_id": "session",
+        "client_event_id": "event",
+        "entry": {"type": "qa", "question": "question", "answer": "answer"},
+    }
+    assert (await find_capture(adapter, **args))["receipt"] == receipt
+    assert (
+        await find_capture(adapter, **{**args, "dataset_id": "dataset", "dataset_name": "ignored"})
+    )["receipt"] == receipt
+    for key in ("tenant_id", "user_id", "session_id", "dataset_id", "client_event_id"):
+        assert await find_capture(adapter, **{**args, key: "other"}) is None
+    with pytest.raises(CaptureConflictError):
+        await find_capture(adapter, **{**args, "entry": {"type": "qa", "answer": "changed"}})

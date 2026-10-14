@@ -64,6 +64,8 @@ def _seq_type():
     return BigInteger().with_variant(Integer(), "sqlite")
 
 
+CAPTURE_RECEIPT_RETENTION_DAYS = 90
+
 # Receipts outlive the cache TTL: an old retry must not resurrect expired/deleted
 # memory. No original entry text is retained here. Created on adapter startup,
 # like the other cache tables (including standalone cache.db deployments).
@@ -82,6 +84,9 @@ cache_capture_receipts = Table(
     Column("index_lease_until", Float, nullable=False, default=0),
     Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
 )
+
+Index("idx_cache_capture_created", cache_capture_receipts.c.created_at)
+Index("idx_cache_capture_user", cache_capture_receipts.c.user_id)
 
 
 # QA entries: one row per entry; qa_id promoted to a column for direct UPDATE.

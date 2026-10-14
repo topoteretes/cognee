@@ -70,3 +70,20 @@ def test_capture_does_not_run_skill_improvement(client, capture):
         client.post("/remember/entry", json={**body(), "skill_improvement": {}}).status_code == 400
     )
     capture.assert_not_awaited()
+
+
+@pytest.mark.parametrize("code", ["capture_session_dataset_mismatch", "capture_invalid_entry"])
+def test_capture_validation_codes_are_actionable(client, capture, code):
+    from cognee.infrastructure.session.capture import CaptureRequestError
+
+    capture.side_effect = CaptureRequestError(code, "Actionable request error")
+    response = client.post("/remember/entry", json=body())
+    assert response.status_code == 400
+    assert response.json() == {"code": code, "error": "Actionable request error"}
+
+
+def test_skill_improvement_error_has_specific_code(client, capture):
+    response = client.post("/remember/entry", json={**body(), "skill_improvement": {}})
+    assert response.status_code == 400
+    assert response.json()["code"] == "capture_skill_improvement_unsupported"
+    capture.assert_not_awaited()

@@ -18,6 +18,59 @@ class CaptureConflictError(ValueError):
     """The same scoped client event ID was used for different content."""
 
 
+def payload_hash(entry):
+    canonical = json.dumps(entry, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+async def find_capture(
+    adapter, *, tenant_id, user_id, dataset_id, dataset_name, session_id, client_event_id, entry
+):
+    """Read only the authenticated caller's receipt, without mutable dataset state.
+
+    A name retry uses the name recorded at admission, even after rename/deletion.
+    UUID callers always match the original UUID. No capture content is returned.
+    """
+    await adapter._ensure_initialized()
+    predicate = [
+        receipts.c.tenant_id == str(tenant_id or ""),
+        receipts.c.user_id == str(user_id),
+        receipts.c.session_id == session_id,
+        receipts.c.client_event_id == str(client_event_id),
+    ]
+    predicate.append(
+        receipts.c.dataset_id == str(dataset_id)
+        if dataset_id is not None
+        else receipts.c.receipt["dataset_name"].as_string() == dataset_name
+    )
+    async with adapter.sessionmaker() as session:
+        rows = (await session.execute(select(receipts).where(*predicate))).mappings().all()
+    if not rows:
+        return None
+    if len(rows) != 1:
+        raise CaptureConflictError("Ambiguous dataset name; retry with the original dataset_id")
+    existing = rows[0]
+    if existing["payload_hash"] != payload_hash(entry):
+        raise CaptureConflictError("client_event_id already belongs to another payload")
+    return existing
+
+
+async def resume_capture(adapter, existing, index_qa):
+    predicate = [
+        receipts.c[key] == existing[key]
+        for key in ("tenant_id", "user_id", "dataset_id", "session_id", "client_event_id")
+    ]
+    await _finish_index(
+        adapter,
+        predicate,
+        existing["user_id"],
+        existing["session_id"],
+        existing["receipt"]["entry_id"],
+        index_qa,
+    )
+    return existing["receipt"]
+
+
 async def store_capture(
     adapter,
     *,
@@ -47,8 +100,7 @@ async def store_capture(
         "client_event_id": str(client_event_id),
     }
     predicate = [receipts.c[key] == value for key, value in scope.items()]
-    canonical = json.dumps(entry, sort_keys=True, separators=(",", ":"), allow_nan=False)
-    digest = hashlib.sha256(canonical.encode()).hexdigest()
+    digest = payload_hash(entry)
     entry_id = str(uuid5(NAMESPACE_URL, json.dumps(scope, sort_keys=True)))
     receipt = {
         "status": "session_stored",
@@ -96,6 +148,7 @@ async def store_capture(
 
     if entry["type"] == "qa":
         await _finish_index(adapter, predicate, user_id, session_id, receipt["entry_id"], index_qa)
+    await adapter._maybe_purge_expired()
     return receipt
 
 
