@@ -8,7 +8,6 @@ import pytest
 
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
     EmbeddingVectors,
-    embedding_tokens,
 )
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingGateway import (
     EmbeddingGateway,
@@ -44,12 +43,9 @@ async def test_embed_text_returns_vectors_and_records_the_tokens():
 
 
 @pytest.mark.asyncio
-async def test_an_engine_returning_a_plain_list_records_zero_tokens():
-    with patch(RECORD, new=AsyncMock()) as record:
-        vectors = await EmbeddingGateway(_PlainListEngine()).embed_text(["a"])
-
-    assert vectors == [[1.0, 0.0]]
-    record.assert_awaited_once_with(model="fake-embedding-model", tokens=0)
+async def test_an_engine_returning_a_plain_list_fails():
+    with pytest.raises(AttributeError):
+        await EmbeddingGateway(_PlainListEngine()).embed_text(["a"])
 
 
 @pytest.mark.asyncio
@@ -74,5 +70,14 @@ def test_embedding_vectors_behave_as_the_plain_list_they_replace():
     assert vectors == [[1.0, 0.0], [0.0, 1.0]]
     assert repr(vectors) == "[[1.0, 0.0], [0.0, 1.0]]"
     assert json.loads(json.dumps(vectors)) == [[1.0, 0.0], [0.0, 1.0]]
-    assert embedding_tokens(vectors) == 5
-    assert embedding_tokens([[1.0, 0.0]]) == 0
+    assert vectors.tokens == 5
+
+
+def test_reading_a_count_that_was_not_given_raises():
+    with pytest.raises(ValueError):
+        _ = EmbeddingVectors([[1.0, 0.0]]).tokens
+
+
+def test_a_new_list_built_from_the_result_has_no_count():
+    with pytest.raises(AttributeError):
+        _ = EmbeddingVectors([[1.0, 0.0], [0.0, 1.0]], tokens=5)[:1].tokens

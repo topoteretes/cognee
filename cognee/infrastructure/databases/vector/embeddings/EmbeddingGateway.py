@@ -1,6 +1,6 @@
 from cognee.shared.logging_utils import get_logger
 
-from .EmbeddingEngine import EmbeddingEngine, Vector, embedding_tokens
+from .EmbeddingEngine import EmbeddingEngine, Vector
 
 logger = get_logger("EmbeddingGateway")
 
@@ -14,7 +14,7 @@ class EmbeddingGateway:
 
     async def embed_text(self, text: list[str]) -> list[Vector]:
         vectors = await self._engine.embed_text(text)
-        await self._record_usage(embedding_tokens(vectors))
+        await self._record_usage(vectors.tokens)
         return vectors
 
     async def _record_usage(self, tokens: int) -> None:

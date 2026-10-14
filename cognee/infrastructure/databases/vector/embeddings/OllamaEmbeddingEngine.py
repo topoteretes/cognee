@@ -18,7 +18,6 @@ from cognee.infrastructure.databases.exceptions import EmbeddingException
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
     EmbeddingEngine,
     EmbeddingVectors,
-    embedding_tokens,
 )
 from cognee.infrastructure.databases.vector.embeddings.input_limit import (
     init_input_limit,
@@ -132,7 +131,7 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
             embeddings = [result[0] for result in results]
             return EmbeddingVectors(
                 vectors=handle_embedding_response(original_texts, embeddings, self.dimensions),
-                tokens=sum(embedding_tokens(result) for result in results),
+                tokens=sum(result.tokens for result in results),
             )
         except Exception as error:
             # A spend cap is terminal and is neither a context-window nor a
@@ -162,7 +161,7 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
                         vectors=handle_embedding_response(
                             original_texts, embeddings, self.dimensions
                         ),
-                        tokens=embedding_tokens(left_result) + embedding_tokens(right_result),
+                        tokens=left_result.tokens + right_result.tokens,
                     )
 
                 if len(original_texts) == 1:
@@ -184,7 +183,7 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
                         vectors=handle_embedding_response(
                             original_texts, embeddings, self.dimensions
                         ),
-                        tokens=embedding_tokens(left_result) + embedding_tokens(right_result),
+                        tokens=left_result.tokens + right_result.tokens,
                     )
 
                 return EmbeddingVectors(
