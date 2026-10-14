@@ -29,7 +29,13 @@ try:
     )
 except (ImportError, ValueError):
     from config import settings
-    from cognee_adapter import CogneeAdapter, default_adapter
+    try:
+        from .adapter import CogneeAdapter, default_adapter
+    except (ImportError, ValueError):
+        try:
+            from adapter import CogneeAdapter, default_adapter
+        except ImportError:
+            from cognee_adapter import CogneeAdapter, default_adapter
     from models import (
         AddMemoryResponse,
         PruneMemoryResponse,
