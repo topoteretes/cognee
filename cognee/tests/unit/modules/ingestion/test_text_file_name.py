@@ -3,7 +3,7 @@
 import pytest
 
 from cognee.modules.ingestion.data_types.TextData import (
-    _MAX_TEXT_NAME_LENGTH,
+    _MAX_TEXT_NAME_BYTES,
     TextData,
     text_file_name,
 )
@@ -34,12 +34,15 @@ def test_unusable_names_are_none(name):
     assert text_file_name(name) is None
 
 
-def test_long_names_are_capped_to_a_storable_basename():
-    name = text_file_name("x" * 1000)
+@pytest.mark.parametrize("title", ["x" * 1000, "日本語" * 70, "🙂" * 100])
+def test_long_names_are_capped_by_bytes_to_a_storable_basename(title):
+    # The filesystem limit is in bytes; a CJK or emoji title is 3-4 bytes per char.
+    name = text_file_name(title)
 
     assert name is not None
-    assert len(name.encode("utf-8")) <= _MAX_TEXT_NAME_LENGTH
+    assert len(name.encode("utf-8")) <= _MAX_TEXT_NAME_BYTES
     assert name.endswith(".txt")
+    name[: -len(".txt")].encode("utf-8").decode("utf-8")  # no split code point
 
 
 def test_text_data_metadata_uses_the_name_and_keeps_the_hash():

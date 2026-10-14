@@ -18,6 +18,9 @@ def test_one_inline_text_may_be_named(tmp_path):
     [
         (["a", "b"], "exactly one inline text item; got 2"),
         ([], "got 0"),
+        # A URL is fetched by cognee, not stored as text: nothing to name.
+        (["https://example.com"], "got 0"),
+        (["s3://bucket/key"], "got 0"),
     ],
 )
 def test_a_name_is_refused_when_it_could_mean_several_things(items, message):
@@ -32,6 +35,13 @@ def test_an_empty_name_is_refused():
 
 def test_no_name_is_always_fine():
     check_name(["a", "b", "c"], None)
+
+
+def test_a_url_or_directory_next_to_the_text_does_not_count(tmp_path):
+    check_name(["some words", "https://example.com", str(tmp_path)], "Q3 plan")
+    assert name_inline_text(["https://example.com", "some words"], "Q3 plan")[0] == (
+        "https://example.com"
+    )
 
 
 @pytest.mark.parametrize(

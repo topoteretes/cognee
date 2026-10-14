@@ -8,6 +8,7 @@ and the option is refused unless exactly one item is inline text.
 """
 
 import os
+import re
 from pathlib import PurePath
 
 NAME_HELP = (
@@ -17,9 +18,20 @@ NAME_HELP = (
 )
 
 
+_URL_LIKE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*://")
+
+
 def inline_text_indices(data_items: list[str]) -> list[int]:
-    """Positions of the items that are inline text rather than existing files."""
-    return [index for index, item in enumerate(data_items) if not os.path.isfile(item)]
+    """Positions of the items that are inline text: not a file, directory or URL.
+
+    A ``file://``, ``s3://`` or ``http(s)://`` item is resolved by cognee, not
+    stored as text, so a name could not apply to it.
+    """
+    return [
+        index
+        for index, item in enumerate(data_items)
+        if not os.path.exists(item) and not _URL_LIKE.match(item)
+    ]
 
 
 def check_name(data_items: list[str], name: str | None) -> None:

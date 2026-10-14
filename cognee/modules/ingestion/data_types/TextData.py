@@ -7,8 +7,9 @@ from typing import BinaryIO
 from .IngestionData import IngestionData
 
 # Long enough for any title a connector hands over, short enough for every
-# object store and filesystem cognee writes to (255-byte basenames).
-_MAX_TEXT_NAME_LENGTH = 200
+# object store and filesystem cognee writes to (255-byte basenames). A byte
+# budget, not a character count: a CJK or emoji title is 3-4 bytes per char.
+_MAX_TEXT_NAME_BYTES = 200
 _TEXT_SUFFIX = ".txt"
 
 
@@ -35,8 +36,10 @@ def text_file_name(name: str | None) -> str | None:
         base = base[: -len(_TEXT_SUFFIX)].rstrip(". ")
         if not base:
             return None
-    if len(base) > _MAX_TEXT_NAME_LENGTH - len(_TEXT_SUFFIX):
-        base = base[: _MAX_TEXT_NAME_LENGTH - len(_TEXT_SUFFIX)].rstrip(". ")
+    budget = _MAX_TEXT_NAME_BYTES - len(_TEXT_SUFFIX)
+    if len(base.encode("utf-8")) > budget:
+        # Cut on the byte budget without splitting a code point.
+        base = base.encode("utf-8")[:budget].decode("utf-8", errors="ignore").rstrip(". ")
     return f"{base}{_TEXT_SUFFIX}"
 
 
