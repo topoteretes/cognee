@@ -1337,3 +1337,126 @@ async def test_api_pipeline_status_omits_an_empty_pipeline_name():
     status_calls = [r for r in requests if r.url.path == "/api/v1/datasets/status"]
     assert status_calls[0].url.params.get_list("pipeline") == []
     assert status_calls[0].url.params.get_list("dataset") == [dataset_id]
+
+
+# --- Named text (SDK-1117) ----------------------------------------------------
+# remember(data=..., name=...) stores the text under a readable name instead
+# of text_<md5>, with a short hash suffix so same-named writes stay distinct.
+
+
+def _digest8(content: str) -> str:
+    return hashlib.md5(content.encode("utf-8")).hexdigest()[:8]
+
+
+@pytest.mark.asyncio
+async def test_cognee_client_api_remember_names_text_after_the_caller():
+    requests: list[httpx.Request] = []
+    client = await _mock_api_client(requests)
+
+    try:
+        await client.remember("works 9 to 5", dataset_name="ds", name="Alice's working hours")
+    finally:
+        await client.close()
+
+    assert _multipart_filenames(requests[0]) == [
+        f"Alice's working hours-{_digest8('works 9 to 5')}.txt"
+    ]
+    assert b"works 9 to 5" in requests[0].content
+
+
+@pytest.mark.asyncio
+async def test_cognee_client_api_same_name_different_text_stays_two_documents():
+    """The hash suffix keeps a reused name from colliding (SDK-790 / SDK-809)."""
+    requests: list[httpx.Request] = []
+    client = await _mock_api_client(requests)
+
+    try:
+        await client.remember("first", dataset_name="ds", name="Notes")
+        await client.remember("second", dataset_name="ds", name="Notes")
+    finally:
+        await client.close()
+
+    first, second = (_multipart_filenames(r)[0] for r in requests)
+    assert first != second
+    assert first.startswith("Notes-") and second.startswith("Notes-")
+
+
+@pytest.mark.parametrize(
+    ("supplied", "expected_stem"),
+    [
+        ("../../etc/passwd", "passwd"),
+        ("notes.txt", "notes"),
+        ("dir/Project Atlas", "Project Atlas"),
+    ],
+)
+def test_text_filename_reduces_the_name_to_a_safe_basename(supplied, expected_stem):
+    assert CogneeClient._text_filename("x", supplied) == f"{expected_stem}-{_digest8('x')}.txt"
+
+
+@pytest.mark.parametrize("supplied", [None, "", "   ", "..", "/"])
+def test_text_filename_without_a_usable_name_is_content_addressed(supplied):
+    digest = hashlib.md5(b"x").hexdigest()
+    assert CogneeClient._text_filename("x", supplied) == f"text_{digest}.txt"
+
+
+@pytest.mark.asyncio
+async def test_cognee_client_local_remember_stages_named_text_under_the_name():
+    """Direct mode writes named text to a temp file so cognee stores it by name."""
+    fake = FakeCogneeModule()
+    client = _local_client(fake)
+
+    await client.remember(
+        data="alice prefers async updates", dataset_name="ds", name="Alice preferences"
+    )
+
+    handed_off = Path(fake.calls[0]["data"])
+    assert handed_off.name == f"Alice preferences-{_digest8('alice prefers async updates')}.txt"
+    assert fake.seen_payloads == [b"alice prefers async updates"]
+    assert fake.calls[0]["dataset_name"] == "ds"
+    # Staged like an upload, cleaned up like one.
+    assert not handed_off.exists()
+    assert not handed_off.parent.exists()
+
+
+@pytest.mark.asyncio
+async def test_cognee_client_remember_rejects_a_name_outside_text_mode():
+    fake = FakeCogneeModule()
+    client = _local_client(fake)
+    payload = base64.b64encode(b"hi").decode("ascii")
+
+    with pytest.raises(ValueError, match="named by `filename`"):
+        await client.remember(
+            data=None, dataset_name="ds", filename="n.md", content_base64=payload, name="x"
+        )
+    with pytest.raises(ValueError, match="omit session_id"):
+        await client.remember(data="note", dataset_name="ds", session_id="s-1", name="x")
+    assert fake.calls == []
+
+
+@pytest.mark.asyncio
+async def test_mcp_remember_forwards_the_name_and_reports_it(monkeypatch):
+    from src import server
+
+    fake_client = RecordingRememberClient()
+    monkeypatch.setattr(server, "cognee_client", fake_client)
+
+    result = await server.remember(data="works 9 to 5", dataset_name="ds", name="Alice hours")
+
+    assert fake_client.calls[0]["name"] == "Alice hours"
+    assert "Alice hours" in result[0].text
+
+
+@pytest.mark.asyncio
+async def test_mcp_remember_refuses_a_name_with_an_upload_or_a_session(monkeypatch):
+    from src import server
+
+    fake_client = RecordingRememberClient()
+    monkeypatch.setattr(server, "cognee_client", fake_client)
+    payload = base64.b64encode(b"hi").decode("ascii")
+
+    upload = await server.remember(filename="n.md", content_base64=payload, name="x")
+    session = await server.remember(data="note", session_id="s-1", name="x")
+
+    assert upload[0].text.startswith("Error:") and "filename" in upload[0].text
+    assert session[0].text.startswith("Error:") and "session_id" in session[0].text
+    assert fake_client.calls == []

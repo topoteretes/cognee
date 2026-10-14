@@ -159,11 +159,30 @@ class CogneeClient:
         return {"status": "success", "result": parsed}
 
     @staticmethod
-    def _text_upload(data: Any) -> dict[str, tuple[str, str, str]]:
-        """Create a content-addressed text upload for API-mode ingestion."""
-        content = str(data)
+    def _text_filename(content: str, name: str | None = None) -> str:
+        """The filename a text payload is stored under.
+
+        Without a name the upload is content-addressed (``text_<md5>.txt``),
+        so repeated writes never collide and never trip the "document already
+        exists, use update" 409. With one it is ``<name>-<md5[:8]>.txt``: the
+        document reads as what the caller called it, and the hash suffix keeps
+        two writes with the same name and different content two documents
+        rather than one 409 or one overwrite. ``name`` is reduced to its
+        basename, like ``filename`` is, so it cannot carry path components.
+        """
         digest = hashlib.md5(content.encode("utf-8")).hexdigest()
-        return {"data": (f"text_{digest}.txt", content, "text/plain")}
+        safe_name = Path(name or "").name.strip().strip(".") if name else ""
+        if not safe_name:
+            return f"text_{digest}.txt"
+        if safe_name.lower().endswith(".txt"):
+            safe_name = safe_name[: -len(".txt")].rstrip(". ") or safe_name
+        return f"{safe_name}-{digest[:8]}.txt"
+
+    @staticmethod
+    def _text_upload(data: Any, name: str | None = None) -> dict[str, tuple[str, str, str]]:
+        """Create a text upload for API-mode ingestion, named per ``_text_filename``."""
+        content = str(data)
+        return {"data": (CogneeClient._text_filename(content, name), content, "text/plain")}
 
     @staticmethod
     def _decode_upload(filename: str, content_base64: str) -> tuple[str, bytes]:
@@ -203,12 +222,14 @@ class CogneeClient:
         data: Any = None,
         filename: str | None = None,
         content_base64: str | None = None,
+        name: str | None = None,
     ) -> dict[str, tuple[str, Any, str]]:
         """Pick the multipart upload for an API-mode ingestion payload.
 
         Base64 uploads and readable local files keep their original
-        basename; anything else is uploaded as content-addressed
-        text so repeated writes don't collide.
+        basename; anything else is uploaded as text, content-addressed so
+        repeated writes don't collide, or under ``name`` when the caller
+        gave the text one (see ``_text_filename``).
         """
         if content_base64:
             return CogneeClient._file_upload(filename, content_base64)
@@ -227,7 +248,7 @@ class CogneeClient:
                 if not settings.accept_local_file_path:
                     raise IngestionError(message="Local files are not accepted.")
                 return CogneeClient._path_upload(data)
-        return CogneeClient._text_upload(data)
+        return CogneeClient._text_upload(data, name)
 
     async def add(
         self, data: Any, dataset_name: str = "main_dataset", node_set: list[str] | None = None
@@ -625,6 +646,7 @@ class CogneeClient:
         content_base64: str | None = None,
         ontology_key: str | list[str] | None = None,
         self_improvement: bool = True,
+        name: str | None = None,
     ) -> dict[str, Any]:
         """Store data in memory via remember().
 
@@ -638,11 +660,17 @@ class CogneeClient:
         upload), not both. File uploads are permanent-memory only.
         ontology_key selects one or more uploaded ontologies for permanent
         extraction; local mode resolves keys for the default user.
+        `name` names a text `data` document (permanent memory only); without
+        it the text is stored under a content-hash name.
         """
         if content_base64 and data:
             raise ValueError("Pass either `data` or `filename` + `content_base64`, not both.")
         if content_base64 and session_id:
             raise ValueError("File uploads (content_base64) do not support session_id.")
+        if name and content_base64:
+            raise ValueError("`name` applies to text `data`; a file upload is named by `filename`.")
+        if name and session_id:
+            raise ValueError("`name` applies to permanent memory; omit session_id.")
 
         ontology_keys = [ontology_key] if isinstance(ontology_key, str) else ontology_key
         ontology_keys = [key.strip() for key in (ontology_keys or []) if key.strip()]
@@ -686,7 +714,7 @@ class CogneeClient:
                 return response.json()
 
             endpoint = f"{self.api_url}/api/v1/remember"
-            files = self._build_upload(data, filename, content_base64)
+            files = self._build_upload(data, filename, content_base64, name=name)
             form_data: dict[str, Any] = {"datasetName": dataset_name}
             if custom_prompt:
                 form_data["custom_prompt"] = custom_prompt
@@ -738,6 +766,15 @@ class CogneeClient:
                     remember_data = os.path.join(tmp_dir, safe_name)
                     with open(remember_data, "wb") as f:
                         f.write(raw_bytes)
+                elif name:
+                    # Named text is staged like an upload, so cognee stores it
+                    # under the name instead of its content hash. Same path a
+                    # base64 upload takes, same cleanup below.
+                    content = str(data)
+                    tmp_dir = tempfile.mkdtemp(prefix="cognee_upload_")
+                    remember_data = os.path.join(tmp_dir, self._text_filename(content, name))
+                    with open(remember_data, "w", encoding="utf-8") as f:
+                        f.write(content)
                 else:
                     remember_data = data
 
