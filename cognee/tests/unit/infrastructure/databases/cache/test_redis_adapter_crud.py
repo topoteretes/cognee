@@ -649,3 +649,14 @@ async def test_delete_session_context_entry_missing_returns_false(adapter):
     await adapter.create_session_context_entry("u1", "s1", {"id": "c1", "kind": "context"})
     assert await adapter.delete_session_context_entry("u1", "s1", "missing") is False
     assert len(await adapter.get_session_context_entries("u1", "s1")) == 1
+
+
+@pytest.mark.asyncio
+async def test_delete_usage_logs_removes_only_that_users_logs(adapter):
+    await adapter.log_usage("u1", {"endpoint": "/add"}, ttl=None)
+    await adapter.log_usage("u2", {"endpoint": "/cognify"}, ttl=None)
+
+    await adapter.delete_usage_logs("u1")
+
+    assert await adapter.get_usage_logs("u1") == []
+    assert await adapter.get_usage_logs("u2") == [{"endpoint": "/cognify"}]

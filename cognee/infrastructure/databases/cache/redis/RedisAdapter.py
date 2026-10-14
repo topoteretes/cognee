@@ -752,6 +752,19 @@ class RedisAdapter(CacheDBInterface):
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
+    async def delete_usage_logs(self, user_id: str) -> None:
+        """Delete the given user's usage log list."""
+        try:
+            await self.async_redis.delete(f"{self.log_key}:{user_id}")
+        except (redis.ConnectionError, redis.TimeoutError) as e:
+            error_msg = f"Redis connection error while deleting usage logs: {e!s}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+        except Exception as e:
+            error_msg = f"Unexpected error while deleting usage logs from Redis: {e!s}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+
     async def close(self):
         """Close Redis connections."""
         try:

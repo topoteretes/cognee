@@ -195,7 +195,9 @@ async def _forget_everything(user: Any) -> dict:
     - Relational DB (datasets, data records): yes
     - Graph DB (nodes, edges): yes
     - Vector DB (embeddings): yes
-    - Session cache (Redis/FS): yes (full prune)
+    - Session cache: yes — only the caller's own sessions and usage logs.
+      The cache is shared by every user, so it must never be pruned
+      wholesale here.
     """
     from cognee.api.v1.datasets.datasets import datasets
 
@@ -204,18 +206,27 @@ async def _forget_everything(user: Any) -> dict:
 
     await datasets.delete_all(user=user)
 
-    # Clean up session cache (Redis or filesystem)
+    # Clean up the caller's sessions (non-fatal)
+    try:
+        from cognee.modules.session_lifecycle.invalidate_sessions import (
+            invalidate_sessions_for_user,
+        )
+
+        await invalidate_sessions_for_user(user.id)
+    except Exception as e:
+        logger.warning("forget: session cache cleanup failed (non-fatal): %s", e, exc_info=True)
+
+    # Clean up the caller's usage logs (non-fatal)
     try:
         from cognee.infrastructure.databases.cache import get_cache_config
         from cognee.infrastructure.databases.cache.get_cache_engine import get_cache_engine
 
-        cache_config = get_cache_config()
-        if cache_config.caching or cache_config.usage_logging:
+        if get_cache_config().usage_logging:
             cache_engine = get_cache_engine()
             if cache_engine is not None:
-                await cache_engine.prune()
+                await cache_engine.delete_usage_logs(str(user.id))
     except Exception as e:
-        logger.warning("forget: session cache cleanup failed (non-fatal): %s", e, exc_info=True)
+        logger.warning("forget: usage log cleanup failed (non-fatal): %s", e, exc_info=True)
 
     logger.info("forget: deleted all data for user=%s (%d datasets)", user.id, count)
     return {"datasets_removed": count, "status": "success"}

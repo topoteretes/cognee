@@ -1151,6 +1151,22 @@ class SqlCacheAdapter(CacheDBInterface):
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from error
 
+    async def delete_usage_logs(self, user_id: str) -> None:
+        """Delete every usage log row of the given user."""
+        await self._ensure_initialized()
+        try:
+            async with self.sessionmaker() as session, session.begin():
+                await session.execute(
+                    delete(cache_usage_logs).where(
+                        cache_usage_logs.c.log_key == self.log_key,
+                        cache_usage_logs.c.user_id == user_id,
+                    )
+                )
+        except Exception as error:
+            error_msg = f"Unexpected error while deleting usage logs from SQL cache: {error}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from error
+
     # --------------------------------------------------------------------- #
     # Key/value storage (small exact-key cache values)
     # --------------------------------------------------------------------- #
