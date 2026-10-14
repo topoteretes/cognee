@@ -107,7 +107,7 @@ def dispatch(args: argparse.Namespace) -> None:
 
 def _dispatch_add(client: CogneeApiClient, args: argparse.Namespace) -> None:
     fmt.echo(f"Adding {len(args.data)} item(s) to dataset '{args.dataset_name}'...")
-    result = client.add(args.data, args.dataset_name)
+    result = client.add(args.data, args.dataset_name, name=getattr(args, "name", None))
     fmt.success(f"Successfully added data to dataset '{args.dataset_name}'")
     if result:
         fmt.echo(json.dumps(result, indent=2, default=str))
@@ -278,6 +278,7 @@ def _dispatch_remember(client: CogneeApiClient, args: argparse.Namespace) -> Non
         chunk_size=getattr(args, "chunk_size", None),
         chunks_per_batch=getattr(args, "chunks_per_batch", None),
         run_in_background=getattr(args, "background", False),
+        name=getattr(args, "name", None),
     )
     if getattr(args, "background", False):
         fmt.success("Data ingested and cognification started in background!")

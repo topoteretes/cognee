@@ -12,7 +12,9 @@ def classify(
     data: str | BinaryIO, filename: str | None = None
 ) -> TextData | BinaryData | S3BinaryData:
     if isinstance(data, str):
-        return TextData(data)
+        # A filename names the text document; without one, text is named by
+        # its content hash.
+        return TextData(data, name=filename)
 
     if isinstance(data, (BufferedReader, SpooledTemporaryFile, BytesIO)):
         # In-memory uploads (BytesIO) carry no .name — the caller-supplied

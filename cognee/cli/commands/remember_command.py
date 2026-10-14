@@ -7,6 +7,7 @@ from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.config import CHUNKER_CHOICES
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
 from cognee.cli.hints import hint_recall
+from cognee.cli.named_text import NAME_HELP, check_name, name_inline_text
 from cognee.cli.reference import SupportsCliCommand
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
@@ -57,6 +58,7 @@ After completion, use `cognee recall` (or `cognee search`) to query the graph.
             default=DEFAULT_DATASET_NAME,
             help="Dataset name (default: main_dataset)",
         )
+        parser.add_argument("--name", "-n", default=None, help=NAME_HELP)
         parser.add_argument(
             "--chunk-size",
             type=int,
@@ -346,6 +348,12 @@ After completion, use `cognee recall` (or `cognee search`) to query the graph.
                     "No data supplied. Pass file paths, text, or --sample-data."
                 )
 
+            name = getattr(args, "name", None)
+            try:
+                check_name(args.data, name)
+            except ValueError as e:
+                raise CliCommandInnerException(str(e)) from e
+
             dry_run = getattr(args, "dry_run", False)
             action = "Estimating" if dry_run else "Remembering"
             fmt.echo(f"{action} {len(args.data)} item(s) in dataset '{args.dataset_name}'...")
@@ -370,7 +378,8 @@ After completion, use `cognee recall` (or `cognee search`) to query the graph.
                         except ImportError:
                             fmt.warning("CsvChunker not available, using TextChunker")
 
-                    data_to_add = args.data[0] if len(args.data) == 1 else args.data
+                    items = name_inline_text(args.data, name)
+                    data_to_add = items[0] if len(items) == 1 else items
 
                     result = await cognee.remember(
                         data=data_to_add,

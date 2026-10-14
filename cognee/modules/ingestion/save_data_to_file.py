@@ -42,9 +42,12 @@ def _storage_key(file_name: str, content_hash: str | None, is_text: bool) -> str
     and dlt derives its source name from it. A flat ``<hash>.<ext>`` key breaks
     all three.
 
-    Text payloads are left alone — they already have a content-addressed name
-    (``text_<md5>.txt``) that other parts of cognee construct by hand and
-    assert on, so it stays the single naming source for text.
+    Nameless text payloads are left alone — they already have a
+    content-addressed name (``text_<md5>.txt``) that other parts of cognee
+    construct by hand and assert on, so it stays the single naming source for
+    text without a name. Text a caller named (a connector row's title, a
+    ``DataItem.name``) is keyed like a file, for the same reason files are:
+    two documents titled "Notes" must not overwrite each other.
     """
     if is_text or not content_hash:
         return file_name
@@ -68,7 +71,8 @@ async def save_data_to_file_detailed(
     data_root_directory = storage_config["data_root_directory"]
 
     classified_data = classify(data, filename)
-    is_text = isinstance(classified_data, TextData)
+    # Only text *without* a name keeps the flat content-hash key.
+    is_text = isinstance(classified_data, TextData) and classified_data.name is None
 
     file_metadata = await classified_data.aget_metadata()
 

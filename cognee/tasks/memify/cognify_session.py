@@ -1,3 +1,4 @@
+import re
 from uuid import UUID
 
 import cognee
@@ -22,18 +23,35 @@ from cognee.tasks.ingestion.data_item import DataItem
 logger = get_logger("cognify_session")
 
 
-def _dated_content(window: SessionPersistWindow) -> str | DataItem:
-    """The window's text, carrying its last entry time as the document's source date.
+def session_document_name(session_id: str, last_entry_time: str | None = None) -> str:
+    """The name a persisted session window is listed under: ``Session <id> [<date>]``.
+
+    Session ids are self-describing (the plugins mint ``<agent>_<host session
+    id>``), and the date of the window's last entry tells one window of a
+    long session from the next. Without a name the window would be stored
+    as ``text_<md5>``, which tells a reader nothing.
+    """
+    name = f"Session {session_id}"
+    date = (last_entry_time or "")[:10]
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
+        name = f"{name} {date}"
+    return name
+
+
+def _dated_content(window: SessionPersistWindow) -> DataItem:
+    """The window's text as a named document, dated by its last entry time.
 
     Conflict review orders competing facts by that date, so a window that has one
-    is added as a DataItem under IMPROVE_EFFECTIVE_DATE_KEY. literal_text keeps
-    session text that happens to look like a URL or a path from being fetched.
+    carries it under IMPROVE_EFFECTIVE_DATE_KEY. literal_text keeps session text
+    that happens to look like a URL or a path from being fetched.
     """
-    if not window.last_entry_time:
-        return window.text
+    external_metadata = None
+    if window.last_entry_time:
+        external_metadata = {get_improve_config().effective_date_key: window.last_entry_time}
     return DataItem(
         data=window.text,
-        external_metadata={get_improve_config().effective_date_key: window.last_entry_time},
+        name=session_document_name(window.session_id, window.last_entry_time),
+        external_metadata=external_metadata,
         literal_text=True,
     )
 

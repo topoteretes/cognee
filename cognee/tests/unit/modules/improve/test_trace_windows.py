@@ -66,7 +66,8 @@ class FakeCognee:
         self.fail_builds = set(fail_builds)
 
     async def add(self, text, **kwargs):
-        self.documents.append(text)
+        # A trace window is added as a named DataItem (CLO-1023); keep its text.
+        self.documents.append(getattr(text, "data", text))
 
     async def cognify(self, **kwargs):
         if len(self.documents) in self.fail_builds:

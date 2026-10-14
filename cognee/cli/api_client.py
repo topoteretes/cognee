@@ -128,29 +128,40 @@ class CogneeApiClient:
 
     # -- add -------------------------------------------------------------
 
+    @staticmethod
+    def _upload_parts(data_items: list[str], name: str | None = None) -> tuple[list[tuple], list]:
+        """Multipart parts for ``data_items``: files under their basename, text as text.
+
+        Inline text is named ``text_<n>.txt`` unless ``name`` names it (one text
+        item only, see ``named_text.check_name``). Returns the parts and the
+        file handles to close once the request is sent.
+        """
+        from cognee.cli.named_text import check_name, upload_filename
+
+        check_name(data_items, name)
+        files: list[tuple] = []
+        opened = []
+        for item in data_items:
+            if os.path.isfile(item):
+                mime, _ = mimetypes.guess_type(item)
+                fh = open(item, "rb")  # noqa: SIM115
+                opened.append(fh)
+                files.append(
+                    ("data", (os.path.basename(item), fh, mime or "application/octet-stream"))
+                )
+            else:
+                filename = upload_filename(name) if name else f"text_{len(files)}.txt"
+                files.append(("data", (filename, io.BytesIO(item.encode()), "text/plain")))
+        return files, opened
+
     def add(
         self,
         data_items: list[str],
         dataset_name: str = DEFAULT_DATASET_NAME,
+        name: str | None = None,
     ) -> dict:
-        files = []
-        opened = []
+        files, opened = self._upload_parts(data_items, name)
         try:
-            for item in data_items:
-                if os.path.isfile(item):
-                    mime, _ = mimetypes.guess_type(item)
-                    fh = open(item, "rb")  # noqa: SIM115
-                    opened.append(fh)
-                    files.append(
-                        ("data", (os.path.basename(item), fh, mime or "application/octet-stream"))
-                    )
-                else:
-                    files.append(
-                        (
-                            "data",
-                            (f"text_{len(files)}.txt", io.BytesIO(item.encode()), "text/plain"),
-                        )
-                    )
             form_data = {"datasetName": dataset_name}
             r = self._get_client().post(self._url("/api/v1/add"), files=files, data=form_data)
             self._raise_for_status(r)
@@ -269,25 +280,10 @@ class CogneeApiClient:
         chunk_size: int | None = None,
         chunks_per_batch: int | None = None,
         custom_prompt: str | None = None,
+        name: str | None = None,
     ) -> dict:
-        files = []
-        opened = []
+        files, opened = self._upload_parts(data_items, name)
         try:
-            for item in data_items:
-                if os.path.isfile(item):
-                    mime, _ = mimetypes.guess_type(item)
-                    fh = open(item, "rb")  # noqa: SIM115
-                    opened.append(fh)
-                    files.append(
-                        ("data", (os.path.basename(item), fh, mime or "application/octet-stream"))
-                    )
-                else:
-                    files.append(
-                        (
-                            "data",
-                            (f"text_{len(files)}.txt", io.BytesIO(item.encode()), "text/plain"),
-                        )
-                    )
             form_data: dict[str, Any] = {
                 "datasetName": dataset_name,
                 "run_in_background": "true" if run_in_background else "false",

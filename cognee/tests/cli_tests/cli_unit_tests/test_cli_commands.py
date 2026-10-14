@@ -74,6 +74,37 @@ class TestAddCommand:
 
     @patch(_RESOLVE_USER_PATCH, new_callable=lambda: AsyncMock(return_value=_mock_user()))
     @patch("cognee.cli.commands.add_command.asyncio.run", side_effect=_mock_run)
+    def test_execute_named_text_adds_a_named_data_item(self, _mock_asyncio_run, _mock_resolve):
+        """--name turns the inline text into a DataItem named after it (CLO-1023)."""
+        from cognee.tasks.ingestion.data_item import DataItem
+
+        mock_cognee = MagicMock()
+        mock_cognee.add = AsyncMock()
+
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            args = argparse.Namespace(data=["some words"], dataset_name="ds", name="Q3 plan")
+            AddCommand().execute(args)
+
+        added = mock_cognee.add.await_args.kwargs["data"]
+        assert isinstance(added, DataItem)
+        assert added.data == "some words"
+        assert added.name == "Q3 plan"
+
+    def test_execute_refuses_a_name_for_two_texts(self):
+        mock_cognee = MagicMock()
+        mock_cognee.add = AsyncMock()
+
+        with (
+            patch.dict(sys.modules, {"cognee": mock_cognee}),
+            pytest.raises(CliCommandException, match="exactly one inline text item"),
+        ):
+            AddCommand().execute(
+                argparse.Namespace(data=["one", "two"], dataset_name="ds", name="Q3 plan")
+            )
+        mock_cognee.add.assert_not_awaited()
+
+    @patch(_RESOLVE_USER_PATCH, new_callable=lambda: AsyncMock(return_value=_mock_user()))
+    @patch("cognee.cli.commands.add_command.asyncio.run", side_effect=_mock_run)
     def test_execute_single_item(self, mock_asyncio_run, _mock_resolve):
         """Test execute with single data item"""
         # Mock the cognee module
