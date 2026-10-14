@@ -403,6 +403,7 @@ class TestImproveDispatch:
             "feedback_alpha": 0.2,
             "build_global_context_index": True,
             "build_truth_subspace": True,
+            "review_conflicts": True,
         }
         base.update(overrides)
         return argparse.Namespace(**base)
@@ -429,6 +430,7 @@ class TestImproveDispatch:
             run_in_background=False,
             build_global_context_index=True,
             build_truth_subspace=True,
+            review_conflicts=True,
             feedback_alpha=0.2,
         )
 

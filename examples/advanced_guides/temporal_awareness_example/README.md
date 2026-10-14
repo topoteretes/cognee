@@ -4,21 +4,18 @@
 
 Ordinary graph extraction with a timestamp-promotion task inserted into the default
 cognify pipeline. Builds on [`temporal_recall.py`](../../guides/temporal_recall.py),
-which uses `temporal_cognify=True` and `SearchType.TEMPORAL`. This example adds the
+which uses `SearchType.TEMPORAL` over the Timestamp nodes the default pipeline
+extracts. This example adds the
 custom extraction task and, later, direct temporal hybrid retrieval.
 
 ### Compared to `temporal_awareness_example.py`
 
-The incumbent in this folder uses `temporal_cognify=True`, which swaps the whole
-cognify task list for an event-centric pipeline, and answers through
-`SearchType.TEMPORAL` — a separate retriever that never sees chunks or entity
-neighbourhoods. This demo keeps the ordinary extraction pipeline and filters hybrid
-candidates by time instead: chunks and entity neighbourhoods stay in the answer, at
-the price of no event timeline and no relative-date handling at query time. One more
-price: the filter only removes candidates, so a time-relevant chunk the vector search
-misses never surfaces. The oversized candidate budget (40 fetched for 5 kept) softens
-this; a real replacement should pull chunks from the time index directly, the way the
-incumbent's `collect_time_ids` does.
+`temporal_awareness_example.py` runs the default pipeline, which already extracts
+dates as Timestamp nodes, and answers through `SearchType.TEMPORAL`. This demo
+instead inserts its own timestamp-promotion task and calls a local temporal hybrid
+retriever that filters hybrid candidates by time. The filter only removes candidates,
+so a time-relevant chunk the vector search misses never surfaces; the oversized
+candidate budget (40 fetched for 5 kept) softens this.
 
 ### Prerequisites
 

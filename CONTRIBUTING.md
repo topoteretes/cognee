@@ -131,7 +131,7 @@ See the [Run with Docker](README.md#run-with-docker) section in the README for m
 
 Copy `.env.template` to `.env` and provide your OPENAI_API_KEY as LLM_API_KEY
 
-Make sure to run ```shell uv sync ``` in the root cloned folder or set up a virtual environment to run cognee
+Make sure to run `uv sync` in the root cloned folder or set up a virtual environment to run cognee
 
 ```shell
 uv run python examples/guides/simple_cognee_example.py
@@ -140,18 +140,35 @@ uv run python examples/guides/simple_cognee_example.py
 ## 4. 📤 Submitting Changes
 
 1. Make sure that `pre-commit` and hooks are installed. See `Required tools` section for more information. Try executing `pre-commit run` if you are not sure.
-3. Push your changes:
-```shell
-git add .
-git commit -s -m "Description of your changes"
-git push origin feature/your-feature-name
-```
-
-2. Create a Pull Request:
+2. Push your changes:
+   ```shell
+   git add .
+   git commit -s -m "Description of your changes"
+   git push origin feature/your-feature-name
+   ```
+3. Create a Pull Request:
    - Go to the [**cognee** repository](https://github.com/topoteretes/cognee) or [cognee community repository](https://github.com/topoteretes/cognee-community)
    - Click "Compare & Pull Request" and open a PR against dev branch
    - Fill in the PR template with details about your changes
    - You MUST provide screenshots of unit and integration tests passing on your machine. We can't merge PRs otherwise
+
+### PR Titles
+
+Use `type: Summary` for your PR title. The [PR title check](.github/workflows/pr_lint.yml)
+accepts these types:
+
+| Type | Example |
+| --- | --- |
+| `chore` | `chore: Update development dependencies` |
+| `ci` | `ci: Add a documentation check` |
+| `docs` | `docs: Fix broken link in setup guide` |
+| `feat` | `feat: Add dataset filtering` |
+| `fix` | `fix: Handle missing auth cookie` |
+| `perf` | `perf: Reduce search latency` |
+| `refactor` | `refactor: Simplify dataset lookup` |
+| `revert` | `revert: Restore previous search behavior` |
+| `test` | `test: Cover empty search results` |
+| `break` | `break: Remove deprecated endpoint` |
 
 ### Changelog Entries
 

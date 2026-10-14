@@ -48,7 +48,7 @@ Requirements: `CACHING=true` (default). The cache backend is
 `CACHE_BACKEND`, one of `sqlite` (default), `postgres`, `redis`, `fs`,
 `tapes`. Sessions expire after `SESSION_TTL_SECONDS` (default 7 days).
 
-### What improve() does: nine stages, in order
+### What improve() does: ten stages, in order
 
 Every run goes through the same ordered stages
 (`cognee/modules/improve/registry.py`). Each stage checks a gate before it
@@ -63,11 +63,12 @@ spends any LLM or embedding cost, and reports one `StageResult`.
 | 5 | `distill_sessions` | Distills session learnings into the graph | `session_ids`, an LLM |
 | 6 | `update_user_preferences` | Folds rated turns into per-user preferences | `session_ids`, `PERSONALIZATION_ENABLED=true` (default false) |
 | 7 | `build_truth_subspace` | Builds the truth subspace from distilled learnings | `session_ids`, `build_truth_subspace=True`, a Ladybug graph |
-| 8 | `triplet_enrichment` | Triplet embeddings over the graph (memify) | `TRIPLET_EMBEDDING=true` (**default false**), or custom tasks/data passed |
-| 9 | `global_context_index` | Bucket and root summaries for global questions | `build_global_context_index=True`, an LLM |
+| 8 | `review_conflicts` | Reviews dated source facts, stores conflicts and rewrites Entity descriptions | `review_conflicts=True` or `IMPROVE_REVIEW_CONFLICTS=true`, an LLM, edge evidence |
+| 9 | `triplet_enrichment` | Triplet embeddings over the graph (memify) | `TRIPLET_EMBEDDING=true` (**default false**), or custom tasks/data passed |
+| 10 | `global_context_index` | Bucket and root summaries for global questions | `build_global_context_index=True`, an LLM |
 
-Stages 1–7 need `session_ids`; 8 and 9 work on the graph alone. The order
-matters: 4 feeds 5, 5 feeds 7, and 7 runs before 8.
+Stages 1–7 need `session_ids`; 8–10 work on the graph alone. The order
+matters: 4 feeds 5, 5 feeds 7, and 7 and 8 run before 9.
 
 ### Reading the result
 
@@ -89,17 +90,18 @@ CLI, and `RememberResult.improve`.
 |---|---|
 | `no_session_ids` | Session stage, no `session_ids` passed |
 | `disabled_by_config` | Listed in `IMPROVE_STAGES_DISABLED` |
-| `triplet_embedding_disabled` | Set `TRIPLET_EMBEDDING=true` to enable stage 8 |
-| `opt_in_disabled` | Pass `build_truth_subspace=True` / `build_global_context_index=True` |
+| `triplet_embedding_disabled` | Set `TRIPLET_EMBEDDING=true` to enable triplet enrichment |
+| `opt_in_disabled` | Pass `build_truth_subspace=True` / `review_conflicts=True` / `build_global_context_index=True` |
 | `personalization_disabled` | Set `PERSONALIZATION_ENABLED=true` |
 | `auto_feedback_disabled` | Stage 4 needs `CACHING=true` and `AUTO_FEEDBACK=true` |
-| `no_llm_configured` | Stages 4, 5, 9 draft text with an LLM; none configured |
+| `no_llm_configured` | Stages 4, 5, 8, 10 draft text with an LLM; none configured |
+| `edge_evidence_disabled` | Conflict review needs `EDGE_EVIDENCE_ENABLED=true` |
 | `backend_unsupported` | The graph adapter lacks the feature (feedback weights, truth subspace) |
 | `session_manager_unavailable` | The session cache is not reachable |
 | `lock_held` | Another improve for the same dataset or session is running (below) |
 | `aborted_by_fatal_stage` | Stage 2 failed, so the rest did not run |
 | `budget_exhausted` | An earlier stage failed because the LLM budget is exhausted (a 402); the rest would fail the same way. Top up, then run improve again |
-| `no_new_entries`, `no_new_trace_steps`, `no_writes_since_last_improve` | With status `already_completed`: nothing new since the last run |
+| `no_new_entries`, `no_new_trace_steps`, `no_new_facts`, `no_writes_since_last_improve` | With status `already_completed`: nothing new since the last run |
 
 ### How remember() triggers improve
 
@@ -128,6 +130,8 @@ CLI, and `RememberResult.improve`.
 | `IMPROVE_DEBOUNCE_SECONDS` | `0` | ...or this many seconds since the last one. Seconds alone (entries left at 1) means time-only |
 | `IMPROVE_STAGES_DISABLED` | empty | CSV of stage names to skip |
 | `IMPROVE_FEEDBACK_ALPHA` | `0.1` | Feedback learning rate, in (0, 1] |
+| `IMPROVE_REVIEW_CONFLICTS` | `false` | Review fact conflicts, including automatic improve |
+| `IMPROVE_EFFECTIVE_DATE_KEY` | `effective_date` | Document metadata key holding the source date |
 
 There is no debounce timer: held-back entries wait for the next
 `remember()` with that session, or an explicit `improve()`.
@@ -135,7 +139,7 @@ There is no debounce timer: held-back entries wait for the next
 ## Pitfalls
 
 - **A plain `improve(dataset)` often does nothing.** Without `session_ids`,
-  only stages 8 and 9 can run, and both are off by default. Result: every
+  only stages 8–10 can run, and all are off by default. Result: every
   stage `skipped`. That is expected, not an error.
 - **Typed entries do not auto-improve.** `remember(QAEntry/TraceEntry/
   FeedbackEntry, session_id=...)` stores the entry but never starts an
@@ -181,9 +185,13 @@ Watermarks keep repeat runs cheap:
 
 - Session stages track how many entries were already persisted, per user
   and session.
-- Stage 8 compares the last completed enrichment against later write
+- Triplet enrichment compares the last completed enrichment against later write
   pipelines for the dataset. A `node_name` or custom-task run bypasses that
   check.
+- Conflict review uses its last succeeded stamp to select touched entities,
+  and retries conflicts with missing citations or pending writes. Source dates
+  come from document metadata; session windows use their last entry time.
+  Fixed attributes remain disputed even when one document is newer.
 
 The improve operation row is written when the run finishes: `failed` if any
 stage errored (a retry is never gated off), `noop` if nothing ran.
@@ -204,7 +212,7 @@ stage errored (a retry is never gated off), `noop` if nothing ran.
 - Background tasks: `cognee/infrastructure/background_tasks.py`
 
 Examples: `examples/guides/improve_quickstart.py`, `sessions.py`,
-`session_distillation.py`, `global_context_index.py`,
+`session_distillation.py`, `review_conflicts.py`, `global_context_index.py`,
 `agent_memory_quickstart.py`, and
 `examples/advanced_guides/remember_recall_improve_example.py`.
 
@@ -223,7 +231,7 @@ Adding a stage:
 3. If it can re-run cheaply, give it a watermark so a repeat run reports
    `already_completed`.
 4. If it writes graph data under a new pipeline name, add that name to
-   `WRITE_PIPELINE_NAMES` in `graph_changes.py`, or stage 8 will not notice
+   `WRITE_PIPELINE_NAMES` in `graph_changes.py`, or triplet enrichment will not notice
    the change.
 5. Tests: `cognee/tests/unit/modules/improve/` (gates, results, config) and
    `cognee/tests/unit/api/v1/improve/` (orchestration, rerun, router).

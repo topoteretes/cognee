@@ -291,11 +291,8 @@ class TestRecordProvenanceTask:
         assert await record_provenance([]) == []
 
 
-async def _task_names(provenance_flag, contradiction_flag=False):
-    config = CognifyConfig(
-        provenance_tracking=provenance_flag,
-        contradiction_detection=contradiction_flag,
-    )
+async def _task_names(provenance_flag):
+    config = CognifyConfig(provenance_tracking=provenance_flag)
     with patch.object(cognify_module, "get_cognify_config", return_value=config):
         tasks = await get_default_tasks(
             # Non-None config skips the ontology-env branch; explicit chunk_size
@@ -359,9 +356,9 @@ class TestPipelineWiring:
     async def test_ledger_is_never_a_pipeline_task(self, flag):
         # Recording lives in add_data_points (storage seam); the task list is
         # the same with the flag on or off.
-        names = await _task_names(provenance_flag=flag, contradiction_flag=True)
+        names = await _task_names(provenance_flag=flag)
         assert "record_provenance" not in names
-        assert names.index("add_data_points") < names.index("detect_contradictions")
+        assert "add_data_points" in names
 
 
 class TestStorageSeamHook:
@@ -420,13 +417,13 @@ class TestStorageSeamHook:
             ),
             ("bad",),  # malformed: skipped, never raises
         ]
-        queued = await record_edges_provenance(edges, ctx, activity="detect_contradictions")
+        queued = await record_edges_provenance(edges, ctx, activity="custom_edge_writer")
         assert queued == 1
 
         entry = await manager.get_provenance(f"rel:{scope}:n1:contradicts:{scope}:n2")
         assert entry["entity_type"] == "relationship"
         assert entry["confidence"] == 0.9
-        assert entry["activity_id"] == f"detect_contradictions:{ctx.pipeline_run_id}"
+        assert entry["activity_id"] == f"custom_edge_writer:{ctx.pipeline_run_id}"
         assert entry["bundle_id"] == str(ctx.pipeline_run_id)
         assert entry["agent_id"] == "user@example.com"
         assert entry["used_entities"] == [f"{scope}:n1", f"{scope}:n2"]

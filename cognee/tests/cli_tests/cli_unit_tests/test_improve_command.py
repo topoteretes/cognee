@@ -39,6 +39,7 @@ class TestParser:
         args = _parse()
         assert args.build_global_context_index is False
         assert args.build_truth_subspace is False
+        assert args.review_conflicts is False
         assert args.feedback_alpha is None
         assert args.background is False
         assert args.dataset_name == "main_dataset"
@@ -56,6 +57,7 @@ class TestParser:
             "0.3",
             "--build-global-context-index",
             "--build-truth-subspace",
+            "--review-conflicts",
             "-b",
         )
         assert args.session_ids == ["s1", "s2"]
@@ -63,6 +65,7 @@ class TestParser:
         assert args.feedback_alpha == 0.3
         assert args.build_global_context_index is True
         assert args.build_truth_subspace is True
+        assert args.review_conflicts is True
         assert args.background is True
 
 
@@ -91,6 +94,7 @@ class TestExecute:
             "0.2",
             "--build-global-context-index",
             "--build-truth-subspace",
+            "--review-conflicts",
         )
         improve, _ = self._execute(args, _result(StageResult.completed("triplet_enrichment")))
 
@@ -100,6 +104,7 @@ class TestExecute:
         assert kwargs["feedback_alpha"] == 0.2
         assert kwargs["build_global_context_index"] is True
         assert kwargs["build_truth_subspace"] is True
+        assert kwargs["review_conflicts"] is True
         assert kwargs["run_in_background"] is False
 
     def test_omitted_alpha_is_not_forwarded(self):

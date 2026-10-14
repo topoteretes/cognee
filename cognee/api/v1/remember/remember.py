@@ -92,6 +92,7 @@ class RememberKwargs(TypedDict, total=False):
 
     graph_model: Any
     extractor: Literal["llm", "gliner_demo", "gliner"]
+    summary_method: Literal["llm", "from_extraction"]
     node_set: list[str]
     preferred_loaders: list
     incremental_loading: bool
@@ -107,6 +108,9 @@ class RememberKwargs(TypedDict, total=False):
     repo_credentials: str
     skills_text: str
     skill_name: str
+    # DLT options: grouped in dlt_config (preferred), or the four bare spellings
+    # below kept for compatibility — see cognee.tasks.ingestion.dlt_config.
+    dlt_config: dict
     primary_key: str
     write_disposition: str
     query: str
@@ -138,6 +142,7 @@ _ADD_ONLY = frozenset(
         "node_set",
         "preferred_loaders",
         "importance_weight",
+        "dlt_config",
         "primary_key",
         "write_disposition",
         "query",
@@ -145,7 +150,7 @@ _ADD_ONLY = frozenset(
     }
 )
 _COGNIFY_ONLY = frozenset(
-    {"graph_model", "extractor", "chunks_per_batch", "config", "temporal_cognify"}
+    {"graph_model", "extractor", "summary_method", "chunks_per_batch", "config", "temporal_cognify"}
 )
 _SHARED = frozenset(
     {
@@ -375,6 +380,7 @@ async def _remember_entry(
     entry,
     *,
     dataset_name: str,
+    dataset_id: UUID | None = None,
     session_id: str | None,
     user,
     skill_improvement: dict[str, Any] | None = None,
@@ -391,6 +397,7 @@ async def _remember_entry(
         payload = await client.remember_entry(
             entry,
             dataset_name=dataset_name,
+            dataset_id=dataset_id,
             session_id=session_id,
             skill_improvement=skill_improvement,
         )
@@ -416,7 +423,7 @@ async def _remember_entry(
 
     return await _dispatch_session_entry(
         entry,
-        dataset_name=dataset_name,
+        dataset_name=dataset_id or dataset_name,
         session_id=session_id,
         user=user,
         skill_improvement=skill_improvement,
@@ -426,7 +433,7 @@ async def _remember_entry(
 async def _dispatch_session_entry(
     entry: "MemoryEntry",
     *,
-    dataset_name: str,
+    dataset_name: str | UUID,
     session_id: str | None,
     user,
     skill_improvement: dict[str, Any] | None = None,
@@ -507,38 +514,26 @@ async def _dispatch_session_entry(
     if not sm.is_available:
         raise RuntimeError("Session cache unavailable — set CACHING=true to enable session memory")
 
-    # Resolve the dataset UUID for this session so the session_records
-    # row carries dataset_id — otherwise downstream permission filtering
-    # (e.g. the dashboard listing) can't match the session via granted
-    # dataset reads. We backfill via ensure_and_touch_session, which
-    # upserts the row and only sets dataset_id when currently null.
-    try:
-        from uuid import UUID as _UUID
+    # Resolve write access before caching any content. Explicit UUIDs are required
+    # for shared datasets; names retain the normal create-or-resolve semantics.
+    from cognee.modules.session_lifecycle.metrics import (
+        ensure_and_touch_session,
+        get_session_row,
+    )
 
-        from cognee.modules.data.methods.get_authorized_dataset import get_authorized_dataset
-        from cognee.modules.session_lifecycle.metrics import ensure_and_touch_session
-
-        resolved_dataset = None
-        try:
-            ds = await get_authorized_dataset(user, dataset_name, "write")
-            if ds is not None:
-                resolved_dataset = ds.id
-        except Exception:
-            # Fall through with None — we still create the session row.
-            logger.debug("Ignoring exception in _dispatch_session_entry", exc_info=True)
-            resolved_dataset = None
-
-        await ensure_and_touch_session(
-            session_id=session_id,
-            user_id=_UUID(user_id),
-            dataset_id=resolved_dataset,
-        )
-    except Exception as exc:
-        logger.debug("remember: pre-upsert session_record failed (%s)", exc, exc_info=True)
+    user, datasets = await resolve_authorized_user_datasets(dataset_name, user)
+    dataset = datasets[0]
+    await ensure_and_touch_session(session_id=session_id, user_id=user.id, dataset_id=dataset.id)
+    # The atomic upsert preserves an existing dataset binding. Re-read it before
+    # caching: concurrent writers cannot reuse a session across datasets.
+    row = await get_session_row(session_id=session_id, user_id=user.id)
+    if row is None or row.dataset_id != dataset.id:
+        raise ValueError("Session is already bound to another dataset or cannot be bound")
 
     result = RememberResult(
         status="session_stored",
-        dataset_name=dataset_name,
+        dataset_name=dataset.name,
+        dataset_id=str(dataset.id),
         session_ids=[session_id],
     )
     result.elapsed_seconds = time.monotonic() - result._started_at
@@ -913,12 +908,6 @@ async def remember(
     **Without session_id (permanent memory):** Runs ``add()`` +
     ``cognify()`` to ingest data and build the knowledge graph.
 
-    Because the graph is built through ``cognify()``, the cognify feature
-    flags apply here too. Notably, setting ``CONTRADICTION_DETECTION=true``
-    makes every ``remember()`` call check the facts it just stored against
-    the ones already in the graph and record each conflict as a
-    ``contradicts`` edge (see ``CognifyConfig``). Off by default.
-
     **With session_id (session memory):** Stores the data in the
     session cache for fast retrieval. When ``self_improvement`` is
     True (default), also bridges the session data into the permanent
@@ -933,9 +922,11 @@ async def remember(
         data: The data to store (text, file paths, binary streams, etc.).
         dataset_name: Target dataset. Defaults to ``"main_dataset"``.
         dataset_id: UUID of an existing dataset to target directly. Takes
-            precedence over ``dataset_name``. Not supported for
-            ``MemorySource`` imports or typed ``MemoryEntry`` payloads,
-            which are dataset-name based.
+            precedence over ``dataset_name``. Typed ``MemoryEntry`` payloads
+            accept it too and require it for shared datasets; write access is
+            checked before anything is cached, and the session is bound to
+            that dataset. Not supported for ``MemorySource`` imports, which are
+            dataset-name based.
         session_id: Optional session ID. When set, stores data in the
             session cache instead of the permanent graph.
         chunk_size: Max tokens per chunk. Auto-calculated when *None*.
@@ -1091,13 +1082,10 @@ async def remember(
     if isinstance(data, MEMORY_ENTRY_TYPES):
         if dry_run:
             raise ValueError("dry_run is supported for add+cognify remember inputs only.")
-        if dataset_id is not None:
-            raise ValueError(
-                "dataset_id is not supported for typed memory entries; use dataset_name."
-            )
         return await _remember_entry(
             data,
             dataset_name=dataset_name,
+            dataset_id=dataset_id,
             session_id=session_id,
             user=kwargs.get("user"),
             skill_improvement=kwargs.get("skill_improvement"),
@@ -1243,6 +1231,7 @@ async def remember(
             GLINER_DEMO_EXTRACTOR,
             get_cognify_config,
             resolve_extractor,
+            resolve_summary_method,
         )
 
         if (
@@ -1273,10 +1262,15 @@ async def remember(
             chunk_size=await resolve_chunk_size(chunk_size),
             graph_model=kwargs.get("graph_model") or KnowledgeGraph,
             custom_prompt=custom_prompt,
+            summary_method=resolve_summary_method(
+                kwargs.get("summary_method"), get_cognify_config()
+            ),
         )
 
     if session_id is not None and kwargs.get("extractor") is not None:
         raise ValueError("extractor is not supported when session_id is provided.")
+    if session_id is not None and kwargs.get("summary_method") is not None:
+        raise ValueError("summary_method is not supported when session_id is provided.")
 
     data_size = _estimate_data_size(data)
     item_count = len(data) if isinstance(data, list) else 1
@@ -1392,6 +1386,12 @@ async def _remember_inner(
                 "extractor is not supported while connected to a remote Cognee "
                 "instance. Call cognee.disconnect() to choose the extractor locally."
             )
+        if kwargs.get("summary_method") is not None:
+            # Same as extractor: client.remember() would drop it.
+            raise ValueError(
+                "summary_method is not supported while connected to a remote Cognee "
+                "instance. Call cognee.disconnect() to choose the summary method locally."
+            )
         if session_ids:
             # Same discipline as extractor: POST /remember carries no
             # session_ids field, so forwarding would silently drop them.
@@ -1422,6 +1422,7 @@ async def _remember_inner(
         default_pipeline_needs_llm,
         get_cognify_config,
         resolve_extractor,
+        resolve_summary_method,
     )
     from cognee.modules.preflight import validate_provider_config
 
@@ -1432,9 +1433,12 @@ async def _remember_inner(
         validate_provider_config(needs_llm=False)
     else:
         cognify_config = get_cognify_config()
+        # Like the extractor below, a misspelled summary_method raises before
+        # add() stores anything, not in cognify() after it.
+        resolve_summary_method(kwargs.get("summary_method"), cognify_config)
         validate_provider_config(
             needs_llm=default_pipeline_needs_llm(
-                resolve_extractor(kwargs.get("extractor"), cognify_config), cognify_config
+                resolve_extractor(kwargs.get("extractor"), cognify_config)
             )
         )
 

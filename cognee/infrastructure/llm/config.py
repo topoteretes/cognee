@@ -486,6 +486,12 @@ def get_llm_config() -> LLMConfig:
     return LLMConfig()
 
 
+def resolve_structured_output_framework(config: LLMConfig) -> str:
+    """The gateway's dispatch decision, also used by diagnostic settings."""
+    framework = config.structured_output_framework.lower()
+    return framework if framework in ("baml", "litellm_native") else "instructor"
+
+
 def get_llm_context_config() -> LLMConfig:
     """Get the appropriate LLM config based on the current async context.
 

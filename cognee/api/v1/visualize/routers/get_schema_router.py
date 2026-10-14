@@ -94,7 +94,7 @@ async def _administers_tenant(user: User, tenant_id) -> bool:
     Defers to ``has_user_management_permission``, the same check the rest of
     the read-side API (``get_tenant_roles``, ``get_users_in_tenant``, ...)
     already uses to decide who sees a whole tenant versus their own slice of
-    it: its owner, plus the role names in ``USER_MANAGEMENT_ALLOWED_ROLE_NAMES``.
+    it: its owner, plus the role names in ``LEGACY_ALL_CAPABILITY_ROLE_NAMES``.
     (A handful of tenant-mutation call sites still check ``tenant.owner_id``
     directly rather than this helper; that is a narrower, pre-existing split
     on the write side, not something this endpoint needs to resolve.) That

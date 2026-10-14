@@ -5,10 +5,10 @@ its graph/vector writes succeeded (node ids are persisted and stable), when
 the ``provenance_tracking`` CognifyConfig flag is on (env
 ``PROVENANCE_TRACKING``, default off). Hooking the one place every DataPoint
 batch passes through — not a cognify-only pipeline task — is what makes the
-ledger cover ``improve()`` enrichment, the code-graph routes, skills, the
-temporal path and custom pipelines alike. The storage hook records only
-dataset-scoped batches (a ``ctx`` with a dataset): without a scope the keys
-would be unprefixed and tenants would share version chains.
+ledger cover ``improve()`` enrichment, the code-graph routes, skills and
+custom pipelines alike. The storage hook records only dataset-scoped batches
+(a ``ctx`` with a dataset): without a scope the keys would be unprefixed and
+tenants would share version chains.
 
 ``record_provenance`` is the same writer as a pipeline ``Task`` for custom
 pipelines that store data points some other way; it records unconditionally
@@ -33,10 +33,10 @@ made_from/is_part_of/contains shape are covered by a generic fallback that
 walks the model with ``get_graph_from_model`` (the same traversal
 ``add_data_points`` uses) and records every node and edge.
 
-Hard constraints, mirroring ``detect_contradictions``: the writer returns its
-input unchanged and swallows all of its own errors — provenance can never
-break ingestion. Missing ctx, missing dataset/data ids, or raw items with no
-document degrade to entries with ``source_ref_key=None``, never a raise.
+Hard constraints: the writer returns its input unchanged and swallows all of
+its own errors — provenance can never break ingestion. Missing ctx, missing
+dataset/data ids, or raw items with no document degrade to entries with
+``source_ref_key=None``, never a raise.
 """
 
 from cognee.infrastructure.databases.provenance import data_item_id, make_source_ref_key
@@ -81,7 +81,8 @@ async def record_edges_provenance(
     edges: list, ctx: PipelineContext | None = None, *, activity: str = "edge_write"
 ) -> int:
     """Record bare graph edges written outside ``add_data_points`` as ledger
-    relationships (contradiction edges today; ``activity`` names the writer).
+    relationships, for custom tasks that call ``graph_engine.add_edges``
+    directly (``activity`` names the writer).
 
     ``edges`` are ``(source_id, target_id, relationship_name, properties)``
     tuples. Properties that describe the assertion (``reason``, ``confidence``,
