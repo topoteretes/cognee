@@ -402,13 +402,16 @@ async def add_code_repository(
 async def extract_code_repo_graph(
     data_documents: list,
     ctx: Optional["PipelineContext"] = None,
+    index_vectors: bool = False,
 ) -> list:
     """Cognify CODE_REPO-route adapter: one enola run over the whole project.
 
     Reads the stored manifest for the repo path and runs the standard code
     graph tasks on the ORIGINAL directory (enola writes its .enola snapshot
     there, exactly like remember(content_type="code")). One repository node,
-    cross-file edges, one graph read per repo. No LLM, no embeddings.
+    cross-file edges, one graph read per repo. No LLM; graph-only unless
+    ``index_vectors`` (``cognify(codegraph_config={"index_vectors": True})``)
+    also embeds the code facts.
 
     A call-level node_set (add()/remember()'s ``node_set`` argument) reaches
     every document this manifest's repo carries, but not the code nodes
@@ -447,7 +450,7 @@ async def extract_code_repo_graph(
         node_set = validate_node_set_names(metadata.get("node_set")) if metadata else None
 
         data_points = await extract_code_graph(repo_path=repo_path, node_set=node_set)
-        state = await add_code_graph_data_points(data_points, ctx=ctx, graph_only=True)
+        state = await add_code_graph_data_points(data_points, ctx=ctx, graph_only=not index_vectors)
         await add_code_graph_edges(state, repo_path=repo_path, ctx=ctx, node_set=node_set)
 
         logger.info("Code repo graph extracted for %s (%s).", repo_path, data_item.id)
@@ -455,8 +458,8 @@ async def extract_code_repo_graph(
     return data_documents
 
 
-def get_code_repo_tasks() -> list:
+def get_code_repo_tasks(index_vectors: bool = False) -> list:
     """The cognify CODE_REPO-route task list: one adapter task, no LLM stages."""
     from cognee.modules.pipelines.tasks.task import Task
 
-    return [Task(extract_code_repo_graph, needs_llm=False)]
+    return [Task(extract_code_repo_graph, needs_llm=False, index_vectors=index_vectors)]

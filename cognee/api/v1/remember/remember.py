@@ -106,6 +106,9 @@ class RememberKwargs(TypedDict, total=False):
     skill_improvement: dict[str, Any]
     index_vectors: bool
     repo_credentials: str
+    # Code graph options forwarded to cognify() (``index_vectors`` for the CODE /
+    # CODE_REPO routes) — see cognee.tasks.code_graph.config.
+    codegraph_config: dict
     skills_text: str
     skill_name: str
     # DLT options: grouped in dlt_config (preferred), or the four bare spellings
@@ -150,7 +153,15 @@ _ADD_ONLY = frozenset(
     }
 )
 _COGNIFY_ONLY = frozenset(
-    {"graph_model", "extractor", "summary_method", "chunks_per_batch", "config", "temporal_cognify"}
+    {
+        "graph_model",
+        "extractor",
+        "summary_method",
+        "chunks_per_batch",
+        "config",
+        "temporal_cognify",
+        "codegraph_config",
+    }
 )
 _SHARED = frozenset(
     {
@@ -1288,6 +1299,8 @@ async def remember(
         raise ValueError("extractor is not supported when session_id is provided.")
     if session_id is not None and kwargs.get("summary_method") is not None:
         raise ValueError("summary_method is not supported when session_id is provided.")
+    if session_id is not None and kwargs.get("codegraph_config") is not None:
+        raise ValueError("codegraph_config is not supported when session_id is provided.")
 
     data_size = _estimate_data_size(data)
     item_count = len(data) if isinstance(data, list) else 1
@@ -1501,6 +1514,14 @@ async def _remember_inner(
         raise ValueError("index_vectors is supported only for content_type='code'.")
     if repo_credentials is not None and content_type != "code":
         raise ValueError("repo_credentials is supported only for content_type='code'.")
+    if content_type == "code" and kwargs.get("codegraph_config") is not None:
+        # The code content type runs its own pipeline and never reaches cognify(),
+        # so the option would be ignored. Its one key has a spelling on this path.
+        raise ValueError(
+            "codegraph_config is not supported with content_type='code'; pass "
+            "index_vectors=True there, or drop content_type and remember the "
+            "repository as ordinary data."
+        )
     if content_type == "code" and session_id is not None:
         raise ValueError(
             "session_id is not applicable to content_type='code'; code graphs are "
