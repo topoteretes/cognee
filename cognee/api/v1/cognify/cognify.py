@@ -333,6 +333,11 @@ async def cognify(
     # Timestamp nodes, which SearchType.TEMPORAL reads. Dropped here because unknown
     # kwargs are forwarded into the extraction LLM call.
     kwargs.pop("temporal_cognify", None)
+    if kwargs:
+        unexpected = sorted(kwargs.keys())
+        raise TypeError(
+            f"cognify() got unexpected keyword argument(s): {', '.join(repr(k) for k in unexpected)}"
+        )
     if dry_run and resolved_extractor == GLINER_DEMO_EXTRACTOR:
         raise ValueError(
             "dry_run estimates the LLM extraction pipeline only; it has no cost model "
