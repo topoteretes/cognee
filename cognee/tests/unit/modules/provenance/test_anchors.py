@@ -1,6 +1,7 @@
 """External HMAC anchors: the defense against rewrite-and-rechain tampering."""
 
 import json
+import os
 from uuid import uuid4
 
 import pytest
@@ -56,7 +57,8 @@ class TestConfiguration:
         monkeypatch.setattr(
             anchors, "get_base_config", lambda: SimpleNamespace(system_root_directory="/sys")
         )
-        assert anchors.anchor_path() == "/sys/provenance_anchors.jsonl"
+        # os.path.join, so the separator is the platform's (``\`` on Windows).
+        assert anchors.anchor_path() == os.path.join("/sys", "provenance_anchors.jsonl")
 
 
 class TestAnchorAndVerify:
