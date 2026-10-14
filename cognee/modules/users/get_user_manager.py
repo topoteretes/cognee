@@ -39,6 +39,33 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
 
         await delete_agents_of_user(self.user_db.session, user.id)
 
+    async def on_after_delete(self, user: User, request: Request | None = None) -> None:
+        from cognee.infrastructure.databases.cache import get_cache_engine
+        from cognee.infrastructure.databases.cache.config import get_cache_config
+        from cognee.infrastructure.databases.cache.sql.SqlCacheAdapter import SqlCacheAdapter
+
+        # The account deletion has committed: no relational write lock spans
+        # cleanup of a cache that may use the same SQLite file. A failed account
+        # deletion must not remove receipts while that user can still retry.
+        config = get_cache_config()
+        if config.cache_backend in {"sqlite", "turso", "postgres"}:
+            adapter = get_cache_engine()
+            temporary = adapter is None
+            if temporary:
+                from cognee.infrastructure.databases.cache.get_cache_engine import (
+                    _resolve_cache_db_url,
+                )
+
+                adapter = SqlCacheAdapter(
+                    _resolve_cache_db_url(config.cache_backend, config.cache_db_url)
+                )
+            try:
+                if isinstance(adapter, SqlCacheAdapter):
+                    await adapter.delete_capture_receipts_for_user(user.id)
+            finally:
+                if temporary:
+                    await adapter.close()
+
     async def on_after_login(
         self, user: User, request: Request | None = None, response: Response | None = None
     ):
