@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, TypeAdapter, model_validator
+from pydantic import BaseModel, Field, TypeAdapter, field_validator, model_validator
 from typing_extensions import Self
 
 COGX_VERSION = "0.2"
@@ -72,7 +72,7 @@ class COGXScope(BaseModel):
 # exchange-and-runtime group (common-ground notes, Oct 14 amendments): an
 # origin kept across copies, a body hash for dedupe, the memory's subject,
 # its semantic kind, a validity interval with a supersession pointer, typed
-# evidence, and a measured accuracy record. Every field is optional so 0.1
+# evidence, and a measured confidence record. Every field is optional so 0.1
 # archives and external importers keep working unchanged.
 
 SEMANTIC_KINDS = (
@@ -88,7 +88,7 @@ SemanticKind = Literal[
     "fact", "decision", "commitment", "procedure", "preference", "observation", "other"
 ]
 EvidenceRole = Literal["observed", "stated", "inferred", "derived"]
-AccuracyOutcome = Literal["unverified", "confirmed", "corrected", "contradicted"]
+ConfidenceOutcome = Literal["unverified", "confirmed", "corrected", "contradicted"]
 Verifier = Literal["human", "agent", "automatic"]
 ContributorRole = Literal["initiator", "author", "approver", "system"]
 ActorKind = Literal["human", "agent", "unknown"]
@@ -125,7 +125,7 @@ class COGXEvidence(BaseModel):
     source), ``stated`` (asserted by an actor), ``inferred`` (a model's
     conclusion) or ``derived`` (consolidated from other memories). ``ref`` is
     another record's identifier, a source locator, or an actor. ``confidence``
-    is the writer's belief at write time; see :class:`COGXAccuracy` for what
+    is the writer's belief at write time; see :class:`COGXConfidence` for what
     happened afterwards.
     """
 
@@ -134,15 +134,18 @@ class COGXEvidence(BaseModel):
     confidence: float | None = None
 
 
-class COGXAccuracy(BaseModel):
-    """How a memory held up after it was written: the measured counterpart to
-    evidence confidence. ``outcome`` records whether a later check confirmed,
-    corrected or contradicted it; ``verified_by`` says whether a human, an
-    agent or an automatic rule did so; ``score`` is an optional feedback-derived
-    value in [0, 1] on an implementation-defined scale.
+class COGXConfidence(BaseModel):
+    """How much a memory can be trusted, measured after it was written.
+
+    ``outcome`` records whether a later check confirmed, corrected or
+    contradicted it; ``verified_by`` says whether a human, an agent or an
+    automatic rule did so; ``score`` is a value in [0, 1] on an
+    implementation-defined scale. A bare number given where a record expects
+    this object (the COGX 0.1 fact ``confidence`` float) becomes ``score``
+    with the outcome left ``unverified``.
     """
 
-    outcome: AccuracyOutcome = "unverified"
+    outcome: ConfidenceOutcome = "unverified"
     verified_at: datetime | None = None
     verified_by: Verifier | None = None
     score: float | None = None
@@ -201,7 +204,14 @@ class COGXRecordBase(BaseModel):
     valid_to: datetime | None = None
     invalidated_by: str | None = None
     evidence: list[COGXEvidence] = Field(default_factory=list)
-    accuracy: COGXAccuracy | None = None
+    confidence: COGXConfidence | None = None
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def _confidence_from_number(cls, value: Any) -> Any:
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return {"score": float(value)}
+        return value
 
     def body_text(self) -> str | None:
         """The text the content hash covers; None for records without a body."""
@@ -281,7 +291,6 @@ class COGXFact(COGXRecordBase):
     fact_text: str | None = None
     valid_at: datetime | None = None
     invalid_at: datetime | None = None
-    confidence: float | None = None
     provenance: list[str] = Field(default_factory=list)
 
     def body_text(self) -> str | None:
@@ -357,14 +366,14 @@ HEADER_FIELDS = (
     "valid_to",
     "invalidated_by",
     "evidence",
-    "accuracy",
+    "confidence",
 )
 
 
 def header_to_properties(record: COGXRecordBase) -> dict[str, Any]:
     """The OMP header as flat, JSON-safe node/edge properties.
 
-    Graph backends store scalars; nested values (origin, evidence, accuracy)
+    Graph backends store scalars; nested values (origin, evidence, contributors)
     are serialized as JSON strings and lists as JSON arrays so the header
     survives a round trip through the graph and comes back on re-export.
     """
@@ -401,10 +410,17 @@ def header_to_properties(record: COGXRecordBase) -> dict[str, Any]:
         properties["evidence"] = json.dumps(
             [item.model_dump(exclude_none=True) for item in record.evidence]
         )
-    if record.accuracy is not None:
-        properties["accuracy"] = json.dumps(
-            record.accuracy.model_dump(mode="json", exclude_none=True)
-        )
+    if record.confidence is not None:
+        # Kept scalar so the edge's ``confidence`` stays the numeric property
+        # retrieval already reads; the measured part rides beside it.
+        if record.confidence.score is not None:
+            properties["confidence"] = record.confidence.score
+        if record.confidence.outcome != "unverified":
+            properties["confidence_outcome"] = record.confidence.outcome
+        if record.confidence.verified_at:
+            properties["confidence_verified_at"] = record.confidence.verified_at.isoformat()
+        if record.confidence.verified_by:
+            properties["confidence_verified_by"] = record.confidence.verified_by
     return properties
 
 
@@ -476,10 +492,27 @@ def header_from_properties(properties: dict[str, Any]) -> dict[str, Any]:
                     continue
         if items:
             header["evidence"] = items
-    accuracy = _loads(properties.get("accuracy"))
-    if isinstance(accuracy, dict):
+    confidence: dict[str, Any] = {}
+    raw_score = _loads(properties.get("confidence"))
+    if isinstance(raw_score, dict):
+        confidence.update(raw_score)
+    elif isinstance(raw_score, (int, float)) and not isinstance(raw_score, bool):
+        confidence["score"] = float(raw_score)
+    if properties.get("confidence_outcome") in (
+        "unverified",
+        "confirmed",
+        "corrected",
+        "contradicted",
+    ):
+        confidence["outcome"] = properties["confidence_outcome"]
+    verified_at = parse_timestamp(properties.get("confidence_verified_at"))
+    if verified_at is not None:
+        confidence["verified_at"] = verified_at
+    if properties.get("confidence_verified_by") in ("human", "agent", "automatic"):
+        confidence["verified_by"] = properties["confidence_verified_by"]
+    if confidence:
         try:
-            header["accuracy"] = COGXAccuracy.model_validate(accuracy)
+            header["confidence"] = COGXConfidence.model_validate(confidence)
         except ValueError:
             pass
     return header

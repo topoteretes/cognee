@@ -93,7 +93,7 @@ and id, kept across copies), `content_hash` (sha256 of the body, for dedupe;
 distinct from an integrity checksum), `subject`, `semantic_kind` (fact,
 decision, commitment, procedure, preference, observation, other),
 `valid_from`/`valid_to` with `invalidated_by`, `evidence[]` (role, ref,
-confidence), `accuracy` (outcome, verified_at, verified_by, score),
+confidence), `confidence` (outcome, verified_at, verified_by, score),
 `version`, `content_type` (the body's format), `tags`, a record `checksum`
 stamped by the writer, and provenance as `contributors[]` (role, actor,
 kind, at) with the `accountable` human and `ai_involvement`. The

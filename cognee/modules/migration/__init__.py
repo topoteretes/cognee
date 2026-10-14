@@ -1,7 +1,7 @@
 from .cogx import (
     COGX_VERSION,
     COGXDocument,
-    COGXAccuracy,
+    COGXConfidence,
     COGXContributor,
     COGXEntity,
     COGXEvidence,
@@ -44,8 +44,8 @@ __all__ = [
     "COGX_VERSION",
     "EXPORT_FORMATS",
     "IMPORT_MODES",
-    "COGXAccuracy",
     "COGXArchiveSource",
+    "COGXConfidence",
     "COGXContributor",
     "COGXDocument",
     "COGXEntity",

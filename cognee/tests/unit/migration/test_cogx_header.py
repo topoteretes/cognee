@@ -1,5 +1,5 @@
 """COGX 0.2 header: the OMP fields (origin, content_hash, subject, kind,
-validity, evidence, accuracy) on export, through the loader, and on re-export.
+validity, evidence, confidence) on export, through the loader, and on re-export.
 
 Pure tests: synthetic ``get_graph_data()``-shaped graphs, no databases, no LLM.
 """
@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 from cognee.modules.migration.cogx import (
     COGX_VERSION,
-    COGXAccuracy,
+    COGXConfidence,
     COGXContributor,
     COGXDocument,
     COGXEntity,
@@ -102,6 +102,13 @@ class TestModels:
         assert entity.content_hash == content_hash_of("Alice: A person")
         assert entity.content_type == "text/plain"
 
+    def test_legacy_float_confidence_becomes_score(self):
+        fact = COGXFact(
+            external_id="f", subject_ref="a", predicate="p", object_ref="b", confidence=0.8
+        )
+        assert fact.confidence == COGXConfidence(score=0.8)
+        assert fact.confidence.outcome == "unverified"
+
     def test_fact_validity_aliases_sync_both_ways(self):
         when = datetime(2026, 1, 1, tzinfo=timezone.utc)
         old_style = COGXFact(
@@ -123,7 +130,7 @@ class TestModels:
             valid_from=datetime(2026, 1, 1, tzinfo=timezone.utc),
             invalidated_by="e-2",
             evidence=[COGXEvidence(role="stated", ref="user:1", confidence=0.5)],
-            accuracy=COGXAccuracy(outcome="confirmed", verified_by="human"),
+            confidence=COGXConfidence(outcome="confirmed", verified_by="human"),
         )
         properties = header_to_properties(record)
         # Flat and JSON-safe: nested values are strings a graph backend can store.
@@ -135,7 +142,7 @@ class TestModels:
         assert back["valid_from"] == record.valid_from
         assert back["invalidated_by"] == "e-2"
         assert back["evidence"] == record.evidence
-        assert back["accuracy"] == record.accuracy
+        assert back["confidence"] == record.confidence
 
     def test_malformed_properties_are_dropped_not_guessed(self):
         header = header_from_properties(
@@ -144,14 +151,18 @@ class TestModels:
                 "subject": "[broken",
                 "semantic_kind": "vibe",
                 "evidence": "[1]",
-                "accuracy": "{}",
+                "confidence": "high",
             }
         )
         assert "origin" not in header
         assert "subject" not in header
         assert "semantic_kind" not in header
         assert "evidence" not in header
-        assert header["accuracy"] == COGXAccuracy()  # empty object: unverified
+        assert "confidence" not in header
+        # A numeric edge confidence (COGX 0.1) becomes the measured record's score.
+        assert header_from_properties({"confidence": 0.8})["confidence"] == COGXConfidence(
+            score=0.8
+        )
 
 
 class TestExportHeader:
@@ -197,6 +208,7 @@ class TestExportHeader:
         _, records = export(tmp_path)
         lives_in = by_id(records, "fact", f"{ALICE}:lives_in:{BERLIN}")
         assert lives_in.evidence == [COGXEvidence(role="derived", ref=CHUNK, confidence=0.8)]
+        assert lives_in.confidence == COGXConfidence(score=0.8)
         assert lives_in.subject == [ALICE, BERLIN]
         # No chunk mentions both Alice and Paris: fall back to either side, in order.
         visited = by_id(records, "fact", f"{ALICE}:visited:{PARIS}")
@@ -212,14 +224,14 @@ class TestExportHeader:
         assert berlin.valid_from == datetime(2026, 1, 1, tzinfo=timezone.utc)
         assert by_id(records, "entity", ALICE).semantic_kind is None
 
-    def test_contradicts_edges_mark_accuracy(self, tmp_path):
+    def test_contradicts_edges_mark_confidence(self, tmp_path):
         _, records = export(tmp_path)
         for node_id in (BERLIN, PARIS):
-            accuracy = by_id(records, "entity", node_id).accuracy
-            assert accuracy.outcome == "contradicted"
-            assert accuracy.verified_by == "automatic"
+            confidence = by_id(records, "entity", node_id).confidence
+            assert confidence.outcome == "contradicted"
+            assert confidence.verified_by == "automatic"
         # Absence means "not stated", never "confirmed".
-        assert by_id(records, "entity", ALICE).accuracy is None
+        assert by_id(records, "entity", ALICE).confidence is None
 
 
 class TestLoaderRetention:
@@ -239,6 +251,7 @@ class TestLoaderRetention:
             {"role": "derived", "ref": CHUNK, "confidence": 0.8}
         ]
         assert json.loads(properties["subject"]) == [ALICE, BERLIN]
+        assert properties["confidence"] == 0.8  # numeric, as retrieval expects
         assert json.loads(properties["origin"]) == {
             "system": "cognee",
             "id": f"{ALICE}:lives_in:{BERLIN}",

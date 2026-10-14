@@ -83,7 +83,7 @@ def _record_external_metadata(record: COGXRecord) -> dict[str, Any]:
     }
     if header:
         # OMP header (COGX 0.2): retained verbatim so origin, body hash,
-        # subject, validity, evidence and accuracy survive the import and
+        # subject, validity, evidence and confidence survive the import and
         # travel again on re-export.
         metadata["header"] = header
     return metadata
@@ -161,10 +161,9 @@ def _fact_edge_properties(fact: COGXFact) -> dict[str, Any]:
         properties["valid_at"] = _iso(fact.valid_at)
     if fact.invalid_at:
         properties["invalid_at"] = _iso(fact.invalid_at)
-    if fact.confidence is not None:
-        properties["confidence"] = fact.confidence
-    # OMP header (COGX 0.2) as flat edge properties; origin is re-stamped on
-    # export from the edge itself unless the fact carried its own.
+    # OMP header (COGX 0.2) as flat edge properties, including the numeric
+    # ``confidence`` score; origin is re-stamped on export from the edge
+    # itself unless the fact carried its own.
     for key, value in header_to_properties(fact).items():
         properties.setdefault(key, value)
     return properties

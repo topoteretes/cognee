@@ -19,8 +19,8 @@ from uuid import UUID
 
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.migration.cogx import (
-    COGXAccuracy,
     COGXArchiveWriter,
+    COGXConfidence,
     COGXContributor,
     COGXDocument,
     COGXEntity,
@@ -148,7 +148,7 @@ COGX_EXPORT_COVERAGE = {
     "semantic_kind": "node property only; no classification is performed",
     "validity": "valid_from/valid_to and invalidated_by read from node and edge properties when present",
     "evidence": "derived: the chunks whose contains edges reach the record; no source spans",
-    "accuracy": "contradicted for endpoints of contradicts edges; otherwise not stated",
+    "confidence": "score from the edge confidence property; contradicted for endpoints of contradicts edges; otherwise not stated",
     "version": "DataPoint version from node properties",
     "content_type": "text/plain for every body; documents keep their mime type",
     "checksum": "sha256 over each exported record, header and body",
@@ -214,11 +214,11 @@ def _write_cogx(
         elif relationship == "contradicts":
             contradicted.update((source, target))
 
-    def accuracy_for(node_id: str, header: dict) -> COGXAccuracy | None:
-        if header.get("accuracy") is not None:
-            return header["accuracy"]
+    def confidence_for(node_id: str, header: dict) -> COGXConfidence | None:
+        if header.get("confidence") is not None:
+            return header["confidence"]
         if node_id in contradicted:
-            return COGXAccuracy(outcome="contradicted", verified_by="automatic")
+            return COGXConfidence(outcome="contradicted", verified_by="automatic")
         return None
 
     with COGXArchiveWriter(destination, source_system="cognee") as writer:
@@ -254,8 +254,8 @@ def _write_cogx(
                         description=properties.get("description"),
                         created_at=parse_timestamp(properties.get("created_at")),
                         updated_at=parse_timestamp(properties.get("updated_at")),
-                        accuracy=accuracy_for(node_id, header),
-                        **{k: v for k, v in header.items() if k != "accuracy"},
+                        confidence=confidence_for(node_id, header),
+                        **{k: v for k, v in header.items() if k != "confidence"},
                     )
                 )
             elif node_type == "DocumentChunk" and properties.get("text"):
@@ -273,8 +273,8 @@ def _write_cogx(
                         external_id=node_id,
                         content=properties["text"],
                         created_at=parse_timestamp(properties.get("created_at")),
-                        accuracy=accuracy_for(node_id, header),
-                        **{k: v for k, v in header.items() if k != "accuracy"},
+                        confidence=confidence_for(node_id, header),
+                        **{k: v for k, v in header.items() if k != "confidence"},
                     )
                 )
                 # Also persist the chunk as a raw node: preserve-mode restore
@@ -309,7 +309,11 @@ def _write_cogx(
                 if either:
                     header["evidence"] = [
                         COGXEvidence(
-                            role="derived", ref=chunk_id, confidence=properties.get("confidence")
+                            role="derived",
+                            ref=chunk_id,
+                            confidence=properties.get("confidence")
+                            if isinstance(properties.get("confidence"), (int, float))
+                            else None,
                         )
                         for chunk_id in either
                     ]
@@ -324,9 +328,6 @@ def _write_cogx(
                     fact_text=properties.get("edge_text"),
                     valid_at=parse_timestamp(properties.get("valid_at")),
                     invalid_at=parse_timestamp(properties.get("invalid_at")),
-                    confidence=properties.get("confidence")
-                    if isinstance(properties.get("confidence"), (int, float))
-                    else None,
                     **header,
                 )
             )
