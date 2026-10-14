@@ -391,6 +391,10 @@ extend-immutable-calls = [
 # doing so re-enters the logging machinery. They swallow broadly and report via
 # Handler.handleError, the same shape the stdlib handlers use.
 "cognee/shared/logging_utils.py" = ["BLE001", "S110"]
+# Eval capture (SDK-529) must never break, block or raise into the operation it
+# observes: every emit point, sink write and flusher iteration swallows broadly and
+# reports at debug — the same posture as the logging handlers above.
+"cognee/modules/observability/capture/*.py" = ["BLE001", "S110"]
 # Route signatures declare query defaults as literals (`datasets: ... = []`); they
 # are API defaults FastAPI hands to the handler, never mutated, and a None default
 # would change the OpenAPI schema. Applies to every API version.
