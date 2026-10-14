@@ -1,6 +1,6 @@
 ---
 name: cognee-improve-sessions
-description: Use when working with cognee's session memory or improve() — storing conversation turns, agent traces and feedback with session_id, bridging sessions into the permanent graph, reading an ImproveResult, understanding why an improve stage was skipped, already_completed or lock_held, or tuning the IMPROVE_* settings.
+description: Use when working with cognee's session memory or improve() — storing conversation turns, agent traces and feedback with session_id, bridging sessions into the permanent graph, reading an ImproveResult, understanding why an improve stage was skipped or already_completed, or tuning the IMPROVE_* settings.
 ---
 
 # Session memory and improve()
@@ -80,8 +80,7 @@ CLI, and `RememberResult.improve`.
 - `result.stages`: one `StageResult` per stage, with `stage`, `status`
   (`completed` / `already_completed` / `skipped` / `errored`), `reason`,
   `error`, `counts`, `duration_ms`.
-- `result.stage("distill_sessions")`, `result.stage_summary()`,
-  `result.lock_held`, `result.rerun_requested`, `result.rerun_passes`.
+- `result.stage("distill_sessions")`, `result.stage_summary()`.
 - `await result.wait()` finishes a background run (no-op otherwise).
 
 **Skip and no-op reasons:**
@@ -98,7 +97,6 @@ CLI, and `RememberResult.improve`.
 | `edge_evidence_disabled` | Conflict review needs `EDGE_EVIDENCE_ENABLED=true` |
 | `backend_unsupported` | The graph adapter lacks the feature (feedback weights, truth subspace) |
 | `session_manager_unavailable` | The session cache is not reachable |
-| `lock_held` | Another improve for the same dataset or session is running (below) |
 | `aborted_by_fatal_stage` | Stage 2 failed, so the rest did not run |
 | `budget_exhausted` | An earlier stage failed because the LLM budget is exhausted (a 402); the rest would fail the same way. Top up, then run improve again |
 | `no_new_entries`, `no_new_trace_steps`, `no_new_facts`, `no_writes_since_last_improve` | With status `already_completed`: nothing new since the last run |
@@ -144,13 +142,11 @@ There is no debounce timer: held-back entries wait for the next
 - **Typed entries do not auto-improve.** `remember(QAEntry/TraceEntry/
   FeedbackEntry, session_id=...)` stores the entry but never starts an
   improve. Call `improve(session_ids=[...])` yourself.
-- **`lock_held` does not wait.** Improves for the same dataset or session
-  run one at a time: a second call returns at once with every stage
-  `skipped: lock_held`. If it shares a session with the running one, it sets
-  `rerun_requested=True` and the holder runs up to 2 extra passes (3 passes
-  in total; see `rerun_passes`). The bound is `IMPROVE_MAX_RERUN_PASSES`, a
-  constant in `cognee/api/v1/improve/improve.py`, not an env var. The lock is per process only; multiple API workers do not
-  share it.
+- **Improves queue.** An improve holds the dataset's lock for its whole
+  run, like `cognify()`: improves, cognify, add and forget on one dataset
+  run one at a time, and improves sharing a session also wait for each
+  other. A background call returns at once and waits inside its task. The
+  lock is per process only; multiple API workers do not share it.
 - **Sessions bridge once.** Q&A and trace persistence are tracked per user
   and session, not per dataset, so bridging a session into dataset A and
   then into dataset B persists no new Q&A/traces into B. Distillation is

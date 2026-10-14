@@ -2,7 +2,7 @@
 
 ``execute_stages``, defined first inside ``improve()``, is what a run does: one
 gated stage after another, in registry order. The body below it decides when
-and whether — forward to a remote server, resolve the request, claim the
+and whether — forward to a remote server, resolve the request, wait for the
 improve lock, then run in the foreground or detach as one background task.
 
 Two contracts shape everything here. First, the row contract: stages may
@@ -31,20 +31,17 @@ from typing_extensions import TypedDict, Unpack
 
 from cognee.api.v1.serve.state import get_remote_client
 from cognee.infrastructure.background_tasks import register_background_task
+from cognee.infrastructure.locks.dataset_lock import dataset_lock
 from cognee.infrastructure.locks.session_lock import (
-    has_pending_improve_rerun,
+    acquire_improve_lock_many,
     improve_lock_keys,
     release_improve_lock_many,
-    release_or_rerun_improve_lock_many,
-    request_improve_rerun_many,
-    try_acquire_improve_lock_many,
 )
 from cognee.modules.improve import (
     DEFAULT_STAGES,
     MEMIFY_PASSTHROUGH_KEYS,
     REASON_ABORTED_BY_FATAL_STAGE,
     REASON_BUDGET_EXHAUSTED,
-    REASON_LOCK_HELD,
     BaseStage,
     GraphCapabilities,
     ImproveResult,
@@ -72,22 +69,6 @@ from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
 
 logger = get_logger("improve")
-
-# Upper bound on the extra passes one lock hold runs when runs that lost the
-# claim keep asking for "one more" (SDK-593). A request still pending after
-# the last pass is left for the next claimant, which starts with a full
-# watermark pass anyway.
-IMPROVE_MAX_RERUN_PASSES = 3
-
-
-def _session_lock_keys(lock_keys: tuple[str, ...]) -> list[str]:
-    """The session-scoped claim keys of a run — the only keys the rerun protocol covers.
-
-    Dataset-only runs are left exactly as before: a rerun there would re-run
-    enrichment once per colliding caller, where today a burst collapses into
-    one enrichment and the rest waits for the next improve.
-    """
-    return [key for key in lock_keys if key.startswith("session:")]
 
 
 class ImproveKwargs(TypedDict, total=False):
@@ -131,10 +112,11 @@ async def improve(
     stages that draft text with an LLM (``extract_agent_context``,
     ``distill_sessions``, ``review_conflicts``, ``global_context_index``) are skipped with
     ``no_llm_configured`` when no usable LLM is configured, so a keyless
-    install still bridges sessions and traces into the graph. A run
-    that loses the improve lock — another run is already touching the same
-    sessions or dataset — returns a result whose every stage is
-    ``skipped: lock_held``. A failure in ``persist_session_qa`` stops the run
+    install still bridges sessions and traces into the graph. A run holds the
+    dataset's lock from start to finish, like a pipeline run: improves,
+    cognify, add and forget on one dataset queue one after another, and
+    improves sharing a session queue too. A failure in
+    ``persist_session_qa`` stops the run
     and raises, because silently losing session Q&A would be data loss; every
     other failure is recorded and the remaining stages still run.
 
@@ -143,18 +125,13 @@ async def improve(
     it would fail the same way, so they are ``skipped: budget_exhausted`` and
     the run ends there, without a further pass. ``status`` is ``errored``.
 
-    A session-keyed run that loses the claim to a run holding one of its
-    sessions asks that holder for one more pass (``rerun_requested`` on the
-    result); the holder runs the stages again before releasing, so the loser's
-    newer entries are bridged without a retry (SDK-593). Dataset-only runs do
-    not take part.
-
     Args:
         dataset: Dataset name or UUID to process. Resolved once; every stage
             receives the resolved id.
-        run_in_background: Run all stages as one background task that holds
-            the improve lock for its lifetime. The returned result has
-            ``status == "running"``; ``await result.wait()`` blocks on it.
+        run_in_background: Run all stages as one background task that waits
+            for the dataset lock and holds it for its lifetime. The returned
+            result has ``status == "running"``; ``await result.wait()`` blocks
+            on it.
         node_name: Filter graph to specific named entities (enrichment stage).
         session_ids: Session IDs whose feedback and content should be
             bridged into the permanent graph. The Q&A and trace persist
@@ -187,107 +164,43 @@ async def improve(
         lock_keys: tuple[str, ...],
         operation: Any,
     ) -> None:
-        """One ``StageResult`` per registry stage, in order; then free the lock.
-
-        Session-keyed runs may run more than one pass: a run that lost the
-        claim on one of our sessions can ask for "one more" (SDK-593). The
-        release itself checks for that request and, when one is pending,
-        consumes it and keeps the lock, so the stages run again over whatever
-        landed above the watermarks meanwhile — cheap, since every stage is
-        watermark-gated. Bounded by ``IMPROVE_MAX_RERUN_PASSES``.
-        """
+        """One ``StageResult`` per registry stage, in order; then free the lock."""
         stages = list(DEFAULT_STAGES)
-        session_keys = _session_lock_keys(lock_keys)
-        # The claim is released exactly once: either by the combined
-        # check-and-release below (set ``released``) or by the finally. A second
-        # release is not holder-scoped and would drop a claim a contender won in
-        # between, so the finally must never run after a successful release.
-        released = False
         try:
-            passes = 0
-            while True:
-                passes += 1
-                if passes > 1:
-                    result.start_rerun_pass()
-                budget_exhausted = False
-                for index, stage in enumerate(stages):
-                    stage_result = await execute_stage(stage, inputs)
-                    result.record(stage_result)
-                    if stage_result.run_info_stamp:
-                        # The stage decides when and what it stamps; the row's
-                        # merge is append-style, so no stage can drop another's.
-                        # A rerun pass refreshing its own stage's stamp is expected.
-                        operation.merge_run_info(
-                            stage_result.run_info_stamp, allow_overwrite=passes > 1
-                        )
-                    remaining_stages = stages[index + 1 :]
-                    # An exhausted LLM budget is not this stage's problem alone:
-                    # every later stage would spend one more failing call on it.
-                    # The stage stays recorded as it ended; the rest is skipped
-                    # with the reason. Whether the run also raises is still the
-                    # fatal stage's decision, below.
-                    budget_exhausted = stage_result.budget_exhausted
-                    if stage.fatal and stage_result.status == "errored":
-                        raise _abort_run(
-                            result,
-                            remaining_stages,
-                            stage,
-                            stage_result,
-                            reason=(
-                                REASON_BUDGET_EXHAUSTED
-                                if budget_exhausted
-                                else REASON_ABORTED_BY_FATAL_STAGE
-                            ),
-                        )
-                    if budget_exhausted:
-                        _skip_stages(result, remaining_stages, REASON_BUDGET_EXHAUSTED)
-                        logger.warning(
-                            "improve: stage '%s' failed because the LLM budget is exhausted; "
-                            "run stopped, %d remaining stage(s) skipped",
-                            stage.name,
-                            len(remaining_stages),
-                        )
-                        break
-
-                if budget_exhausted:
-                    # No further pass either: it would fail the same way. The
-                    # plain release in the finally frees the claim, and a rerun
-                    # request still pending is left to the next claimant — as
-                    # after a fatal abort or at the pass bound below.
+            for index, stage in enumerate(stages):
+                stage_result = await execute_stage(stage, inputs)
+                result.record(stage_result)
+                if stage_result.run_info_stamp:
+                    # The stage decides when and what it stamps; the row's
+                    # merge is append-style, so no stage can drop another's.
+                    operation.merge_run_info(stage_result.run_info_stamp)
+                remaining_stages = stages[index + 1 :]
+                # An exhausted LLM budget is not this stage's problem alone:
+                # every later stage would spend one more failing call on it.
+                # The stage stays recorded as it ended; the rest is skipped
+                # with the reason. Whether the run also raises is still the
+                # fatal stage's decision, below.
+                if stage.fatal and stage_result.status == "errored":
+                    raise _abort_run(
+                        result,
+                        remaining_stages,
+                        stage,
+                        stage_result,
+                        reason=(
+                            REASON_BUDGET_EXHAUSTED
+                            if stage_result.budget_exhausted
+                            else REASON_ABORTED_BY_FATAL_STAGE
+                        ),
+                    )
+                if stage_result.budget_exhausted:
+                    _skip_stages(result, remaining_stages, REASON_BUDGET_EXHAUSTED)
+                    logger.warning(
+                        "improve: stage '%s' failed because the LLM budget is exhausted; "
+                        "run stopped, %d remaining stage(s) skipped",
+                        stage.name,
+                        len(remaining_stages),
+                    )
                     break
-                if not session_keys:
-                    break
-                if passes >= IMPROVE_MAX_RERUN_PASSES:
-                    # Known gap: a loser that requested a rerun during this last
-                    # pass was told rerun_requested=True, but we stop here and
-                    # leave its request for the next claimant — which, for an
-                    # ended plugin session, may never come. Three colliding
-                    # runs inside one hold are needed to get here; make it
-                    # visible rather than restructure for it.
-                    if await has_pending_improve_rerun(session_keys):
-                        logger.warning(
-                            "improve: %d-pass bound reached for %s with a rerun request "
-                            "still pending; it is left to the next claimant, which may "
-                            "not arrive for an ended session",
-                            passes,
-                            ", ".join(session_keys),
-                        )
-                    else:
-                        logger.info(
-                            "improve: %d-pass bound reached for %s; a further rerun "
-                            "request is left to the next claimant",
-                            passes,
-                            ", ".join(session_keys),
-                        )
-                    break
-                if await release_or_rerun_improve_lock_many(lock_keys, rerun_keys=session_keys):
-                    released = True
-                    break
-                logger.info(
-                    "improve: rerun requested on %s while running; starting pass %d",
-                    ", ".join(session_keys),
-                    passes + 1,
-                )
         finally:
             result.finished = True
             from cognee.modules.pipelines.models import OperationOutcome
@@ -301,8 +214,7 @@ async def improve(
                 # Nothing ran: record that truthfully, and keep the stamp-less
                 # row out of the stage watermark queries.
                 operation.set_outcome(OperationOutcome.NOOP)
-            if not released:
-                await release_improve_lock_many(lock_keys)
+            await release_improve_lock_many(lock_keys)
 
     session_ids = [session_id for session_id in (session_ids or []) if session_id]
     _send_improve_telemetry(
@@ -346,73 +258,59 @@ async def improve(
                 review_conflicts=review_conflicts,
                 overrides=kwargs,
             )
-            # One claim per session id plus one for the dataset, so bridge
-            # runs and dataset runs exclude each other; held until the last
-            # stage finishes, background included.
-            lock_keys = improve_lock_keys(inputs.session_ids, inputs.dataset_id, inputs.user.id)
-            if not await try_acquire_improve_lock_many(lock_keys):
-                # Session-keyed only: ask the holder of our sessions for one
-                # more pass, so this run's newer entries are covered without a
-                # retry. A dataset-only collision has no such promise.
-                rerun_requested = await request_improve_rerun_many(_session_lock_keys(lock_keys))
-                return report(
-                    _skip_lock_held_run(
-                        operation, inputs, lock_keys, rerun_requested=rerun_requested
-                    )
-                )
+            # The whole run holds the dataset's lock, like a pipeline run, so
+            # improve, cognify, add, forget... on one dataset queue one after
+            # another. Sessions are claimed on top: two improves bridging one
+            # session into different datasets queue too. Both are held until
+            # the last stage finishes, background included.
+            lock_keys = improve_lock_keys(inputs.session_ids, inputs.user.id)
+            # Created before the stages run: background mode hands this result
+            # to the caller while the detached task is still filling it.
+            result = ImproveResult(
+                dataset_id=inputs.dataset_id,
+                dataset_name=inputs.dataset_name,
+                session_ids=inputs.session_id_list,
+                memify_run={},
+                background=run_in_background,
+                finished=False,
+            )
 
-            # The claim is owned here until it is handed to execute_stages,
-            # whose finally releases it. The probe below awaits real engine
-            # setup and cancellation is not an Exception, so a raise before
-            # the handoff must release or the keys leak for the process
-            # lifetime.
-            claim_owned = True
-            try:
-                # Probed only after the claim was won: the probe leases the
-                # graph engine, which every lock loser would otherwise pay
-                # for although only the capability-gated stages read it.
-                inputs = inputs.with_capabilities(
-                    await resolve_graph_capabilities(
-                        inputs.dataset_id, getattr(inputs.dataset, "owner_id", None)
-                    )
-                )
+            async def run_claimed() -> None:
+                # Lock order: dataset lock, then the session claim, then (in the
+                # probe and the stages) a dataset-queue slot. The stages' own
+                # pipeline runs re-enter the dataset lock this task holds.
+                async with dataset_lock(inputs.dataset_id):
+                    await acquire_improve_lock_many(lock_keys)
+                    # The claim is owned here until execute_stages' finally
+                    # takes it over; the probe awaits real engine setup, so a
+                    # raise or a cancellation before then must release it.
+                    try:
+                        # Probed only once both are held: the probe leases the
+                        # graph engine, which a queued run must not hold while
+                        # it waits.
+                        claimed = inputs.with_capabilities(
+                            await resolve_graph_capabilities(
+                                inputs.dataset_id, getattr(inputs.dataset, "owner_id", None)
+                            )
+                        )
+                    except BaseException:
+                        await release_improve_lock_many(lock_keys)
+                        raise
+                    # Awaiting the coroutine enters execute_stages synchronously
+                    # up to its try, so its finally owns the release from here.
+                    await execute_stages(claimed, result, lock_keys, operation)
 
-                # Created before the stages run: background mode hands this
-                # result to the caller while the detached task is still
-                # filling it.
-                result = ImproveResult(
-                    dataset_id=inputs.dataset_id,
-                    dataset_name=inputs.dataset_name,
-                    session_ids=inputs.session_id_list,
-                    memify_run={},
-                    background=run_in_background,
-                    finished=False,
-                )
-
-                if run_in_background:
-                    operation.defer_close()
-                    # ``operation`` is passed twice on purpose: the coroutine's
-                    # own finally sets the outcome from the finished stages,
-                    # while _run_detached closes the deferred row even on
-                    # cancellation.
-                    run = _run_detached(
-                        execute_stages(inputs, result, lock_keys, operation), operation
-                    )
-                    task = asyncio.create_task(run)
-                    # Scheduled: execute_stages' finally owns the release now.
-                    claim_owned = False
-                    result.attach_background_task(register_background_task(task))
-                    return report(result)
-
-                # Awaiting the coroutine enters execute_stages synchronously up
-                # to its try, so its finally owns the release from here.
-                claim_owned = False
-                await execute_stages(inputs, result, lock_keys, operation)
+            if run_in_background:
+                operation.defer_close()
+                # ``operation`` is passed twice on purpose: execute_stages'
+                # finally sets the outcome from the finished stages, while
+                # _run_detached closes the deferred row even on cancellation.
+                task = asyncio.create_task(_run_detached(run_claimed(), operation))
+                result.attach_background_task(register_background_task(task))
                 return report(result)
-            except BaseException:
-                if claim_owned:
-                    await release_improve_lock_many(lock_keys)
-                raise
+
+            await run_claimed()
+            return report(result)
 
 
 @contextmanager
@@ -507,9 +405,9 @@ async def _resolve_inputs(
         improve_operation_id=operation.operation_id,
         session_ids=tuple(session_ids),
         config=config,
-        # Placeholder until the lock claim is won: the real probe leases the
-        # graph engine (and a dataset-queue slot), which a lock loser must not
-        # pay for. improve() swaps in the probed answer via with_capabilities.
+        # Placeholder until the claim is held: the real probe leases the graph
+        # engine (and a dataset-queue slot), which a queued run must not hold
+        # while it waits. improve() swaps in the probed answer via with_capabilities.
         capabilities=GraphCapabilities.assume_supported(),
         node_name=node_name,
         feedback_alpha=feedback_alpha,
@@ -518,39 +416,6 @@ async def _resolve_inputs(
         review_conflicts=review_conflicts,
         memify_kwargs={key: overrides[key] for key in MEMIFY_PASSTHROUGH_KEYS if key in overrides},
     )
-
-
-def _skip_lock_held_run(
-    operation: Any,
-    inputs: ImproveRunInputs,
-    lock_keys: tuple[str, ...],
-    *,
-    rerun_requested: bool = False,
-) -> ImproveResult:
-    """React to a lost lock claim: log it, record a no-op run, skip every stage.
-
-    Not "succeeded": zero stages ran, and the row contract (module docstring)
-    reserves that outcome for runs whose work actually happened. The caller
-    still gets one entry per stage, never ``{}``. ``rerun_requested`` says the
-    holder of our sessions will run one more pass, so nothing here is lost.
-    """
-    from cognee.modules.pipelines.models import OperationOutcome
-
-    logger.info(
-        "improve: another run holds the improve lock for %s, skipping%s",
-        ", ".join(lock_keys),
-        " (rerun requested from the holder)" if rerun_requested else "",
-    )
-    operation.set_outcome(OperationOutcome.NOOP)
-    result = ImproveResult.all_skipped(
-        stage_names(DEFAULT_STAGES),
-        REASON_LOCK_HELD,
-        dataset_id=inputs.dataset_id,
-        dataset_name=inputs.dataset_name,
-        session_ids=inputs.session_id_list,
-    )
-    result.rerun_requested = rerun_requested
-    return result
 
 
 def _skip_stages(result: ImproveResult, stages: Sequence[BaseStage], reason: str) -> None:

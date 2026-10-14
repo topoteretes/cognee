@@ -9,10 +9,10 @@ from uuid import uuid4
 
 import pytest
 
+from cognee.infrastructure.locks.dataset_lock import get_dataset_lock
 from cognee.modules.improve import (
     REASON_ABORTED_BY_FATAL_STAGE,
     REASON_DISABLED_BY_CONFIG,
-    REASON_LOCK_HELD,
     REASON_NO_SESSION_IDS,
     ImproveResult,
 )
@@ -29,10 +29,47 @@ from .conftest import FakeStage
 session_lock = importlib.import_module("cognee.infrastructure.locks.session_lock")
 
 
-def _lock_held(result: ImproveResult) -> bool:
-    return bool(result.stages) and all(
-        stage.status == "skipped" and stage.reason == REASON_LOCK_HELD for stage in result.stages
-    )
+async def _claim_is_free(keys) -> bool:
+    """Whether the improve claim on ``keys`` can be taken right now."""
+    try:
+        await asyncio.wait_for(session_lock.acquire_improve_lock_many(keys), 0.1)
+    except asyncio.TimeoutError:
+        return False
+    await session_lock.release_improve_lock_many(keys)
+    return True
+
+
+async def _settle():
+    for _ in range(10):
+        await asyncio.sleep(0)
+
+
+async def _dataset_lock(harness):
+    return await get_dataset_lock(harness.dataset.id)
+
+
+async def _dataset_lock_is_free(harness) -> bool:
+    return not (await _dataset_lock(harness)).locked()
+
+
+async def _waits_while_held(harness, *, sessions=(), dataset=False, **improve_kwargs):
+    """Run improve while ``sessions`` are claimed and/or the dataset lock is held
+    (as another run would hold them): it must wait, then finish."""
+    # Acquired on the lock itself, not via dataset_lock(): that would mark the
+    # dataset held in this context, and the improve task would inherit the mark.
+    lock = await _dataset_lock(harness) if dataset else None
+    if lock is not None:
+        await lock.acquire()
+    await session_lock.acquire_improve_lock_many(sessions)
+    task = asyncio.create_task(harness.improve(**improve_kwargs))
+    await _settle()
+    try:
+        assert not task.done()
+    finally:
+        await session_lock.release_improve_lock_many(sessions)
+        if lock is not None:
+            lock.release()
+    return await asyncio.wait_for(task, 1)
 
 
 def _run_info(cls, dataset_id, **extra):
@@ -156,72 +193,44 @@ async def test_explicit_improve_is_never_gated_by_the_auto_improve_admission(har
 
 
 @pytest.mark.asyncio
-async def test_lock_held_returns_every_stage_skipped_never_empty_dict(harness):
+async def test_a_held_claim_makes_improve_wait_then_run_every_stage(harness):
     calls = []
     harness.use_stages([FakeStage("a", calls=calls), FakeStage("b", calls=calls)])
-    key = f"dataset:{harness.dataset.id}"
-    assert await session_lock.try_acquire_improve_lock_many([key])
-    try:
-        result = await harness.improve()
-    finally:
-        await session_lock.release_improve_lock_many([key])
 
-    assert isinstance(result, ImproveResult)
-    assert _lock_held(result)
-    assert result.status == "skipped"
-    assert [(s.stage, s.status, s.reason) for s in result.stages] == [
-        ("a", "skipped", REASON_LOCK_HELD),
-        ("b", "skipped", REASON_LOCK_HELD),
-    ]
-    assert calls == []
-    assert result.memify_run == {}
-    assert harness.span.attributes[COGNEE_IMPROVE_STAGES] == "a=skipped,b=skipped"
+    result = await _waits_while_held(harness, dataset=True)
+
+    assert result.status == "completed"
+    assert calls == ["a", "b"]
+    assert harness.span.attributes[COGNEE_IMPROVE_STAGES] == "a=completed,b=completed"
 
 
 @pytest.mark.asyncio
 async def test_lock_is_keyed_to_session_ids_and_the_dataset(harness):
     calls = []
     harness.use_stages([FakeStage("a", calls=calls)])
-    # Another run holding one of our sessions blocks us. Session keys carry
+    # Another run holding one of our sessions makes us wait. Session keys carry
     # the user id: session state is scoped per (user, session) everywhere.
     session_key = f"session:{harness.user.id}:chat_2"
-    assert await session_lock.try_acquire_improve_lock_many([session_key])
-    try:
-        blocked = await harness.improve(session_ids=["chat_1", "chat_2"])
-    finally:
-        await session_lock.release_improve_lock_many([session_key])
-    assert _lock_held(blocked)
+    await _waits_while_held(harness, sessions=[session_key], session_ids=["chat_1", "chat_2"])
 
-    # A DIFFERENT user's session of the same name never blocks us.
+    # A DIFFERENT user's session of the same name never makes us wait.
     other_users_key = f"session:{uuid4()}:chat_1"
-    assert await session_lock.try_acquire_improve_lock_many([other_users_key])
+    await session_lock.acquire_improve_lock_many([other_users_key])
     try:
-        allowed = await harness.improve(session_ids=["chat_1"])
+        await asyncio.wait_for(harness.improve(session_ids=["chat_1"]), 1)
     finally:
         await session_lock.release_improve_lock_many([other_users_key])
-    assert not _lock_held(allowed)
 
-    # So does a dataset-keyed run over the same dataset: a session-keyed
-    # bridge and a plain improve(dataset=...) must never write concurrently.
-    dataset_key = f"dataset:{harness.dataset.id}"
-    assert await session_lock.try_acquire_improve_lock_many([dataset_key])
-    try:
-        blocked = await harness.improve(session_ids=["chat_1", "chat_2"])
-    finally:
-        await session_lock.release_improve_lock_many([dataset_key])
-    assert _lock_held(blocked)
+    # Anything holding the dataset's lock (another improve, a cognify) makes a
+    # session-keyed run wait too: they must never write concurrently.
+    await _waits_while_held(harness, dataset=True, session_ids=["chat_1", "chat_2"])
 
-    allowed = await harness.improve(session_ids=["chat_1", "chat_2"])
-    assert not _lock_held(allowed)
-    assert calls == ["a", "a"]  # the other-user run above plus this one
+    assert calls == ["a", "a", "a"]
     # And every claim — sessions and dataset — is released afterwards.
-    all_keys = [
-        f"session:{harness.user.id}:chat_1",
-        f"session:{harness.user.id}:chat_2",
-        dataset_key,
-    ]
-    assert await session_lock.try_acquire_improve_lock_many(all_keys)
-    await session_lock.release_improve_lock_many(all_keys)
+    assert await _claim_is_free(
+        [f"session:{harness.user.id}:chat_1", f"session:{harness.user.id}:chat_2"]
+    )
+    assert await _dataset_lock_is_free(harness)
 
 
 @pytest.mark.asyncio
@@ -253,9 +262,7 @@ async def test_fatal_stage_stops_run_and_raises_with_partial_result(harness):
     assert partial.stages[2].reason == REASON_ABORTED_BY_FATAL_STAGE
     assert partial.status == "errored"
     # The lock was released on the way out.
-    key = f"dataset:{harness.dataset.id}"
-    assert await session_lock.try_acquire_improve_lock_many([key])
-    await session_lock.release_improve_lock_many([key])
+    assert await _dataset_lock_is_free(harness)
     assert harness.span.attributes[COGNEE_IMPROVE_STAGES] == (
         "first=completed,fatal_one=errored,after_fatal=skipped,last=skipped"
     )
@@ -351,7 +358,6 @@ async def test_background_mode_runs_all_stages_under_one_lock(harness):
             FakeStage("after_slow", calls=calls),
         ]
     )
-    key = f"dataset:{harness.dataset.id}"
 
     result = await harness.improve(run_in_background=True)
 
@@ -361,7 +367,7 @@ async def test_background_mode_runs_all_stages_under_one_lock(harness):
     assert harness.span.attributes[COGNEE_IMPROVE_STAGES] == "background"
     # The whole run, not one stage, is what holds the claim.
     await asyncio.sleep(0)
-    assert not await session_lock.try_acquire_improve_lock_many([key])
+    assert not await _dataset_lock_is_free(harness)
     assert calls == ["slow"]
     assert "after_slow" not in calls
 
@@ -372,8 +378,7 @@ async def test_background_mode_runs_all_stages_under_one_lock(harness):
     assert result.status == "completed"
     assert calls == ["slow", "after_slow"]
     assert [s.stage for s in result.stages] == ["slow", "after_slow"]
-    assert await session_lock.try_acquire_improve_lock_many([key])
-    await session_lock.release_improve_lock_many([key])
+    assert await _dataset_lock_is_free(harness)
     # No stage was told about background mode.
     assert not hasattr(harness.improve_mod.DEFAULT_STAGES[0].seen_inputs[0], "run_in_background")
 
@@ -395,9 +400,7 @@ async def test_background_fatal_error_is_recorded_not_raised(harness):
     assert result.status == "errored"
     assert result.error == "RuntimeError: boom"
     assert [s.status for s in result.stages] == ["errored", "skipped"]
-    key = f"dataset:{harness.dataset.id}"
-    assert await session_lock.try_acquire_improve_lock_many([key])
-    await session_lock.release_improve_lock_many([key])
+    assert await _dataset_lock_is_free(harness)
 
 
 @pytest.mark.asyncio
@@ -429,28 +432,6 @@ async def test_errored_non_fatal_run_marks_the_operation_failed(harness):
     # The stage-8 watermark trusts the operation row, so a run with an errored
     # stage must not be recorded as a succeeded improve.
     assert harness.operations[-1].outcome == OperationOutcome.FAILED
-
-
-@pytest.mark.asyncio
-async def test_lock_held_run_records_a_noop_operation_row(harness):
-    """A lost claim runs zero stages, so its row must never serve as a watermark.
-
-    The dataset is bound to the record before the claim, so a "succeeded" row
-    here would mark a dataset current that this call never improved — including
-    one whose claim was lost on a shared *session* key.
-    """
-    from cognee.modules.pipelines.models import OperationOutcome
-
-    harness.use_stages([FakeStage("a")])
-    key = f"dataset:{harness.dataset.id}"
-    assert await session_lock.try_acquire_improve_lock_many([key])
-    try:
-        result = await harness.improve()
-    finally:
-        await session_lock.release_improve_lock_many([key])
-
-    assert _lock_held(result)
-    assert harness.operations[-1].outcome == OperationOutcome.NOOP
 
 
 @pytest.mark.asyncio
@@ -533,9 +514,7 @@ async def test_cancelled_background_run_still_closes_the_operation(harness):
     assert [call["context"] for call in harness.finish_calls] == [harness.operations[-1]]
     assert isinstance(harness.finish_calls[0]["error"], asyncio.CancelledError)
     # execute_stages' own finally still released the lock during cancellation.
-    key = f"dataset:{harness.dataset.id}"
-    assert await session_lock.try_acquire_improve_lock_many([key])
-    await session_lock.release_improve_lock_many([key])
+    assert await _dataset_lock_is_free(harness)
 
 
 @pytest.mark.asyncio
@@ -633,24 +612,20 @@ def test_memify_passthrough_keys_are_declared_on_improve_kwargs():
 
 
 @pytest.mark.asyncio
-async def test_lock_loser_never_probes_the_graph_engine(harness):
+async def test_a_queued_run_probes_the_graph_engine_only_once_it_holds_the_claim(harness):
     """The capability probe leases the graph engine (and a dataset-queue slot);
-    a run that loses its lock claim runs nothing, so it must not pay for it."""
+    a run waiting for its claim must not hold that while it waits."""
     harness.use_stages([FakeStage("a")])
     resolve_mock = harness.improve_mod.resolve_graph_capabilities  # AsyncMock in conftest
     resolve_mock.reset_mock()
-    key = f"dataset:{harness.dataset.id}"
-    assert await session_lock.try_acquire_improve_lock_many([key])
-    try:
-        blocked = await harness.improve()
-    finally:
-        await session_lock.release_improve_lock_many([key])
-
-    assert _lock_held(blocked)
+    lock = await _dataset_lock(harness)
+    await lock.acquire()
+    task = asyncio.create_task(harness.improve())
+    await _settle()
     resolve_mock.assert_not_awaited()
 
-    winner = await harness.improve()
-    assert not _lock_held(winner)
+    lock.release()
+    await asyncio.wait_for(task, 1)
     resolve_mock.assert_awaited_once()
 
 
@@ -658,8 +633,7 @@ async def test_lock_loser_never_probes_the_graph_engine(harness):
 async def test_cancellation_during_the_probe_releases_the_lock(harness):
     """The probe runs after the claim but before execute_stages' finally
     exists; a task cancelled there (client disconnect, wait_for timeout) must
-    not strand the keys, or every later improve on the dataset skips
-    lock_held until restart."""
+    not strand the keys, or every later improve on the dataset waits forever."""
     harness.use_stages([FakeStage("a")])
     probe_mock = harness.improve_mod.resolve_graph_capabilities  # AsyncMock in conftest
     probing = asyncio.Event()
@@ -677,8 +651,8 @@ async def test_cancellation_during_the_probe_releases_the_lock(harness):
         await task
 
     harness.monkeypatch.setattr(harness.improve_mod, "resolve_graph_capabilities", probe_mock)
-    retry = await harness.improve()
-    assert not _lock_held(retry)
+    retry = await asyncio.wait_for(harness.improve(), 1)
+    assert retry.status == "completed"
 
 
 def _stamped_stage(name: str, stamp: dict) -> FakeStage:
