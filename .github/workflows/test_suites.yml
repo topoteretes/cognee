@@ -13,6 +13,12 @@ on:
     # runs on the same sha, seconds apart, on every PR).
     types: [opened, synchronize, reopened]
   workflow_dispatch:
+    inputs:
+      simulate-fork:
+        description: "Run as a fork PR would: secret-dependent suites skip, the rest run with provider settings cleared"
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -26,6 +32,34 @@ env:
   ENV: 'dev'
 
 jobs:
+  # ── Can this run use repository secrets? ─────────────────────────────
+  # GitHub withholds secrets from fork PRs (and Dependabot PRs), so we test for
+  # the key itself instead of guessing from who opened the PR. Jobs that need a
+  # real LLM/embedding key gate on this output and skip; everything else runs.
+  ci-context:
+    name: CI Context
+    runs-on: ubuntu-latest
+    outputs:
+      has-secrets: ${{ steps.check.outputs.has-secrets }}
+    steps:
+      - name: Check for repository secrets
+        id: check
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          SIMULATE_FORK: ${{ inputs.simulate-fork }}
+        run: |
+          if [ -n "$LLM_API_KEY" ] && [ "$SIMULATE_FORK" != "true" ]; then
+            echo "has-secrets=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-secrets=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Secret-dependent suites skipped"
+              echo "This run has no access to repository secrets (fork PR), so jobs"
+              echo "that call a real LLM or embedding API are skipped. A maintainer"
+              echo "runs them before merge. Every other suite ran normally."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   # ── Build pre-baked CI container ──────────────────────────────────────
   build-ci-env:
     permissions:
@@ -103,8 +137,8 @@ jobs:
   basic-tests:
     name: Basic Tests
     uses: ./.github/workflows/basic_tests.yml
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    needs: [ build-ci-env, ci-context ]
+    if: ${{ !cancelled() && needs.ci-context.outputs.has-secrets == 'true' }}
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
@@ -112,18 +146,20 @@ jobs:
   e2e-tests:
     name: End-to-End Tests
     uses: ./.github/workflows/e2e_tests.yml
-    needs: [ build-ci-env ]
+    needs: [ build-ci-env, ci-context ]
     if: ${{ !cancelled() }}
     with:
+      has-secrets: ${{ needs.ci-context.outputs.has-secrets == 'true' }}
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
 
   cli-tests:
     name: CLI Tests
     uses: ./.github/workflows/cli_tests.yml
-    needs: [ build-ci-env ]
+    needs: [ build-ci-env, ci-context ]
     if: ${{ !cancelled() }}
     with:
+      has-secrets: ${{ needs.ci-context.outputs.has-secrets == 'true' }}
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
 
@@ -140,43 +176,47 @@ jobs:
   slow-e2e-tests:
     name: Slow End-to-End Tests
     uses: ./.github/workflows/slow_e2e_tests.yml
-    needs: [ build-ci-env ]
+    needs: [ build-ci-env, ci-context ]
     if: ${{ !cancelled() }}
     with:
+      has-secrets: ${{ needs.ci-context.outputs.has-secrets == 'true' }}
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
 
   graph-db-tests:
     name: Graph Database Tests
-    needs: [ build-ci-env ]
+    needs: [ build-ci-env, ci-context ]
     if: ${{ !cancelled() }}
     uses: ./.github/workflows/graph_db_tests.yml
     with:
+      has-secrets: ${{ needs.ci-context.outputs.has-secrets == 'true' }}
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
 
   vector-db-tests:
     name: Vector DB Tests
-    needs: [ build-ci-env ]
+    needs: [ build-ci-env, ci-context ]
     if: ${{ !cancelled() }}
     uses: ./.github/workflows/vector_db_tests.yml
     with:
+      has-secrets: ${{ needs.ci-context.outputs.has-secrets == 'true' }}
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
 
   example-tests:
     name: Example Tests
-    needs: [ build-ci-env ]
+    needs: [ build-ci-env, ci-context ]
     if: ${{ !cancelled() }}
     uses: ./.github/workflows/examples_tests.yml
     with:
+      has-secrets: ${{ needs.ci-context.outputs.has-secrets == 'true' }}
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
 
   notebook-tests:
     name: Notebook Tests
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    needs: [ build-ci-env, ci-context ]
+    if: ${{ !cancelled() && needs.ci-context.outputs.has-secrets == 'true' }}
     uses: ./.github/workflows/notebooks_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -184,8 +224,11 @@ jobs:
 
   different-os-tests-basic:
     name: OS and Python Tests Ubuntu
+    needs: [ ci-context ]
+    if: ${{ !cancelled() }}
     uses: ./.github/workflows/test_different_operating_systems.yml
     with:
+      has-secrets: ${{ needs.ci-context.outputs.has-secrets == 'true' }}
       # The interpreter edges only. Every version-specific fix on dev since
       # 2025-06 was 3.10 (5) or 3.14 (1); none was 3.11/3.12/3.13-only. Those
       # three run in release_test.yml instead. The unit suite is byte-identical across the
@@ -204,16 +247,19 @@ jobs:
 
   different-os-tests-extended:
     name: OS and Python Tests Extended
+    needs: [ ci-context ]
+    if: ${{ !cancelled() }}
     uses: ./.github/workflows/test_different_operating_systems.yml
     with:
+      has-secrets: ${{ needs.ci-context.outputs.has-secrets == 'true' }}
       python-versions: '["3.13.x"]'
       os: '["macos-15", "windows-latest"]'
     secrets: inherit
 
   llm-tests:
     name: LLM Test Suite
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    needs: [ build-ci-env, ci-context ]
+    if: ${{ !cancelled() && needs.ci-context.outputs.has-secrets == 'true' }}
     uses: ./.github/workflows/test_llms.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -221,8 +267,8 @@ jobs:
 
   s3-file-storage-test:
     name: S3 File Storage Test
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    needs: [ build-ci-env, ci-context ]
+    if: ${{ !cancelled() && needs.ci-context.outputs.has-secrets == 'true' }}
     uses: ./.github/workflows/test_s3_file_storage.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -230,21 +276,30 @@ jobs:
 
   integration-tests:
     name: Run Integration Tests
-    needs: [ build-ci-env ]
+    needs: [ build-ci-env, ci-context ]
     if: ${{ !cancelled() }}
     uses: ./.github/workflows/integration_tests.yml
     with:
+      has-secrets: ${{ needs.ci-context.outputs.has-secrets == 'true' }}
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
 
   mcp-test:
     name: MCP Tests
+    needs: [ ci-context ]
+    if: ${{ !cancelled() }}
     uses: ./.github/workflows/test_mcp.yml
+    with:
+      has-secrets: ${{ needs.ci-context.outputs.has-secrets == 'true' }}
     secrets: inherit
 
   docker-compose-test:
     name: Docker Compose Test
+    needs: [ ci-context ]
+    if: ${{ !cancelled() }}
     uses: ./.github/workflows/docker_compose.yml
+    with:
+      has-secrets: ${{ needs.ci-context.outputs.has-secrets == 'true' }}
     secrets: inherit
 
   docker-ci-test:
@@ -259,8 +314,8 @@ jobs:
 
   temporal-graph-tests:
     name: Temporal Graph Test
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    needs: [ build-ci-env, ci-context ]
+    if: ${{ !cancelled() && needs.ci-context.outputs.has-secrets == 'true' }}
     uses: ./.github/workflows/temporal_graph_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -268,8 +323,8 @@ jobs:
 
   search-db-tests:
     name: Search Test on Different DBs
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    needs: [ build-ci-env, ci-context ]
+    if: ${{ !cancelled() && needs.ci-context.outputs.has-secrets == 'true' }}
     uses: ./.github/workflows/search_db_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -284,8 +339,8 @@ jobs:
 
   relational-db-migration-tests:
     name: Relational DB Migration Tests
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    needs: [ build-ci-env, ci-context ]
+    if: ${{ !cancelled() && needs.ci-context.outputs.has-secrets == 'true' }}
     uses: ./.github/workflows/relational_db_migration_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -294,6 +349,7 @@ jobs:
   notify:
     name: Test Completion Status
     needs: [
+      ci-context,
       pre-test,
       basic-tests,
       e2e-tests,
@@ -321,34 +377,22 @@ jobs:
     if: ${{ !cancelled() }}
     steps:
       - name: Check Status
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          HAS_SECRETS: ${{ needs.ci-context.outputs.has-secrets }}
         run: |
-          if [[ "${{ needs.pre-test.result }}" == "success" &&
-                "${{ needs.basic-tests.result }}" == "success" &&
-                "${{ needs.e2e-tests.result }}" == "success" &&
-                "${{ needs.cli-tests.result }}" == "success" &&
-                "${{ needs.journey-tests.result }}" == "success" &&
-                "${{ needs.slow-e2e-tests.result }}" == "success" &&
-                "${{ needs.graph-db-tests.result }}" == "success" &&
-                "${{ needs.vector-db-tests.result }}" == "success" &&
-                "${{ needs.example-tests.result }}" == "success" &&
-                "${{ needs.notebook-tests.result }}" == "success" &&
-                "${{ needs.different-os-tests-basic.result }}" == "success" &&
-                "${{ needs.different-os-tests-extended.result }}" == "success" &&
-                "${{ needs.llm-tests.result }}" == "success" &&
-                "${{ needs.s3-file-storage-test.result }}" == "success" &&
-                "${{ needs.integration-tests.result }}" == "success" &&
-                "${{ needs.mcp-test.result }}" == "success" &&
-                "${{ needs.docker-compose-test.result }}" == "success" &&
-                "${{ needs.docker-ci-test.result }}" == "success" &&
-                "${{ needs.ui-docker-ci-test.result }}" == "success" &&
-                "${{ needs.temporal-graph-tests.result }}" == "success" &&
-                "${{ needs.search-db-tests.result }}" == "success" &&
-                "${{ needs.relational-db-migration-tests.result }}" == "success" ]]; then
-            echo "All test suites completed successfully!"
-          else
-            echo "One or more test suites failed."
+          # Skips are expected on fork PRs (no secrets); anywhere else a
+          # skipped suite means something did not run and fails the check.
+          allowed='["success"]'
+          if [ "$HAS_SECRETS" != "true" ]; then allowed='["success","skipped"]'; fi
+          bad=$(echo "$NEEDS" | jq -r --argjson ok "$allowed" \
+            'to_entries[] | select(.value.result as $r | $ok | index($r) | not) | "\(.key): \(.value.result)"')
+          if [ -n "$bad" ]; then
+            echo "One or more test suites did not pass:"
+            echo "$bad"
             exit 1
           fi
+          echo "All test suites completed successfully!"
 
   # ── Advisory Claude Code review — pulls the private skill from cognee-ci at runtime ──
   # The rubric + Slack map live in the private cognee-ci repo; this job carries no review

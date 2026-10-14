@@ -57,6 +57,9 @@ def test_keyless_gate_fixture_covers_module_level_llm_available_imports():
     package_root = Path(cognee_package_file).resolve().parent
     importing_modules = set()
     for path in package_root.rglob("*.py"):
+        # Product gates only: tests may check llm_available to pick a keyless path.
+        if path.relative_to(package_root).parts[0] == "tests":
+            continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
         if any(
             isinstance(node, ast.ImportFrom)

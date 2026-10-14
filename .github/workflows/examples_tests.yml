@@ -15,6 +15,13 @@ permissions:
 on:
   workflow_call:
     inputs:
+      has-secrets:
+        # False on fork PRs, where GitHub withholds repository secrets. Jobs
+        # that need a real LLM/embedding key skip instead of failing on an
+        # empty key. Other callers leave the default and run everything.
+        required: false
+        type: boolean
+        default: true
       ci-image:
         required: false
         type: string
@@ -212,6 +219,7 @@ jobs:
 
   test-s3-permissions-example: # Make sure permission and multi-user mode work with S3 file system
     name: Run Permissions Example
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     defaults:
@@ -275,6 +283,7 @@ jobs:
   # tokens), so a generic mock's empty completion fails it by design.
   test_docling_add:
     name: Run Add with Docling Test
+    if: ${{ inputs.has-secrets }}
     runs-on: macos-15
     steps:
       - name: Check out repository
