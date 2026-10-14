@@ -12,6 +12,7 @@ Two independent things are pinned here:
 
 import importlib
 import io
+from urllib.parse import unquote
 
 import pytest
 
@@ -124,3 +125,70 @@ async def test_text_metadata_is_complete(storage_root):
     assert stored.metadata["extension"] == "txt"
     assert stored.metadata["mime_type"] == "text/plain"
     assert stored.metadata["file_size"] == len(b"a plain note")
+
+
+# --- Named text (CLO-1023) ----------------------------------------------------
+# Text a caller names (a connector row's title, DataItem.name) is a document
+# with that name, stored under a content-addressed key like any file. Only
+# nameless text keeps the text_<md5>.txt convention.
+
+
+@pytest.mark.asyncio
+async def test_named_text_is_stored_under_its_name(storage_root):
+    stored = await save_data_to_file_detailed("Ship the thing.", filename="Q3 Plan")
+
+    assert unquote(stored.file_path).endswith("/Q3 Plan.txt")
+    assert stored.metadata["name"] == "Q3 Plan"
+    assert stored.metadata["extension"] == "txt"
+    assert stored.metadata["mime_type"] == "text/plain"
+    assert stored.metadata["file_path"] == stored.file_path
+
+
+@pytest.mark.asyncio
+async def test_named_text_keeps_the_source_suffix_in_the_document_name(storage_root):
+    # A Drive export's text is still text: read back as .txt, shown as roadmap.docx.
+    stored = await save_data_to_file_detailed("exported body", filename="roadmap.docx")
+
+    assert stored.file_path.endswith("/roadmap.docx.txt")
+    assert stored.metadata["name"] == "roadmap.docx"
+    assert stored.metadata["extension"] == "txt"
+
+
+@pytest.mark.asyncio
+async def test_two_named_texts_sharing_a_name_do_not_clobber(storage_root):
+    first = await save_data_to_file_detailed("first notes", filename="Notes")
+    second = await save_data_to_file_detailed("second notes", filename="Notes")
+
+    assert first.file_path != second.file_path
+    assert first.metadata["name"] == second.metadata["name"] == "Notes"
+    assert len(_stored_files(storage_root)) == 2
+
+    async with open_data_file(first.file_path) as file:
+        assert file.read() == b"first notes"
+    async with open_data_file(second.file_path) as file:
+        assert file.read() == b"second notes"
+
+
+@pytest.mark.asyncio
+async def test_readding_the_same_named_text_is_idempotent(storage_root):
+    first = await save_data_to_file_detailed("same words", filename="Notes")
+    second = await save_data_to_file_detailed("same words", filename="Notes")
+
+    assert first.file_path == second.file_path
+    assert len(_stored_files(storage_root)) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_name_cannot_pick_the_storage_directory(storage_root):
+    stored = await save_data_to_file_detailed("x", filename="../../etc/passwd")
+
+    assert stored.file_path.endswith("/passwd.txt")
+    assert stored.metadata["name"] == "passwd"
+    assert all(path.is_relative_to(storage_root) for path in _stored_files(storage_root))
+
+
+@pytest.mark.asyncio
+async def test_an_unusable_name_falls_back_to_the_content_hash(storage_root):
+    stored = await save_data_to_file_detailed("a plain note", filename="   ")
+
+    assert stored.file_path.rsplit("/", 1)[-1].startswith("text_")

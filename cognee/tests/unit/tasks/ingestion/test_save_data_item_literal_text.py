@@ -85,3 +85,20 @@ async def test_literal_text_on_an_upload_stores_the_upload():
         await storage.save_data_item_to_storage_detailed(DataItem(data=upload, literal_text=True))
 
     saved.assert_awaited_once_with(upload.file, filename="report.txt")
+
+
+@pytest.mark.asyncio
+async def test_literal_text_with_a_name_is_stored_under_that_name(stored_as_text):
+    """A named document (a connector row's title) reaches storage as the filename."""
+    await storage.save_data_item_to_storage_detailed(
+        DataItem(data="# Q3 Plan\n\nShip it.", name="Q3 Plan", literal_text=True)
+    )
+
+    stored_as_text.assert_awaited_once_with("# Q3 Plan\n\nShip it.", filename="Q3 Plan")
+
+
+@pytest.mark.asyncio
+async def test_a_named_item_whose_text_is_not_literal_keeps_the_name(stored_as_text):
+    await storage.save_data_item_to_storage_detailed(DataItem(data="plain words", name="Note"))
+
+    stored_as_text.assert_awaited_once_with("plain words", filename="Note")

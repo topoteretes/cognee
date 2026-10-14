@@ -69,6 +69,9 @@ def test_build_document_data_item_tags_a_non_dlt_source():
     # title becomes an H1 prefixed to the content body.
     assert item.data.startswith("# My Page")
     assert "body text" in item.data
+    # The title names the document (CLO-1023): the dataset shows "My Page",
+    # not text_<md5>.
+    assert item.name == "My Page"
     # Document rows are always stored as literal text, titled or not.
     assert item.literal_text is True
 
@@ -84,6 +87,8 @@ def test_build_document_data_item_without_title_is_just_content():
     assert item.system_metadata["source"] == "wiki"
     assert item.system_metadata["title"] is None
     assert item.literal_text is True
+    # No title, no name: the row keeps the content-hash name.
+    assert item.name is None
 
 
 def test_build_document_data_item_untitled_url_content_is_marked_literal():

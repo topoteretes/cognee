@@ -622,6 +622,9 @@ def _build_document_data_item(row: DltRowData, data_id: UUID, source_tag: str) -
     the row's own node sets (``_row_node_set``); they ride on the DataItem and
     ingest_data unions them with the call-level node_set.
 
+    ``name`` is the row's title, so the dataset lists the document under the
+    name its source gives it instead of a content hash.
+
     ``literal_text=True`` because ``content`` is provider data cognee did not
     write: an untitled row (no "# title" prefix) whose content happens to be
     just a URL or an existing local path must still be stored as that text,
@@ -645,6 +648,10 @@ def _build_document_data_item(row: DltRowData, data_id: UUID, source_tag: str) -
     return DataItem(
         data=text,
         label=title or str(row_data.get("id")),
+        # The row's title is the document's name: a Drive file shows up as
+        # ``roadmap.docx``, a Gmail thread as its subject, not ``text_<md5>``.
+        # An untitled row keeps the content-hash name.
+        name=title or None,
         system_metadata=system_metadata,
         data_id=data_id,
         literal_text=True,
