@@ -668,6 +668,9 @@ DATA_ROOT_DIRECTORY="s3://your-bucket/cognee/data"
 SYSTEM_ROOT_DIRECTORY="s3://your-bucket/cognee/system"
 ```
 
+### File Encryption (application layer)
+`FILE_ENCRYPTION_ENABLED=true` seals every object cognee writes under `DATA_ROOT_DIRECTORY` (ingested originals and loader-derived text) with chunked AES-256-GCM, one random data key per file wrapped by a key provider: `local` (a base64 32-byte key or a JSON ring for rotation, `FILE_ENCRYPTION_KEY` / `FILE_ENCRYPTION_KEYS` / `FILE_ENCRYPTION_ACTIVE_KEY_ID` / `FILE_ENCRYPTION_KEY_FILE`) or `aws_kms` (`FILE_ENCRYPTION_KMS_KEY_ID`, GenerateDataKey/Decrypt with the encryption context `cognee:purpose=file-storage`; boto3 from the `aws` extra). Other services plug in through `register_file_key_provider`. The layer is attached by `get_file_storage()` and `open_data_file()` as an `EncryptedFileStorage` wrapper around the local or S3 backend, only for roots under the data root — never the system root, whose database files their engines open directly. Scope is file storage only: graph, vector, relational, session cache and logs keep relying on backend encryption at rest. Files written before enabling stay readable (plaintext passes through by header sniff) and are sealed on their next write; loaders read by path, so ingestion unseals a sealed original into a 0600 temp file for the loader's lifetime; `GET .../data/{id}/raw` streams through the decrypting reader. Content hashes and sizes stay those of the plaintext. A missing or malformed key fails the first store with `FileEncryptionConfigurationError` and a remediation. Full guide: `docs/file-encryption.md`; implementation: `cognee/infrastructure/files/encryption/`.
+
 ## Extension Points
 
 ### Adding New Functionality
@@ -789,6 +792,7 @@ Several security environment variables in `.env`:
 - `COGNEE_ALLOWED_LOCAL_FILE_ROOTS` - Optional `os.pathsep`-separated allowlist of directories local paths may be read from. Unset (default) means any local path is accepted, so a local repo or document tree can be ingested from anywhere; a path-looking string that does not exist is still ingested as text. When set, paths outside the listed roots are rejected (or ingested as text on the non-strict `add()` path); cognee's own data/system/cache/logs/repos roots are always allowed. Set it for servers reachable by untrusted callers.
 - `ALLOW_HTTP_REQUESTS` - Allow HTTP requests from Cognee (default: True)
 - `ALLOW_CYPHER_QUERY` - Allow raw Cypher queries (default: True)
+- `FILE_ENCRYPTION_ENABLED` - Seal files under `DATA_ROOT_DIRECTORY` with cognee's own AES-256-GCM envelope, keys held locally or in AWS KMS (default: False). File storage only; see "File Encryption (application layer)" above.
 - `ENABLE_BACKEND_ACCESS_CONTROL` - Multi-tenant isolation (default: True). When `true`, API auth is required and per-user/dataset DB isolation is enabled. When `false`, single-user mode: shared DBs and auth off unless overridden.
 - `REQUIRE_AUTHENTICATION` - Explicit auth override. Unset (default): follows `ENABLE_BACKEND_ACCESS_CONTROL`. `false` is ignored when `ENABLE_BACKEND_ACCESS_CONTROL=true`. For a single-user deployment with auth off, set `ENABLE_BACKEND_ACCESS_CONTROL=false` (and optionally `REQUIRE_AUTHENTICATION=false`).
 
