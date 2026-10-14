@@ -95,6 +95,9 @@ async def get_memory_fragment(
                 edge_properties_to_project=edge_properties_to_project,
                 seed_node_ids=seed_ids,
                 depth=neighborhood_depth,
+                node_type=node_type,
+                node_name=node_name,
+                node_name_filter_operator=node_name_filter_operator,
                 triplet_distance_penalty=triplet_distance_penalty,
                 feedback_influence=feedback_influence,
             )
@@ -160,10 +163,12 @@ async def _get_top_triplet_importances(
         List[List[Edge]]: For batch mode (query_list_length is set), one list per query.
     """
     if memory_fragment is None:
-        if wide_search_limit is None:
+        if wide_search_limit is None and neighborhood_depth is None:
             relevant_node_ids = None
         else:
-            relevant_node_ids = vector_search.extract_relevant_node_ids()
+            relevant_node_ids = vector_search.extract_relevant_node_ids(
+                rank_by_score=neighborhood_depth is not None
+            )
 
         memory_fragment = await get_memory_fragment(
             properties_to_project=properties_to_project,
