@@ -95,7 +95,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         max_completion_tokens: int | None = None,
         endpoint: str | None = "http://localhost:8080",
         api_key: str | None = "no-key-required",
-        batch_size: int = 36,
+        batch_size: int = 32,
         input_type: str | None = None,
     ):
         self.model = model or "default"

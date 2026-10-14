@@ -154,8 +154,11 @@ class EmbeddingConfig(BaseSettings):
                 )
                 self.embedding_dimensions = _FALLBACK_DIMENSIONS
 
+        # 32 is the most inputs one request may carry on common self-hosted
+        # servers (Text Embeddings Inference answers 422 above it), and the
+        # difference from the old 36 is not measurable on hosted providers.
         if not self.embedding_batch_size:
-            self.embedding_batch_size = 36
+            self.embedding_batch_size = 32
 
     def to_dict(self) -> dict:
         """
