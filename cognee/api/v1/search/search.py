@@ -1,3 +1,5 @@
+import asyncio
+import os
 from typing import Any
 from uuid import UUID
 
@@ -69,6 +71,7 @@ async def search(
     llm_config: LLMConfig | None = None,
     embedding_config: EmbeddingConfig | None = None,
     code_query: dict[str, Any] | None = None,
+    timeout: float | None = None,
 ) -> list[SearchResult]:
     """
     Search and query the knowledge graph for insights, information, and connections.
@@ -258,6 +261,11 @@ async def search(
             message="code_query requires query_type=SearchType.CODE.",
             name="InvalidCodeSearchConfig",
         )
+    if timeout is not None and (not isinstance(timeout, (int, float)) or timeout <= 0):
+        raise CogneeValidationError(
+            message="timeout must be a positive number of seconds.",
+            name="InvalidSearchTimeout",
+        )
     agentic_overrides = {
         "skills": skills,
         "tools": tools,
@@ -381,7 +389,21 @@ async def search(
                 retriever_specific_config = dict(retriever_specific_config or {})
                 retriever_specific_config.update(code_query)
 
-            filtered_search_results = await search_function(
+            effective_timeout = timeout
+            if effective_timeout is None:
+                env_timeout_str = os.getenv("COGNEE_SEARCH_TIMEOUT_SECONDS")
+                if env_timeout_str:
+                    try:
+                        val = float(env_timeout_str)
+                        if val > 0:
+                            effective_timeout = val
+                    except (ValueError, TypeError):
+                        logger.warning(
+                            "Invalid COGNEE_SEARCH_TIMEOUT_SECONDS '%s'; ignoring timeout",
+                            env_timeout_str,
+                        )
+
+            search_coro = search_function(
                 query_text=query_text,
                 query_type=query_type,
                 dataset_ids=dataset_ids if dataset_ids else datasets,
@@ -405,6 +427,13 @@ async def search(
                 llm_config=llm_config,
                 embedding_config=embedding_config,
             )
+
+            if effective_timeout is not None:
+                filtered_search_results = await asyncio.wait_for(
+                    search_coro, timeout=effective_timeout
+                )
+            else:
+                filtered_search_results = await search_coro
 
             n = len(filtered_search_results) if filtered_search_results else 0
             span.set_attribute(COGNEE_RESULT_COUNT, n)
