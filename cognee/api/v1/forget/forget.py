@@ -196,6 +196,7 @@ async def _forget_everything(user: Any) -> dict:
     - Graph DB (nodes, edges): yes
     - Vector DB (embeddings): yes
     - Session cache (Redis/FS): yes (full prune)
+    - Search history (queries/results rows): yes, every row the user owns
     """
     from cognee.api.v1.datasets.datasets import datasets
 
@@ -217,8 +218,30 @@ async def _forget_everything(user: Any) -> dict:
     except Exception as e:
         logger.warning("forget: session cache cleanup failed (non-fatal): %s", e, exc_info=True)
 
+    await _forget_search_history(user, None)
+
     logger.info("forget: deleted all data for user=%s (%d datasets)", user.id, count)
     return {"datasets_removed": count, "status": "success"}
+
+
+async def _forget_search_history(user: Any, dataset_id: UUID | None) -> None:
+    """Drop the recorded questions and answers that referenced the deleted data.
+
+    Search history quotes the answer text, which can carry chunk text, so a
+    forget that leaves it behind has not removed the content. Non-fatal: the
+    data itself is already gone, and a history table that cannot be reached
+    must not turn a successful forget into a failure.
+    """
+    from cognee.modules.search.operations import delete_search_history
+
+    try:
+        removed = await delete_search_history(user.id, dataset_id)
+    except Exception as e:
+        logger.warning("forget: search history cleanup failed (non-fatal): %s", e, exc_info=True)
+        return
+
+    if removed:
+        logger.info("forget: removed %d search history rows for user=%s", removed, user.id)
 
 
 async def _forget_dataset(dataset_ref: str | UUID, user: Any) -> dict:
@@ -231,12 +254,16 @@ async def _forget_dataset(dataset_ref: str | UUID, user: Any) -> dict:
     - Session cache: yes — sessions attributed to the dataset (via
       session_records.dataset_id or the per-dataset default session id)
       are deleted inside datasets.empty_dataset (non-fatal, best-effort)
+    - Search history: yes, the rows attributed to this dataset (a search that
+      fanned out over several datasets is attributed to none and stays until
+      ``forget(everything=True)``)
     """
     from cognee.api.v1.datasets.datasets import datasets
 
     dataset_id = await _resolve_dataset_id(dataset_ref, user)
 
     await datasets.empty_dataset(dataset_id, user=user)
+    await _forget_search_history(user, dataset_id)
 
     logger.info("forget: deleted dataset=%s for user=%s", dataset_id, user.id)
     return {"dataset_id": str(dataset_id), "status": "success"}
