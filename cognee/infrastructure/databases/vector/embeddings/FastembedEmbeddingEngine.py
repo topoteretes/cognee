@@ -49,18 +49,57 @@ logger = get_logger("FastembedEmbeddingEngine")
 observe = get_observe()
 
 
-def fastembed_model_cached(model: str) -> tuple[bool, str, str | None]:
+def resolve_fastembed_cache_dir() -> str:
+    """The directory fastembed keeps its models in, created if it can be.
+
+    Precedence: ``FASTEMBED_CACHE_PATH`` (fastembed's own variable, taken as
+    given) over ``<models_root_directory>/fastembed`` (``COGNEE_MODELS_DIR``,
+    default ``~/.cognee/models``). Left to itself fastembed would use
+    ``fastembed_cache`` under the system temp directory, which is emptied on
+    many hosts at every restart, so the model was downloaded again each time;
+    the default now lives next to cognee's logs and repos. When that directory
+    cannot be created or written to (a read-only home, a sandbox) the temp
+    location is used after all, with a warning, so an embed never fails over
+    where its model is kept.
+    """
+    explicit = os.getenv("FASTEMBED_CACHE_PATH")
+    if explicit:
+        return explicit
+
+    from cognee.base_config import get_base_config
+
+    cache_dir = Path(get_base_config().models_root_directory) / "fastembed"
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        if os.access(cache_dir, os.W_OK):
+            return str(cache_dir)
+        reason = "not writable"
+    except OSError as error:
+        reason = str(error)
+
+    fallback = os.path.join(tempfile.gettempdir(), "fastembed_cache")
+    logger.warning(
+        "fastembed model cache %s is unusable (%s); using %s instead. The model will be "
+        "downloaded again after a restart that clears the temp directory. Set "
+        "COGNEE_MODELS_DIR or FASTEMBED_CACHE_PATH to a writable location.",
+        cache_dir,
+        reason,
+        fallback,
+    )
+    return fallback
+
+
+def fastembed_model_cached(
+    model: str, cache_dir: str | None = None
+) -> tuple[bool, str, str | None]:
     """Whether fastembed already holds ``model`` locally, its cache dir, and a size hint.
 
-    fastembed resolves its cache the same way: ``FASTEMBED_CACHE_PATH`` or
-    ``fastembed_cache`` under the system temp dir. A model downloaded from the
-    hub lives under ``models--<repo>``; one fetched from fastembed's own
-    bucket under ``fast-<name>``. Zero-network; unknown models report a
-    download with no size.
+    ``cache_dir`` defaults to ``resolve_fastembed_cache_dir()``, the directory
+    the engine hands fastembed. A model downloaded from the hub lives under
+    ``models--<repo>``; one fetched from fastembed's own bucket under
+    ``fast-<name>``. Zero-network; unknown models report a download with no size.
     """
-    cache_dir = Path(
-        os.getenv("FASTEMBED_CACHE_PATH", os.path.join(tempfile.gettempdir(), "fastembed_cache"))
-    )
+    cache_dir = Path(cache_dir or resolve_fastembed_cache_dir())
     description = next(
         (entry for entry in TextEmbedding.list_supported_models() if entry.get("model") == model),
         None,
@@ -127,16 +166,18 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
         self.model = model
         self.dimensions = dimensions
         self.batch_size = batch_size
-        cached, cache_dir, size_hint = fastembed_model_cached(model)
+        cache_dir = resolve_fastembed_cache_dir()
+        cached, cache_dir, size_hint = fastembed_model_cached(model, cache_dir)
         log_model_load(
             logger,
             model=model,
             cached=cached,
             cache_dir=cache_dir,
             size_hint=size_hint,
-            location_var="FASTEMBED_CACHE_PATH",
+            location_var="COGNEE_MODELS_DIR (or FASTEMBED_CACHE_PATH)",
         )
-        self.embedding_model = TextEmbedding(model_name=model)
+        # Passed explicitly: fastembed's own default is the system temp directory.
+        self.embedding_model = TextEmbedding(model_name=model, cache_dir=cache_dir)
         pad_to_batch_longest(self.embedding_model)
         # fastembed truncates input at the model's own limit without an error, so
         # chunks must never be sized past it: see input_limit().
