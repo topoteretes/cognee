@@ -142,6 +142,22 @@ async def test_event_offsets_are_converted_to_utc_and_mixed_entries_share_one_sc
 
 
 @pytest.mark.asyncio
+async def test_event_time_with_a_trailing_z_is_parsed_on_every_python_version():
+    """fromisoformat rejects a trailing "Z" before Python 3.11, which would
+    silently drop the event from the delta."""
+    events = [_event("2026-08-03T09:00:10Z")]
+
+    ctx_a, ctx_b = _patches(events)
+    with ctx_a, ctx_b:
+        result = await visualize_module.get_live_events(
+            DATASET_ID,
+            since=datetime(2026, 8, 3, 9, 0, 5),  # noqa: DTZ001 - naive cursor, as older event timestamps are
+        )
+
+    assert result["events"] == events
+
+
+@pytest.mark.asyncio
 async def test_unauthorized_dataset_raises_permission_denied():
     ctx_a, ctx_b = _patches([], authorized=False)
     with ctx_a, ctx_b, pytest.raises(PermissionDeniedError):

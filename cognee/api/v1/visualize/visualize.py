@@ -3,7 +3,7 @@ import json
 from collections import defaultdict
 from collections.abc import AsyncGenerator
 from contextlib import aclosing
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
@@ -28,11 +28,7 @@ from cognee.modules.visualization.cognee_network_visualization import (
 )
 from cognee.modules.visualization.graph_stream import STREAM_CHUNK_SIZE, stream_graph_events
 from cognee.modules.visualization.preprocessor import build_node_set_colors
-from cognee.modules.visualization.session_events import (
-    as_naive_utc,
-    collect_session_events,
-    parse_event_time,
-)
+from cognee.modules.visualization.session_events import collect_session_events
 from cognee.modules.visualization.subgraph_data import (
     DEFAULT_MAX_NODES,
     DEFAULT_NEIGHBORHOOD_DEPTH,
@@ -520,6 +516,36 @@ async def build_brains_summary_payload(user: User | None = None) -> dict:
     return payload
 
 
+def _as_naive_utc(value: datetime) -> datetime:
+    """Normalize to naive UTC so the cutoff and event times share one scale.
+
+    The cache adapters stamp ``SessionQAEntry.time`` with
+    ``datetime.now(timezone.utc).isoformat()`` — aware, UTC — while entries
+    written before that change hold naive ``utcnow()`` strings, and a client
+    may send ``since`` either way. Python refuses to order a naive datetime
+    against an aware one, so both sides of the comparison in
+    ``get_live_events`` go through here.
+
+    See also ``cogx.parse_timestamp``, ``plugin_status.as_utc`` and
+    ``auto_improve_debounce._parse_timestamp``, which normalize to aware UTC
+    instead; this one stays naive because older cursors are naive.
+    """
+    if value.tzinfo is not None:
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
+
+
+def _event_time(event: dict[str, Any]) -> datetime | None:
+    raw = event.get("time")
+    if not raw:
+        return None
+    try:
+        # fromisoformat only accepts a trailing "Z" from Python 3.11 on.
+        return _as_naive_utc(datetime.fromisoformat(raw.replace("Z", "+00:00")))
+    except ValueError:
+        return None
+
+
 async def get_live_events(
     dataset_id: UUID,
     since: datetime | None = None,
@@ -573,14 +599,15 @@ async def get_live_events(
     events = await collect_session_events(user=user, dataset_id=dataset_id)
 
     if since is not None:
-        cutoff = as_naive_utc(since)
+        cutoff = _as_naive_utc(since)
         events = [
             event
             for event in events
-            if (event_time := parse_event_time(event)) is not None and event_time > cutoff
+            if (event_time := _event_time(event)) is not None and event_time > cutoff
         ]
 
     if events:
+        # collect_session_events returns events oldest first, so the last is the newest.
         cursor = events[-1]["time"]
     else:
         cursor = since.isoformat() if since is not None else None
