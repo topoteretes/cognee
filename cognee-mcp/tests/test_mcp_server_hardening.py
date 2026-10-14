@@ -12,6 +12,8 @@ from pathlib import Path
 import httpx
 import pytest
 
+from cognee.tasks.ingestion.data_item import DataItem
+
 MCP_ROOT = Path(__file__).resolve().parents[1]  # cognee-mcp/
 if str(MCP_ROOT) not in sys.path:
     sys.path.insert(0, str(MCP_ROOT))
@@ -1246,8 +1248,7 @@ async def test_remember_self_improvement_end_to_end(
             assert len(fake.calls) == 1
             received = fake.calls[0]
             assert received["dataset_name"] == "ds"
-            if upload or not session_id:
-                # Uploads and permanent text are staged on disk under a name.
+            if upload:
                 assert fake.seen_payloads == [b"memory"]
             else:
                 assert received["data"] == "memory"
@@ -1427,8 +1428,8 @@ def test_untitled_text_name_is_a_safe_readable_line(content, expected_line):
 
 
 @pytest.mark.asyncio
-async def test_cognee_client_local_remember_stages_named_text_under_the_name():
-    """Direct mode writes named text to a temp file so cognee stores it by name."""
+async def test_cognee_client_local_remember_hands_named_text_over_as_a_named_item():
+    """Direct mode passes named text as a literal DataItem so cognee stores it by name."""
     fake = FakeCogneeModule()
     client = _local_client(fake)
 
@@ -1436,26 +1437,26 @@ async def test_cognee_client_local_remember_stages_named_text_under_the_name():
         data="alice prefers async updates", dataset_name="ds", name="Alice preferences"
     )
 
-    handed_off = Path(fake.calls[0]["data"])
+    handed_off = fake.calls[0]["data"]
+    assert isinstance(handed_off, DataItem)
+    assert handed_off.data == "alice prefers async updates"
     assert handed_off.name == f"Alice preferences-{_digest8('alice prefers async updates')}.txt"
-    assert fake.seen_payloads == [b"alice prefers async updates"]
+    # Literal: never read as a URL or path, and nothing is staged on disk.
+    assert handed_off.literal_text is True
+    assert fake.seen_paths == []
     assert fake.calls[0]["dataset_name"] == "ds"
-    # Staged like an upload, cleaned up like one.
-    assert not handed_off.exists()
-    assert not handed_off.parent.exists()
 
 
 @pytest.mark.asyncio
-async def test_cognee_client_local_remember_stages_untitled_permanent_text_by_first_line():
+async def test_cognee_client_local_remember_passes_unnamed_text_through_untouched():
+    """Without a name, direct mode leaves URL/path resolution to cognee."""
     fake = FakeCogneeModule()
     client = _local_client(fake)
 
-    await client.remember(data="alice prefers async updates", dataset_name="ds")
+    await client.remember(data="https://example.com/page", dataset_name="ds")
 
-    handed_off = Path(fake.calls[0]["data"])
-    assert _untitled_text_filename(handed_off.name, "alice prefers async updates")
-    assert fake.seen_payloads == [b"alice prefers async updates"]
-    assert not handed_off.exists()
+    assert fake.calls[0]["data"] == "https://example.com/page"
+    assert fake.seen_paths == []
 
 
 @pytest.mark.asyncio

@@ -16,7 +16,7 @@ import re
 import sys
 import tempfile
 from contextlib import redirect_stdout
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -161,6 +161,8 @@ class CogneeClient:
         return {"status": "success", "result": parsed}
 
     _UNTITLED_LINE_LENGTH = 60
+    # Byte budget for the name stem: NAME_MAX is 255 bytes, minus "-<md5[:8]>.txt".
+    _NAME_BYTES = 200
 
     @staticmethod
     def _untitled_text_name(content: str) -> str:
@@ -180,7 +182,7 @@ class CogneeClient:
         first_line = re.sub(r"[\s/\\:]+", " ", first_line).strip()
         if len(first_line) > CogneeClient._UNTITLED_LINE_LENGTH:
             first_line = first_line[: CogneeClient._UNTITLED_LINE_LENGTH].rstrip() + "…"
-        return f"{datetime.now(UTC).strftime('%Y-%m-%d %H%M')} {first_line or 'memory'}"
+        return f"{datetime.now(timezone.utc).strftime('%Y-%m-%d %H%M')} {first_line or 'memory'}"
 
     @staticmethod
     def _text_filename(content: str, name: str | None = None) -> str:
@@ -201,7 +203,25 @@ class CogneeClient:
             safe_name = safe_name[: -len(".txt")].rstrip(". ")
         if not safe_name:
             safe_name = CogneeClient._untitled_text_name(content)
+        if len(safe_name.encode("utf-8")) > CogneeClient._NAME_BYTES:
+            # Cut on the byte budget without splitting a code point.
+            safe_name = (
+                safe_name.encode("utf-8")[: CogneeClient._NAME_BYTES]
+                .decode("utf-8", errors="ignore")
+                .rstrip(". ")
+            )
         return f"{safe_name}-{digest[:8]}.txt"
+
+    @staticmethod
+    def _cognee_names_text() -> bool:
+        """Whether the installed cognee can store text under a name (``DataItem.name``).
+
+        Older releases cannot; there a named direct-mode remember keeps the
+        content-hash name instead of failing on an unknown argument.
+        """
+        from cognee.tasks.ingestion.data_item import DataItem
+
+        return "name" in getattr(DataItem, "__dataclass_fields__", {})
 
     @staticmethod
     def _text_upload(data: Any, name: str | None = None) -> dict[str, tuple[str, str, str]]:
@@ -797,17 +817,18 @@ class CogneeClient:
                     remember_data = os.path.join(tmp_dir, safe_name)
                     with open(remember_data, "wb") as f:
                         f.write(raw_bytes)
-                elif not session_id and isinstance(data, str) and not os.path.isfile(data):
-                    # Permanent text is staged like an upload, so cognee stores
-                    # it under a readable name (the caller's, or timestamp and
-                    # first line) instead of its content hash. Same path a
-                    # base64 upload takes, same cleanup below. Session entries
-                    # and existing local files are handed over as they are.
-                    content = data
-                    tmp_dir = tempfile.mkdtemp(prefix="cognee_upload_")
-                    remember_data = os.path.join(tmp_dir, self._text_filename(content, name))
-                    with open(remember_data, "w", encoding="utf-8") as f:
-                        f.write(content)
+                elif name and isinstance(data, str) and self._cognee_names_text():
+                    # Named text is handed to cognee as a literal, named
+                    # document: it keeps the readable name without being
+                    # staged on disk, so local-file settings never apply and
+                    # the text is never read as a URL or a path. Unnamed text
+                    # and session entries are handed over as they are, so a
+                    # URL, an s3 path or a directory is still resolved by cognee.
+                    from cognee.tasks.ingestion.data_item import DataItem
+
+                    remember_data = DataItem(
+                        data=data, name=self._text_filename(data, name), literal_text=True
+                    )
                 else:
                     remember_data = data
 
