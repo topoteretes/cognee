@@ -4,6 +4,7 @@ import asyncio
 import cognee.cli.echo as fmt
 from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.cli.named_text import NAME_HELP, check_name, name_inline_text
 from cognee.cli.reference import SupportsCliCommand
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
@@ -49,11 +50,18 @@ After adding data, use `cognee cognify` to process it into knowledge graphs.
             default=DEFAULT_DATASET_NAME,
             help="Dataset name to organize your data (default: main_dataset)",
         )
+        parser.add_argument("--name", "-n", default=None, help=NAME_HELP)
 
     def execute(self, args: argparse.Namespace) -> None:
         try:
             # Import cognee here to avoid circular imports
             import cognee
+
+            name = getattr(args, "name", None)
+            try:
+                check_name(args.data, name)
+            except ValueError as e:
+                raise CliCommandException(str(e), error_code=1) from e
 
             fmt.echo(f"Adding {len(args.data)} item(s) to dataset '{args.dataset_name}'...")
 
@@ -65,10 +73,11 @@ After adding data, use `cognee cognify` to process it into knowledge graphs.
                     user = await resolve_cli_user(getattr(args, "user_id", None))
 
                     # Pass all data items as a list to cognee.add if multiple items
-                    if len(args.data) == 1:
-                        data_to_add = args.data[0]
+                    items = name_inline_text(args.data, name)
+                    if len(items) == 1:
+                        data_to_add = items[0]
                     else:
-                        data_to_add = args.data
+                        data_to_add = items
 
                     fmt.echo("Processing data...")
                     await cognee.add(data=data_to_add, dataset_name=args.dataset_name, user=user)

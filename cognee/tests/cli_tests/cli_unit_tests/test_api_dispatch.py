@@ -467,3 +467,18 @@ class TestImproveDispatch:
         mock_fmt.success.assert_called_once_with("Knowledge graph improved successfully!")
         dumped = [call.args[0] for call in mock_fmt.echo.call_args_list]
         assert any('"some-uuid"' in line for line in dumped)
+
+
+def test_dispatch_add_and_remember_forward_the_name():
+    from cognee.cli.api_dispatch import _dispatch_add, _dispatch_remember
+
+    client = MagicMock()
+    client.add.return_value = {}
+    client.remember.return_value = {}
+
+    with patch("cognee.cli.api_dispatch.fmt"):
+        _dispatch_add(client, argparse.Namespace(data=["words"], dataset_name="ds", name="Q3"))
+        _dispatch_remember(client, argparse.Namespace(data=["words"], dataset_name="ds", name="Q3"))
+
+    assert client.add.call_args.kwargs["name"] == "Q3"
+    assert client.remember.call_args.kwargs["name"] == "Q3"
