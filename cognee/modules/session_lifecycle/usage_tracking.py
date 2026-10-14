@@ -145,12 +145,19 @@ async def record_llm_call(
     model: str | None = None,
     tokens_in_override: int | None = None,
     tokens_out_override: int | None = None,
+    cost_usd_override: float | None = None,
+    count_in_operation: bool = True,
+    update_last_model: bool = True,
 ) -> None:
     """If there's an active session, accumulate this call's usage into it.
 
     Pass ``tokens_in_override`` / ``tokens_out_override`` when the
     caller has exact counts from ``response.usage``; otherwise the
     char-based estimate is used.
+
+    ``count_in_operation=False`` keeps the call out of the operation-scoped
+    counters, which hold LLM tokens only. ``update_last_model=False`` credits
+    the per-model row without making ``model`` the session's last model.
     """
     tokens_in = (
         tokens_in_override if tokens_in_override is not None else _estimate_tokens(input_text)
@@ -163,7 +170,7 @@ async def record_llm_call(
     # record_operation / run_tasks scope captures tokens even when no
     # session-usage target is set (SDK-399).
     op_usage = get_active_operation_usage()
-    if op_usage is not None:
+    if op_usage is not None and count_in_operation:
         op_usage.add(tokens_in, tokens_out)
 
     target = _active_session.get()
@@ -171,7 +178,11 @@ async def record_llm_call(
         return
     session_id, user_id = target
 
-    cost = _estimate_cost_usd(model, tokens_in, tokens_out)
+    cost = (
+        cost_usd_override
+        if cost_usd_override is not None
+        else _estimate_cost_usd(model, tokens_in, tokens_out)
+    )
 
     try:
         from cognee.modules.session_lifecycle.metrics import accumulate_usage
@@ -183,6 +194,44 @@ async def record_llm_call(
             tokens_out=tokens_out,
             cost_usd=cost,
             model=model,
+            update_last_model=update_last_model,
         )
     except Exception as exc:
         logger.debug("record_llm_call: accumulate failed (%s)", exc, exc_info=True)
+
+
+async def record_embedding_call(response, *, model: str, input_text: str) -> None:
+    """Include embedding usage in session totals, without billing it twice.
+
+    Provider token counts are preferred. Price comes from LiteLLM's model price
+    metadata; this is an estimate, and an unknown model retains the existing
+    unpriced-cost fallback. No instrumentation failure may retry a paid request.
+    """
+    try:
+        usage = getattr(response, "usage", None)
+        tokens = (
+            usage.get("prompt_tokens")
+            if isinstance(usage, dict)
+            else getattr(usage, "prompt_tokens", None)
+        )
+        cost = None
+        try:
+            import litellm
+
+            cost = litellm.completion_cost(completion_response=response, model=model)
+        except Exception:
+            logger.debug("Embedding price unavailable", exc_info=True)
+        await record_llm_call(
+            input_text=input_text,
+            output_text="",
+            model=model,
+            tokens_in_override=tokens,
+            tokens_out_override=0,
+            cost_usd_override=cost,
+            # Operation rows count LLM tokens only, and the session's last
+            # model names the model that answered, not the embedder.
+            count_in_operation=False,
+            update_last_model=False,
+        )
+    except Exception:
+        logger.debug("Embedding usage unavailable", exc_info=True)

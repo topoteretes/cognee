@@ -10,8 +10,10 @@ on SQLite so unit tests can run on aiosqlite without a server.
 from sqlalchemy import (
     JSON,
     BigInteger,
+    Boolean,
     Column,
     DateTime,
+    Float,
     Index,
     Integer,
     MetaData,
@@ -60,6 +62,31 @@ def _payload_type():
 def _seq_type():
     """BIGINT identity on Postgres, INTEGER autoincrement on SQLite."""
     return BigInteger().with_variant(Integer(), "sqlite")
+
+
+CAPTURE_RECEIPT_RETENTION_DAYS = 90
+
+# Receipts outlive the cache TTL: an old retry must not resurrect expired/deleted
+# memory. No original entry text is retained here. Created on adapter startup,
+# like the other cache tables (including standalone cache.db deployments).
+cache_capture_receipts = Table(
+    "cache_capture_receipts",
+    cache_metadata,
+    Column("tenant_id", StringKey(), primary_key=True),
+    Column("user_id", StringKey(), primary_key=True),
+    Column("dataset_id", StringKey(), primary_key=True),
+    Column("session_id", StringKey(), primary_key=True),
+    Column("client_event_id", StringKey(), primary_key=True),
+    Column("payload_hash", Text, nullable=False),
+    Column("receipt", _payload_type(), nullable=False),
+    Column("indexed", Boolean, nullable=False, default=False),
+    Column("index_owner", Text, nullable=True),
+    Column("index_lease_until", Float, nullable=False, default=0),
+    Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
+)
+
+Index("idx_cache_capture_created", cache_capture_receipts.c.created_at)
+Index("idx_cache_capture_user", cache_capture_receipts.c.user_id)
 
 
 # QA entries: one row per entry; qa_id promoted to a column for direct UPDATE.

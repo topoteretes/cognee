@@ -245,6 +245,8 @@ class AgentCandidateContextUpdate(CandidateContextUpdate):
     """A proposed new agent-profile session-context lesson (tool/workflow guidance)."""
 
     context_profile: Literal["agent"] = ContextProfile.AGENT.value
+    reason: str = Field(default="", max_length=280, description="Why this project fact matters.")
+    evidence: str = Field(default="", max_length=280, description="Supporting trace observation.")
     section: str = Field(
         description=(
             "One of tool_rules, workflow_state, success_patterns, failure_lessons, or "
@@ -390,6 +392,9 @@ class SessionContextEntry(BaseModel):
     harmful_count: int = 0
     priority: int = 0
     last_served_at: str | None = None
+    reason: str = ""
+    evidence: str = ""
+    expired_at: str | None = None
     embedding: list[float] | None = None
     kind: Literal["context"] = "context"
 

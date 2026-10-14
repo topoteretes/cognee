@@ -279,6 +279,8 @@ class CloudClient:
             payload["scope"] = kwargs["scope"]
         if kwargs.get("context_profile") is not None:
             payload["context_profile"] = kwargs["context_profile"]
+        if kwargs.get("record_context_usage"):
+            payload["record_context_usage"] = True
         if kwargs.get("include_references") is not None:
             payload["include_references"] = kwargs["include_references"]
         if kwargs.get("response_schema") is not None:

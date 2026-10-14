@@ -190,7 +190,12 @@ def _patch_llm(monkeypatch, lessons, captured=None):
     async def fake_acreate_structured_output(text_input, system_prompt, response_model):
         if captured is not None:
             captured["text_input"] = text_input
-        return AgentContextExtraction(lessons=lessons)
+        return AgentContextExtraction(
+            lessons=[
+                {"evidence": "The test trace demonstrates the repository constraint.", **lesson}
+                for lesson in lessons
+            ]
+        )
 
     monkeypatch.setattr(
         agent_context_extraction.LLMGateway,

@@ -425,7 +425,11 @@ async def _expectations_for(data_id, dataset_id, owner_by_dataset):
 
 async def _session_data_items(user):
     datasets = await get_datasets_by_name([DATASET], user.id)
-    return await get_dataset_data(datasets[0].id)
+    items = await get_dataset_data(datasets[0].id)
+    # Current improve() also publishes derived summaries. They may repeat session
+    # facts by design; this oracle checks exactly-once RAW transcript persistence.
+    summary_prefix = f"# Session summary ({COMPAT_SESSION_ID})\n\n"
+    return [item for item in items if not _read_raw_document(item).startswith(summary_prefix)]
 
 
 def _read_raw_document(item) -> str:
@@ -436,13 +440,14 @@ def _read_raw_document(item) -> str:
 async def _verify_session_takeover(stage: str) -> None:
     """Verify the current branch takes over the legacy session cache incrementally.
 
-    A. improve() on the untouched legacy session must ingest NOTHING new — the
+    A. improve() on the untouched legacy session must ingest NO new raw transcript — the
        full window is byte-identical to the legacy whole-session snapshot, so
        content-hash dedup absorbs it — and must write the persist watermark.
     B. After the session grows by one entry, improve() must ingest exactly ONE
-       new document containing ONLY the new entry (legacy entries are never
+       new raw document containing ONLY the new entry (legacy entries are never
        re-ingested), and every session fact must be stored exactly once across
-       both versions.
+       both versions. Derived summary documents are excluded from this raw-data
+       oracle; summary publication and retry dedup have separate unit coverage.
     """
     print(f"\n[{stage}] Verifying session persistence takeover")
 
