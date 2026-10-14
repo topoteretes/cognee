@@ -121,13 +121,9 @@ def hashed_embedding(text: str, dims: int) -> list[float]:
     return [v / norm for v in vector]
 
 
-async def _mock_embed_text(self, text: list[str]):
-    from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
-        EmbeddingResult,
-    )
-
+async def _mock_embed_text(self, text: list[str]) -> list[list[float]]:
     dims = int(self.get_vector_size())
-    return EmbeddingResult(vectors=[hashed_embedding(t, dims) for t in text], tokens=0)
+    return [hashed_embedding(t, dims) for t in text]
 
 
 def install_mock_embeddings() -> None:

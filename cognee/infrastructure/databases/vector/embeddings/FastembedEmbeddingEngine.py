@@ -30,7 +30,8 @@ from cognee.infrastructure.databases.exceptions import (
 )
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
     EmbeddingEngine,
-    EmbeddingResult,
+    EmbeddingVectors,
+    embedding_tokens,
 )
 from cognee.infrastructure.databases.vector.embeddings.input_limit import (
     init_input_limit,
@@ -166,7 +167,7 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    async def embed_text(self, text: list[str]) -> EmbeddingResult:
+    async def embed_text(self, text: list[str]) -> EmbeddingVectors:
         """
         Embed the given text into numerical vectors; returns them and the input-token count.
 
@@ -182,7 +183,7 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
         Returns:
         --------
 
-            - EmbeddingResult: A vector per input text and the input tokens, counted with
+            - EmbeddingVectors: A vector per input text and the input tokens, counted with
               the model's own tokenizer.
         """
         original_texts = text if isinstance(text, list) else [text]
@@ -226,7 +227,7 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
                 f"Failed to index data points using model {self.model}"
             ) from error
 
-        return EmbeddingResult(
+        return EmbeddingVectors(
             vectors=handle_embedding_response(original_texts, embeddings, self.dimensions),
             # A mock embeds nothing; fastembed itself reports no usage.
             tokens=0 if self.mock else count_input_tokens(None, sanitized_text, self.tokenizer),
@@ -264,7 +265,7 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
             logger.debug("Could not check input length with the fastembed tokenizer", exc_info=True)
             return False
 
-    async def _embed_in_parts(self, original_texts: list[str]) -> EmbeddingResult:
+    async def _embed_in_parts(self, original_texts: list[str]) -> EmbeddingVectors:
         """Embed over-length input in parts: a batch is split in two, a single text
         into two overlapping halves whose embeddings are pooled. Each part goes back
         through :meth:`embed_text`, which splits further while it is still too long.
@@ -275,11 +276,11 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
                 self.embed_text(original_texts[:mid]),
                 self.embed_text(original_texts[mid:]),
             )
-            return EmbeddingResult(
+            return EmbeddingVectors(
                 vectors=handle_embedding_response(
-                    original_texts, left_result.vectors + right_result.vectors, self.dimensions
+                    original_texts, left_result + right_result, self.dimensions
                 ),
-                tokens=left_result.tokens + right_result.tokens,
+                tokens=embedding_tokens(left_result) + embedding_tokens(right_result),
             )
 
         s = original_texts[0]
@@ -298,14 +299,14 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
             self.embed_text([left_part]),
             self.embed_text([right_part]),
         )
-        (left_vec,), (right_vec,) = left_result.vectors, right_result.vectors
+        (left_vec,), (right_vec,) = left_result, right_result
         pooled = (np.array(left_vec) + np.array(right_vec)) / 2
         # Tokens are what the model processed, overlaps included - as the hosted
         # engines that count what they were billed for; with recursive splitting
         # this can be several times the text's own count.
-        return EmbeddingResult(
+        return EmbeddingVectors(
             vectors=handle_embedding_response(original_texts, [pooled.tolist()], self.dimensions),
-            tokens=left_result.tokens + right_result.tokens,
+            tokens=embedding_tokens(left_result) + embedding_tokens(right_result),
         )
 
     def get_vector_size(self) -> int:

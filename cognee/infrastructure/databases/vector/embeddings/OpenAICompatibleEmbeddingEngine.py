@@ -35,7 +35,8 @@ from cognee.infrastructure.databases.exceptions import (
 )
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
     EmbeddingEngine,
-    EmbeddingResult,
+    EmbeddingVectors,
+    embedding_tokens,
 )
 from cognee.infrastructure.databases.vector.embeddings.input_limit import (
     init_input_limit,
@@ -141,7 +142,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    async def embed_text(self, text: list[str]) -> EmbeddingResult:
+    async def embed_text(self, text: list[str]) -> EmbeddingVectors:
         """
         Embed a list of text strings; returns their vectors and the input-token count.
 
@@ -156,7 +157,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         Returns:
         --------
 
-            - EmbeddingResult: A vector per input text and the input tokens consumed.
+            - EmbeddingVectors: A vector per input text and the input tokens consumed.
         """
         original_texts = text if isinstance(text, list) else [text]
         sanitized_text = sanitize_embedding_text_inputs(original_texts)
@@ -164,7 +165,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         if self.mock:
             embeddings = [[0.0] * (self.dimensions or 1) for _ in sanitized_text]
             # No provider call, so nothing consumed.
-            return EmbeddingResult(
+            return EmbeddingVectors(
                 vectors=handle_embedding_response(original_texts, embeddings, self.dimensions),
                 tokens=0,
             )
@@ -209,12 +210,12 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
                         self.embed_text(original_texts[:mid]),
                         self.embed_text(original_texts[mid:]),
                     )
-                    embeddings = left_result.vectors + right_result.vectors
-                    return EmbeddingResult(
+                    embeddings = left_result + right_result
+                    return EmbeddingVectors(
                         vectors=handle_embedding_response(
                             original_texts, embeddings, self.dimensions
                         ),
-                        tokens=left_result.tokens + right_result.tokens,
+                        tokens=embedding_tokens(left_result) + embedding_tokens(right_result),
                     )
 
                 if isinstance(original_texts, list) and len(original_texts) == 1:
@@ -227,14 +228,14 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
                         self.embed_text([left_part]),
                         self.embed_text([right_part]),
                     )
-                    (left_vec,), (right_vec,) = left_result.vectors, right_result.vectors
+                    (left_vec,), (right_vec,) = left_result, right_result
                     pooled = (np.array(left_vec) + np.array(right_vec)) / 2
                     embeddings = [pooled.tolist()]
-                    return EmbeddingResult(
+                    return EmbeddingVectors(
                         vectors=handle_embedding_response(
                             original_texts, embeddings, self.dimensions
                         ),
-                        tokens=left_result.tokens + right_result.tokens,
+                        tokens=embedding_tokens(left_result) + embedding_tokens(right_result),
                     )
 
             if isinstance(error, asyncio.TimeoutError):
@@ -289,7 +290,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
                 "Embedding failed. Verify EMBEDDING_ENDPOINT and server status."
             ) from error
 
-        return EmbeddingResult(
+        return EmbeddingVectors(
             vectors=handle_embedding_response(original_texts, embeddings, self.dimensions),
             tokens=count_input_tokens(response, sanitized_text, self.tokenizer),
         )

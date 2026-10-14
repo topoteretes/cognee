@@ -17,7 +17,8 @@ from tenacity import (
 from cognee.infrastructure.databases.exceptions import EmbeddingException
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
     EmbeddingEngine,
-    EmbeddingResult,
+    EmbeddingVectors,
+    embedding_tokens,
 )
 from cognee.infrastructure.databases.vector.embeddings.input_limit import (
     init_input_limit,
@@ -97,7 +98,7 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         self.mock = enable_mocking in ("true", "1", "yes")
 
     @observe(as_type="embeddings")
-    async def embed_text(self, text: list[str]) -> EmbeddingResult:
+    async def embed_text(self, text: list[str]) -> EmbeddingVectors:
         """
         Embed a list of text prompts; returns their vectors and the input-token count.
 
@@ -111,7 +112,7 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         Returns:
         --------
 
-            - EmbeddingResult: A vector per text prompt and the input tokens consumed.
+            - EmbeddingVectors: A vector per text prompt and the input tokens consumed.
         """
         original_texts = text if isinstance(text, list) else [text]
         sanitized_text = sanitize_embedding_text_inputs(original_texts)
@@ -119,7 +120,7 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         if self.mock:
             embeddings = [[0.0] * self.dimensions for _ in sanitized_text]
             # No provider call, so nothing consumed.
-            return EmbeddingResult(
+            return EmbeddingVectors(
                 vectors=handle_embedding_response(original_texts, embeddings, self.dimensions),
                 tokens=0,
             )
@@ -128,10 +129,10 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
             results = await asyncio.gather(
                 *[self._get_embedding(prompt) for prompt in sanitized_text]
             )
-            embeddings = [result.vectors[0] for result in results]
-            return EmbeddingResult(
+            embeddings = [result[0] for result in results]
+            return EmbeddingVectors(
                 vectors=handle_embedding_response(original_texts, embeddings, self.dimensions),
-                tokens=sum(result.tokens for result in results),
+                tokens=sum(embedding_tokens(result) for result in results),
             )
         except Exception as error:
             # A spend cap is terminal and is neither a context-window nor a
@@ -156,12 +157,12 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
                         self.embed_text(original_texts[:mid]),
                         self.embed_text(original_texts[mid:]),
                     )
-                    embeddings = left_result.vectors + right_result.vectors
-                    return EmbeddingResult(
+                    embeddings = left_result + right_result
+                    return EmbeddingVectors(
                         vectors=handle_embedding_response(
                             original_texts, embeddings, self.dimensions
                         ),
-                        tokens=left_result.tokens + right_result.tokens,
+                        tokens=embedding_tokens(left_result) + embedding_tokens(right_result),
                     )
 
                 if len(original_texts) == 1:
@@ -176,17 +177,17 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
                         self.embed_text([left_part]),
                         self.embed_text([right_part]),
                     )
-                    (left_vec,), (right_vec,) = left_result.vectors, right_result.vectors
+                    (left_vec,), (right_vec,) = left_result, right_result
                     pooled = (np.array(left_vec) + np.array(right_vec)) / 2
                     embeddings = [pooled.tolist()]
-                    return EmbeddingResult(
+                    return EmbeddingVectors(
                         vectors=handle_embedding_response(
                             original_texts, embeddings, self.dimensions
                         ),
-                        tokens=left_result.tokens + right_result.tokens,
+                        tokens=embedding_tokens(left_result) + embedding_tokens(right_result),
                     )
 
-                return EmbeddingResult(
+                return EmbeddingVectors(
                     vectors=handle_embedding_response(original_texts, embeddings, self.dimensions),
                     tokens=0,
                 )
@@ -219,7 +220,7 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    async def _get_embedding(self, prompt: str) -> EmbeddingResult:
+    async def _get_embedding(self, prompt: str) -> EmbeddingVectors:
         """
         Internal method to call the Ollama embeddings endpoint for a single prompt;
         returns its one vector and the input-token count.
@@ -280,7 +281,7 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
                 vector = data["data"][0]["embedding"]
             else:
                 raise ValueError(f"Unexpected response format from Ollama: {data}")
-            return EmbeddingResult(
+            return EmbeddingVectors(
                 vectors=[vector], tokens=count_input_tokens(data, [prompt], self.tokenizer)
             )
 

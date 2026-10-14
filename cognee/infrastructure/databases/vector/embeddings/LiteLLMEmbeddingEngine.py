@@ -21,7 +21,8 @@ from cognee.infrastructure.databases.exceptions import (
 )
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
     EmbeddingEngine,
-    EmbeddingResult,
+    EmbeddingVectors,
+    embedding_tokens,
 )
 from cognee.infrastructure.databases.vector.embeddings.input_limit import (
     init_input_limit,
@@ -190,7 +191,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    async def embed_text(self, text: list[str]) -> EmbeddingResult:
+    async def embed_text(self, text: list[str]) -> EmbeddingVectors:
         """
         Embed a list of text strings; returns their vectors and the input-token count.
 
@@ -207,7 +208,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         Returns:
         --------
 
-            - EmbeddingResult: A vector per input text and the input tokens consumed.
+            - EmbeddingVectors: A vector per input text and the input tokens consumed.
         """
 
         sanitized_text_input = sanitize_embedding_text_inputs(text)
@@ -218,7 +219,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                     "data": [{"embedding": [0.0] * self.dimensions} for _ in sanitized_text_input]
                 }
                 # No provider call, so nothing consumed.
-                return EmbeddingResult(
+                return EmbeddingVectors(
                     vectors=[data["embedding"] for data in response["data"]], tokens=0
                 )
             else:
@@ -274,7 +275,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                     )
 
                 embedding_response = [data["embedding"] for data in response.data]
-                return EmbeddingResult(
+                return EmbeddingVectors(
                     vectors=handle_embedding_response(text, embedding_response, self.dimensions),
                     tokens=count_input_tokens(response, sanitized_text_input, self.tokenizer),
                 )
@@ -310,9 +311,9 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                     self.embed_text(left),
                     self.embed_text(right),
                 )
-                return EmbeddingResult(
-                    vectors=left_result.vectors + right_result.vectors,
-                    tokens=left_result.tokens + right_result.tokens,
+                return EmbeddingVectors(
+                    vectors=left_result + right_result,
+                    tokens=embedding_tokens(left_result) + embedding_tokens(right_result),
                 )
 
                 # If caller passed ONE oversize string split the string itself into
@@ -332,12 +333,13 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                     self.embed_text([left_part]),
                     self.embed_text([right_part]),
                 )
-                (left_vec,), (right_vec,) = left_result.vectors, right_result.vectors
+                (left_vec,), (right_vec,) = left_result, right_result
 
                 # POOL the two embeddings into one
                 pooled = (np.array(left_vec) + np.array(right_vec)) / 2
-                return EmbeddingResult(
-                    vectors=[pooled.tolist()], tokens=left_result.tokens + right_result.tokens
+                return EmbeddingVectors(
+                    vectors=[pooled.tolist()],
+                    tokens=embedding_tokens(left_result) + embedding_tokens(right_result),
                 )
 
             logger.error("Embedding input exceeds the model's max length: %s", str(error))

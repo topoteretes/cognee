@@ -1,17 +1,29 @@
-from dataclasses import dataclass
 from typing import Protocol, TypeAlias
 
 # One embedding: the model's vector for one input text.
 Vector: TypeAlias = list[float]
 
 
-@dataclass
-class EmbeddingResult:
-    """What an engine returns for one embed_text() call: a vector per input text and
-    the input tokens the provider consumed (embeddings have no output tokens)."""
+class EmbeddingVectors(list[Vector]):
+    """What an engine's embed_text() returns: a plain list with one vector per input
+    text, which also carries the input tokens the provider consumed in ``tokens``
+    (embeddings have no output tokens).
 
-    vectors: list[Vector]
-    tokens: int
+    Callers that only want the vectors use it as the list it is, exactly as before
+    token counting existed; EmbeddingGateway reads ``tokens`` to record usage. An
+    engine that returns a plain list reports 0 tokens. Anything that builds a new
+    list from it (slicing, ``+``, ``list()``) is a plain list again, so an engine
+    combining partial results must wrap them in a new EmbeddingVectors.
+    """
+
+    def __init__(self, vectors=(), tokens: int = 0):
+        super().__init__(vectors)
+        self.tokens = tokens
+
+
+def embedding_tokens(vectors: list[Vector]) -> int:
+    """The input tokens an embed_text() result carries; 0 for a plain list."""
+    return getattr(vectors, "tokens", 0)
 
 
 class EmbeddingEngine(Protocol):
@@ -20,12 +32,12 @@ class EmbeddingEngine(Protocol):
     vector size.
     """
 
-    async def embed_text(self, text: list[str]) -> EmbeddingResult:
+    async def embed_text(self, text: list[str]) -> EmbeddingVectors:
         """
         Embed the provided text and report the input tokens it consumed.
 
-        Called by EmbeddingGateway, which records the tokens; everything
-        else embeds through its embed_text.
+        Callers may use the engine directly and get a list of vectors; embedding
+        through EmbeddingGateway also records the tokens.
 
         Parameters:
         -----------
@@ -35,7 +47,8 @@ class EmbeddingEngine(Protocol):
         Returns:
         --------
 
-            - EmbeddingResult: One vector per input text, plus the token count.
+            - EmbeddingVectors: One vector per input text, with the token count in
+              ``tokens``.
         """
         raise NotImplementedError("Subclasses must implement embed_text()")
 

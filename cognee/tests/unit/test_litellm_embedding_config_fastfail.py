@@ -18,9 +18,6 @@ import litellm
 import pytest
 
 from cognee.infrastructure.databases.exceptions import EmbeddingException
-from cognee.infrastructure.databases.vector.embeddings.EmbeddingGateway import (
-    EmbeddingGateway,
-)
 from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
     LiteLLMEmbeddingEngine,
 )
@@ -191,7 +188,7 @@ async def test_preflight_surfaces_real_404_in_one_attempt(monkeypatch):
     engine, calls = _engine(monkeypatch, lambda _: _not_found())
 
     async def _fake_get_vector_engine_async():
-        return SimpleNamespace(embedding_engine=EmbeddingGateway(engine))
+        return SimpleNamespace(embedding_engine=engine)
 
     monkeypatch.setattr(vector_module, "get_vector_engine_async", _fake_get_vector_engine_async)
 

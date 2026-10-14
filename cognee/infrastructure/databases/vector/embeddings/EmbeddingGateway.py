@@ -1,21 +1,21 @@
 from cognee.shared.logging_utils import get_logger
 
-from .EmbeddingEngine import EmbeddingEngine, Vector
+from .EmbeddingEngine import EmbeddingEngine, Vector, embedding_tokens
 
 logger = get_logger("EmbeddingGateway")
 
 
 class EmbeddingGateway:
-    """Gateway to an embedding engine: wraps it, returns its vectors and records
-    each call's token usage, the way LLMGateway does for completions."""
+    """An embedding engine with metered use: wraps an engine and records each
+    call's token usage, the way LLMGateway does for completions."""
 
     def __init__(self, engine: EmbeddingEngine):
         self._engine = engine
 
     async def embed_text(self, text: list[str]) -> list[Vector]:
-        result = await self._engine.embed_text(text)
-        await self._record_usage(result.tokens)
-        return result.vectors
+        vectors = await self._engine.embed_text(text)
+        await self._record_usage(embedding_tokens(vectors))
+        return vectors
 
     async def _record_usage(self, tokens: int) -> None:
         """Best-effort: usage accounting must never fail the embedding itself."""

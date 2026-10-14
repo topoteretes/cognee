@@ -18,7 +18,6 @@ import pytest_asyncio
 
 import cognee
 from cognee.context_global_variables import graph_db_config, vector_db_config
-from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingResult
 from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
     LiteLLMEmbeddingEngine,
 )
@@ -35,8 +34,7 @@ CSV_CONTENT = "id,name,section\n1,anemometer,weather\n2,barometer,weather\n3,sei
 
 
 async def _mock_embed_text(self, texts):
-    vectors = [[float(len(t) % 7) / 10.0 + 0.1] * self.dimensions for t in texts]
-    return EmbeddingResult(vectors=vectors, tokens=0)
+    return [[float(len(t) % 7) / 10.0 + 0.1] * self.dimensions for t in texts]
 
 
 @pytest_asyncio.fixture

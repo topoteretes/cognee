@@ -1,11 +1,15 @@
 """EmbeddingGateway returns an engine's vectors and records its token usage,
 which never fails the embedding."""
 
+import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingResult
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
+    EmbeddingVectors,
+    embedding_tokens,
+)
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingGateway import (
     EmbeddingGateway,
 )
@@ -20,7 +24,14 @@ class _Engine:
         return 2
 
     async def embed_text(self, text):
-        return EmbeddingResult(vectors=[[1.0, 0.0] for _ in text], tokens=7)
+        return EmbeddingVectors([[1.0, 0.0] for _ in text], tokens=7)
+
+
+class _PlainListEngine(_Engine):
+    """A custom engine written before token counting: returns a plain list."""
+
+    async def embed_text(self, text):
+        return [[1.0, 0.0] for _ in text]
 
 
 @pytest.mark.asyncio
@@ -30,6 +41,15 @@ async def test_embed_text_returns_vectors_and_records_the_tokens():
 
     assert vectors == [[1.0, 0.0], [1.0, 0.0]]
     record.assert_awaited_once_with(model="fake-embedding-model", tokens=7)
+
+
+@pytest.mark.asyncio
+async def test_an_engine_returning_a_plain_list_records_zero_tokens():
+    with patch(RECORD, new=AsyncMock()) as record:
+        vectors = await EmbeddingGateway(_PlainListEngine()).embed_text(["a"])
+
+    assert vectors == [[1.0, 0.0]]
+    record.assert_awaited_once_with(model="fake-embedding-model", tokens=0)
 
 
 @pytest.mark.asyncio
@@ -45,3 +65,14 @@ def test_other_attributes_pass_through_to_the_engine():
 
     assert gateway.get_vector_size() == 2
     assert gateway.model == "fake-embedding-model"
+
+
+def test_embedding_vectors_behave_as_the_plain_list_they_replace():
+    vectors = EmbeddingVectors([[1.0, 0.0], [0.0, 1.0]], tokens=5)
+
+    assert isinstance(vectors, list)
+    assert vectors == [[1.0, 0.0], [0.0, 1.0]]
+    assert repr(vectors) == "[[1.0, 0.0], [0.0, 1.0]]"
+    assert json.loads(json.dumps(vectors)) == [[1.0, 0.0], [0.0, 1.0]]
+    assert embedding_tokens(vectors) == 5
+    assert embedding_tokens([[1.0, 0.0]]) == 0
