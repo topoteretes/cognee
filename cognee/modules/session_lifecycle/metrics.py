@@ -178,8 +178,12 @@ async def accumulate_usage(
     cost_usd: float = 0.0,
     model: str | None = None,
     errored: bool = False,
+    update_last_model: bool = True,
 ) -> None:
     """Atomically add usage counters to the session row + per-model row.
+
+    ``update_last_model=False`` credits ``model``'s per-model row but leaves
+    ``last_model`` alone (embedding calls).
 
     Only mutates sessions in ``running`` state — terminal sessions are
     frozen. Per-model accumulation runs against
@@ -203,7 +207,7 @@ async def accumulate_usage(
             values["cost_usd"] = SessionRecord.cost_usd + cost_usd
         if errored:
             values["error_count"] = SessionRecord.error_count + 1
-        if model:
+        if model and update_last_model:
             values["last_model"] = model
 
         if values:

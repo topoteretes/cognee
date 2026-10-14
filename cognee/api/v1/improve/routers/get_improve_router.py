@@ -122,25 +122,19 @@ def get_improve_router() -> APIRouter:
             if payload.feedback_alpha is not None:
                 improve_kwargs["feedback_alpha"] = payload.feedback_alpha
 
-            from cognee.modules.session_lifecycle.usage_tracking import track_session_usage
-
-            tracked_session = (
-                payload.session_ids[0] if len(payload.session_ids or []) == 1 else None
+            improve_run = await cognee_improve(
+                extraction_tasks=payload.extraction_tasks,
+                enrichment_tasks=payload.enrichment_tasks,
+                data=payload.data,
+                dataset=payload.dataset_id if payload.dataset_id else payload.dataset_name,
+                node_name=payload.node_name,
+                session_ids=payload.session_ids,
+                build_global_context_index=bool(payload.build_global_context_index),
+                build_truth_subspace=bool(payload.build_truth_subspace),
+                user=user,
+                run_in_background=bool(payload.run_in_background),
+                **improve_kwargs,
             )
-            async with track_session_usage(tracked_session, user.id):
-                improve_run = await cognee_improve(
-                    extraction_tasks=payload.extraction_tasks,
-                    enrichment_tasks=payload.enrichment_tasks,
-                    data=payload.data,
-                    dataset=payload.dataset_id if payload.dataset_id else payload.dataset_name,
-                    node_name=payload.node_name,
-                    session_ids=payload.session_ids,
-                    build_global_context_index=bool(payload.build_global_context_index),
-                    build_truth_subspace=bool(payload.build_truth_subspace),
-                    user=user,
-                    run_in_background=bool(payload.run_in_background),
-                    **improve_kwargs,
-                )
 
             return improve_run
         except CogneeApiError as error:

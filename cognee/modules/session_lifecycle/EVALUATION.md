@@ -1,10 +1,16 @@
 # Usage accounting for controlled trials
 
 Use a fresh authenticated user session and evaluation dataset for every trial.
-Typed idempotent capture, `/recall`, and single-session `/improve` bind model work
-to that session. LiteLLM embedding requests contribute their provider input tokens
-and estimated cost to the same session and active operation counters. An embedding
-instrumentation failure does not retry the paid request or fail the operation.
+Typed idempotent capture, `recall(session_id=...)`, and single-session
+`improve(session_ids=[...])` bind model work to that session on every surface:
+SDK, HTTP, MCP, and the background improve after `remember(session_id=...)`.
+A recall without a `session_id` binds nothing beyond its session turn.
+LiteLLM embedding requests contribute their provider input tokens and estimated
+cost to the session totals, under the embedding model's own per-model row. They
+are kept out of the operation counters (`pipeline_runs.tokens_in`/`tokens_out`,
+which count LLM tokens only) and never become the session's `last_model`. An
+embedding instrumentation failure does not retry the paid request or fail the
+operation.
 
 Read `/api/v1/sessions/{session_id}` after synchronous work finishes. Its token and
 cost totals include the session's child operations: do not add pipeline totals a
