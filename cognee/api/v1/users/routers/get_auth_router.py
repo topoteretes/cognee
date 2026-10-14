@@ -42,9 +42,16 @@ def get_auth_router():
     @router.post("/logout")
     async def logout(response: Response, user: User = Depends(get_authenticated_user)):
         """Logout — POST /api/v1/auth/logout."""
+        # Same attributes as the login's set_cookie: a deletion is a Set-Cookie
+        # with a past expiry, and browsers drop it when Secure, path or
+        # SameSite disagree with the stored cookie.
         response.delete_cookie(
             key=default_transport.cookie_name,
+            path=default_transport.cookie_path,
             domain=default_transport.cookie_domain,
+            secure=default_transport.cookie_secure,
+            httponly=default_transport.cookie_httponly,
+            samesite=default_transport.cookie_samesite,
         )
 
         return {}
