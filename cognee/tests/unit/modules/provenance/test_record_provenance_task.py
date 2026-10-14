@@ -310,10 +310,10 @@ class TestPipelineWiring:
             assert config.to_dict()["provenance_tracking"] is False
 
     def test_env_var_enables_flag(self):
+        # get_cognify_config() re-reads the environment on every call (no cache
+        # to clear since issue #5771), so the flag flips with the env var.
         with patch.dict(os.environ, {"PROVENANCE_TRACKING": "true"}):
-            get_cognify_config.cache_clear()
             assert get_cognify_config().provenance_tracking is True
-        get_cognify_config.cache_clear()
 
     @pytest.mark.asyncio
     async def test_flag_off_pipeline_unchanged(self):
