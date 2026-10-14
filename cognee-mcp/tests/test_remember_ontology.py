@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import hashlib
 import sys
 from email.parser import BytesParser
 from email.policy import default
@@ -110,7 +111,12 @@ async def test_local_omission_preserves_config():
     client.use_api = False
     client.cognee = SimpleNamespace(remember=AsyncMock())
     await client.remember("hello")
-    client.cognee.remember.assert_awaited_once_with(data="hello", dataset_name="main_dataset")
+    client.cognee.remember.assert_awaited_once()
+    kwargs = client.cognee.remember.await_args.kwargs
+    # Permanent text is staged under a readable name (SDK-1117); no config rides along.
+    assert set(kwargs) == {"data", "dataset_name"}
+    assert kwargs["dataset_name"] == "main_dataset"
+    assert kwargs["data"].endswith("-" + hashlib.md5(b"hello").hexdigest()[:8] + ".txt")
 
 
 @pytest.mark.asyncio

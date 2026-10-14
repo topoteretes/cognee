@@ -12,9 +12,11 @@ import hashlib
 import json
 import mimetypes
 import os
+import re
 import sys
 import tempfile
 from contextlib import redirect_stdout
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -158,29 +160,57 @@ class CogneeClient:
             return parsed
         return {"status": "success", "result": parsed}
 
+    _UNTITLED_LINE_LENGTH = 60
+
+    @staticmethod
+    def _untitled_text_name(content: str) -> str:
+        """A readable name for text nobody named: when it was saved, and its first line.
+
+        A dataset listing of memories saved without a name used to be a wall of
+        ``text_<md5>`` entries. The first non-empty line (a heading or the
+        opening sentence) says what the text is about, and the timestamp says
+        when it was remembered, which is how a person looks for a memory.
+        """
+        first_line = ""
+        for line in content.splitlines():
+            line = re.sub(r"^[\s#*\->]+", "", line).strip()
+            if line:
+                first_line = line
+                break
+        first_line = re.sub(r"[\s/\\:]+", " ", first_line).strip()
+        if len(first_line) > CogneeClient._UNTITLED_LINE_LENGTH:
+            first_line = first_line[: CogneeClient._UNTITLED_LINE_LENGTH].rstrip() + "…"
+        return f"{datetime.now(UTC).strftime('%Y-%m-%d %H%M')} {first_line or 'memory'}"
+
     @staticmethod
     def _text_filename(content: str, name: str | None = None) -> str:
-        """The filename a text payload is stored under.
+        """The filename a text payload is stored under: ``<name>-<md5[:8]>.txt``.
 
-        Without a name the upload is content-addressed (``text_<md5>.txt``),
-        so repeated writes never collide and never trip the "document already
-        exists, use update" 409. With one it is ``<name>-<md5[:8]>.txt``: the
-        document reads as what the caller called it, and the hash suffix keeps
-        two writes with the same name and different content two documents
-        rather than one 409 or one overwrite. ``name`` is reduced to its
-        basename, like ``filename`` is, so it cannot carry path components.
+        ``name`` is what the caller called the text, reduced to its basename
+        like ``filename`` is, so it cannot carry path components. Text nobody
+        named gets ``<timestamp> <first line>`` (``_untitled_text_name``)
+        instead of the old content-hash name, which told a reader nothing.
+        The hash suffix keeps the upload unique per content either way: two
+        writes with the same name and different content stay two documents
+        rather than one "document already exists, use update" 409 or one
+        overwrite, which is what the content-addressed name was for.
         """
         digest = hashlib.md5(content.encode("utf-8")).hexdigest()
-        safe_name = Path(name or "").name.strip().strip(".") if name else ""
-        if not safe_name:
-            return f"text_{digest}.txt"
+        safe_name = Path(name or "").name.strip().strip(". ") if name else ""
         if safe_name.lower().endswith(".txt"):
-            safe_name = safe_name[: -len(".txt")].rstrip(". ") or safe_name
+            safe_name = safe_name[: -len(".txt")].rstrip(". ")
+        if not safe_name:
+            safe_name = CogneeClient._untitled_text_name(content)
         return f"{safe_name}-{digest[:8]}.txt"
 
     @staticmethod
     def _text_upload(data: Any, name: str | None = None) -> dict[str, tuple[str, str, str]]:
-        """Create a text upload for API-mode ingestion, named per ``_text_filename``."""
+        """Create a text upload for API-mode ingestion, named per ``_text_filename``.
+
+        Every text upload carries a readable name now; ``text_<md5>.txt`` is
+        gone from this client (the hash lives on as the suffix, see
+        ``_text_filename``).
+        """
         content = str(data)
         return {"data": (CogneeClient._text_filename(content, name), content, "text/plain")}
 
@@ -227,9 +257,10 @@ class CogneeClient:
         """Pick the multipart upload for an API-mode ingestion payload.
 
         Base64 uploads and readable local files keep their original
-        basename; anything else is uploaded as text, content-addressed so
-        repeated writes don't collide, or under ``name`` when the caller
-        gave the text one (see ``_text_filename``).
+        basename; anything else is uploaded as text under ``name`` when the
+        caller gave it one, else under a timestamp and its first line, with a
+        content-hash suffix so repeated writes don't collide (see
+        ``_text_filename``).
         """
         if content_base64:
             return CogneeClient._file_upload(filename, content_base64)
@@ -766,11 +797,13 @@ class CogneeClient:
                     remember_data = os.path.join(tmp_dir, safe_name)
                     with open(remember_data, "wb") as f:
                         f.write(raw_bytes)
-                elif name:
-                    # Named text is staged like an upload, so cognee stores it
-                    # under the name instead of its content hash. Same path a
-                    # base64 upload takes, same cleanup below.
-                    content = str(data)
+                elif not session_id and isinstance(data, str) and not os.path.isfile(data):
+                    # Permanent text is staged like an upload, so cognee stores
+                    # it under a readable name (the caller's, or timestamp and
+                    # first line) instead of its content hash. Same path a
+                    # base64 upload takes, same cleanup below. Session entries
+                    # and existing local files are handed over as they are.
+                    content = data
                     tmp_dir = tempfile.mkdtemp(prefix="cognee_upload_")
                     remember_data = os.path.join(tmp_dir, self._text_filename(content, name))
                     with open(remember_data, "w", encoding="utf-8") as f:

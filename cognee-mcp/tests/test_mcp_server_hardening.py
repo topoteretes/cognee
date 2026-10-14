@@ -122,7 +122,7 @@ async def test_mcp_exposes_memory_and_code_search_tools():
 
 
 @pytest.mark.asyncio
-async def test_cognee_client_api_add_uses_content_addressed_filename():
+async def test_cognee_client_api_add_names_untitled_text_by_time_and_first_line():
     requests: list[httpx.Request] = []
 
     async def handler(request: httpx.Request) -> httpx.Response:
@@ -134,7 +134,6 @@ async def test_cognee_client_api_add_uses_content_addressed_filename():
     client.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
 
     content = "first memory"
-    digest = hashlib.md5(content.encode("utf-8")).hexdigest()
 
     try:
         await client.add(content, dataset_name="ds")
@@ -143,8 +142,11 @@ async def test_cognee_client_api_add_uses_content_addressed_filename():
 
     assert requests[0].url.path == "/api/v1/add"
     body = requests[0].content.decode()
-    assert f'filename="text_{digest}.txt"' in body
-    assert "data.txt" not in body
+    (filename,) = _multipart_filenames(requests[0])
+    assert _untitled_text_filename(filename, content)
+    assert "first memory" in filename
+    # The hash suffix keeps re-saves of different text under one line apart.
+    assert "data.txt" not in body and 'filename="text_' not in body
 
 
 async def _mock_api_client(requests: list[httpx.Request], **kwargs) -> CogneeClient:
@@ -164,6 +166,12 @@ def _multipart_filenames(request: httpx.Request) -> list[str]:
     """Filenames declared in a multipart body, in order."""
     body = request.content.decode("latin-1")
     return re.findall(r'filename="([^"]*)"', body)
+
+
+def _untitled_text_filename(filename: str, content: str) -> bool:
+    """``<YYYY-MM-DD HHMM> <first line>-<md5[:8]>.txt`` for text saved without a name."""
+    digest8 = hashlib.md5(content.encode("utf-8")).hexdigest()[:8]
+    return re.fullmatch(rf"\d{{4}}-\d{{2}}-\d{{2}} \d{{4}} .+-{digest8}\.txt", filename) is not None
 
 
 @pytest.mark.asyncio
@@ -235,7 +243,6 @@ async def test_cognee_client_api_add_keeps_content_addressed_name_for_non_file_t
     client = await _mock_api_client(requests)
 
     content = "/definitely/not/on/disk/notes.md"
-    digest = hashlib.md5(content.encode("utf-8")).hexdigest()
 
     try:
         await client.add(content, dataset_name="ds")
@@ -243,7 +250,8 @@ async def test_cognee_client_api_add_keeps_content_addressed_name_for_non_file_t
         await client.close()
 
     body = requests[0].content.decode()
-    assert _multipart_filenames(requests[0]) == [f"text_{digest}.txt"]
+    (filename,) = _multipart_filenames(requests[0])
+    assert _untitled_text_filename(filename, content)
     assert 'filename="notes.md"' not in body
     assert content in body
 
@@ -262,11 +270,8 @@ async def test_cognee_client_api_add_keeps_text_upload_for_directories_and_long_
     finally:
         await client.close()
 
-    dir_digest = hashlib.md5(str(tmp_path).encode("utf-8")).hexdigest()
-    text_digest = hashlib.md5(long_text.encode("utf-8")).hexdigest()
-
-    assert _multipart_filenames(requests[0]) == [f"text_{dir_digest}.txt"]
-    assert _multipart_filenames(requests[1]) == [f"text_{text_digest}.txt"]
+    assert _untitled_text_filename(_multipart_filenames(requests[0])[0], str(tmp_path))
+    assert _untitled_text_filename(_multipart_filenames(requests[1])[0], long_text)
 
 
 @pytest.mark.asyncio
@@ -315,10 +320,10 @@ async def test_cognee_client_api_upload_honours_allowed_local_file_roots(monkeyp
     finally:
         await client.close()
 
-    digest = hashlib.md5(str(outside).encode("utf-8")).hexdigest()
     for request in requests[:2]:
         assert b"PRIVATE KEY MATERIAL" not in request.content
-        assert _multipart_filenames(request) == [f"text_{digest}.txt"]
+        # Stored as text (named by its first line, the path string), not read.
+        assert _untitled_text_filename(_multipart_filenames(request)[0], str(outside))
     # A file inside an allowed root is still uploaded as a file.
     assert _multipart_filenames(requests[2]) == ["notes.md"]
     assert b"allowed notes" in requests[2].content
@@ -1240,7 +1245,8 @@ async def test_remember_self_improvement_end_to_end(
             assert len(fake.calls) == 1
             received = fake.calls[0]
             assert received["dataset_name"] == "ds"
-            if upload:
+            if upload or not session_id:
+                # Uploads and permanent text are staged on disk under a name.
                 assert fake.seen_payloads == [b"memory"]
             else:
                 assert received["data"] == "memory"
@@ -1394,9 +1400,29 @@ def test_text_filename_reduces_the_name_to_a_safe_basename(supplied, expected_st
 
 
 @pytest.mark.parametrize("supplied", [None, "", "   ", "..", "/"])
-def test_text_filename_without_a_usable_name_is_content_addressed(supplied):
-    digest = hashlib.md5(b"x").hexdigest()
-    assert CogneeClient._text_filename("x", supplied) == f"text_{digest}.txt"
+def test_text_filename_without_a_usable_name_uses_time_and_first_line(supplied):
+    content = "# Alice\n\nprefers async updates"
+    filename = CogneeClient._text_filename(content, supplied)
+
+    assert _untitled_text_filename(filename, content)
+    assert " Alice-" in filename
+    assert not filename.startswith("text_")
+
+
+@pytest.mark.parametrize(
+    ("content", "expected_line"),
+    [
+        ("\n\n  - bullet first\nsecond", "bullet first"),
+        ("a/b\\c:d", "a b c d"),
+        ("", "memory"),
+        ("x" * 100, "x" * 60 + "…"),
+    ],
+)
+def test_untitled_text_name_is_a_safe_readable_line(content, expected_line):
+    name = CogneeClient._untitled_text_name(content)
+
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{4} .+", name)
+    assert name.endswith(" " + expected_line)
 
 
 @pytest.mark.asyncio
@@ -1416,6 +1442,19 @@ async def test_cognee_client_local_remember_stages_named_text_under_the_name():
     # Staged like an upload, cleaned up like one.
     assert not handed_off.exists()
     assert not handed_off.parent.exists()
+
+
+@pytest.mark.asyncio
+async def test_cognee_client_local_remember_stages_untitled_permanent_text_by_first_line():
+    fake = FakeCogneeModule()
+    client = _local_client(fake)
+
+    await client.remember(data="alice prefers async updates", dataset_name="ds")
+
+    handed_off = Path(fake.calls[0]["data"])
+    assert _untitled_text_filename(handed_off.name, "alice prefers async updates")
+    assert fake.seen_payloads == [b"alice prefers async updates"]
+    assert not handed_off.exists()
 
 
 @pytest.mark.asyncio
