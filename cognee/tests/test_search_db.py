@@ -24,7 +24,7 @@ from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
 )
 from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
-from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
+from cognee.modules.retrieval.temporal_hybrid_retriever import TemporalHybridRetriever
 from cognee.modules.search.types import SearchType
 
 logger = logging.getLogger(__name__)
@@ -177,7 +177,7 @@ async def e2e_state(_disable_session_turn_gating):
         "chunks": await _get_retriever_context(ChunksRetriever(top_k=5), query=query),
         "summaries": await _get_retriever_context(SummariesRetriever(top_k=5), query=query),
         "rag_completion": await _get_retriever_context(CompletionRetriever(top_k=3), query=query),
-        "temporal": await _get_retriever_context(TemporalRetriever(top_k=5), query=query),
+        "temporal": await _get_retriever_context(TemporalHybridRetriever(top_k=5), query=query),
     }
 
     # --- Retriever triplets + vector distance validation ---

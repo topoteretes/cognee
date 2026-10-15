@@ -19,8 +19,7 @@ task's output, `enriches`, `ctx` injection, `Drop`) are documented in
 | 5 | `storage.add_data_points` | data points → written to graph + vector DB (+ edge evidence) |
 | 6 | `provenance.record_provenance` | audit-ledger rows, when `PROVENANCE_TRACKING=true` |
 
-Dates are extracted in step 3 as `Timestamp` nodes; the event pipeline under `temporal_graph/` is
-no longer a cognify option. The dlt route adds
+The dlt route adds
 `ingestion.purge_stale_dlt_source_artifacts` and `ingestion.extract_dlt_source_edges`.
 `improve()` stages run the pre-assembled lists in `cognee/memify_pipelines/`.
 
@@ -43,7 +42,6 @@ no longer a cognify option. The dlt route adds
 | `schema/` | Ingest a relational database schema as graph nodes | `ingest_database_schema` |
 | `storage/` | Persist data points: graph + vector writes, index rebuilds | `add_data_points`, `index_data_points`, `index_graph_edges` |
 | `summarization/` | Chunk summaries (LLM, or relations plus entity types) and code summaries | `summarize_text`, `build_summary_from_extraction`, `summarize_code` |
-| `temporal_graph/` | Event/timestamp extraction and the temporal knowledge graph | `extract_events_and_timestamps`, `extract_knowledge_graph_from_events` |
 | `translation/` | Translate chunk content before extraction (provider-pluggable) | `TranslationConfig`, `TranslatedContent` |
 | `web_scraper/` | Fetch and crawl web pages for URL ingestion | `fetch_page_content`, `DefaultUrlCrawler` |
 
