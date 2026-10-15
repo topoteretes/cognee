@@ -164,7 +164,8 @@ async def test_chunk_associations_includes_metadata(clean_test_environment):
 
 
 @pytest.mark.asyncio
-async def test_chunk_associations_with_cypher_query(clean_test_environment):
+async def test_chunk_associations_with_cypher_query(clean_test_environment, monkeypatch):
+    monkeypatch.setenv("ALLOW_CYPHER_QUERY", "true")
     text_1 = "Climate change is affecting global weather patterns and ecosystems."
     text_2 = "Rising temperatures contribute to extreme weather events worldwide."
     text_3 = "Renewable energy sources help reduce carbon emissions."
