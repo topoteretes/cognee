@@ -36,7 +36,7 @@ from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
 from cognee.shared.logging_utils import get_logger
 
-from ..embeddings.EmbeddingEngine import EmbeddingEngine
+from ..embeddings.EmbeddingGateway import EmbeddingGateway
 from ..exceptions import CollectionNotFoundError
 from ..models.ScoredResult import ScoredResult
 from ..pgvector.serialize_data import serialize_data
@@ -99,7 +99,7 @@ class TursoVectorAdapter(VectorDBInterface):
         self,
         url: str,
         api_key: str | None,
-        embedding_engine: EmbeddingEngine,
+        embedding_engine: EmbeddingGateway,
         database_name: str | None = None,
     ):
         if _is_remote_url(url):
