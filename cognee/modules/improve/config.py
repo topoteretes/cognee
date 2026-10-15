@@ -1,9 +1,8 @@
 """Configuration owned by the improve loop itself (plan Part 5.9).
 
 ``ImproveConfig`` holds only the knobs the loop owns. Shared knobs stay with
-their owners and are read where they live: ``triplet_embedding`` is cognify's
-(``get_cognify_config()``), ``caching`` / ``auto_feedback`` belong to the cache
-layer, ``default_feedback_influence`` and ``personalization_enabled`` to
+their owners and are read where they live: ``caching`` / ``auto_feedback``
+belong to the cache layer, ``default_feedback_influence`` and ``personalization_enabled`` to
 ``base_config``. Re-declaring one of those here is the drift this package
 removes.
 

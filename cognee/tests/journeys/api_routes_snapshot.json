@@ -108,7 +108,6 @@
   "POST /api/v1/integrations/{provider}/sync",
   "POST /api/v1/llm/custom-prompt",
   "POST /api/v1/llm/infer-schema",
-  "POST /api/v1/memify",
   "POST /api/v1/ontologies",
   "POST /api/v1/permissions/capabilities/{principal_id}",
   "POST /api/v1/permissions/datasets/{principal_id}",

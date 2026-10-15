@@ -174,7 +174,6 @@ async def test_lock_held_returns_every_stage_skipped_never_empty_dict(harness):
         ("b", "skipped", REASON_LOCK_HELD),
     ]
     assert calls == []
-    assert result.memify_run == {}
     assert harness.span.attributes[COGNEE_IMPROVE_STAGES] == "a=skipped,b=skipped"
 
 
@@ -314,13 +313,9 @@ async def test_stage_status_is_derived_from_pipeline_run_info(harness):
     completed = _run_info(PipelineRunCompleted, ds)
     already = _run_info(PipelineRunAlreadyCompleted, ds)
     errored = _run_info(PipelineRunErrored, ds, error_message="bad")
-    memify_return = {ds: completed}
     harness.use_stages(
         [
-            FakeStage(
-                "triplet_enrichment",
-                run=lambda _i: StageResult.from_pipeline_run("triplet_enrichment", memify_return),
-            ),
+            FakeStage("a", run=lambda _i: StageResult.from_pipeline_run("a", {ds: completed})),
             FakeStage("b", run=lambda _i: StageResult.from_pipeline_run("b", {ds: already})),
             FakeStage("c", run=lambda _i: StageResult.from_pipeline_run("c", errored)),
         ]
@@ -331,8 +326,6 @@ async def test_stage_status_is_derived_from_pipeline_run_info(harness):
     assert [s.status for s in result.stages] == ["completed", "already_completed", "errored"]
     assert result.stages[0].run is completed
     assert result.stages[2].error == "bad"
-    # Legacy return shape stays reachable, nested (D4).
-    assert result.memify_run is memify_return
     assert result.stages[0].duration_ms >= 0
 
 
@@ -566,7 +559,6 @@ async def test_remote_client_passthrough_forwards_every_option(harness, monkeypa
 
     result = await harness.improve_mod.improve(
         "docs",
-        node_name=["Carlos"],
         session_ids=["s1"],
         build_global_context_index=True,
         build_truth_subspace=True,
@@ -577,14 +569,13 @@ async def test_remote_client_passthrough_forwards_every_option(harness, monkeypa
     client.improve.assert_awaited_once()
     args, kwargs = client.improve.await_args
     assert args == ("docs",)
-    assert kwargs["node_name"] == ["Carlos"]
     assert kwargs["session_ids"] == ["s1"]
     assert kwargs["build_global_context_index"] is True
     assert kwargs["build_truth_subspace"] is True
     assert kwargs["review_conflicts"] is True
     assert kwargs["run_in_background"] is True
     assert isinstance(result, ImproveResult)
-    assert result.memify_run == {"legacy": "run"}
+    assert result.stages == []
     assert harness.resolve_calls == []
 
 
@@ -596,7 +587,6 @@ async def test_remote_result_stamps_the_span(harness, monkeypatch):
 
     payload = ImproveResult(
         stages=[StageResult.completed("a"), StageResult.skipped("b", "opt_in_disabled")],
-        memify_run={},
     ).model_dump(mode="json")
     client = type("Client", (), {})()
     client.improve = AsyncMock(return_value=payload)
@@ -621,15 +611,43 @@ async def test_feedback_alpha_kwarg_overrides_config(harness):
     assert stage.seen_inputs[1].feedback_alpha == 0.7
 
 
-def test_memify_passthrough_keys_are_declared_on_improve_kwargs():
-    """The forwarded memify surface is spelled twice — MEMIFY_PASSTHROUGH_KEYS
-    (what _resolve_inputs forwards) and ImproveKwargs (what type checkers let a
-    caller pass). A key added to one and not the other is silently either
-    rejected by type checkers or never forwarded; this pins the two together."""
-    from cognee.api.v1.improve.improve import ImproveKwargs
-    from cognee.modules.improve import MEMIFY_PASSTHROUGH_KEYS
+@pytest.mark.asyncio
+@pytest.mark.parametrize("option", ["extraction_tasks", "enrichment_tasks"])
+async def test_removed_custom_task_options_are_rejected(harness, option):
+    """The memify pipeline is gone (SDK-1115): custom tasks raise instead of being
+    silently dropped, before any dataset resolution or stage runs."""
+    stage = FakeStage("a")
+    harness.use_stages([stage])
 
-    assert set(MEMIFY_PASSTHROUGH_KEYS) <= set(ImproveKwargs.__annotations__)
+    with pytest.raises(TypeError, match=f"no longer accepts {option}"):
+        await harness.improve(**{option: []})
+
+    assert harness.resolve_calls == []
+    assert stage.calls == []
+
+
+@pytest.mark.asyncio
+async def test_deprecated_options_warn_and_are_not_forwarded(harness, monkeypatch):
+    """node_name and the old memify passthrough only scoped the removed
+    triplet-enrichment stage; they warn and never reach a stage or the server."""
+    from unittest.mock import AsyncMock
+
+    stage = FakeStage("a")
+    harness.use_stages([stage])
+    with pytest.warns(DeprecationWarning, match="node_name, data, node_type"):
+        result = await harness.improve(node_name=["n"], data="x", node_type=object)
+    assert result.status == "completed"
+    assert not hasattr(stage.seen_inputs[0], "node_name")
+
+    client = type("Client", (), {})()
+    client.improve = AsyncMock(return_value={})
+    monkeypatch.setattr(harness.improve_mod, "get_remote_client", lambda: client)
+    with pytest.warns(DeprecationWarning, match="vector_db_config, graph_db_config"):
+        await harness.improve_mod.improve(
+            "docs", node_name=["n"], vector_db_config={}, graph_db_config={}
+        )
+    forwarded = client.improve.await_args.kwargs
+    assert not {"node_name", "vector_db_config", "graph_db_config"} & set(forwarded)
 
 
 @pytest.mark.asyncio

@@ -20,7 +20,6 @@ EXPECTED_ORDER = [
     "update_user_preferences",
     "build_truth_subspace",
     "review_conflicts",
-    "triplet_enrichment",
     "global_context_index",
 ]
 
@@ -42,8 +41,8 @@ def test_distill_sessions_runs_before_build_truth_subspace():
     assert _position("distill_sessions") < _position("build_truth_subspace")
 
 
-def test_build_truth_subspace_runs_before_triplet_enrichment():
-    assert _position("build_truth_subspace") < _position("triplet_enrichment")
+def test_build_truth_subspace_runs_before_review_conflicts():
+    assert _position("build_truth_subspace") < _position("review_conflicts")
 
 
 def test_persist_session_qa_is_the_only_fatal_stage():
@@ -55,7 +54,6 @@ def test_persist_session_qa_is_the_only_fatal_stage():
 def test_session_fed_stages_and_graph_stages():
     needs = {stage.name: stage.needs_sessions for stage in DEFAULT_STAGES}
     assert needs["review_conflicts"] is False
-    assert needs["triplet_enrichment"] is False
     assert needs["global_context_index"] is False
     assert all(needs[name] for name in EXPECTED_ORDER[:7])
 
@@ -85,7 +83,21 @@ def test_fatal_policy_requires_exactly_persist_session_qa():
 
 def test_validate_stages_disabled_accepts_real_non_fatal_names():
     validate_stages_disabled([])
-    validate_stages_disabled(["triplet_enrichment", "distill_sessions"])
+    validate_stages_disabled(["review_conflicts", "distill_sessions"])
+
+
+def test_validate_stages_disabled_ignores_the_removed_triplet_enrichment(monkeypatch):
+    """A config written before SDK-1115 must not fail the boot, but says it is stale."""
+    from unittest.mock import MagicMock
+
+    from cognee.modules.improve import registry
+
+    warning = MagicMock()
+    monkeypatch.setattr(registry.logger, "warning", warning)
+    validate_stages_disabled(iter(["triplet_enrichment", "distill_sessions"]))
+    warning.assert_called_once()
+    assert "triplet_enrichment" in str(warning.call_args)
+    assert "triplet_enrichment" not in stage_names()
 
 
 def test_validate_stages_disabled_rejects_unknown_and_fatal_names():

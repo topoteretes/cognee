@@ -39,7 +39,6 @@ from cognee.modules.retrieval.natural_language_retriever import NaturalLanguageR
 from cognee.modules.retrieval.skills_retriever import SkillsRetriever
 from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
 from cognee.modules.retrieval.temporal_hybrid_retriever import TemporalHybridRetriever
-from cognee.modules.retrieval.triplet_retriever import TripletRetriever
 from cognee.modules.search.exceptions import UnsupportedSearchTypeError
 from cognee.modules.search.operations import select_search_type
 from cognee.modules.search.types import SearchType
@@ -190,19 +189,6 @@ async def get_search_type_retriever_instance(
                     "include_external_metadata", False
                 ),
                 "external_metadata_keys": retriever_specific_config.get("external_metadata_keys"),
-            },
-        ),
-        SearchType.TRIPLET_COMPLETION: (
-            TripletRetriever,
-            {
-                "system_prompt_path": system_prompt_path,
-                "top_k": top_k,
-                "system_prompt": system_prompt,
-                "session_id": session_id,
-                "response_model": retriever_specific_config.get("response_model", str),
-                "include_references": include_references,
-                "node_name": node_name,
-                "node_name_filter_operator": node_name_filter_operator,
             },
         ),
         SearchType.GRAPH_COMPLETION: (

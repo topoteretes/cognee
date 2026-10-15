@@ -27,8 +27,6 @@ REASON_SESSION_MANAGER_UNAVAILABLE = "session_manager_unavailable"
 REASON_AUTO_FEEDBACK_DISABLED = "auto_feedback_disabled"
 REASON_PERSONALIZATION_DISABLED = "personalization_disabled"
 REASON_OPT_IN_DISABLED = "opt_in_disabled"
-REASON_TRIPLET_EMBEDDING_DISABLED = "triplet_embedding_disabled"
-REASON_NO_WRITES_SINCE_LAST_IMPROVE = "no_writes_since_last_improve"
 REASON_NO_NEW_SESSION_ENTRIES = "no_new_entries"
 REASON_NO_NEW_TRACE_STEPS = "no_new_trace_steps"
 REASON_EDGE_EVIDENCE_DISABLED = "edge_evidence_disabled"
@@ -55,9 +53,8 @@ async def _watermarks_show_nothing_new(inputs: ImproveRunInputs, *, kind: str) -
 
     True only when the stage's own persist watermarks cover every given
     session, so the memify pipeline need not run at all — an unconditional run
-    logs a completed ``memify_pipeline`` row even with nothing new, which the
-    enrichment change-check counts as a graph write (a repeat session improve
-    would then re-embed the whole dataset). Fail-open: any error here means
+    would log a completed ``memify_pipeline`` row even with nothing new.
+    Fail-open: any error here means
     "run the pipeline"; the extraction tasks keep their own watermark logic,
     so this check is an optimization, never the correctness gate.
     """
@@ -556,88 +553,8 @@ class ReviewConflictsStage(BaseStage):
         return result
 
 
-class TripletEnrichmentStage(BaseStage):
-    """Stage 9: default memify enrichment (triplet embeddings).
-
-    Skipped when ``triplet_embedding`` is off and the caller supplied no tasks
-    of their own (the default task list would be empty). ``already_completed``
-    when no write pipeline has completed for this dataset since its last
-    improve, read from ``pipeline_runs`` — unless the caller scoped the run
-    with ``node_name`` or supplied custom tasks: the watermark's unit is the
-    dataset, and "nothing changed" does not imply that narrower or different
-    work was already done.
-    """
-
-    name = "triplet_enrichment"
-
-    def gate(self, inputs: ImproveRunInputs) -> str | None:
-        if inputs.has_custom_memify_tasks:
-            return None
-        from cognee.modules.cognify.config import get_cognify_config
-
-        if not get_cognify_config().triplet_embedding:
-            return REASON_TRIPLET_EMBEDDING_DISABLED
-        return None
-
-    async def run(self, inputs: ImproveRunInputs) -> StageResult:
-        from datetime import datetime, timezone
-
-        from cognee.modules.memify import memify
-
-        from .graph_changes import (
-            enrichment_watermark_stamp,
-            has_graph_changed_since_last_improve,
-        )
-
-        # Only a full, unscoped enrichment stamps the watermark: the stamp
-        # says "the whole dataset was enriched as of started_at", which
-        # narrower or different work cannot claim. started_at is captured
-        # before the change check and the memify run, so a write racing the
-        # row close stays visible to the next run's gate.
-        full_scope = not inputs.has_custom_memify_tasks and not inputs.node_name
-        started_at = datetime.now(timezone.utc)
-
-        if full_scope and not await has_graph_changed_since_last_improve(
-            inputs.dataset_id, exclude_operation_id=inputs.improve_operation_id
-        ):
-            result = StageResult(
-                stage=self.name,
-                status="already_completed",
-                reason=REASON_NO_WRITES_SINCE_LAST_IMPROVE,
-            )
-            result._raw_run = {}
-            result._run_info_stamp = enrichment_watermark_stamp(result.status, started_at)
-            return result
-
-        kwargs = dict(inputs.memify_kwargs)
-        if kwargs.get("node_type") is None:
-            from cognee.modules.engine.models.node_set import NodeSet
-
-            kwargs["node_type"] = NodeSet
-
-        # The default memify tasks never read the projected graph: they stream
-        # triplets straight from the graph DB (or no-op). Pass the non-empty
-        # sentinel the other improve stages already use so memify skips the
-        # full-graph projection. Custom tasks/data keep the projection, since a
-        # caller-supplied task may consume it.
-        if not inputs.has_custom_memify_tasks:
-            kwargs["data"] = [{}]
-
-        run_result = await memify(
-            dataset=inputs.dataset_id,
-            node_name=inputs.node_name,
-            user=inputs.user,
-            run_in_background=False,
-            **kwargs,
-        )
-        result = StageResult.from_pipeline_run(self.name, run_result)
-        if full_scope and result.status in ("completed", "already_completed"):
-            result._run_info_stamp = enrichment_watermark_stamp(result.status, started_at)
-        return result
-
-
 class GlobalContextIndexStage(BaseStage):
-    """Stage 10: build retrieval-ready bucket and root summaries (opt-in)."""
+    """Stage 9: build retrieval-ready bucket and root summaries (opt-in)."""
 
     name = "global_context_index"
 

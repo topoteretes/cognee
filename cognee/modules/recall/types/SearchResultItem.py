@@ -31,7 +31,6 @@ class SearchResultKind(str, Enum):
 
     GRAPH_COMPLETION = "graph_completion"
     RAG_COMPLETION = "rag_completion"
-    TRIPLET_COMPLETION = "triplet_completion"
     CYPHER = "cypher"
     CHUNK = "chunk"
     SUMMARY = "summary"

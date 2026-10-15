@@ -20,7 +20,6 @@ SUPPORTED_COMMANDS = {
     "add",
     "cognify",
     "search",
-    "memify",
     "datasets",
     "delete",
     "remember",
@@ -67,7 +66,6 @@ def dispatch(args: argparse.Namespace) -> None:
             "add": _dispatch_add,
             "cognify": _dispatch_cognify,
             "search": _dispatch_search,
-            "memify": _dispatch_memify,
             "datasets": _dispatch_datasets,
             "delete": _dispatch_delete,
             "remember": _dispatch_remember,
@@ -149,24 +147,6 @@ def _dispatch_search(client: CogneeApiClient, args: argparse.Namespace) -> None:
         for i, result in enumerate(results, 1):
             fmt.echo(f"{fmt.bold(f'Result {i}:')} {result}")
             fmt.echo()
-
-
-def _dispatch_memify(client: CogneeApiClient, args: argparse.Namespace) -> None:
-    label = args.dataset_id or args.dataset_name
-    fmt.echo(f"Running memify on '{label}'...")
-    result = client.memify(
-        dataset_name=args.dataset_name,
-        dataset_id=args.dataset_id,
-        data=getattr(args, "data", None),
-        node_name=getattr(args, "node_name", None),
-        run_in_background=getattr(args, "background", False),
-    )
-    if getattr(args, "background", False):
-        fmt.success("Memify started in background.")
-    else:
-        fmt.success("Memify completed.")
-    if result:
-        fmt.echo(json.dumps(result, indent=2, default=str))
 
 
 def _dispatch_datasets(client: CogneeApiClient, args: argparse.Namespace) -> None:
@@ -337,11 +317,12 @@ def _dispatch_improve(client: CogneeApiClient, args: argparse.Namespace) -> None
     from cognee.cli.commands.improve_command import print_improve_result
 
     dataset = args.dataset_id or args.dataset_name
+    if getattr(args, "node_name", None) is not None:
+        fmt.warning("--node-name is deprecated and ignored.")
     fmt.echo(f"Improving knowledge graph for dataset '{dataset}'...")
     result = client.improve(
         dataset_name=args.dataset_name if not args.dataset_id else None,
         dataset_id=args.dataset_id,
-        node_name=getattr(args, "node_name", None),
         session_ids=getattr(args, "session_ids", None),
         run_in_background=getattr(args, "background", False),
         build_global_context_index=getattr(args, "build_global_context_index", False),

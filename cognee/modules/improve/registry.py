@@ -2,14 +2,15 @@
 
 ``DEFAULT_STAGES`` lists the stages in execution order. The order
 is load-bearing — stage 4's lessons are what stage 5 gates on, stage 5's
-accepted lessons are stage 7's anchors, and stage 7 runs before enrichment —
-and ``test_registry_order`` pins it; this list is the single place it is
-declared. ``operations_catalog`` generates its improve rows from this list, so
-the schema view cannot drift. ``memify_task_registry`` is untouched: it names
-tasks for the public ``memify(tasks=[...])`` API at a finer grain than a stage.
+accepted lessons are stage 7's anchors, and stage 7 runs before conflict
+review — and ``test_registry_order`` pins it; this list is the single place it
+is declared. ``operations_catalog`` generates its improve rows from this list,
+so the schema view cannot drift.
 """
 
 from collections.abc import Iterable, Sequence
+
+from cognee.shared.logging_utils import get_logger
 
 from .stage import BaseStage
 from .stages import (
@@ -21,7 +22,6 @@ from .stages import (
     PersistAgentTracesStage,
     PersistSessionQAStage,
     ReviewConflictsStage,
-    TripletEnrichmentStage,
     UpdateUserPreferencesStage,
 )
 
@@ -34,9 +34,14 @@ DEFAULT_STAGES: list[BaseStage] = [
     UpdateUserPreferencesStage(),
     BuildTruthSubspaceStage(),
     ReviewConflictsStage(),
-    TripletEnrichmentStage(),
     GlobalContextIndexStage(),
 ]
+
+# Stages that existed in earlier releases. ``IMPROVE_STAGES_DISABLED`` may
+# still name one; it is ignored with a warning instead of failing the boot.
+REMOVED_STAGE_NAMES = frozenset({"triplet_enrichment"})
+
+logger = get_logger("improve")
 
 
 def stage_names(stages: Iterable[BaseStage] = DEFAULT_STAGES) -> list[str]:
@@ -74,11 +79,15 @@ def validate_stages_disabled(
     guards against data loss (decision D2), so configuration must not offer a
     runtime bypass of the invariant the registry enforces at import time.
     """
-    disabled = [name for name in disabled if name]
+    disabled = list(disabled)
+    known = {stage.name for stage in stages}
+    removed = sorted(name for name in disabled if name in REMOVED_STAGE_NAMES and name not in known)
+    if removed:
+        logger.warning("IMPROVE_STAGES_DISABLED names removed stage(s) %s; ignoring them", removed)
+    disabled = [name for name in disabled if name and name not in removed]
     if not disabled:
         return
 
-    known = {stage.name for stage in stages}
     unknown = sorted(name for name in disabled if name not in known)
     if unknown:
         raise ValueError(

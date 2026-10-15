@@ -3,7 +3,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from cognee import __version__ as cognee_version
 from cognee.api.DTO import InDTO
@@ -18,13 +18,22 @@ from cognee.shared.utils import send_telemetry
 logger = get_logger()
 
 
+# Custom-task options of the removed memify pipeline (SDK-1115). InDTO ignores
+# unknown keys, so they are refused explicitly rather than silently dropped.
+_REMOVED_IMPROVE_FIELDS = (
+    "extraction_tasks",
+    "extractionTasks",
+    "enrichment_tasks",
+    "enrichmentTasks",
+)
+
+
 class ImprovePayloadDTO(InDTO):
-    extraction_tasks: list[str] | None = Field(default=None, examples=[[]])
-    enrichment_tasks: list[str] | None = Field(default=None, examples=[[]])
-    data: str | None = Field(default=None)
+    # Deprecated and ignored: both only scoped the removed triplet-enrichment stage.
+    data: str | None = Field(default=None, deprecated=True)
     dataset_name: str | None = Field(default=None)
     dataset_id: UUID | Literal[""] | None = Field(default=None, examples=[""])
-    node_name: list[str] | None = Field(default=None, examples=[[]])
+    node_name: list[str] | None = Field(default=None, examples=[[]], deprecated=True)
     run_in_background: bool | None = Field(default=False)
     build_global_context_index: bool | None = Field(default=False)
     build_truth_subspace: bool | None = Field(default=False)
@@ -38,6 +47,17 @@ class ImprovePayloadDTO(InDTO):
     # distillation, preferences, truth subspace) are skipped with
     # ``no_session_ids`` and only the graph-kind stages can run.
     session_ids: list[str] | None = Field(default=None, examples=[[]])
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_removed_fields(cls, values):
+        if isinstance(values, dict):
+            removed = [key for key in _REMOVED_IMPROVE_FIELDS if values.get(key) is not None]
+            if removed:
+                raise ValueError(
+                    f"{', '.join(removed)} are no longer accepted: the memify pipeline was removed"
+                )
+        return values
 
 
 def get_improve_router() -> APIRouter:
@@ -57,20 +77,18 @@ def get_improve_router() -> APIRouter:
         cannot do under the current settings, with no LLM calls) and only then runs:
         `feedback_weights`, `persist_session_qa`, `persist_agent_traces`,
         `extract_agent_context`, `distill_sessions`, `update_user_preferences`,
-        `build_truth_subspace`, `review_conflicts`, `triplet_enrichment`, `global_context_index`.
-        Stages 1-7 need `sessionIds`; stages 7 and 10 are opt-in via the `build*` flags.
+        `build_truth_subspace`, `review_conflicts`, `global_context_index`.
+        Stages 1-7 need `sessionIds`; stages 7 and 9 are opt-in via the `build*` flags.
 
         ## Request Parameters
-        - **extraction_tasks** (Optional[List[str]]): Tasks for graph/data extraction.
-        - **enrichment_tasks** (Optional[List[str]]): Tasks for graph enrichment.
-        - **data** (Optional[str]): Custom input data. Uses existing graph when omitted.
         - **dataset_name** (Optional[str]): Dataset name.
         - **dataset_id** (Optional[UUID]): Dataset UUID.
-        - **node_name** (Optional[List[str]]): Filter to specific named entities.
+        - **data**, **node_name**: Deprecated and ignored.
+        - **extraction_tasks**, **enrichment_tasks**: Removed; sending either returns 422.
         - **run_in_background** (Optional[bool]): Run all stages as one background
           task and return immediately with `status == "running"` (default: False).
         - **build_global_context_index** (Optional[bool]): Build the global context index
-          after enrichment (default: False).
+          (default: False).
         - **review_conflicts** (bool): Review conflicts using source documents and dates.
         - **build_truth_subspace** (Optional[bool]): Build the truth subspace from the
           sessions' distilled learnings (default: False; needs `sessionIds` and a
@@ -124,12 +142,12 @@ def get_improve_router() -> APIRouter:
             if payload.feedback_alpha is not None:
                 improve_kwargs["feedback_alpha"] = payload.feedback_alpha
 
+            # model_fields_set, not attribute access: reading a deprecated field warns.
+            if {"data", "node_name"} & payload.model_fields_set:
+                logger.warning("POST /v1/improve: data and nodeName are deprecated and ignored")
+
             improve_run = await cognee_improve(
-                extraction_tasks=payload.extraction_tasks,
-                enrichment_tasks=payload.enrichment_tasks,
-                data=payload.data,
                 dataset=payload.dataset_id if payload.dataset_id else payload.dataset_name,
-                node_name=payload.node_name,
                 session_ids=payload.session_ids,
                 build_global_context_index=bool(payload.build_global_context_index),
                 build_truth_subspace=bool(payload.build_truth_subspace),

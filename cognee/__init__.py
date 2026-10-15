@@ -40,7 +40,6 @@ logger.info(describe_resolution(_env_file))
 from .api.v1.add import add
 from .api.v1.delete import delete
 from .api.v1.cognify import cognify
-from .modules.memify import memify
 from .modules.run_custom_pipeline import run_custom_pipeline
 from .api.v1.update import update
 from .api.v1.config.config import config

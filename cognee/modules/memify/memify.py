@@ -2,14 +2,7 @@ from collections.abc import Sequence
 from typing import Any
 from uuid import UUID
 
-from cognee.context_global_variables import set_database_global_context_variables
-from cognee.memify_pipelines.memify_default_tasks import (
-    get_default_memify_enrichment_tasks,
-    get_default_memify_extraction_tasks,
-)
-from cognee.memify_pipelines.memify_task_registry import resolve_memify_tasks
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
-from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.engine.operations.setup import setup
 from cognee.modules.pipelines import run_pipeline
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
@@ -17,7 +10,6 @@ from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
 )
 from cognee.modules.pipelines.tasks.task import Task
-from cognee.modules.retrieval.utils.brute_force_triplet_search import get_memory_fragment
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 
@@ -25,81 +17,36 @@ logger = get_logger("memify")
 
 
 async def memify(
-    extraction_tasks: Sequence[Task | str] | None = None,
-    enrichment_tasks: Sequence[Task | str] | None = None,
+    extraction_tasks: Sequence[Task],
+    enrichment_tasks: Sequence[Task],
     data: Any | None = None,
     dataset: str | UUID = DEFAULT_DATASET_NAME,
     user: User = None,
-    node_type: type | None = NodeSet,
-    node_name: list[str] | None = None,
-    vector_db_config: dict | None = None,
-    graph_db_config: dict | None = None,
     run_in_background: bool = False,
 ):
-    """
-    Enrichment pipeline in Cognee, can work with already built graphs. If no data is provided existing knowledge graph will be used as data,
-    custom data can also be provided instead which can be processed with provided extraction and enrichment tasks.
+    """Run a fixed list of enrichment tasks over one dataset as ``memify_pipeline``.
 
-    Provided tasks and data will be arranged to run the Cognee pipeline and execute graph enrichment/creation.
-
-    This is the core processing step in Cognee that converts raw text and documents
-    into an intelligent knowledge graph. It analyzes content, extracts entities and
-    relationships, and creates semantic connections for enhanced search and reasoning.
+    Internal runner for the pipelines in ``cognee/memify_pipelines`` that
+    ``improve()`` stages call. It is not a public API: callers always pass
+    their own tasks, and there are no default tasks. Custom tasks belong in
+    ``run_custom_pipeline``.
 
     Args:
-        extraction_tasks: List of Cognee Tasks to execute for graph/data extraction.
-                          Entries may be Task instances or names of built-in memify tasks
-                          (see cognee.memify_pipelines.memify_task_registry).
-        enrichment_tasks: List of Cognee Tasks to handle enrichment of provided graph/data from extraction tasks.
-                          Entries may be Task instances or names of built-in memify tasks.
-        data: The data to ingest. Can be anything when custom extraction and enrichment tasks are used.
-              Data provided here will be forwarded to the first extraction task in the pipeline as input.
-              If no data is provided the whole graph (or subgraph if node_name/node_type is specified) will be forwarded
-        dataset: Dataset name or dataset uuid to process.
+        extraction_tasks: Tasks that read the input the enrichment tasks work on.
+        enrichment_tasks: Tasks that write the enrichment.
+        data: Seed forwarded to the first extraction task. Defaults to ``[{}]``,
+            a placeholder for tasks that read what they need from the graph.
+        dataset: Dataset name or UUID to process.
         user: User context for authentication and data access. Uses default if None.
-        node_type: Filter graph to specific entity types (for advanced filtering). Used when no data is provided.
-        node_name: Filter graph to specific named entities (for targeted search). Used when no data is provided.
-        vector_db_config: Custom vector database configuration for embeddings storage.
-        graph_db_config: Custom graph database configuration for relationship storage.
-        run_in_background: If True, starts processing asynchronously and returns immediately.
-                          If False, waits for completion before returning.
-                          Background mode recommended for large datasets (>100MB).
-                          Use pipeline_run_id from return value to monitor progress.
+        run_in_background: Return immediately and run the pipeline as a background task.
 
     Returns:
-        Union[dict, list[PipelineRunInfo]]:
-            - **Blocking mode**: Dictionary mapping dataset_id -> PipelineRunInfo with:
-                * Processing status (completed/failed/in_progress)
-                * Processing duration and resource usage
-                * Error details if any failures occurred
-            - **Background mode**: List of PipelineRunInfo objects for tracking progress
-                * Use pipeline_run_id from return value to monitor status
-
-    Example:
-        ```python
-        import cognee
-
-        # Add and process data first
-        await cognee.add("Your document content")
-        await cognee.cognify()
-
-        # Enrich the existing knowledge graph with the default memify pipeline
-        await cognee.memify()
-
-        # Search the enriched graph
-        results = await cognee.search("What insights can you find?")
-        ```
+        The pipeline executor's result: a dict of dataset_id -> PipelineRunInfo
+        in blocking mode, or the started runs in background mode.
     """
-
-    # Resolve task names into Task instances (raises CogneeValidationError on unknown names)
-    resolved_extraction_tasks = resolve_memify_tasks(extraction_tasks)
-    resolved_enrichment_tasks = resolve_memify_tasks(enrichment_tasks)
-
-    # Use default triplet embedding tasks if no tasks were provided
-    if not resolved_extraction_tasks:
-        resolved_extraction_tasks = get_default_memify_extraction_tasks()
-    if not resolved_enrichment_tasks:
-        resolved_enrichment_tasks = get_default_memify_enrichment_tasks()
+    tasks = [*extraction_tasks, *enrichment_tasks]
+    if not tasks:
+        raise ValueError("memify() needs at least one extraction or enrichment task")
 
     await setup()
 
@@ -113,31 +60,14 @@ async def memify(
     user, authorized_dataset_list = await resolve_authorized_user_datasets(dataset, user)
     authorized_dataset = authorized_dataset_list[0]
 
-    if not data:
-        async with set_database_global_context_variables(
-            authorized_dataset.id, authorized_dataset.owner_id
-        ):
-            memory_fragment = await get_memory_fragment(node_type=node_type, node_name=node_name)
-            # Subgraphs should be a single element in the list to represent one data item
-            data = [memory_fragment]
-
-    memify_tasks = [
-        *resolved_extraction_tasks,  # Unpack tasks provided to memify pipeline
-        *resolved_enrichment_tasks,
-    ]
-
-    # By calling get pipeline executor we get a function that will have the run_pipeline run in the background or a function that we will need to wait for
     pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)
 
-    # Run the run_pipeline in the background or blocking based on executor
     return await pipeline_executor_func(
         pipeline=run_pipeline,
-        tasks=memify_tasks,
+        tasks=tasks,
         user=user,
-        data=data,
+        data=data if data else [{}],
         datasets=[authorized_dataset.id],
-        vector_db_config=vector_db_config,
-        graph_db_config=graph_db_config,
         incremental_loading=False,
         data_cache=False,
         pipeline_name="memify_pipeline",

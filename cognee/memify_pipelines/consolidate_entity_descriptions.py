@@ -10,8 +10,8 @@ The actual work lives in ``cognee.tasks.memify.consolidate_entity_descriptions``
 
 import warnings
 
-from cognee import memify
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
+from cognee.modules.memify import memify
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger

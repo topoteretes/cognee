@@ -6,10 +6,10 @@ detect (extraction) task followed by a single merge (enrichment) task. The share
 both tasks so detection and merge agree on thresholds and on ``dry_run``.
 """
 
-from cognee import memify
 from cognee.exceptions import CogneeValidationError
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.data.methods import get_authorized_existing_datasets
+from cognee.modules.memify import memify
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User

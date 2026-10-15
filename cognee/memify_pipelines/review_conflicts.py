@@ -3,10 +3,10 @@
 from datetime import datetime
 from uuid import UUID
 
-from cognee import memify
 from cognee.exceptions import CogneeValidationError
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.improve.result import first_run_info
+from cognee.modules.memify import memify
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.models import User

@@ -144,7 +144,6 @@ def test_improve_result_status_summary():
     assert all_skipped.status == "skipped"
     assert all(stage.reason == REASON_LOCK_HELD for stage in all_skipped.stages)
     assert all_skipped.session_ids == ["s"]
-    assert all_skipped.memify_run == {}
 
 
 def test_lock_held_decodes_only_the_lost_claim_shape():
@@ -166,8 +165,7 @@ def test_model_dump_includes_status_and_serializes_run_info():
     info = _info(PipelineRunCompleted)
     result = ImproveResult(
         dataset_id=uuid4(),
-        stages=[StageResult.from_pipeline_run("triplet_enrichment", {info.dataset_id: info})],
-        memify_run={},
+        stages=[StageResult.from_pipeline_run("review_conflicts", {info.dataset_id: info})],
     )
     dumped = result.model_dump(mode="json")
     assert dumped["status"] == "completed"
