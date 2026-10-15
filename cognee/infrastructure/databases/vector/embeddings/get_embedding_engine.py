@@ -91,12 +91,10 @@ def create_embedding_engine(
 
         Returns an instance of an embedding engine based on the specified provider.
     """
-    if embedding_encoding_format == "base64" and not base64_supported(
-        embedding_provider, embedding_model
-    ):
+    if embedding_encoding_format == "base64" and not base64_supported(embedding_provider):
         raise CogneeConfigurationError(
-            f"The embedding provider '{embedding_provider}' with model '{embedding_model}' "
-            f"does not support base64 embeddings (EMBEDDING_ENCODING_FORMAT=base64).",
+            f"The embedding provider '{embedding_provider}' has no wire format to request, "
+            f"so EMBEDDING_ENCODING_FORMAT=base64 cannot apply to it.",
             remediation=(
                 "Comment out or remove EMBEDDING_ENCODING_FORMAT in your .env file or "
                 "environment. Embeddings are unchanged; base64 only makes responses cheaper "

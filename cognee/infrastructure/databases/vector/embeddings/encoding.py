@@ -7,7 +7,9 @@ the openai SDK builds a float response one element at a time.
 
 base64 is used automatically only on routes known to accept it: OpenAI's own
 API. Every other route sends the request cognee always sent and gets floats,
-unless EMBEDDING_ENCODING_FORMAT=base64 opts it in.
+unless EMBEDDING_ENCODING_FORMAT=base64 opts it in. An opted-in route is
+trusted and checked on the first reply: a provider that cannot honour base64
+answers with a list, bad bytes or a 400/422, and each fails that call for good.
 """
 
 import base64
@@ -63,18 +65,14 @@ def _routes_to_openai_api(model: str | None, endpoint: str | None) -> bool:
     return _routes_through_openai_handler(model)
 
 
-def base64_supported(provider: str, model: str | None) -> bool:
-    """Whether EMBEDDING_ENCODING_FORMAT=base64 may be set for this provider and model.
+def base64_supported(provider: str) -> bool:
+    """Whether EMBEDDING_ENCODING_FORMAT=base64 can be sent at all for this provider.
 
-    Only routes that send OpenAI's embeddings request unchanged, which are the ones
-    tested: the openai_compatible engine and litellm's OpenAI handler. litellm maps
-    base64 to other providers' own formats, e.g. Bedrock's 1-bit "binary" vectors.
+    Only the engines with no wire format are refused: fastembed embeds in-process and
+    the ollama engine calls Ollama's native API, which has no such parameter. Every
+    other engine sends the request and decode_embedding() checks the reply.
     """
-    if provider == "openai_compatible":
-        return True
-    if provider in ("fastembed", "ollama"):
-        return False
-    return _routes_through_openai_handler(model)
+    return provider not in ("fastembed", "ollama")
 
 
 def resolve_encoding_format(

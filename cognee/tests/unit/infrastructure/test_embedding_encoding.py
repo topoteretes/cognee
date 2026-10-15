@@ -109,53 +109,50 @@ def test_decode_embedding_rejects_what_is_not_base64_float32(payload, detail):
 
 
 @pytest.mark.parametrize(
-    ("provider", "model", "supported"),
+    ("provider", "supported"),
     [
-        # Tested: OpenAI's embeddings request, sent unchanged.
-        ("openai", "openai/text-embedding-3-large", True),
-        ("openai", "text-embedding-3-small", True),
-        ("custom", "openai/BAAI/bge-m3", True),
-        ("openai_compatible", "nomic-embed-text", True),
-        # Untested, or litellm translates encoding_format for the provider.
-        ("azure", "azure/my-deployment", False),
-        ("bedrock", "bedrock/amazon.titan-embed-text-v2:0", False),
-        ("cohere", "cohere/embed-english-v3.0", False),
-        ("gemini", "gemini/text-embedding-004", False),
-        ("mistral", "mistral/mistral-embed", False),
-        ("custom", "openrouter/openai/text-embedding-3-small", False),
-        ("custom", "hosted_vllm/BAAI/bge-m3", False),
-        ("custom", "BAAI/bge-m3", False),
-        ("fastembed", "BAAI/bge-small-en-v1.5", False),
-        ("ollama", "nomic-embed-text", False),
+        # Engines that send an OpenAI-style request: trusted, the reply is checked.
+        ("openai", True),
+        ("custom", True),
+        ("openai_compatible", True),
+        ("azure", True),
+        ("bedrock", True),
+        # Engines with no wire format to request.
+        ("fastembed", False),
+        ("ollama", False),
     ],
 )
-def test_base64_supported_only_on_tested_routes(provider, model, supported):
-    assert base64_supported(provider, model) is supported
+def test_base64_supported_everywhere_but_engines_without_a_wire(provider, supported):
+    assert base64_supported(provider) is supported
+
+
+def _create(provider, model, encoding_format):
+    return create_embedding_engine(
+        provider, model, 4, None, None, None, None, 36, None, None, None, None, encoding_format
+    )
+
+
+@pytest.mark.parametrize(
+    ("provider", "model"),
+    [("fastembed", "BAAI/bge-small-en-v1.5"), ("ollama", "nomic-embed-text")],
+)
+def test_base64_on_an_engine_without_a_wire_is_a_configuration_error(provider, model):
+    with pytest.raises(CogneeConfigurationError, match="EMBEDDING_ENCODING_FORMAT"):
+        _create(provider, model, "base64")
 
 
 @pytest.mark.parametrize(
     ("provider", "model"),
     [
-        ("fastembed", "BAAI/bge-small-en-v1.5"),
-        ("ollama", "nomic-embed-text"),
+        # A proxy or gateway route: cognee cannot see what is behind it.
+        ("custom", "litellm_proxy/text-embedding-3-large"),
+        ("custom", "openai/text-embedding-3-large"),
+        # litellm translates the format for these; the first reply shows whether it held.
         ("bedrock", "bedrock/amazon.titan-embed-text-v2:0"),
         ("azure", "azure/my-deployment"),
     ],
 )
-def test_base64_on_an_unsupported_route_is_a_configuration_error(provider, model):
-    with pytest.raises(CogneeConfigurationError, match="EMBEDDING_ENCODING_FORMAT"):
-        create_embedding_engine(
-            provider,
-            model,
-            4,
-            None,
-            None,
-            None,
-            None,
-            36,
-            None,
-            None,
-            None,
-            None,
-            "base64",
-        )
+def test_configured_base64_is_trusted_at_creation(provider, model, monkeypatch):
+    monkeypatch.setenv("MOCK_EMBEDDING", "true")
+    engine = _create(provider, model, "base64")
+    assert engine.encoding_format == "base64"
