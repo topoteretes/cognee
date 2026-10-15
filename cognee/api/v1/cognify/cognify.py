@@ -616,7 +616,6 @@ async def cognify(
                 chunks_per_batch=chunks_per_batch,
                 config=config,
                 chunk_attachment=chunk_attachment,
-                embed_triplets=cognify_config.triplet_embedding,
                 track_provenance=cognify_config.provenance_tracking,
             )
         else:
@@ -748,7 +747,6 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     **kwargs,
 ) -> list[Task]:
     cognify_config = get_cognify_config()
-    embed_triplets = cognify_config.triplet_embedding
     summary_method = summary_method or cognify_config.summary_method
     track_provenance = cognify_config.provenance_tracking
 
@@ -786,7 +784,6 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
         # LOAD: persist nodes, edges, and embeddings to graph/vector DBs
         Task(
             add_data_points,
-            embed_triplets=embed_triplets,
             task_config={"batch_size": chunks_per_batch},
             needs_llm=False,
         ),
@@ -836,7 +833,6 @@ async def get_dlt_tasks(
         # LOAD: persist row chunks and embeddings to graph/vector DBs
         Task(
             add_data_points,
-            embed_triplets=cognify_config.triplet_embedding,
             task_config={"batch_size": chunks_per_batch},
             needs_llm=False,
         ),
