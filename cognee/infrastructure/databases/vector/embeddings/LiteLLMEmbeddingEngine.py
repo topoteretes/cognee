@@ -20,7 +20,10 @@ from cognee.infrastructure.databases.exceptions import (
     EmbeddingContextWindowTooSmallError,
     EmbeddingException,
 )
-from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
+    EmbeddingEngine,
+    EmbeddingResult,
+)
 from cognee.infrastructure.databases.vector.embeddings.encoding import (
     ENCODING_FORMAT_HINT,
     EncodingFormat,
@@ -36,6 +39,7 @@ from cognee.infrastructure.databases.vector.embeddings.retry_config import (
     embedding_retry_condition,
 )
 from cognee.infrastructure.databases.vector.embeddings.utils import (
+    count_input_tokens,
     handle_embedding_response,
     sanitize_embedding_text_inputs,
 )
@@ -112,7 +116,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
     embedding calls.
 
     Public methods:
-    - embed_text: Embed a list of strings into vector representations.
+    - embed_text: Embed a list of strings; returns their vectors and the input-token count.
     - get_vector_size: Retrieve the size of the embedding vectors.
     - get_tokenizer: Load the appropriate tokenizer for the specified model.
     """
@@ -206,9 +210,9 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    async def embed_text(self, text: list[str]) -> list[list[float]]:
+    async def embed_text(self, text: list[str]) -> EmbeddingResult:
         """
-        Embed a list of text strings into vector representations.
+        Embed a list of text strings; returns their vectors and the input-token count.
 
         If the input exceeds the model's context window, the method will recursively split the
         input and combine the results. It handles both mock and live embedding scenarios,
@@ -223,7 +227,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         Returns:
         --------
 
-            - List[List[float]]: A list of vectors representing the embedded texts.
+            - EmbeddingResult: A vector per input text and the input tokens consumed.
         """
 
         sanitized_text_input = sanitize_embedding_text_inputs(text)
@@ -233,7 +237,10 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 response = {
                     "data": [{"embedding": [0.0] * self.dimensions} for _ in sanitized_text_input]
                 }
-                return [data["embedding"] for data in response["data"]]
+                # No provider call, so nothing consumed.
+                return EmbeddingResult(
+                    vectors=[data["embedding"] for data in response["data"]], tokens=0
+                )
             else:
                 async with embedding_rate_limiter_context_manager():
                     embedding_kwargs = {
@@ -289,7 +296,10 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                     )
 
                 embedding_response = [decode_embedding(data["embedding"]) for data in response.data]
-                return handle_embedding_response(text, embedding_response, self.dimensions)
+                return EmbeddingResult(
+                    vectors=handle_embedding_response(text, embedding_response, self.dimensions),
+                    tokens=count_input_tokens(response, sanitized_text_input, self.tokenizer),
+                )
 
         except litellm.exceptions.BadRequestError as error:
             # A spend cap can arrive as a 400 depending on how the proxy maps it, and this
@@ -324,11 +334,14 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             if isinstance(text, list) and len(text) > 1:
                 mid = math.ceil(len(text) / 2)
                 left, right = text[:mid], text[mid:]
-                left_vecs, right_vecs = await asyncio.gather(
+                left_result, right_result = await asyncio.gather(
                     self.embed_text(left),
                     self.embed_text(right),
                 )
-                return left_vecs + right_vecs
+                return EmbeddingResult(
+                    vectors=left_result + right_result,
+                    tokens=left_result.tokens + right_result.tokens,
+                )
 
                 # If caller passed ONE oversize string split the string itself into
                 # half so we can process it
@@ -343,14 +356,18 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 left_part, right_part = s[: third * 2], s[third:]
 
                 # Recursively embed the split parts in parallel
-                (left_vec,), (right_vec,) = await asyncio.gather(
+                left_result, right_result = await asyncio.gather(
                     self.embed_text([left_part]),
                     self.embed_text([right_part]),
                 )
+                (left_vec,), (right_vec,) = left_result, right_result
 
                 # POOL the two embeddings into one
                 pooled = (np.array(left_vec) + np.array(right_vec)) / 2
-                return [pooled.tolist()]
+                return EmbeddingResult(
+                    vectors=[pooled.tolist()],
+                    tokens=left_result.tokens + right_result.tokens,
+                )
 
             logger.error("Embedding input exceeds the model's max length: %s", str(error))
             raise

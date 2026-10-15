@@ -95,16 +95,6 @@ _OPERATIONS: list[dict[str, Any]] = [
         ],
     },
     {
-        "name": "temporal_graph",
-        "label": "temporal graph",
-        "kind": "pipeline",
-        "scope": "subset",
-        "summary": "Extracts events and time-stamped relationships.",
-        "effects": [
-            {"effect": "produces", "target_type": "Entity"},
-        ],
-    },
-    {
         "name": "forget",
         "label": "forget",
         "kind": "lifecycle",

@@ -106,6 +106,7 @@ class RememberKwargs(TypedDict, total=False):
     skill_improvement: dict[str, Any]
     index_vectors: bool
     repo_credentials: str
+    branch: str
     skills_text: str
     skill_name: str
     # DLT options: grouped in dlt_config (preferred), or the four bare spellings
@@ -147,10 +148,11 @@ _ADD_ONLY = frozenset(
         "write_disposition",
         "query",
         "max_rows_per_table",
+        "branch",
     }
 )
 _COGNIFY_ONLY = frozenset(
-    {"graph_model", "extractor", "summary_method", "chunks_per_batch", "config", "temporal_cognify"}
+    {"graph_model", "extractor", "summary_method", "chunks_per_batch", "config"}
 )
 _SHARED = frozenset(
     {
@@ -990,7 +992,8 @@ async def remember(
         skill_improvement: Internal skill-improvement control dict used with
             ``SkillRunEntry`` or ``content_type="skills"``. ``apply=True``
             requires an existing ``proposal_id``.
-        **kwargs: Additional options -- see ``RememberKwargs``.
+        **kwargs: Additional options -- see ``RememberKwargs``. ``branch`` (without
+            ``content_type``) clones that branch of a repository URL; see ``add()``.
 
     Returns:
         RememberResult or DryRunEstimate: A promise-like object for normal
@@ -1014,7 +1017,10 @@ async def remember(
         result.raw_result    # {dataset_id: PipelineRunInfo}
     """
     from cognee import __version__ as cognee_version
+    from cognee.api.v1.cognify.cognify import drop_deprecated_temporal_cognify
     from cognee.shared.utils import send_telemetry
+
+    drop_deprecated_temporal_cognify(kwargs)
 
     # Migration dispatch: a MemorySource streams COGX records from an external
     # memory system (Mem0, Zep/Graphiti, Letta, a COGX archive, ...). The
@@ -1271,6 +1277,9 @@ async def remember(
         raise ValueError("extractor is not supported when session_id is provided.")
     if session_id is not None and kwargs.get("summary_method") is not None:
         raise ValueError("summary_method is not supported when session_id is provided.")
+    if session_id is not None and kwargs.get("branch") is not None:
+        # The session path never calls add(), so the branch would be dropped silently.
+        raise ValueError("branch is not supported when session_id is provided.")
 
     data_size = _estimate_data_size(data)
     item_count = len(data) if isinstance(data, list) else 1
@@ -1392,6 +1401,12 @@ async def _remember_inner(
                 "summary_method is not supported while connected to a remote Cognee "
                 "instance. Call cognee.disconnect() to choose the summary method locally."
             )
+        if kwargs.get("branch") is not None:
+            # Same as extractor: client.remember() would drop it.
+            raise ValueError(
+                "branch is not supported while connected to a remote Cognee instance. "
+                "Call cognee.disconnect() to clone the branch locally."
+            )
         if session_ids:
             # Same discipline as extractor: POST /remember carries no
             # session_ids field, so forwarding would silently drop them.
@@ -1484,6 +1499,12 @@ async def _remember_inner(
         raise ValueError("index_vectors is supported only for content_type='code'.")
     if repo_credentials is not None and content_type != "code":
         raise ValueError("repo_credentials is supported only for content_type='code'.")
+    if kwargs.get("branch") is not None and content_type is not None:
+        # Only the add() route reads it, so a content_type call would drop it silently.
+        raise ValueError(
+            "branch is supported only without content_type: pass the repository URL "
+            "to remember() directly."
+        )
     if content_type == "code" and session_id is not None:
         raise ValueError(
             "session_id is not applicable to content_type='code'; code graphs are "
