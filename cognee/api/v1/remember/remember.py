@@ -936,8 +936,7 @@ async def remember(
         custom_prompt: Custom prompt for entity extraction.
         run_in_background: If *True*, run as a background task.
         self_improvement: If *True* (default), automatically runs
-            ``improve()`` after cognify to enrich the graph with
-            triplet embeddings and indexing. The outcome lands on
+            ``improve()`` after cognify to enrich the graph. The outcome lands on
             ``RememberResult.improve`` / ``.improve_error``; a failed
             improve never marks the remember itself as errored.
             ``IMPROVE_AUTO_ENABLED=false`` overrides this to off, and a

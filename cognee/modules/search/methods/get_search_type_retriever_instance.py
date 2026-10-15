@@ -39,10 +39,10 @@ from cognee.modules.retrieval.natural_language_retriever import NaturalLanguageR
 from cognee.modules.retrieval.skills_retriever import SkillsRetriever
 from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
 from cognee.modules.retrieval.temporal_hybrid_retriever import TemporalHybridRetriever
-from cognee.modules.retrieval.triplet_retriever import TripletRetriever
 from cognee.modules.search.exceptions import SearchTypeDisabledError, UnsupportedSearchTypeError
 from cognee.modules.search.operations import select_search_type
 from cognee.modules.search.types import SearchType
+from cognee.modules.search.types.SearchType import DEPRECATED_SEARCH_TYPES
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
@@ -100,6 +100,9 @@ async def get_search_type_retriever_instance(
     Returns:
 
     """
+    # A deprecated type is resolved, with its warning, by search() / recall();
+    # this covers callers that reach the factory directly.
+    query_type = DEPRECATED_SEARCH_TYPES.get(query_type, query_type)
     # Transform retriever specific config if empty to avoid None checks later
     retriever_specific_config = kwargs.get("retriever_specific_config")
     if retriever_specific_config is None:
@@ -215,19 +218,6 @@ async def get_search_type_retriever_instance(
                     "include_external_metadata", False
                 ),
                 "external_metadata_keys": retriever_specific_config.get("external_metadata_keys"),
-            },
-        ),
-        SearchType.TRIPLET_COMPLETION: (
-            TripletRetriever,
-            {
-                "system_prompt_path": system_prompt_path,
-                "top_k": top_k,
-                "system_prompt": system_prompt,
-                "session_id": session_id,
-                "response_model": retriever_specific_config.get("response_model", str),
-                "include_references": include_references,
-                "node_name": node_name,
-                "node_name_filter_operator": node_name_filter_operator,
             },
         ),
         SearchType.GRAPH_COMPLETION: (

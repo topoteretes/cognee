@@ -932,7 +932,6 @@ class CogneeClient:
         self,
         dataset_name: str = "main_dataset",
         session_ids: list[str] | None = None,
-        node_name: list[str] | None = None,
         build_global_context_index: bool = False,
         build_truth_subspace: bool = False,
     ) -> dict[str, Any]:
@@ -947,8 +946,6 @@ class CogneeClient:
             payload: dict[str, Any] = {"dataset_name": dataset_name}
             if session_ids:
                 payload["session_ids"] = session_ids
-            if node_name:
-                payload["node_name"] = node_name
             if build_global_context_index:
                 payload["build_global_context_index"] = True
             if build_truth_subspace:
@@ -961,8 +958,6 @@ class CogneeClient:
                 kwargs: dict[str, Any] = {"dataset": dataset_name}
                 if session_ids:
                     kwargs["session_ids"] = session_ids
-                if node_name:
-                    kwargs["node_name"] = node_name
                 if build_global_context_index:
                     kwargs["build_global_context_index"] = True
                 if build_truth_subspace:

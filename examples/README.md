@@ -142,7 +142,7 @@ Every demo lives in a topic folder.
 ### [`comprehensive_example/`](demos/comprehensive_example/) — everything at once
 | Script | Demonstrates |
 |---|---|
-| [`cognee_comprehensive_example.py`](demos/comprehensive_example/cognee_comprehensive_example.py) | Three sources, node sets, ontology, memify, filtered recall — stitched together |
+| [`cognee_comprehensive_example.py`](demos/comprehensive_example/cognee_comprehensive_example.py) | Three sources, node sets, ontology, filtered recall — stitched together |
 
 ### [`agentic/`](demos/agentic/) — agents reasoning over memory
 | Script | Demonstrates |
@@ -183,7 +183,6 @@ Every demo lives in a topic folder.
 |---|---|
 | [`custom_cognify_pipeline_example.py`](demos/custom_pipelines/custom_cognify_pipeline_example.py) | Replacing the default `cognify` task list |
 | [`custom_pipeline_single_object_example.py`](demos/custom_pipelines/custom_pipeline_single_object_example.py) | Deferred-call pipeline pattern with typed `DataPoint`s |
-| [`memify_coding_agent_rule_extraction_example.py`](demos/custom_pipelines/memify_coding_agent_rule_extraction_example.py) | Distilling coding-agent traces into reusable rules |
 | [`relational_database_to_knowledge_graph_migration_example.py`](demos/custom_pipelines/relational_database_to_knowledge_graph_migration_example.py) | Migration config + tuned recalls |
 | [`dynamic_steps_resume_analysis_hr_example.py`](demos/custom_pipelines/dynamic_steps_resume_analysis_hr_example.py) | Self-coded run stages toggled per run, over a CV corpus |
 | [`organizational_hierarchy/`](demos/custom_pipelines/organizational_hierarchy/) | Org-chart ingestion — high-level and low-level variants |
