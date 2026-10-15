@@ -364,6 +364,7 @@ async def remember(
     background: bool = False,
     ontology_key: str | list[str] | None = None,
     self_improvement: bool = True,
+    node_set: list[str] | None = None,
 ) -> list:
     """Store data in memory.
 
@@ -417,6 +418,14 @@ async def remember(
         deadline shorter than ingestion takes. Ignored with session_id, which
         is already fast. Errors surface via cognify_status, not the return
         value.
+    node_set : list[str], optional
+        Node-set names to file the data under, the same names recall filters
+        on with node_name. Permanent memory tags the ingested data. With
+        session_id the first write that carries one pins it on the session;
+        later writes must repeat it or omit it, and a different set is
+        refused, so one session never spans two node sets. improve() keeps
+        the pinned set on everything it bridges from the session into the
+        graph. Used for per-project memory.
     """
     if content_base64 and data:
         return [
@@ -482,6 +491,7 @@ async def remember(
                 custom_prompt=custom_prompt,
                 ontology_key=ontology_key,
                 self_improvement=self_improvement,
+                node_set=node_set,
             ),
             dataset=dataset_name,
         )
@@ -509,6 +519,7 @@ async def remember(
                 custom_prompt=custom_prompt,
                 ontology_key=ontology_key,
                 self_improvement=self_improvement,
+                node_set=node_set,
             )
             status = result.get("status", "completed")
             if session_id:

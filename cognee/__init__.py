@@ -88,6 +88,7 @@ from .api.v1 import (
     ExportResult,
 )
 from .memory import MemoryEntry, QAEntry, TraceEntry, FeedbackEntry
+from .infrastructure.session.session_node_set import SessionNodeSetConflictError
 
 # Background work: wait for fire-and-forget tasks (background remember, the
 # session-to-graph improve bridge) before the process exits.
