@@ -188,10 +188,12 @@ def get_datasets_router() -> APIRouter:
 
             return datasets
         except Exception as error:
-            logger.error(f"Error retrieving datasets: {error!s}")
+            # The exception text can carry database hosts, names or SQL; it
+            # belongs in the server log, never in a response.
+            logger.exception("Error retrieving datasets")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Error retrieving datasets: {error!s}",
+                detail="Error retrieving datasets.",
             ) from error
 
     @router.post("", response_model=DatasetDTO)
@@ -241,10 +243,11 @@ def get_datasets_router() -> APIRouter:
 
             return dataset
         except Exception as error:
-            logger.error(f"Error creating dataset: {error!s}")
+            # Same as get_datasets: diagnostics stay server-side.
+            logger.exception("Error creating dataset")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Error creating dataset: {error!s}",
+                detail="Error creating dataset.",
             ) from error
 
     @router.delete("")

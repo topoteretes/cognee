@@ -10,7 +10,7 @@ import asyncio
 import pytest
 from sqlalchemy import event, text
 from sqlalchemy import inspect as sa_inspect
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -717,3 +717,24 @@ class TestFileInUse:
         finally:
             holder.kill()
             holder.wait()
+
+
+class TestOpenErrors:
+    def test_missing_directory_is_an_operational_error(self, tmp_path):
+        """A file the engine cannot open fails as OperationalError, as on stock sqlite3.
+
+        pyturso raises an unmapped IoError; callers such as prune_system on a fresh
+        install catch OperationalError and treat the database as not there yet.
+        """
+
+        async def open_engine():
+            engine = create_async_engine(turso_url(str(tmp_path / "missing" / "db")))
+            try:
+                async with engine.connect():
+                    pass
+            finally:
+                await engine.dispose()
+
+        with pytest.raises(OperationalError, match="unable to open database file") as raised:
+            _run(open_engine())
+        assert type(raised.value.orig.__cause__).__name__ == "IoError"

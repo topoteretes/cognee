@@ -28,6 +28,9 @@ MIN_GATE_CONFIDENCE = GATE_CONFIDENCE
 # blocks plus separators stays below the budget, so the batching logic can stay simple.
 BATCH_CHAR_BUDGET = 16_000
 CURATOR_BLOCKS_PER_BATCH = 6
+# One run curates at most this many batches, so a session that gates thousands of
+# entries stays bounded; entries past the bound are sealed by the watermark, not carried over.
+MAX_CURATOR_BATCHES_PER_RUN = 20
 MAX_QA_QUESTION_CHARS = 1_200
 MAX_QA_ANSWER_CHARS = 1_200
 MAX_CANDIDATE_CHARS = 280

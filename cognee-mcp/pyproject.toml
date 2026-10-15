@@ -1,6 +1,6 @@
 [project]
 name = "cognee-mcp"
-version = "0.5.6"
+version = "0.5.7"
 description = "Cognee MCP server"
 readme = "README.md"
 # Upper bound is real, not defensive: cognee[docs] -> unstructured -> spacy, and
