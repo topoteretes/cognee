@@ -894,6 +894,11 @@ def get_integrations_router():
         credential = await get_active_credential_for_user(user.id, integration.provider)
         if credential is None:
             raise HTTPException(status_code=404, detail=f"{provider} is not connected")
+        if payload.resource_ids is None and not integration.resource_selection_allows_all:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{provider} needs an explicit list of resource ids; null is not supported",
+            )
         resource_ids = None
         if payload.resource_ids is not None:
             resource_ids = list(

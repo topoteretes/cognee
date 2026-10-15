@@ -21,7 +21,7 @@ async def install(provider, user_id=None, token="original"):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("provider", ["google_drive", "gmail"])
+@pytest.mark.parametrize("provider", ["google_drive", "gmail", "google_calendar"])
 @pytest.mark.parametrize("reconnect", [False, True])
 async def test_refresh_cannot_resurrect_or_overwrite_reconnected_credentials(
     credential_db, monkeypatch, provider, reconnect
@@ -29,7 +29,11 @@ async def test_refresh_cannot_resurrect_or_overwrite_reconnected_credentials(
     adapter = import_module(f"cognee.modules.integrations.{provider}.adapter")
     integration = getattr(
         adapter,
-        "GoogleDriveIntegration" if provider == "google_drive" else "GoogleGmailIntegration",
+        {
+            "google_drive": "GoogleDriveIntegration",
+            "gmail": "GoogleGmailIntegration",
+            "google_calendar": "GoogleCalendarIntegration",
+        }[provider],
     )()
     original = await install(provider)
     started, finish = asyncio.Event(), asyncio.Event()
