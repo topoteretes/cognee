@@ -164,10 +164,11 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
             return handle_embedding_response(original_texts, embeddings, self.dimensions)
 
         try:
+            # encoding_format is left unset: the openai SDK then requests base64 and
+            # decodes it with numpy, instead of parsing float JSON one element at a time.
             create_kwargs = {
                 "model": self.model,
                 "input": sanitized_text,
-                "encoding_format": "float",
             }
             if self.input_type:
                 create_kwargs["extra_body"] = {"input_type": self.input_type}
