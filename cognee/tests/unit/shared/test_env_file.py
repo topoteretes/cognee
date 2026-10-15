@@ -247,3 +247,71 @@ def test_persisted_config_goes_to_the_loaded_file(monkeypatch, tmp_path):
     assert (path, created) == (str(pinned), False)
     assert "COGNEE_ENVFILE_TEST_PERSIST='yes'" in pinned.read_text()
     assert not (elsewhere / ".env").exists()
+
+
+def test_litellm_is_kept_from_loading_a_dotenv_of_its_own(monkeypatch, tmp_path):
+    """litellm's import-time load_dotenv() would bypass the resolution above."""
+    monkeypatch.delenv("LITELLM_MODE", raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    env_file.load_env_file()
+
+    assert os.environ["LITELLM_MODE"] == "PRODUCTION"
+
+
+def test_a_litellm_mode_already_set_is_kept(monkeypatch, tmp_path):
+    monkeypatch.setenv("LITELLM_MODE", "DEV")
+    monkeypatch.chdir(tmp_path)
+
+    env_file.load_env_file()
+
+    assert os.environ["LITELLM_MODE"] == "DEV"
+
+
+def test_a_litellm_mode_in_the_resolved_file_is_kept(monkeypatch, tmp_path):
+    monkeypatch.delenv("LITELLM_MODE", raising=False)
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / ".env").write_text("LITELLM_MODE=DEV\n")
+    monkeypatch.chdir(project)
+
+    env_file.load_env_file()
+
+    assert os.environ["LITELLM_MODE"] == "DEV"
+
+
+def test_importing_cognee_lets_no_dependency_load_another_dotenv(tmp_path):
+    """End to end in a fresh interpreter: only cognee's resolver may call load_dotenv()."""
+    import subprocess
+    import sys
+
+    pinned = tmp_path / "cognee.env"
+    pinned.write_text(f"{KEY}=from-pinned\n")
+    script = (
+        "import dotenv, sys\n"
+        "callers = []\n"
+        "real = dotenv.load_dotenv\n"
+        "def spy(*args, **kwargs):\n"
+        "    callers.append(sys._getframe(1).f_code.co_filename)\n"
+        "    return real(*args, **kwargs)\n"
+        "dotenv.load_dotenv = spy\n"
+        "import cognee\n"
+        "others = [c for c in callers if not c.endswith('env_file.py')]\n"
+        "print(others)\n"
+        "sys.exit(1 if others else 0)\n"
+    )
+    env = {k: v for k, v in os.environ.items() if k != "LITELLM_MODE"}
+    env[env_file.ENV_FILE_VARIABLE] = str(pinned)
+    env["PYTHONPATH"] = os.pathsep.join(sys.path)  # the cognee under test
+
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        check=False,
+        cwd=tmp_path,
+        env=env,
+        timeout=300,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, f"load_dotenv() called by {result.stdout.strip()}"
