@@ -96,9 +96,14 @@ def create_embedding_engine(
     ):
         raise CogneeConfigurationError(
             f"EMBEDDING_ENCODING_FORMAT=base64 is not supported with "
-            f"EMBEDDING_PROVIDER={embedding_provider} and EMBEDDING_MODEL={embedding_model}; "
-            f"it is supported for openai/ models and EMBEDDING_PROVIDER=openai_compatible.",
-            remediation="Unset EMBEDDING_ENCODING_FORMAT.",
+            f"EMBEDDING_PROVIDER={embedding_provider} and EMBEDDING_MODEL={embedding_model}. "
+            f"base64 is supported only for openai/ models and EMBEDDING_PROVIDER=openai_compatible; "
+            f"other providers reject it or return vectors in a different format.",
+            remediation=(
+                "Remove EMBEDDING_ENCODING_FORMAT from your environment or .env file, so cognee "
+                "requests the format this provider supports. Embeddings are unchanged; base64 "
+                "only makes responses cheaper to parse."
+            ),
         )
 
     if embedding_provider == "fastembed":
