@@ -426,13 +426,15 @@ async def recall(
             only when every other requested source returned nothing, i.e. when
             cognee lacks the context to answer.
         code_query: Structured operation and arguments for the ``"code"``
-            scope (same dict format as ``search(code_query=...)``, e.g.
-            ``{"operation": "impact_analysis", "seeds": ["UserService"]}``).
+            scope (same dict format and operations as ``search(code_query=...)``,
+            e.g. ``{"operation": "impact_analysis", "seeds": ["UserService"]}`` or
+            ``{"operation": "ask", "question": "where are tokens validated?"}``).
             ``None`` runs the default ``explore`` operation with the query
             text as seed. Only valid when ``scope`` includes ``"code"``
             (which is never implied by ``"auto"`` or ``"all"``); results are
-            tagged ``source="code"``. A seed the code graph cannot resolve
-            contributes nothing rather than failing the recall.
+            tagged ``source="code"``. A seed the code graph cannot resolve, a
+            dataset without a code graph, or flows on a graph without them
+            contribute nothing rather than failing the recall.
 
     Returns:
         Search results. When searching session-only, returns a list of
