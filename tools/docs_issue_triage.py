@@ -660,7 +660,7 @@ async def site_check_with_llm(system_prompt: str, user_message: str) -> Any:
         note: str = Field(
             description=(
                 "One sentence, no more, saying what this page states that resolves the report. "
-                "Starts with a verb, e.g. 'states that TRIPLET_COMPLETION requires ...'"
+                "Starts with a verb, e.g. 'states that GRAPH_COMPLETION requires ...'"
             )
         )
 
