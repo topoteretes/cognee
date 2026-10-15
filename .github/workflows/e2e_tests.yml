@@ -485,9 +485,12 @@ jobs:
 
       # Deliberately NO LLM/embedding secrets: the enola code-graph route must
       # ingest, store and answer SearchType.CODE queries without an API key.
+      # GLINER_AUTO_INSTALL=false turns a GLiNER runtime install into an error, so
+      # this job fails if a keyless code-only run ever reaches for it (SDK-795).
       - name: Run code graph e2e test
         env:
           ENV: 'dev'
+          GLINER_AUTO_INSTALL: 'false'
         run: uv run python ./cognee/tests/test_code_graph_e2e.py
 
   run-s3-bucket-test:
