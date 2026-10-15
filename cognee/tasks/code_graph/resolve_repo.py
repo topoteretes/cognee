@@ -5,17 +5,25 @@ Used by ``add()`` to recognise a GitHub/GitLab repository URL
 route, and by the GitHub integration sync to clone private repositories with
 an installation token (``resolve_repo_source(credentials=...)``). Clones live under
 ``BaseConfig.repos_root_directory`` (``~/.cognee/repos`` by default) and are
-reused across calls; an existing clone is refreshed with a best-effort
-``git pull``. A ``branch`` can be chosen for a remote repository; each branch is
-cloned into a directory of its own.
+reused across calls once its ``origin`` is checked; an existing clone is
+refreshed with a best-effort ``git pull`` (a clone made with credentials is
+refused when that refresh fails). A ``branch`` can be chosen for a remote
+repository; each branch is cloned into a directory of its own. A new clone is
+made in a temporary sibling directory and renamed into place once complete.
+Cloning and refreshing one clone directory are serialized by a file lock, across
+processes; reading the clone afterwards (building its code graph, adding its
+documents) runs outside that lock.
 """
 
 import asyncio
 import base64
+import concurrent.futures
 import hashlib
 import os
 import re
 import shutil
+import tempfile
+from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
@@ -31,6 +39,15 @@ _REMOTE_PREFIXES = ("https://", "http://", "git@", "ssh://")
 # The ssh half of the above, as one whitespace-free token: unambiguously a git
 # remote, never a web page -- and never a sentence that merely starts with one.
 _SSH_REPO_SPEC = re.compile(r"(?:git@[\w.-]+:|ssh://)\S+")
+
+# Written into .git of a clone made with credentials. Such a clone may hold a
+# private repository, so it is handed out only after a refresh that proves the
+# caller's access: a failed refresh is refused instead of handing over the stale
+# copy, whatever credentials the caller passed (they may be wrong).
+_CREDENTIALED_MARKER = "cognee-credentialed"
+
+# Per-clone lock files, in a directory of their own inside the clones directory.
+_LOCKS_DIR = ".locks"
 
 _FALSEY = {"false", "0", "no", "off"}
 
@@ -183,17 +200,37 @@ def redact_repo_spec(spec: str | Path) -> str:
     return urlunsplit((parts.scheme, host, parts.path, parts.query, parts.fragment))
 
 
-def _clone_slug(url: str, branch: str | None = None) -> str:
-    """A stable directory name for a remote URL, e.g. 'github.com-org-repo'.
+def _repo_key(url: str) -> str:
+    """The part of a credential-free remote URL that names the repository.
 
-    A chosen branch gets its own directory beside it, e.g. 'github.com-org-repo@dev-<hash>',
-    so no clone is ever replaced under another caller. The hash of the exact name keeps
-    apart branches the readable part merges: case-insensitive file systems, and the
-    characters replaced here.
+    The scheme, a trailing slash and a ``.git`` suffix are dropped, so the
+    spellings of one repository share a clone and pass its origin check.
     """
-    tail = url.split("://")[-1].replace(":", "/").rstrip("/")
-    tail = tail.removesuffix(".git")
-    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", tail).strip("-.")
+    return url.split("://")[-1].rstrip("/").removesuffix(".git")
+
+
+def _readable_slug(url: str) -> str:
+    """The readable directory name of a remote URL, e.g. 'github.com-org-repo'.
+
+    Every run of characters other than letters, digits, '.', '_' and '-' becomes one '-'.
+    """
+    return re.sub(r"[^A-Za-z0-9._-]+", "-", _repo_key(url).replace(":", "/")).strip("-.")
+
+
+def _clone_slug(url: str, branch: str | None = None) -> str:
+    """A stable directory name for a remote URL, e.g. 'github.com-org-repo-<hash>'.
+
+    The readable part merges every run of other characters into one '-', so
+    'github.com/a-b/c' and 'github.com/a/b-c' read the same; the hash of the
+    repository's exact name (:func:`_repo_key`) keeps their clones apart.
+
+    A chosen branch gets its own directory beside it, e.g.
+    'github.com-org-repo-<hash>@dev-<hash>', so no clone is ever replaced under another
+    caller. The hash of the exact name keeps apart branches the readable part merges:
+    case-insensitive file systems, and the characters replaced here.
+    """
+    key = _repo_key(url)
+    slug = f"{_readable_slug(url)}-{hashlib.sha256(key.encode()).hexdigest()[:8]}"
     if branch is None:
         return slug
     readable = re.sub(r"[^A-Za-z0-9._-]+", "-", branch)[:40]
@@ -202,8 +239,37 @@ def _clone_slug(url: str, branch: str | None = None) -> str:
 
 def clone_dir(url: str, branch: str | None = None, clones_dir: Path | None = None) -> Path:
     """Where :func:`resolve_repo_source` clones the credential-free ``url`` on ``branch``
-    (None: the remote's default branch, in the directory every clone had before)."""
+    (None: the remote's default branch, in a directory of its own)."""
     return (Path(clones_dir) if clones_dir else default_clones_dir()) / _clone_slug(url, branch)
+
+
+def repo_identity(url: str) -> Path:
+    """The Data-row identity of the credential-free remote ``url``.
+
+    The path its default-branch clone had before clone directories carried a
+    hash (:func:`_clone_slug`). Rows are keyed on it, so repositories already
+    stored keep their row: keying on the hashed directory would add a second
+    manifest row for each of them on the next add. Not a directory anything is
+    cloned into.
+    """
+    return default_clones_dir() / _readable_slug(url)
+
+
+def clone_repo_name(url: str, clone: str | Path) -> str:
+    """The repository name the code graph gives ``clone``, a clone of the credential-free ``url``.
+
+    enola names a repository after its directory, and every code node id derives
+    from that name. Clone directories now carry a hash (:func:`_clone_slug`), so
+    the name is the one the directory had before: the readable slug, followed by
+    a branch clone's own suffix. A repository already stored keeps its node ids,
+    where the hashed name would add a second subgraph that nothing sweeps. A
+    directory that is not a clone of ``url`` keeps its own name.
+    """
+    name = Path(clone).name
+    hashed = _clone_slug(url)
+    if name == hashed or name.startswith(hashed + "@"):
+        return _readable_slug(url) + name[len(hashed) :]
+    return name
 
 
 # git's refname rules that cannot appear anywhere in a branch name: control
@@ -239,23 +305,102 @@ def check_branch_name(branch) -> None:
         raise ValueError(f"Invalid branch name {branch!r}: {reason}.")
 
 
-def _credential_env(token: str) -> dict:
+def _credential_env(token: str, url: str) -> dict:
     """Auth for git over https, injected as environment-level git config.
 
     The environment channel (git >= 2.31) keeps the token out of argv (which
     any local process can read from the process listing), out of every
     URL-shaped string (so nothing derived from the URL can leak it into
     logs or error messages), and out of the on-disk remote config.
+
+    The header is scoped to the origin of the credential-free ``url``
+    (``http.<scheme>://<host>/.extraHeader``), so git sends it to that host
+    only, never to another host a redirect or a submodule points at. A remote
+    that is not http(s) gets nothing: the header is http config.
     """
+    parts = urlsplit(url)
+    scheme = parts.scheme.lower()
+    if scheme not in ("http", "https") or not parts.netloc:
+        return {}
+    host = parts.netloc.rsplit("@", 1)[-1].lower()
     basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
     return {
         "GIT_CONFIG_COUNT": "1",
-        "GIT_CONFIG_KEY_0": "http.extraHeader",
+        "GIT_CONFIG_KEY_0": f"http.{scheme}://{host}/.extraHeader",
         "GIT_CONFIG_VALUE_0": f"Authorization: Basic {basic}",
     }
 
 
-async def _run_git(args, cwd: Path | None = None, env: dict | None = None) -> tuple:
+def _noninteractive_env(ssh_command: str | None = None) -> dict:
+    """Git never waits for input: no username/password prompt over https, and
+    ssh in batch mode (no passphrase or host-key prompt). ``ssh_command`` is the
+    user's ``core.sshCommand`` (see :func:`_configured_ssh_command`), run in
+    batch mode in place of plain ssh. A user's own GIT_SSH_COMMAND or GIT_SSH
+    is left in charge of ssh."""
+    env = {"GIT_TERMINAL_PROMPT": "0"}
+    if "GIT_SSH_COMMAND" not in os.environ and "GIT_SSH" not in os.environ:
+        env["GIT_SSH_COMMAND"] = f"{ssh_command or 'ssh'} -o BatchMode=yes"
+    return env
+
+
+# Git config every invocation carries: no credential helper and no askpass
+# program, so git authenticates only with what the caller passed (the
+# environment-level header of _credential_env, or URL userinfo). Without these a
+# refresh of a private clone could succeed on the server's stored credentials (a
+# helper, a keychain) for a caller who brought none, and unlock that clone. An
+# empty credential.helper resets the helper list built from the system, global
+# and repository config, which git reads before the environment's entries.
+_NO_STORED_CREDENTIALS_CONFIG = (("credential.helper", ""), ("core.askPass", ""))
+
+
+def _git_config_entries(env) -> list[tuple[str, str]]:
+    """The ``GIT_CONFIG_COUNT`` / ``GIT_CONFIG_KEY_<n>`` / ``GIT_CONFIG_VALUE_<n>`` entries of ``env``."""
+    try:
+        count = int(env.get("GIT_CONFIG_COUNT", "0"))
+    except ValueError:
+        count = 0
+    return [
+        (env.get(f"GIT_CONFIG_KEY_{index}", ""), env.get(f"GIT_CONFIG_VALUE_{index}", ""))
+        for index in range(count)
+    ]
+
+
+def _is_git_config_entry(name: str) -> bool:
+    return name == "GIT_CONFIG_COUNT" or name.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"))
+
+
+def _git_env(env: dict | None = None) -> dict:
+    """The environment git runs with: the process's, non-interactive, ``env`` on top,
+    and no stored credentials (see :data:`_NO_STORED_CREDENTIALS_CONFIG`).
+
+    Environment-level config entries are renumbered into one list: the process's own
+    first, then ``env``'s (e.g. :func:`_credential_env`), then the hardening entries
+    last, so they win and no index of one source overwrites another's. GIT_ASKPASS
+    and SSH_ASKPASS are set empty: git then skips every askpass program, and with
+    GIT_TERMINAL_PROMPT=0 a missing credential fails instead of being asked for.
+    """
+    extra = env or {}
+    entries = (
+        _git_config_entries(os.environ)
+        + _git_config_entries(extra)
+        + list(_NO_STORED_CREDENTIALS_CONFIG)
+    )
+    merged = {
+        name: value
+        for source in (os.environ, _noninteractive_env(), extra)
+        for name, value in source.items()
+        if not _is_git_config_entry(name)
+    }
+    merged["GIT_ASKPASS"] = ""
+    merged["SSH_ASKPASS"] = ""
+    merged["GIT_CONFIG_COUNT"] = str(len(entries))
+    for index, (key, value) in enumerate(entries):
+        merged[f"GIT_CONFIG_KEY_{index}"] = key
+        merged[f"GIT_CONFIG_VALUE_{index}"] = value
+    return merged
+
+
+async def _exec_git(args, cwd: Path | None = None, env: dict | None = None) -> tuple:
     git_binary = shutil.which("git")
     if git_binary is None:
         raise CodeRepositoryError(
@@ -265,19 +410,98 @@ async def _run_git(args, cwd: Path | None = None, env: dict | None = None) -> tu
         git_binary,
         *args,
         cwd=str(cwd) if cwd else None,
-        env={**os.environ, **env} if env else None,
+        env=_git_env(env),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
     try:
-        _stdout, stderr = await asyncio.wait_for(
-            process.communicate(), timeout=_GIT_TIMEOUT_SECONDS
-        )
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=_GIT_TIMEOUT_SECONDS)
     except asyncio.TimeoutError:
         process.kill()
         await process.wait()
         raise CodeRepositoryError(message=f"git {args[0]} timed out after {_GIT_TIMEOUT_SECONDS}s.")
-    return process.returncode, stderr.decode(errors="replace")
+    return process.returncode, stdout.decode(errors="replace"), stderr.decode(errors="replace")
+
+
+async def _run_git(args, cwd: Path | None = None, env: dict | None = None) -> tuple:
+    returncode, _stdout, stderr = await _exec_git(args, cwd, env)
+    return returncode, stderr
+
+
+async def _configured_ssh_command() -> str | None:
+    """The user's ``core.sshCommand`` from the global or system git config, or None.
+
+    The GIT_SSH_COMMAND that :func:`_noninteractive_env` sets overrides that
+    setting, so it is read here and carried into that command. A repository's
+    own config is not read: no clone sets one, and the process's working
+    directory may sit in an unrelated repository.
+    """
+    for scope in ("--global", "--system"):
+        returncode, stdout, _stderr = await _exec_git(["config", scope, "--get", "core.sshCommand"])
+        if returncode == 0 and stdout.strip():
+            return stdout.strip()
+    return None
+
+
+async def _has_commit(clone: Path) -> bool:
+    """Whether ``clone`` has a checked-out commit; an interrupted clone has none."""
+    returncode, _stdout, _stderr = await _exec_git(
+        ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], cwd=clone
+    )
+    return returncode == 0
+
+
+@asynccontextmanager
+async def _clone_lock(target: Path):
+    """Hold the lock of the clone directory ``target``, across processes and tasks.
+
+    An OS file lock (``filelock``) in the clones directory's lock directory,
+    released by the OS if its holder crashes. Acquire and release run on one
+    dedicated thread, off the event loop, as in ``cognee.modules.migrations.runner``
+    and for the same reason: filelock's per-thread state breaks when they run on
+    different threads. A caller cancelled while waiting releases the lock as soon
+    as its thread gets it.
+    """
+    from filelock import FileLock
+
+    lock_dir = target.parent / _LOCKS_DIR
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    lock = FileLock(str(lock_dir / f"{target.name}.lock"), thread_local=False)
+    loop = asyncio.get_running_loop()
+    executor = concurrent.futures.ThreadPoolExecutor(
+        max_workers=1, thread_name_prefix="cognee-clone-lock"
+    )
+    acquiring = loop.run_in_executor(executor, lock.acquire)
+    try:
+        await asyncio.shield(acquiring)
+    except asyncio.CancelledError:
+
+        def _release_late(future) -> None:
+            if not future.cancelled() and future.exception() is None:
+                executor.submit(lock.release)
+            executor.shutdown(wait=False)
+
+        acquiring.add_done_callback(_release_late)
+        raise
+    except BaseException:
+        executor.shutdown(wait=False)
+        raise
+    try:
+        yield
+    finally:
+        try:
+            await loop.run_in_executor(executor, lock.release)
+        finally:
+            executor.shutdown(wait=False)
+
+
+async def _origin_url(clone: Path) -> str | None:
+    """The remote URL stored for ``origin`` in ``clone``, as written (no
+    ``insteadOf`` rewrite), or None when it has none."""
+    returncode, stdout, _stderr = await _exec_git(
+        ["config", "--get", "remote.origin.url"], cwd=clone
+    )
+    return stdout.strip() if returncode == 0 else None
 
 
 async def _remote_ref_missing(remote: str, branch: str, env: dict | None) -> bool:
@@ -390,7 +614,24 @@ async def resolve_repo_source(
             text = text.replace(url, clean_url)
         return re.sub(r"://[^/\s@]+@", "://", text)
 
-    auth_env = _credential_env(credentials) if credentials else None
+    is_http_remote = clean_url.lower().startswith(("http://", "https://"))
+    if credentials and not is_http_remote:
+        # They would reach git as an http header, which an ssh remote never sends:
+        # cloning without them would still mark the clone as credentialed.
+        raise CodeRepositoryError(
+            message=f"credentials are only supported for http(s) remotes, but "
+            f"'{clean_url}' is an ssh remote: configure an ssh key for it instead, "
+            "or pass its https:// URL."
+        )
+
+    # The caller's credentials, if any, only ever reach the remote's own host.
+    git_env = _credential_env(credentials, clean_url) if credentials else {}
+    ssh_overridden = "GIT_SSH_COMMAND" in os.environ or "GIT_SSH" in os.environ
+    if not ssh_overridden and not is_http_remote:
+        # ssh runs only for an ssh remote: the user's core.sshCommand is read only then.
+        git_env = {**_noninteractive_env(await _configured_ssh_command()), **git_env}
+    git_env = git_env or None
+    credentialed = has_credentials or bool(credentials)
 
     base = Path(clones_dir) if clones_dir else default_clones_dir()
     target = clone_dir(clean_url, branch, base)
@@ -404,54 +645,145 @@ async def resolve_repo_source(
     def _branch_not_found() -> CodeRepositoryError:
         return CodeRepositoryError(message=f"Branch '{branch}' was not found in '{clean_url}'.")
 
-    if (target / ".git").is_dir():
-        # Legacy URL-embedded credentials: fetch from the explicit URL
-        # instead of the stored remote (which is deliberately
-        # credential-free). Out-of-band credentials ride the environment.
-        if branch is None:
-            pull_args = ["pull", "--ff-only"] + ([url] if has_credentials else [])
-            returncode, stderr = await _run_git(pull_args, cwd=target, env=auth_env)
-        else:
-            # Fetch and reset, not pull: a rebased or force-pushed branch is not a
-            # fast-forward. The ref is spelled out because git resolves a bare name
-            # itself (a tag before a branch, '+x' as a force refspec).
-            remote = url if has_credentials else "origin"
-            fetch_args = ["fetch", "--depth", "1", remote, f"refs/heads/{branch}"]
-            returncode, stderr = await _run_git(fetch_args, cwd=target, env=auth_env)
-            if returncode != 0 and await _remote_ref_missing(url, branch, auth_env):
-                raise _branch_not_found()
-            if returncode == 0:
-                returncode, stderr = await _run_git(["reset", "--hard", "FETCH_HEAD"], cwd=target)
-        if returncode != 0:
-            # A stale clone is still indexable; the caller asked for the repo,
-            # not for freshness guarantees.
-            logger.warning(
-                "Reusing existing clone at %s (refresh failed: %s)", target, _scrub(stderr[-500:])
+    base.mkdir(parents=True, exist_ok=True)
+    # One caller at a time per clone directory, in this process or another: a
+    # refresh never runs on a clone another caller is still writing or refreshing.
+    async with _clone_lock(target):
+        # Left by a holder that died mid-clone; nobody else uses them while we hold the lock.
+        for leftover in target.parent.glob(f".{target.name}.tmp-*"):
+            await asyncio.to_thread(shutil.rmtree, leftover, True)
+
+        if (target / ".git").is_dir():
+            # The slug is shared by every caller, so never index a clone of another
+            # repository that happens to sit where this one would.
+            origin = await _origin_url(target)
+            if origin is None or _repo_key(redact_repo_spec(origin)) != _repo_key(clean_url):
+                raise CodeRepositoryError(
+                    message=f"The existing clone at {target} is not a clone of '{clean_url}' "
+                    f"(its origin is '{redact_repo_spec(origin) if origin else 'unset'}'). "
+                    "Remove that directory to clone the repository again."
+                )
+            if await _has_commit(target):
+                await _refresh_clone(
+                    target, url, clean_url, branch, has_credentials, credentialed, git_env, _scrub
+                )
+                return target
+            # Interrupted before it had a commit (made before clones were renamed
+            # into place): never index it, clone it again instead.
+            logger.warning("Replacing the incomplete clone at %s", target)
+            await asyncio.to_thread(shutil.rmtree, target)
+
+        if target.exists():
+            if target.is_dir() and not any(target.iterdir()):
+                target.rmdir()
+            else:
+                raise CodeRepositoryError(
+                    message=f"{target} exists and is not a clone of '{clean_url}'. "
+                    "Remove it to clone the repository."
+                )
+
+        # Checked first: 'clone --branch' falls back to a tag of that name and leaves HEAD
+        # detached, which no later fetch of the branch would follow.
+        if branch is not None and await _remote_ref_missing(url, branch, git_env):
+            raise _branch_not_found()
+        logger.info("Cloning %s into %s", clean_url, target)
+        # Cloned beside the target and renamed into place once the remote and the
+        # marker are written: the target directory is always a complete clone, so
+        # an interrupted clone is never found there and taken for one.
+        partial = await asyncio.to_thread(_make_partial_clone_dir, target)
+        try:
+            # core.symlinks=false: git otherwise materializes symlinks committed in the
+            # remote, and nothing re-validates paths under the clone afterwards -- a repo
+            # containing '.enola -> ~/.ssh' would have the enola snapshot written through
+            # it, and 'mod.py -> /proc/self/environ' would be read into the code graph.
+            # With this set, git writes each symlink as a regular file containing its
+            # target path. Passed via -c on clone so it is persisted into the new repo's
+            # config and the later 'git pull --ff-only' honours it too.
+            branch_args = ["--branch", branch] if branch is not None else []
+            returncode, stderr = await _run_git(
+                [
+                    "clone",
+                    "-c",
+                    "core.symlinks=false",
+                    "--depth",
+                    "1",
+                    *branch_args,
+                    url,
+                    str(partial),
+                ],
+                env=git_env,
             )
+            if returncode != 0:
+                raise CodeRepositoryError(
+                    message=f"Failed to clone '{clean_url}': {_scrub(stderr[-1000:])}"
+                )
+            if has_credentials:
+                returncode, stderr = await _run_git(
+                    ["remote", "set-url", "origin", clean_url], cwd=partial
+                )
+                if returncode != 0:
+                    # The stored remote would keep the token: never move this clone in.
+                    raise CodeRepositoryError(
+                        message=f"Could not store the remote of '{clean_url}': "
+                        f"{_scrub(stderr[-500:])}"
+                    )
+            if credentialed and (partial / ".git").is_dir():
+                (partial / ".git" / _CREDENTIALED_MARKER).touch()
+            os.replace(partial, target)
+        finally:
+            if partial.exists():
+                await asyncio.to_thread(shutil.rmtree, partial, True)
         return target
 
-    target.parent.mkdir(parents=True, exist_ok=True)
-    # Checked first: 'clone --branch' falls back to a tag of that name and leaves HEAD
-    # detached, which no later fetch of the branch would follow.
-    if branch is not None and await _remote_ref_missing(url, branch, auth_env):
-        raise _branch_not_found()
-    logger.info("Cloning %s into %s", clean_url, target)
-    # core.symlinks=false: git otherwise materializes symlinks committed in the
-    # remote, and nothing re-validates paths under the clone afterwards -- a repo
-    # containing '.enola -> ~/.ssh' would have the enola snapshot written through it,
-    # and 'mod.py -> /proc/self/environ' would be read into the code graph. With this
-    # set, git writes each symlink as a regular file containing its target path.
-    # Passed via -c on clone so it is persisted into the new repo's config and the
-    # later 'git pull --ff-only' honours it too.
-    branch_args = ["--branch", branch] if branch is not None else []
-    returncode, stderr = await _run_git(
-        ["clone", "-c", "core.symlinks=false", "--depth", "1", *branch_args, url, str(target)],
-        env=auth_env,
-    )
+
+def _make_partial_clone_dir(target: Path) -> Path:
+    """A new empty directory beside ``target`` that a clone is made in before its rename."""
+    return Path(tempfile.mkdtemp(prefix=f".{target.name}.tmp-", dir=target.parent))
+
+
+async def _refresh_clone(
+    target: Path,
+    url: str,
+    clean_url: str,
+    branch: str | None,
+    has_credentials: bool,
+    credentialed: bool,
+    git_env: dict | None,
+    scrub,
+) -> None:
+    """Bring the existing clone ``target`` up to date, or decide it may be used stale."""
+    marker = target / ".git" / _CREDENTIALED_MARKER
+    # Legacy URL-embedded credentials: fetch from the explicit URL
+    # instead of the stored remote (which is deliberately
+    # credential-free). Out-of-band credentials ride the environment.
+    if branch is None:
+        pull_args = ["pull", "--ff-only"] + ([url] if has_credentials else [])
+        returncode, stderr = await _run_git(pull_args, cwd=target, env=git_env)
+    else:
+        # Fetch and reset, not pull: a rebased or force-pushed branch is not a
+        # fast-forward. The ref is spelled out because git resolves a bare name
+        # itself (a tag before a branch, '+x' as a force refspec).
+        remote = url if has_credentials else "origin"
+        fetch_args = ["fetch", "--depth", "1", remote, f"refs/heads/{branch}"]
+        returncode, stderr = await _run_git(fetch_args, cwd=target, env=git_env)
+        if returncode != 0 and await _remote_ref_missing(url, branch, git_env):
+            raise CodeRepositoryError(message=f"Branch '{branch}' was not found in '{clean_url}'.")
+        if returncode == 0:
+            returncode, stderr = await _run_git(["reset", "--hard", "FETCH_HEAD"], cwd=target)
     if returncode != 0:
-        raise CodeRepositoryError(
-            message=f"Failed to clone '{clean_url}': {_scrub(stderr[-1000:])}"
+        # A clone made with credentials may be private: it is handed out only
+        # through a refresh that proves access. Credentials the caller passed
+        # prove nothing until the remote accepts them -- they may be wrong.
+        if marker.is_file():
+            raise CodeRepositoryError(
+                message=f"Could not refresh '{clean_url}', and its existing clone was made "
+                "with credentials, so it is used only after a refresh with valid credentials "
+                f"succeeds: {scrub(stderr[-500:])}"
+            )
+        # A stale clone is still indexable; the caller asked for the repo,
+        # not for freshness guarantees.
+        logger.warning(
+            "Reusing existing clone at %s (refresh failed: %s)", target, scrub(stderr[-500:])
         )
-    if has_credentials:
-        await _run_git(["remote", "set-url", "origin", clean_url], cwd=target)
-    return target
+    elif credentialed:
+        marker.touch()
