@@ -165,7 +165,7 @@ Python classes for those.
   `cognify()` do not forward `graph_model`; the server builds a generic
   graph.
 - A custom model skips the generic path's ontology resolution, per-graph
-  node dedup, and `functional_relationships`. Summaries still run.
+  node dedup. Summaries still run.
 
 ## How it works
 

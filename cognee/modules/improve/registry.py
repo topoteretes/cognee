@@ -1,6 +1,6 @@
 """The only description of the improve stages (plan Part 5.5).
 
-``DEFAULT_STAGES`` lists the nine stages in the order of plan Part 2. The order
+``DEFAULT_STAGES`` lists the stages in execution order. The order
 is load-bearing — stage 4's lessons are what stage 5 gates on, stage 5's
 accepted lessons are stage 7's anchors, and stage 7 runs before enrichment —
 and ``test_registry_order`` pins it; this list is the single place it is
@@ -20,6 +20,7 @@ from .stages import (
     GlobalContextIndexStage,
     PersistAgentTracesStage,
     PersistSessionQAStage,
+    ReviewConflictsStage,
     TripletEnrichmentStage,
     UpdateUserPreferencesStage,
 )
@@ -32,6 +33,7 @@ DEFAULT_STAGES: list[BaseStage] = [
     DistillSessionsStage(),
     UpdateUserPreferencesStage(),
     BuildTruthSubspaceStage(),
+    ReviewConflictsStage(),
     TripletEnrichmentStage(),
     GlobalContextIndexStage(),
 ]

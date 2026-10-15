@@ -20,7 +20,6 @@ import lancedb
 from lancedb.pydantic import LanceModel, Vector
 from pydantic import BaseModel
 
-from cognee.infrastructure.background_tasks import register_background_task
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.infrastructure.databases.vector.pgvector.serialize_data import serialize_data
@@ -54,9 +53,6 @@ from ..vector_db_interface import VectorDBInterface
 
 logger = get_logger("LanceDBAdapter")
 _NO_DEFAULT = object()
-# Anchors the background version prune each adapter starts when it first opens
-# its store (asyncio keeps only weak references to tasks).
-_OPEN_PRUNE_TASKS: set[asyncio.Task] = set()
 _SIMPLE_TYPE_DEFAULTS = {
     str: "",
     int: 0,
@@ -235,25 +231,10 @@ class LanceDBAdapter(VectorDBInterface):
         self._compaction_lock = asyncio.Lock()
         self._compaction_unsupported: str | None = None
         self._lance_core_checked = False
-        # The version prune started when this adapter first opens its store
-        # (see ``_schedule_open_prune``), so a store that receives no more
-        # writes still has its superseded versions reclaimed.
-        self._open_prune_started = False
-        self._open_prune_task: asyncio.Task | None = None
-        # Timer for one more prune once a pass's pending versions have aged
-        # (see ``_schedule_followup_prune``).
-        self._followup_prune_handle: asyncio.TimerHandle | None = None
 
     async def get_connection(self):
-        """
-        Return the connection used by this adapter.
-
-        The first successful call also starts a background prune of superseded
-        table versions (see ``_schedule_open_prune``).
-        """
-        connection = await self._open_connection()
-        self._schedule_open_prune()
-        return connection
+        """Return the connection used by this adapter."""
+        return await self._open_connection()
 
     async def _open_connection(self):
         """
@@ -779,11 +760,9 @@ class LanceDBAdapter(VectorDBInterface):
         every pass, so no table starves. A pass ends once both are spent.
 
         The files a pass supersedes can only go once the retention window has
-        passed, i.e. in a later pass. So that a store which receives no more
-        writes still gets them back, every pass schedules one more prune for
-        when the window has passed (``_schedule_followup_prune``), and every
-        adapter prunes versions once when it first opens the store
-        (``_schedule_open_prune``), for what a closed adapter left behind.
+        passed, i.e. in a later pass: the next cognify on the store reclaims
+        them. Nothing prunes in the background, so no prune can outlive the
+        adapter or run while it closes.
 
         Only the fragment rewrite runs under ``VECTOR_DB_LOCK``: its commit is a
         Lance "rewrite" transaction that conflicts with a concurrent upsert or
@@ -802,10 +781,6 @@ class LanceDBAdapter(VectorDBInterface):
         reason = self._compaction_skip_reason()
         if reason:
             return {"skipped": reason}
-        # This pass prunes versions itself, so a first-open prune not yet
-        # started is redundant; one already running finishes first.
-        self._open_prune_started = True
-        await self._wait_for_open_prune()
         if self._compaction_lock.locked():
             return {"skipped": "in_progress"}
 
@@ -855,7 +830,6 @@ class LanceDBAdapter(VectorDBInterface):
                     tasks_left -= int(stats.get("executed_tasks", 0) or 0)
                 if version_budget > 0:
                     versions_left -= int(stats.get("old_versions_removed", 0) or 0)
-            self._schedule_followup_prune(options)
             return results
 
     async def _compact_collection(
@@ -902,134 +876,6 @@ class LanceDBAdapter(VectorDBInterface):
             retention_seconds=retention_seconds,
             max_versions=max_versions,
         )
-
-    # ------------------------------------------------------------------
-    # Version prune on first open
-    # ------------------------------------------------------------------
-
-    def _schedule_open_prune(self) -> None:
-        """Start, once per adapter, a background prune of superseded versions.
-
-        A compaction pass can only delete what it superseded once the retention
-        window has passed, i.e. in a later pass, and passes run only at the end
-        of a cognify. A store that stops receiving writes would keep those
-        files. Every process that opens the store -- server start, an SDK
-        script, an engine re-created after the idle-engine eviction -- reclaims
-        them here instead, within the same ``max_versions_per_run`` budget.
-        Runs in the background so the operation that opened the store is not
-        delayed; never raises.
-        """
-        if self._open_prune_started:
-            return
-        self._open_prune_started = True
-        options = self._compaction_options()
-        if self._compaction_skip_reason():
-            return
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return
-        self._start_prune_task(options)
-
-    def _schedule_followup_prune(self, options: dict) -> None:
-        """Prune once more when the versions younger than the retention window at
-        this pass (the writes that preceded it, the files it superseded) have aged.
-
-        Otherwise they wait for the next cognify, which an adapter that stays
-        open (a server) may never see. A later pass replaces the timer; the
-        prune itself schedules nothing, so the timer never chains."""
-        if self._followup_prune_handle is not None:
-            self._followup_prune_handle.cancel()
-            self._followup_prune_handle = None
-        if options["retention_seconds"] > 0:
-            self._followup_prune_handle = asyncio.get_running_loop().call_later(
-                options["retention_seconds"] + 1, self._start_followup_prune, options
-            )
-
-    def _start_followup_prune(self, options: dict) -> None:
-        self._followup_prune_handle = None
-        if self._permanently_closed:
-            return
-        self._start_prune_task(options)
-
-    def _start_prune_task(self, options: dict) -> asyncio.Task:
-        """Start a version prune in the background.
-
-        Every prune -- first-open or follow-up -- goes through here and takes
-        the single ``_open_prune_task`` slot that ``compact``, ``close`` and
-        ``prune`` wait on. A prune that replaces a still-running one in the slot
-        needs no explicit chaining: both take ``_compaction_lock``, which wakes
-        waiters in order, so the newer one finishes last and waiting on it
-        covers both. Registered as a background task, so
-        ``cognee.wait_for_background_tasks()`` and the server's shutdown drain
-        let it finish.
-        """
-        task = asyncio.ensure_future(self._prune_on_open(options))
-        self._open_prune_task = task
-        _OPEN_PRUNE_TASKS.add(task)
-        task.add_done_callback(_OPEN_PRUNE_TASKS.discard)
-        register_background_task(task)
-        return task
-
-    async def _prune_on_open(self, options: dict) -> dict:
-        try:
-            async with self._compaction_lock:
-                return await self._prune_pass(options)
-        except Exception as exc:
-            logger.warning("Version prune on open skipped: %s", exc, exc_info=True)
-            return {"error": str(exc)[:200]}
-
-    async def _wait_for_open_prune(self) -> None:
-        """Let a running version prune (first-open or follow-up, see
-        ``_start_prune_task``) finish -- it is bounded -- before this adapter
-        compacts, prunes or closes, so they never overlap and closing never tears
-        the worker down under it. A prune started on another event loop cannot be
-        awaited from this one and is left alone."""
-        task = self._open_prune_task
-        if task is None or task.done():
-            return
-        try:
-            same_loop = task.get_loop() is asyncio.get_running_loop()
-        except RuntimeError:
-            return
-        if same_loop:
-            await asyncio.wait({task})
-
-    async def _prune_pass(self, options: dict) -> dict:
-        """Prune superseded versions across the store's tables; no fragment rewrites."""
-        connection = await self.get_connection()
-        budget = int(options["max_versions"])  # 0 = unlimited
-        left = budget
-        results: dict = {}
-        for name in list(await connection.table_names()):
-            if budget > 0 and left <= 0:
-                break
-            try:
-                collection = await self.get_collection(name)
-                stats = await self._prune_collection(
-                    collection, options["retention_seconds"], left if budget > 0 else 0
-                )
-            except PylanceIncompatibleError as exc:
-                self._turn_off_compaction(exc)
-                results[name] = {"error": str(exc)[:200]}
-                break
-            except Exception as exc:
-                logger.warning(
-                    "Version prune skipped for collection '%s': %s", name, exc, exc_info=True
-                )
-                results[name] = {"error": str(exc)[:200]}
-                continue
-            results[name] = stats
-            if budget > 0:
-                left -= int(stats.get("old_versions_removed", 0) or 0)
-        removed = sum(
-            int(value.get("old_versions_removed", 0) or 0)
-            for value in results.values()
-            if isinstance(value, dict)
-        )
-        if removed:
-            logger.info("LanceDB version prune on open: %d old version(s) removed", removed)
-        return results
 
     async def _migrate_collection_schema(
         self,
@@ -1500,11 +1346,11 @@ class LanceDBAdapter(VectorDBInterface):
                 otel_span.set_attribute(COGNEE_VECTOR_RESULT_COUNT, 0)
                 return []
 
-            # Note: Exclude payload if not needed to optimize performance
+            # Never select the vector column: results carry only id, payload and
+            # distance. A limit=None search reads the whole collection, and fetching
+            # vectors there materializes every stored embedding (see PGVectorAdapter).
             select_columns = (
-                ["id", "vector", "payload", "_distance"]
-                if include_payload
-                else ["id", "vector", "_distance"]
+                ["id", "payload", "_distance"] if include_payload else ["id", "_distance"]
             )
 
             if node_name:
@@ -1860,15 +1706,9 @@ class LanceDBAdapter(VectorDBInterface):
         )
 
     async def prune(self):
-        # Everything is about to go, so a first-open version prune is pointless;
-        # one already running, or a compaction pass (whose version cleanup runs
-        # outside VECTOR_DB_LOCK), finishes before the tables are dropped under
-        # it. Same lock order as ``compact``: compaction lock, then the write lock.
-        self._open_prune_started = True
-        if self._followup_prune_handle is not None:
-            self._followup_prune_handle.cancel()
-            self._followup_prune_handle = None
-        await self._wait_for_open_prune()
+        # A compaction pass (whose version cleanup runs outside VECTOR_DB_LOCK)
+        # finishes before the tables are dropped under it. Same lock order as
+        # ``compact``: compaction lock, then the write lock.
         connection = await self.get_connection()
 
         async with self._compaction_lock:
@@ -1986,10 +1826,6 @@ class LanceDBAdapter(VectorDBInterface):
         concurrent ``get_connection`` that reads the snapshot sees the
         closed state immediately — no new connections after this point.
         """
-        if self._followup_prune_handle is not None:
-            self._followup_prune_handle.cancel()
-            self._followup_prune_handle = None
-        await self._wait_for_open_prune()
         with self._lifecycle_lock:
             if self._permanently_closed:
                 return  # idempotent

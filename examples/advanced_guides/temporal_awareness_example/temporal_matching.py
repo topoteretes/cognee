@@ -10,8 +10,8 @@ from datetime import datetime, timezone
 from temporal_extraction_task import timestamp_bounds
 
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
-from cognee.modules.retrieval.hybrid.results import result_id
 from cognee.modules.retrieval.temporal_hybrid.models import QueryInterval
+from cognee.modules.retrieval.utils.results import result_id
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("temporal_matching")

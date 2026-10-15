@@ -1,0 +1,149 @@
+"""Typed memory entries authorize and bind their session to the target dataset.
+
+Runs against a real relational database and the sqlite session cache, because
+the contract is about real ACLs and the session row that permission filtering
+reads.
+"""
+
+import importlib
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from uuid import uuid4
+
+import pytest
+import pytest_asyncio
+
+import cognee
+from cognee.memory import QAEntry
+from cognee.modules.users.exceptions import PermissionDeniedError
+
+
+async def _reset_engines():
+    from cognee.infrastructure.databases.cache.config import get_cache_config
+    from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
+    from cognee.infrastructure.databases.relational.create_relational_engine import (
+        create_relational_engine,
+    )
+    from cognee.infrastructure.databases.vector.create_vector_engine import _create_vector_engine
+
+    cache_factory = importlib.import_module(
+        "cognee.infrastructure.databases.cache.get_cache_engine"
+    )
+    for cached in (
+        _create_graph_engine,
+        _create_vector_engine,
+        create_relational_engine,
+        get_cache_config,
+        cache_factory.create_cache_engine,
+    ):
+        cached.cache_clear()
+
+
+@pytest_asyncio.fixture
+async def env(tmp_path, monkeypatch):
+    from cognee.modules.engine.operations.setup import setup
+    from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
+        resolve_authorized_user_datasets,
+    )
+    from cognee.modules.users.methods import create_user, get_default_user
+    from cognee.modules.users.permissions.methods import give_permission_on_dataset
+
+    monkeypatch.setenv("CACHING", "true")
+    monkeypatch.setenv("CACHE_BACKEND", "sqlite")
+    cognee.config.data_root_directory(str(tmp_path / "data"))
+    cognee.config.system_root_directory(str(tmp_path / "system"))
+    await _reset_engines()
+    await setup()
+
+    owner = await get_default_user()
+    member = await create_user(f"member-{uuid4()}@example.com", "member-password")
+    outsider = await create_user(f"outsider-{uuid4()}@example.com", "outsider-password")
+    _, [shared] = await resolve_authorized_user_datasets("shared", owner)
+    await give_permission_on_dataset(member, shared.id, "read")
+    await give_permission_on_dataset(member, shared.id, "write")
+
+    yield SimpleNamespace(owner=owner, member=member, outsider=outsider, shared=shared)
+    await _reset_engines()
+
+
+async def _cached_questions(user, session_id):
+    from cognee.infrastructure.session.get_session_manager import get_session_manager
+
+    entries = await get_session_manager().get_session(user_id=str(user.id), session_id=session_id)
+    return [entry.question for entry in entries]
+
+
+async def _bound_dataset_id(user, session_id):
+    from cognee.modules.session_lifecycle.metrics import get_session_row
+
+    row = await get_session_row(session_id=session_id, user_id=user.id)
+    return row.dataset_id if row else None
+
+
+@pytest.mark.asyncio
+async def test_granted_user_writes_to_shared_dataset_by_id(env):
+    result = await cognee.remember(
+        QAEntry(question="q1", answer="a1"),
+        dataset_id=env.shared.id,
+        session_id="member-session",
+        user=env.member,
+    )
+
+    assert result.status == "session_stored"
+    assert result.dataset_id == str(env.shared.id)
+    assert result.dataset_name == "shared"
+    assert await _bound_dataset_id(env.member, "member-session") == env.shared.id
+    assert await _cached_questions(env.member, "member-session") == ["q1"]
+
+
+@pytest.mark.asyncio
+async def test_user_without_grant_caches_nothing(env):
+    with pytest.raises(PermissionDeniedError):
+        await cognee.remember(
+            QAEntry(question="q1", answer="a1"),
+            dataset_id=env.shared.id,
+            session_id="outsider-session",
+            user=env.outsider,
+        )
+
+    assert await _cached_questions(env.outsider, "outsider-session") == []
+
+
+@pytest.mark.asyncio
+async def test_session_bound_to_one_dataset_rejects_another(env):
+    await cognee.remember(
+        QAEntry(question="q1", answer="a1"),
+        dataset_name="shared",
+        session_id="owner-session",
+        user=env.owner,
+    )
+
+    with pytest.raises(ValueError, match="bound"):
+        await cognee.remember(
+            QAEntry(question="q2", answer="a2"),
+            dataset_name="other",
+            session_id="owner-session",
+            user=env.owner,
+        )
+
+    assert await _bound_dataset_id(env.owner, "owner-session") == env.shared.id
+    assert await _cached_questions(env.owner, "owner-session") == ["q1"]
+
+
+@pytest.mark.asyncio
+async def test_remote_client_receives_dataset_id(monkeypatch):
+    remember_module = importlib.import_module("cognee.api.v1.remember.remember")
+    state = importlib.import_module("cognee.api.v1.serve.state")
+    client = SimpleNamespace(remember_entry=AsyncMock(return_value={"status": "session_stored"}))
+    monkeypatch.setattr(state, "get_remote_client", lambda: client)
+    dataset_id = uuid4()
+
+    await remember_module._remember_entry(
+        QAEntry(question="q1", answer="a1"),
+        dataset_name="shared",
+        dataset_id=dataset_id,
+        session_id="remote-session",
+        user=None,
+    )
+
+    assert client.remember_entry.await_args.kwargs["dataset_id"] == dataset_id

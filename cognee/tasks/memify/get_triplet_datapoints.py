@@ -6,6 +6,7 @@ from cognee.infrastructure.engine import DataPoint, is_internal_node
 from cognee.modules.engine.models import Triplet
 from cognee.modules.engine.utils import generate_node_id
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
+from cognee.modules.graph.utils.fact_conflicts import is_conflict_edge, status_label
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.storage import index_data_points
 
@@ -153,6 +154,12 @@ def _process_single_triplet(
         )
 
     relationship_text = _extract_relationship_text(relationship, datapoint_type_index_property)
+    # The review status rides on the embedded text, so a superseded fact reads as
+    # superseded wherever the triplet is retrieved. The triplet id is built from
+    # node ids and relationship_name only, so a mark never forks its identity.
+    status = status_label(relationship)
+    if relationship_text and status:
+        relationship_text = f"{relationship_text} {status}"
     start_node_text = _extract_embeddable_text(start_node, start_index_fields)
     end_node_text = _extract_embeddable_text(end_node, end_index_fields)
 
@@ -234,6 +241,11 @@ async def get_triplet_datapoints(
             skipped_count = 0
 
             for idx, triplet_datapoint in enumerate(triplets_batch):
+                relationship = triplet_datapoint.get("relationship_properties", {})
+                # Conflict links are the review's own bookkeeping, not facts:
+                # embedding them would make them retrievable as triplets.
+                if is_conflict_edge(relationship.get("relationship_name", "")):
+                    continue
                 try:
                     triplet_obj, error_msg = _process_single_triplet(
                         triplet_datapoint, datapoint_type_index_property, offset, idx
@@ -263,9 +275,12 @@ async def get_triplet_datapoints(
                 )
 
             if not triplet_datapoints:
-                logger.warning(
-                    f"No valid triplet datapoints in batch {batch_number} after processing"
-                )
+                # A batch of nothing but conflict links is normal, not malformed
+                # input: only warn when something was actually rejected.
+                if skipped_count:
+                    logger.warning(
+                        f"No valid triplet datapoints in batch {batch_number} after processing"
+                    )
                 offset += len(triplets_batch)
                 if len(triplets_batch) < triplets_batch_size:
                     break
