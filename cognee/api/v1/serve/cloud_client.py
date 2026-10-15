@@ -153,32 +153,25 @@ class CloudClient:
         if codegraph_config.get("index_vectors"):
             form.add_field("index_vectors", "true")
 
-        # POST /remember carries the repository options as one legacy field,
-        # content_type='code', which the server reads back through
-        # with_legacy_code_content_type. A config that means exactly that
-        # travels as that field -- every spec then goes in 'raw_data' and the
-        # server resolves it as a repository, whatever the host. Any other
-        # combination has no wire representation, and forwarding it would
-        # silently build something else.
-        from cognee.tasks.code_graph.config import is_legacy_code_content_type
-
-        declared_repositories = bool(codegraph_config.get("treat_as_repository"))
-        if codegraph_config.get("include_documents", True) is False and not declared_repositories:
+        # POST /remember has no field for the repository options; forwarding
+        # them would silently build something else (the server would sniff the
+        # specs, or ingest the repository's documents), so they raise.
+        # index_vectors has its own field above; repo_credentials is refused by
+        # remember() before it gets here.
+        if codegraph_config.get("treat_as_repository"):
             raise ValueError(
-                "codegraph_config include_documents=False without treat_as_repository is "
-                "not supported while connected to a remote Cognee instance; POST /remember "
-                "would ingest the repository's documents. Add treat_as_repository=True, or "
-                "call cognee.disconnect() to ingest locally."
+                "codegraph_config treat_as_repository is not supported while connected to "
+                "a remote Cognee instance; POST /remember has no field for it. Pass "
+                "GitHub/GitLab or .git repository URLs without it, or call "
+                "cognee.disconnect() to ingest locally."
             )
-        if declared_repositories:
-            if not is_legacy_code_content_type(codegraph_config):
-                raise ValueError(
-                    "codegraph_config treat_as_repository with include_documents=True is "
-                    "not supported while connected to a remote Cognee instance; "
-                    "POST /remember can only express the two together. Drop "
-                    "include_documents, or call cognee.disconnect() to ingest locally."
-                )
-            form.add_field("content_type", "code")
+        if codegraph_config.get("include_documents", True) is False:
+            raise ValueError(
+                "codegraph_config include_documents=False is not supported while connected "
+                "to a remote Cognee instance; POST /remember has no field for it and would "
+                "ingest the repository's documents. Call cognee.disconnect() to ingest "
+                "locally."
+            )
 
         from cognee.tasks.code_graph.resolve_repo import (
             SSH_REPO_SPEC_MESSAGE,
@@ -193,13 +186,6 @@ class CloudClient:
             # clones it and builds the code graph; uploaded as a text file it
             # would be stored as the URL's text instead.
             nonlocal sent_repo_url
-            # Declared repositories all travel that way, whether or not this
-            # side recognises the host: the server resolves them as repository
-            # specs, which is the point of the declaration.
-            if declared_repositories:
-                form.add_field("raw_data", item)
-                sent_repo_url = True
-                return
             # The server cannot clone an ssh remote either, so uploading the
             # spec would store it as text there. Fail with the same guidance
             # the local path gives.
@@ -238,14 +224,12 @@ class CloudClient:
                 rel = skill_path.relative_to(base).as_posix()
                 form.add_field("data", skill_path.open("rb"), filename=rel)
         # Handle data — string or file-like objects
-        elif isinstance(data, str) or (declared_repositories and isinstance(data, Path)):
-            _add_string(str(data))
+        elif isinstance(data, str):
+            _add_string(data)
         elif isinstance(data, list):
             for item in data:
-                if isinstance(item, str) or (declared_repositories and isinstance(item, Path)):
-                    # A declared repository may be spelled as a Path; it travels
-                    # as its spec like a str.
-                    _add_string(str(item))
+                if isinstance(item, str):
+                    _add_string(item)
                 elif hasattr(item, "read"):
                     name = getattr(item, "name", "upload")
                     form.add_field("data", item, filename=name)

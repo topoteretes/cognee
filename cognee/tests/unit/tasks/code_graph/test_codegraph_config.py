@@ -1,32 +1,8 @@
-"""The one translation of the removed ``content_type="code"`` every surface shares."""
+"""Validation of the per-call ``codegraph_config`` options."""
 
 import pytest
 
-from cognee.tasks.code_graph.config import (
-    LEGACY_CODE_CONTENT_TYPE_CONFIG,
-    is_legacy_code_content_type,
-    validate_codegraph_config,
-    with_legacy_code_content_type,
-)
-
-
-def test_legacy_value_means_code_graph_only_declared_repositories():
-    assert with_legacy_code_content_type(None) == LEGACY_CODE_CONTENT_TYPE_CONFIG
-    assert with_legacy_code_content_type({}) == {
-        "include_documents": False,
-        "treat_as_repository": True,
-    }
-
-
-def test_explicit_keys_win_over_the_legacy_defaults():
-    config = with_legacy_code_content_type({"include_documents": True, "index_vectors": True})
-
-    assert config == {
-        "include_documents": True,
-        "treat_as_repository": True,
-        "index_vectors": True,
-    }
-    assert validate_codegraph_config(config) == config
+from cognee.tasks.code_graph.config import requests_codegraph_options, validate_codegraph_config
 
 
 @pytest.mark.parametrize(
@@ -34,21 +10,16 @@ def test_explicit_keys_win_over_the_legacy_defaults():
     [
         (None, False),
         ({}, False),
+        ({"index_vectors": False}, False),
+        ({"include_documents": True}, False),
         ({"treat_as_repository": True}, True),
-        ({"treat_as_repository": True, "include_documents": False}, True),
-        ({"treat_as_repository": True, "include_documents": True}, False),
-        ({"include_documents": False}, False),
-        (LEGACY_CODE_CONTENT_TYPE_CONFIG, True),
+        ({"include_documents": False}, True),
+        ({"index_vectors": True}, True),
+        ({"repo_credentials": "tok"}, True),
     ],
 )
-def test_wire_form_matches_exactly_what_the_server_reads_back(config, expected):
-    assert is_legacy_code_content_type(config) is expected
-    if expected:
-        # Round trip: what travels as content_type='code' is read back as itself.
-        assert with_legacy_code_content_type(config) == {
-            **LEGACY_CODE_CONTENT_TYPE_CONFIG,
-            **config,
-        }
+def test_only_non_default_options_count_as_requested(config, expected):
+    assert requests_codegraph_options(config) is expected
 
 
 @pytest.mark.parametrize("key", ["index_vectors", "include_documents", "treat_as_repository"])

@@ -81,9 +81,9 @@ async def test_the_branch_reaches_the_early_resolve_of_a_codegraph_config_add(
 
 
 @pytest.mark.asyncio
-async def test_the_deprecated_code_content_type_takes_the_branch():
-    # content_type="code" is read as treat_as_repository, which clones through add(),
-    # so the branch is honoured rather than refused.
+async def test_the_ignored_code_content_type_still_takes_the_branch():
+    # content_type="code" is ignored, so the call is a plain remember: the branch
+    # reaches add() rather than being refused as a content_type call.
     import cognee
 
     user = MagicMock(id=uuid4())
@@ -107,7 +107,7 @@ async def test_the_deprecated_code_content_type_takes_the_branch():
         )
 
     assert add.await_args.kwargs["branch"] == "dev"
-    assert add.await_args.kwargs["codegraph_config"]["treat_as_repository"] is True
+    assert "codegraph_config" not in add.await_args.kwargs
 
 
 @pytest.mark.asyncio

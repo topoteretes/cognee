@@ -260,9 +260,7 @@ def get_remember_router() -> APIRouter:
                 "or 'cogx-archive' to import an uploaded archive. Leave empty for normal "
                 "ingestion, including code repositories (pass git URLs or server-local "
                 "repo paths via 'raw_data'). The removed 'code' value is still accepted "
-                "and read as code-graph-only ingestion of declared repository specs -- "
-                "every raw_data entry is cloned as a repository whatever its host, which "
-                "normal ingestion only does for GitHub/GitLab URLs and .git URLs."
+                "and ignored: such a request is normal ingestion."
             ),
         ),
         import_mode: str | None = Form(
@@ -344,10 +342,7 @@ def get_remember_router() -> APIRouter:
           Skill nodes; omit for normal ingestion. Code repositories need no content type:
           a GitHub/GitLab URL or server-local repo path in raw_data is stored as one
           data item and built by cognify's CODE_REPO route. The removed "code" value is
-          still accepted and read as its old behaviour: the repository's README and docs
-          are not ingested, and every raw_data entry is taken as a repository spec and
-          cloned whatever its host (normal ingestion claims only GitHub/GitLab and .git
-          URLs, and leaves the rest to the web-page path).
+          still accepted and ignored: such a request is normal ingestion.
         - **index_vectors** (Optional[bool]): Also embed the code facts of the code files
           and repositories this call builds (default false). Normal ingestion only.
 
@@ -363,9 +358,8 @@ def get_remember_router() -> APIRouter:
 
         ## Error Codes
         - **400 Bad Request**: Neither datasetId nor datasetName provided, unsupported
-          content_type, invalid graph_model JSON/schema, index_vectors with
-          session_id or content_type, or a deprecated content_type="code" request
-          that carries session_id, file uploads, or no raw_data entry
+          content_type, invalid graph_model JSON/schema, or index_vectors with
+          session_id or content_type
         - **409 Conflict**: Error during processing
         """
         # Swagger UI submits an untouched file list as one blank part; treat it
@@ -389,43 +383,10 @@ def get_remember_router() -> APIRouter:
             )
 
         # content_type='code' was removed (SDK-793): a repository in raw_data is
-        # ordinary data. Clients still sending it keep working, and keep the
-        # behaviour they had: the value is read as the codegraph_config it
-        # meant (with_legacy_code_content_type, shared with the SDK) rather
-        # than dropped.
-        code_only = content_type == "code"
-        if code_only:
+        # ordinary data. Clients still sending it keep working: the value is
+        # ignored and the request is normal ingestion.
+        if content_type == "code":
             content_type = None
-            if session_id:
-                # Parity with the removed route, which rejected the combination
-                # instead of writing a repository path into the session cache.
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        "session_id is not applicable to a code repository; code graphs "
-                        "are stored in the permanent graph, not a session cache."
-                    ),
-                )
-            if data:
-                # Checked here, before raw_data is merged into `data` below:
-                # this is the last point at which an upload is distinguishable
-                # from a repository spec. The removed route refused the
-                # combination outright, and it stays ambiguous — a repository
-                # ingest suppresses the repo's own documents, which says
-                # nothing about what to do with files the caller attached.
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        "content_type='code' does not accept file uploads — pass repository "
-                        "paths or git URLs via 'raw_data'. To ingest individual code "
-                        "files, upload them under their real filename without content_type."
-                    ),
-                )
-            logger.warning(
-                "POST /remember content_type='code' is deprecated: pass the repository "
-                "path or URL in raw_data; it is read as code-graph-only ingestion "
-                "(no README/docs) of declared repository specs."
-            )
 
         # String inputs join the uploads as one item list, uploads first. Drop
         # empty entries — Swagger UI submits untouched array items as "". The
@@ -438,17 +399,6 @@ def get_remember_router() -> APIRouter:
                 detail=(
                     "raw_data is only supported for normal ingestion — 'skills' and "
                     "'cogx-archive' take file uploads."
-                ),
-            )
-        if code_only and not raw_items:
-            # Reported as the missing repository rather than as the generic
-            # "nothing to ingest" below: the caller said this was a repository
-            # ingest, so name the field that carries one.
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "content_type='code' requires at least one repository path or "
-                    "git URL in 'raw_data'."
                 ),
             )
 
@@ -606,10 +556,7 @@ def get_remember_router() -> APIRouter:
                 chunks_per_batch=chunks_per_batch,
                 # Swagger UI submits every rendered form field, so an untouched
                 # content_type arrives as "" — treat it as omitted.
-                # The deprecated value travels to remember() as itself: the SDK
-                # translates it (with_legacy_code_content_type) and keeps the
-                # legacy result shape and improve default for it.
-                content_type="code" if code_only else (content_type or None),
+                content_type=content_type or None,
                 skills_text=skills_text or None,
                 skill_name=skill_name or None,
                 **({"codegraph_config": codegraph_config} if codegraph_config else {}),

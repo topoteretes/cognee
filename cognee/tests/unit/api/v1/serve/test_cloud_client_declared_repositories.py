@@ -1,15 +1,11 @@
-"""A declared repository reaches the remote as a repository, not as a text upload.
+"""Repository options a remote ``POST /remember`` cannot carry raise instead of vanishing.
 
-``POST /remember`` has no ``codegraph_config`` field. It has one legacy field
-that means the same pair of things — ``content_type='code'``, which the server
-reads back as ``include_documents=False`` + ``treat_as_repository=True`` — so a
-config that means exactly that travels as that field, with every spec in
-``raw_data``.
-
-Without this, ``remember("https://bitbucket.org/o/r", content_type="code")``
-against a remote instance uploaded the URL as a one-line text file: the
-declaration was dropped on the wire and the server stored a string where the
-caller asked for a code graph.
+``POST /remember`` has no ``codegraph_config`` field; only ``index_vectors``
+has a form field of its own. ``treat_as_repository`` and
+``include_documents=False`` would be dropped on the wire -- the server would
+sniff the specs (uploading a Bitbucket URL as a one-line text file) or ingest
+the repository's documents -- so the client refuses them. The removed
+``content_type='code'``, which once carried them, is ignored by the server.
 """
 
 import importlib
@@ -77,17 +73,33 @@ def _client():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("spec", UNDETECTED_REMOTES)
-async def test_a_declared_spec_travels_as_raw_data(form, spec):
-    await _client().remember(
-        spec,
-        "ds",
-        codegraph_config={"treat_as_repository": True, "include_documents": False},
-    )
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"treat_as_repository": True},
+        {"treat_as_repository": True, "include_documents": False},
+        {"treat_as_repository": True, "include_documents": True},
+        {"treat_as_repository": True, "index_vectors": True},
+    ],
+)
+@pytest.mark.parametrize("spec", [*UNDETECTED_REMOTES, ["https://bitbucket.org/acme/api"]])
+async def test_treat_as_repository_raises_instead_of_being_dropped(form, spec, config):
+    with pytest.raises(ValueError, match="treat_as_repository is not supported while connected"):
+        await _client().remember(spec, "ds", codegraph_config=config)
 
-    assert form.values_for("raw_data") == [spec]
-    assert form.values_for("data") == [], "the spec was uploaded as a file"
-    assert form.values_for("content_type") == ["code"]
+    assert form.values_for("raw_data") == [] and form.values_for("data") == []
+    assert form.values_for("content_type") == []
+
+
+@pytest.mark.asyncio
+async def test_include_documents_false_raises_instead_of_vanishing(form):
+    # The server would ingest the repository's documents, with LLM cost,
+    # against what was asked.
+    with pytest.raises(ValueError, match="include_documents=False is not supported"):
+        await _client().remember(
+            "https://github.com/acme/api", "ds", codegraph_config={"include_documents": False}
+        )
+    assert form.values_for("raw_data") == [] and form.values_for("data") == []
 
 
 @pytest.mark.asyncio
@@ -114,66 +126,11 @@ async def test_a_detected_repository_url_still_travels_as_raw_data(form):
 
 
 @pytest.mark.asyncio
-async def test_a_combination_the_wire_cannot_express_raises(form):
-    # Declared repositories WITH their documents has no form field. Sending
-    # content_type='code' anyway would suppress the documents the caller asked
-    # for -- the silent drop this whole mapping exists to avoid.
-    with pytest.raises(ValueError, match="include_documents=True is not supported"):
-        await _client().remember(
-            "https://bitbucket.org/acme/api",
-            "ds",
-            codegraph_config={"treat_as_repository": True, "include_documents": True},
-        )
-
-
-@pytest.mark.asyncio
-async def test_a_list_of_declared_specs_all_travel_as_raw_data(form):
-    specs = ["https://bitbucket.org/acme/api", "https://gitlab.acme.com/team/web"]
-
-    await _client().remember(specs, "ds", codegraph_config={"treat_as_repository": True})
-
-    assert form.values_for("raw_data") == specs
-    assert form.values_for("data") == []
-
-
-@pytest.mark.asyncio
-async def test_index_vectors_still_rides_alongside(form):
+async def test_index_vectors_rides_its_own_field(form):
     await _client().remember(
-        "https://bitbucket.org/acme/api",
-        "ds",
-        codegraph_config={"treat_as_repository": True, "index_vectors": True},
+        "https://github.com/acme/api", "ds", codegraph_config={"index_vectors": True}
     )
 
     assert form.values_for("index_vectors") == ["true"]
-    assert form.values_for("raw_data") == ["https://bitbucket.org/acme/api"]
-
-
-@pytest.mark.asyncio
-async def test_a_declared_path_travels_as_raw_data(form, tmp_path):
-    # A scalar Path matched none of the data branches, so the server got
-    # content_type=code with nothing to ingest.
-    await _client().remember(
-        tmp_path, "ds", codegraph_config={"treat_as_repository": True, "include_documents": False}
-    )
-
-    assert form.values_for("raw_data") == [str(tmp_path)]
-
-
-@pytest.mark.asyncio
-async def test_declared_paths_in_a_list_are_not_skipped(form, tmp_path):
-    specs = [tmp_path, "https://bitbucket.org/acme/api"]
-
-    await _client().remember(specs, "ds", codegraph_config={"treat_as_repository": True})
-
-    assert form.values_for("raw_data") == [str(tmp_path), "https://bitbucket.org/acme/api"]
-
-
-@pytest.mark.asyncio
-async def test_include_documents_false_alone_raises_instead_of_vanishing(form):
-    # POST /remember has no field for it: the server would ingest the
-    # repository's documents, with LLM cost, against what was asked.
-    with pytest.raises(ValueError, match="include_documents=False without treat_as_repository"):
-        await _client().remember(
-            "https://github.com/acme/api", "ds", codegraph_config={"include_documents": False}
-        )
-    assert form.values_for("raw_data") == [] and form.values_for("data") == []
+    assert form.values_for("raw_data") == ["https://github.com/acme/api"]
+    assert form.values_for("content_type") == []

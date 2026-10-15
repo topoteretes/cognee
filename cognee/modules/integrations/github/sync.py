@@ -1,10 +1,11 @@
 """Sync a GitHub installation's repositories into the code graph.
 
 Thin orchestration: mint a fresh installation token, resolve which
-repositories to index, and ``remember`` each repository's clone URL with the
-token as ``codegraph_config["repo_credentials"]``. ``add()`` clones it and
+repositories to index, and ``remember`` their clone URLs in one call with the
+token as ``codegraph_config["repo_credentials"]``. ``add()`` clones each and
 stores it as one ``code_repo`` row (with its ``repo_url``), and cognify builds
-it on the CODE_REPO route. Clone reuse lives in ``resolve_repo_source`` and
+it on the CODE_REPO route -- each repository in a pipeline run of its own, so
+one failing repository never rolls back or blocks the others. Clone reuse lives in ``resolve_repo_source`` and
 incremental loading skips an unchanged repo, which is what makes re-running
 this on every webhook cheap and idempotent.
 
@@ -84,10 +85,12 @@ async def sync_repositories(
 ) -> None:
     """Index ``repo_full_names`` (default: every repo the installation covers).
 
-    Runs each repository to completion — callers are already off the request
-    path (the post-install hook and webhook handling both run detached), so
-    there is nothing to hand off to. A repository that fails (clone, auth,
-    pipeline) is logged and the sync continues with the next one.
+    One blocking ``remember`` over every clone URL — callers are already off
+    the request path (the post-install hook and webhook handling both run
+    detached), so there is nothing to hand off to. ``treat_as_repository``
+    with ``raise_on_error=False`` makes remember add and build each repository
+    on its own: a repository that fails (clone, auth, pipeline) comes back as
+    an errored item and is logged, and the others are built and kept.
 
     The minted token lives ~1 hour and repos are cloned sequentially, so a
     very large installation can outlive the token mid-batch; the affected
@@ -122,34 +125,41 @@ async def sync_repositories(
         account_login,
         dataset_name,
     )
+    full_name_by_url = {clone_url(full_name): full_name for full_name in repo_full_names}
+    try:
+        result = await cognee_remember(
+            list(full_name_by_url),
+            dataset_name=dataset_name,
+            user=owner,
+            codegraph_config={
+                "repo_credentials": token,
+                # Every URL is a repository: clone it, never sniff it.
+                "treat_as_repository": True,
+                # The code graph is the point of the sync: indexing every
+                # repository's README and docs would mean LLM extraction
+                # and embeddings for an installation's whole prose, on
+                # every webhook.
+                "include_documents": False,
+            },
+            # The code graph is the point of the sync; no session to bridge.
+            self_improvement=False,
+            # Per-repository failures come back as errored items instead.
+            raise_on_error=False,
+        )
+    except Exception:
+        logger.exception("GitHub sync failed for %s", account_login)
+        return
+
     failed: list[str] = []
-    for full_name in repo_full_names:
-        try:
-            result = await cognee_remember(
-                clone_url(full_name),
-                dataset_name=dataset_name,
-                user=owner,
-                codegraph_config={
-                    "repo_credentials": token,
-                    # The code graph is the point of the sync: indexing every
-                    # repository's README and docs would mean LLM extraction
-                    # and embeddings for an installation's whole prose, on
-                    # every webhook.
-                    "include_documents": False,
-                },
-                # The code graph is the point of the sync; no session to bridge.
-                self_improvement=False,
-                raise_on_error=False,
-            )
-        except Exception:
-            logger.exception("GitHub sync failed for repository %s", full_name)
-            failed.append(full_name)
+    for item in getattr(result, "items", None) or []:
+        if item.get("status") != "errored":
             continue
-        if getattr(result, "status", None) == "errored":
-            logger.warning(
-                "GitHub sync for %s errored: %s", full_name, getattr(result, "error", None)
-            )
-            failed.append(full_name)
+        source = item.get("source")
+        full_name = full_name_by_url.get(source, source)
+        logger.warning("GitHub sync for %s errored: %s", full_name, item.get("error"))
+        failed.append(str(full_name))
+    if not failed and getattr(result, "status", None) == "errored":
+        logger.warning("GitHub sync for %s errored: %s", account_login, result.error)
     if failed:
         logger.warning(
             "GitHub sync for %s finished with %d failed repositories: %s",

@@ -1,10 +1,17 @@
 import importlib
 import re
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
 resolve_module = importlib.import_module("cognee.tasks.code_graph.resolve_repo")
+
+
+@pytest.fixture(autouse=True)
+def _fake_clones_have_a_commit(monkeypatch):
+    """The clones here are fake ``.git`` directories; real git would find no commit in them."""
+    monkeypatch.setattr(resolve_module, "_has_commit", AsyncMock(return_value=True))
 
 
 def test_is_remote_repo_detection():
@@ -293,7 +300,7 @@ async def test_git_never_prompts(monkeypatch):
     with pytest.raises(RuntimeError):
         await resolve_module._run_git(["status"])
     assert seen["GIT_TERMINAL_PROMPT"] == "0"
-    assert "-oBatchMode=yes" in seen["GIT_SSH_COMMAND"]
+    assert seen["GIT_SSH_COMMAND"] == "ssh -o BatchMode=yes"
 
     # A user's own ssh command is left alone.
     monkeypatch.setenv("GIT_SSH_COMMAND", "ssh -i ~/.ssh/deploy_key")

@@ -134,7 +134,9 @@ def raise_if_cognify_errored(result) -> None:
 _CODE_ROUTES = frozenset({CognifyRoute.CODE, CognifyRoute.CODE_REPO})
 
 
-async def _pending_items_are_code_only(datasets, user: User | None, incremental_loading) -> bool:
+async def _pending_items_are_code_only(
+    datasets, user: User | None, incremental_loading, scoped_data: list | None = None
+) -> bool:
     """Whether every item this cognify will process takes a code route.
 
     Code files and code-repo manifests run the deterministic enola lists and never
@@ -148,6 +150,7 @@ async def _pending_items_are_code_only(datasets, user: User | None, incremental_
     the extractor never runs then either. Any non-code item, or any error while
     looking (permissions, a tombstoned DLT row, ...) answers False, so the caller
     keeps the runtime check and the pipeline reports the real error.
+    ``scoped_data`` (a ``data_ids`` run's rows) replaces the dataset scan.
     An item added between this check and the run would still meet the extractor
     without its runtime; the extractor then raises its own not-installed error.
     """
@@ -166,7 +169,12 @@ async def _pending_items_are_code_only(datasets, user: User | None, incremental_
 
         pending = []
         for dataset in target_datasets:
-            for data_item in await get_dataset_data(dataset_id=dataset.id):
+            dataset_items = (
+                scoped_data
+                if scoped_data is not None
+                else await get_dataset_data(dataset_id=dataset.id)
+            )
+            for data_item in dataset_items:
                 if incremental_loading:
                     status = (data_item.pipeline_status or {}).get("cognify_pipeline") or {}
                     if is_data_item_completed(status.get(str(dataset.id))):
@@ -177,6 +185,36 @@ async def _pending_items_are_code_only(datasets, user: User | None, incremental_
     except Exception as error:  # noqa: BLE001 - any doubt keeps the runtime check
         logger.debug("Code-only check failed; keeping the extractor runtime check: %s", error)
         return False
+
+
+async def _resolve_scoped_data(datasets, user: User | None, data_ids) -> list:
+    """The rows of ``data_ids`` that belong to the one dataset ``datasets`` names.
+
+    A ``data_ids`` run builds those items only, so its pipeline run (and the
+    rollback scoped to that run) cannot reach the rest of the dataset. Read with
+    the same write check the pipeline applies; the pipeline still takes the
+    dataset lock and checks permissions itself.
+    """
+    from cognee.modules.data.methods import (
+        get_authorized_existing_datasets,
+        get_dataset_data,
+    )
+    from cognee.modules.users.methods import get_default_user
+
+    if user is None:
+        user = await get_default_user()
+    requested = [datasets] if isinstance(datasets, (str, UUID)) else datasets
+    if not requested or len(requested) != 1:
+        raise ValueError("cognify(data_ids=...) requires exactly one dataset in datasets.")
+    target_datasets = await get_authorized_existing_datasets(requested, "write", user)
+    if not target_datasets:
+        return []
+    wanted = {UUID(str(data_id)) for data_id in data_ids}
+    return [
+        data_item
+        for data_item in await get_dataset_data(dataset_id=target_datasets[0].id)
+        if data_item.id in wanted
+    ]
 
 
 async def cognify(
@@ -203,6 +241,7 @@ async def cognify(
     ontology_file_path: str | None = None,
     codegraph_config: CodeGraphConfig | None = None,
     summary_method: Literal["llm", "from_extraction"] | None = None,
+    data_ids: list[UUID] | None = None,
     **kwargs,
 ):
     """
@@ -319,6 +358,13 @@ async def cognify(
                  with no relations gets no summary. The explicit argument wins over
                  the SUMMARY_METHOD setting ("llm" by default). Raises while
                  connected to a remote instance.
+        data_ids: Build only these data items of the one dataset in ``datasets``
+                 (ids that are not in it are ignored) in their own pipeline run,
+                 still recorded as ``cognify_pipeline`` under the dataset lock. A
+                 failure then rolls back that run only, and other pending items of
+                 the dataset are left for a later cognify. When none of the ids is
+                 in the dataset nothing runs and ``{}`` is returned. Not supported
+                 with ``dry_run`` or while connected to a remote instance.
 
     Returns:
         Union[dict, list[PipelineRunInfo], DryRunEstimate]:
@@ -414,6 +460,9 @@ async def cognify(
     resolved_extractor = resolve_extractor(extractor, cognify_config)
     resolved_summary_method = resolve_summary_method(summary_method, cognify_config)
 
+    if data_ids is not None and dry_run:
+        raise ValueError("data_ids is not supported with dry_run.")
+
     if dry_run and resolved_extractor == GLINER_DEMO_EXTRACTOR:
         raise ValueError(
             "dry_run estimates the LLM extraction pipeline only; it has no cost model "
@@ -438,6 +487,11 @@ async def cognify(
 
     client = get_remote_client()
     if client is not None:
+        if data_ids is not None:
+            raise ValueError(
+                "data_ids is not supported while connected to a remote Cognee instance. "
+                "Call cognee.disconnect() to cognify locally."
+            )
         if chunk_attachment is not None:
             raise ValueError(
                 "chunk_attachment is not supported while connected to a remote Cognee "
@@ -498,7 +552,17 @@ async def cognify(
         # index_vectors. So it neither installs nor requires the GLiNER runtime
         # (a keyless code-only remember must not pull in torch) and skips the
         # provider probes it has no use for (SDK-795).
-        code_only = await _pending_items_are_code_only(datasets, user, incremental_loading)
+        scoped_data = None
+        if data_ids is not None:
+            scoped_data = await _resolve_scoped_data(datasets, user, data_ids)
+            if not scoped_data:
+                # An empty data list would make the runner fall back to the
+                # whole dataset; a scoped run with nothing in scope builds nothing.
+                return {}
+
+        code_only = await _pending_items_are_code_only(
+            datasets, user, incremental_loading, scoped_data=scoped_data
+        )
 
         # After the argument checks and the remote route: a cognify that raises
         # above, or runs remotely, must not install anything locally. Awaited, so
@@ -613,6 +677,7 @@ async def cognify(
             result = await pipeline_executor_func(
                 pipeline=run_pipeline,
                 datasets=datasets,
+                data=scoped_data,
                 tasks=resolve_cognify_tasks,
                 pipeline_name="cognify_pipeline",
                 user=user,

@@ -163,9 +163,8 @@ or a remote instance.
 - **`content_type` is strict.** Only `None` or `"skills"`.
   `"skills"` ingests into the target dataset like any other call (default
   `main_dataset`); pass `dataset_name` to keep skills in their own dataset.
-  The removed `"code"` is still accepted for existing callers and read as
-  `codegraph_config={"include_documents": False, "treat_as_repository": True}`
-  — both halves of what it meant; it still rejects `session_id`.
+  The removed `"code"` is still accepted for existing callers and ignored:
+  such a call is a plain `remember(data)`.
 - **Session mode needs `CACHING=true`**, and `extractor` cannot be combined
   with `session_id`.
 - **Remote mode.** After `cognee.serve(url)`, calls go to the server:

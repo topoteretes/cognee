@@ -1,11 +1,12 @@
 """Unit tests for cognee.modules.integrations.github.sync.
 
 Token minting, repo listing, and remember() are mocked — what's under test is
-the orchestration: one dataset per installation, each repo remembered by its
-credential-free clone URL with the installation token in
-``codegraph_config["repo_credentials"]`` and code-graph-only ingestion
-(``include_documents=False``), one failing repo not stopping the
-rest, and the full-installation default when no explicit repo list is given.
+the orchestration: one dataset per installation, every repo remembered in ONE
+call by its credential-free clone URL with the installation token in
+``codegraph_config["repo_credentials"]``, declared repositories
+(``treat_as_repository``) and code-graph-only ingestion
+(``include_documents=False``), per-repo failures read from the result items,
+and the full-installation default when no explicit repo list is given.
 """
 
 import importlib
@@ -68,30 +69,33 @@ def mocks(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_default_sync_covers_every_installation_repo(mocks):
+async def test_default_sync_covers_every_installation_repo_in_one_call(mocks):
     await sync_module.sync_repositories(_credential())
 
     mocks.mint.assert_awaited_once_with(42)
     mocks.list_repos.assert_awaited_once_with("tok123")
-    # The URL, not a local clone: add() clones it with the token and records it
-    # as the manifest's repo_url.
-    assert [call.args for call in mocks.remember.await_args_list] == [
-        ("https://github.com/acme/api.git",),
-        ("https://github.com/acme/web.git",),
-    ]
-    for call in mocks.remember.await_args_list:
-        assert call.kwargs == {
-            "dataset_name": "github_acme_org",
-            "user": mocks.owner,
-            # include_documents=False: the sync indexes code graphs, so an
-            # installation's READMEs never reach LLM extraction or embeddings.
-            "codegraph_config": {
-                "repo_credentials": "tok123",
-                "include_documents": False,
-            },
-            "self_improvement": False,
-            "raise_on_error": False,
-        }
+    # One remember for the whole installation: remember builds each declared
+    # repository in a scoped run of its own, so one failure never rolls back
+    # the others and no repository's cognify rescans the dataset.
+    mocks.remember.assert_awaited_once()
+    # The URLs, not local clones: add() clones each with the token and records
+    # it as the manifest's repo_url.
+    assert mocks.remember.await_args.args == (
+        ["https://github.com/acme/api.git", "https://github.com/acme/web.git"],
+    )
+    assert mocks.remember.await_args.kwargs == {
+        "dataset_name": "github_acme_org",
+        "user": mocks.owner,
+        "codegraph_config": {
+            "repo_credentials": "tok123",
+            "treat_as_repository": True,
+            # The sync indexes code graphs, so an installation's READMEs never
+            # reach LLM extraction or embeddings.
+            "include_documents": False,
+        },
+        "self_improvement": False,
+        "raise_on_error": False,
+    }
 
 
 @pytest.mark.asyncio
@@ -100,36 +104,46 @@ async def test_explicit_repo_list_skips_the_listing_call(mocks):
 
     mocks.list_repos.assert_not_awaited()
     mocks.remember.assert_awaited_once()
-    assert mocks.remember.await_args.args == ("https://github.com/acme/api.git",)
+    assert mocks.remember.await_args.args == (["https://github.com/acme/api.git"],)
 
 
 @pytest.mark.asyncio
-async def test_a_failing_repo_does_not_stop_the_rest(mocks):
-    async def remember(url, **kwargs):
-        if url.endswith("api.git"):
-            raise RuntimeError("clone failed")
-        return SimpleNamespace(status="completed", error=None)
+async def test_per_repo_failures_are_logged_by_repository(mocks, caplog):
+    import logging
 
-    mocks.remember.side_effect = remember
+    mocks.remember.return_value = SimpleNamespace(
+        status="errored",
+        error="https://github.com/acme/api.git: clone failed",
+        items=[
+            {"id": "x", "kind": "code_repo", "source": "https://github.com/acme/web.git"},
+            {
+                "kind": "code_repo",
+                "source": "https://github.com/acme/api.git",
+                "status": "errored",
+                "error": "clone failed",
+            },
+        ],
+    )
 
-    await sync_module.sync_repositories(_credential())
+    with caplog.at_level(logging.WARNING, logger=sync_module.logger.name):
+        await sync_module.sync_repositories(_credential())
 
-    assert [call.args for call in mocks.remember.await_args_list] == [
-        ("https://github.com/acme/api.git",),
-        ("https://github.com/acme/web.git",),
-    ]
+    mocks.remember.assert_awaited_once()
+    assert "GitHub sync for acme/api errored: clone failed" in caplog.text
+    assert "1 failed repositories: acme/api" in caplog.text
+    assert "acme/web" not in caplog.text
 
 
 @pytest.mark.asyncio
-async def test_an_errored_repo_does_not_stop_the_rest(mocks):
-    mocks.remember.side_effect = [
-        SimpleNamespace(status="errored", error="pipeline failed"),
-        SimpleNamespace(status="completed", error=None),
-    ]
+async def test_a_raising_remember_is_logged_not_raised(mocks, caplog):
+    import logging
 
-    await sync_module.sync_repositories(_credential())
+    mocks.remember.side_effect = RuntimeError("database down")
 
-    assert mocks.remember.await_count == 2
+    with caplog.at_level(logging.ERROR, logger=sync_module.logger.name):
+        await sync_module.sync_repositories(_credential())
+
+    assert "GitHub sync failed for Acme-Org" in caplog.text
 
 
 @pytest.mark.asyncio

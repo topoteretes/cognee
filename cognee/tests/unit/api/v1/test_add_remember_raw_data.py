@@ -217,83 +217,58 @@ def test_remember_forwards_index_vectors_with_repo_urls(client):
         assert mock_remember.call_args.kwargs["content_type"] is None
 
 
-def test_remember_reads_the_removed_code_content_type_as_code_only(client):
-    # The old request shape (content_type=code + a repository in raw_data) keeps
-    # working: the route hands the value to remember() as itself, which reads it
-    # as code-graph-only ingestion of declared repositories (pinned in
-    # test_remember_codegraph_config.py) and keeps the legacy result shape.
-    with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
-        mock_remember.return_value = remember_completed()
+@pytest.mark.parametrize(
+    ("form", "files"),
+    [
+        ({"raw_data": [REPO_URL]}, None),
+        ({"raw_data": ["https://bitbucket.org/acme/api"]}, None),
+        ({"raw_data": [REPO_URL], "index_vectors": "true"}, None),
+        ({"raw_data": [REPO_URL], "session_id": "s1"}, None),
+        ({"raw_data": [REPO_URL]}, {"data": ("notes.txt", b"hello", "text/plain")}),
+    ],
+)
+def test_remember_ignores_the_removed_code_content_type(client, form, files):
+    # The old request shape keeps working and is plain ingestion: remember()
+    # gets exactly what the same request without content_type sends it, and
+    # nothing warns.
+    import warnings
 
+    calls = []
+    for extra in ({}, {"content_type": "code"}):
+        with (
+            patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember,
+            warnings.catch_warnings(record=True) as caught,
+        ):
+            warnings.simplefilter("always")
+            mock_remember.return_value = remember_completed()
+
+            response = client.post(
+                "/api/v1/remember",
+                data={"datasetName": "test_dataset", **form, **extra},
+                files=files,
+            )
+
+            assert response.status_code == 200, response.text
+            assert [w for w in caught if "content_type" in str(w.message)] == []
+            calls.append(mock_remember.call_args)
+
+    plain, legacy = calls
+    assert legacy.kwargs["content_type"] is None
+    assert repr(legacy.args) == repr(plain.args)
+    assert legacy.kwargs.keys() == plain.kwargs.keys()
+    for key in plain.kwargs:
+        assert repr(legacy.kwargs[key]) == repr(plain.kwargs[key]), key
+
+
+def test_remember_with_only_the_removed_code_content_type_has_nothing_to_ingest(client):
+    with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
         response = client.post(
             "/api/v1/remember",
-            data={"datasetName": "test_dataset", "content_type": "code", "raw_data": [REPO_URL]},
-        )
-
-        assert response.status_code == 200, response.text
-        assert mock_remember.call_args.args[0] == [REPO_URL]
-        assert mock_remember.call_args.kwargs["content_type"] == "code"
-        assert "codegraph_config" not in mock_remember.call_args.kwargs
-
-
-def test_remember_declares_a_repository_url_add_would_not_claim(client):
-    # The regression this half of the translation prevents: a Bitbucket URL is
-    # not matched by code_repo_clone_url, so without treat_as_repository the
-    # server would fetch and store the project's web page.
-    with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
-        mock_remember.return_value = remember_completed()
-
-        response = client.post(
-            "/api/v1/remember",
-            data={
-                "datasetName": "test_dataset",
-                "content_type": "code",
-                "raw_data": ["https://bitbucket.org/acme/api"],
-            },
-        )
-
-        assert response.status_code == 200, response.text
-        assert mock_remember.call_args.args[0] == ["https://bitbucket.org/acme/api"]
-        # remember() reads content_type="code" as treat_as_repository.
-        assert mock_remember.call_args.kwargs["content_type"] == "code"
-
-
-def test_remember_combines_code_content_type_with_index_vectors(client):
-    with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
-        mock_remember.return_value = remember_completed()
-
-        response = client.post(
-            "/api/v1/remember",
-            data={
-                "datasetName": "test_dataset",
-                "content_type": "code",
-                "raw_data": [REPO_URL],
-                "index_vectors": "true",
-            },
-        )
-
-        assert response.status_code == 200, response.text
-        assert mock_remember.call_args.kwargs["content_type"] == "code"
-        assert mock_remember.call_args.kwargs["codegraph_config"] == {"index_vectors": True}
-
-
-def test_remember_rejects_code_content_type_with_session_id(client):
-    # Parity with the removed route: a repository is not session-cache data.
-    with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
-        mock_remember.return_value = remember_completed()
-
-        response = client.post(
-            "/api/v1/remember",
-            data={
-                "datasetName": "test_dataset",
-                "content_type": "code",
-                "raw_data": [REPO_URL],
-                "session_id": "s1",
-            },
+            data={"datasetName": "test_dataset", "content_type": "code"},
         )
 
         assert response.status_code == 400, response.text
-        assert "session_id" in response.json()["detail"]
+        assert "Provide at least one file" in response.json()["detail"]
         mock_remember.assert_not_called()
 
 
@@ -396,39 +371,8 @@ def test_remember_forwards_self_improvement_without_defaulting_false(client, fla
             assert mock_remember.call_args.args[0] == ["memory"]
 
 
-def test_remember_rejects_code_content_type_with_file_uploads(client):
-    # Parity with the removed route: a repository ingest does not take uploads.
-    with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
-        mock_remember.return_value = remember_completed()
-
-        response = client.post(
-            "/api/v1/remember",
-            data={"datasetName": "test_dataset", "content_type": "code", "raw_data": [REPO_URL]},
-            files={"data": ("notes.txt", b"hello", "text/plain")},
-        )
-
-        assert response.status_code == 400, response.text
-        assert "does not accept file uploads" in response.json()["detail"]
-        mock_remember.assert_not_called()
-
-
-def test_remember_rejects_code_content_type_without_raw_data(client):
-    with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
-        mock_remember.return_value = remember_completed()
-
-        response = client.post(
-            "/api/v1/remember",
-            data={"datasetName": "test_dataset", "content_type": "code"},
-        )
-
-        assert response.status_code == 400, response.text
-        assert "requires at least one repository path" in response.json()["detail"]
-        mock_remember.assert_not_called()
-
-
 def test_plain_ingestion_still_accepts_uploads_beside_raw_data(client):
-    # The two refusals above are scoped to the deprecated content type; an
-    # ordinary request may mix uploads and raw_data as it always could.
+    # An ordinary request may mix uploads and raw_data as it always could.
     with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
         mock_remember.return_value = remember_completed()
 

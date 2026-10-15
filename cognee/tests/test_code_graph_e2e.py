@@ -22,6 +22,12 @@ Verifies:
 - every remembered repository is one Data row whose id the result carries, and
   forget(data_id=...) removes exactly that repository's graph (SDK-783); an
   unchanged repository is skipped by incremental loading
+- a directory with no project marker and no .git, remembered with
+  codegraph_config={"treat_as_repository": True}, is still ONE code_repo item
+- with raise_on_error=False, a failing repository spec next to a good one is an
+  errored item of the result while the good one is built
+- remember(..., content_type="code") is silently ignored: no warning, the same
+  result as a plain remember()
 - add(<project dir>) + cognify() routes the repo down the CODE_REPO route and
   produces the same typed graph
 - forget(everything=True) leaves no datasets or graph state behind
@@ -37,6 +43,7 @@ import os
 import pathlib
 import shutil
 import tempfile
+import warnings
 from uuid import UUID
 
 import cognee
@@ -62,6 +69,16 @@ FIXTURE_DIR = TESTS_DIR / "test_data" / "code_repo_fixture"
 
 REMEMBER_DATASET = "code_graph_e2e_remember"
 COGNIFY_DATASET = "code_graph_e2e_cognify"
+MARKERLESS_DATASET = "code_graph_e2e_markerless"
+MIXED_DATASET = "code_graph_e2e_mixed"
+CONTENT_TYPE_DATASET = "code_graph_e2e_content_type"
+
+# What makes a directory a code project on its own; the markerless step strips them.
+PROJECT_MARKERS = ("pyproject.toml", ".git")
+# Only the code graph: the fixture's README would otherwise go to the LLM
+# pipeline whenever an LLM key happens to be configured.
+CODE_ONLY = {"include_documents": False}
+DECLARED_CODE_ONLY = {"treat_as_repository": True, "include_documents": False}
 
 # --- Known answers, pinned to the fixture + ENOLA_PINNED_VERSION ------------
 # If enola is bumped and these change, update them deliberately. Last
@@ -367,12 +384,23 @@ async def main():
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
-    async def _remember_repo(path, **kwargs):
+    async def _remember_repo(path, dataset_name=REMEMBER_DATASET, **kwargs):
         # self_improvement=False: this test is about the code graph, and the
         # improve stages over a code-only dataset have nothing to enrich.
+        # include_documents=False keeps the README out, so the run is LLM-free
+        # (and items_processed == 1) even with an LLM key in the environment.
+        kwargs.setdefault("codegraph_config", CODE_ONLY)
+        data = [str(p) for p in path] if isinstance(path, list) else str(path)
         return await cognee.remember(
-            str(path), dataset_name=REMEMBER_DATASET, self_improvement=False, **kwargs
+            data, dataset_name=dataset_name, self_improvement=False, **kwargs
         )
+
+    async def _dataset_rows(dataset_name):
+        user = await get_default_user()
+        dataset = next(
+            ds for ds in await datasets.list_datasets(user=user) if ds.name == dataset_name
+        )
+        return dataset, await datasets.list_data(dataset.id, user=user)
 
     try:
         logger.info("enola pinned version: %s", ENOLA_PINNED_VERSION)
@@ -495,6 +523,82 @@ async def main():
         _assert_typed_code_graph(nodes, edges, repo_name=second_repo_path.name)
         remaining_rows = await datasets.list_data(remember_dataset.id, user=user)
         assert [str(row.id) for row in remaining_rows] == [second_data_id]
+
+        # --- 3c. A directory with no project marker, declared a repository ----
+        # Without treat_as_repository such a directory (a package subdirectory,
+        # a tree copied without .git) is split into per-file items.
+        markerless_path = _copy_fixture(
+            os.path.join(scratch_root, "markerless"), name="markerless_repo"
+        )
+        for marker in PROJECT_MARKERS:
+            marker_path = markerless_path / marker
+            if marker_path.is_dir():
+                shutil.rmtree(marker_path)
+            elif marker_path.exists():
+                marker_path.unlink()
+        result = await _remember_repo(
+            markerless_path, dataset_name=MARKERLESS_DATASET, codegraph_config=DECLARED_CODE_ONLY
+        )
+        assert result.status == "completed", f"{result.status} {result.error}"
+        assert result.items_processed == 1, result.items
+        markerless_dataset, markerless_rows = await _dataset_rows(MARKERLESS_DATASET)
+        assert [_system_metadata(row).get("source") for row in markerless_rows] == ["code_repo"], (
+            f"Expected one code_repo item, got {[row.name for row in markerless_rows]}"
+        )
+        processing = await get_dataset_processing_status(markerless_dataset.id)
+        assert processing["pending"] == 0, f"Markerless repository left pending: {processing}"
+        async with set_database_global_context_variables(markerless_dataset.id, user.id):
+            nodes, edges = await _graph_snapshot()
+        _assert_typed_code_graph(nodes, edges, repo_name=markerless_path.name)
+
+        # --- 3d. One failing repository spec next to a good one ----------------
+        # raise_on_error=False (what the HTTP router and the GitHub sync pass):
+        # the failure is an errored item, and the good repository is built.
+        missing_repo = pathlib.Path(scratch_root) / "no_such_repo"
+        good_repo_path = _copy_fixture(os.path.join(scratch_root, "mixed"), name="mixed_repo")
+        result = await _remember_repo(
+            [missing_repo, good_repo_path],
+            dataset_name=MIXED_DATASET,
+            codegraph_config=DECLARED_CODE_ONLY,
+            raise_on_error=False,
+        )
+        errored_items = [item for item in result.items if item.get("status") == "errored"]
+        built_items = [item for item in result.items if item.get("status") != "errored"]
+        assert len(errored_items) == 1, f"Expected one errored item: {result.items}"
+        assert errored_items[0].get("error"), errored_items[0]
+        assert len(built_items) == 1 and built_items[0].get("id"), result.items
+        mixed_dataset, mixed_rows = await _dataset_rows(MIXED_DATASET)
+        assert [str(row.id) for row in mixed_rows] == [built_items[0]["id"]], (
+            f"Expected only the good repository stored, got {[row.name for row in mixed_rows]}"
+        )
+        assert _system_metadata(mixed_rows[0]).get("source") == "code_repo"
+        processing = await get_dataset_processing_status(mixed_dataset.id)
+        assert processing["pending"] == 0, f"The good repository was not built: {processing}"
+        async with set_database_global_context_variables(mixed_dataset.id, user.id):
+            nodes, edges = await _graph_snapshot()
+        _assert_typed_code_graph(nodes, edges, repo_name=good_repo_path.name)
+
+        # --- 3e. content_type="code" is silently ignored -----------------------
+        # It used to select the code route; now remember() detects code
+        # projects on its own, so the argument changes nothing and says nothing.
+        content_type_path = _copy_fixture(
+            os.path.join(scratch_root, "content_type"), name="content_type_repo"
+        )
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            result = await _remember_repo(
+                content_type_path, dataset_name=CONTENT_TYPE_DATASET, content_type="code"
+            )
+        content_type_warnings = [w for w in caught if "content_type" in str(w.message)]
+        assert content_type_warnings == [], [str(w.message) for w in content_type_warnings]
+        assert result.status == "completed", f"{result.status} {result.error}"
+        assert result.items_processed == 1, result.items
+        content_type_dataset, content_type_rows = await _dataset_rows(CONTENT_TYPE_DATASET)
+        assert [_system_metadata(row).get("source") for row in content_type_rows] == [
+            "code_repo"
+        ], f"Expected one code_repo item, got {[row.name for row in content_type_rows]}"
+        processing = await get_dataset_processing_status(content_type_dataset.id)
+        assert processing["pending"] == 0, f"content_type='code' left items pending: {processing}"
 
         # --- 4. add(<project dir>) + cognify(): the CODE_REPO route -----------
         # The remember() steps above ran with no switch at all, proving a

@@ -46,7 +46,6 @@ from cognee.tasks.code_graph.config import (
     CodeGraphConfig,
     requests_codegraph_options,
     validate_codegraph_config,
-    with_legacy_code_content_type,
 )
 from cognee.tasks.ingestion.data_item import DataItem
 
@@ -108,7 +107,9 @@ class RememberKwargs(TypedDict, total=False):
     user: object
     vector_db_config: dict
     graph_db_config: dict
-    content_type: Literal["skills"]
+    # "code" is accepted and ignored: the removed code content type is read as
+    # a plain remember(data). Kept in the Literal so typed callers still check.
+    content_type: Literal["skills", "code"]
     skill_improvement: dict[str, Any]
     codegraph_config: CodeGraphConfig
     # Top-level spellings of the codegraph_config keys, kept for existing
@@ -255,45 +256,45 @@ async def _attach_item_identity(result: "RememberResult") -> None:
         logger.debug("Could not attach item identity to the remember result", exc_info=True)
 
 
-class _RepositoriesFailed(Exception):
-    """Every declared repository of an isolating remember failed to ingest."""
-
-    def __init__(self, items: list[dict]):
-        super().__init__(_repositories_error(items))
-        self.items = items
-
-
 def _repositories_error(items: list[dict]) -> str:
     return "; ".join(f"{item['source']}: {item['error']}" for item in items)
 
 
-def _restore_legacy_code_items(result: "RememberResult", specs: list) -> None:
-    """Give a deprecated ``content_type="code"`` call the result items it used to get.
+def _run_error_text(run_info) -> str | None:
+    """What an errored ``PipelineRunInfo`` says went wrong, or None if it did not error.
 
-    The removed route reported each repository as ``kind="code_repository"``
-    with the caller's (redacted) spec as ``source`` and the run's
-    ``pipeline_run_id``; :func:`_attach_item_identity` names the same rows
-    ``code_repo`` with the stored URL or resolved path. Map them back so
-    existing callers keep reading the shape they had.
+    Accepts a single run info (``add()``) or cognify's ``{dataset_id: run_info}``.
     """
-    from cognee.tasks.code_graph.resolve_repo import is_remote_repo, redact_repo_spec
+    if isinstance(run_info, dict):
+        for value in run_info.values():
+            error = _run_error_text(value)
+            if error is not None:
+                return error
+        return None
+    if "Errored" not in str(getattr(run_info, "status", "")):
+        return None
+    return (
+        getattr(run_info, "error_message", None)
+        or getattr(run_info, "payload", None)
+        or "Pipeline run errored."
+    )
 
-    spec_by_source = {}
-    for spec in specs:
-        if not isinstance(spec, (str, Path)):
-            continue
-        redacted = redact_repo_spec(spec)
-        spec_by_source[redacted] = redacted
-        if not is_remote_repo(spec):
-            spec_by_source[str(Path(spec).expanduser().resolve())] = redacted
 
-    for item in result.items:
-        if item.get("kind") != "code_repo":
+def _ingested_data_ids(add_result) -> list:
+    """The data ids one ``add()`` run stored (or found already stored).
+
+    Read from the run's per-item results. Items the add skipped as already
+    added still carry their id; items that errored do not count. Empty when the
+    add ran without incremental loading and data cache, which report no ids.
+    """
+    data_ids = []
+    for entry in getattr(add_result, "data_ingestion_info", None) or []:
+        if not isinstance(entry, dict) or entry.get("data_id") is None:
             continue
-        item["kind"] = "code_repository"
-        item["source"] = spec_by_source.get(item.get("source"), item.get("source"))
-        if result.pipeline_run_id:
-            item["pipeline_run_id"] = result.pipeline_run_id
+        if "Errored" in str(getattr(entry.get("run_info"), "status", "")):
+            continue
+        data_ids.append(entry["data_id"])
+    return data_ids
 
 
 PRESORT_FOLDERS_ENV = "PRESORT_FOLDERS_ENABLED"
@@ -306,9 +307,8 @@ def _should_auto_presort(data, dataset_name, dataset_id, session_id, kwargs) -> 
     plain local directories targeting the default dataset without a session,
     content_type or codegraph_config qualify. Code projects, paths outside the
     allowed local roots, and remote-connected sessions keep the classic
-    behavior. A codegraph_config call (including the deprecated
-    content_type="code", already translated into one) has said how to read the
-    input: presorting it into per-file items would undo that.
+    behavior. A codegraph_config call has said how to read the input:
+    presorting it into per-file items would undo that.
     """
     if os.environ.get(PRESORT_FOLDERS_ENV, "false").strip().lower() not in ("true", "1", "yes"):
         return False
@@ -1004,6 +1004,31 @@ class RememberResult:
                         self.items.append({"id": str(entry["data_id"])})
                 self.items_processed = processed
 
+    def _resolve_repositories(self, built: list):
+        """Fold the per-repository cognify results of an isolating remember.
+
+        ``built`` holds one cognify return value per repository that built
+        (the caller appends the errored items of the others). Each built item
+        carries the ``pipeline_run_id`` of its own run; the result's own
+        ``pipeline_run_id`` and ``raw_result`` are the last built run's.
+        """
+        items: list[dict] = []
+        processed = 0
+        for cognify_result in built:
+            self.items = []
+            self.items_processed = 0
+            self._resolve(cognify_result)
+            for item in self.items:
+                if self.pipeline_run_id:
+                    item.setdefault("pipeline_run_id", self.pipeline_run_id)
+            items.extend(self.items)
+            processed += self.items_processed
+        self.items = items
+        self.items_processed = processed
+        self.elapsed_seconds = time.monotonic() - self._started_at
+        if not built:
+            self.status = "errored"
+
     def _fail(self, exc: BaseException):
         """Mark the result as failed with an error message and elapsed time."""
         self.status = "errored"
@@ -1032,7 +1057,7 @@ async def remember(
     chunker: Any | None = None,
     custom_prompt: str | None = None,
     run_in_background: bool = False,
-    self_improvement: bool | None = None,
+    self_improvement: bool = True,
     session_ids: list[str] | None = None,
     dry_run: bool | Literal["presort"] = False,
     raise_on_error: bool = True,
@@ -1123,17 +1148,20 @@ async def remember(
             ``treat_as_repository=True`` to take every item as a repository
             spec -- needed for a git remote ``add()`` does not claim on its
             own, such as a Bitbucket or self-hosted forge URL with no ``.git``
-            suffix, or an ssh remote. The top-level ``index_vectors=`` /
-            ``repo_credentials=`` spellings are still accepted. The deprecated
-            ``content_type="code"`` is read as ``include_documents=False`` plus
-            ``treat_as_repository=True``, the behaviour it used to have.
+            suffix, or an ssh remote. With ``raise_on_error=False`` or
+            ``run_in_background=True`` each declared repository is added and
+            built in a run of its own: one that fails becomes an errored item
+            (``kind``, ``source``, ``status``, ``error``) and the others keep
+            their graphs. The top-level ``index_vectors=`` /
+            ``repo_credentials=`` spellings are still accepted. The removed
+            ``content_type="code"`` is accepted and ignored: such a call is a
+            plain ``remember(data)``.
         skill_improvement: Internal skill-improvement control dict used with
             ``SkillRunEntry`` or ``content_type="skills"``. ``apply=True``
             requires an existing ``proposal_id``.
         **kwargs: Additional options -- see ``RememberKwargs``. ``branch`` clones that
             branch of a repository URL (of every remote spec with
-            ``treat_as_repository``, which the deprecated ``content_type="code"`` is
-            read as); see ``add()``. It is refused with ``content_type="skills"``.
+            ``treat_as_repository``); see ``add()``. It is refused with ``content_type="skills"``.
 
     Returns:
         RememberResult or DryRunEstimate: A promise-like object for normal
@@ -1163,27 +1191,11 @@ async def remember(
     drop_deprecated_temporal_cognify(kwargs)
 
     # content_type="code" was removed (SDK-793): a repository is ordinary data
-    # and builds through add() + cognify(). Callers still passing it keep
-    # working -- and keep the behaviour they had, so the value is translated
-    # (with_legacy_code_content_type, shared with the HTTP route) rather than
-    # dropped. An explicit codegraph_config key wins over the translation.
-    # Translated here, before any path reads content_type.
-    legacy_code_content_type = kwargs.get("content_type") == "code"
-    if legacy_code_content_type:
-        if session_id is not None:
-            raise ValueError("session_id is not applicable to content_type='code'.")
+    # and builds through add() + cognify(). The value is still accepted so
+    # existing callers do not break, and ignored: the call is a plain
+    # remember(data). Dropped here, before any path reads content_type.
+    if kwargs.get("content_type") == "code":
         kwargs.pop("content_type")
-        kwargs["codegraph_config"] = with_legacy_code_content_type(kwargs.get("codegraph_config"))
-        logger.warning(
-            "remember(content_type='code') is deprecated: pass the repository path or URL "
-            'as data with codegraph_config={"include_documents": False, '
-            '"treat_as_repository": True} for the same code-graph-only ingestion. '
-            "Reading it as that for now."
-        )
-    # None means "not passed": True, except for the deprecated code content
-    # type, whose route never ran improve() and so keeps not running it.
-    if self_improvement is None:
-        self_improvement = not legacy_code_content_type
 
     # Migration dispatch: a MemorySource streams COGX records from an external
     # memory system (Mem0, Zep/Graphiti, Letta, a COGX archive, ...). The
@@ -1199,8 +1211,7 @@ async def remember(
             "repo_credentials", None
         ):
             raise ValueError(
-                "codegraph_config and repo_credentials are not supported for MemorySource "
-                "imports (including the deprecated content_type='code')."
+                "codegraph_config and repo_credentials are not supported for MemorySource imports."
             )
         if dataset_id is not None:
             raise ValueError(
@@ -1413,9 +1424,8 @@ async def remember(
         if session_id is not None:
             raise ValueError("dry_run is supported for permanent add+cognify remember inputs only.")
         if kwargs.get("content_type") or requests_codegraph_options(kwargs.get("codegraph_config")):
-            # codegraph_config covers the deprecated content_type="code" too (translated
-            # into it above): the estimate prices LLM extraction of documents, which a
-            # code-graph run does not do.
+            # The estimate prices LLM extraction of documents, which a code-graph
+            # run does not do.
             raise ValueError("dry_run is supported for standard add+cognify remember inputs only.")
 
         from cognee.modules.cognify.config import (
@@ -1512,7 +1522,6 @@ async def remember(
             session_ids=session_ids,
             span=span,
             raise_on_error=raise_on_error,
-            legacy_code_content_type=legacy_code_content_type,
             **kwargs,
         )
 
@@ -1568,7 +1577,6 @@ async def _remember_inner(
     session_ids,
     span,
     raise_on_error: bool = True,
-    legacy_code_content_type: bool = False,
     **kwargs,
 ) -> "RememberResult":
     from cognee.api.v1.serve.state import get_remote_client
@@ -2009,21 +2017,99 @@ async def _remember_inner(
         )
         result.improve_skipped = improve_skipped
 
-        # Declared repositories (treat_as_repository, which the deprecated
-        # content_type="code" is read as) are cloned one by one inside add().
-        # Where a failure is reported rather than raised -- background runs, and
-        # raise_on_error=False as the HTTP router and the GitHub sync pass -- one
-        # failing repository must not abort the others, so each is added on its
-        # own and a failure becomes an errored item of the result.
+        # Declared repositories (treat_as_repository) are cloned one by one
+        # inside add(). Where a failure is reported rather than raised --
+        # background runs, and raise_on_error=False as the HTTP router and the
+        # GitHub sync pass -- one failing repository must not cost the others,
+        # one repository or many. So each is added and built on its own: add()
+        # stores its rows and cognify(data_ids=...) builds exactly those rows in
+        # a cognify_pipeline run of their own. A failed clone or a failed build
+        # then rolls back that repository's run only and becomes an errored item
+        # naming it; the repositories that built keep their graphs, and a
+        # repository left pending by an earlier failure is not rebuilt (and
+        # failed again) by every later one.
         repo_specs = data if isinstance(data, list) else [data]
-        isolate_repositories = (
-            bool(codegraph_config.get("treat_as_repository"))
-            and len(repo_specs) > 1
-            and (run_in_background or not raise_on_error)
+        isolate_repositories = bool(codegraph_config.get("treat_as_repository")) and (
+            run_in_background or not raise_on_error
         )
+        datasets_arg = [dataset_name] if dataset_id is None else [dataset_id]
 
-        async def _add() -> list[dict]:
-            if not isolate_repositories:
+        async def _build_repositories() -> bool:
+            """Add and cognify each repository on its own; False when none built."""
+            from cognee.tasks.code_graph.resolve_repo import redact_repo_spec
+
+            built = []
+            failed = []
+            for position, spec in enumerate(repo_specs, start=1):
+                failed_run_id = None
+                try:
+                    add_result = await add(
+                        data=spec,
+                        dataset_name=dataset_name,
+                        dataset_id=dataset_id,
+                        **shared_kwargs,
+                        **add_kwargs,
+                    )
+                    error = _run_error_text(add_result)
+                    if error is None:
+                        # No ids (an add without incremental loading or data
+                        # cache reports none): build the dataset, as a plain
+                        # cognify would.
+                        data_ids = _ingested_data_ids(add_result) or None
+                        cognify_result = await cognify(
+                            datasets=datasets_arg,
+                            data_ids=data_ids,
+                            chunker=chunker,
+                            chunk_size=chunk_size,
+                            custom_prompt=custom_prompt,
+                            run_in_background=False,
+                            raise_on_error=False,
+                            **shared_kwargs,
+                            **cognify_kwargs,
+                        )
+                        error = _run_error_text(cognify_result)
+                        if error is None:
+                            built.append(cognify_result)
+                        else:
+                            logger.warning(
+                                "remember: repository %d of %d failed to build",
+                                position,
+                                len(repo_specs),
+                            )
+                            run_info = next(iter(cognify_result.values()), None)
+                            failed_run_id = getattr(run_info, "pipeline_run_id", None)
+                except Exception as exc:
+                    # Specs can embed URL credentials: never log spec-derived values.
+                    logger.exception(
+                        "remember: repository %d of %d failed", position, len(repo_specs)
+                    )
+                    error = str(exc)
+                if error is None:
+                    continue
+                failed_item = {
+                    "kind": "code_repo",
+                    "source": redact_repo_spec(spec),
+                    "status": "errored",
+                    "error": error,
+                }
+                if failed_run_id is not None:
+                    failed_item["pipeline_run_id"] = str(failed_run_id)
+                failed.append(failed_item)
+
+            result._resolve_repositories(built)
+            await _attach_item_identity(result)
+            if failed:
+                result.items.extend(failed)
+                result.status = "errored"
+                result.error = _repositories_error(failed)
+            return bool(built)
+
+        # Permanent memory: add + cognify (+ optional improve)
+        async def _run():
+            if isolate_repositories:
+                if not await _build_repositories():
+                    return
+            else:
                 await add(
                     data=data,
                     dataset_name=dataset_name,
@@ -2031,77 +2117,27 @@ async def _remember_inner(
                     **shared_kwargs,
                     **add_kwargs,
                 )
-                return []
 
-            from cognee.tasks.code_graph.resolve_repo import redact_repo_spec
+                cognify_result = await cognify(
+                    datasets=datasets_arg,
+                    chunker=chunker,
+                    chunk_size=chunk_size,
+                    custom_prompt=custom_prompt,
+                    run_in_background=False,
+                    # Loud-by-default: a failed build raises CognifyFailedError
+                    # (typed, classified, with a remedy) out of blocking remember()
+                    # instead of returning a silently "errored" result nobody
+                    # inspects. In background remember() a raise has nowhere to go
+                    # and would skip _resolve(), losing pipeline_run_id/dataset_id/
+                    # raw_result — so take the errored-run-info path there and let
+                    # _resolve() record the failure on the result.
+                    raise_on_error=raise_on_error and not run_in_background,
+                    **shared_kwargs,
+                    **cognify_kwargs,
+                )
 
-            failed = []
-            for position, spec in enumerate(repo_specs, start=1):
-                try:
-                    await add(
-                        data=spec,
-                        dataset_name=dataset_name,
-                        dataset_id=dataset_id,
-                        **shared_kwargs,
-                        **add_kwargs,
-                    )
-                except Exception as exc:
-                    # Specs can embed URL credentials: never log spec-derived values.
-                    logger.exception(
-                        "remember: repository %d of %d failed to ingest", position, len(repo_specs)
-                    )
-                    failed.append(
-                        {
-                            "kind": "code_repository" if legacy_code_content_type else "code_repo",
-                            "source": redact_repo_spec(spec),
-                            "status": "errored",
-                            "error": str(exc),
-                        }
-                    )
-            if len(failed) == len(repo_specs):
-                # Nothing was stored, so there is nothing to cognify.
-                raise _RepositoriesFailed(failed)
-            return failed
-
-        # Permanent memory: add + cognify (+ optional improve)
-        async def _run():
-            try:
-                failed_repositories = await _add()
-            except _RepositoriesFailed as exc:
-                result.items.extend(exc.items)
-                result.status = "errored"
-                result.error = _repositories_error(exc.items)
-                result.elapsed_seconds = time.monotonic() - result._started_at
-                return
-
-            datasets_arg = [dataset_name] if dataset_id is None else [dataset_id]
-
-            cognify_result = await cognify(
-                datasets=datasets_arg,
-                chunker=chunker,
-                chunk_size=chunk_size,
-                custom_prompt=custom_prompt,
-                run_in_background=False,
-                # Loud-by-default: a failed build raises CognifyFailedError
-                # (typed, classified, with a remedy) out of blocking remember()
-                # instead of returning a silently "errored" result nobody
-                # inspects. In background remember() a raise has nowhere to go
-                # and would skip _resolve(), losing pipeline_run_id/dataset_id/
-                # raw_result — so take the errored-run-info path there and let
-                # _resolve() record the failure on the result.
-                raise_on_error=raise_on_error and not run_in_background,
-                **shared_kwargs,
-                **cognify_kwargs,
-            )
-
-            result._resolve(cognify_result)
-            await _attach_item_identity(result)
-            if legacy_code_content_type:
-                _restore_legacy_code_items(result, repo_specs)
-            if failed_repositories:
-                result.items.extend(failed_repositories)
-                result.status = "errored"
-                result.error = _repositories_error(failed_repositories)
+                result._resolve(cognify_result)
+                await _attach_item_identity(result)
 
             if auto_improve:
                 from cognee.api.v1.improve import improve

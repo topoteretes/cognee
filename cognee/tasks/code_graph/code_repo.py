@@ -44,6 +44,7 @@ from cognee.modules.chunking.external_metadata import decode_external_metadata
 from cognee.modules.engine.models.node_set import validate_node_set_names
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.code_graph.resolve_repo import (
+    clone_repo_name,
     code_repo_clone_url,
     redact_repo_spec,
     repo_identity,
@@ -134,6 +135,25 @@ REPO_SKIPPED_MEDIA_EXTENSIONS = frozenset(
 def is_code_repo_sourced(metadata) -> bool:
     """Check whether system_metadata indicates a repo manifest (source == "code_repo")."""
     return metadata_source(metadata) == "code_repo"
+
+
+def manifest_repo_name(data_item, repo_path: Path) -> str | None:
+    """The code-graph name of a cloned repository's manifest, or None for a local directory.
+
+    A clone's directory carries a hash its stored graph never had (see
+    ``resolve_repo.clone_repo_name``); the manifest row's ``repo_url`` says it
+    is a clone and of what. A local directory keeps the name enola gives it.
+    """
+    metadata = getattr(data_item, "system_metadata", None)
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except (json.JSONDecodeError, TypeError):
+            return None
+    repo_url = metadata.get("repo_url") if isinstance(metadata, dict) else None
+    if not isinstance(repo_url, str) or not repo_url:
+        return None
+    return clone_repo_name(redact_repo_spec(repo_url), repo_path)
 
 
 def detect_code_project(directory: Path) -> bool:
@@ -263,7 +283,7 @@ async def resolve_code_repository(
     code graph itself never needs one — a key-less repo add still works fully.
     ``include_documents=False`` returns no document paths at all, for callers
     that index the code graph only (``codegraph_config={"include_documents":
-    False}``, and the deprecated ``content_type="code"`` that maps onto it).
+    False}``).
     """
     from cognee.infrastructure.llm.config import get_llm_config
     from cognee.tasks.ingestion.data_item import DataItem
@@ -389,8 +409,7 @@ async def resolve_declared_repositories(
 ):
     """Resolve every item of ``data`` as a repository spec, sniffing nothing.
 
-    What ``codegraph_config={"treat_as_repository": True}`` means, and what the
-    deprecated ``content_type="code"`` declared: the caller has told us these
+    What ``codegraph_config={"treat_as_repository": True}`` means: the caller has told us these
     are repositories, so the conservative detection
     (:func:`code_repo_clone_url`, :func:`detect_code_project`) is bypassed and
     every spec goes through :func:`resolve_repo_source` — a local directory is
@@ -523,9 +542,16 @@ async def extract_code_repo_graph(
         metadata = decode_external_metadata(data_item.external_metadata)
         node_set = validate_node_set_names(metadata.get("node_set")) if metadata else None
 
-        data_points = await extract_code_graph(repo_path=repo_path, node_set=node_set)
+        # A clone keeps the repository name its graph had before clone directories
+        # carried a hash, so its node ids, and the sweep of stale ones, still match.
+        repo_name = manifest_repo_name(data_item, repo_path)
+        data_points = await extract_code_graph(
+            repo_path=repo_path, node_set=node_set, repo_name=repo_name
+        )
         state = await add_code_graph_data_points(data_points, ctx=ctx, graph_only=not index_vectors)
-        await add_code_graph_edges(state, repo_path=repo_path, ctx=ctx, node_set=node_set)
+        await add_code_graph_edges(
+            state, repo_path=repo_path, ctx=ctx, node_set=node_set, repo_name=repo_name
+        )
 
         logger.info("Code repo graph extracted for %s (%s).", repo_path, data_item.id)
 

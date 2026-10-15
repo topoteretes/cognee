@@ -6,15 +6,13 @@ directories with a build manifest or ``.git``. It has to be, because most http(s
 URLs really are web pages — a wider guess would scrape a repository or, worse,
 clone a web page.
 
-The removed ``content_type="code"`` was the explicit declaration that made the
-guessing unnecessary: it took every item as a repository spec and handed it to
-``resolve_repo_source``, which clones any git remote. ``treat_as_repository``
-is that declaration as a first-class option, so the deprecated value still
-means what it meant and new callers have a supported way to say it.
+``treat_as_repository`` is the explicit declaration that makes the guessing
+unnecessary: it takes every item as a repository spec and hands it to
+``resolve_repo_source``, which clones any git remote.
 
-Regression guard: without it, ``remember("https://bitbucket.org/o/r",
-content_type="code")`` silently fetched and stored the project's web page
-instead of building its code graph.
+Regression guard: without it, ``remember("https://bitbucket.org/o/r")``
+silently fetches and stores the project's web page instead of building its
+code graph.
 """
 
 import importlib
@@ -229,7 +227,7 @@ async def test_a_branch_with_a_local_spec_raises_before_anything_is_cloned(clone
 
 
 @pytest.mark.asyncio
-async def test_the_deprecated_content_type_still_declares_its_repositories(monkeypatch):
+async def test_the_declaration_reaches_add(monkeypatch):
     """The end-to-end reason this option exists."""
     calls = {}
 
@@ -252,7 +250,7 @@ async def test_the_deprecated_content_type_still_declares_its_repositories(monke
         dataset_id=uuid4(),
         user=SimpleNamespace(id=uuid4()),
         self_improvement=False,
-        content_type="code",
+        codegraph_config={"treat_as_repository": True},
     )
 
     assert calls["add"]["codegraph_config"]["treat_as_repository"] is True
@@ -261,7 +259,7 @@ async def test_the_deprecated_content_type_still_declares_its_repositories(monke
 @pytest.mark.asyncio
 async def test_declared_local_specs_honour_the_allowed_local_roots(monkeypatch, tmp_path):
     # A declaration is not a licence to read outside COGNEE_ALLOWED_LOCAL_FILE_ROOTS:
-    # the HTTP route (content_type=code) reaches this path with caller paths.
+    # SDK callers reach this path with arbitrary paths.
     from cognee.tasks.code_graph.resolve_repo import CodeRepositoryError
 
     allowed = tmp_path / "allowed"

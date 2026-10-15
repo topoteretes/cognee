@@ -84,10 +84,25 @@ async def main(args: argparse.Namespace) -> None:
 
     step("2/3 build the code graph locally (no LLM, no network)")
     t = time.time()
-    # A code project (one with a build manifest; run.sh copies the repo without .git)
-    # is stored as one code_repo item and built by cognify's CODE_REPO route. Its
-    # README and docs are skipped: the sandbox has no LLM key.
-    result = await cognee.remember(args.repo, dataset_name=args.dataset, self_improvement=False)
+    # The directory is taken as one repository (one code_repo item, built by
+    # cognify's CODE_REPO route) even without a build manifest or .git: run.sh
+    # copies it without .git, and the README's example is a package subdirectory,
+    # which would otherwise be split into per-file items. Its README and docs are
+    # skipped: the sandbox has no LLM key.
+    try:
+        result = await cognee.remember(
+            args.repo,
+            dataset_name=args.dataset,
+            self_improvement=False,
+            codegraph_config={"treat_as_repository": True, "include_documents": False},
+        )
+    except TypeError as error:
+        if "codegraph_config" not in str(error):
+            raise
+        # cognee <= 1.6.4 has no codegraph_config; content_type="code" did the same there.
+        result = await cognee.remember(
+            args.repo, dataset_name=args.dataset, self_improvement=False, content_type="code"
+        )
     arch = await cognee.search(
         query_type=cognee.SearchType.CODE,
         query_text="",

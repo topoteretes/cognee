@@ -16,9 +16,8 @@ class CodeGraphConfig(TypedDict, total=False):
     index_vectors: bool
     # Also ingest the repository's document files (README, docs, ...) as
     # ordinary documents, alongside its code graph. On by default, as a
-    # directory add has always done. False indexes the code graph only -- the
-    # behaviour the removed ``content_type="code"`` route had, and what the
-    # GitHub sync wants: no LLM extraction or embeddings for a repo's prose.
+    # directory add has always done. False indexes the code graph only -- what
+    # the GitHub sync wants: no LLM extraction or embeddings for a repo's prose.
     # Documents are excluded regardless when no LLM API key is configured,
     # since their pipelines need one.
     include_documents: bool
@@ -36,9 +35,7 @@ class CodeGraphConfig(TypedDict, total=False):
     # Turn it on when that sniffing cannot see what you have: a Bitbucket or
     # self-hosted forge URL with no ``.git`` suffix (guessing would scrape a web
     # page instead), an ssh remote (``git@host:owner/repo``), or a source tree
-    # with no build manifest and no ``.git``. It is also what the deprecated
-    # ``content_type="code"`` declared, and what that value is read as, so those
-    # callers keep the repository set they had.
+    # with no build manifest and no ``.git``.
     #
     # Every item is then resolved through ``resolve_repo_source``: a local
     # directory is used in place, a remote URL is shallow-cloned. An item that
@@ -94,41 +91,3 @@ def requests_codegraph_options(codegraph_config: CodeGraphConfig | None) -> bool
         or config.get("treat_as_repository")
         or config.get("include_documents", True) is False
     )
-
-
-# What the removed ``remember(content_type="code")`` meant, as codegraph_config:
-# the route indexed the code graph only and took every item as a repository
-# spec, cloning any git remote. Both halves have to survive the translation or
-# the deprecation changes results silently (a Bitbucket or self-hosted forge
-# URL, which add()'s detection does not claim, would be scraped as a web page).
-LEGACY_CODE_CONTENT_TYPE_CONFIG: CodeGraphConfig = {
-    "include_documents": False,
-    "treat_as_repository": True,
-}
-
-
-def with_legacy_code_content_type(codegraph_config: CodeGraphConfig | None) -> CodeGraphConfig:
-    """The config a deprecated ``content_type="code"`` call means.
-
-    The legacy pair is applied as defaults: an explicit key in
-    ``codegraph_config`` wins over it. Used wherever the removed value is
-    still accepted (the SDK and ``POST /remember``), so every surface reads
-    it the same way.
-    """
-    return cast(
-        CodeGraphConfig, {**LEGACY_CODE_CONTENT_TYPE_CONFIG, **dict(codegraph_config or {})}
-    )
-
-
-def is_legacy_code_content_type(codegraph_config: CodeGraphConfig | None) -> bool:
-    """Whether the config's repository options are exactly the legacy pair.
-
-    ``POST /remember`` has no field for ``treat_as_repository``; the one wire
-    form that carries it is the deprecated ``content_type="code"``, which the
-    server reads back through :func:`with_legacy_code_content_type`. A config
-    is sent that way only when that reading reproduces it, so nothing is
-    built differently from what the caller asked. An absent
-    ``include_documents`` counts as the legacy value, as the server defaults it.
-    """
-    config = codegraph_config or {}
-    return bool(config.get("treat_as_repository")) and not config.get("include_documents", False)

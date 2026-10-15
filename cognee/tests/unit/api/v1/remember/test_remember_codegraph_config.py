@@ -122,64 +122,73 @@ async def test_codegraph_config_is_rejected_with_session_id(permanent_pipeline):
 
 
 @pytest.mark.asyncio
-async def test_removed_code_content_type_keeps_its_behaviour(permanent_pipeline):
-    # Existing callers keep working AND keep what they had. The removed route
-    # said two things, so the value is read as both: it indexed the code graph
-    # only (include_documents=False) and took every item as a repository spec
-    # (treat_as_repository=True). Dropping the second would quietly scrape a
-    # Bitbucket or self-hosted forge URL as a web page instead of cloning it.
-    result = await remember_module.remember(
-        "https://github.com/acme/private",
-        dataset_id=uuid4(),
-        user=SimpleNamespace(id=uuid4()),
-        self_improvement=False,
-        content_type="code",
-        repo_credentials="tok123",
-    )
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {},
+        {"repo_credentials": "tok123"},
+        {"codegraph_config": {"include_documents": True}},
+    ],
+)
+async def test_removed_code_content_type_is_ignored(permanent_pipeline, kwargs, caplog):
+    # Accepted so existing callers do not break, and ignored: the call is a
+    # plain remember(data) -- no warning, no translation into codegraph_config.
+    import logging
+    import warnings
 
-    assert result.status == "completed"
-    assert permanent_pipeline["add"]["codegraph_config"] == {
-        "repo_credentials": "tok123",
-        "include_documents": False,
-        "treat_as_repository": True,
-    }
-    assert "content_type" not in permanent_pipeline["add"]
-    assert "content_type" not in permanent_pipeline["cognify"]
-
-
-@pytest.mark.asyncio
-async def test_explicit_include_documents_wins_over_the_content_type_default(permanent_pipeline):
-    # The translation is a default, not an override: a caller that asks for the
-    # documents while still sending the deprecated value gets them.
+    dataset_id = uuid4()
+    user = SimpleNamespace(id=uuid4())
     await remember_module.remember(
         "https://github.com/acme/api",
+        dataset_id=dataset_id,
+        user=user,
+        self_improvement=False,
+        **kwargs,
+    )
+    plain = dict(permanent_pipeline)
+    permanent_pipeline.clear()
+
+    with warnings.catch_warnings(record=True) as caught, caplog.at_level(logging.WARNING):
+        warnings.simplefilter("always")
+        result = await remember_module.remember(
+            "https://github.com/acme/api",
+            dataset_id=dataset_id,
+            user=user,
+            self_improvement=False,
+            content_type="code",
+            **kwargs,
+        )
+
+    assert result.status == "completed"
+    assert permanent_pipeline == plain
+    assert "content_type" not in permanent_pipeline["add"]
+    assert "content_type" not in permanent_pipeline["cognify"]
+    assert [w for w in caught if "content_type" in str(w.message)] == []
+    assert "content_type" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_code_content_type_with_session_id_takes_the_session_path(
+    permanent_pipeline, monkeypatch
+):
+    stored = []
+
+    async def fake_add_to_session(session_id, data, user):
+        stored.append((session_id, data))
+
+    monkeypatch.setattr(remember_module, "_add_to_session", fake_add_to_session)
+
+    result = await remember_module.remember(
+        "/some/repo",
+        session_id="s1",
         dataset_id=uuid4(),
         user=SimpleNamespace(id=uuid4()),
         self_improvement=False,
         content_type="code",
-        codegraph_config={"include_documents": True},
     )
 
-    assert permanent_pipeline["add"]["codegraph_config"] == {
-        "include_documents": True,
-        # Still declared: the caller overrode what to ingest, not what the
-        # items are.
-        "treat_as_repository": True,
-    }
-
-
-@pytest.mark.asyncio
-async def test_code_content_type_with_session_id_is_still_refused(permanent_pipeline):
-    # The removed route rejected this instead of writing a repository path into
-    # the session cache; the translation keeps that refusal and its wording.
-    with pytest.raises(ValueError, match="session_id is not applicable to content_type='code'"):
-        await remember_module.remember(
-            "/some/repo",
-            session_id="s1",
-            user=SimpleNamespace(id=uuid4()),
-            content_type="code",
-        )
-
+    assert result.status == "session_stored"
+    assert stored == [("s1", "/some/repo")]
     assert permanent_pipeline == {}
 
 
@@ -225,26 +234,13 @@ def improve_calls(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_code_content_type_does_not_run_improve_by_default(permanent_pipeline, improve_calls):
-    # The removed route returned before improve(); a translated call keeps that.
+async def test_code_content_type_runs_improve_by_default(permanent_pipeline, improve_calls):
+    # Ignored means ignored: the improve default is the plain call's.
     await remember_module.remember(
         "https://github.com/acme/api",
         dataset_id=uuid4(),
         user=SimpleNamespace(id=uuid4()),
         content_type="code",
-    )
-
-    assert improve_calls == []
-
-
-@pytest.mark.asyncio
-async def test_code_content_type_runs_improve_when_asked(permanent_pipeline, improve_calls):
-    await remember_module.remember(
-        "https://github.com/acme/api",
-        dataset_id=uuid4(),
-        user=SimpleNamespace(id=uuid4()),
-        content_type="code",
-        self_improvement=True,
     )
 
     assert len(improve_calls) == 1
@@ -284,23 +280,70 @@ async def test_explicit_index_vectors_false_is_not_a_codegraph_option(permanent_
     assert "codegraph_config" not in str(error.value)
 
 
+DATASET_ID = uuid4()
+
+
+def _run_info(status, **fields):
+    return SimpleNamespace(status=status, dataset_name=None, payload=None, **fields)
+
+
 @pytest.fixture
 def failing_repo_add(monkeypatch):
-    """add() fails for any spec containing 'bad'; cognify() records its calls."""
+    """Stub add()/cognify() per repository.
+
+    add() fails (a clone error) for any spec containing 'bad' and otherwise
+    stores one row whose id is derived from the spec; cognify() records its
+    calls and fails the build (an errored run, as an enola failure is
+    reported) of any row whose spec contains 'unbuildable'.
+    """
     calls = {"add": [], "cognify": []}
+    spec_by_id = {}
 
     async def fake_add(*args, **kwargs):
-        calls["add"].append(kwargs["data"])
-        if "bad" in str(kwargs["data"]):
+        spec = kwargs["data"]
+        calls["add"].append(spec)
+        if "bad" in str(spec):
             raise RuntimeError("clone failed")
+        data_id = uuid4()
+        spec_by_id[data_id] = str(spec)
+        return _run_info(
+            "PipelineRunCompleted",
+            data_ingestion_info=[
+                {"run_info": _run_info("PipelineRunCompleted"), "data_id": data_id}
+            ],
+        )
 
     async def fake_cognify(*args, **kwargs):
         calls["cognify"].append(kwargs)
-        return {}
+        data_ids = kwargs.get("data_ids") or []
+        run_id = uuid4()
+        if any("unbuildable" in spec_by_id.get(data_id, "") for data_id in data_ids):
+            return {
+                DATASET_ID: _run_info(
+                    "PipelineRunErrored", pipeline_run_id=run_id, error_message="enola failed"
+                )
+            }
+        return {
+            DATASET_ID: _run_info(
+                "PipelineRunCompleted",
+                pipeline_run_id=run_id,
+                data_ingestion_info=[
+                    {"run_info": _run_info("PipelineRunCompleted"), "data_id": data_id}
+                    for data_id in data_ids
+                ],
+            )
+        }
+
+    async def no_identity(result):
+        return None
 
     monkeypatch.setattr("cognee.api.v1.add.add", fake_add)
     monkeypatch.setattr("cognee.api.v1.cognify.cognify", fake_cognify)
+    monkeypatch.setattr(remember_module, "_attach_item_identity", no_identity)
     return calls
+
+
+DECLARED = {"codegraph_config": {"treat_as_repository": True}}
 
 
 @pytest.mark.asyncio
@@ -309,8 +352,9 @@ async def test_one_failing_repository_does_not_stop_the_others(failing_repo_add)
         ["https://bitbucket.org/acme/good", "https://bitbucket.org/acme/bad"],
         dataset_id=uuid4(),
         user=SimpleNamespace(id=uuid4()),
-        content_type="code",
+        self_improvement=False,
         raise_on_error=False,
+        **DECLARED,
     )
 
     assert failing_repo_add["add"] == [
@@ -322,7 +366,7 @@ async def test_one_failing_repository_does_not_stop_the_others(failing_repo_add)
     errored = [item for item in result.items if item.get("status") == "errored"]
     assert errored == [
         {
-            "kind": "code_repository",
+            "kind": "code_repo",
             "source": "https://bitbucket.org/acme/bad",
             "status": "errored",
             "error": "clone failed",
@@ -332,13 +376,89 @@ async def test_one_failing_repository_does_not_stop_the_others(failing_repo_add)
 
 
 @pytest.mark.asyncio
+async def test_a_failed_build_rolls_back_only_its_own_repository(failing_repo_add):
+    # Each repository builds in its own scoped cognify run: repository A's
+    # failed build is an errored item naming A, and B's graph is kept.
+    result = await remember_module.remember(
+        ["https://bitbucket.org/acme/unbuildable-a", "https://bitbucket.org/acme/b"],
+        dataset_id=uuid4(),
+        user=SimpleNamespace(id=uuid4()),
+        self_improvement=False,
+        raise_on_error=False,
+        **DECLARED,
+    )
+
+    cognify_calls = failing_repo_add["cognify"]
+    assert len(cognify_calls) == 2
+    # Scoped to that repository's own rows, never the whole dataset.
+    assert [len(call["data_ids"]) for call in cognify_calls] == [1, 1]
+    assert cognify_calls[0]["data_ids"] != cognify_calls[1]["data_ids"]
+    assert all(call["raise_on_error"] is False for call in cognify_calls)
+
+    assert result.status == "errored"
+    built = [item for item in result.items if item.get("status") != "errored"]
+    errored = [item for item in result.items if item.get("status") == "errored"]
+    assert [item["id"] for item in built] == [str(cognify_calls[1]["data_ids"][0])]
+    assert built[0]["pipeline_run_id"] == result.pipeline_run_id
+    assert len(errored) == 1
+    assert errored[0]["kind"] == "code_repo"
+    assert errored[0]["source"] == "https://bitbucket.org/acme/unbuildable-a"
+    assert errored[0]["error"] == "enola failed"
+    assert errored[0]["pipeline_run_id"] != result.pipeline_run_id
+    assert result.items_processed == 1
+    assert "https://bitbucket.org/acme/unbuildable-a: enola failed" == result.error
+
+
+@pytest.mark.asyncio
+async def test_a_single_failing_repository_is_reported_not_raised(failing_repo_add):
+    # One repository behaves like many: raise_on_error=False reports it.
+    result = await remember_module.remember(
+        "https://bitbucket.org/acme/bad",
+        dataset_id=uuid4(),
+        user=SimpleNamespace(id=uuid4()),
+        self_improvement=False,
+        raise_on_error=False,
+        **DECLARED,
+    )
+
+    assert failing_repo_add["cognify"] == []
+    assert result.status == "errored"
+    assert result.items == [
+        {
+            "kind": "code_repo",
+            "source": "https://bitbucket.org/acme/bad",
+            "status": "errored",
+            "error": "clone failed",
+        }
+    ]
+    assert result.error == "https://bitbucket.org/acme/bad: clone failed"
+
+
+@pytest.mark.asyncio
+async def test_a_single_failing_repository_in_the_background_names_it(failing_repo_add):
+    result = await remember_module.remember(
+        "https://bitbucket.org/acme/bad",
+        dataset_id=uuid4(),
+        user=SimpleNamespace(id=uuid4()),
+        self_improvement=False,
+        run_in_background=True,
+        **DECLARED,
+    )
+    await result._task
+
+    assert result.status == "errored"
+    assert [item["source"] for item in result.items] == ["https://bitbucket.org/acme/bad"]
+    assert result.items[0]["error"] == "clone failed"
+
+
+@pytest.mark.asyncio
 async def test_every_repository_failing_skips_cognify(failing_repo_add):
     result = await remember_module.remember(
         ["https://bitbucket.org/acme/bad1", "https://bitbucket.org/acme/bad2"],
         dataset_id=uuid4(),
         user=SimpleNamespace(id=uuid4()),
-        codegraph_config={"treat_as_repository": True},
         raise_on_error=False,
+        **DECLARED,
     )
 
     assert failing_repo_add["cognify"] == []
@@ -356,8 +476,9 @@ async def test_background_run_isolates_repository_failures(failing_repo_add):
         ["https://bitbucket.org/acme/bad", "https://bitbucket.org/acme/good"],
         dataset_id=uuid4(),
         user=SimpleNamespace(id=uuid4()),
-        content_type="code",
+        self_improvement=False,
         run_in_background=True,
+        **DECLARED,
     )
     await result._task
 
@@ -368,61 +489,16 @@ async def test_background_run_isolates_repository_failures(failing_repo_add):
 
 @pytest.mark.asyncio
 async def test_blocking_raise_on_error_still_raises_on_the_first_failure(failing_repo_add):
-    # As the removed route did: isolation only where failures are reported.
+    # Isolation only where failures are reported.
     with pytest.raises(RuntimeError, match="clone failed"):
         await remember_module.remember(
             ["https://bitbucket.org/acme/bad", "https://bitbucket.org/acme/good"],
             dataset_id=uuid4(),
             user=SimpleNamespace(id=uuid4()),
-            content_type="code",
+            **DECLARED,
         )
 
     assert failing_repo_add["cognify"] == []
-
-
-@pytest.mark.asyncio
-async def test_item_identity_is_attached_and_legacy_items_keep_their_shape(
-    permanent_pipeline, monkeypatch
-):
-    attached = []
-
-    async def fake_attach(result):
-        attached.append(result)
-        result.pipeline_run_id = "run-1"
-        result.items = [
-            {"id": "a", "kind": "code_repo", "source": "https://github.com/acme/api"},
-            {"id": "b", "kind": "code_repo", "source": "/abs/elsewhere"},
-            {"id": "c", "name": "README.md"},
-        ]
-
-    monkeypatch.setattr(remember_module, "_attach_item_identity", fake_attach)
-
-    result = await remember_module.remember(
-        ["https://github.com/acme/api"],
-        dataset_id=uuid4(),
-        user=SimpleNamespace(id=uuid4()),
-        content_type="code",
-    )
-
-    assert attached == [result]
-    assert result.items[0] == {
-        "id": "a",
-        "kind": "code_repository",
-        "source": "https://github.com/acme/api",
-        "pipeline_run_id": "run-1",
-    }
-    assert result.items[1]["kind"] == "code_repository"
-    assert result.items[2] == {"id": "c", "name": "README.md"}
-
-
-def test_legacy_items_map_a_local_spec_back_to_what_the_caller_passed(tmp_path):
-    result = remember_module.RememberResult(status="completed", dataset_name="d")
-    result.items = [{"id": "a", "kind": "code_repo", "source": str(tmp_path.resolve())}]
-
-    remember_module._restore_legacy_code_items(result, [str(tmp_path)])
-
-    assert result.items[0]["source"] == str(tmp_path)
-    assert result.items[0]["kind"] == "code_repository"
 
 
 @pytest.mark.asyncio

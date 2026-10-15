@@ -1337,3 +1337,45 @@ async def test_api_pipeline_status_omits_an_empty_pipeline_name():
     status_calls = [r for r in requests if r.url.path == "/api/v1/datasets/status"]
     assert status_calls[0].url.params.get_list("pipeline") == []
     assert status_calls[0].url.params.get_list("dataset") == [dataset_id]
+
+
+@pytest.mark.asyncio
+async def test_direct_pipeline_status_resolves_the_legacy_code_graph_alias(monkeypatch):
+    """Direct mode must resolve the deprecated code_graph_pipeline alias like the
+    status endpoint does: a dataset whose pre-upgrade code_graph_pipeline run is
+    older than its latest cognify_pipeline run reports the cognify run."""
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace
+    from uuid import uuid4
+
+    datasets_module = importlib.import_module("cognee.api.v1.datasets.datasets")
+    dataset_id = uuid4()
+    older = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    runs = {
+        "code_graph_pipeline": SimpleNamespace(
+            status="DATASET_PROCESSING_COMPLETED", created_at=older
+        ),
+        "cognify_pipeline": SimpleNamespace(
+            status="DATASET_PROCESSING_ERRORED", created_at=older + timedelta(days=1)
+        ),
+    }
+
+    async def fake_latest_runs(dataset_ids, pipeline_name):
+        return {d: runs[pipeline_name] for d in dataset_ids if pipeline_name in runs}
+
+    async def fake_status(dataset_ids, pipeline_name):
+        latest = await fake_latest_runs(dataset_ids, pipeline_name)
+        return {str(d): run.status for d, run in latest.items()}
+
+    monkeypatch.setattr(datasets_module, "get_latest_pipeline_runs_by_datasets", fake_latest_runs)
+    monkeypatch.setattr(datasets_module, "get_pipeline_status", fake_status)
+
+    client = CogneeClient()
+    assert not client.use_api
+
+    assert await client.get_pipeline_status([dataset_id], "code_graph_pipeline") == {
+        str(dataset_id): "DATASET_PROCESSING_ERRORED"
+    }
+    assert await client.get_pipeline_status([dataset_id], "") == {
+        str(dataset_id): "DATASET_PROCESSING_ERRORED"
+    }
