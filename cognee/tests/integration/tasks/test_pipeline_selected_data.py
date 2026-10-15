@@ -103,10 +103,12 @@ async def _load(data_id):
 
 def test_row_of_another_dataset_is_rejected(local_env):
     async def scenario():
+        from cognee.exceptions import CogneeValidationError
+
         _, foreign = await _add_one("Foreign document for the selection test.", "selected_a")
         await _add_one("Own document for the selection test.", "selected_b")
 
-        with pytest.raises(ValueError, match="do not belong to dataset"):
+        with pytest.raises(CogneeValidationError, match="do not belong to dataset"):
             await _run_selected([foreign], "selected_b")
 
         assert "custom_pipeline" not in (await _load(foreign.id)).pipeline_status
@@ -119,7 +121,7 @@ def test_row_deleted_after_selection_is_skipped(local_env):
         import cognee
 
         dataset, row = await _add_one("Document deleted before the run.", "selected_deleted")
-        await cognee.delete(data_id=row.id, dataset_id=dataset.id)
+        await cognee.forget(data_id=row.id, dataset_id=dataset.id)
 
         assert await _run_selected([row], "selected_deleted") == []
 
@@ -139,5 +141,44 @@ def test_row_changed_after_selection_is_processed_as_current(local_env):
         seen = await _run_selected([row], "selected_stale")
 
         assert [item.name for item in seen] == ["current name"]
+
+    asyncio.run(scenario())
+
+
+def test_row_changed_while_waiting_for_the_lock_is_processed_as_current(local_env):
+    """The selection is read under the dataset lock, not when the run is called."""
+
+    async def scenario():
+        from cognee.infrastructure.databases.relational import get_relational_engine
+        from cognee.infrastructure.locks import get_dataset_lock
+        from cognee.modules.data.models import Data
+        from cognee.modules.pipelines.operations import pipeline
+
+        dataset, row = await _add_one("Document changed while the run waits.", "selected_locked")
+
+        waiting = asyncio.Event()
+        original_get_dataset_lock = pipeline.get_dataset_lock
+
+        async def get_dataset_lock_and_signal(dataset_id):
+            lock = await original_get_dataset_lock(dataset_id)
+            waiting.set()
+            return lock
+
+        mp = pytest.MonkeyPatch()
+        mp.setattr(pipeline, "get_dataset_lock", get_dataset_lock_and_signal)
+        try:
+            async with await get_dataset_lock(dataset.id):
+                run = asyncio.create_task(_run_selected([row], "selected_locked"))
+                await waiting.wait()
+
+                async with get_relational_engine().get_async_session() as session:
+                    (await session.get(Data, row.id)).name = "changed while waiting"
+                    await session.commit()
+
+            seen = await run
+        finally:
+            mp.undo()
+
+        assert [item.name for item in seen] == ["changed while waiting"]
 
     asyncio.run(scenario())

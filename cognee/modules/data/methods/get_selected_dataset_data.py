@@ -3,6 +3,7 @@ from uuid import UUID
 
 from sqlalchemy import select
 
+from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.models import Data
 
@@ -15,7 +16,7 @@ async def get_selected_dataset_data(dataset_id: UUID, data: Any) -> Any:
     no data, never over the whole dataset. Items that are not Data rows pass through,
     and a selection without Data rows is returned unchanged.
 
-    Raises ValueError when a selected row belongs to another dataset. A NULL
+    Raises CogneeValidationError when a selected row belongs to another dataset. A NULL
     dataset_id only exists before the startup backfill stamps legacy rows.
     """
     items = data if isinstance(data, (list, tuple)) else [data]
@@ -31,8 +32,12 @@ async def get_selected_dataset_data(dataset_id: UUID, data: Any) -> Any:
         str(row.id) for row in current.values() if row.dataset_id not in (None, dataset_id)
     ]
     if foreign_ids:
-        raise ValueError(
-            f"Data rows {', '.join(foreign_ids)} do not belong to dataset {dataset_id}."
+        raise CogneeValidationError(
+            f"Data rows {', '.join(foreign_ids)} do not belong to dataset {dataset_id}.",
+            remediation=(
+                "Pass only Data rows of the dataset the pipeline runs on, "
+                "or run the pipeline on the dataset that owns them."
+            ),
         )
 
     return [

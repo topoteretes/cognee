@@ -39,6 +39,10 @@ async def run_custom_pipeline(
         tasks: List of Cognee Tasks to execute.
         data: The data to ingest. Can be anything when custom extraction and enrichment tasks are used.
               Data provided here will be forwarded to the first extraction task in the pipeline as input.
+              Data rows (cognee's Data model) are read again under the dataset lock, so tasks get
+              their current values; rows deleted since are dropped (a selection left empty runs
+              over no data, not the whole dataset), and a row of another dataset raises
+              CogneeValidationError.
         dataset: Dataset name or dataset uuid to process.
         user: User context for authentication and data access. Uses default if None.
         vector_db_config: Custom vector database configuration for embeddings storage.
