@@ -422,24 +422,6 @@ include = [
 # Exclude generated files
 exclude = ["cognee/infrastructure/llm/structured_output_framework/baml/baml_client/"]
 
-# litellm 1.101+ types acompletion() as ModelResponse | CustomStreamWrapper even for
-# non-streaming calls, so every read of response.choices in the litellm call sites is
-# reported. Their runtime types are unchanged; ignore these rules here until the stubs
-# narrow on stream=. Only these four files are affected.
-[[tool.ty.overrides]]
-include = [
-    "cognee/infrastructure/llm/streaming/stream_completion.py",
-    "cognee/infrastructure/llm/structured_output_framework/litellm_native/native_adapter.py",
-    "cognee/infrastructure/llm/structured_output_framework/litellm_instructor/llm/generic_llm_api/adapter.py",
-    "cognee/infrastructure/llm/structured_output_framework/litellm_instructor/llm/mistral/adapter.py",
-]
-
-[tool.ty.overrides.rules]
-unresolved-attribute = "ignore"
-invalid-assignment = "ignore"
-invalid-argument-type = "ignore"
-not-iterable = "ignore"
-
 [dependency-groups]
 dev = [
     "httpx>=0.28.1",

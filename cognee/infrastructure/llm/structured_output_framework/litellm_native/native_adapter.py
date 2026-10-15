@@ -274,6 +274,9 @@ class NativeLiteLLMAdapter:
                 api_version=api_version,
                 **merged_kwargs,
             )
+            # litellm types acompletion() as ModelResponse | CustomStreamWrapper whatever
+            # `stream` is; a call without stream=True returns a ModelResponse.
+            response = cast(litellm.ModelResponse, response)
         if not response.choices:
             raise ValueError("litellm_native returned no choices for a plain-text completion")
         return response.choices[0].message.content or ""
@@ -307,6 +310,7 @@ class NativeLiteLLMAdapter:
                 api_version=api_version,
                 **merged_kwargs,
             )
+            response = cast(litellm.ModelResponse, response)
         raw_content = response.choices[0].message.content or "{}"
         return _attach_raw_response(response_model.model_validate_json(raw_content), response)
 
@@ -359,6 +363,7 @@ class NativeLiteLLMAdapter:
                     api_version=api_version,
                     **merged_kwargs,
                 )
+                response = cast(litellm.ModelResponse, response)
 
             raw_content = _strip_json_fence(response.choices[0].message.content or "{}")
             try:
@@ -633,7 +638,7 @@ class NativeLiteLLMAdapter:
             raise ValueError(
                 f"Could not determine MIME type for image file: {input}. Is the extension correct?"
             )
-        response: litellm.ModelResponse = await litellm.acompletion(
+        response = await litellm.acompletion(
             model=self.image_transcribe_model,
             messages=[
                 {
@@ -657,4 +662,4 @@ class NativeLiteLLMAdapter:
             drop_params=True,
             **self._primary_auth_kwargs(),
         )
-        return response
+        return cast(litellm.ModelResponse, response)
