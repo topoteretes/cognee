@@ -144,7 +144,7 @@ async def test_a_declared_remote_keeps_one_row_whatever_branch_is_cloned(cloned)
     # Same rule as the detected URL path: the row is keyed on the default branch's
     # clone, so another branch replaces that row's graph instead of adding a row.
     # The key is credential-free, so a rotating token does not mint a new row either.
-    from cognee.tasks.code_graph.resolve_repo import clone_dir
+    from cognee.tasks.code_graph.resolve_repo import repo_identity
 
     spec = "https://x-access-token:secret@bitbucket.org/acme/api"
     on_default = await resolve_data_directories([spec], treat_as_repository=True)
@@ -152,7 +152,7 @@ async def test_a_declared_remote_keeps_one_row_whatever_branch_is_cloned(cloned)
 
     # The requested branch reaches the cloner.
     assert cloned.branches == [None, "dev"]
-    expected = clone_dir("https://bitbucket.org/acme/api")
+    expected = repo_identity("https://bitbucket.org/acme/api")
     assert on_default[0].kwargs["identity"] == expected
     assert on_dev[0].kwargs["identity"] == expected
     # The URL credential is redacted before the repository URL is stored.
