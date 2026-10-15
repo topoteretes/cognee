@@ -289,7 +289,7 @@ Available search types (from `cognee/modules/search/types/SearchType.py`), passe
 - **CHUNKS_LEXICAL** - Lexical (keyword) search over chunks
 - **SUMMARIES** - Search pre-computed document summaries
 - **CYPHER** - Direct Cypher query execution (disabled by default; `ALLOW_CYPHER_QUERY=true` enables it)
-- **NATURAL_LANGUAGE** - Natural language to structured query
+- **NATURAL_LANGUAGE** - Natural language to structured query (LLM writes Cypher, then runs it; disabled by default behind the same `ALLOW_CYPHER_QUERY=true` flag)
 - **TEMPORAL** - Hybrid retrieval reranked by time: the `Timestamp` nodes overlapping the window the LLM extracts from the question ("what happened in 1969?") are looked up natively (`get_timestamps_in_range` on Ladybug, Neo4j, Postgres demo; a scan elsewhere), the chunks attached to them join the hybrid candidates (similarity alone misses most rows dated inside a window), and the anchored candidates move to the front, ranked by how tightly their matched timestamp fits the window (a chunk dated to the day before one that only names the year); nothing is dropped, and a question with no time or no overlap gets plain hybrid
 - **FEELING_LUCKY** - Automatic search type selection
 - **CODING_RULES** - Code-specific search rules

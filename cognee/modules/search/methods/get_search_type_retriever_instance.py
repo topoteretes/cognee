@@ -50,10 +50,10 @@ logger = get_logger()
 CYPHER_SEARCH_TYPES = (SearchType.CYPHER, SearchType.NATURAL_LANGUAGE)
 
 # Returned to the caller: says what to change, without detailing the risk.
-CYPHER_DISABLED_MESSAGE = (
-    "{search_type} search is disabled by default for security reasons. To enable it, set "
-    "the environment variable ALLOW_CYPHER_QUERY=true, and only do so when every user of "
-    "this deployment is trusted."
+CYPHER_DISABLED_MESSAGE = "{search_type} search is disabled by default for security reasons."
+CYPHER_DISABLED_REMEDIATION = (
+    "Set the environment variable ALLOW_CYPHER_QUERY=true, and only do so when every user "
+    "of this deployment is trusted."
 )
 
 # Logged on the server only.
@@ -464,6 +464,7 @@ async def get_search_type_retriever_instance(
         raise SearchTypeDisabledError(
             query_type.value,
             message=CYPHER_DISABLED_MESSAGE.format(search_type=query_type.value),
+            remediation=CYPHER_DISABLED_REMEDIATION,
             log=False,
         )
 

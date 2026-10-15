@@ -13,10 +13,11 @@ class UnsupportedSearchTypeError(CogneeValidationError):
         status_code: int = status.HTTP_400_BAD_REQUEST,
         message: str | None = None,
         log: bool = True,
+        remediation: str | None = None,
     ):
         if message is None:
             message = f"Unsupported search type: {search_type}"
-        super().__init__(message, name, status_code, log=log)
+        super().__init__(message, name, status_code, log=log, remediation=remediation)
 
 
 class SearchTypeDisabledError(UnsupportedSearchTypeError):
@@ -33,5 +34,8 @@ class SearchTypeDisabledError(UnsupportedSearchTypeError):
         name: str = "SearchTypeDisabledError",
         status_code: int = status.HTTP_403_FORBIDDEN,
         log: bool = True,
+        remediation: str | None = None,
     ):
-        super().__init__(search_type, name, status_code, message=message, log=log)
+        super().__init__(
+            search_type, name, status_code, message=message, log=log, remediation=remediation
+        )

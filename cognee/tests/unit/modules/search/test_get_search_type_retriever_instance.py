@@ -84,6 +84,8 @@ async def test_cypher_search_types_are_disabled_by_default(monkeypatch, search_t
     assert error.name == "SearchTypeDisabledError"
     assert error.message.startswith(f"{search_type.value} search is disabled by default")
     assert "Unsupported search type" not in error.message
+    # The fix travels as remediation, so REST answers carry it in a `remediation` key.
+    assert "ALLOW_CYPHER_QUERY=true" in error.remediation
     # The risk details stay in the server log, not in the caller-facing message.
     assert "remote code execution" not in error.message
 

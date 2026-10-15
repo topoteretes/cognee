@@ -363,7 +363,7 @@ Retrieval-only types (no LLM call):
 Other:
 
 - `CYPHER`: raw Cypher, off by default (`ALLOW_CYPHER_QUERY=true` enables it; not on the Postgres demo graph)
-- `NATURAL_LANGUAGE`: natural language to graph query
+- `NATURAL_LANGUAGE`: natural language to graph query, off by default (same `ALLOW_CYPHER_QUERY=true` flag)
 - `CODING_RULES`: retrieve stored coding rules
 - `GRAPH_REPORT`: graph insight report (hubs, cross-source links, suggested questions)
 - `FEELING_LUCKY`: let Cognee choose
