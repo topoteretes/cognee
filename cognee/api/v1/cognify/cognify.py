@@ -164,16 +164,17 @@ async def _pending_items_are_code_only(datasets, user: User | None, incremental_
         requested = [datasets] if isinstance(datasets, (str, UUID)) else datasets
         target_datasets = await get_authorized_existing_datasets(requested, "write", user)
 
-        pending = []
+        # Stops at the first pending non-code item: later datasets' rows are
+        # never read once the answer is known.
         for dataset in target_datasets:
             for data_item in await get_dataset_data(dataset_id=dataset.id):
                 if incremental_loading:
                     status = (data_item.pipeline_status or {}).get("cognify_pipeline") or {}
                     if is_data_item_completed(status.get(str(dataset.id))):
                         continue
-                pending.append(data_item)
-
-        return all(cognify_route_for(item) in _CODE_ROUTES for item in pending)
+                if cognify_route_for(data_item) not in _CODE_ROUTES:
+                    return False
+        return True
     except Exception as error:  # noqa: BLE001 - any doubt keeps the runtime check
         logger.debug("Code-only check failed; keeping the extractor runtime check: %s", error)
         return False

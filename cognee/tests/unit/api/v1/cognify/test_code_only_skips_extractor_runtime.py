@@ -124,3 +124,24 @@ async def test_code_only_run_with_index_vectors_still_probes_embeddings():
     kwargs = pipeline.await_args.kwargs
     assert kwargs["needs_llm"] is False
     assert kwargs["skip_connection_test"] is False
+
+
+@pytest.mark.asyncio
+async def test_code_only_check_stops_at_the_first_pending_non_code_item():
+    """The answer is known at the first non-code item: later datasets are never read."""
+    other = SimpleNamespace(id=uuid4(), name="other")
+    rows = AsyncMock(side_effect=[[_item(), CODE_FILE], [CODE_REPO]])
+
+    with (
+        patch(
+            "cognee.modules.data.methods.get_authorized_existing_datasets",
+            AsyncMock(return_value=[DATASET, other]),
+        ),
+        patch("cognee.modules.data.methods.get_dataset_data", rows),
+    ):
+        code_only = await cognify_module._pending_items_are_code_only(
+            ["my_code", "other"], SimpleNamespace(id=uuid4()), True
+        )
+
+    assert code_only is False
+    assert rows.await_count == 1
