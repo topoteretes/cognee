@@ -311,7 +311,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                     self.embed_text(right),
                 )
                 return EmbeddingResult(
-                    vectors=left_result.vectors + right_result.vectors,
+                    vectors=left_result + right_result,
                     tokens=left_result.tokens + right_result.tokens,
                 )
 
@@ -332,12 +332,13 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                     self.embed_text([left_part]),
                     self.embed_text([right_part]),
                 )
-                (left_vec,), (right_vec,) = left_result.vectors, right_result.vectors
+                (left_vec,), (right_vec,) = left_result, right_result
 
                 # POOL the two embeddings into one
                 pooled = (np.array(left_vec) + np.array(right_vec)) / 2
                 return EmbeddingResult(
-                    vectors=[pooled.tolist()], tokens=left_result.tokens + right_result.tokens
+                    vectors=[pooled.tolist()],
+                    tokens=left_result.tokens + right_result.tokens,
                 )
 
             logger.error("Embedding input exceeds the model's max length: %s", str(error))

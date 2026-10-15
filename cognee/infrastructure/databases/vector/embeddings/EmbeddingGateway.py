@@ -13,9 +13,9 @@ class EmbeddingGateway:
         self._engine = engine
 
     async def embed_text(self, text: list[str]) -> list[Vector]:
-        result = await self._engine.embed_text(text)
-        await self._record_usage(result.tokens)
-        return result.vectors
+        vectors = await self._engine.embed_text(text)
+        await self._record_usage(vectors.tokens)
+        return vectors
 
     async def _record_usage(self, tokens: int) -> None:
         """Best-effort: usage accounting must never fail the embedding itself."""

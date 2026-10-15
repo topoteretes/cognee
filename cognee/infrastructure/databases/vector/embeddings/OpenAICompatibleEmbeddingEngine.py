@@ -209,7 +209,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
                         self.embed_text(original_texts[:mid]),
                         self.embed_text(original_texts[mid:]),
                     )
-                    embeddings = left_result.vectors + right_result.vectors
+                    embeddings = left_result + right_result
                     return EmbeddingResult(
                         vectors=handle_embedding_response(
                             original_texts, embeddings, self.dimensions
@@ -227,7 +227,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
                         self.embed_text([left_part]),
                         self.embed_text([right_part]),
                     )
-                    (left_vec,), (right_vec,) = left_result.vectors, right_result.vectors
+                    (left_vec,), (right_vec,) = left_result, right_result
                     pooled = (np.array(left_vec) + np.array(right_vec)) / 2
                     embeddings = [pooled.tolist()]
                     return EmbeddingResult(

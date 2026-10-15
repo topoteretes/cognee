@@ -321,6 +321,7 @@ async def run_tasks(
                     started_at=run_started_at,
                     tokens_in=run_usage.tokens_in if run_usage else 0,
                     tokens_out=run_usage.tokens_out if run_usage else 0,
+                    embedding_tokens=run_usage.embedding_tokens if run_usage else 0,
                 )
                 ownership.closed = True
                 run_finished = True
@@ -381,6 +382,7 @@ async def run_tasks(
                     started_at=run_started_at,
                     tokens_in=run_usage.tokens_in if run_usage else 0,
                     tokens_out=run_usage.tokens_out if run_usage else 0,
+                    embedding_tokens=run_usage.embedding_tokens if run_usage else 0,
                 )
 
                 ownership.closed = True

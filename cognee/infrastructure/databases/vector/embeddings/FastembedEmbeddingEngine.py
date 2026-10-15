@@ -277,7 +277,7 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
             )
             return EmbeddingResult(
                 vectors=handle_embedding_response(
-                    original_texts, left_result.vectors + right_result.vectors, self.dimensions
+                    original_texts, left_result + right_result, self.dimensions
                 ),
                 tokens=left_result.tokens + right_result.tokens,
             )
@@ -298,7 +298,7 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
             self.embed_text([left_part]),
             self.embed_text([right_part]),
         )
-        (left_vec,), (right_vec,) = left_result.vectors, right_result.vectors
+        (left_vec,), (right_vec,) = left_result, right_result
         pooled = (np.array(left_vec) + np.array(right_vec)) / 2
         # Tokens are what the model processed, overlaps included - as the hosted
         # engines that count what they were billed for; with recursive splitting

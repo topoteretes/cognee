@@ -128,7 +128,7 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
             results = await asyncio.gather(
                 *[self._get_embedding(prompt) for prompt in sanitized_text]
             )
-            embeddings = [result.vectors[0] for result in results]
+            embeddings = [result[0] for result in results]
             return EmbeddingResult(
                 vectors=handle_embedding_response(original_texts, embeddings, self.dimensions),
                 tokens=sum(result.tokens for result in results),
@@ -156,7 +156,7 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
                         self.embed_text(original_texts[:mid]),
                         self.embed_text(original_texts[mid:]),
                     )
-                    embeddings = left_result.vectors + right_result.vectors
+                    embeddings = left_result + right_result
                     return EmbeddingResult(
                         vectors=handle_embedding_response(
                             original_texts, embeddings, self.dimensions
@@ -176,7 +176,7 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
                         self.embed_text([left_part]),
                         self.embed_text([right_part]),
                     )
-                    (left_vec,), (right_vec,) = left_result.vectors, right_result.vectors
+                    (left_vec,), (right_vec,) = left_result, right_result
                     pooled = (np.array(left_vec) + np.array(right_vec)) / 2
                     embeddings = [pooled.tolist()]
                     return EmbeddingResult(

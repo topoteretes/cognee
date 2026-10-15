@@ -38,7 +38,7 @@ class TestOpenAICompatibleEmbeddingEngine:
         """When MOCK_EMBEDDING=true, embed_text returns zero vectors of correct dimensions."""
         monkeypatch.setenv("MOCK_EMBEDDING", "true")
         engine = self._make_engine(dimensions=4096)
-        result = (await engine.embed_text(["hello", "world"])).vectors
+        result = await engine.embed_text(["hello", "world"])
         assert len(result) == 2
         assert len(result[0]) == 4096
         assert all(v == 0.0 for v in result[0])
@@ -61,7 +61,7 @@ class TestOpenAICompatibleEmbeddingEngine:
         engine._client = MagicMock()
         engine._client.embeddings.create = AsyncMock(return_value=mock_response)
 
-        result = (await engine.embed_text(["test text"])).vectors
+        result = await engine.embed_text(["test text"])
 
         # Verify create was called with encoding_format="float"
         engine._client.embeddings.create.assert_called_once_with(
