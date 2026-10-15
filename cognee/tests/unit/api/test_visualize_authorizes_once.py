@@ -2,12 +2,12 @@
 
 Each route authorized the dataset itself and then called an SDK function that
 authorized it again (SDK-972), which is a handful of sequential permission
-queries paid twice. The routers now hand the SDK function the Dataset they
-authorized, with already_authorized set. Only the edges are faked here
+queries paid twice. The routes now leave the check to the SDK function and
+pass the dataset id through; only the stream branch of /json, which never
+calls the SDK function, checks on its own. Only the edges are faked here
 (permission lookup, graph read, event collection, HTML and semantic rendering),
 so a second check anywhere in the route or the SDK function counts as a second
-call. The dataset is owned by someone else, so a shared dataset, which is
-what the owner shortcut of an earlier version missed, is covered too.
+call. The dataset is owned by someone else, so a shared dataset is covered too.
 """
 
 import sys

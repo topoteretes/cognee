@@ -140,13 +140,9 @@ def get_visualize_router() -> APIRouter:
         from cognee.api.v1.visualize import visualize_graph
 
         try:
-            # Verify user has permission to read dataset
-            dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
-
-            # Just authorized above, so visualize_graph does not check again.
+            # visualize_graph checks read permission on the dataset itself.
             html_visualization = await visualize_graph(
-                dataset=dataset[0],
-                already_authorized=True,
+                dataset=dataset_id,
                 user=user,
                 full=full,
                 query=query,
@@ -317,9 +313,12 @@ def get_visualize_router() -> APIRouter:
             )
 
         try:
-            dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
-
             if streaming:
+                # The stream reads the Dataset row directly, so this branch
+                # checks read permission itself; the JSON branch below leaves
+                # that to visualize_graph_json.
+                dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
+
                 # Starts the read and waits for its first chunk, so a failure
                 # before any output keeps the status code the JSON path gives.
                 graph_stream = await begin_graph_stream(
@@ -342,8 +341,7 @@ def get_visualize_router() -> APIRouter:
                 )
 
             payload = await visualize_graph_json(
-                dataset=dataset[0],
-                already_authorized=True,
+                dataset=dataset_id,
                 user=user,
                 full=full,
                 query=query,
@@ -453,11 +451,9 @@ def get_visualize_router() -> APIRouter:
         from cognee.api.v1.visualize import visualize_semantic_json
 
         try:
-            dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
-
+            # visualize_semantic_json checks read permission on the dataset itself.
             payload = await visualize_semantic_json(
-                dataset=dataset[0],
-                already_authorized=True,
+                dataset=dataset_id,
                 user=user,
                 full=full,
                 query=query,
