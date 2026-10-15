@@ -31,14 +31,12 @@ from cognee.modules.retrieval.session_aware_completion import (
     run_session_aware_completion,
     should_run_concurrent,
 )
-from cognee.modules.retrieval.triplet_retriever import TripletRetriever
 from cognee.modules.search.types import SearchType
 
 SUPPORTED_RETRIEVERS = [
     CompletionRetriever,
     GraphCompletionRetriever,
     HybridRetriever,
-    TripletRetriever,
 ]
 
 PARTIAL_METHODS = [

@@ -80,6 +80,7 @@ class PipelineRun(Base):
     error_class = Column(String)  # exception class name, e.g. "DatasetNotFoundError"
     tokens_in = Column(Integer)  # NULL = not measured; 0 = measured zero
     tokens_out = Column(Integer)
+    embedding_tokens = Column(Integer)  # same convention; never part of tokens_in
     origin = Column(String)  # initiating surface: "sdk" / "api" / "cli" / "mcp" / "background"
     session_id = Column(String, index=True)  # session-cache id; joins SessionModelUsage
     # Parent operation's pipeline_run_id — makes remember → add/cognify/improve

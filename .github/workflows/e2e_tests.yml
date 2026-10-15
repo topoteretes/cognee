@@ -295,6 +295,11 @@ jobs:
       - name: Run incremental update suite
         run: uv run pytest cognee/tests/e2e/incremental_update/
 
+      # Same backend matrix, no LLM: the Timestamp range lookup and the anchors
+      # SearchType.TEMPORAL reranks by.
+      - name: Run temporal range lookup suite
+        run: uv run pytest cognee/tests/e2e/temporal/
+
       - name: Run incremental update stress test
         run: uv run python ./cognee/tests/test_incremental_update_stress.py
 
