@@ -42,6 +42,7 @@ from cognee.modules.retrieval.temporal_hybrid_retriever import TemporalHybridRet
 from cognee.modules.search.exceptions import UnsupportedSearchTypeError
 from cognee.modules.search.operations import select_search_type
 from cognee.modules.search.types import SearchType
+from cognee.modules.search.types.SearchType import DEPRECATED_SEARCH_TYPES
 
 
 def _hybrid_lane_top_k(config: dict, key: str, search_top_k: int | None) -> int | None:
@@ -74,6 +75,9 @@ async def get_search_type_retriever_instance(
     Returns:
 
     """
+    # A deprecated type is resolved, with its warning, by search() / recall();
+    # this covers callers that reach the factory directly.
+    query_type = DEPRECATED_SEARCH_TYPES.get(query_type, query_type)
     # Transform retriever specific config if empty to avoid None checks later
     retriever_specific_config = kwargs.get("retriever_specific_config")
     if retriever_specific_config is None:

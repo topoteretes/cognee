@@ -17,7 +17,7 @@ from cognee.shared.logging_utils import get_logger
 
 from .constants import AGENT_TRACE_FEEDBACKS_NODE_SET
 from .inputs import ImproveRunInputs
-from .result import REASON_BACKEND_UNSUPPORTED, StageResult
+from .result import LEGACY_CUSTOM_TASKS_STAGE_NAME, REASON_BACKEND_UNSUPPORTED, StageResult
 from .stage import BaseStage
 
 logger = get_logger("improve")
@@ -551,6 +551,29 @@ class ReviewConflictsStage(BaseStage):
                 REVIEW_WATERMARK_KEY, result.status, started_at, retry_entity_ids=retry_ids
             )
         return result
+
+
+class LegacyCustomTasksStage(BaseStage):
+    """Deprecated (SDK-1115): ``improve(extraction_tasks=..., enrichment_tasks=...)``.
+
+    Not in ``DEFAULT_STAGES``. ``improve()`` appends it for a run whose caller
+    gave custom tasks, so they keep running for one release, as the removed
+    triplet-enrichment stage ran them. Its raw return fills the deprecated
+    ``ImproveResult.memify_run``. Removed in the next release, with those options.
+    """
+
+    name = LEGACY_CUSTOM_TASKS_STAGE_NAME
+
+    async def run(self, inputs: ImproveRunInputs) -> StageResult:
+        from cognee.api.v1.memify.memify import run_legacy_memify
+
+        run_result = await run_legacy_memify(
+            **dict(inputs.legacy_memify or {}),
+            dataset=inputs.dataset_id,
+            user=inputs.user,
+            run_in_background=False,
+        )
+        return StageResult.from_pipeline_run(self.name, run_result)
 
 
 class GlobalContextIndexStage(BaseStage):

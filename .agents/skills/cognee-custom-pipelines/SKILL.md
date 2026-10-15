@@ -117,9 +117,9 @@ instead of duplicating (see the `cognee-custom-graph-models` skill).
 
 ### Work on the existing graph
 
-There is no public memify any more (`cognee.memify`, `cognee-cli memify` and
-`POST /api/v1/memify` were removed; `improve()` rejects `extraction_tasks` /
-`enrichment_tasks` with `TypeError`). Run a post-processing step over the
+`cognee.memify`, `cognee-cli memify`, `POST /api/v1/memify` and `improve()`'s
+`extraction_tasks` / `enrichment_tasks` are deprecated and removed in the next
+release. Run a post-processing step over the
 graph with `run_custom_pipeline`: the task reads the graph itself, and one
 placeholder item as `data` makes the chain run once instead of once per
 document.

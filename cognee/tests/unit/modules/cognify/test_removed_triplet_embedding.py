@@ -1,16 +1,25 @@
 """TRIPLET_EMBEDDING was removed (SDK-1115): a stale setting warns once and writes nothing."""
 
 import importlib
-import inspect
-from unittest.mock import patch
+import sys
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from cognee.infrastructure.engine import DataPoint
 from cognee.modules.cognify.config import CognifyConfig, get_cognify_config
+from cognee.modules.engine.models import Triplet
+from cognee.modules.improve import stage_names
 from cognee.tasks.storage.add_data_points import add_data_points
 
 cognify_module = importlib.import_module("cognee.api.v1.cognify.cognify")
 config_module = importlib.import_module("cognee.modules.cognify.config")
+adp_module = sys.modules["cognee.tasks.storage.add_data_points"]
+
+
+class _Point(DataPoint):
+    text: str
+    metadata: dict = {"index_fields": ["text"]}
 
 
 @pytest.mark.asyncio
@@ -49,6 +58,37 @@ def test_unset_triplet_embedding_does_not_warn(monkeypatch):
         get_cognify_config.cache_clear()
 
 
-def test_add_data_points_has_no_triplet_writer():
-    assert "embed_triplets" not in inspect.signature(add_data_points).parameters
+@pytest.mark.asyncio
+@patch.object(adp_module, "index_graph_edges")
+@patch.object(adp_module, "index_data_points")
+@patch.object(adp_module, "get_unified_engine")
+@patch.object(adp_module, "deduplicate_nodes_and_edges")
+@patch.object(adp_module, "get_graph_from_model")
+async def test_deprecated_embed_triplets_warns_and_indexes_no_triplets(
+    mock_get_graph, mock_dedup, mock_get_unified, mock_index_nodes, mock_index_edges
+):
+    """embed_triplets=True still runs, but writes the nodes and edges only."""
+    source, target = _Point(text="source"), _Point(text="target")
+    edge = (str(source.id), str(target.id), "relates", {"edge_text": "describes"})
+    mock_get_graph.side_effect = [([source], [edge]), ([target], [])]
+    mock_dedup.side_effect = lambda nodes, edges: (nodes, edges)
+    unified = AsyncMock()
+    unified.vector = MagicMock()
+    unified.has_capability = MagicMock(return_value=False)
+    unified.graph.is_empty = AsyncMock(return_value=False)
+    unified.graph.get_graph_metadata = AsyncMock(return_value={})
+    mock_get_unified.return_value = unified
+
+    with pytest.warns(FutureWarning, match="embed_triplets"):
+        await add_data_points([source, target], embed_triplets=True)
+
+    mock_index_nodes.assert_awaited_once()
+    indexed = mock_index_nodes.await_args.args[0]
+    assert indexed == [source, target]
+    assert not any(isinstance(point, Triplet) for point in indexed)
+    mock_index_edges.assert_awaited_once()
+
+
+def test_no_triplet_writer_is_left():
     assert "triplet_embedding" not in CognifyConfig.model_fields
+    assert "triplet_enrichment" not in stage_names()

@@ -69,9 +69,11 @@ spends any LLM or embedding cost, and reports one `StageResult`.
 Stages 1–7 need `session_ids`; 8–9 work on the graph alone. The order
 matters: 4 feeds 5, 5 feeds 7, and 7 runs before 8.
 
-`extraction_tasks` / `enrichment_tasks` raise `TypeError`; `node_name`, `data`,
-`node_type`, `vector_db_config` and `graph_db_config` are accepted but ignored
-with a `DeprecationWarning`.
+`extraction_tasks` / `enrichment_tasks` are deprecated and removed in the next
+release: they still run, as a `custom_tasks` stage after the others, scoped by
+`node_name`, `data`, `node_type`, `vector_db_config` and `graph_db_config`.
+Without custom tasks those options are ignored. Both cases warn with a
+`FutureWarning`; use `run_custom_pipeline()` instead.
 
 ### Reading the result
 

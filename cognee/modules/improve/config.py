@@ -25,7 +25,11 @@ from typing import Annotated, Any
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+from cognee.shared.logging_utils import get_logger
+
 from .constants import DEFAULT_FEEDBACK_ALPHA
+
+logger = get_logger("improve")
 
 
 class ImproveConfig(BaseSettings):
@@ -104,7 +108,12 @@ def get_improve_config() -> ImproveConfig:
     later request.
     """
     config = ImproveConfig()
-    from .registry import DEFAULT_STAGES, validate_stages_disabled
+    from .registry import DEFAULT_STAGES, REMOVED_STAGE_NAMES, validate_stages_disabled
 
     validate_stages_disabled(config.stages_disabled, DEFAULT_STAGES)
+    # Warned here, behind the cache, so it fires once per process and not on
+    # every improve() run, which re-validates.
+    removed = sorted(set(config.stages_disabled) & REMOVED_STAGE_NAMES)
+    if removed:
+        logger.warning("IMPROVE_STAGES_DISABLED names removed stage(s) %s; ignoring them", removed)
     return config

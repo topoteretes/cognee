@@ -135,19 +135,43 @@ def test_defaults_leave_feedback_alpha_to_the_server_config(client, improve_stub
     assert kwargs["session_ids"] is None
 
 
-@pytest.mark.parametrize("field", ["extractionTasks", "enrichment_tasks"])
-def test_removed_custom_task_fields_are_rejected(client, improve_stub, field):
-    resp = client.post("/improve", json={"datasetName": "docs", field: ["get_triplet_datapoints"]})
-
-    assert resp.status_code == 422
-    improve_stub.assert_not_called()
-
-
-def test_deprecated_fields_are_accepted_and_not_forwarded(client, improve_stub):
-    resp = client.post("/improve", json={"datasetName": "docs", "nodeName": ["Alice"], "data": "x"})
+@pytest.mark.parametrize(
+    ("field", "kwarg"),
+    [
+        ("extractionTasks", "extraction_tasks"),
+        ("extraction_tasks", "extraction_tasks"),
+        ("enrichmentTasks", "enrichment_tasks"),
+        ("enrichment_tasks", "enrichment_tasks"),
+        ("nodeName", "node_name"),
+        ("data", "data"),
+    ],
+)
+def test_deprecated_fields_are_forwarded_to_improve(client, improve_stub, field, kwarg):
+    """Deprecated for one release (SDK-1115): improve() runs custom tasks and warns."""
+    value = "seed" if kwarg == "data" else ["extract_subgraph_chunks"]
+    resp = client.post("/improve", json={"datasetName": "docs", field: value})
 
     assert resp.status_code == 200
-    assert not {"node_name", "data"} & set(improve_stub.call_args.kwargs)
+    assert improve_stub.call_args.kwargs[kwarg] == value
+
+
+def test_null_deprecated_fields_are_not_forwarded(client, improve_stub):
+    """null means "not given" for every deprecated field, as in the SDK."""
+    resp = client.post(
+        "/improve",
+        json={
+            "datasetName": "docs",
+            "extractionTasks": None,
+            "enrichmentTasks": None,
+            "nodeName": None,
+            "data": None,
+        },
+    )
+
+    assert resp.status_code == 200
+    assert not {"data", "node_name", "extraction_tasks", "enrichment_tasks"} & set(
+        improve_stub.call_args.kwargs
+    )
 
 
 @pytest.mark.parametrize("alpha", [0, -0.1, 1.5])

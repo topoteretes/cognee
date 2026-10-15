@@ -313,6 +313,28 @@ class CloudClient:
             payload["review_conflicts"] = True
         if kwargs.get("feedback_alpha") is not None:
             payload["feedback_alpha"] = kwargs["feedback_alpha"]
+        # Deprecated custom tasks (SDK-1115): the /improve DTO takes registry task
+        # names, a data string and node_name. Task objects and the other scoping
+        # options cannot cross the wire, so they fail loudly instead of the
+        # server silently running without them.
+        for key in ("extraction_tasks", "enrichment_tasks"):
+            tasks = kwargs.get(key)
+            if tasks:
+                if not all(isinstance(task, str) for task in tasks):
+                    raise ValueError(
+                        f"improve({key}=...) on a remote instance takes registry "
+                        "task names (strings); Task objects cannot be serialized."
+                    )
+                payload[key] = list(tasks)
+        if kwargs.get("data") is not None:
+            payload["data"] = kwargs["data"]
+        if kwargs.get("node_name") is not None:
+            payload["node_name"] = kwargs["node_name"]
+        for key in ("node_type", "vector_db_config", "graph_db_config"):
+            if kwargs.get(key) is not None:
+                raise ValueError(
+                    f"improve({key}=...) is not supported on a remote instance; run it locally."
+                )
 
         async with session.post(
             f"{self.service_url}/api/v1/improve",

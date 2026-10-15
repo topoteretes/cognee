@@ -22,6 +22,8 @@ async def memify(
     data: Any | None = None,
     dataset: str | UUID = DEFAULT_DATASET_NAME,
     user: User = None,
+    vector_db_config: dict | None = None,
+    graph_db_config: dict | None = None,
     run_in_background: bool = False,
 ):
     """Run a fixed list of enrichment tasks over one dataset as ``memify_pipeline``.
@@ -34,10 +36,13 @@ async def memify(
     Args:
         extraction_tasks: Tasks that read the input the enrichment tasks work on.
         enrichment_tasks: Tasks that write the enrichment.
-        data: Seed forwarded to the first extraction task. Defaults to ``[{}]``,
-            a placeholder for tasks that read what they need from the graph.
+        data: Seed forwarded to the first extraction task. ``None`` becomes
+            ``[{}]``, a placeholder for tasks that read what they need from the
+            graph; any other value, an empty list included, is passed as given.
         dataset: Dataset name or UUID to process.
         user: User context for authentication and data access. Uses default if None.
+        vector_db_config: Vector database override for the pipeline run.
+        graph_db_config: Graph database override for the pipeline run.
         run_in_background: Return immediately and run the pipeline as a background task.
 
     Returns:
@@ -66,8 +71,10 @@ async def memify(
         pipeline=run_pipeline,
         tasks=tasks,
         user=user,
-        data=data if data else [{}],
+        data=data if data is not None else [{}],
         datasets=[authorized_dataset.id],
+        vector_db_config=vector_db_config,
+        graph_db_config=graph_db_config,
         incremental_loading=False,
         data_cache=False,
         pipeline_name="memify_pipeline",

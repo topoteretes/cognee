@@ -81,3 +81,36 @@ async def test_improve_defaults_send_only_the_dataset():
 
     _, payload = posts[0]
     assert payload == {"dataset_id": str(dataset_id)}
+
+
+@pytest.mark.asyncio
+async def test_improve_forwards_deprecated_custom_task_names():
+    """Deprecated for one release (SDK-1115): registry names, data and node_name cross the wire."""
+    client, posts = _client_with_recorder()
+
+    await client.improve(
+        "docs",
+        extraction_tasks=["extract_subgraph_chunks"],
+        enrichment_tasks=["index_data_points"],
+        data="seed text",
+        node_name=["n1"],
+    )
+
+    _url, payload = posts[0]
+    assert payload["extraction_tasks"] == ["extract_subgraph_chunks"]
+    assert payload["enrichment_tasks"] == ["index_data_points"]
+    assert payload["data"] == "seed text"
+    assert payload["node_name"] == ["n1"]
+
+
+@pytest.mark.asyncio
+async def test_improve_refuses_options_that_cannot_cross_the_wire():
+    """Task objects and the db-config overrides have no wire form; a loud
+    error beats the server silently running without them."""
+    client, posts = _client_with_recorder()
+
+    with pytest.raises(ValueError, match="registry task names"):
+        await client.improve("docs", extraction_tasks=[lambda: None])
+    with pytest.raises(ValueError, match="node_type"):
+        await client.improve("docs", node_type=object())
+    assert posts == []

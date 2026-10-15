@@ -123,6 +123,7 @@ class TestDispatchRouting:
             "add",
             "cognify",
             "search",
+            "memify",
             "datasets",
             "delete",
             "remember",

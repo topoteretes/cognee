@@ -10,8 +10,6 @@ so the schema view cannot drift.
 
 from collections.abc import Iterable, Sequence
 
-from cognee.shared.logging_utils import get_logger
-
 from .stage import BaseStage
 from .stages import (
     BuildTruthSubspaceStage,
@@ -40,8 +38,6 @@ DEFAULT_STAGES: list[BaseStage] = [
 # Stages that existed in earlier releases. ``IMPROVE_STAGES_DISABLED`` may
 # still name one; it is ignored with a warning instead of failing the boot.
 REMOVED_STAGE_NAMES = frozenset({"triplet_enrichment"})
-
-logger = get_logger("improve")
 
 
 def stage_names(stages: Iterable[BaseStage] = DEFAULT_STAGES) -> list[str]:
@@ -79,12 +75,13 @@ def validate_stages_disabled(
     guards against data loss (decision D2), so configuration must not offer a
     runtime bypass of the invariant the registry enforces at import time.
     """
-    disabled = list(disabled)
     known = {stage.name for stage in stages}
-    removed = sorted(name for name in disabled if name in REMOVED_STAGE_NAMES and name not in known)
-    if removed:
-        logger.warning("IMPROVE_STAGES_DISABLED names removed stage(s) %s; ignoring them", removed)
-    disabled = [name for name in disabled if name and name not in removed]
+    # A removed stage is ignored here; get_improve_config() warns about it once.
+    disabled = [
+        name
+        for name in disabled
+        if name and not (name in REMOVED_STAGE_NAMES and name not in known)
+    ]
     if not disabled:
         return
 

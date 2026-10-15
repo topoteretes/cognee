@@ -196,6 +196,29 @@ class CogneeApiClient:
         self._raise_for_status(r)
         return r.json()
 
+    # -- memify ----------------------------------------------------------
+
+    def memify(  # deprecated (SDK-1115), removed in the next release
+        self,
+        dataset_name: str | None = None,
+        dataset_id: str | None = None,
+        data: str | None = None,
+        node_name: list[str] | None = None,
+        run_in_background: bool = False,
+    ) -> dict:
+        payload: dict[str, Any] = {"run_in_background": run_in_background}
+        if dataset_name:
+            payload["dataset_name"] = dataset_name
+        if dataset_id:
+            payload["dataset_id"] = dataset_id
+        if data:
+            payload["data"] = data
+        if node_name:
+            payload["node_name"] = node_name
+        r = self._get_client().post(self._url("/api/v1/memify"), json=payload)
+        self._raise_for_status(r)
+        return r.json()
+
     # -- datasets --------------------------------------------------------
 
     def datasets_list(self) -> list[dict]:

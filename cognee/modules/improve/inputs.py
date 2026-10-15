@@ -7,7 +7,9 @@ context for the ``pipeline_runs`` row. It has no ``run_in_background`` field
 because ``improve()`` owns background mode and a stage never asks.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
+from types import MappingProxyType
 from typing import Any
 from uuid import UUID
 
@@ -30,8 +32,15 @@ class ImproveRunInputs:
     build_global_context_index: bool = False
     build_truth_subspace: bool = False
     review_conflicts: bool = False
+    # Deprecated (SDK-1115): the caller's improve(extraction_tasks=...,
+    # enrichment_tasks=...) and the options that scope them (data, node_type,
+    # node_name, vector_db_config, graph_db_config). None unless custom tasks
+    # were given; then the custom_tasks stage runs them. Read-only.
+    legacy_memify: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
+        if self.legacy_memify is not None and not isinstance(self.legacy_memify, MappingProxyType):
+            object.__setattr__(self, "legacy_memify", MappingProxyType(dict(self.legacy_memify)))
         if not isinstance(self.session_ids, tuple):
             object.__setattr__(self, "session_ids", tuple(self.session_ids or ()))
 

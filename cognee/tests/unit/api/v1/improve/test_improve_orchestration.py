@@ -35,6 +35,11 @@ def _lock_held(result: ImproveResult) -> bool:
     )
 
 
+def _memify_shim():
+    # The package re-exports the memify() function under the submodule's name.
+    return importlib.import_module("cognee.api.v1.memify.memify")
+
+
 def _run_info(cls, dataset_id, **extra):
     return cls(pipeline_run_id=uuid4(), dataset_id=dataset_id, dataset_name="docs", **extra)
 
@@ -612,29 +617,92 @@ async def test_feedback_alpha_kwarg_overrides_config(harness):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("option", ["extraction_tasks", "enrichment_tasks"])
-async def test_removed_custom_task_options_are_rejected(harness, option):
-    """The memify pipeline is gone (SDK-1115): custom tasks raise instead of being
-    silently dropped, before any dataset resolution or stage runs."""
+async def test_deprecated_custom_tasks_run_last_and_fill_memify_run(harness, monkeypatch):
+    """Deprecated for one release (SDK-1115): custom tasks still run, after the
+    stages, scoped by node_name / data, and their raw return is memify_run."""
+    from unittest.mock import AsyncMock
+
+    from cognee.modules.pipelines.tasks.task import Task
+
+    async def extract(data):
+        return data
+
+    calls = []
+    harness.use_stages([FakeStage("a", calls=calls)])
+    raw = {harness.dataset.id: _run_info(PipelineRunCompleted, harness.dataset.id)}
+    run_legacy = AsyncMock(return_value=raw)
+    monkeypatch.setattr(_memify_shim(), "run_legacy_memify", run_legacy)
+    task = Task(extract)
+
+    with pytest.warns(FutureWarning, match="run_custom_pipeline"):
+        result = await harness.improve(
+            extraction_tasks=[task], enrichment_tasks=[], node_name=["n"], data="x"
+        )
+
+    assert calls == ["a"]
+    assert [s.stage for s in result.stages] == ["a", "custom_tasks"]
+    assert result.stage("custom_tasks").status == "completed"
+    with pytest.warns(FutureWarning, match="memify_run"):
+        assert result.memify_run == raw
+    kwargs = run_legacy.await_args.kwargs
+    assert kwargs["extraction_tasks"] == [task]
+    assert "enrichment_tasks" not in kwargs  # an empty list counts as not given
+    assert kwargs["node_name"] == ["n"]
+    assert kwargs["data"] == "x"
+    assert kwargs["dataset"] == harness.dataset.id
+    assert kwargs["user"] is harness.user
+
+
+@pytest.mark.asyncio
+async def test_a_failing_custom_task_is_recorded_not_raised(harness, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    harness.use_stages([FakeStage("a")])
+    monkeypatch.setattr(
+        _memify_shim(), "run_legacy_memify", AsyncMock(side_effect=RuntimeError("boom"))
+    )
+
+    with pytest.warns(FutureWarning):
+        result = await harness.improve(extraction_tasks=["extract_subgraph"])
+
+    assert result.stage("custom_tasks").status == "errored"
+    assert result.stage("a").status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_unknown_custom_task_name_fails_before_any_stage(harness):
+    from cognee.exceptions import CogneeValidationError
+
     stage = FakeStage("a")
     harness.use_stages([stage])
 
-    with pytest.raises(TypeError, match=f"no longer accepts {option}"):
-        await harness.improve(**{option: []})
-
-    assert harness.resolve_calls == []
+    with pytest.warns(FutureWarning), pytest.raises(CogneeValidationError):
+        await harness.improve(enrichment_tasks=["get_triplet_datapoints"])
     assert stage.calls == []
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("empty", [None, []])
+async def test_empty_custom_task_options_count_as_absent(harness, recwarn, empty):
+    """None and [] mean "no custom tasks", silently — the same rule as REST null."""
+    harness.use_stages([FakeStage("a")])
+
+    result = await harness.improve(extraction_tasks=empty, enrichment_tasks=empty)
+
+    assert [s.stage for s in result.stages] == ["a"]
+    assert not [w for w in recwarn if issubclass(w.category, FutureWarning)]
+
+
+@pytest.mark.asyncio
 async def test_deprecated_options_warn_and_are_not_forwarded(harness, monkeypatch):
-    """node_name and the old memify passthrough only scoped the removed
-    triplet-enrichment stage; they warn and never reach a stage or the server."""
+    """Without custom tasks, node_name and the old memify passthrough only scoped
+    the removed triplet-enrichment stage; they warn and never reach a stage or
+    the server."""
     from unittest.mock import AsyncMock
 
     stage = FakeStage("a")
     harness.use_stages([stage])
-    with pytest.warns(DeprecationWarning, match="node_name, data, node_type"):
+    with pytest.warns(FutureWarning, match="node_name, data, node_type"):
         result = await harness.improve(node_name=["n"], data="x", node_type=object)
     assert result.status == "completed"
     assert not hasattr(stage.seen_inputs[0], "node_name")
@@ -642,7 +710,7 @@ async def test_deprecated_options_warn_and_are_not_forwarded(harness, monkeypatc
     client = type("Client", (), {})()
     client.improve = AsyncMock(return_value={})
     monkeypatch.setattr(harness.improve_mod, "get_remote_client", lambda: client)
-    with pytest.warns(DeprecationWarning, match="vector_db_config, graph_db_config"):
+    with pytest.warns(FutureWarning, match="vector_db_config, graph_db_config"):
         await harness.improve_mod.improve(
             "docs", node_name=["n"], vector_db_config={}, graph_db_config={}
         )

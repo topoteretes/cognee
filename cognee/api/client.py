@@ -38,6 +38,7 @@ from cognee.api.v1.health.routers import get_health_router
 from cognee.api.v1.improve.routers import get_improve_router
 from cognee.api.v1.integrations.routers import get_integrations_router
 from cognee.api.v1.llm.routers import get_llm_router
+from cognee.api.v1.memify.routers import get_memify_router
 from cognee.api.v1.ontologies.routers.get_ontology_router import get_ontology_router
 from cognee.api.v1.permissions.routers import get_permissions_router
 from cognee.api.v1.proposals.routers import get_proposals_router
@@ -382,6 +383,8 @@ app.include_router(get_add_router(), prefix="/api/v1/add", tags=["add"])
 
 app.include_router(get_cognify_router(), prefix="/api/v1/cognify", tags=["cognify"])
 
+# Deprecated (SDK-1115); removed in the next release.
+app.include_router(get_memify_router(), prefix="/api/v1/memify", tags=["memify"])
 
 app.include_router(get_search_router(), prefix="/api/v1/search", tags=["search"])
 

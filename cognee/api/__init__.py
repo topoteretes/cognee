@@ -6,7 +6,7 @@ FastAPI router, registered in ``client.py`` under ``/api/v1/<name>``.
 
 Memory API (primary): ``remember``, ``recall``, ``improve``, ``forget``.
 Low-level operations they call: ``add``, ``cognify``, ``search``,
-``update``, ``delete`` (deprecated). Supporting: ``datasets``, ``users``,
+``update``, ``delete`` (deprecated), ``memify`` (deprecated). Supporting: ``datasets``, ``users``,
 ``permissions``, ``sessions``, ``skills``, ``agents``, ``settings``,
 ``visualize``, ``health``, ``serve`` (point the SDK at a remote server).
 

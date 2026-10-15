@@ -1,4 +1,5 @@
 import asyncio
+import warnings
 from typing import TYPE_CHECKING, Optional
 
 from cognee.infrastructure.databases.provenance import (
@@ -70,6 +71,7 @@ async def add_data_points(
     custom_edges: list | None = None,
     ctx: Optional["PipelineContext"] = None,
     graph_only: bool = False,
+    embed_triplets: bool | None = None,
 ) -> list[DataPoint]:
     """
     Add a batch of data points to the graph database by extracting nodes and edges,
@@ -81,7 +83,19 @@ async def add_data_points(
         ctx: Pipeline runtime context (user, dataset, data_item).
         graph_only: Persist graph nodes and edges without initializing or writing
             a vector engine. Intended for deterministic extraction pipelines.
+        embed_triplets: Deprecated and ignored (SDK-1115); removed in the next
+            release. Triplet embeddings were removed: graph completion searches
+            edges through the ``EdgeType_relationship_name`` index written here.
     """
+    if embed_triplets is not None:
+        warnings.warn(
+            "add_data_points(embed_triplets=...) is deprecated and ignored: triplet embeddings "
+            "were removed, and graph completion uses the EdgeType_relationship_name index "
+            "that add_data_points writes. Drop the argument; it will be removed in "
+            "the next release.",
+            FutureWarning,
+            stacklevel=2,
+        )
     user = ctx.user if ctx else None
     data_item = ctx.data_item if ctx else None
     dataset = ctx.dataset if ctx else None

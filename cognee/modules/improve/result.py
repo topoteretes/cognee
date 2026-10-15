@@ -11,6 +11,7 @@ is what every surface hands back.
 """
 
 import asyncio
+import warnings
 from typing import Any, Literal
 from uuid import UUID
 
@@ -27,6 +28,10 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("improve")
 
 StageStatus = Literal["completed", "already_completed", "skipped", "errored"]
+
+# Deprecated (SDK-1115): the stage that runs improve()'s custom tasks. Its raw
+# pipeline return is kept on ``ImproveResult.memify_run``.
+LEGACY_CUSTOM_TASKS_STAGE_NAME = "custom_tasks"
 
 # Gate reasons the orchestrator itself produces (stages add their own).
 REASON_LOCK_HELD = "lock_held"
@@ -237,6 +242,25 @@ class ImproveResult(BaseModel):
 
     _task: asyncio.Task | None = PrivateAttr(default=None)
     _current_pass: list[StageResult] | None = PrivateAttr(default=None)
+    # Backs the deprecated ``memify_run`` property: ``{}``, or an older server's
+    # legacy memify run mapping.
+    _legacy_memify_run: Any = PrivateAttr(default_factory=dict)
+
+    @property
+    def memify_run(self) -> Any:
+        """Deprecated (SDK-1115) and removed in the next release: read ``stages``.
+
+        It holds the raw pipeline return of the deprecated ``custom_tasks`` stage
+        when ``improve()`` was given custom tasks, the legacy memify run mapping
+        an older remote server returned, or ``{}``.
+        """
+        warnings.warn(
+            "ImproveResult.memify_run is deprecated and will be removed in the next release; "
+            "read ImproveResult.stages instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
+        return self._legacy_memify_run
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -283,6 +307,10 @@ class ImproveResult(BaseModel):
         """
         target = self._current_pass if self._current_pass is not None else self.stages
         target.append(stage_result)
+        if stage_result.stage == LEGACY_CUSTOM_TASKS_STAGE_NAME:
+            self._legacy_memify_run = (
+                stage_result.raw_run if stage_result.raw_run is not None else {}
+            )
 
     def stage(self, name: str) -> StageResult | None:
         for stage in self.stages:
@@ -320,7 +348,8 @@ class ImproveResult(BaseModel):
         """Rebuild a result handed back by a remote cognee server.
 
         A server running the same stages returns the serialized result; an older one
-        returns a legacy memify run mapping, which carries no stage detail.
+        returns a legacy memify run mapping, which carries no stage detail. That
+        mapping is kept on the deprecated ``memify_run``.
         """
         if isinstance(payload, dict) and "stages" in payload:
             try:
@@ -332,7 +361,13 @@ class ImproveResult(BaseModel):
                     exc_info=True,
                 )
 
-        return cls(session_ids=list(session_ids), stages=[])
+        logger.warning(
+            "improve: the remote server returned a legacy memify result with no stage "
+            "detail; it is kept on the deprecated ImproveResult.memify_run"
+        )
+        result = cls(session_ids=list(session_ids), stages=[])
+        result._legacy_memify_run = payload
+        return result
 
     @classmethod
     def all_skipped(

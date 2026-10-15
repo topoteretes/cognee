@@ -3,7 +3,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
-from pydantic import Field, model_validator
+from pydantic import Field
 
 from cognee import __version__ as cognee_version
 from cognee.api.DTO import InDTO
@@ -18,18 +18,15 @@ from cognee.shared.utils import send_telemetry
 logger = get_logger()
 
 
-# Custom-task options of the removed memify pipeline (SDK-1115). InDTO ignores
-# unknown keys, so they are refused explicitly rather than silently dropped.
-_REMOVED_IMPROVE_FIELDS = (
-    "extraction_tasks",
-    "extractionTasks",
-    "enrichment_tasks",
-    "enrichmentTasks",
-)
+# Deprecated (SDK-1115) and removed in the next release: custom memify tasks
+# and the options scoping them. improve() runs the tasks as its custom_tasks
+# stage; without tasks, data and node_name are ignored.
+_LEGACY_IMPROVE_FIELDS = ("extraction_tasks", "enrichment_tasks", "data", "node_name")
 
 
 class ImprovePayloadDTO(InDTO):
-    # Deprecated and ignored: both only scoped the removed triplet-enrichment stage.
+    extraction_tasks: list[str] | None = Field(default=None, examples=[[]], deprecated=True)
+    enrichment_tasks: list[str] | None = Field(default=None, examples=[[]], deprecated=True)
     data: str | None = Field(default=None, deprecated=True)
     dataset_name: str | None = Field(default=None)
     dataset_id: UUID | Literal[""] | None = Field(default=None, examples=[""])
@@ -47,17 +44,6 @@ class ImprovePayloadDTO(InDTO):
     # distillation, preferences, truth subspace) are skipped with
     # ``no_session_ids`` and only the graph-kind stages can run.
     session_ids: list[str] | None = Field(default=None, examples=[[]])
-
-    @model_validator(mode="before")
-    @classmethod
-    def _reject_removed_fields(cls, values):
-        if isinstance(values, dict):
-            removed = [key for key in _REMOVED_IMPROVE_FIELDS if values.get(key) is not None]
-            if removed:
-                raise ValueError(
-                    f"{', '.join(removed)} are no longer accepted: the memify pipeline was removed"
-                )
-        return values
 
 
 def get_improve_router() -> APIRouter:
@@ -83,8 +69,10 @@ def get_improve_router() -> APIRouter:
         ## Request Parameters
         - **dataset_name** (Optional[str]): Dataset name.
         - **dataset_id** (Optional[UUID]): Dataset UUID.
-        - **data**, **node_name**: Deprecated and ignored.
-        - **extraction_tasks**, **enrichment_tasks**: Removed; sending either returns 422.
+        - **extraction_tasks**, **enrichment_tasks**, **data**, **node_name**: Deprecated and
+          removed in the next release. Built-in task names still run after the stages (result
+          stage `custom_tasks`); `data` and `node_name` scope them and are ignored without
+          tasks. Use a custom pipeline instead.
         - **run_in_background** (Optional[bool]): Run all stages as one background
           task and return immediately with `status == "running"` (default: False).
         - **build_global_context_index** (Optional[bool]): Build the global context index
@@ -142,9 +130,18 @@ def get_improve_router() -> APIRouter:
             if payload.feedback_alpha is not None:
                 improve_kwargs["feedback_alpha"] = payload.feedback_alpha
 
-            # model_fields_set, not attribute access: reading a deprecated field warns.
-            if {"data", "node_name"} & payload.model_fields_set:
-                logger.warning("POST /v1/improve: data and nodeName are deprecated and ignored")
+            # model_dump, not attribute access: reading a deprecated field warns.
+            legacy = {
+                key: value
+                for key, value in payload.model_dump(include=set(_LEGACY_IMPROVE_FIELDS)).items()
+                if value is not None
+            }
+            if legacy:
+                logger.warning(
+                    "POST /v1/improve: %s are deprecated and will be removed in the next release",
+                    ", ".join(sorted(legacy)),
+                )
+                improve_kwargs.update(legacy)
 
             improve_run = await cognee_improve(
                 dataset=payload.dataset_id if payload.dataset_id else payload.dataset_name,

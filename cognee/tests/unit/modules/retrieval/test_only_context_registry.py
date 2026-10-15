@@ -28,6 +28,7 @@ RETURNS_FULL_PROMPT = {
     SearchType.GRAPH_COMPLETION_DECOMPOSITION,
     SearchType.HYBRID_COMPLETION,
     SearchType.RAG_COMPLETION,
+    SearchType.TRIPLET_COMPLETION,  # deprecated; runs as GRAPH_COMPLETION
     SearchType.TEMPORAL,
     # The query or the reading happens during retrieval; the answer is one prompt from
     # the pair, over the result.

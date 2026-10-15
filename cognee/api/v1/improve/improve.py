@@ -56,6 +56,7 @@ from cognee.modules.improve import (
     stage_names,
     validate_stages_disabled,
 )
+from cognee.modules.improve.stages import LegacyCustomTasksStage
 from cognee.modules.migrations.startup import run_migrations_and_block
 from cognee.modules.observability import (
     COGNEE_DATASET_NAME,
@@ -90,12 +91,12 @@ def _session_lock_keys(lock_keys: tuple[str, ...]) -> list[str]:
     return [key for key in lock_keys if key.startswith("session:")]
 
 
-# Options of the removed triplet-enrichment stage (SDK-1115). Custom tasks
-# have no home in improve() any more: run_custom_pipeline() runs them.
-REMOVED_IMPROVE_OPTIONS = ("extraction_tasks", "enrichment_tasks")
-# Options only that stage read. Accepted and ignored with a DeprecationWarning
-# for now, so existing callers keep working; to be removed in a later release.
-DEPRECATED_IMPROVE_OPTIONS = ("data", "node_type", "vector_db_config", "graph_db_config")
+# Options of the removed triplet-enrichment stage (SDK-1115), deprecated for
+# one release. Custom tasks still run, as the custom_tasks stage; the scoping
+# options apply to them. Without custom tasks the scoping options only scoped
+# the removed stage and are ignored. Replacement: run_custom_pipeline().
+LEGACY_TASK_OPTIONS = ("extraction_tasks", "enrichment_tasks")
+LEGACY_SCOPE_OPTIONS = ("data", "node_type", "vector_db_config", "graph_db_config")
 
 
 class ImproveKwargs(TypedDict, total=False):
@@ -103,37 +104,53 @@ class ImproveKwargs(TypedDict, total=False):
 
     user: object
     feedback_alpha: float
-    # Deprecated and ignored, see DEPRECATED_IMPROVE_OPTIONS.
+    # Deprecated, see LEGACY_TASK_OPTIONS / LEGACY_SCOPE_OPTIONS.
+    extraction_tasks: list
+    enrichment_tasks: list
     data: Any
     node_type: type
     vector_db_config: dict
     graph_db_config: dict
 
 
-def _drop_removed_options(node_name: list[str] | None, kwargs: dict) -> dict:
-    """Reject the removed custom-task options and drop the deprecated ones.
+def _split_legacy_options(node_name: list[str] | None, kwargs: dict) -> tuple[dict, dict | None]:
+    """Split the deprecated memify options off improve()'s overrides, warning once.
 
-    Returns the overrides improve() still honours. ``node_name`` and the
-    ``DEPRECATED_IMPROVE_OPTIONS`` only scoped the triplet-enrichment stage,
-    which no longer exists, so they warn and are not forwarded anywhere.
+    Returns ``(overrides, legacy_memify)``. ``legacy_memify`` is ``None`` unless
+    custom tasks were given; then it holds them and the options scoping them,
+    for the deprecated ``custom_tasks`` stage. ``None`` and an empty task list
+    count as not given, as they did before.
     """
-    removed = [key for key in REMOVED_IMPROVE_OPTIONS if key in kwargs]
-    if removed:
-        raise TypeError(
-            f"improve() no longer accepts {', '.join(removed)}: the memify pipeline "
-            "was removed. Run custom tasks with cognee.run_custom_pipeline() instead."
-        )
-    deprecated = [key for key in DEPRECATED_IMPROVE_OPTIONS if key in kwargs]
+    legacy = {key: kwargs[key] for key in LEGACY_SCOPE_OPTIONS if kwargs.get(key) is not None}
     if node_name is not None:
-        deprecated.insert(0, "node_name")
-    if deprecated:
+        legacy = {"node_name": node_name, **legacy}
+    overrides = {
+        key: value
+        for key, value in kwargs.items()
+        if key not in (*LEGACY_TASK_OPTIONS, *LEGACY_SCOPE_OPTIONS)
+    }
+
+    if any(kwargs.get(key) for key in LEGACY_TASK_OPTIONS):
         warnings.warn(
-            f"improve() ignores {', '.join(deprecated)}: these options only scoped the "
-            "removed triplet-enrichment stage and will be removed in a future release.",
-            DeprecationWarning,
+            "improve(extraction_tasks=..., enrichment_tasks=...) is deprecated and will be "
+            "removed in the next release. Run custom tasks with cognee.run_custom_pipeline().",
+            FutureWarning,
             stacklevel=3,
         )
-    return {key: value for key, value in kwargs.items() if key not in DEPRECATED_IMPROVE_OPTIONS}
+        for key in LEGACY_TASK_OPTIONS:
+            if kwargs.get(key):
+                legacy[key] = kwargs[key]
+        return overrides, legacy
+
+    if legacy:
+        warnings.warn(
+            f"improve() ignores {', '.join(legacy)}: without custom tasks these options only "
+            "scoped the removed triplet-enrichment stage, and they will be removed in the "
+            "next release.",
+            FutureWarning,
+            stacklevel=3,
+        )
+    return overrides, None
 
 
 async def improve(
@@ -187,8 +204,9 @@ async def improve(
         run_in_background: Run all stages as one background task that holds
             the improve lock for its lifetime. The returned result has
             ``status == "running"``; ``await result.wait()`` blocks on it.
-        node_name: Deprecated and ignored. It scoped the removed
-            triplet-enrichment stage.
+        node_name: Deprecated. Scopes the graph passed to the deprecated
+            custom tasks (``extraction_tasks`` / ``enrichment_tasks``); ignored
+            without them. Removed in the next release.
         session_ids: Session IDs whose feedback and content should be
             bridged into the permanent graph. The Q&A and trace persist
             watermarks are per (user, session), NOT per dataset: content a
@@ -229,6 +247,9 @@ async def improve(
         watermark-gated. Bounded by ``IMPROVE_MAX_RERUN_PASSES``.
         """
         stages = list(DEFAULT_STAGES)
+        if inputs.legacy_memify is not None:
+            # Deprecated custom tasks run last, under the same lock and result.
+            stages.append(LegacyCustomTasksStage())
         session_keys = _session_lock_keys(lock_keys)
         # The claim is released exactly once: either by the combined
         # check-and-release below (set ``released``) or by the finally. A second
@@ -336,7 +357,7 @@ async def improve(
             if not released:
                 await release_improve_lock_many(lock_keys)
 
-    kwargs = _drop_removed_options(node_name, kwargs)
+    kwargs, legacy_memify = _split_legacy_options(node_name, kwargs)
     session_ids = [session_id for session_id in (session_ids or []) if session_id]
     _send_improve_telemetry(
         dataset,
@@ -359,7 +380,7 @@ async def improve(
                 build_truth_subspace=build_truth_subspace,
                 review_conflicts=review_conflicts,
                 run_in_background=run_in_background,
-                overrides=kwargs,
+                overrides={**kwargs, **(legacy_memify or {})},
             )
             return report(remote_result)
 
@@ -376,6 +397,7 @@ async def improve(
                 build_truth_subspace=build_truth_subspace,
                 review_conflicts=review_conflicts,
                 overrides=kwargs,
+                legacy_memify=legacy_memify,
             )
             # One claim per session id plus one for the dataset, so bridge
             # runs and dataset runs exclude each other; held until the last
@@ -487,6 +509,7 @@ async def _resolve_inputs(
     build_truth_subspace: bool,
     review_conflicts: bool,
     overrides: dict,
+    legacy_memify: dict | None = None,
 ) -> ImproveRunInputs:
     """Resolve everything a stage may read into the frozen ``ImproveRunInputs``.
 
@@ -528,6 +551,12 @@ async def _resolve_inputs(
         feedback_alpha = config.feedback_alpha
     # Argument and IMPROVE_REVIEW_CONFLICTS are both opt-ins: either turns the stage on.
     review_conflicts = review_conflicts or config.review_conflicts
+    if legacy_memify is not None:
+        from cognee.api.v1.memify.memify import resolve_memify_tasks
+
+        # Unknown or removed task names fail here, before the lock or any stage.
+        for key in LEGACY_TASK_OPTIONS:
+            resolve_memify_tasks(legacy_memify.get(key))
 
     return ImproveRunInputs(
         user=user,
@@ -544,6 +573,7 @@ async def _resolve_inputs(
         build_global_context_index=build_global_context_index,
         build_truth_subspace=build_truth_subspace,
         review_conflicts=review_conflicts,
+        legacy_memify=legacy_memify,
     )
 
 
