@@ -1,9 +1,9 @@
 # Data-source connectors
 
 Connectors pull data from external sources (Gmail, Slack, Notion, Google Drive,
-Confluence, …) into cognee memory. **Gmail, Google Drive and Linear ship in the SDK**;
-install the Google extras for their client libraries and DLT (Linear needs none). Other connectors
-are distributed under [topoteretes/cognee-community](https://github.com/topoteretes/cognee-community).
+Google Calendar, Confluence, …) into cognee memory. **Gmail, Google Drive, Google Calendar and
+Linear ship in the SDK**; install the Google extras for their client libraries and DLT (Linear
+needs none). Other connectors are distributed under [topoteretes/cognee-community](https://github.com/topoteretes/cognee-community).
 
 Every connector is built on cognee's **DLT ingestion subsystem**, so they all share
 the same guarantees instead of each reinventing ingestion:
@@ -28,6 +28,7 @@ Install from PyPI; you do **not** need to clone the community monorepo to use th
 | Confluence | `cognee-community-connector-confluence` |
 | Notion | `cognee-community-connector-notion` |
 | Google Drive | `cognee[google-drive]` |
+| Google Calendar | `cognee[google-calendar]` |
 | Linear | bundled, no extra |
 
 ## Quickstart (Gmail)
