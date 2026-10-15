@@ -158,12 +158,15 @@ async def add(
         extraction_rules: Optional dictionary of rules (e.g., CSS selectors, XPath) for extracting specific content from web pages using BeautifulSoup
         tavily_config: Optional configuration for Tavily API, including API key and extraction settings
         soup_crawler_config: Optional configuration for BeautifulSoup crawler, specifying concurrency, crawl delay, and extraction rules.
-        branch: Branch to clone for the GitHub/GitLab repository URL(s) in ``data``, instead of
-                the remote's default. Each branch is cloned into its own directory, so adds on
-                different branches never touch each other's clone. A dataset holds one branch of
-                a URL at a time: adding it on another branch re-indexes the code graph, but the
-                documents ingested from the previous branch stay. A missing branch raises
-                ``CodeRepositoryError``; not supported while connected to a remote instance.
+        branch: Branch to clone for the GitHub/GitLab repository URL(s) in ``data`` -- or, with
+                ``codegraph_config={"treat_as_repository": True}``, for every remote spec --
+                instead of the remote's default. Each branch is cloned into its own directory,
+                so adds on different branches never touch each other's clone. A dataset holds
+                one branch of a URL at a time: adding it on another branch re-indexes the code
+                graph, but the documents ingested from the previous branch stay. A missing
+                branch raises ``CodeRepositoryError``; with ``treat_as_repository`` a local spec
+                raises ``IngestionError`` before anything is cloned. Not supported while
+                connected to a remote instance.
 
     Returns:
         PipelineRunInfo: Information about the ingestion pipeline execution including:

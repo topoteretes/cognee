@@ -65,6 +65,52 @@ async def test_the_branch_reaches_run_tasks_and_the_add_task(executor):
 
 
 @pytest.mark.asyncio
+async def test_the_branch_reaches_the_early_resolve_of_a_codegraph_config_add(
+    executor, monkeypatch
+):
+    # A codegraph_config add resolves (and clones) before the pipeline runs; the
+    # pipeline's own resolve then passes the items through, so this call is the
+    # only one that can clone the branch.
+    early = AsyncMock(return_value=["resolved"])
+    monkeypatch.setattr(add_module, "resolve_data_directories", early)
+
+    await add_module.add(_REPO, branch="dev", codegraph_config={"include_documents": False})
+
+    assert early.await_args.kwargs["branch"] == "dev"
+    assert early.await_args.kwargs["include_documents"] is False
+
+
+@pytest.mark.asyncio
+async def test_the_deprecated_code_content_type_takes_the_branch():
+    # content_type="code" is read as treat_as_repository, which clones through add(),
+    # so the branch is honoured rather than refused.
+    import cognee
+
+    user = MagicMock(id=uuid4())
+    dataset = MagicMock(id=uuid4())
+
+    with (
+        patch("cognee.shared.utils.send_telemetry"),
+        patch.object(serve_state, "get_remote_client", return_value=None),
+        patch("cognee.modules.engine.operations.setup.setup", AsyncMock()),
+        patch("cognee.modules.users.methods.get_default_user", AsyncMock(return_value=user)),
+        patch.object(
+            remember_module,
+            "resolve_authorized_user_datasets",
+            AsyncMock(return_value=(user, [dataset])),
+        ),
+        patch("cognee.api.v1.add.add", AsyncMock()) as add,
+        patch("cognee.api.v1.cognify.cognify", AsyncMock(return_value={})),
+    ):
+        await cognee.remember(
+            _REPO, dataset_name="code", content_type="code", branch="dev", self_improvement=False
+        )
+
+    assert add.await_args.kwargs["branch"] == "dev"
+    assert add.await_args.kwargs["codegraph_config"]["treat_as_repository"] is True
+
+
+@pytest.mark.asyncio
 async def test_remember_passes_the_branch_to_add_and_not_to_cognify():
     import cognee
 
@@ -92,8 +138,8 @@ async def test_remember_passes_the_branch_to_add_and_not_to_cognify():
 
 @pytest.mark.asyncio
 async def test_a_branch_that_would_be_dropped_is_refused(monkeypatch):
-    # content_type and session_id never reach add(), and a remote instance gets no branch
-    # field: each would ingest the default branch while the caller asked for another.
+    # session_id never reaches add(), and a remote instance gets no branch field: each
+    # would ingest the default branch while the caller asked for another.
     monkeypatch.setattr(serve_state, "get_remote_client", lambda: None)
     monkeypatch.setattr(
         importlib.import_module("cognee.modules.migrations.startup"),

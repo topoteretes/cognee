@@ -261,13 +261,21 @@ def _should_auto_presort(data, dataset_name, dataset_id, session_id, kwargs) -> 
     """Whether a remember() input should be presorted automatically.
 
     Requires an explicit opt-in through PRESORT_FOLDERS_ENABLED=true. Only
-    plain local directories targeting the default dataset without a session
-    or content_type qualify. Code projects, paths outside the allowed local
-    roots, and remote-connected sessions keep the classic behavior.
+    plain local directories targeting the default dataset without a session,
+    content_type or codegraph_config qualify. Code projects, paths outside the
+    allowed local roots, and remote-connected sessions keep the classic
+    behavior. A codegraph_config call (including the deprecated
+    content_type="code", already translated into one) has said how to read the
+    input: presorting it into per-file items would undo that.
     """
     if os.environ.get(PRESORT_FOLDERS_ENV, "false").strip().lower() not in ("true", "1", "yes"):
         return False
-    if session_id is not None or dataset_id is not None or kwargs.get("content_type"):
+    if (
+        session_id is not None
+        or dataset_id is not None
+        or kwargs.get("content_type")
+        or kwargs.get("codegraph_config")
+    ):
         return False
 
     from cognee.modules.data.constants import DEFAULT_DATASET_NAME
@@ -1080,8 +1088,10 @@ async def remember(
         skill_improvement: Internal skill-improvement control dict used with
             ``SkillRunEntry`` or ``content_type="skills"``. ``apply=True``
             requires an existing ``proposal_id``.
-        **kwargs: Additional options -- see ``RememberKwargs``. ``branch`` (without
-            ``content_type``) clones that branch of a repository URL; see ``add()``.
+        **kwargs: Additional options -- see ``RememberKwargs``. ``branch`` clones that
+            branch of a repository URL (of every remote spec with
+            ``treat_as_repository``, which the deprecated ``content_type="code"`` is
+            read as); see ``add()``. It is refused with ``content_type="skills"``.
 
     Returns:
         RememberResult or DryRunEstimate: A promise-like object for normal
@@ -1269,7 +1279,7 @@ async def remember(
     if dry_run == "presort":
         if session_id is not None:
             raise ValueError("dry_run='presort' is not applicable to session memory.")
-        if kwargs.get("content_type"):
+        if kwargs.get("content_type") or kwargs.get("codegraph_config"):
             raise ValueError("dry_run='presort' is supported for folder inputs only.")
 
         from cognee.api.v1.serve.state import get_remote_client
@@ -1338,7 +1348,10 @@ async def remember(
     if dry_run:
         if session_id is not None:
             raise ValueError("dry_run is supported for permanent add+cognify remember inputs only.")
-        if kwargs.get("content_type"):
+        if kwargs.get("content_type") or kwargs.get("codegraph_config"):
+            # codegraph_config covers the deprecated content_type="code" too (translated
+            # into it above): the estimate prices LLM extraction of documents, which a
+            # code-graph run does not do.
             raise ValueError("dry_run is supported for standard add+cognify remember inputs only.")
 
         from cognee.modules.cognify.config import (

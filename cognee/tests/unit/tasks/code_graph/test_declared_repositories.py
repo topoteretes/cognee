@@ -41,13 +41,22 @@ UNDETECTED_REMOTES = [
 ]
 
 
+class _ClonerCalls(list):
+    """(spec, credentials) per clone, plus the branch each was asked for."""
+
+    def __init__(self):
+        super().__init__()
+        self.branches = []
+
+
 @pytest.fixture
 def cloned(monkeypatch, tmp_path):
     """Record what resolve_repo_source is asked for; hand back a fake clone."""
-    seen = []
+    seen = _ClonerCalls()
 
     async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
         seen.append((str(spec), credentials))
+        seen.branches.append(branch)
         clone = tmp_path / "clone"
         clone.mkdir(exist_ok=True)
         return clone
@@ -172,6 +181,51 @@ async def test_local_specs_are_still_gated_by_accept_local_file_path(cloned, mon
     assert await resolve_data_directories(
         ["https://bitbucket.org/acme/api"], treat_as_repository=True
     )
+
+
+@pytest.mark.asyncio
+async def test_a_declared_remote_clones_the_requested_branch(cloned):
+    await resolve_data_directories(
+        ["https://bitbucket.org/acme/api"], branch="dev", treat_as_repository=True
+    )
+
+    assert cloned.branches == ["dev"]
+
+
+@pytest.mark.asyncio
+async def test_a_declared_remote_keeps_one_row_whatever_branch_is_cloned(cloned):
+    # Same rule as the detected URL path: the row is keyed on the default branch's
+    # clone, so another branch replaces that row's graph instead of adding a row.
+    # The key is credential-free, so a rotating token does not mint a new row either.
+    from cognee.tasks.code_graph.resolve_repo import clone_dir
+
+    spec = "https://x-access-token:secret@bitbucket.org/acme/api"
+    on_default = await resolve_data_directories([spec], treat_as_repository=True)
+    on_dev = await resolve_data_directories([spec], branch="dev", treat_as_repository=True)
+
+    expected = clone_dir("https://bitbucket.org/acme/api")
+    assert on_default[0].kwargs["identity"] == expected
+    assert on_dev[0].kwargs["identity"] == expected
+
+
+@pytest.mark.asyncio
+async def test_a_declared_local_repository_is_keyed_on_its_own_directory(cloned, tmp_path):
+    resolved = await resolve_data_directories([str(tmp_path)], treat_as_repository=True)
+
+    assert resolved[0].kwargs["identity"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_branch_with_a_local_spec_raises_before_anything_is_cloned(cloned, tmp_path):
+    # Checked up front: otherwise the remote ahead of it would be cloned first.
+    with pytest.raises(IngestionError, match="branch is only supported for remote repositories"):
+        await resolve_data_directories(
+            ["https://bitbucket.org/acme/api", str(tmp_path)],
+            branch="dev",
+            treat_as_repository=True,
+        )
+
+    assert cloned == []
 
 
 @pytest.mark.asyncio

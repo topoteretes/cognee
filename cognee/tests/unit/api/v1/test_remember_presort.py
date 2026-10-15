@@ -447,3 +447,60 @@ def test_auto_presort_checks_allowlist_before_probing_folder(tmp_path, monkeypat
             tmp_path / "outside", "main_dataset", None, None, {}
         )
     is_dir.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [{"codegraph_config": {"treat_as_repository": True}}, {"content_type": "skills"}],
+)
+def test_auto_presort_leaves_declared_inputs_alone(tmp_path, monkeypatch, kwargs):
+    # A codegraph_config call (the deprecated content_type="code" is translated into
+    # one) has said how to read the folder; presorting it into per-file items would
+    # hand treat_as_repository DataItems it rejects.
+    from cognee.modules.presort import local_paths
+
+    monkeypatch.setenv("PRESORT_FOLDERS_ENABLED", "true")
+    monkeypatch.setattr(local_paths, "get_presort_roots", lambda: (tmp_path,))
+    (tmp_path / "notes.txt").write_text("plain folder, no build manifest")
+
+    assert remember_module._should_auto_presort(tmp_path, "main_dataset", None, None, {})
+    assert not remember_module._should_auto_presort(tmp_path, "main_dataset", None, None, kwargs)
+
+
+@pytest.mark.asyncio
+async def test_the_deprecated_code_content_type_is_not_auto_presorted(tmp_path, monkeypatch):
+    from cognee.modules.presort import local_paths
+
+    monkeypatch.setenv("PRESORT_FOLDERS_ENABLED", "true")
+    monkeypatch.setattr(local_paths, "get_presort_roots", lambda: (tmp_path,))
+    (tmp_path / "a.py").write_text("def a():\n    return 1\n")
+
+    with (
+        patch("cognee.modules.presort.run_presort", new=AsyncMock()) as presort,
+        patch.object(remember_module, "_remember_inner", new=AsyncMock()) as inner,
+    ):
+        await remember(str(tmp_path), content_type="code", self_improvement=False)
+
+    presort.assert_not_awaited()
+    inner.assert_awaited_once()
+    assert inner.await_args.kwargs["codegraph_config"]["treat_as_repository"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("dry_run", "message"),
+    [
+        (True, "dry_run is supported for standard add\\+cognify remember inputs only"),
+        ("presort", "dry_run='presort' is supported for folder inputs only"),
+    ],
+)
+@pytest.mark.parametrize(
+    "kwargs",
+    [{"content_type": "code"}, {"codegraph_config": {"include_documents": False}}],
+)
+async def test_dry_run_refuses_code_graph_calls(tmp_path, dry_run, message, kwargs):
+    # The estimate prices LLM extraction of documents and presort splits a folder
+    # into files: neither describes a code-graph run. The deprecated content_type
+    # used to be refused here before it was translated into codegraph_config.
+    with pytest.raises(ValueError, match=message):
+        await remember(str(tmp_path), dry_run=dry_run, **kwargs)
