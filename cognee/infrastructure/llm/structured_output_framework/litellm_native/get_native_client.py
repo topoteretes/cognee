@@ -7,9 +7,12 @@ adapter serves every provider — and construction is pure attribute assignment
 active (possibly per-request) config and builds a fresh adapter.
 """
 
-from collections.abc import Callable
 from functools import lru_cache
 
+from cognee.infrastructure.llm.azure_identity import (
+    get_azure_ad_token_provider,
+    require_azure_endpoint,
+)
 from cognee.infrastructure.llm.config import get_llm_context_config
 from cognee.infrastructure.llm.exceptions import LLMAPIKeyNotSetError
 from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
@@ -70,33 +73,6 @@ def _qualify_model(model: str, provider: str) -> str:
         return f"{prefix}/{model}" if prefix else model
 
 
-# The token audience of Azure OpenAI (Azure AI Services), as in the instructor
-# AzureOpenAIAdapter.
-_AZURE_COGNITIVE_SERVICES_SCOPE = "https://cognitiveservices.azure.com/.default"
-
-
-@lru_cache(maxsize=1)
-def _azure_ad_token_provider() -> Callable[[], str]:
-    """The process-wide Entra ID token provider for Azure managed identity.
-
-    Built once: the provider caches its token and refreshes it before expiry, and
-    get_native_client builds a fresh adapter per call, so a provider per adapter
-    would fetch a new token from the identity endpoint for every LLM request.
-    """
-    try:
-        from azure.identity import (  # ty:ignore[unresolved-import]
-            DefaultAzureCredential,
-            get_bearer_token_provider,
-        )
-    except ImportError as error:
-        raise ImportError(
-            "azure-identity is required for Azure managed identity authentication. "
-            'Install it with: pip install "cognee[azure]"'
-        ) from error
-
-    return get_bearer_token_provider(DefaultAzureCredential(), _AZURE_COGNITIVE_SERVICES_SCOPE)
-
-
 def get_native_client(raise_api_key_error: bool = True) -> NativeLiteLLMAdapter:
     """Build a ``NativeLiteLLMAdapter`` from the active LLM configuration.
 
@@ -118,12 +94,8 @@ def get_native_client(raise_api_key_error: bool = True) -> NativeLiteLLMAdapter:
 
     azure_ad_token_provider = None
     if use_managed_identity:
-        if not llm_config.llm_endpoint:
-            raise ValueError(
-                "LLM_ENDPOINT must be set to your Azure OpenAI endpoint "
-                "(e.g. https://YOUR-RESOURCE.openai.azure.com) when using Azure managed identity."
-            )
-        azure_ad_token_provider = _azure_ad_token_provider()
+        require_azure_endpoint(llm_config.llm_endpoint)
+        azure_ad_token_provider = get_azure_ad_token_provider()
 
     # Cap generation at the model's ceiling when LiteLLM knows it, else the user's
     # configured limit — same computation as get_llm_client.

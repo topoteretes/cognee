@@ -17,6 +17,7 @@ import pytest_asyncio
 from aiohttp import web
 from pydantic import BaseModel
 
+from cognee.infrastructure.llm.azure_identity import get_azure_ad_token_provider
 from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
     NativeLiteLLMAdapter,
 )
@@ -54,9 +55,9 @@ def _config(**overrides):
 
 @pytest.fixture(autouse=True)
 def fresh_token_provider():
-    native_factory._azure_ad_token_provider.cache_clear()
+    get_azure_ad_token_provider.cache_clear()
     yield
-    native_factory._azure_ad_token_provider.cache_clear()
+    get_azure_ad_token_provider.cache_clear()
 
 
 @pytest.fixture
@@ -111,6 +112,24 @@ def test_managed_identity_requires_an_endpoint(fake_azure_identity):
         pytest.raises(ValueError, match="LLM_ENDPOINT"),
     ):
         native_factory.get_native_client()
+
+
+def test_instructor_adapter_shares_the_native_token_provider(fake_azure_identity):
+    from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.azure_openai.adapter import (
+        AzureOpenAIAdapter,
+    )
+
+    with patch.object(native_factory, "get_llm_context_config", return_value=_config()):
+        native_factory.get_native_client()
+    AzureOpenAIAdapter(
+        api_key="",
+        model="azure/my-deployment",
+        max_completion_tokens=256,
+        endpoint="https://example.openai.azure.com",
+        use_managed_identity=True,
+    )
+
+    assert len(fake_azure_identity) == 1
 
 
 def test_api_key_auth_is_unchanged_without_managed_identity():
