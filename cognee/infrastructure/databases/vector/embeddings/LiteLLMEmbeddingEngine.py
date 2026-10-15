@@ -51,7 +51,10 @@ litellm.set_verbose = False
 # list[float], so a base64 payload trips a harmless pydantic serializer warning.
 warnings.filterwarnings(
     "ignore",
-    message=r"Pydantic serializer warnings:[\s\S]*field_name='embedding'",
+    message=(
+        r"Pydantic serializer warnings:[\s\S]*"
+        r"field_name='embedding', input_value='[^']*', input_type=str\]"
+    ),
     category=UserWarning,
 )
 logger = get_logger("LiteLLMEmbeddingEngine")
