@@ -240,16 +240,17 @@ def test_any_one_auth_method_from_the_environment_is_enough(monkeypatch, env):
 
 def test_access_token_argument_builds_the_hosted_client(monkeypatch):
     pytest.importorskip("dlt")
-    built = {}
-    monkeypatch.setattr(
-        module,
-        "build_calendar_service_from_access_token",
-        lambda token: built.setdefault("token", token) and FakeCalendar(),
-    )
+    tokens = []
+
+    def build(token):
+        tokens.append(token)
+        return FakeCalendar()
+
+    monkeypatch.setattr(module, "build_calendar_service_from_access_token", build)
     source = google_calendar_source(access_token="host-token")
 
     assert list(source) == []  # the empty primary calendar
-    assert built["token"] == "host-token"
+    assert tokens == ["host-token"]
 
 
 def test_empty_calendar_list_is_refused_instead_of_forgetting_everything():
@@ -337,3 +338,13 @@ def test_a_run_where_every_calendar_fails_raises_through_dlt_and_stores_nothing(
     assert "all 1 configured calendar(s)" in str(error.value.__cause__)
     assert source.cognee_sync_stats["failed"] == 1
     assert pipeline.state.get("sources") is None
+
+
+def test_list_calendars_asks_for_hidden_calendars():
+    # A hidden calendar missing from the list changes every row id of the primary
+    # calendar and the name in a named calendar's content.
+    fake = FakeCalendar()
+
+    list_calendars(fake)
+
+    assert [p["showHidden"] for p in fake.calendar_list_params] == [True]

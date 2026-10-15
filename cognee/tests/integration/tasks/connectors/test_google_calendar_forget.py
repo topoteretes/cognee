@@ -52,7 +52,7 @@ class _Events:
 
 
 class _CalendarList:
-    def list(self, pageToken=None, maxResults=None):
+    def list(self, pageToken=None, maxResults=None, showHidden=None):
         return _Req({"items": [{"id": PRIMARY, "summary": "Owner", "primary": True}]})
 
 

@@ -85,7 +85,7 @@ Run the same `remember` call again whenever you want to sync.
 one set of documents.
 
 After a run, `source.cognee_sync_stats` holds counts only: `scanned`, `skipped`, `deleted`,
-`calendars` and `failed`, plus `failed_auth` (HTTP 401), `failed_rate_limit` (HTTP 429) or
+`calendars` and `failed`, plus `failed_auth` (HTTP 401), `failed_rate_limit` (HTTP 429, or 403 with a rate-limit reason) or
 `failed_calendar_sync` (anything else) for the reason a calendar failed. Never titles or content.
 
 ## How sync and forget-on-delete work
@@ -114,8 +114,12 @@ After a run, `source.cognee_sync_stats` holds counts only: `scanned`, `skipped`,
     typo in the config), is a failure.
   - A calendar that fails keeps its old state and is retried on the next run. The other
     calendars finish and save theirs. The run raises only when no calendar finished, because
-    dlt rolls back the state of a failed run. A 401 or 429 ends the run early, since the
-    remaining calendars would fail the same way.
+    dlt rolls back the state of a failed run. A 401, a 429 and a 403 with a rate-limit reason
+    end the run early, since the remaining calendars would fail the same way; any other 403
+    (lost access) only fails its own calendar.
+  - This holds for HTTP responses only. A transport error, or an auth error raised by the
+    Google client library itself (google-auth's `RefreshError` is raised before any HTTP call),
+    ends the whole run: the other calendars are not tried and the stats do not count it.
 - Removing a calendar from `calendar_ids` forgets the events of that calendar.
 - `check_active` (for hosts) runs before every API request, not only between rows.
 

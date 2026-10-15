@@ -26,7 +26,7 @@ Install from PyPI; you do **not** need to clone the community monorepo to use th
 | Gmail | `cognee[gmail]` |
 | Slack (export) | `cognee-community-connector-slack` |
 | Confluence | `cognee-community-connector-confluence` |
-| Notion | `cognee-community-connector-notion` |
+| Notion | bundled, no extra |
 | Google Drive | `cognee[google-drive]` |
 | Google Calendar | `cognee[google-calendar]` |
 | Linear | bundled, no extra |

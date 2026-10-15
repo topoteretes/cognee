@@ -23,9 +23,11 @@ class HttpError(Exception):
     request contains the calendar id.
     """
 
-    def __init__(self, status: int, uri: str = ""):
+    def __init__(self, status: int, uri: str = "", reason: str | None = None):
         super().__init__(f'<HttpError {status} when requesting {uri} returned "error">')
         self.resp = type("Resp", (), {"status": status})()
+        # Like googleapiclient 2.x: a list of dicts, each with the error's reason.
+        self.error_details = [{"reason": reason}] if reason else []
 
 
 def install_google_errors(monkeypatch) -> None:
@@ -57,7 +59,10 @@ class _CalendarList:
     def __init__(self, fake):
         self.fake = fake
 
-    def list(self, pageToken=None, maxResults=None):
+    def list(self, pageToken=None, maxResults=None, showHidden=None):
+        self.fake.calendar_list_params.append(
+            {"pageToken": pageToken, "maxResults": maxResults, "showHidden": showHidden}
+        )
         return _Request(lambda: self.fake._list_calendars())
 
 
@@ -74,6 +79,9 @@ class FakeCalendar:
         self.fail_next: list[int] = []
         # Calendar id -> status that every events.list for it answers with.
         self.event_errors: dict[str, int] = {}
+        # Calendar id -> reason Google gives with that status (a 403 is told apart by it).
+        self.event_error_reasons: dict[str, str] = {}
+        self.calendar_list_params: list[dict] = []
         self.list_calls: list[dict] = []
         # One entry per API request, in order: "calendarList" or "events".
         self.api_calls: list[str] = []
@@ -191,7 +199,9 @@ class FakeCalendar:
         calendar = self._resolve(params["calendarId"])
         uri = f"https://www.googleapis.com/calendar/v3/calendars/{params['calendarId']}/events"
         if calendar in self.event_errors:
-            raise HttpError(self.event_errors[calendar], uri)
+            raise HttpError(
+                self.event_errors[calendar], uri, self.event_error_reasons.get(calendar)
+            )
         if calendar not in self.calendars:
             raise HttpError(404, uri)
         token = params.get("syncToken")

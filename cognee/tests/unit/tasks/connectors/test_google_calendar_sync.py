@@ -129,6 +129,22 @@ def test_event_row_shape_and_content(cal):
     }
 
 
+def test_attendee_order_from_google_does_not_change_the_content(cal):
+    # The content hash decides whether the event is re-cognified, so a reshuffle
+    # by Google must not look like an edit.
+    ada = {"email": "ada@example.com", "responseStatus": "accepted"}
+    bob = {"email": "bob@example.com", "responseStatus": "declined"}
+    nameless = {"displayName": "Zed", "responseStatus": "needsAction"}
+    first = cal.put_event("primary", "Review", START, attendees=[ada, bob, nameless])
+    second = cal.put_event("primary", "Review", START, attendees=[nameless, bob, ada])
+
+    upserts, _, _ = sync(cal, {})
+
+    assert upserts[rid(first)]["content"] == upserts[rid(second)]["content"]
+    content = upserts[rid(first)]["content"]
+    assert "Zed (needsAction), ada@example.com (accepted), bob@example.com (declined)" in content
+
+
 def test_omitted_attendees_are_said_so(cal):
     big = cal.put_event(
         "primary",
@@ -523,9 +539,13 @@ def test_a_failing_calendar_list_is_counted_too(cal):
     assert stats["failed"] == 1 and stats["failed_rate_limit"] == 1
 
 
-@pytest.mark.parametrize("status", [401, 429])
-def test_auth_and_rate_limit_end_the_run_but_keep_what_finished(cal, status):
+@pytest.mark.parametrize(
+    ("status", "reason"), [(401, None), (429, None), (403, "rateLimitExceeded")]
+)
+def test_auth_and_rate_limit_end_the_run_but_keep_what_finished(cal, status, reason):
     # Every later calendar would fail the same way, so none is tried.
+    if reason:
+        cal.event_error_reasons["a@group.calendar.google.com"] = reason
     cal.add_calendar("a@group.calendar.google.com", "A")
     cal.add_calendar("b@group.calendar.google.com", "B")
     keep = cal.put_event("primary", "Keep", START)
@@ -540,6 +560,33 @@ def test_auth_and_rate_limit_end_the_run_but_keep_what_finished(cal, status):
     assert set(state["calendars"]) == {PRIMARY}
     assert stats["failed"] == 1
     assert [c["calendarId"] for c in cal.list_calls] == [PRIMARY, "a@group.calendar.google.com"]
+
+
+@pytest.mark.parametrize("reason", ["rateLimitExceeded", "userRateLimitExceeded"])
+def test_a_403_with_a_rate_limit_reason_is_counted_as_rate_limit(cal, reason):
+    stats: dict = {}
+    cal.event_errors[PRIMARY] = 403
+    cal.event_error_reasons[PRIMARY] = reason
+
+    with pytest.raises(GoogleCalendarError, match="HTTP 403"):
+        list(_iter_rows(cal, ("primary",), {}, stats))
+
+    assert stats["failed_rate_limit"] == 1 and "failed_calendar_sync" not in stats
+
+
+def test_a_403_without_a_rate_limit_reason_fails_only_its_calendar(cal):
+    # Lost access to one calendar says nothing about the others.
+    cal.add_calendar(TEAM, "Team")
+    cal.add_calendar("b@group.calendar.google.com", "B")
+    keep = cal.put_event("b@group.calendar.google.com", "Keep", START)
+    cal.event_errors[TEAM] = 403
+    cal.event_error_reasons[TEAM] = "forbidden"
+
+    upserts, _, stats = sync(cal, {}, (TEAM, "b@group.calendar.google.com"))
+
+    assert set(upserts) == {rid(keep, "b@group.calendar.google.com")}
+    assert stats["failed"] == 1 and stats["failed_calendar_sync"] == 1
+    assert "failed_rate_limit" not in stats
 
 
 def test_stats_start_every_run_with_zero_failures(cal):
@@ -614,6 +661,18 @@ def test_primary_and_its_real_id_are_one_calendar(cal):
     assert set(state["calendars"]) == {PRIMARY}
     assert stats["scanned"] == 1 and stats["calendars"] == 1
     assert len(cal.list_calls) == 1, "one round for one calendar"
+
+
+def test_primary_keeps_its_real_id_when_the_list_has_it(cal):
+    # If the list ever lacked the primary calendar (a hidden one), "primary" would
+    # stay literal and every row id would change.
+    event = cal.put_event("primary", "Launch", START)
+    state: dict = {}
+
+    upserts, _, _ = sync(cal, state)
+
+    assert list(upserts) == [rid(event)]
+    assert set(state["calendars"]) == {PRIMARY}
 
 
 def test_primary_and_its_real_id_later_in_the_config_are_the_same_state(cal):

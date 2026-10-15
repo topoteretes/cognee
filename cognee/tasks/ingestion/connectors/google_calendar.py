@@ -39,13 +39,18 @@ Design
   retried on the next run.  Only a calendar that was synced before and has left
   the account's calendar list is forgotten; a 404 for one that is still listed,
   or for one that was never synced (most likely a typo), is a failure.
-* **One bad calendar does not block the others** - the other calendars finish
-  and save their state.  The run raises only when no calendar finished: ``dlt``
-  rolls back the state of a failed run, so raising after a partial success would
-  throw the finished calendars away.  Failures are counted in
-  ``cognee_sync_stats`` (``failed``, ``failed_auth``, ``failed_rate_limit``,
-  ``failed_calendar_sync``).  A 401 or 429 ends the run, since the remaining
-  calendars would fail the same way.
+* **One bad calendar does not block the others** - when Google answers with an
+  HTTP error, the other calendars finish and save their state.  The run raises
+  only when no calendar finished: ``dlt`` rolls back the state of a failed run,
+  so raising after a partial success would throw the finished calendars away.
+  Failures are counted in ``cognee_sync_stats`` (``failed``, ``failed_auth``,
+  ``failed_rate_limit``, ``failed_calendar_sync``).  A 401, a 429 and a 403 with
+  a rate-limit reason end the run, since the remaining calendars would fail the
+  same way; any other 403 only fails its own calendar.  This holds for HTTP
+  responses only.  A transport error, or an auth error raised by the Google
+  client library itself (google-auth's ``RefreshError`` is raised before any
+  HTTP call), ends the whole run: the other calendars are not tried and the
+  stats do not count it.
 * **Document path** - each event becomes a text document with the calendar
   name, organizer and attendees with their responses written into the content,
   so cognify links the same person across meetings.
@@ -63,7 +68,7 @@ Limitations
 import html
 import os
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
@@ -88,8 +93,8 @@ PAGE_SIZE = 250
 # googleapiclient retries 429 and 5xx with exponential backoff this many times.
 NUM_RETRIES = 5
 ID_PREFIX = "gcal:"
-# After these statuses every other calendar would fail the same way, so the run stops.
-_RUN_WIDE_FAILURES = {401: "auth", 429: "rate_limit"}
+# Google's reasons for a 403 that is a quota rejection. Same list as gmail.py.
+_RATE_LIMIT_REASONS = ("rateLimitExceeded", "userRateLimitExceeded")
 # Tags Google Calendar descriptions can carry. Anything else between angle brackets,
 # like "<5 lakh>", is the user's text and stays.
 _HTML_TAG = re.compile(
@@ -124,9 +129,12 @@ class GoogleCalendarError(RuntimeError):
     request URL that googleapiclient puts in its own error text.
     """
 
-    def __init__(self, message: str, status: int | None = None):
+    def __init__(self, message: str, status: int | None = None, rate_limited: bool = False):
         super().__init__(message)
         self.status = status
+        # Set where the HttpError is still in hand: its text must not be kept, so the
+        # reason Google gave for a 403 would otherwise be lost.
+        self.rate_limited = rate_limited
 
 
 @dataclass(frozen=True)
@@ -142,7 +150,7 @@ class _Round:
 # ---------------------------------------------------------------------------
 # Auth / service construction
 # ---------------------------------------------------------------------------
-def _google_libraries():
+def _google_libraries() -> tuple[Any, Any, Any, Any]:
     try:
         from google.auth.transport.requests import Request
         from google.oauth2.credentials import Credentials
@@ -244,8 +252,29 @@ def _execute(request: Any, check_active: Callable[[], None] | None) -> Any:
     except _http_error() as error:
         status = error.resp.status
         raise GoogleCalendarError(
-            f"Google Calendar request failed: HTTP {status}", status
+            f"Google Calendar request failed: HTTP {status}", status, _is_rate_limited(error)
         ) from None
+
+
+def _is_rate_limited(error: Any) -> bool:
+    """Whether Google rejected the call for quota: a 429, or a 403 with a rate-limit reason.
+
+    Calendar mostly reports quota as 403 ``rateLimitExceeded``, so the status alone
+    cannot tell it from lost access. A local copy of ``gmail._is_rate_limited``:
+    importing it would pull Gmail's ``limits`` dependency into this extra. Like
+    Gmail it falls back to the message for older googleapiclient versions, where
+    the reason strings cannot appear in a request URL.
+    """
+    status = error.resp.status
+    if status == 429:
+        return True
+    if status != 403:
+        return False
+    details = getattr(error, "error_details", None) or []
+    reasons = {d.get("reason") for d in details if isinstance(d, dict)}
+    if reasons.intersection(_RATE_LIMIT_REASONS):
+        return True
+    return any(reason in str(error) for reason in _RATE_LIMIT_REASONS)
 
 
 def list_calendars(service: Any, check_active: Callable[[], None] | None = None) -> list[dict]:
@@ -253,7 +282,13 @@ def list_calendars(service: Any, check_active: Callable[[], None] | None = None)
     calendars: list[dict] = []
     page_token = None
     while True:
-        request = service.calendarList().list(pageToken=page_token, maxResults=PAGE_SIZE)
+        # showHidden: a hidden calendar still has to be listed, or "primary" would stop
+        # resolving to its real id and a named calendar would lose its name, which changes
+        # every row id or content hash. showDeleted stays off its default (on) on purpose:
+        # a deleted calendar must drop out of the names so the 404 branch can forget it.
+        request = service.calendarList().list(
+            pageToken=page_token, maxResults=PAGE_SIZE, showHidden=True
+        )
         response = _execute(request, check_active)
         for entry in response.get("items", []):
             calendars.append(
@@ -283,6 +318,10 @@ def _list_events(
     events: list[dict] = []
     page_token = None
     while True:
+        # No showDeleted or other filter: forgetting a deleted event relies on the
+        # sync-token round returning it as status "cancelled", which Google's sync guide
+        # documents. FakeCalendar always does, so the tests cannot prove it; confirm it
+        # once on a live account.
         params: dict[str, Any] = {
             "calendarId": calendar_id,
             "maxResults": PAGE_SIZE,
@@ -312,7 +351,7 @@ def _iter_rows(
     state: dict,
     stats: dict[str, int],
     check_active: Callable[[], None] | None = None,
-):
+) -> Iterator[dict]:
     """Yield one row per new or changed event, plus hard-delete tombstones.
 
     ``state`` is a plain dict standing in for dlt's resource state, so this is
@@ -361,7 +400,7 @@ def _iter_rows(
                 len(wanted),
                 error,
             )
-            if error.status in _RUN_WIDE_FAILURES:
+            if _failure_reason(error) != "calendar_sync":
                 break
             continue
         rounds.append(result)
@@ -377,13 +416,14 @@ def _iter_rows(
             f"Google Calendar sync failed for all {len(wanted)} configured calendar(s): "
             f"{last_error}",
             last_error.status,
+            last_error.rate_limited,
         ) from last_error
 
     for result in rounds:
         deletes.extend(result.deletes)
         stats["skipped"] += result.skipped
         stats["scanned"] += len(result.rows)
-    stats["deleted"] += len(deletes)
+    stats["deleted"] = len(deletes)
 
     for row_id in deletes:
         yield {"id": row_id, "_deleted": True}
@@ -394,8 +434,17 @@ def _iter_rows(
     logger.info("Google Calendar: sync stats %s", stats)
 
 
+def _failure_reason(error: GoogleCalendarError) -> str:
+    """Why a calendar failed. Auth and rate limit end the run: the others would fail alike."""
+    if error.status == 401:
+        return "auth"
+    if error.rate_limited:
+        return "rate_limit"
+    return "calendar_sync"
+
+
 def _count_failure(stats: dict[str, int], error: GoogleCalendarError) -> None:
-    reason = _RUN_WIDE_FAILURES.get(error.status, "calendar_sync")
+    reason = _failure_reason(error)
     stats["failed"] += 1
     stats[f"failed_{reason}"] = stats.get(f"failed_{reason}", 0) + 1
 
@@ -483,7 +532,7 @@ def _sync_calendar(
     return _Round(new_state, rows, _row_ids(calendar_id, gone), skipped)
 
 
-def _row_ids(calendar_id: str, event_ids) -> list[str]:
+def _row_ids(calendar_id: str, event_ids: Iterable[str]) -> list[str]:
     return [_row_id(calendar_id, event_id) for event_id in sorted(event_ids)]
 
 
@@ -500,6 +549,7 @@ def _event_row(calendar_id: str, calendar_name: str, event: dict) -> dict:
     lines = [f"Calendar event: {title}", f"Calendar: {calendar_name}"]
     start, end = event.get("start") or {}, event.get("end") or {}
     if start.get("date"):
+        # A confirmed event always has an end, so a missing one is a bug to see, not hide.
         lines.append(f"When: {_all_day(start['date'], end['date'])}")
     else:
         lines.append(f"When: {_when(start)} to {_when(end)}")
@@ -507,7 +557,11 @@ def _event_row(calendar_id: str, calendar_name: str, event: dict) -> dict:
         lines.append(f"Location: {event['location']}")
     if event.get("organizer"):
         lines.append(f"Organizer: {_person(event['organizer'])}")
-    attendees = event.get("attendees") or []
+    # Google's order is not stable between fetches, and the content hash decides
+    # whether the event is re-cognified.
+    attendees = sorted(
+        event.get("attendees") or [], key=lambda a: a.get("email") or a.get("displayName") or ""
+    )
     if attendees:
         line = "Attendees: " + ", ".join(
             f"{_person(a)} ({a.get('responseStatus') or 'needsAction'})" for a in attendees
