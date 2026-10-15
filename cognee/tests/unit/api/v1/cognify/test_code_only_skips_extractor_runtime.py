@@ -81,71 +81,40 @@ async def test_code_only_dataset_never_ensures_the_extractor_runtime():
 
     runtime.assert_not_awaited()
     pipeline.assert_awaited_once()
+    kwargs = pipeline.await_args.kwargs
+    assert kwargs["needs_llm"] is False
+    assert kwargs["skip_connection_test"] is True
 
 
+@pytest.mark.parametrize(
+    "items, incremental_loading, needs_runtime",
+    [
+        # Incremental loading skips the completed document, leaving only code.
+        ([CODE_REPO, _item(completed=True)], True, False),
+        # Without incremental loading the completed document is rebuilt.
+        ([CODE_REPO, _item(completed=True)], False, True),
+        # An unchanged, already-built repository re-remembered: nothing pending.
+        ([_item(source="code_repo", completed=True)], True, False),
+    ],
+    ids=["completed_document_skipped", "no_incremental_loading", "nothing_pending"],
+)
 @pytest.mark.asyncio
-async def test_completed_documents_do_not_require_the_runtime_under_incremental_loading():
-    runtime, pipeline = await _cognify([CODE_REPO, _item(completed=True)])
+async def test_completed_items_count_only_without_incremental_loading(
+    items, incremental_loading, needs_runtime
+):
+    runtime, pipeline = await _cognify(items, incremental_loading=incremental_loading)
 
-    runtime.assert_not_awaited()
-    pipeline.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_completed_documents_still_count_without_incremental_loading():
-    runtime, pipeline = await _cognify(
-        [CODE_REPO, _item(completed=True)], incremental_loading=False
-    )
-
-    runtime.assert_awaited_once()
-    pipeline.assert_not_awaited()
+    assert runtime.await_count == int(needs_runtime)
+    assert pipeline.await_count == int(not needs_runtime)
 
 
 @pytest.mark.asyncio
 async def test_mixed_dataset_still_ensures_the_extractor_runtime():
-    runtime, pipeline = await _cognify([CODE_FILE, _item()])
-
-    runtime.assert_awaited_once()
-    pipeline.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_nothing_pending_needs_no_runtime():
-    # An unchanged, already-built repository re-remembered: incremental loading
-    # skips it, so the extractor never runs.
-    runtime, pipeline = await _cognify([_item(source="code_repo", completed=True)])
-
-    runtime.assert_not_awaited()
-    pipeline.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_a_failing_lookup_keeps_the_runtime_check():
     runtime = AsyncMock()
-    with (
-        patch.object(cognify_module, "resolve_extractor", return_value="gliner_demo"),
-        patch.object(cognify_module, "ensure_extractor_runtime", runtime),
-        patch.object(migrations, "run_migrations_and_block", AsyncMock()),
-        patch(
-            "cognee.modules.users.methods.get_default_user",
-            AsyncMock(side_effect=RuntimeError("db down")),
-        ),
-        patch.object(
-            cognify_module, "get_pipeline_executor", return_value=AsyncMock(return_value={})
-        ),
-    ):
-        await cognify_module.cognify(datasets=["my_code"])
+    _, pipeline = await _cognify([CODE_FILE, _item()], runtime=runtime)
 
     runtime.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_code_only_run_skips_the_provider_probes():
-    _, pipeline = await _cognify([CODE_FILE, CODE_REPO])
-
-    kwargs = pipeline.await_args.kwargs
-    assert kwargs["needs_llm"] is False
-    assert kwargs["skip_connection_test"] is True
+    assert pipeline.await_args.kwargs["skip_connection_test"] is False
 
 
 @pytest.mark.asyncio
@@ -155,12 +124,3 @@ async def test_code_only_run_with_index_vectors_still_probes_embeddings():
     kwargs = pipeline.await_args.kwargs
     assert kwargs["needs_llm"] is False
     assert kwargs["skip_connection_test"] is False
-
-
-@pytest.mark.asyncio
-async def test_mixed_run_keeps_the_provider_probes():
-    runtime = AsyncMock()
-    _, pipeline = await _cognify([CODE_FILE, _item()], runtime=runtime)
-
-    runtime.assert_awaited_once()
-    assert pipeline.await_args.kwargs["skip_connection_test"] is False

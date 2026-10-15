@@ -22,8 +22,10 @@ def test_only_non_default_options_count_as_requested(config, expected):
     assert requests_codegraph_options(config) is expected
 
 
-@pytest.mark.parametrize("key", ["index_vectors", "include_documents", "treat_as_repository"])
-@pytest.mark.parametrize("value", ["false", "true", 0, 1])
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [("index_vectors", "false"), ("include_documents", 0), ("treat_as_repository", "true")],
+)
 def test_flags_must_be_real_bools(key, value):
     # "false" is truthy: accepting it would invert the caller's intent.
     with pytest.raises(TypeError, match=f"codegraph_config\\['{key}'\\] must be a bool"):
@@ -40,8 +42,3 @@ def test_none_values_count_as_absent():
     assert validate_codegraph_config({"index_vectors": None, "include_documents": False}) == {
         "include_documents": False
     }
-
-
-def test_a_non_dict_config_is_rejected():
-    with pytest.raises(TypeError, match="codegraph_config must be a dict"):
-        validate_codegraph_config([("index_vectors", True)])

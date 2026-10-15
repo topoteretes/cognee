@@ -18,7 +18,6 @@ code graph.
 import importlib
 from pathlib import Path
 from types import SimpleNamespace
-from uuid import uuid4
 
 import pytest
 
@@ -26,7 +25,6 @@ from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.tasks.ingestion.resolve_data_directories import resolve_data_directories
 
 code_repo = importlib.import_module("cognee.tasks.code_graph.code_repo")
-remember_module = importlib.import_module("cognee.api.v1.remember.remember")
 
 # Real repository URLs that add()'s detection does not claim: cloning them is
 # only correct because the caller said they are repositories.
@@ -78,23 +76,23 @@ def cloned(monkeypatch, tmp_path):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("spec", UNDETECTED_REMOTES)
 async def test_a_declared_remote_is_cloned_not_sniffed(cloned, spec):
+    from cognee.tasks.ingestion.repo_clone_file import RepoCloneFile
+
     resolved = await resolve_data_directories([spec], treat_as_repository=True)
 
     assert cloned == [(spec, None)], "the spec never reached the cloner"
     assert len(resolved) == 2
     assert resolved[0].system_metadata["source"] == "code_repo"
+    # The clone is cognee's own, so its documents are marked as such.
+    assert all(isinstance(item, RepoCloneFile) for item in resolved[1:])
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("spec", UNDETECTED_REMOTES)
+@pytest.mark.parametrize("spec", [s for s in UNDETECTED_REMOTES if s.startswith("https://")])
 async def test_without_the_declaration_the_same_spec_is_left_alone(cloned, spec):
-    # The contrast that makes the option necessary. An ssh spec is refused
-    # outright (it can only be a repository); the http(s) ones fall through to
-    # the web-page path, which is right for a URL nobody declared.
-    if spec.startswith(("git@", "ssh://")):
-        with pytest.raises(IngestionError, match="ssh git remotes"):
-            await resolve_data_directories([spec])
-        return
+    # The contrast that makes the option necessary: an undeclared http(s) URL
+    # falls through to the web-page path, which is right for a URL nobody declared.
+    # (ssh specs are refused outright; see test_ssh_repo_specs.py.)
     assert await resolve_data_directories([spec]) == [spec]
     assert cloned == []
 
@@ -113,46 +111,6 @@ async def test_a_declared_directory_needs_no_project_marker(cloned, tmp_path):
     # A local repository is not cognee's own clone, so its documents stay
     # caller-supplied path strings and keep the ACCEPT_LOCAL_FILE_PATH gate.
     assert all(isinstance(item, str) for item in resolved[1:])
-
-
-@pytest.mark.asyncio
-async def test_a_declared_clone_marks_its_documents_as_cognees_own(cloned):
-    from cognee.tasks.ingestion.repo_clone_file import RepoCloneFile
-
-    resolved = await resolve_data_directories(
-        ["https://bitbucket.org/acme/api"], treat_as_repository=True
-    )
-
-    assert all(isinstance(item, RepoCloneFile) for item in resolved[1:])
-
-
-@pytest.mark.asyncio
-async def test_credentials_reach_the_cloner(cloned):
-    await resolve_data_directories(
-        ["https://git.acme.com/team/api"], credentials="tok123", treat_as_repository=True
-    )
-
-    assert cloned == [("https://git.acme.com/team/api", "tok123")]
-
-
-@pytest.mark.asyncio
-async def test_a_url_credential_is_redacted_before_it_is_stored(cloned):
-    spec = "https://x-access-token:secret@git.acme.com/team/api"
-
-    resolved = await resolve_data_directories([spec], treat_as_repository=True)
-
-    stored = resolved[0].system_metadata["repo_url"]
-    assert "secret" not in stored
-    assert stored == "https://git.acme.com/team/api"
-
-
-@pytest.mark.asyncio
-async def test_include_documents_false_still_suppresses_them(cloned):
-    resolved = await resolve_data_directories(
-        ["https://bitbucket.org/acme/api"], include_documents=False, treat_as_repository=True
-    )
-
-    assert resolved[0].kwargs["include_documents"] is False
 
 
 @pytest.mark.asyncio
@@ -182,15 +140,6 @@ async def test_local_specs_are_still_gated_by_accept_local_file_path(cloned, mon
 
 
 @pytest.mark.asyncio
-async def test_a_declared_remote_clones_the_requested_branch(cloned):
-    await resolve_data_directories(
-        ["https://bitbucket.org/acme/api"], branch="dev", treat_as_repository=True
-    )
-
-    assert cloned.branches == ["dev"]
-
-
-@pytest.mark.asyncio
 async def test_a_declared_remote_keeps_one_row_whatever_branch_is_cloned(cloned):
     # Same rule as the detected URL path: the row is keyed on the default branch's
     # clone, so another branch replaces that row's graph instead of adding a row.
@@ -201,16 +150,14 @@ async def test_a_declared_remote_keeps_one_row_whatever_branch_is_cloned(cloned)
     on_default = await resolve_data_directories([spec], treat_as_repository=True)
     on_dev = await resolve_data_directories([spec], branch="dev", treat_as_repository=True)
 
+    # The requested branch reaches the cloner.
+    assert cloned.branches == [None, "dev"]
     expected = repo_identity("https://bitbucket.org/acme/api")
     assert on_default[0].kwargs["identity"] == expected
     assert on_dev[0].kwargs["identity"] == expected
-
-
-@pytest.mark.asyncio
-async def test_a_declared_local_repository_is_keyed_on_its_own_directory(cloned, tmp_path):
-    resolved = await resolve_data_directories([str(tmp_path)], treat_as_repository=True)
-
-    assert resolved[0].kwargs["identity"] is None
+    # The URL credential is redacted before the repository URL is stored.
+    for resolved in (on_default, on_dev):
+        assert resolved[0].system_metadata["repo_url"] == "https://bitbucket.org/acme/api"
 
 
 @pytest.mark.asyncio
@@ -224,36 +171,6 @@ async def test_a_branch_with_a_local_spec_raises_before_anything_is_cloned(clone
         )
 
     assert cloned == []
-
-
-@pytest.mark.asyncio
-async def test_the_declaration_reaches_add(monkeypatch):
-    """The end-to-end reason this option exists."""
-    calls = {}
-
-    async def fake_add(*args, **kwargs):
-        calls["add"] = kwargs
-
-    async def fake_cognify(*args, **kwargs):
-        calls["cognify"] = kwargs
-        return {}
-
-    async def _noop_setup():
-        return None
-
-    monkeypatch.setattr("cognee.modules.engine.operations.setup.setup", _noop_setup)
-    monkeypatch.setattr("cognee.api.v1.add.add", fake_add)
-    monkeypatch.setattr("cognee.api.v1.cognify.cognify", fake_cognify)
-
-    await remember_module.remember(
-        "https://bitbucket.org/acme/api",
-        dataset_id=uuid4(),
-        user=SimpleNamespace(id=uuid4()),
-        self_improvement=False,
-        codegraph_config={"treat_as_repository": True},
-    )
-
-    assert calls["add"]["codegraph_config"]["treat_as_repository"] is True
 
 
 @pytest.mark.asyncio

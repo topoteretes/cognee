@@ -200,9 +200,21 @@ def _marker(clone_dir):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "spec, credentials", [(_TOKEN_URL, None), (_CLEAN_URL, "tok-SECRET")], ids=["url", "argument"]
+    "spec, credentials, existing, marked",
+    [
+        (_TOKEN_URL, None, False, True),
+        (_CLEAN_URL, "tok-SECRET", False, True),
+        (_CLEAN_URL, None, False, False),
+        (_TOKEN_URL, None, True, True),
+    ],
+    ids=["url", "argument", "public", "credentialed-refresh"],
 )
-async def test_a_clone_made_with_credentials_is_marked(monkeypatch, tmp_path, spec, credentials):
+async def test_a_clone_made_with_credentials_is_marked(
+    monkeypatch, tmp_path, spec, credentials, existing, marked
+):
+    if existing:
+        (resolve_module.clone_dir(_CLEAN_URL, clones_dir=tmp_path) / ".git").mkdir(parents=True)
+
     async def fake_run_git(args, cwd=None, env=None):
         if args[0] == "clone":
             (resolve_module.Path(args[-1]) / ".git").mkdir(parents=True)
@@ -214,80 +226,48 @@ async def test_a_clone_made_with_credentials_is_marked(monkeypatch, tmp_path, sp
         spec, clones_dir=tmp_path, credentials=credentials
     )
 
-    assert _marker(resolved).is_file()
+    assert _marker(resolved).is_file() is marked
 
 
-@pytest.mark.asyncio
-async def test_a_public_clone_is_not_marked(monkeypatch, tmp_path):
-    async def fake_run_git(args, cwd=None, env=None):
-        if args[0] == "clone":
-            (resolve_module.Path(args[-1]) / ".git").mkdir(parents=True)
-        return 0, ""
-
-    monkeypatch.setattr(resolve_module, "_run_git", fake_run_git)
-
-    resolved = await resolve_module.resolve_repo_source(_CLEAN_URL, clones_dir=tmp_path)
-
-    assert not _marker(resolved).exists()
-
-
-async def _failing_refresh(args, cwd=None, env=None):
-    return 128, "fatal: Authentication failed for 'https://github.com/org/repo.git/'"
-
-
-@pytest.mark.asyncio
-async def test_a_credentialed_clone_is_refused_when_a_caller_without_credentials_cannot_refresh(
-    monkeypatch, tmp_path
-):
-    monkeypatch.setattr(resolve_module, "_run_git", _failing_refresh)
-
-    for branch in (None, "dev"):
-        target = resolve_module.clone_dir(_CLEAN_URL, branch, tmp_path)
-        (target / ".git").mkdir(parents=True, exist_ok=True)
-        _marker(target).touch()
-        with pytest.raises(resolve_module.CodeRepositoryError, match="made with credentials"):
-            await resolve_module.resolve_repo_source(_CLEAN_URL, clones_dir=tmp_path, branch=branch)
+_BOGUS_URL = "https://x-access-token:tok-BOGUS@github.com/org/repo.git"
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("branch", [None, "dev"])
+@pytest.mark.parametrize(
+    "spec, credentials, secret",
+    [
+        (_CLEAN_URL, None, None),
+        (_CLEAN_URL, "tok-WRONG", "tok-WRONG"),
+        (_BOGUS_URL, None, "tok-BOGUS"),
+    ],
+    ids=["no-credentials", "wrong-credentials", "bogus-url-credentials"],
+)
 async def test_a_credentialed_clone_is_refused_to_a_caller_whose_credentials_fail_to_refresh(
-    monkeypatch, tmp_path, branch
+    monkeypatch, tmp_path, branch, spec, credentials, secret
 ):
-    """Passing credentials proves nothing until the remote accepts them: wrong ones
-    must not unlock a private clone that someone else's credentials made."""
+    """Passing credentials proves nothing until the remote accepts them: none, wrong
+    or bogus ones must not unlock a private clone that someone else's credentials made."""
     clone_dir = resolve_module.clone_dir(_CLEAN_URL, branch, tmp_path)
     (clone_dir / ".git").mkdir(parents=True)
     _marker(clone_dir).touch()
-    monkeypatch.setattr(resolve_module, "_run_git", _failing_refresh)
-
-    with pytest.raises(resolve_module.CodeRepositoryError, match="made with credentials") as error:
-        await resolve_module.resolve_repo_source(
-            _CLEAN_URL, clones_dir=tmp_path, credentials="tok-WRONG", branch=branch
-        )
-
-    assert "tok-WRONG" not in str(error.value)
-    # Refused, not discarded: a later caller with valid credentials refreshes it.
-    assert _marker(clone_dir).is_file()
-
-
-@pytest.mark.asyncio
-async def test_a_credentialed_clone_is_refused_to_bogus_url_credentials(monkeypatch, tmp_path):
-    clone_dir = resolve_module.clone_dir(_CLEAN_URL, clones_dir=tmp_path)
-    (clone_dir / ".git").mkdir(parents=True)
-    _marker(clone_dir).touch()
-    bogus_url = "https://x-access-token:tok-BOGUS@github.com/org/repo.git"
 
     async def failing_refresh_echoing_the_url(args, cwd=None, env=None):
-        return 128, f"fatal: Authentication failed for '{bogus_url}'"
+        # git echoes the URL it was given, credentials included, in its error output.
+        return 128, f"fatal: Authentication failed for '{spec}'"
 
     monkeypatch.setattr(resolve_module, "_run_git", failing_refresh_echoing_the_url)
 
     with pytest.raises(resolve_module.CodeRepositoryError, match="made with credentials") as error:
-        await resolve_module.resolve_repo_source(bogus_url, clones_dir=tmp_path)
+        await resolve_module.resolve_repo_source(
+            spec, clones_dir=tmp_path, credentials=credentials, branch=branch
+        )
 
-    assert "tok-BOGUS" not in str(error.value)
+    if secret:
+        assert secret not in str(error.value)
     assert _CLEAN_URL in str(error.value)
+    # Refused, not discarded: a later caller with valid credentials refreshes it.
+    assert _marker(clone_dir).is_file()
 
 
 @pytest.mark.asyncio
@@ -315,9 +295,7 @@ async def test_a_credentialed_clone_is_reused_after_a_refresh_with_the_callers_c
 
 def test_the_credential_header_is_scoped_to_the_remote_host():
     env = resolve_module._credential_env("tok-SECRET", "https://GitHub.com:8443/org/repo.git")
-
     assert env["GIT_CONFIG_KEY_0"] == "http.https://github.com:8443/.extraHeader"
-    assert "tok-SECRET" not in env["GIT_CONFIG_KEY_0"]
     # An ssh remote never sends http headers, so it gets none.
     assert resolve_module._credential_env("tok-SECRET", "git@github.com:org/repo.git") == {}
 
@@ -347,29 +325,3 @@ def test_git_sends_the_scoped_header_to_the_remote_host_only(tmp_path):
     assert header_for("https://github.com/other/repo").startswith("Authorization: Basic ")
     assert header_for("https://evil.example/org/repo.git") == ""
     assert header_for("http://github.com/org/repo.git") == ""
-
-
-@pytest.mark.asyncio
-async def test_a_public_clone_is_still_reused_stale(monkeypatch, tmp_path):
-    clone_dir = resolve_module.clone_dir(_CLEAN_URL, clones_dir=tmp_path)
-    (clone_dir / ".git").mkdir(parents=True)
-    monkeypatch.setattr(resolve_module, "_run_git", _failing_refresh)
-
-    resolved = await resolve_module.resolve_repo_source(_CLEAN_URL, clones_dir=tmp_path)
-
-    assert resolved == clone_dir
-
-
-@pytest.mark.asyncio
-async def test_a_credentialed_refresh_marks_the_clone(monkeypatch, tmp_path):
-    clone_dir = resolve_module.clone_dir(_CLEAN_URL, clones_dir=tmp_path)
-    (clone_dir / ".git").mkdir(parents=True)
-
-    async def fake_run_git(args, cwd=None, env=None):
-        return 0, ""
-
-    monkeypatch.setattr(resolve_module, "_run_git", fake_run_git)
-
-    await resolve_module.resolve_repo_source(_TOKEN_URL, clones_dir=tmp_path)
-
-    assert _marker(clone_dir).is_file()

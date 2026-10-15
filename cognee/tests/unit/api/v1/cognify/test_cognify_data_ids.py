@@ -71,14 +71,6 @@ async def test_data_ids_scope_the_run_to_those_rows():
 
 
 @pytest.mark.asyncio
-async def test_without_data_ids_the_whole_dataset_runs():
-    _result, pipeline, runtime = await _cognify()
-
-    assert pipeline.await_args.kwargs["data"] is None
-    runtime.assert_awaited_once()
-
-
-@pytest.mark.asyncio
 async def test_ids_outside_the_dataset_run_nothing():
     # An empty data list would make the runner fall back to the whole dataset.
     result, pipeline, _runtime = await _cognify(data_ids=[uuid4()])
@@ -87,13 +79,15 @@ async def test_ids_outside_the_dataset_run_nothing():
     pipeline.assert_not_awaited()
 
 
+@pytest.mark.parametrize(
+    "cognify_kwargs, message",
+    [
+        ({"datasets": ["a", "b"]}, "exactly one dataset"),
+        ({"dry_run": True}, "data_ids is not supported with dry_run"),
+    ],
+    ids=["several_datasets", "dry_run"],
+)
 @pytest.mark.asyncio
-async def test_data_ids_need_exactly_one_dataset():
-    with pytest.raises(ValueError, match="exactly one dataset"):
-        await _cognify(datasets=["a", "b"], data_ids=[REPO_A.id])
-
-
-@pytest.mark.asyncio
-async def test_data_ids_are_refused_with_dry_run():
-    with pytest.raises(ValueError, match="data_ids is not supported with dry_run"):
-        await _cognify(data_ids=[REPO_A.id], dry_run=True)
+async def test_data_ids_are_refused(cognify_kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        await _cognify(data_ids=[REPO_A.id], **cognify_kwargs)

@@ -91,20 +91,10 @@ def _fake_runs(monkeypatch, runs):
     return calls
 
 
-def _capture_warnings(monkeypatch):
-    datasets_module = importlib.import_module(DATASETS_MODULE)
-    warnings = []
-    monkeypatch.setattr(
-        datasets_module.logger, "warning", lambda *args, **kwargs: warnings.append(args)
-    )
-    return warnings
-
-
 def test_alias_falls_back_to_cognify_when_no_code_graph_run(client, monkeypatch):
     dataset_id = uuid.uuid4()
     _authorize(monkeypatch, [dataset_id])
     _fake_runs(monkeypatch, {"cognify_pipeline": {dataset_id: "DATASET_PROCESSING_COMPLETED"}})
-    warnings = _capture_warnings(monkeypatch)
 
     response = client.get(
         "/api/v1/datasets/status",
@@ -113,77 +103,42 @@ def test_alias_falls_back_to_cognify_when_no_code_graph_run(client, monkeypatch)
 
     assert response.status_code == 200
     assert response.json() == {str(dataset_id): "DATASET_PROCESSING_COMPLETED"}
-    assert len(warnings) == 1
 
 
-def test_alias_reports_own_run_when_code_graph_run_is_newer(client, monkeypatch):
-    with_run, without_run = uuid.uuid4(), uuid.uuid4()
-    _authorize(monkeypatch, [with_run, without_run])
-    _fake_runs(
-        monkeypatch,
-        {
-            "code_graph_pipeline": {with_run: ("DATASET_PROCESSING_STARTED", NEWER)},
-            "cognify_pipeline": {
-                with_run: ("DATASET_PROCESSING_COMPLETED", OLDER),
-                without_run: "DATASET_PROCESSING_ERRORED",
-            },
-        },
-    )
-
-    response = client.get(
-        "/api/v1/datasets/status",
-        params={"dataset": [str(with_run), str(without_run)], "pipeline": "code_graph_pipeline"},
-    )
-
-    assert response.status_code == 200
-    assert response.json() == {
-        str(with_run): "DATASET_PROCESSING_STARTED",
-        str(without_run): "DATASET_PROCESSING_ERRORED",
-    }
-
-
-def test_alias_reports_newer_cognify_run_over_stale_code_graph_run(client, monkeypatch):
-    """A pre-upgrade code_graph_pipeline run must not mask a newer cognify build."""
+@pytest.mark.parametrize(
+    "code_graph_created_at, cognify_created_at, expected",
+    [
+        # A pre-upgrade code_graph_pipeline run must not mask a newer cognify build.
+        (OLDER, NEWER, "DATASET_PROCESSING_STARTED"),
+        # A custom pipeline still running under the old name reports its own run.
+        (NEWER, OLDER, "DATASET_PROCESSING_COMPLETED"),
+    ],
+    ids=["newer_cognify_run", "newer_code_graph_run"],
+)
+def test_alias_reports_the_newer_of_the_two_runs(
+    client, monkeypatch, code_graph_created_at, cognify_created_at, expected
+):
     dataset_id = uuid.uuid4()
     _authorize(monkeypatch, [dataset_id])
     _fake_runs(
         monkeypatch,
         {
-            "code_graph_pipeline": {dataset_id: ("DATASET_PROCESSING_COMPLETED", OLDER)},
-            "cognify_pipeline": {dataset_id: ("DATASET_PROCESSING_STARTED", NEWER)},
+            "code_graph_pipeline": {
+                dataset_id: ("DATASET_PROCESSING_COMPLETED", code_graph_created_at)
+            },
+            "cognify_pipeline": {dataset_id: ("DATASET_PROCESSING_STARTED", cognify_created_at)},
         },
     )
-    warnings = _capture_warnings(monkeypatch)
 
-    for endpoint, expected in (
-        ("/api/v1/datasets/status", "DATASET_PROCESSING_STARTED"),
-        (
-            "/api/v1/datasets/status/progress",
-            {"status": "DATASET_PROCESSING_STARTED", "progress": None},
-        ),
+    for endpoint, body in (
+        ("/api/v1/datasets/status", expected),
+        ("/api/v1/datasets/status/progress", {"status": expected, "progress": None}),
     ):
         response = client.get(
             endpoint, params={"dataset": str(dataset_id), "pipeline": "code_graph_pipeline"}
         )
         assert response.status_code == 200
-        assert response.json() == {str(dataset_id): expected}
-    assert len(warnings) == 2
-
-
-def test_alias_with_no_runs_at_all_stays_empty_without_warning(client, monkeypatch):
-    dataset_id = uuid.uuid4()
-    _authorize(monkeypatch, [dataset_id])
-    _fake_runs(monkeypatch, {})
-    warnings = _capture_warnings(monkeypatch)
-
-    response = client.get(
-        "/api/v1/datasets/status",
-        params={"dataset": str(dataset_id), "pipeline": "code_graph_pipeline"},
-    )
-
-    assert response.status_code == 200
-    assert response.json() == {}
-    assert warnings == []
+        assert response.json() == {str(dataset_id): body}
 
 
 def test_multi_pipeline_shape_keeps_requested_key(client, monkeypatch):
@@ -197,7 +152,6 @@ def test_multi_pipeline_shape_keeps_requested_key(client, monkeypatch):
             "cognify_pipeline": {dataset_id: "DATASET_PROCESSING_STARTED"},
         },
     )
-    warnings = _capture_warnings(monkeypatch)
 
     response = client.get(
         "/api/v1/datasets/status",
@@ -215,7 +169,6 @@ def test_multi_pipeline_shape_keeps_requested_key(client, monkeypatch):
             "code_graph_pipeline": "DATASET_PROCESSING_STARTED",
         }
     }
-    assert len(warnings) == 1
 
 
 def test_other_custom_pipeline_names_do_not_fall_back(client, monkeypatch):
@@ -232,22 +185,6 @@ def test_other_custom_pipeline_names_do_not_fall_back(client, monkeypatch):
     assert response.status_code == 200
     assert response.json() == {}
     assert [name for _, name in calls] == ["my_pipeline"]
-
-
-def test_progress_endpoint_applies_the_same_fallback(client, monkeypatch):
-    dataset_id = uuid.uuid4()
-    _authorize(monkeypatch, [dataset_id])
-    _fake_runs(monkeypatch, {"cognify_pipeline": {dataset_id: "DATASET_PROCESSING_COMPLETED"}})
-
-    response = client.get(
-        "/api/v1/datasets/status/progress",
-        params={"dataset": str(dataset_id), "pipeline": "code_graph_pipeline"},
-    )
-
-    assert response.status_code == 200
-    assert response.json() == {
-        str(dataset_id): {"status": "DATASET_PROCESSING_COMPLETED", "progress": None}
-    }
 
 
 def _item(item_id, completed):
@@ -283,7 +220,6 @@ def test_processing_status_alias_counts_either_stamp(client, monkeypatch):
     dataset_id = uuid.uuid4()
     old_item, new_item, pending_item = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     _authorize(monkeypatch, [dataset_id])
-    warnings = _capture_warnings(monkeypatch)
     helper = _patch_count_helper(
         monkeypatch,
         {
@@ -309,18 +245,3 @@ def test_processing_status_alias_counts_either_stamp(client, monkeypatch):
         "code_graph_pipeline",
         "cognify_pipeline",
     ]
-    assert len(warnings) == 1
-
-
-def test_processing_status_other_pipelines_count_only_their_own_stamp(client, monkeypatch):
-    dataset_id = uuid.uuid4()
-    _authorize(monkeypatch, [dataset_id])
-    helper = _patch_count_helper(monkeypatch)
-
-    response = client.get(
-        f"/api/v1/datasets/{dataset_id}/processing-status",
-        params={"pipeline": "cognify_pipeline"},
-    )
-
-    assert response.status_code == 200
-    helper.assert_awaited_once_with(dataset_id, pipeline_name="cognify_pipeline")

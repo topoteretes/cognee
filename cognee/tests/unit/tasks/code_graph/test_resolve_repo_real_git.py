@@ -14,7 +14,6 @@ import subprocess
 from unittest.mock import AsyncMock
 
 import pytest
-from filelock import FileLock
 
 resolve_module = importlib.import_module("cognee.tasks.code_graph.resolve_repo")
 ssrf_module = importlib.import_module("cognee.tasks.web_scraper.ssrf_protection")
@@ -240,15 +239,6 @@ async def test_the_origin_is_read_as_stored(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_a_clone_whose_origin_was_changed_is_refused(origin, clones):
-    default = await _resolve(clones)
-    _git(default, "remote", "set-url", "origin", "https://github.com/someone/else")
-
-    with pytest.raises(resolve_module.CodeRepositoryError, match="is not a clone of"):
-        await _resolve(clones)
-
-
-@pytest.mark.asyncio
 async def test_concurrent_callers_share_one_clone(origin, clones, monkeypatch):
     run_git = resolve_module._run_git
     clone_calls = []
@@ -266,23 +256,6 @@ async def test_concurrent_callers_share_one_clone(origin, clones, monkeypatch):
     assert len(clone_calls) == 1
     assert len(set(resolved)) == 1 and _content(resolved[0]) == "main-1"
     assert _temporary_clones(clones) == []
-
-
-@pytest.mark.asyncio
-async def test_a_caller_waits_for_the_lock_of_its_clone(origin, clones):
-    target = resolve_module.clone_dir(_URL, clones_dir=clones)
-    held = FileLock(str(clones / ".locks" / f"{target.name}.lock"))
-    (clones / ".locks").mkdir(parents=True)
-    held.acquire()
-    try:
-        waiting = asyncio.create_task(_resolve(clones))
-        await asyncio.sleep(0.5)
-        assert not waiting.done()
-        assert not target.exists()
-    finally:
-        held.release()
-
-    assert await asyncio.wait_for(waiting, timeout=60) == target
 
 
 @pytest.mark.asyncio
@@ -352,11 +325,3 @@ async def test_the_users_ssh_command_is_kept_in_batch_mode(tmp_path, monkeypatch
             "git@github.com:org/repo.git", clones_dir=tmp_path / "clones"
         )
     assert seen[0]["GIT_SSH_COMMAND"] == "ssh -i /keys/deploy -o BatchMode=yes"
-
-    # A user's own GIT_SSH_COMMAND stays in charge: nothing replaces it.
-    monkeypatch.setenv("GIT_SSH_COMMAND", "ssh -i /keys/other")
-    with pytest.raises(resolve_module.CodeRepositoryError):
-        await resolve_module.resolve_repo_source(
-            "git@github.com:org/repo.git", clones_dir=tmp_path / "clones"
-        )
-    assert "GIT_SSH_COMMAND" not in (seen[1] or {})

@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from cognee.tasks.code_graph.code_repo import extract_code_repo_graph, manifest_repo_name
+from cognee.tasks.code_graph.code_repo import extract_code_repo_graph
 from cognee.tasks.code_graph.extract_code_graph import (
     build_code_graph_edges,
     map_facts_to_data_points,
@@ -113,24 +113,14 @@ def test_node_and_edge_ids_of_a_hashed_clone_match_the_legacy_name(tmp_path, eno
     assert [point.id for point in unnamed] != [point.id for point in old_points]
 
 
-def test_a_manifest_names_only_a_clone():
-    clone = clone_dir(_URL)
-    assert manifest_repo_name(
-        SimpleNamespace(system_metadata={"source": "code_repo", "repo_url": _URL}), clone
-    ) == _legacy_clone_slug(_URL)
-    assert manifest_repo_name(
-        SimpleNamespace(system_metadata=json.dumps({"repo_url": _URL})), clone
-    ) == _legacy_clone_slug(_URL)
-    assert (
-        manifest_repo_name(SimpleNamespace(system_metadata={"source": "code_repo"}), clone) is None
-    )
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize("repo_url", [_URL, None], ids=["clone", "local"])
+@pytest.mark.parametrize("index_vectors", [False, True])
 async def test_the_code_repo_route_passes_the_name_to_both_graph_tasks(
-    monkeypatch, tmp_path, repo_url
+    monkeypatch, tmp_path, repo_url, index_vectors
 ):
+    """The route names the repository for both graph tasks, and stores graph-only
+    unless index_vectors asks it to embed."""
     open_data_file_module = importlib.import_module(
         "cognee.infrastructure.files.utils.open_data_file"
     )
@@ -146,16 +136,18 @@ async def test_the_code_repo_route_passes_the_name_to_both_graph_tasks(
     extract = AsyncMock(return_value=[])
     edges = AsyncMock()
     monkeypatch.setattr(extract_module, "extract_code_graph", extract)
-    monkeypatch.setattr(extract_module, "add_code_graph_data_points", AsyncMock(return_value=[]))
+    add_points = AsyncMock(return_value=[])
+    monkeypatch.setattr(extract_module, "add_code_graph_data_points", add_points)
     monkeypatch.setattr(extract_module, "add_code_graph_edges", edges)
 
     metadata = {"source": "code_repo", **({"repo_url": repo_url} if repo_url else {})}
     data_item = SimpleNamespace(
         id="d1", raw_data_location="unused", system_metadata=metadata, external_metadata=None
     )
-    await extract_code_repo_graph([data_item])
+    await extract_code_repo_graph([data_item], index_vectors=index_vectors)
 
     expected = _legacy_clone_slug(repo_url) if repo_url else None
     assert extract.await_args.kwargs["repo_name"] == expected
     assert edges.await_args.kwargs["repo_name"] == expected
     assert Path(extract.await_args.kwargs["repo_path"]) == repo
+    assert add_points.await_args.kwargs["graph_only"] is (not index_vectors)

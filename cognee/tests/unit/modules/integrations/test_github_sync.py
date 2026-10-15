@@ -10,6 +10,7 @@ and the full-installation default when no explicit repo list is given.
 """
 
 import importlib
+import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -18,10 +19,8 @@ import pytest
 
 sync_module = importlib.import_module("cognee.modules.integrations.github.sync")
 
-# The remember package's __init__ rebinds `remember` to the function,
-# shadowing the submodule — string-target monkeypatching resolves the
-# function and fails. Importing the submodule explicitly sidesteps it (same
-# workaround as test_get_integrations_router.py).
+# The remember package's __init__ shadows the submodule with the function, so
+# patch the submodule itself.
 _remember_module = importlib.import_module("cognee.api.v1.remember.remember")
 _users_methods = importlib.import_module("cognee.modules.users.methods")
 
@@ -74,12 +73,8 @@ async def test_default_sync_covers_every_installation_repo_in_one_call(mocks):
 
     mocks.mint.assert_awaited_once_with(42)
     mocks.list_repos.assert_awaited_once_with("tok123")
-    # One remember for the whole installation: remember builds each declared
-    # repository in a scoped run of its own, so one failure never rolls back
-    # the others and no repository's cognify rescans the dataset.
+    # One remember for the whole installation; remember isolates each repository.
     mocks.remember.assert_awaited_once()
-    # The URLs, not local clones: add() clones each with the token and records
-    # it as the manifest's repo_url.
     assert mocks.remember.await_args.args == (
         ["https://github.com/acme/api.git", "https://github.com/acme/web.git"],
     )
@@ -89,9 +84,7 @@ async def test_default_sync_covers_every_installation_repo_in_one_call(mocks):
         "codegraph_config": {
             "repo_credentials": "tok123",
             "treat_as_repository": True,
-            # The sync indexes code graphs, so an installation's READMEs never
-            # reach LLM extraction or embeddings.
-            "include_documents": False,
+            "include_documents": False,  # code graphs only, no README extraction
         },
         "self_improvement": False,
         "raise_on_error": False,
@@ -109,8 +102,6 @@ async def test_explicit_repo_list_skips_the_listing_call(mocks):
 
 @pytest.mark.asyncio
 async def test_per_repo_failures_are_logged_by_repository(mocks, caplog):
-    import logging
-
     mocks.remember.return_value = SimpleNamespace(
         status="errored",
         error="https://github.com/acme/api.git: clone failed",
@@ -136,8 +127,6 @@ async def test_per_repo_failures_are_logged_by_repository(mocks, caplog):
 
 @pytest.mark.asyncio
 async def test_a_raising_remember_is_logged_not_raised(mocks, caplog):
-    import logging
-
     mocks.remember.side_effect = RuntimeError("database down")
 
     with caplog.at_level(logging.ERROR, logger=sync_module.logger.name):

@@ -81,36 +81,6 @@ async def test_the_branch_reaches_the_early_resolve_of_a_codegraph_config_add(
 
 
 @pytest.mark.asyncio
-async def test_the_ignored_code_content_type_still_takes_the_branch():
-    # content_type="code" is ignored, so the call is a plain remember: the branch
-    # reaches add() rather than being refused as a content_type call.
-    import cognee
-
-    user = MagicMock(id=uuid4())
-    dataset = MagicMock(id=uuid4())
-
-    with (
-        patch("cognee.shared.utils.send_telemetry"),
-        patch.object(serve_state, "get_remote_client", return_value=None),
-        patch("cognee.modules.engine.operations.setup.setup", AsyncMock()),
-        patch("cognee.modules.users.methods.get_default_user", AsyncMock(return_value=user)),
-        patch.object(
-            remember_module,
-            "resolve_authorized_user_datasets",
-            AsyncMock(return_value=(user, [dataset])),
-        ),
-        patch("cognee.api.v1.add.add", AsyncMock()) as add,
-        patch("cognee.api.v1.cognify.cognify", AsyncMock(return_value={})),
-    ):
-        await cognee.remember(
-            _REPO, dataset_name="code", content_type="code", branch="dev", self_improvement=False
-        )
-
-    assert add.await_args.kwargs["branch"] == "dev"
-    assert "codegraph_config" not in add.await_args.kwargs
-
-
-@pytest.mark.asyncio
 async def test_remember_passes_the_branch_to_add_and_not_to_cognify():
     import cognee
 

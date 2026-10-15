@@ -468,17 +468,18 @@ def test_auto_presort_leaves_declared_inputs_alone(tmp_path, monkeypatch, kwargs
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("dry_run", "message"),
+    ("dry_run", "message", "kwargs"),
     [
-        (True, "dry_run is supported for standard add\\+cognify remember inputs only"),
-        ("presort", "dry_run='presort' is supported for folder inputs only"),
-    ],
-)
-@pytest.mark.parametrize(
-    "kwargs",
-    [
-        {"codegraph_config": {"treat_as_repository": True}},
-        {"codegraph_config": {"include_documents": False}},
+        (
+            True,
+            "dry_run is supported for standard add\\+cognify remember inputs only",
+            {"codegraph_config": {"treat_as_repository": True}},
+        ),
+        (
+            "presort",
+            "dry_run='presort' is supported for folder inputs only",
+            {"codegraph_config": {"include_documents": False}},
+        ),
     ],
 )
 async def test_dry_run_refuses_code_graph_calls(tmp_path, dry_run, message, kwargs):

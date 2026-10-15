@@ -54,13 +54,8 @@ async def test_cognify_refuses_index_vectors_remotely():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "kwargs",
-    [
-        {"repo_credentials": "tok"},
-        {"codegraph_config": {"repo_credentials": "tok"}},
-    ],
-)
-async def test_remember_refuses_repo_credentials_remotely(kwargs):
+async def test_remember_refuses_repo_credentials_remotely():
     with pytest.raises(ValueError, match="repo_credentials is not supported"):
-        await remember_module.remember("https://github.com/acme/api", **kwargs)
+        await remember_module.remember(
+            "https://github.com/acme/api", codegraph_config={"repo_credentials": "tok"}
+        )

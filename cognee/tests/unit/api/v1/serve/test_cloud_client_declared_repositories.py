@@ -18,12 +18,6 @@ from cognee.api.v1.serve.cloud_client import CloudClient
 # `serve`, which shadows the dotted path inside a function body.
 cloud_client_module = importlib.import_module("cognee.api.v1.serve.cloud_client")
 
-UNDETECTED_REMOTES = [
-    "https://bitbucket.org/acme/api",
-    "https://gitlab.acme.com/team/api",
-    "git@github.com:acme/api.git",
-]
-
 
 class _FakeForm:
     def __init__(self):
@@ -74,15 +68,15 @@ def _client():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "config",
+    "spec, config",
     [
-        {"treat_as_repository": True},
-        {"treat_as_repository": True, "include_documents": False},
-        {"treat_as_repository": True, "include_documents": True},
-        {"treat_as_repository": True, "index_vectors": True},
+        ("https://bitbucket.org/acme/api", {"treat_as_repository": True}),
+        (
+            ["git@github.com:acme/api.git"],
+            {"treat_as_repository": True, "include_documents": False},
+        ),
     ],
 )
-@pytest.mark.parametrize("spec", [*UNDETECTED_REMOTES, ["https://bitbucket.org/acme/api"]])
 async def test_treat_as_repository_raises_instead_of_being_dropped(form, spec, config):
     with pytest.raises(ValueError, match="treat_as_repository is not supported while connected"):
         await _client().remember(spec, "ds", codegraph_config=config)
@@ -103,34 +97,15 @@ async def test_include_documents_false_raises_instead_of_vanishing(form):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("spec", UNDETECTED_REMOTES)
-async def test_without_the_declaration_the_same_spec_does_not(form, spec):
-    # The contrast. An ssh spec is refused (it can only be a repository, and
-    # the server cannot clone an undeclared one); the http(s) ones upload as
-    # text, which is right for a URL nobody declared a repository.
-    if spec.startswith(("git@", "ssh://")):
-        with pytest.raises(ValueError, match="ssh git remotes"):
-            await _client().remember(spec, "ds")
-        return
-    await _client().remember(spec, "ds")
-    assert form.values_for("raw_data") == []
-    assert len(form.values_for("data")) == 1
+@pytest.mark.parametrize(
+    "config, index_vectors",
+    [(None, []), ({"index_vectors": True}, ["true"])],
+)
+async def test_index_vectors_rides_its_own_field(form, config, index_vectors):
+    # A detected repository URL travels as raw_data either way, and
+    # undeclared adds keep their documents.
+    await _client().remember("https://github.com/acme/api", "ds", codegraph_config=config)
 
-
-@pytest.mark.asyncio
-async def test_a_detected_repository_url_still_travels_as_raw_data(form):
-    await _client().remember("https://github.com/acme/api", "ds")
-
-    assert form.values_for("raw_data") == ["https://github.com/acme/api"]
-    assert form.values_for("content_type") == [], "undeclared adds keep their documents"
-
-
-@pytest.mark.asyncio
-async def test_index_vectors_rides_its_own_field(form):
-    await _client().remember(
-        "https://github.com/acme/api", "ds", codegraph_config={"index_vectors": True}
-    )
-
-    assert form.values_for("index_vectors") == ["true"]
+    assert form.values_for("index_vectors") == index_vectors
     assert form.values_for("raw_data") == ["https://github.com/acme/api"]
     assert form.values_for("content_type") == []

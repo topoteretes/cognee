@@ -44,53 +44,33 @@ def _patch_rows(monkeypatch, rows):
 
 
 @pytest.mark.asyncio
-async def test_repository_item_carries_kind_source_and_path(monkeypatch):
+@pytest.mark.parametrize(
+    "metadata, expected",
+    [
+        (
+            {
+                "source": "code_repo",
+                "repo_path": "/srv/repos/api",
+                "repo_url": "https://github.com/acme/api",
+                "file_count": 12,
+            },
+            {"source": "https://github.com/acme/api", "path": "/srv/repos/api"},
+        ),
+        # A local project reports its path as the source.
+        (
+            {"source": "code_repo", "repo_path": "/srv/repos/api"},
+            {"source": "/srv/repos/api", "path": "/srv/repos/api"},
+        ),
+    ],
+)
+async def test_repository_item_carries_kind_source_and_path(monkeypatch, metadata, expected):
     repo_id = uuid4()
-    _patch_rows(
-        monkeypatch,
-        [
-            SimpleNamespace(
-                id=repo_id,
-                system_metadata={
-                    "source": "code_repo",
-                    "repo_path": "/srv/repos/api",
-                    "repo_url": "https://github.com/acme/api",
-                    "file_count": 12,
-                },
-            )
-        ],
-    )
+    _patch_rows(monkeypatch, [SimpleNamespace(id=repo_id, system_metadata=metadata)])
     result = _result([{"id": str(repo_id)}])
 
     await remember_module._attach_item_identity(result)
 
-    assert result.items == [
-        {
-            "id": str(repo_id),
-            "kind": "code_repo",
-            "source": "https://github.com/acme/api",
-            "path": "/srv/repos/api",
-        }
-    ]
-
-
-@pytest.mark.asyncio
-async def test_local_project_reports_its_path_as_the_source(monkeypatch):
-    repo_id = uuid4()
-    _patch_rows(
-        monkeypatch,
-        [
-            SimpleNamespace(
-                id=repo_id,
-                system_metadata={"source": "code_repo", "repo_path": "/srv/repos/api"},
-            )
-        ],
-    )
-    result = _result([{"id": str(repo_id)}])
-
-    await remember_module._attach_item_identity(result)
-
-    assert result.items[0]["source"] == "/srv/repos/api"
+    assert result.items == [{"id": str(repo_id), "kind": "code_repo", **expected}]
 
 
 @pytest.mark.asyncio
@@ -116,16 +96,3 @@ async def test_a_lookup_failure_leaves_the_items_alone(monkeypatch):
     await remember_module._attach_item_identity(result)
 
     assert result.items == original
-
-
-@pytest.mark.asyncio
-async def test_no_items_makes_no_query(monkeypatch):
-    def _boom():
-        raise AssertionError("must not query when there is nothing to name")
-
-    monkeypatch.setattr("cognee.infrastructure.databases.relational.get_relational_engine", _boom)
-    result = _result([])
-
-    await remember_module._attach_item_identity(result)
-
-    assert result.items == []

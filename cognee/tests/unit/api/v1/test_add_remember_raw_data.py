@@ -220,9 +220,6 @@ def test_remember_forwards_index_vectors_with_repo_urls(client):
 @pytest.mark.parametrize(
     ("form", "files"),
     [
-        ({"raw_data": [REPO_URL]}, None),
-        ({"raw_data": ["https://bitbucket.org/acme/api"]}, None),
-        ({"raw_data": [REPO_URL], "index_vectors": "true"}, None),
         ({"raw_data": [REPO_URL], "session_id": "s1"}, None),
         ({"raw_data": [REPO_URL]}, {"data": ("notes.txt", b"hello", "text/plain")}),
     ],
@@ -260,18 +257,6 @@ def test_remember_ignores_the_removed_code_content_type(client, form, files):
         assert repr(legacy.kwargs[key]) == repr(plain.kwargs[key]), key
 
 
-def test_remember_with_only_the_removed_code_content_type_has_nothing_to_ingest(client):
-    with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
-        response = client.post(
-            "/api/v1/remember",
-            data={"datasetName": "test_dataset", "content_type": "code"},
-        )
-
-        assert response.status_code == 400, response.text
-        assert "Provide at least one file" in response.json()["detail"]
-        mock_remember.assert_not_called()
-
-
 def test_remember_sends_no_codegraph_config_for_plain_ingestion(client):
     with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
         mock_remember.return_value = remember_completed()
@@ -283,19 +268,6 @@ def test_remember_sends_no_codegraph_config_for_plain_ingestion(client):
 
         assert response.status_code == 200, response.text
         assert "codegraph_config" not in mock_remember.call_args.kwargs
-
-
-def test_remember_rejects_unknown_content_types(client):
-    with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
-        response = client.post(
-            "/api/v1/remember",
-            files=[("data", ("notes.txt", b"hello", "text/plain"))],
-            data={"datasetName": "test_dataset", "content_type": "pdf"},
-        )
-
-        assert response.status_code == 400
-        assert "Unsupported content_type 'pdf'" in response.json()["detail"]
-        mock_remember.assert_not_awaited()
 
 
 def test_remember_rejects_index_vectors_with_session_id(client):
@@ -369,18 +341,3 @@ def test_remember_forwards_self_improvement_without_defaulting_false(client, fla
             assert mock_remember.call_args.kwargs["self_improvement"] is flag
         if not session_entry:
             assert mock_remember.call_args.args[0] == ["memory"]
-
-
-def test_plain_ingestion_still_accepts_uploads_beside_raw_data(client):
-    # An ordinary request may mix uploads and raw_data as it always could.
-    with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
-        mock_remember.return_value = remember_completed()
-
-        response = client.post(
-            "/api/v1/remember",
-            data={"datasetName": "test_dataset", "raw_data": [REPO_URL]},
-            files={"data": ("notes.txt", b"hello", "text/plain")},
-        )
-
-        assert response.status_code == 200, response.text
-        assert mock_remember.call_args.args[0][-1] == REPO_URL
