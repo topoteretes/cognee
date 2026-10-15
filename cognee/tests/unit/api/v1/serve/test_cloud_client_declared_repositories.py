@@ -109,3 +109,18 @@ async def test_index_vectors_rides_its_own_field(form, config, index_vectors):
     assert form.values_for("index_vectors") == index_vectors
     assert form.values_for("raw_data") == ["https://github.com/acme/api"]
     assert form.values_for("content_type") == []
+
+
+@pytest.mark.asyncio
+async def test_a_code_content_type_call_sends_its_strings_as_raw_data(form, monkeypatch):
+    # remember(content_type="code") passes repository specs, often a path on the
+    # server: uploaded as text, the server would store the path string itself.
+    remember_module = importlib.import_module("cognee.api.v1.remember.remember")
+    serve_state = importlib.import_module("cognee.api.v1.serve.state")
+    monkeypatch.setattr(serve_state, "get_remote_client", _client)
+
+    with pytest.warns(FutureWarning, match="treat_as_repository"):
+        await remember_module.remember("/srv/checkout/repo", "ds", content_type="code")
+
+    assert form.values_for("raw_data") == ["/srv/checkout/repo"]
+    assert form.values_for("data") == [] and form.values_for("content_type") == []

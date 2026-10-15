@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import os
 import time
+import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, BinaryIO, Literal, Union
 from uuid import UUID
@@ -50,6 +51,13 @@ from cognee.tasks.code_graph.config import (
 from cognee.tasks.ingestion.data_item import DataItem
 
 logger = get_logger("remember")
+
+CODE_CONTENT_TYPE_DEPRECATION_MESSAGE = (
+    'remember(content_type="code") is deprecated and ignored: a repository is ordinary '
+    "data, so the call runs as a plain remember(data). To keep the old code-graph-only "
+    'behaviour, pass codegraph_config={"treat_as_repository": True, '
+    '"include_documents": False} instead.'
+)
 
 # Strong refs for fire-and-forget background remember tasks. The event loop only
 # keeps a weak reference to a task, and the API router drops the RememberResult
@@ -1136,7 +1144,9 @@ async def remember(
             suffix, or an ssh remote. The top-level ``index_vectors=`` /
             ``repo_credentials=`` spellings are still accepted. The removed
             ``content_type="code"`` is accepted and ignored: such a call is a
-            plain ``remember(data)``.
+            plain ``remember(data)``, with a ``FutureWarning`` naming
+            ``codegraph_config={"treat_as_repository": True,
+            "include_documents": False}`` as the replacement.
         skill_improvement: Internal skill-improvement control dict used with
             ``SkillRunEntry`` or ``content_type="skills"``. ``apply=True``
             requires an existing ``proposal_id``.
@@ -1175,8 +1185,11 @@ async def remember(
     # and builds through add() + cognify(). The value is still accepted so
     # existing callers do not break, and ignored: the call is a plain
     # remember(data). Dropped here, before any path reads content_type.
-    if kwargs.get("content_type") == "code":
+    legacy_code_content_type = kwargs.get("content_type") == "code"
+    if legacy_code_content_type:
         kwargs.pop("content_type")
+        warnings.warn(CODE_CONTENT_TYPE_DEPRECATION_MESSAGE, FutureWarning, stacklevel=2)
+        logger.warning(CODE_CONTENT_TYPE_DEPRECATION_MESSAGE)
 
     # Migration dispatch: a MemorySource streams COGX records from an external
     # memory system (Mem0, Zep/Graphiti, Letta, a COGX archive, ...). The
@@ -1505,6 +1518,7 @@ async def remember(
             session_ids=session_ids,
             span=span,
             raise_on_error=raise_on_error,
+            legacy_code_content_type=legacy_code_content_type,
             **kwargs,
         )
 
@@ -1560,6 +1574,7 @@ async def _remember_inner(
     session_ids,
     span,
     raise_on_error: bool = True,
+    legacy_code_content_type: bool = False,
     **kwargs,
 ) -> "RememberResult":
     from cognee.api.v1.serve.state import get_remote_client
@@ -1616,6 +1631,11 @@ async def _remember_inner(
                 "session ids after the remote remember finishes."
             )
         span.set_attribute(COGNEE_OPERATION_MODE, "cloud")
+        if legacy_code_content_type:
+            # A content_type="code" caller passes repository specs, often a path
+            # on the server: send every string as raw_data, as that call always
+            # did, so it is not uploaded and stored as the path's text.
+            kwargs["strings_as_raw_data"] = True
         return await client.remember(
             data,
             dataset_name,

@@ -180,7 +180,9 @@ class CloudClient:
             # the local path gives.
             if is_ssh_repo_spec(item):
                 raise ValueError(SSH_REPO_SPEC_MESSAGE)
-            if code_repo_clone_url(item) is not None:
+            # strings_as_raw_data: set by remember() for the deprecated
+            # content_type="code", whose strings are repository specs.
+            if kwargs.get("strings_as_raw_data") or code_repo_clone_url(item) is not None:
                 form.add_field("raw_data", item)
                 sent_repo_url = True
                 return

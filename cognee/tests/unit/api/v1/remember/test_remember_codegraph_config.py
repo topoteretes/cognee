@@ -127,8 +127,8 @@ def improve_calls(monkeypatch):
 @pytest.mark.asyncio
 async def test_removed_code_content_type_is_ignored(permanent_pipeline, improve_calls, caplog):
     # Accepted so existing callers do not break, and ignored: the call is a
-    # plain remember(data) -- no warning, no translation into codegraph_config,
-    # and the plain call's improve default.
+    # plain remember(data) -- no translation into codegraph_config, and the
+    # plain call's improve default -- with a warning naming the replacement.
     import logging
     import warnings
 
@@ -155,8 +155,11 @@ async def test_removed_code_content_type_is_ignored(permanent_pipeline, improve_
     assert permanent_pipeline == plain
     assert "content_type" not in permanent_pipeline["add"]
     assert "content_type" not in permanent_pipeline["cognify"]
-    assert [w for w in caught if "content_type" in str(w.message)] == []
-    assert "content_type" not in caplog.text
+    deprecations = [w for w in caught if "content_type" in str(w.message)]
+    assert [w.category for w in deprecations] == [FutureWarning]
+    assert deprecations[0].filename == __file__
+    assert '"treat_as_repository": True' in str(deprecations[0].message)
+    assert 'content_type="code"' in caplog.text
     assert len(improve_calls) == 2
 
 

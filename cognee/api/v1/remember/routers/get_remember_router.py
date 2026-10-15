@@ -386,6 +386,10 @@ def get_remember_router() -> APIRouter:
         # ordinary data. Clients still sending it keep working: the value is
         # ignored and the request is normal ingestion.
         if content_type == "code":
+            logger.warning(
+                "POST /remember: content_type='code' is deprecated and ignored; the request "
+                "is normal ingestion. Send repository specs in raw_data without it."
+            )
             content_type = None
 
         # String inputs join the uploads as one item list, uploads first. Drop
