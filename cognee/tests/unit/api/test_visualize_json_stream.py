@@ -211,6 +211,7 @@ def test_the_json_path_hands_over_the_dataset_it_authorized(client):
     _get(client)
 
     assert client.json_path.await_args.kwargs["dataset"] is client.authorized_dataset
+    assert client.json_path.await_args.kwargs["already_authorized"] is True
 
 
 def test_session_events_are_collected_unless_the_request_opts_out(client):

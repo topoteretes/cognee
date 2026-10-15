@@ -53,6 +53,7 @@ async def fetch_visualization_data(
     max_nodes: int = DEFAULT_MAX_NODES,
     include_session_events: bool = True,
     session_ids: list | None = None,
+    already_authorized: bool = False,
 ) -> tuple[Any, list | None]:
     """Authorize, fetch and bound the graph data behind a visualization.
 
@@ -75,13 +76,14 @@ async def fetch_visualization_data(
     # is set with None: a no-op when access control is off, and an (expected)
     # error in multi-user mode where a dataset is required.
     resolved_dataset = None
-    if isinstance(dataset, Dataset) and dataset.owner_id == user.id:
-        # An owner can always read their own dataset, so a caller that already
-        # holds the row (the routers, after their own check) skips a second
-        # one. The row proves nothing for anyone else, so it is not trusted.
+    if already_authorized and isinstance(dataset, Dataset):
+        # The caller just got this row from get_authorized_existing_datasets,
+        # so it is not checked a second time. Nothing about the row itself
+        # (owner, tenant) is evidence of permission, which is why this is a
+        # flag and not inferred from the argument.
         resolved_dataset = dataset
     elif dataset:
-        # A name, a UUID, or a Dataset the user does not own: checked by id.
+        # A name, a UUID, or a Dataset nobody vouched for: checked by id.
         dataset_id = dataset.id if isinstance(dataset, Dataset) else dataset
         authorized = await get_authorized_existing_datasets([dataset_id], "read", user)
         resolved_dataset = authorized[0] if authorized else None
@@ -211,6 +213,7 @@ async def visualize_graph(
     neighborhood_depth: int = DEFAULT_NEIGHBORHOOD_DEPTH,
     neighborhood_seed_top_k: int = DEFAULT_SEED_TOP_K,
     max_nodes: int = DEFAULT_MAX_NODES,
+    already_authorized: bool = False,
 ) -> str:
     """Render the knowledge graph to a self-contained HTML file.
 
@@ -236,9 +239,8 @@ async def visualize_graph(
             first authorized match selects which user+dataset database is
             visualized. Defaults to "main_dataset" (the same default used by
             add/cognify/remember). Pass None to skip dataset resolution and
-            render the current context's graph. A ``Dataset`` the user owns
-            is used as is; any other ``Dataset`` is checked by its id like a
-            name or UUID would be.
+            render the current context's graph. A ``Dataset`` is checked by its id
+            like a name or UUID, unless already_authorized is set.
         full: When True, render the entire graph (legacy behavior).
         query: Optional query string; its nearest vector hits seed the subgraph.
         seed_node_ids: Explicit seed node ids for neighborhood expansion.
@@ -248,6 +250,12 @@ async def visualize_graph(
         neighborhood_depth: k-hop expansion depth around the seeds (default 2).
         neighborhood_seed_top_k: Maximum number of seed nodes (default 10).
         max_nodes: Hard cap on rendered nodes after expansion (default 500).
+        already_authorized: Skip the permission check for ``dataset``. Only
+            for a ``Dataset`` the caller has just received from
+            get_authorized_existing_datasets for this same user; a ``Dataset``
+            loaded any other way (get_datasets, a plain query) has not been
+            checked and must not be passed with this set. Ignored for a name
+            or UUID, which is always checked.
     """
     graph_data, search_events = await fetch_visualization_data(
         user=user,
@@ -261,6 +269,7 @@ async def visualize_graph(
         max_nodes=max_nodes,
         include_session_events=include_session_events,
         session_ids=session_ids,
+        already_authorized=already_authorized,
     )
 
     graph = await cognee_network_visualization(
@@ -290,6 +299,7 @@ async def visualize_graph_json(
     neighborhood_depth: int = DEFAULT_NEIGHBORHOOD_DEPTH,
     neighborhood_seed_top_k: int = DEFAULT_SEED_TOP_K,
     max_nodes: int = DEFAULT_MAX_NODES,
+    already_authorized: bool = False,
 ) -> dict:
     """The graph, as a JSON-safe dict, without the semantic layout.
 
@@ -318,6 +328,7 @@ async def visualize_graph_json(
         max_nodes=max_nodes,
         include_session_events=include_session_events,
         session_ids=session_ids,
+        already_authorized=already_authorized,
     )
 
     return build_visualization_payload(graph_data, search_events=search_events)
@@ -334,6 +345,7 @@ async def visualize_semantic_json(
     neighborhood_depth: int = DEFAULT_NEIGHBORHOOD_DEPTH,
     neighborhood_seed_top_k: int = DEFAULT_SEED_TOP_K,
     max_nodes: int = DEFAULT_MAX_NODES,
+    already_authorized: bool = False,
 ) -> dict:
     """Semantic positions and clusters for the same subgraph, computed on demand.
 
@@ -356,6 +368,7 @@ async def visualize_semantic_json(
         neighborhood_seed_top_k=neighborhood_seed_top_k,
         max_nodes=max_nodes,
         include_session_events=False,
+        already_authorized=already_authorized,
     )
 
     return await build_semantic_payload(graph_data)

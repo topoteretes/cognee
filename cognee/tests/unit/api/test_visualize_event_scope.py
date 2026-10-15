@@ -85,16 +85,18 @@ async def test_no_dataset_asked_for_stays_unscoped():
 
 
 @pytest.mark.asyncio
-async def test_a_dataset_the_user_owns_is_not_authorized_again():
-    """A router that already checked read permission passes the Dataset itself;
-    asking get_authorized_existing_datasets again was a second round of
-    permission queries per request (SDK-972)."""
+async def test_an_already_authorized_dataset_is_not_checked_again():
+    """The routers check read permission and hand over the row they got, with
+    the flag set; asking get_authorized_existing_datasets again was a second
+    round of permission queries per request (SDK-972)."""
     collect = AsyncMock(return_value=[])
-    dataset = Dataset(id=DATASET_ID, name="some-dataset", owner_id=USER.id)
+    dataset = Dataset(id=DATASET_ID, name="some-dataset", owner_id=uuid4())
     authorize, fetch_graph, db_context, collector = _patches(collect, authorized=False)
 
     with authorize as authorize_mock, fetch_graph as fetch_graph_mock, db_context, collector:
-        await visualize_module.fetch_visualization_data(user=USER, dataset=dataset)
+        await visualize_module.fetch_visualization_data(
+            user=USER, dataset=dataset, already_authorized=True
+        )
 
     authorize_mock.assert_not_awaited()
     assert fetch_graph_mock.await_args.args[0] is dataset
@@ -102,31 +104,34 @@ async def test_a_dataset_the_user_owns_is_not_authorized_again():
 
 
 @pytest.mark.asyncio
-async def test_a_dataset_someone_else_owns_is_checked_by_its_id():
-    """A Dataset row says nothing about who may read it. Any caller can load
-    one with an unauthorized query, so only the owner's own row skips the
-    check; for everyone else the id goes through the permission lookup."""
+async def test_a_dataset_row_alone_is_not_proof_of_permission():
+    """The row proves nothing, not even for its owner: a tenant switch or a
+    revoked read grant makes the canonical check refuse a dataset the user
+    still owns. Without the flag it goes through that check by its id."""
     collect = AsyncMock(return_value=[])
-    dataset = Dataset(id=DATASET_ID, name="some-dataset", owner_id=uuid4())
-    authorize, fetch_graph, db_context, collector = _patches(collect, authorized=True)
-
-    with authorize as authorize_mock, fetch_graph, db_context, collector:
-        await visualize_module.fetch_visualization_data(user=USER, dataset=dataset)
-
-    authorize_mock.assert_awaited_once_with([DATASET_ID], "read", USER)
-
-
-@pytest.mark.asyncio
-async def test_a_dataset_the_user_cannot_read_does_not_render():
-    collect = AsyncMock(return_value=[])
-    dataset = Dataset(id=DATASET_ID, name="some-dataset", owner_id=uuid4())
+    dataset = Dataset(id=DATASET_ID, name="some-dataset", owner_id=USER.id)
     authorize, fetch_graph, db_context, collector = _patches(collect, authorized=False)
 
-    with authorize, fetch_graph as fetch_graph_mock, db_context, collector:
+    with authorize as authorize_mock, fetch_graph as fetch_graph_mock, db_context, collector:
         _graph_data, search_events = await visualize_module.fetch_visualization_data(
             user=USER, dataset=dataset
         )
 
+    authorize_mock.assert_awaited_once_with([DATASET_ID], "read", USER)
     assert fetch_graph_mock.await_args.args[0] is None
     assert search_events == []
     collect.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_the_flag_does_not_skip_the_check_for_a_name():
+    collect = AsyncMock(return_value=[])
+    authorize, fetch_graph, db_context, collector = _patches(collect, authorized=False)
+
+    with authorize as authorize_mock, fetch_graph as fetch_graph_mock, db_context, collector:
+        await visualize_module.fetch_visualization_data(
+            user=USER, dataset="some-dataset", already_authorized=True
+        )
+
+    authorize_mock.assert_awaited_once_with(["some-dataset"], "read", USER)
+    assert fetch_graph_mock.await_args.args[0] is None

@@ -143,10 +143,10 @@ def get_visualize_router() -> APIRouter:
             # Verify user has permission to read dataset
             dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
 
-            # The authorized Dataset itself, not its id: visualize_graph then
-            # does not check permission a second time.
+            # Just authorized above, so visualize_graph does not check again.
             html_visualization = await visualize_graph(
                 dataset=dataset[0],
+                already_authorized=True,
                 user=user,
                 full=full,
                 query=query,
@@ -343,6 +343,7 @@ def get_visualize_router() -> APIRouter:
 
             payload = await visualize_graph_json(
                 dataset=dataset[0],
+                already_authorized=True,
                 user=user,
                 full=full,
                 query=query,
@@ -456,6 +457,7 @@ def get_visualize_router() -> APIRouter:
 
             payload = await visualize_semantic_json(
                 dataset=dataset[0],
+                already_authorized=True,
                 user=user,
                 full=full,
                 query=query,
