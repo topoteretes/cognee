@@ -20,11 +20,6 @@ from .enola import (
     run_enola_generate,
     validate_receipt,
 )
-from .install_enola import (
-    ENOLA_PINNED_VERSION,
-    EnolaInstallError,
-    install_enola,
-)
 from .extract_code_graph import (
     add_code_graph_edges,
     build_code_graph_edges,

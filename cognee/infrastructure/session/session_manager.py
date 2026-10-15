@@ -217,6 +217,14 @@ class SessionManager:
         """
         Append one agent trace step to the session trace payload.
 
+        ``generate_feedback_with_llm`` asks for a one-line LLM summary of the step's
+        return value as its ``session_feedback``. That call is made only when automatic
+        feedback analysis is enabled (``CACHING`` and ``AUTO_FEEDBACK`` both on); with it
+        off, the step gets the deterministic success/failure line instead. Nothing is
+        lost either way: improve()'s agent-context extraction reads the stored return
+        value directly, and its trace persistence substitutes the return value for
+        steps whose feedback is only the fallback line.
+
         Returns trace_id, or None if cache unavailable.
         """
         session_id = self.resolve_session_id(session_id)
@@ -226,7 +234,7 @@ class SessionManager:
             return None
 
         trace_id = str(uuid.uuid4())
-        if generate_feedback_with_llm:
+        if generate_feedback_with_llm and self.is_auto_feedback_enabled():
             session_feedback = await generate_agent_trace_feedback(
                 origin_function=origin_function,
                 status=status,
@@ -309,13 +317,21 @@ class SessionManager:
         """Return True if session (history + save) is available for completion."""
         if not user_id or not self.is_available:
             return False
-        cache_config = CacheConfig()
-        return bool(cache_config.caching)
+        # Fresh read, not the lru-cached accessor: `import cognee` fills that
+        # cache, and CACHING/AUTO_FEEDBACK are toggled after import (the demo
+        # command, library tests) — the gates must see the live env.
+        return bool(CacheConfig().caching)
 
     def is_auto_feedback_enabled(self) -> bool:
-        """Return True if caching and automatic turn-feedback analysis are both enabled."""
-        cache_config = CacheConfig()
-        return bool(cache_config.caching and cache_config.auto_feedback)
+        """Return True if caching and automatic turn-feedback analysis are both enabled.
+
+        The session layer's auto-feedback gate: retrievers, turn handling and
+        the improve stages all ask here. Delegates to the one implementation in
+        ``feedback_detection`` so the two entry points can never drift.
+        """
+        from cognee.infrastructure.session.feedback_detection import is_auto_feedback_enabled
+
+        return is_auto_feedback_enabled()
 
     async def prepare_session_turn(
         self,

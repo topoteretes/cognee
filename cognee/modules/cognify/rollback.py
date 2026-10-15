@@ -15,6 +15,7 @@ from cognee.modules.graph.legacy.has_edges_in_legacy_ledger import has_edges_in_
 from cognee.modules.graph.legacy.has_nodes_in_legacy_ledger import has_nodes_in_legacy_ledger
 from cognee.modules.graph.methods.delete_from_graph_and_vector import delete_from_graph_and_vector
 from cognee.modules.graph.models import Edge, Node
+from cognee.modules.pipelines.models.DataItemStatus import is_data_item_completed
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunAlreadyCompleted
 from cognee.shared.logging_utils import get_logger
 
@@ -105,13 +106,42 @@ async def _reset_pipeline_status(session, target_data_ids: set, dataset_id: Any)
             orm_attributes.flag_modified(data_record, "pipeline_status")
 
 
+async def _completed_data_ids(session, data_ids: set, dataset_id: Any) -> set:
+    """The ids among ``data_ids`` whose cognify status for ``dataset_id`` records a
+    completed item: documents the run finished before it stopped."""
+    if not data_ids:
+        return set()
+    dataset_id_str = str(dataset_id)
+    records = (
+        (await session.execute(select(Data).where(Data.id.in_(list(data_ids))))).scalars().all()
+    )
+    return {
+        record.id
+        for record in records
+        if is_data_item_completed(
+            ((record.pipeline_status or {}).get("cognify_pipeline") or {}).get(dataset_id_str)
+        )
+    }
+
+
 async def cognify_rollback_handler(
     pipeline_run_id: UUID,
     dataset: Any,
     user: Any = None,
     data_ingestion_info: Any = None,
+    keep_completed_data: bool = False,
     **kwargs: Any,
 ) -> None:
+    """Undo what ``pipeline_run_id`` wrote into ``dataset``.
+
+    With ``keep_completed_data`` the documents the run marked complete keep their
+    artifacts and their completed status; only the run's unfinished work is
+    removed. Startup recovery uses that: the run is closed hours later, and a
+    later run may already have trusted those completed documents and skipped
+    them, so deleting them would leave the dataset with holes nothing refills.
+    The inline failure path keeps the default, whole-run rollback: there the
+    redo is immediate.
+    """
     dataset_id = getattr(dataset, "id", None)
     if not dataset_id or not pipeline_run_id:
         logger.warning(
@@ -142,10 +172,16 @@ async def cognify_rollback_handler(
             )
             target_data_ids |= _extract_data_ids(data_ingestion_info)
 
-            await unified.rollback_by_pipeline_run_id(str(pipeline_run_id))
+            kept_data_ids = set()
+            if keep_completed_data:
+                async with db_engine.get_async_session() as session:
+                    kept_data_ids = await _completed_data_ids(session, target_data_ids, dataset_id)
+            await unified.rollback_by_pipeline_run_id(
+                str(pipeline_run_id), keep_data_ids=kept_data_ids or None
+            )
 
             async with db_engine.get_async_session() as session:
-                await _reset_pipeline_status(session, target_data_ids, dataset_id)
+                await _reset_pipeline_status(session, target_data_ids - kept_data_ids, dataset_id)
                 await session.commit()
 
             logger.info(
@@ -191,6 +227,11 @@ async def cognify_rollback_handler(
             | {edge.data_id for edge in target_edges}
             | _extract_data_ids(data_ingestion_info)
         )
+        kept_data_ids = set()
+        if keep_completed_data:
+            kept_data_ids = await _completed_data_ids(session, target_data_ids, dataset_id)
+            target_nodes = [node for node in target_nodes if node.data_id not in kept_data_ids]
+            target_edges = [edge for edge in target_edges if edge.data_id not in kept_data_ids]
 
         unique_nodes = []
         if target_nodes:
@@ -254,25 +295,21 @@ async def cognify_rollback_handler(
 
     async with db_engine.get_async_session() as session:
         if target_nodes:
-            await session.execute(
-                delete(Node).where(
-                    and_(
-                        Node.pipeline_run_id == pipeline_run_id,
-                        Node.dataset_id == dataset_id,
-                    )
-                )
+            node_filter = and_(
+                Node.pipeline_run_id == pipeline_run_id, Node.dataset_id == dataset_id
             )
+            if kept_data_ids:
+                node_filter = and_(node_filter, Node.data_id.notin_(list(kept_data_ids)))
+            await session.execute(delete(Node).where(node_filter))
         if target_edges:
-            await session.execute(
-                delete(Edge).where(
-                    and_(
-                        Edge.pipeline_run_id == pipeline_run_id,
-                        Edge.dataset_id == dataset_id,
-                    )
-                )
+            edge_filter = and_(
+                Edge.pipeline_run_id == pipeline_run_id, Edge.dataset_id == dataset_id
             )
+            if kept_data_ids:
+                edge_filter = and_(edge_filter, Edge.data_id.notin_(list(kept_data_ids)))
+            await session.execute(delete(Edge).where(edge_filter))
 
-        await _reset_pipeline_status(session, target_data_ids, dataset_id)
+        await _reset_pipeline_status(session, target_data_ids - kept_data_ids, dataset_id)
 
         await session.commit()
 

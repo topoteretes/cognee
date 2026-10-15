@@ -12,7 +12,7 @@ callback endpoint calls this for whichever provider is in the URL.
 from uuid import UUID
 
 from cognee.modules.integrations.base import OAuthIntegration
-from cognee.modules.integrations.credentials import upsert_credential
+from cognee.modules.integrations.credentials import get_credential_by_account, upsert_credential
 from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
 
 
@@ -39,6 +39,16 @@ async def complete_installation(
     """
     token_response = await integration.exchange_callback(code, callback_params or {})
     installation = integration.parse_installation(token_response)
+    metadata = dict(installation.provider_metadata)
+    selection_key = integration.resource_selection_key
+    if selection_key and selection_key in metadata:
+        existing = await get_credential_by_account(
+            integration.provider, installation.provider_account_id
+        )
+        if existing is not None and selection_key in (existing.provider_metadata or {}):
+            # Installation defaults apply only before the user chooses a scope.
+            # Omit the key so upsert's metadata merge retains the stored choice.
+            metadata.pop(selection_key)
 
     return await upsert_credential(
         provider=integration.provider,
@@ -48,6 +58,6 @@ async def complete_installation(
         account_label=installation.account_label,
         auth_type=installation.auth_type,
         scopes=installation.scopes,
-        provider_metadata=installation.provider_metadata,
+        provider_metadata=metadata,
         token_expires_at=installation.token_expires_at,
     )

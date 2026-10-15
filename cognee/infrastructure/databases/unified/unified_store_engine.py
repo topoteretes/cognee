@@ -1,14 +1,28 @@
 from __future__ import annotations
 
 from typing import cast
+from uuid import UUID
 
 from cognee.infrastructure.databases.exceptions import UnsupportedProvenanceCapability
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 from cognee.infrastructure.databases.vector.vector_db_interface import VectorDBInterface
 
+from ..provenance.source_refs import get_data_id_from_source_ref_key
 from .capabilities import EngineCapability
 from .graph_vector_store_interface import GraphVectorStoreInterface
 from .provenance_delete_planner import SourceRefRemovalResult, execute_source_ref_removal
+
+
+def _without_kept_refs(refs_by_artifact: dict, keep_data_ids: set[UUID]) -> dict:
+    """Drop the refs that point at a kept data item; drop artifacts left with none."""
+    trimmed = {}
+    for artifact_id, refs in refs_by_artifact.items():
+        remaining = [
+            ref for ref in refs if get_data_id_from_source_ref_key(ref) not in keep_data_ids
+        ]
+        if remaining:
+            trimmed[artifact_id] = remaining
+    return trimmed
 
 
 class UnifiedStoreEngine(GraphVectorStoreInterface):
@@ -218,8 +232,14 @@ class UnifiedStoreEngine(GraphVectorStoreInterface):
             refs_by_edge=refs_by_edge,
         )
 
-    async def rollback_by_pipeline_run_id(self, pipeline_run_id: str) -> None:
-        """Remove the refs a run attached; delete artifacts left unowned."""
+    async def rollback_by_pipeline_run_id(
+        self, pipeline_run_id: str, *, keep_data_ids: set[UUID] | None = None
+    ) -> None:
+        """Remove the refs a run attached; delete artifacts left unowned.
+
+        Refs pointing at a data item in ``keep_data_ids`` stay: that document's
+        work is complete and stays owned by this run.
+        """
         if not self.supports_graph_provenance_delete():
             raise UnsupportedProvenanceCapability()
         graph = self.graph
@@ -227,6 +247,9 @@ class UnifiedStoreEngine(GraphVectorStoreInterface):
 
         refs_by_node = await graph.find_node_source_refs_by_pipeline_run(pipeline_run_id)
         refs_by_edge = await graph.find_edge_source_refs_by_pipeline_run(pipeline_run_id)
+        if keep_data_ids:
+            refs_by_node = _without_kept_refs(refs_by_node, keep_data_ids)
+            refs_by_edge = _without_kept_refs(refs_by_edge, keep_data_ids)
 
         node_data = await graph.get_node_delete_data(list(refs_by_node.keys()))
         edge_data = await graph.get_edge_delete_data(list(refs_by_edge.keys()))

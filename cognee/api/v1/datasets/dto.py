@@ -15,7 +15,8 @@ from cognee.api.DTO import OutDTO
 class DataDTO(OutDTO):
     id: UUID
     name: str
-    created_at: datetime
+    # Legacy/external writers may omit the ORM timestamp default.
+    created_at: datetime | None = None
     updated_at: datetime | None = None
     extension: str
     mime_type: str
@@ -23,3 +24,7 @@ class DataDTO(OutDTO):
     dataset_id: UUID
     label: str | None = None
     external_metadata: dict | None = None
+    # Serialized as `dataSize` (OutDTO camel-cases aliases). The UI has always
+    # rendered a size column against this row; without the field it read
+    # undefined and showed a dash for every file.
+    data_size: int | None = None

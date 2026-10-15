@@ -1,1 +1,11 @@
-from .exceptions import CollectionNotFoundError
+from .exceptions import (
+    CollectionNotFoundError,
+    EmbeddingDimensionMismatchError,
+    SharedDatabasePruneError,
+)
+
+__all__ = [
+    "CollectionNotFoundError",
+    "EmbeddingDimensionMismatchError",
+    "SharedDatabasePruneError",
+]

@@ -131,6 +131,9 @@ def test_registered_provider_without_credential_reports_disconnected(client):
             "accountLabel": None,
             "providerAccountId": None,
             "connectedAt": None,
+            "syncStatus": None,
+            "lastSyncedAt": None,
+            "syncCounts": None,
         }
     ]
 
@@ -143,10 +146,16 @@ def test_connected_provider_exposes_display_fields_and_no_token_material(client)
         account_label="Acme Workspace",
         provider_account_id="ACC1",
         created_at=datetime(2026, 8, 1, 12, 0, 0, tzinfo=timezone.utc),
+        sync_status="ok",
+        last_synced_at=datetime(2026, 8, 1, 12, 5, 0, tzinfo=timezone.utc),
         ciphertext=b"secret-ciphertext",
         nonce=b"secret-nonce",
         encryption_version=1,
         key_id="k1",
+        provider_metadata={
+            "last_sync_counts": {"scanned": 7, "skipped": 2, "failed": 0},
+            "refresh_token": "private-metadata-must-not-be-serialized",
+        },
     )
     with (
         patch.object(
@@ -165,9 +174,21 @@ def test_connected_provider_exposes_display_fields_and_no_token_material(client)
     # Offset required: SQLite hands back tz-naive datetimes, and an
     # offset-less ISO string gets parsed as local time by JS Date.
     assert row["connectedAt"] in ("2026-08-01T12:00:00Z", "2026-08-01T12:00:00+00:00")
+    assert row["syncStatus"] == "ok"
+    assert row["syncCounts"] == {"scanned": 7, "skipped": 2, "failed": 0}
+    assert row["lastSyncedAt"] in ("2026-08-01T12:05:00Z", "2026-08-01T12:05:00+00:00")
     # Whitelist, not blacklist: the serialized row is exactly the display
     # fields — nothing token-shaped can leak through renames.
-    assert set(row) == {"provider", "connected", "accountLabel", "providerAccountId", "connectedAt"}
+    assert set(row) == {
+        "provider",
+        "connected",
+        "accountLabel",
+        "providerAccountId",
+        "connectedAt",
+        "syncStatus",
+        "lastSyncedAt",
+        "syncCounts",
+    }
     body_text = response.text.lower()
     for forbidden in ("ciphertext", "nonce", "token", "apikey", "api_key"):
         assert forbidden not in body_text
@@ -310,6 +331,8 @@ def test_failing_identity_source_leaves_integrations_section_intact(client):
         account_label="Acme Workspace",
         provider_account_id="ACC1",
         created_at=datetime(2026, 8, 1, 12, 0, 0, tzinfo=timezone.utc),
+        sync_status=None,
+        last_synced_at=None,
     )
     with (
         patch.object(

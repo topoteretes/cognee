@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import type { CogneeInstance } from "@/modules/instances/types";
 import getDatasets from "@/modules/datasets/getDatasets";
-import getDatasetData from "@/modules/datasets/getDatasetData";
+import { getDatasetDataCount } from "@/modules/datasets/getDatasetData";
 import { listSessions, SEARCH_SESSION_PREFIX } from "@/modules/sessions/getSessions";
 
 // Detects agent activity while either the Upload or Recall step is active.
@@ -35,8 +35,7 @@ export function useAgentConnectionDetection(
         if (!Array.isArray(datasets) || datasets.length === 0) return 0;
         const target = datasets.find((d: { name?: string }) => d.name === "default_dataset") ?? datasets[0];
         if (!target?.id) return 0;
-        const data = await getDatasetData(target.id, cogniInstance!);
-        return Array.isArray(data) ? data.length : 0;
+        return await getDatasetDataCount(target.id, cogniInstance!);
       } catch {
         return -1;
       }

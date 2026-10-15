@@ -3,10 +3,40 @@ import json
 from cognee.context_global_variables import session_user
 from cognee.exceptions import CogneeSystemError
 from cognee.infrastructure.session.get_session_manager import get_session_manager
+from cognee.infrastructure.session.session_persist_watermark import (
+    TRACE_PERSIST_WATERMARK,
+    TracePersistWindow,
+)
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("extract_agent_trace_feedbacks")
+
+
+def _effective_feedback(entry) -> str | None:
+    """The step's summary, or its raw return value when only the fallback exists.
+
+    With trace summaries off (the ``session_trace_summary=False`` default, or
+    ``AUTO_FEEDBACK`` off) every stored ``session_feedback`` is the
+    deterministic line ``"<fn> succeeded."`` — cognifying those would build an
+    ``agent_trace_feedbacks`` node set with none of the content the summaries
+    used to carry. A step whose feedback equals its own fallback line gets its
+    return value appended instead; real summaries pass through untouched.
+    """
+    from cognee.infrastructure.session.session_agent_trace import fallback_agent_trace_feedback
+
+    feedback = entry.session_feedback
+    fallback = fallback_agent_trace_feedback(
+        origin_function=entry.origin_function or "",
+        status=entry.status or "",
+        error_message=entry.error_message or "",
+    )
+    if (feedback or "").strip() != fallback.strip():
+        return feedback
+    return_text = _normalize_trace_content(entry.method_return_value)
+    if return_text is None:
+        return feedback
+    return f"{fallback} Output: {return_text}"
 
 
 def _normalize_trace_content(value) -> str | None:
@@ -24,6 +54,50 @@ def _normalize_trace_content(value) -> str | None:
     return normalized or None
 
 
+def resolve_trace_window(
+    total_trace_count: int,
+    persisted_trace_count: int,
+    last_n_steps: int | None,
+    *,
+    session_id: str = "",
+) -> tuple[int, int]:
+    """The pending trace window as ``(start index, size)``.
+
+    The pending window is every step above the watermark. A stale watermark
+    (above the current step count: the trace session was cleared and rebuilt)
+    restarts from the beginning. An explicit ``last_n_steps`` caps the window
+    at the OLDEST N pending steps and the watermark advances only past them,
+    so a backlog drains across bounded triggers instead of being sealed —
+    capping at the newest N would leave the older pending steps below an
+    advanced watermark forever, unreachable even for ``improve()``.
+    """
+    effective = TRACE_PERSIST_WATERMARK.resolve_effective(
+        persisted_trace_count, total_trace_count, session_id=session_id
+    )
+    pending = max(0, total_trace_count - effective)
+    if last_n_steps is not None:
+        pending = min(pending, max(0, int(last_n_steps)))
+    return effective, pending
+
+
+async def has_new_trace_steps(session_manager, user_id: str, session_ids: list[str]) -> bool:
+    """Whether any session holds trace steps the persist watermark hasn't covered.
+
+    The improve stage's pre-check (counts only, no step reads): when False, the
+    stage reports ``already_completed`` without running the memify pipeline —
+    an unconditional run logs a completed ``memify_pipeline`` row even with
+    nothing new, which the enrichment change-check would count as a graph write.
+    """
+    for session_id in session_ids:
+        total = await session_manager.get_agent_trace_count(user_id=user_id, session_id=session_id)
+        if not total:
+            continue
+        persisted = await TRACE_PERSIST_WATERMARK.read_count(session_manager, user_id, session_id)
+        if resolve_trace_window(total, persisted, None, session_id=session_id)[1] > 0:
+            return True
+    return False
+
+
 async def extract_agent_trace_feedbacks(
     data,
     session_ids: list[str] | None = None,
@@ -31,22 +105,33 @@ async def extract_agent_trace_feedbacks(
     last_n_steps: int | None = None,
 ):
     """
-    Extract step-level agent trace content for the current user.
+    Extract not-yet-persisted agent trace steps for the current user.
 
-    Retrieves either stored ``session_feedback`` values or raw ``method_return_value``
-    values from agent trace sessions and yields one formatted text blob per session.
-    Only non-empty entries are included.
+    For each session, reads the trace persist watermark (see
+    ``session_persist_watermark.TRACE_PERSIST_WATERMARK``) and yields ONE
+    ``TracePersistWindow`` holding the formatted content of the trace steps
+    above it — either stored ``session_feedback`` values or raw
+    ``method_return_value`` values. A session with no new steps yields nothing,
+    so re-running improve() on an unchanged session does zero ingestion work.
+    The watermark itself is advanced by ``cognify_agent_trace_feedback`` only
+    after the window is successfully cognified.
+
+    The pending slice and the count the watermark advances to come from ONE
+    snapshot of the trace (the same shape as the Q&A path), so a step a live
+    agent writes mid-run is always at or above the advanced watermark — next
+    run's work, never sealed below it.
 
     Args:
         data: Data passed from memify. If empty dict ({}), no external data is provided.
         session_ids: Optional list of specific session IDs to extract.
         raw_trace_content: When True, persist raw ``method_return_value`` values instead
             of ``session_feedback`` summaries.
-        last_n_steps: Optional number of most recent trace steps to extract per
-            session. When None, all stored steps are used.
+        last_n_steps: Optional cap on the number of most recent pending trace
+            steps to extract per session. ``None`` means every step above the
+            watermark — never "everything stored".
 
     Yields:
-        String containing the session ID and all non-empty extracted entries.
+        TracePersistWindow covering the session's unpersisted steps.
 
     Raises:
         CogneeSystemError: If SessionManager is unavailable or extraction fails.
@@ -79,37 +164,98 @@ async def extract_agent_trace_feedbacks(
 
         if session_ids:
             for session_id in session_ids:
+                content_label = "method_return_value" if raw_trace_content else "session_feedback"
                 try:
-                    content_label = (
-                        "method_return_value" if raw_trace_content else "session_feedback"
+                    total_trace_count = await session_manager.get_agent_trace_count(
+                        user_id=user_id, session_id=session_id
+                    )
+                    if not total_trace_count:
+                        continue
+
+                    persisted_count = await TRACE_PERSIST_WATERMARK.read_count(
+                        session_manager, user_id, session_id
+                    )
+                    if (
+                        resolve_trace_window(
+                            total_trace_count,
+                            persisted_count,
+                            last_n_steps,
+                            session_id=session_id,
+                        )[1]
+                        <= 0
+                    ):
+                        logger.info(
+                            "Session %s trace steps already persisted up to %d, nothing new",
+                            session_id,
+                            persisted_count,
+                        )
+                        continue
+
+                    # One snapshot: the same read provides the pending slice AND the
+                    # total the watermark advances to. Counting first and fetching the
+                    # `last_n` newest second raced a live agent — steps written between
+                    # the two reads shifted the newest-first window past the oldest
+                    # pending steps, and the watermark then sealed them below it
+                    # forever. The count above is only a cheap early exit; every index
+                    # from here on comes from this one fetch.
+                    trace_session = await session_manager.get_agent_trace_session(
+                        user_id=user_id,
+                        session_id=session_id,
                     )
                     if not raw_trace_content:
-                        trace_values = await session_manager.get_agent_trace_feedback(
-                            user_id=user_id,
-                            session_id=session_id,
-                            last_n=last_n_steps,
-                        )
+                        trace_values = [_effective_feedback(entry) for entry in trace_session]
                     else:
-                        trace_session = await session_manager.get_agent_trace_session(
-                            user_id=user_id,
-                            session_id=session_id,
-                            last_n=last_n_steps,
-                        )
                         trace_values = [entry.method_return_value for entry in trace_session]
+
+                    total_trace_count = len(trace_values)
+                    window_start, window_size = resolve_trace_window(
+                        total_trace_count,
+                        persisted_count,
+                        last_n_steps,
+                        session_id=session_id,
+                    )
+                    if window_size <= 0:
+                        continue
+                    window_end = window_start + window_size
+                    pending_trace_values = trace_values[window_start:window_end]
 
                     normalized_trace_values = [
                         normalized
-                        for value in trace_values
+                        for value in pending_trace_values
                         if (normalized := _normalize_trace_content(value)) is not None
                     ]
-                    if normalized_trace_values:
-                        logger.info(
-                            "Extracted session %s via SessionManager with %d %s entries",
-                            session_id,
-                            len(normalized_trace_values),
-                            content_label,
+                    if not normalized_trace_values:
+                        # Nothing worth cognifying in this window (steps without
+                        # feedback text). Mark it done so it is not re-read forever;
+                        # there is no cognify whose success the advance could wait on.
+                        await TRACE_PERSIST_WATERMARK.write_count(
+                            session_manager, user_id, session_id, window_end
                         )
-                        yield f"Session ID: {session_id}\n\n" + "\n".join(normalized_trace_values)
+                        logger.info(
+                            "Session %s: %d pending trace steps carry no %s; watermark "
+                            "advanced to %d without ingestion",
+                            session_id,
+                            window_size,
+                            content_label,
+                            window_end,
+                        )
+                        continue
+
+                    logger.info(
+                        "Extracted session %s via SessionManager: %d %s entries "
+                        "(%d new of %d trace steps)",
+                        session_id,
+                        len(normalized_trace_values),
+                        content_label,
+                        window_size,
+                        total_trace_count,
+                    )
+                    yield TracePersistWindow(
+                        user_id=user_id,
+                        session_id=session_id,
+                        text=f"Session ID: {session_id}\n\n" + "\n".join(normalized_trace_values),
+                        persisted_trace_count=window_end,
+                    )
                 except Exception as error:
                     logger.warning(
                         "Failed to extract agent trace %s for session %s: %s",

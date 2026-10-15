@@ -128,6 +128,49 @@ async def test_transcribe_image_defaults_are_backwards_compatible():
 
 
 @pytest.mark.asyncio
+async def test_transcribe_image_uses_image_transcribe_model_when_set():
+    """A base model with no vision capability is why this setting exists."""
+    fake = AsyncMock(
+        return_value=SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=""))])
+    )
+
+    with patch("litellm.acompletion", fake):
+        await _adapter(image_transcribe_model="openai/gpt-4o").transcribe_image(str(IMAGE))
+
+    assert fake.call_args.kwargs["model"] == "openai/gpt-4o"
+
+
+@pytest.mark.asyncio
+async def test_transcribe_image_falls_back_to_chat_model_when_unset():
+    """Unset must keep today's behaviour: images ride the chat model."""
+    fake = AsyncMock(
+        return_value=SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=""))])
+    )
+
+    with patch("litellm.acompletion", fake):
+        await _adapter(image_transcribe_model=None).transcribe_image(str(IMAGE))
+
+    assert fake.call_args.kwargs["model"] == "openai/gpt-5-mini"
+
+
+@pytest.mark.asyncio
+async def test_image_and_audio_models_are_independent():
+    """The two transcription entry points must not share one setting."""
+    adapter = _adapter(transcription_model="whisper-1", image_transcribe_model="openai/gpt-4o")
+    audio = AsyncMock(return_value=SimpleNamespace(text="x"))
+    image = AsyncMock(
+        return_value=SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=""))])
+    )
+
+    with patch("litellm.atranscription", audio), patch("litellm.acompletion", image):
+        await adapter.create_transcript(str(AUDIO))
+        await adapter.transcribe_image(str(IMAGE))
+
+    assert audio.call_args.kwargs["model"] == "whisper-1"
+    assert image.call_args.kwargs["model"] == "openai/gpt-4o"
+
+
+@pytest.mark.asyncio
 async def test_transcribe_image_rejects_non_image_mime(tmp_path):
     not_an_image = tmp_path / "notes.txt"
     not_an_image.write_bytes(b"plain text")
@@ -161,12 +204,65 @@ def test_get_native_client_passes_transcription_model():
         fallback_endpoint="",
         llm_args={},
         transcription_model="whisper-1",
+        image_transcribe_model="",
     )
 
     with patch.object(native_factory, "get_llm_context_config", return_value=config):
         client = native_factory.get_native_client()
 
     assert client.transcription_model == "whisper-1"
+
+
+def test_get_native_client_passes_image_transcribe_model():
+    native_factory = importlib.import_module(
+        "cognee.infrastructure.llm.structured_output_framework.litellm_native.get_native_client"
+    )
+    config = SimpleNamespace(
+        llm_api_key="test-key",
+        llm_provider="openai",
+        llm_azure_use_managed_identity=False,
+        llm_model="gpt-5-mini",
+        llm_max_completion_tokens=4096,
+        llm_endpoint="",
+        llm_api_version=None,
+        fallback_model="",
+        fallback_api_key="",
+        fallback_endpoint="",
+        llm_args={},
+        transcription_model="whisper-1",
+        image_transcribe_model="gpt-4o",
+    )
+
+    with patch.object(native_factory, "get_llm_context_config", return_value=config):
+        client = native_factory.get_native_client()
+
+    assert client.image_transcribe_model == "gpt-4o"
+
+
+def test_get_native_client_leaves_image_model_on_the_chat_model_when_unset():
+    native_factory = importlib.import_module(
+        "cognee.infrastructure.llm.structured_output_framework.litellm_native.get_native_client"
+    )
+    config = SimpleNamespace(
+        llm_api_key="test-key",
+        llm_provider="openai",
+        llm_azure_use_managed_identity=False,
+        llm_model="gpt-5-mini",
+        llm_max_completion_tokens=4096,
+        llm_endpoint="",
+        llm_api_version=None,
+        fallback_model="",
+        fallback_api_key="",
+        fallback_endpoint="",
+        llm_args={},
+        transcription_model="whisper-1",
+        image_transcribe_model="",
+    )
+
+    with patch.object(native_factory, "get_llm_context_config", return_value=config):
+        client = native_factory.get_native_client()
+
+    assert client.image_transcribe_model == client.model
 
 
 # ---- LLMGateway routing ----

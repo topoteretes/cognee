@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -60,7 +60,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -82,7 +82,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -104,7 +104,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -120,7 +120,7 @@ jobs:
           LLM_API_KEY: "mock-not-used"
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_API_KEY: "mock-not-used"
-        run: uv run python cognee/tests/utils/run_mocked.py ./examples/demos/feedback/feedback_score_shifting_example.py
+        run: uv run python cognee/tests/utils/run_mocked.py --replay cognee/tests/utils/mock_ingestion/replays/feedback_score_shifting.json ./examples/demos/feedback/feedback_score_shifting_example.py
 
   test-agentic-reasoning:
     name: Run Agentic Reasoning Tests
@@ -128,7 +128,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -142,7 +142,7 @@ jobs:
           LLM_API_KEY: "mock-not-used"
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_API_KEY: "mock-not-used"
-        run: uv run python cognee/tests/utils/run_mocked.py ./examples/demos/agentic/agentic_reasoning_procurement_example.py
+        run: uv run python cognee/tests/utils/run_mocked.py --replay cognee/tests/utils/mock_ingestion/replays/agentic_reasoning_procurement.json ./examples/demos/agentic/agentic_reasoning_procurement_example.py
 
   test-memify:
     name: Run Memify Example
@@ -150,7 +150,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -172,7 +172,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -194,7 +194,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -236,7 +236,7 @@ jobs:
           - 5432:5432
     steps:
       - name: Check out repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -278,14 +278,13 @@ jobs:
     runs-on: macos-15
     steps:
       - name: Check out repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
           python-version: '3.11.x'
-          # codegraph (in the default base set) is declared conflicting with
-          # docling-full, so this job installs only what the test needs.
+          # Keep this heavyweight integration job limited to what it tests.
           base-extras: ''
           extra-dependencies: 'docling-full'
 
@@ -313,7 +312,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup

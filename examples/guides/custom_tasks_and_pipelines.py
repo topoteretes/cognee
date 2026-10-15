@@ -1,3 +1,13 @@
+"""Author custom Tasks and compose them into a pipeline with cognee.run_custom_pipeline.
+
+An LLM-backed task extracts Person DataPoints with ``knows`` edges, add_data_points stores them,
+cognify() runs over the dataset, and the graph is written to
+.artifacts/custom_tasks_and_pipelines.html.
+
+Requires: LLM_API_KEY.
+Run: uv run python examples/guides/custom_tasks_and_pipelines.py
+"""
+
 import asyncio
 import os
 from typing import Any

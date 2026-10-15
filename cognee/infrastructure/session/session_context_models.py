@@ -5,12 +5,18 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 VALID_RATINGS = {"helpful", "harmful"}
 MAX_CONTEXT_CONTENT_CHARS = 280
-MIN_CANDIDATE_CONFIDENCE = 0.75
 
-# Gate shared by every downstream consumer of stored guidance (session
-# distillation, preference personalization): an entry is usable only when it
-# was never rated harmful and its confidence clears this threshold.
-MIN_GATE_CONFIDENCE = 0.75
+# One threshold, declared once here with the models it gates: a candidate must
+# clear it to be stored, and a stored entry must clear it to be served,
+# distilled, or folded into preferences. The harmful-rating rule differs by
+# consumer: serving and preferences require never-rated-harmful
+# (``is_context_entry_usable``), while distillation uses net helpfulness
+# (``session_distillation.distill.is_entry_distillable`` — an entry rated
+# harmful once and helpful three times is still distillable). The two legacy
+# names are kept for their existing importers.
+GATE_CONFIDENCE = 0.75
+MIN_CANDIDATE_CONFIDENCE = GATE_CONFIDENCE
+MIN_GATE_CONFIDENCE = GATE_CONFIDENCE
 
 
 class ContextSection(str, Enum):
@@ -126,7 +132,10 @@ class CandidateContextUpdate(BaseModel):
     )
     confidence: float = Field(
         default=0.0,
-        description="Confidence from 0 to 1. Only candidates with confidence >= 0.75 are stored.",
+        description=(
+            "Confidence from 0 to 1. Only candidates with confidence "
+            f">= {GATE_CONFIDENCE} are stored."
+        ),
     )
 
     @field_validator("section")
@@ -484,11 +493,13 @@ class SessionContextEntry(BaseModel):
 
 
 def is_context_entry_usable(entry: SessionContextEntry) -> bool:
-    """Shared downstream gate: never rated harmful and confidence clears the threshold.
+    """Serving/preferences gate: never rated harmful and confidence clears the threshold.
 
-    Both session distillation and preference personalization consume stored guidance
-    through this one check, so the two features can never drift apart on what counts
-    as a usable entry.
+    Session serving and preference personalization consume stored guidance through
+    this check. Distillation deliberately does NOT: it gates on net helpfulness
+    (``session_distillation.distill.is_entry_distillable``), so an entry rated
+    harmful once and helpful three times can still be distilled while it is
+    withheld from live serving.
     """
     return entry.harmful_count == 0 and entry.confidence >= MIN_GATE_CONFIDENCE
 

@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 
 from cognee.api.v1.validate.validate import ValidationReport, ValidationStatus, validate
+from cognee.exceptions import CogneeApiError
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
@@ -41,6 +42,8 @@ def get_validate_router() -> APIRouter:
             report = await validate(dataset=dataset, user=user)
             status_code = 503 if report.status == ValidationStatus.UNHEALTHY else 200
             return JSONResponse(status_code=status_code, content=report.model_dump(mode="json"))
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("validate() failed")
             return JSONResponse(

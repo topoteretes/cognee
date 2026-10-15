@@ -11,11 +11,14 @@ from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.modules.retrieval.base_retriever import BaseRetriever
+from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
 from cognee.modules.retrieval.utils.completion import (
+    SessionPrompt,
     generate_completion,
     generate_completion_batch,
 )
+from cognee.modules.retrieval.utils.conflict_context import format_conflicts, get_chunk_conflicts
 from cognee.modules.retrieval.utils.evidence import graph_context_evidence
 from cognee.modules.retrieval.utils.global_context import (
     format_global_context_prelude,
@@ -38,6 +41,18 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("GraphCompletionRetriever")
 
 
+def _document_chunk_ids(edges: list[Edge]) -> list[str]:
+    """Sorted ids of the DocumentChunk endpoints among the retrieved triplets."""
+    return sorted(
+        {
+            str(node.id)
+            for edge in edges
+            for node in (edge.node1, edge.node2)
+            if node.attributes.get("type") == "DocumentChunk"
+        }
+    )
+
+
 class GraphCompletionRetriever(BaseRetriever):
     """
     Retriever for handling graph-based completion searches.
@@ -46,6 +61,16 @@ class GraphCompletionRetriever(BaseRetriever):
     resolving those triplets into human-readable text context (get_context_from_objects function), and generating
     LLM completions using the retrieved graph data (get_completion_from_context function).
     """
+
+    # An empty graph must yield an empty result, not a phantom LLM deflection
+    # (SDK-270 / gh #3728). Applies to the whole graph-completion family via
+    # inheritance; AgenticRetriever opts back out.
+    skip_completion_on_empty_context = True
+
+    # Resolved once per retrieval in get_retrieved_objects and reused by the
+    # context builders, which must not resolve a second engine mid-query. A
+    # class-level default keeps it readable on a retriever that has not searched yet.
+    _unified_engine = None
 
     def __init__(
         self,
@@ -131,8 +156,14 @@ class GraphCompletionRetriever(BaseRetriever):
         is_empty = await self._unified_engine.graph.is_empty()
 
         if is_empty:
-            logger.warning("Search attempt on an empty knowledge graph")
-            return []
+            # An empty graph is a state problem, not a query miss: surface it
+            # loudly (404 over the API) the same way the RAG retriever raises
+            # on a missing vector collection, instead of quietly returning
+            # nothing. A populated graph with no matching triplets still
+            # yields an empty result below — that is a normal miss.
+            raise NoDataError(
+                "The knowledge graph is empty. Ingest data through Cognee before searching."
+            )
 
         triplets = await self.get_triplets(query, query_batch)
 
@@ -151,6 +182,10 @@ class GraphCompletionRetriever(BaseRetriever):
         """
         Converts retrieved graph edges into a human-readable string format.
 
+        Renders the triplets, then appends the conflicts stored for the chunks
+        behind them. Subclasses override ``render_edges``, never this method, so
+        the conflict block is appended exactly once however the edges are rendered.
+
         Parameters:
         -----------
 
@@ -161,7 +196,33 @@ class GraphCompletionRetriever(BaseRetriever):
 
             - str: A formatted string representation of the nodes and their connections.
         """
+        rendered = await self.render_edges(retrieved_edges)
+        conflicts = await self._chunk_conflicts_block(retrieved_edges)
+        return "\n\n".join(section for section in (rendered, conflicts) if section)
+
+    async def render_edges(self, retrieved_edges: list) -> str:
+        """The triplet rendering itself: the one step a subclass may replace."""
         return await resolve_edges_to_text(retrieved_edges)
+
+    async def _chunk_conflicts_block(self, edges: list[Edge]) -> str:
+        """Conflicts stored for the chunks behind these triplets, as a trailing block.
+
+        The guard covers the id collection too, not just the I/O: subclasses in
+        this family hand ``resolve_edges_to_text`` shapes other than a flat list
+        of ``Edge``, and an additive block must never fail the search.
+        """
+        try:
+            chunk_ids = _document_chunk_ids(edges)
+            if not chunk_ids:
+                return ""
+            engine = self._unified_engine or await get_unified_engine()
+            chunks = await get_chunk_conflicts(engine.graph, chunk_ids)
+            return format_conflicts(
+                text for chunk in chunks.values() for text in chunk.conflicts.values()
+            )
+        except Exception:
+            logger.warning("Could not read graph context conflicts", exc_info=True)
+            return ""
 
     async def get_triplets(
         self,
@@ -182,7 +243,7 @@ class GraphCompletionRetriever(BaseRetriever):
             - list: A list of found triplets that match the query.
         """
         collections = self._get_vector_index_collections()
-        unified_engine = getattr(self, "_unified_engine", None)
+        unified_engine = self._unified_engine
         # Personal prefers weights ride into the triplet scorer. The lookup is
         # memoized per context — on a concurrent session turn each gather lane
         # inherits the read warmed by warm_preference_cache; without that warm
@@ -283,7 +344,7 @@ class GraphCompletionRetriever(BaseRetriever):
     async def _build_global_context_prelude(self, query: str | None) -> str:
         if not query:
             return ""
-        if getattr(self, "_unified_engine", None) is None:
+        if self._unified_engine is None:
             self._unified_engine = await get_unified_engine()
         root_text = await load_root_text()
         top_summaries = await search_top_global_context_summaries(
@@ -330,22 +391,22 @@ class GraphCompletionRetriever(BaseRetriever):
     ) -> list[Any]:
         """Generate completion(s) without session; returns list of completions."""
         kwargs = self._completion_kwargs(context)
-        # Sessionless guidance site: preference text rides the guidance channel
-        # (conversation_history), never context. The lookup is memoized per
+        # Sessionless guidance site: preference text is the guidance layer of the
+        # session prompt, never context. The lookup is memoized per
         # context; this sessionless path runs retrieval and completion in one
         # context, so this reuses the get_triplets read. (Across a task
         # fan-out that sharing needs warm_preference_cache in the parent — the
         # ContextVar does not propagate out of gather lanes.) Empty text is
-        # falsy and leaves the system prompt untouched. The session path never
+        # falsy and adds nothing to the prompt. The session path never
         # reaches this method, so it cannot collide with the session guidance
         # block, which owns preference rendering on that path.
         preference_text = await load_preference_text()
         if query_batch:
             return await generate_completion_batch(
-                query_batch=query_batch, conversation_history=preference_text, **kwargs
+                query_batch=query_batch, session=SessionPrompt(guidance=preference_text), **kwargs
             )
         completion = await generate_completion(
-            query=query, conversation_history=preference_text, **kwargs
+            query=query, session=SessionPrompt(guidance=preference_text), **kwargs
         )
         return [completion]
 
@@ -390,6 +451,14 @@ class GraphCompletionRetriever(BaseRetriever):
         Note: To avoid duplicate retrievals, ensure that retrieved_objects and context
               are provided from previous method calls.
         """
+        if self.skip_completion_on_empty_context and not query_batch and not context:
+            # Empty context must not reach the LLM: the only possible output is
+            # a phantom "no context provided" deflection that callers cannot
+            # distinguish from a real answer (SDK-270 / gh #3728). An empty
+            # result also lets recall()'s on_empty fallback actually fire.
+            logger.warning("Empty context: skipping LLM completion, returning no results")
+            return []
+
         use_session = self._use_session_cache() and not query_batch
         if use_session:
             sm = get_session_manager()

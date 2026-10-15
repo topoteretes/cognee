@@ -4,7 +4,7 @@ from cognee.modules.recall.methods.normalize_search_payload import normalize_sea
 from cognee.modules.recall.types.SearchResultItem import SearchResultKind
 from cognee.modules.search.models.EvidenceReference import EvidenceReference
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
-from cognee.modules.search.types import ContextFormat, SearchType
+from cognee.modules.search.types import SearchType
 
 
 def test_hybrid_completion_normalizes_as_graph_completion():
@@ -139,7 +139,8 @@ def test_structured_response_model_populates_structured_field():
     assert "Revenue grew 12%" in items[0].text
 
 
-def test_only_context_default_format_yields_one_item_per_context_entry():
+def test_only_context_without_a_prompt_yields_one_item_per_context_entry():
+    """Retrieval-only types (and opt-outs) keep the historical per-entry shape."""
     payload = SearchResultPayload(
         context=["triplet-a", "triplet-b"],
         only_context=True,
@@ -151,64 +152,42 @@ def test_only_context_default_format_yields_one_item_per_context_entry():
     assert [item.text for item in items] == ["triplet-a", "triplet-b"]
 
 
-def test_only_context_prompt_format_yields_one_item_carrying_the_parts():
-    """The prompt is a single artifact, so it must not be split per context entry."""
+def test_only_context_with_a_prompt_yields_one_item_with_user_and_system_prompts():
+    """The LLM input is a single artifact, so it must not be split per context entry:
+    the user prompt is the item's text, the system prompt its own field."""
+    user_prompt = "The question is: `why?` ... triplet-a\n---\ntriplet-b"
+    system_prompt = "history\nTASK:answer"
     payload = SearchResultPayload(
         context=["triplet-a", "triplet-b"],
         only_context=True,
-        context_format=ContextFormat.PROMPT,
-        question="why?",
-        session_context="## Active session guidance\n- be terse",
-        user_prompt="The question is: `why?` ... triplet-a\n---\ntriplet-b",
-        system_prompt="history\nTASK:answer",
+        user_prompt=user_prompt,
+        system_prompt=system_prompt,
         search_type=SearchType.GRAPH_COMPLETION,
     )
 
     items = normalize_search_payload(payload)
 
     assert len(items) == 1
-    item = items[0]
-    assert item.text == "The question is: `why?` ... triplet-a\n---\ntriplet-b"
-    # The parts stay addressable so a caller can still take just one layer.
-    assert item.raw["question"] == "why?"
-    assert item.raw["context"] == ["triplet-a", "triplet-b"]
-    assert item.raw["session_context"] == "## Active session guidance\n- be terse"
-    assert item.raw["system_prompt"] == "history\nTASK:answer"
+    assert items[0].kind == SearchResultKind.GRAPH_COMPLETION
+    assert items[0].text == user_prompt
+    assert items[0].system_prompt == system_prompt
+    assert items[0].raw == {"value": user_prompt}
 
 
-def test_only_context_prompt_format_with_empty_context_yields_no_items():
+def test_system_prompt_is_unset_outside_only_context():
+    payload = SearchResultPayload(completion="an answer", search_type=SearchType.GRAPH_COMPLETION)
+    assert normalize_search_payload(payload)[0].system_prompt is None
+
+
+def test_only_context_with_empty_context_and_no_prompt_yields_no_items():
     """An empty retrieval must stay empty: recall's on_empty tools fallback reads the count."""
-    for empty in (None, "", []):
+    for empty in (None, "", [], [""]):
         payload = SearchResultPayload(
             context=empty,
             only_context=True,
-            context_format=ContextFormat.PROMPT,
-            question="why?",
-            session_context="## Active session guidance\n- be terse",
             search_type=SearchType.GRAPH_COMPLETION,
         )
-        assert normalize_search_payload(payload) == []
-
-
-def test_only_context_prompt_format_without_a_prompt_keeps_text_readable():
-    """CHUNKS has no template: text is the context itself, never a JSON dump of the envelope."""
-    payload = SearchResultPayload(
-        context=["chunk-a", "chunk-b"],
-        only_context=True,
-        context_format=ContextFormat.PROMPT,
-        question="why?",
-        session_context="## Active session guidance\n- be terse",
-        user_prompt=None,
-        system_prompt=None,
-        search_type=SearchType.CHUNKS,
-    )
-
-    items = normalize_search_payload(payload)
-
-    assert len(items) == 1
-    assert items[0].text == "chunk-a\n---\nchunk-b"
-    assert not items[0].text.startswith("{")
-    assert items[0].raw["session_context"] == "## Active session guidance\n- be terse"
+        assert normalize_search_payload(payload) == [], repr(empty)
 
 
 def test_chunk_result_surfaces_retriever_score():

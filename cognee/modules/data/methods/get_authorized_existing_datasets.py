@@ -10,7 +10,10 @@ from cognee.modules.users.permissions.methods import (
 
 
 async def get_authorized_existing_datasets(
-    datasets: list[str] | list[UUID] | None, permission_type: str, user: User
+    datasets: list[str] | list[UUID] | None,
+    permission_type: str,
+    user: User,
+    strict: bool = False,
 ) -> list[Dataset]:
     """
     Function returns a list of existing dataset objects user has access for based on datasets input.
@@ -18,6 +21,8 @@ async def get_authorized_existing_datasets(
     Args:
         datasets:
         user:
+        strict: When True, a dataset name that does not resolve raises DatasetNotFoundError
+            instead of being dropped from the result (see get_dataset_ids).
 
     Returns:
         list of Dataset objects
@@ -25,7 +30,7 @@ async def get_authorized_existing_datasets(
     """
     if datasets:
         # Function handles transforming dataset input to dataset IDs (if possible)
-        dataset_ids = await get_dataset_ids(datasets, user)
+        dataset_ids = await get_dataset_ids(datasets, user, strict=strict)
         # If dataset_ids are provided filter these datasets based on what user has permission for.
         if dataset_ids:
             existing_datasets = await get_specific_user_permission_datasets(

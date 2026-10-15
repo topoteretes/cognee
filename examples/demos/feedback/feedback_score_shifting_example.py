@@ -1,3 +1,14 @@
+"""Nudge retrieval scores with session feedback, then sweep feedback_influence (beta) on recall.
+
+Two GRAPH_COMPLETION questions receive scores 5 and 1 through cognee.session.add_feedback,
+apply_feedback_weights_pipeline folds them into feedback_weight values on the graph, and a neutral
+query is re-run for beta from 0.0 to 1.0. Watch the answers shift toward the positively rated
+(car manufacturer) context as beta grows.
+
+Requires: LLM_API_KEY, CACHING=true and CACHE_BACKEND=fs (checked at import).
+Run: uv run python examples/demos/feedback/feedback_score_shifting_example.py
+"""
+
 import asyncio
 from pathlib import Path
 

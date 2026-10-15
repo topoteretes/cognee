@@ -1,5 +1,7 @@
 "use client";
 
+import ConnectorLogo from "./ConnectorLogo";
+
 import { useState, type ReactElement } from "react";
 import { trackEvent } from "@/modules/analytics";
 
@@ -22,10 +24,8 @@ interface DataSource {
 
 const INTEGRATIONS: DataSource[] = [
   { name: "Notion",       description: "Pages and databases",         initials: "No", color: "#000000", logo: "notion" },
-  { name: "Google Drive", description: "Docs, Sheets, and Slides",    initials: "GD", color: "#1A73E8", logo: "googledrive" },
   { name: "Confluence",   description: "Spaces and wikis",            initials: "Cf", color: "#172B4D", logo: "confluence" },
   { name: "GitHub",       description: "Issues, PRs, and docs",       initials: "GH", color: "#181717", logo: "github" },
-  { name: "Gmail",        description: "Email threads and files",     initials: "Gm", color: "#EA4335", logo: "gmail" },
   { name: "Jira",         description: "Tickets and epics",           initials: "Jr", color: "#0052CC", logo: "jira" },
   { name: "Linear",       description: "Issues and project context",  initials: "Li", color: "#5E6AD2", logo: "linear" },
   { name: "Granola",      description: "Meeting notes and transcripts",initials: "Gr", color: "#C2410C", logo: "granola" },
@@ -169,13 +169,7 @@ export default function MoreDataSourcesSection(): ReactElement {
         <div className="ds-grid">
           {filtered.map((it) => (
             <button key={it.name} className="ds-card" onClick={() => openSource(it)} style={{ position: "relative", display: "flex", alignItems: "center", gap: 12, background: "rgba(255,255,255,0.06)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: "13px 15px", textAlign: "left", cursor: "pointer", fontFamily: "inherit", width: "100%" }}>
-              <div style={{ width: 36, height: 36, borderRadius: 10, background: it.color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.08)" }}>
-                {it.logo ? (
-                  <span aria-hidden style={{ width: 19, height: 19, background: "#fff", WebkitMaskImage: `url(/visuals/logos/datasources/${it.logo}.svg)`, maskImage: `url(/visuals/logos/datasources/${it.logo}.svg)`, WebkitMaskRepeat: "no-repeat", maskRepeat: "no-repeat", WebkitMaskPosition: "center", maskPosition: "center", WebkitMaskSize: "contain", maskSize: "contain" }} />
-                ) : (
-                  <span style={{ color: "#fff", fontSize: 13, fontWeight: 700, letterSpacing: "-0.02em" }}>{it.initials}</span>
-                )}
-              </div>
+              <ConnectorLogo logo={it.logo} initials={it.initials} color={it.color} size={36} />
               <div style={{ minWidth: 0, flex: 1 }}>
                 <div style={{ fontSize: 14, fontWeight: 500, color: "#EDECEA", fontFamily: '"TWKLausanne", sans-serif', overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", lineHeight: 1.3 }}>{it.name}</div>
                 <div style={{ fontSize: 12, color: "rgba(237,236,234,0.45)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", lineHeight: 1.4 }}>{it.description}</div>

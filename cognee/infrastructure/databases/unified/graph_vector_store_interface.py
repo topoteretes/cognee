@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from cognee.infrastructure.databases.exceptions import UnsupportedProvenanceCapability
 
 
@@ -35,7 +37,9 @@ class GraphVectorStoreInterface:
         """
         raise UnsupportedProvenanceCapability()
 
-    async def rollback_by_pipeline_run_id(self, pipeline_run_id: str) -> None:
+    async def rollback_by_pipeline_run_id(
+        self, pipeline_run_id: str, *, keep_data_ids: set[UUID] | None = None
+    ) -> None:
         """
         Remove source refs attached by a failed pipeline run.
 
@@ -43,5 +47,8 @@ class GraphVectorStoreInterface:
         -----------
 
             - pipeline_run_id (str): Unique identifier of the pipeline run to roll back.
+            - keep_data_ids (set[UUID] | None): Data items whose refs from this run are
+              left in place. Startup recovery passes the documents the run had already
+              completed, so an abandoned run gives up only its unfinished work.
         """
         raise UnsupportedProvenanceCapability()

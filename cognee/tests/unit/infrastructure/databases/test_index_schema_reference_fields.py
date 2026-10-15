@@ -12,7 +12,13 @@ import pytest
 
 logger = logging.getLogger(__name__)
 
-REFERENCE_FIELDS = ("document_id", "document_name", "chunk_index", "source_chunk_id")
+REFERENCE_FIELDS = (
+    "document_id",
+    "document_name",
+    "chunk_index",
+    "source_chunk_id",
+    "external_metadata",
+)
 
 
 def _index_schema_classes():
@@ -69,6 +75,7 @@ def test_index_schema_round_trips_reference_fields(name, schema_cls):
         chunk_index=4,
         source_chunk_id="33333333-3333-3333-3333-333333333333",
         importance_weight=0.8,
+        external_metadata='{"created_at": "2024-01-15"}',
     )
     dumped = instance.model_dump()
     assert dumped["document_id"] == "22222222-2222-2222-2222-222222222222"
@@ -76,3 +83,6 @@ def test_index_schema_round_trips_reference_fields(name, schema_cls):
     assert dumped["chunk_index"] == 4
     assert dumped["source_chunk_id"] == "33333333-3333-3333-3333-333333333333"
     assert dumped["importance_weight"] == 0.8
+    # JSON text, not a dict: LanceDB maps the payload model onto an Arrow
+    # struct and has no Arrow type for a free-form dict.
+    assert dumped["external_metadata"] == '{"created_at": "2024-01-15"}'

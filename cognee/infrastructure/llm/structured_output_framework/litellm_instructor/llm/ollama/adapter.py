@@ -78,6 +78,8 @@ class OllamaAPIAdapter(LLMInterface):
         instructor_mode: str | None = None,
         llm_args: dict[str, Any] | None = None,
         ollama_num_ctx: int | None = None,
+        transcription_model: str | None = None,
+        image_transcribe_model: str | None = None,
     ) -> None:
         self.name = name
         self.model = model.removeprefix("ollama/") if model.startswith("ollama/") else model
@@ -86,6 +88,18 @@ class OllamaAPIAdapter(LLMInterface):
         self.max_completion_tokens = max_completion_tokens
         self.llm_args: dict[str, Any] = llm_args or {}
         self.ollama_num_ctx = ollama_num_ctx
+        # Audio goes to the OpenAI-compatible /audio/transcriptions route, which
+        # never accepts a chat model, so an unset value keeps the historical
+        # whisper-1 rather than falling back to the chat model.
+        self.transcription_model = (
+            transcription_model.removeprefix("ollama/") if transcription_model else "whisper-1"
+        )
+        # Ollama ships vision as separate models (llava, llama3.2-vision), so the
+        # chat model is routinely text-only; IMAGE_TRANSCRIBE_MODEL points images
+        # at a multimodal one without changing the chat model.
+        self.image_transcribe_model = (
+            image_transcribe_model.removeprefix("ollama/") if image_transcribe_model else self.model
+        )
 
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
 
@@ -204,7 +218,7 @@ class OllamaAPIAdapter(LLMInterface):
 
         async with open_data_file(input, mode="rb") as audio_file:
             transcription = await self.client.audio.transcriptions.create(
-                model="whisper-1",  # Ensure the correct model for transcription
+                model=self.transcription_model,
                 file=audio_file,
                 language="en",
             )
@@ -255,7 +269,7 @@ class OllamaAPIAdapter(LLMInterface):
             encoded_image = base64.b64encode(image_file.read()).decode("utf-8")
 
         response = await self.client.chat.completions.create(
-            model=self.model,
+            model=self.image_transcribe_model,
             messages=[
                 {
                     "role": "user",

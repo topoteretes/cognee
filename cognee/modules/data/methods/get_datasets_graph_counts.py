@@ -215,15 +215,12 @@ async def _count_one_dataset(
     try:
         async with set_database_global_context_variables(dataset.id, dataset.owner_id):
             graph_engine = await get_graph_engine()
-            graph_metrics = await graph_engine.get_graph_metrics(include_optional=False) or {}
+            num_nodes, num_edges = await graph_engine.get_graph_counts()
     except Exception as error:
         logger.warning(
-            "Failed to compute graph metrics for dataset %s: %s", dataset.id, error, exc_info=True
+            "Failed to count the graph for dataset %s: %s", dataset.id, error, exc_info=True
         )
         return DatasetGraphCounts(pipeline_run_id=pipeline_run_id), False, False
-
-    num_nodes = graph_metrics.get("num_nodes") or 0
-    num_edges = graph_metrics.get("num_edges") or 0
 
     # A concurrent caller may have cached the same run id between the read
     # above and this write, which collides on the GraphMetrics primary key

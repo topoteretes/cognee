@@ -58,3 +58,50 @@ def test_schema_inventory_uses_generic_error_response(monkeypatch):
 
     assert response.status_code == 409
     assert response.json() == {"error": "Failed to build schema inventory"}
+
+
+def test_schema_provenance_returns_409_when_scope_computation_fails(monkeypatch):
+    """``_provenance_scope`` now does real work (DB round trips to decide
+    tenant administration and readable datasets) where the code it replaced
+    was a zero-failure ``getattr``. A transient error there must land on the
+    endpoint's own graceful 409, the same as a failure inside the graph
+    build itself, not bypass it as a bare 500."""
+    app = _app()
+    user_id = uuid4()
+
+    app.dependency_overrides[router_module.get_authenticated_user] = lambda: SimpleNamespace(
+        id=user_id,
+        tenant_id=uuid4(),
+    )
+
+    async def fail_scope(_user):
+        raise RuntimeError("relational engine unavailable")
+
+    monkeypatch.setattr(router_module, "send_telemetry", lambda *args, **kwargs: None)
+    monkeypatch.setattr(router_module, "_provenance_scope", fail_scope)
+
+    response = TestClient(app).get("/api/v1/schema/provenance")
+
+    assert response.status_code == 409
+    assert response.json() == {"error": "Failed to build memory provenance"}
+
+
+def test_schema_provenance_json_returns_409_when_scope_computation_fails(monkeypatch):
+    app = _app()
+    user_id = uuid4()
+
+    app.dependency_overrides[router_module.get_authenticated_user] = lambda: SimpleNamespace(
+        id=user_id,
+        tenant_id=uuid4(),
+    )
+
+    async def fail_scope(_user):
+        raise RuntimeError("relational engine unavailable")
+
+    monkeypatch.setattr(router_module, "send_telemetry", lambda *args, **kwargs: None)
+    monkeypatch.setattr(router_module, "_provenance_scope", fail_scope)
+
+    response = TestClient(app).get("/api/v1/schema/provenance/json")
+
+    assert response.status_code == 409
+    assert response.json() == {"error": "Failed to build memory provenance"}

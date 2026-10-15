@@ -12,7 +12,6 @@ from uuid import UUID
 from cognee.infrastructure.engine import INTERNAL_PROPERTY, is_internal_node
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
 from cognee.modules.user_preferences import UserPreference, preference_node_id
-from cognee.tasks.graph.detect_contradictions import _node_names
 from cognee.tasks.memify.get_triplet_datapoints import _process_single_triplet
 
 
@@ -126,14 +125,3 @@ class TestTripletEmbeddingFilter:
 
         assert error_msg is None
         assert triplet_obj is not None
-
-
-class TestContradictionNodeNames:
-    def test_internal_node_omitted_from_name_map(self):
-        nodes = [
-            ("node-a", {"name": "Postgres"}),
-            ("pref-1", {"name": "named internal node", INTERNAL_PROPERTY: True}),
-            ("node-b", {}),
-        ]
-
-        assert _node_names(nodes) == {"node-a": "Postgres"}

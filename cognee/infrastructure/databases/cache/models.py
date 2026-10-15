@@ -31,7 +31,9 @@ class SessionQAEntry(BaseModel):
         feedback_text: Optional user feedback text.
         feedback_score: Optional feedback score 1-5.
         used_graph_element_ids: Optional dict with only "node_ids" and "edge_ids" (lists of str).
-        memify_metadata: Optional dict with memify status keys (e.g. "feedback_weights_applied") and bool values.
+        memify_metadata: Optional dict with memify status keys (e.g. "feedback_weights_applied").
+            Values are bools, ints (attempt counters), strings (the applied rating's
+            source) or lists of str (applied element ids).
         used_session_context_ids: Optional list of session-context entry ids served to this answer.
     """
 
@@ -43,7 +45,7 @@ class SessionQAEntry(BaseModel):
     feedback_text: str | None = None
     feedback_score: int | None = None
     used_graph_element_ids: dict[str, list[str]] | None = None
-    memify_metadata: dict[str, bool] | None = None
+    memify_metadata: dict[str, Any] | None = None
     used_session_context_ids: list[str] | None = None
 
     @field_validator("used_graph_element_ids")
@@ -82,17 +84,26 @@ class SessionQAEntry(BaseModel):
 
     @field_validator("memify_metadata")
     @classmethod
-    def memify_metadata_only_pipeline_keys(
-        cls, v: dict[str, bool] | None
-    ) -> dict[str, bool] | None:
+    def memify_metadata_only_pipeline_keys(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
         if v is None:
             return None
         if not isinstance(v, dict):
             raise ValueError("memify_metadata must be a dict or None")
-        out: dict[str, bool] = {}
+        out: dict[str, Any] = {}
         for key, val in v.items():
-            if not isinstance(key, str) or not isinstance(val, bool):
-                raise ValueError("memify_metadata may only have string keys and bool values")
+            if not isinstance(key, str):
+                raise ValueError("memify_metadata may only have string keys")
+            # Strings joined the whitelist with the feedback-weight bookkeeping
+            # (the applied rating's source, "explicit"/"implicit"); ints and id
+            # lists arrived with the same bookkeeping. Every widening here is a
+            # rolling-deploy caveat: pods on an older release reject rows
+            # carrying the new type at read time (release-notes item).
+            is_scalar = isinstance(val, (bool, int, str))
+            is_id_list = isinstance(val, list) and all(isinstance(item, str) for item in val)
+            if not (is_scalar or is_id_list):
+                raise ValueError(
+                    "memify_metadata values may only be bools, ints, strings or lists of strings"
+                )
             out[key] = val
         return out if out else None
 

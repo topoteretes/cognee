@@ -79,6 +79,7 @@ async def test_extract_user_sessions_success(mock_user, mock_qa_data):
         assert sessions[0].session_id == "test_session"
         assert sessions[0].user_id == "test-user-123"
         assert sessions[0].persisted_qa_count == 2
+        assert sessions[0].last_entry_time == mock_qa_data[-1].time
         mock_session_manager.get_session.assert_called_once_with(
             user_id="test-user-123",
             session_id="test_session",

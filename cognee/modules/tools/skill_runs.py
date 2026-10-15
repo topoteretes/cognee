@@ -122,9 +122,7 @@ async def remember_skill_run_entry(
             latency_ms=entry.latency_ms,
             feedback=entry.feedback,
         )
-        run.belongs_to_set = [
-            NodeSet(id=generate_node_id(f"NodeSet:{entry.node_set}"), name=entry.node_set)
-        ]
+        run.belongs_to_set = [NodeSet(name=entry.node_set)]
 
         await add_data_points([run], ctx=_make_storage_context(user, dataset, entry.run_id))
 

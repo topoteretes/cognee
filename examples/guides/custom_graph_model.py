@@ -1,3 +1,13 @@
+"""Pass a custom graph_model of DataPoint classes with typed Edge fields to remember.
+
+PeopleGraph declares Person, Role and Group nodes plus edges named three ways: fixed by the field,
+chosen from a Literal, or free-form from the LLM. The extracted graph is written to
+.artifacts/custom_graph.html.
+
+Requires: LLM_API_KEY.
+Run: uv run python examples/guides/custom_graph_model.py
+"""
+
 import asyncio
 import os
 from typing import Annotated, Literal
