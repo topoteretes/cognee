@@ -22,8 +22,10 @@ Verifies:
 - every remembered repository is one Data row whose id the result carries, and
   forget(data_id=...) removes exactly that repository's graph (SDK-783); an
   unchanged repository is skipped by incremental loading
-- with codegraph_config={"treat_as_repository": True}, a directory with no
-  project marker and no .git is still ONE code_repo item
+- with raise_on_error=False, a failing repository spec next to a good one is an
+  errored item of the result while the good one is built; the good one is a
+  directory with no project marker and no .git, which
+  codegraph_config={"treat_as_repository": True} still makes ONE code_repo item
 - add(<project dir>) + cognify() routes the repo down the CODE_REPO route and
   produces the same typed graph
 - forget(everything=True) leaves no datasets or graph state behind
@@ -523,9 +525,13 @@ async def main():
         remaining_rows = await datasets.list_data(remember_dataset.id, user=user)
         assert [str(row.id) for row in remaining_rows] == [second_data_id]
 
-        # --- 3c. A declared repository with no project marker ------------------
-        # Without treat_as_repository such a directory (a package subdirectory, a
-        # tree copied without .git) would be split into per-file items.
+        # --- 3c. One failing repository spec next to a good one ----------------
+        # raise_on_error=False (what the HTTP router and the GitHub sync pass):
+        # the failure is an errored item, and the good repository is built. The
+        # good one has no project marker: without treat_as_repository such a
+        # directory (a package subdirectory, a tree copied without .git) would be
+        # split into per-file items.
+        missing_repo = pathlib.Path(scratch_root) / "no_such_repo"
         good_repo_path = _copy_fixture(
             os.path.join(scratch_root, "markerless"), name="markerless_repo"
         )
@@ -536,19 +542,25 @@ async def main():
             elif marker_path.exists():
                 marker_path.unlink()
         result = await _remember_repo(
-            good_repo_path, dataset_name=MIXED_DATASET, codegraph_config=DECLARED_CODE_ONLY
+            [missing_repo, good_repo_path],
+            dataset_name=MIXED_DATASET,
+            codegraph_config=DECLARED_CODE_ONLY,
+            raise_on_error=False,
         )
-        assert result.status == "completed", result.error
-        assert result.items_processed == 1 and result.items[0].get("id"), result.items
+        errored_items = [item for item in result.items if item.get("status") == "errored"]
+        built_items = [item for item in result.items if item.get("status") != "errored"]
+        assert len(errored_items) == 1, f"Expected one errored item: {result.items}"
+        assert errored_items[0].get("error"), errored_items[0]
+        assert len(built_items) == 1 and built_items[0].get("id"), result.items
         mixed_dataset, mixed_rows = await _dataset_rows(MIXED_DATASET)
-        assert [str(row.id) for row in mixed_rows] == [result.items[0]["id"]], (
-            f"Expected only the declared repository stored, got {[row.name for row in mixed_rows]}"
+        assert [str(row.id) for row in mixed_rows] == [built_items[0]["id"]], (
+            f"Expected only the good repository stored, got {[row.name for row in mixed_rows]}"
         )
         assert [_system_metadata(row).get("source") for row in mixed_rows] == ["code_repo"], (
             f"Expected one code_repo item, got {[row.name for row in mixed_rows]}"
         )
         processing = await get_dataset_processing_status(mixed_dataset.id)
-        assert processing["pending"] == 0, f"The repository was not built: {processing}"
+        assert processing["pending"] == 0, f"The good repository was not built: {processing}"
         async with set_database_global_context_variables(mixed_dataset.id, user.id):
             nodes, edges = await _graph_snapshot()
         _assert_typed_code_graph(nodes, edges, repo_name=good_repo_path.name)
