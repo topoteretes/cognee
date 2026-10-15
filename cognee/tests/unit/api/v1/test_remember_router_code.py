@@ -1,10 +1,10 @@
-"""Unit tests for the content_type='code' branch of the /v1/remember router.
+"""The /v1/remember router's code repository options.
 
-All tests are pure: ``remember()`` itself is monkeypatched on the
+Repositories take the normal ingestion path: content_type="code" is accepted
+and ignored, and codegraph_config (a JSON form field) reaches remember()
+validated. ``remember()`` itself is monkeypatched on the
 ``cognee.api.v1.remember`` package (the router imports it lazily at call
-time), so no databases, git, enola, or network are involved. The tests cover
-the router-level contract: validation, payload shaping, and passthrough of
-the code-only options.
+time), so no databases, git, enola, or network are involved.
 """
 
 import importlib
@@ -71,14 +71,13 @@ def fake_remember(monkeypatch):
     return captured
 
 
-def test_code_specs_are_forwarded(client, fake_remember):
+def test_code_content_type_is_ignored_and_specs_are_forwarded(client, fake_remember):
     response = client.post(
         "/remember",
         data={
             "datasetName": "code_ds",
             "content_type": "code",
-            "raw_data": ["https://github.com/org/repo", "https://github.com/org/other"],
-            "index_vectors": "true",
+            "raw_data": ["https://github.com/org/repo", "", "https://github.com/org/other"],
             "run_in_background": "true",
         },
     )
@@ -88,135 +87,60 @@ def test_code_specs_are_forwarded(client, fake_remember):
         "https://github.com/org/repo",
         "https://github.com/org/other",
     ]
-    assert fake_remember["kwargs"]["content_type"] == "code"
-    assert fake_remember["kwargs"]["index_vectors"] is True
+    assert fake_remember["kwargs"]["content_type"] is None
+    assert "codegraph_config" not in fake_remember["kwargs"]
     assert fake_remember["kwargs"]["run_in_background"] is True
 
 
-def test_empty_repository_entries_are_dropped(client, fake_remember):
+def test_codegraph_config_is_parsed_and_forwarded(client, fake_remember):
     response = client.post(
         "/remember",
         data={
             "datasetName": "code_ds",
-            "content_type": "code",
-            # Swagger UI submits untouched array items as "".
-            "raw_data": ["https://github.com/org/repo", "", "  "],
+            "raw_data": "https://git.example.com/org/repo",
+            "codegraph_config": (
+                '{"treat_as_repository": true, "include_documents": false, "index_vectors": null}'
+            ),
         },
     )
 
     assert response.status_code == 200, response.text
-    assert fake_remember["data"] == ["https://github.com/org/repo"]
-    # index_vectors defaults off and must not leak to non-code kwargs handling.
-    assert fake_remember["kwargs"]["index_vectors"] is False
+    # None keys are dropped by validation.
+    assert fake_remember["kwargs"]["codegraph_config"] == {
+        "treat_as_repository": True,
+        "include_documents": False,
+    }
 
 
-def test_code_requires_raw_data_specs(client, fake_remember):
-    response = client.post(
-        "/remember",
-        data={"datasetName": "code_ds", "content_type": "code"},
-    )
-
-    assert response.status_code == 400
-    assert "raw_data" in response.json()["detail"]
-    assert not fake_remember
-
-
-def test_code_rejects_file_uploads(client, fake_remember):
+def test_legacy_index_vectors_field_is_forwarded_for_folding(client, fake_remember):
     response = client.post(
         "/remember",
         data={
             "datasetName": "code_ds",
-            "content_type": "code",
-            "raw_data": ["https://github.com/org/repo"],
-        },
-        files=[("data", ("main.py", b"print('hi')", "text/plain"))],
-    )
-
-    assert response.status_code == 400
-    assert "file uploads" in response.json()["detail"]
-    assert not fake_remember
-
-
-def test_code_rejects_session_id(client, fake_remember):
-    response = client.post(
-        "/remember",
-        data={
-            "datasetName": "code_ds",
-            "content_type": "code",
-            "raw_data": ["https://github.com/org/repo"],
-            "session_id": "s1",
-        },
-    )
-
-    assert response.status_code == 400
-    assert "session_id" in response.json()["detail"]
-    assert not fake_remember
-
-
-def test_index_vectors_without_code_content_type_rejected(client, fake_remember):
-    response = client.post(
-        "/remember",
-        data={"datasetName": "ds", "index_vectors": "true"},
-    )
-
-    assert response.status_code == 400
-    assert "index_vectors" in response.json()["detail"]
-    assert not fake_remember
-
-
-def test_local_paths_gated_by_accept_local_file_path(client, fake_remember, monkeypatch):
-    monkeypatch.setattr(storage_module.settings, "accept_local_file_path", False)
-
-    response = client.post(
-        "/remember",
-        data={
-            "datasetName": "code_ds",
-            "content_type": "code",
-            "raw_data": ["/srv/some/repo"],
-        },
-    )
-
-    assert response.status_code == 400
-    assert "ACCEPT_LOCAL_FILE_PATH" in response.json()["detail"]
-    assert not fake_remember
-
-
-def test_remote_urls_allowed_when_local_paths_disabled(client, fake_remember, monkeypatch):
-    monkeypatch.setattr(storage_module.settings, "accept_local_file_path", False)
-
-    response = client.post(
-        "/remember",
-        data={
-            "datasetName": "code_ds",
-            "content_type": "code",
-            "raw_data": ["https://github.com/org/repo"],
+            "raw_data": "https://github.com/org/repo",
+            "index_vectors": "true",
         },
     )
 
     assert response.status_code == 200, response.text
-    assert fake_remember["data"] == ["https://github.com/org/repo"]
+    assert fake_remember["kwargs"]["index_vectors"] is True
 
 
-def test_local_paths_allowed_by_default(client, fake_remember):
+@pytest.mark.parametrize(
+    "value",
+    [
+        "not json",
+        '["a list"]',
+        '{"unknown_key": true}',
+        '{"include_documents": "false"}',
+    ],
+)
+def test_invalid_codegraph_config_is_a_400(client, fake_remember, value):
     response = client.post(
         "/remember",
-        data={
-            "datasetName": "code_ds",
-            "content_type": "code",
-            "raw_data": ["/srv/some/repo"],
-        },
+        data={"datasetName": "code_ds", "raw_data": "/repo", "codegraph_config": value},
     )
 
-    assert response.status_code == 200, response.text
-    assert fake_remember["data"] == ["/srv/some/repo"]
-
-
-def test_unknown_content_type_still_rejected(client, fake_remember):
-    response = client.post(
-        "/remember",
-        data={"datasetName": "ds", "content_type": "sculpture"},
-    )
-
-    assert response.status_code == 400
-    assert "Unsupported content_type" in response.json()["detail"]
+    assert response.status_code == 400, response.text
+    assert "codegraph_config" in response.json()["detail"]
     assert not fake_remember

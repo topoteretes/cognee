@@ -9,7 +9,9 @@ relation edges into a real graph store, reading them back through the CODE
 retriever with dataset scoping, idempotent re-ingestion, and teardown.
 
 Verifies:
-- remember(content_type="code") ingests the repo and reports a completed run
+- remember(<repo dir>) stores the repo as one code_repo row and builds its
+  graph through cognify's CODE_REPO route; content_type="code" is accepted and
+  ignored (SDK-793)
 - the graph holds ONLY the typed enola models (CodeRepository, CodeModule,
   CodeSymbol, ...) — no generic Node / Entity / DocumentChunk / TextSummary
 - known files, symbols, modules, dependencies and typed relations
@@ -18,8 +20,11 @@ Verifies:
   impact_analysis) through both search() and recall()
 - re-ingesting the unchanged repo is a no-op (same node/edge counts, same
   snapshot id)
-- every remembered repository is one Data row whose id the result carries, and
-  forget(data_id=...) removes exactly that repository's graph (SDK-783)
+- every remembered repository is one Data row, refreshed in place when the
+  repository changes, and forget(data_id=...) removes exactly that
+  repository's graph (SDK-783)
+- codegraph_config={"treat_as_repository": True} builds a source tree with no
+  project file as one repository (SDK-793)
 - add(<project dir>) + cognify() routes the repo down the CODE_REPO route and
   produces the same typed graph
 - forget(everything=True) leaves no datasets or graph state behind
@@ -60,6 +65,7 @@ FIXTURE_DIR = TESTS_DIR / "test_data" / "code_repo_fixture"
 
 REMEMBER_DATASET = "code_graph_e2e_remember"
 COGNIFY_DATASET = "code_graph_e2e_cognify"
+TREAT_DATASET = "code_graph_e2e_treat_as_repository"
 
 # --- Known answers, pinned to the fixture + ENOLA_PINNED_VERSION ------------
 # If enola is bumped and these change, update them deliberately. Last
@@ -368,21 +374,31 @@ async def main():
     try:
         logger.info("enola pinned version: %s", ENOLA_PINNED_VERSION)
 
-        # --- 1. remember(content_type="code") ---------------------------------
+        # --- 1. remember(<repo dir>) ------------------------------------------
+        # content_type="code" is accepted and ignored: the directory carries a
+        # project marker, so add() takes it as one repository and cognify's
+        # CODE_REPO route builds its graph. The README is not ingested: the run
+        # is keyless and include_documents=False says so explicitly anyway.
         repo_path = _copy_fixture(os.path.join(scratch_root, "remember"))
         result = await cognee.remember(
-            str(repo_path), dataset_name=REMEMBER_DATASET, content_type="code"
+            str(repo_path),
+            dataset_name=REMEMBER_DATASET,
+            content_type="code",
+            codegraph_config={"include_documents": False},
+            self_improvement=False,
         )
         assert result.status == "completed", (
             f"remember() did not complete: {result.status} {result.error}"
         )
-        assert result.items_processed == 1 and result.items[0]["kind"] == "code_repository", (
-            result.items
-        )
-        assert result.pipeline_run_id, "remember() reported no pipeline_run_id"
         assert (repo_path / ".enola" / "facts.jsonl").is_file(), "enola snapshot was not written"
-        first_data_id = result.items[0].get("id")
-        assert first_data_id, f"remember() returned no data id for the repository: {result.items}"
+
+        user = await get_default_user()
+        remember_dataset = next(
+            ds for ds in await datasets.list_datasets(user=user) if ds.name == REMEMBER_DATASET
+        )
+        (repo_data_row,) = await datasets.list_data(remember_dataset.id, user=user)
+        assert _system_metadata(repo_data_row).get("source") == "code_repo", repo_data_row.name
+        first_data_id = str(repo_data_row.id)
 
         nodes, edges = await _graph_snapshot()
         _assert_typed_code_graph(nodes, edges, repo_name=repo_path.name)
@@ -397,7 +413,10 @@ async def main():
 
         # --- 3. Re-ingest the unchanged repo: must be a no-op -----------------
         result = await cognee.remember(
-            str(repo_path), dataset_name=REMEMBER_DATASET, content_type="code"
+            str(repo_path),
+            dataset_name=REMEMBER_DATASET,
+            codegraph_config={"include_documents": False},
+            self_improvement=False,
         )
         assert result.status == "completed", result.error
         nodes, edges = await _graph_snapshot()
@@ -412,26 +431,24 @@ async def main():
         assert second_snapshot_id == first_snapshot_id, (
             "Snapshot id changed although the repository did not"
         )
-        assert result.items[0].get("id") == first_data_id, (
+        (row,) = await datasets.list_data(remember_dataset.id, user=user)
+        assert str(row.id) == first_data_id, (
             "Re-remembering the same repository minted a new data id"
         )
         await _assert_code_search(REMEMBER_DATASET)
 
         # --- 3b. One Data row per repo; forget(data_id) drops only it (SDK-783)
-        user = await get_default_user()
-        remember_dataset = next(
-            ds for ds in await datasets.list_datasets(user=user) if ds.name == REMEMBER_DATASET
-        )
-
         # A changed repository refreshes its row in place: same id, new manifest.
-        (repo_data_row,) = await datasets.list_data(remember_dataset.id, user=user)
         (repo_path / "inventory" / "audit.py").write_text("def audit():\n    return True\n")
         result = await cognee.remember(
-            str(repo_path), dataset_name=REMEMBER_DATASET, content_type="code"
+            str(repo_path),
+            dataset_name=REMEMBER_DATASET,
+            codegraph_config={"include_documents": False},
+            self_improvement=False,
         )
         assert result.status == "completed", result.error
-        assert result.items[0].get("id") == first_data_id, "A changed repo minted a new data id"
         (refreshed_row,) = await datasets.list_data(remember_dataset.id, user=user)
+        assert str(refreshed_row.id) == first_data_id, "A changed repo minted a new data id"
         assert refreshed_row.content_hash != repo_data_row.content_hash, (
             "Re-remembering a changed repository kept its old manifest"
         )
@@ -445,52 +462,24 @@ async def main():
             "The changed repository refreshed its row but not its graph"
         )
 
-        # An unchanged repository whose re-sync fails keeps its stamps: its graph
-        # is still built, so a later cognify() of the dataset must not pick the
-        # row up again (it would rerun enola, or fail when the clone is gone).
-        import cognee.modules.run_custom_pipeline as custom_pipeline_module
-
-        real_run_custom_pipeline = custom_pipeline_module.run_custom_pipeline
-
-        async def _failing_code_graph_run(*_args, **_kwargs):
-            raise RuntimeError("simulated code graph failure")
-
-        custom_pipeline_module.run_custom_pipeline = _failing_code_graph_run
-        try:
-            result = await cognee.remember(
-                str(repo_path),
-                dataset_name=REMEMBER_DATASET,
-                content_type="code",
-                raise_on_error=False,
-            )
-        finally:
-            custom_pipeline_module.run_custom_pipeline = real_run_custom_pipeline
-        assert result.status == "errored", result
-        assert result.items[0].get("id") == first_data_id, result.items
-        processing = await get_dataset_processing_status(remember_dataset.id)
-        assert processing["pending"] == 0, (
-            f"A failed re-sync of an unchanged repository dropped its cognify stamp: {processing}"
-        )
-
         second_repo_path = _copy_fixture(os.path.join(scratch_root, "second"), name="second_repo")
         result = await cognee.remember(
-            str(second_repo_path), dataset_name=REMEMBER_DATASET, content_type="code"
+            str(second_repo_path),
+            dataset_name=REMEMBER_DATASET,
+            codegraph_config={"include_documents": False},
+            self_improvement=False,
         )
         assert result.status == "completed", result.error
-        second_data_id = result.items[0].get("id")
 
         data_rows = await datasets.list_data(remember_dataset.id, user=user)
-        assert {str(row.id) for row in data_rows} == {first_data_id, second_data_id}, (
+        assert len(data_rows) == 2, (
             f"Expected one Data row per remembered repository, got {[row.name for row in data_rows]}"
         )
         assert all(_system_metadata(row).get("source") == "code_repo" for row in data_rows)
-        # Stamped as cognified (a later cognify() of the dataset has nothing to
-        # redo) and in the code graph pipeline's own per-item slot.
-        for pipeline_name in ("cognify_pipeline", "code_graph_pipeline"):
-            processing = await get_dataset_processing_status(remember_dataset.id, pipeline_name)
-            assert processing["pending"] == 0, (
-                f"Repositories left pending for {pipeline_name}: {processing}"
-            )
+        second_data_id = next(str(row.id) for row in data_rows if str(row.id) != first_data_id)
+        # Built under cognify_pipeline, like any other item: nothing left to redo.
+        processing = await get_dataset_processing_status(remember_dataset.id)
+        assert processing["pending"] == 0, f"Repositories left pending: {processing}"
 
         await cognee.forget(data_id=UUID(first_data_id), dataset_id=remember_dataset.id)
 
@@ -502,12 +491,29 @@ async def main():
         remaining_rows = await datasets.list_data(remember_dataset.id, user=user)
         assert [str(row.id) for row in remaining_rows] == [second_data_id]
 
+        # --- 3c. treat_as_repository: a source tree with no project file ------
+        # Without the flag add() would split it into files (per-file CODE
+        # route, no repository node); with it the tree is one repository.
+        tree_path = _copy_fixture(os.path.join(scratch_root, "tree"), name="tree_repo")
+        (tree_path / "pyproject.toml").unlink()
+        result = await cognee.remember(
+            str(tree_path),
+            dataset_name=TREAT_DATASET,
+            codegraph_config={"treat_as_repository": True, "include_documents": False},
+            self_improvement=False,
+        )
+        assert result.status == "completed", result.error
+        treat_dataset = next(
+            ds for ds in await datasets.list_datasets(user=user) if ds.name == TREAT_DATASET
+        )
+        (tree_row,) = await datasets.list_data(treat_dataset.id, user=user)
+        assert _system_metadata(tree_row).get("source") == "code_repo", tree_row.name
+        async with set_database_global_context_variables(treat_dataset.id, user.id):
+            nodes, _edges = await _graph_snapshot()
+        assert len(_by_type(nodes, "CodeRepository")) == 1
+        assert "inventory/pricing.compute_total" in _named(_by_type(nodes, "CodeSymbol"))
+
         # --- 4. add(<project dir>) + cognify(): the CODE_REPO route -----------
-        # cognify() runs the LLM/embedding connection test unconditionally,
-        # even when every item routes to an LLM-free task list. Skip it via
-        # the documented switch — set only NOW so the remember() steps above
-        # still prove that remember(content_type="code") is keyless on its own.
-        os.environ["COGNEE_SKIP_CONNECTION_TEST"] = "true"
         cognify_repo_path = _copy_fixture(os.path.join(scratch_root, "cognify"))
         await cognee.add(str(cognify_repo_path), dataset_name=COGNIFY_DATASET)
 

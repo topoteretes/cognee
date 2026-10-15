@@ -1,14 +1,15 @@
 """Unit tests for cognee.modules.integrations.github.sync.
 
 Token minting, repo listing, and remember() are mocked — what's under test
-is the orchestration: one dataset per installation, authenticated clone
-URLs handed to the code path, and the full-installation default when no
-explicit repo list is given.
+is the orchestration: one dataset per installation, one remember() per
+repository with the token in codegraph_config, failures isolated per
+repository, and the full-installation default when no explicit repo list is
+given.
 """
 
 import importlib
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, call
 from uuid import uuid4
 
 import pytest
@@ -71,17 +72,17 @@ async def test_default_sync_covers_every_installation_repo(mocks):
 
     mocks.mint.assert_awaited_once_with(42)
     mocks.list_repos.assert_awaited_once_with("tok123")
-    mocks.remember.assert_awaited_once_with(
-        [
-            "https://github.com/acme/api.git",
-            "https://github.com/acme/web.git",
-        ],
-        dataset_name="github_acme_org",
-        user=mocks.owner,
-        content_type="code",
-        repo_credentials="tok123",
-        raise_on_error=False,
-    )
+    expected_kwargs = {
+        "dataset_name": "github_acme_org",
+        "user": mocks.owner,
+        "codegraph_config": {"repo_credentials": "tok123", "include_documents": False},
+        "self_improvement": False,
+        "raise_on_error": False,
+    }
+    assert mocks.remember.await_args_list == [
+        call("https://github.com/acme/api.git", **expected_kwargs),
+        call("https://github.com/acme/web.git", **expected_kwargs),
+    ]
 
 
 @pytest.mark.asyncio
@@ -90,9 +91,23 @@ async def test_explicit_repo_list_skips_the_listing_call(mocks):
 
     mocks.list_repos.assert_not_awaited()
     mocks.remember.assert_awaited_once()
-    (urls,) = mocks.remember.await_args.args
-    assert urls == ["https://github.com/acme/api.git"]
-    assert mocks.remember.await_args.kwargs["repo_credentials"] == "tok123"
+    (url,) = mocks.remember.await_args.args
+    assert url == "https://github.com/acme/api.git"
+    assert mocks.remember.await_args.kwargs["codegraph_config"]["repo_credentials"] == "tok123"
+
+
+@pytest.mark.asyncio
+async def test_a_failing_repo_does_not_stop_the_rest(mocks, caplog):
+    mocks.remember.side_effect = [
+        RuntimeError("clone failed"),
+        SimpleNamespace(status="completed", error=None),
+    ]
+
+    await sync_module.sync_repositories(_credential())
+
+    assert mocks.remember.await_count == 2
+    assert "1 failed repositories: acme/api" in caplog.text
+    assert "tok123" not in caplog.text
 
 
 @pytest.mark.asyncio

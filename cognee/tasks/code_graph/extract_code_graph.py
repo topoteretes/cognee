@@ -154,8 +154,8 @@ def map_facts_to_data_points(
     manifest's external_metadata by extract_code_repo_graph) tags every
     returned node -- CodeRepository included -- with the same
     belongs_to_set/source_node_set a document gets from classify_documents.
-    An untagged call (node_set=None, the per-file CODE route and the legacy
-    remember(content_type="code") path) produces byte-identical fact_hash
+    An untagged call (node_set=None, the per-file CODE route and custom
+    code-graph pipelines) produces byte-identical fact_hash
     values to before this parameter existed.
     """
     fallback_repo = _resolve_fallback_repo(facts, repo_path)
@@ -1039,9 +1039,8 @@ async def add_code_graph_edges(
 
         # Retag: strip node_set names this repo carried before but not anymore.
         # A no-op (zero graph calls) when node_set is unchanged, including the
-        # untagged case, so the per-file CODE route and the legacy
-        # remember(content_type="code") path (both always pass node_set=None)
-        # never pay for this.
+        # untagged case, so the per-file CODE route and custom code-graph
+        # pipelines (both always pass node_set=None) never pay for this.
         detagged = await _detag_stale_code_graph(
             graph_engine, facts, repo_path, existing_nodes, existing_edge_keys, node_set
         )

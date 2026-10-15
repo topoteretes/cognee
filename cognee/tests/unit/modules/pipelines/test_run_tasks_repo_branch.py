@@ -20,18 +20,21 @@ async def test_the_branch_in_extras_reaches_the_repository_resolution(monkeypatc
     runner_plumbing(run_tasks_module, dataset)
     monkeypatch.setattr(run_tasks_module, "validate_pipeline_tasks", lambda tasks: None)
     branches = []
+    repository_options = []
 
     async def item_run(*args, **kwargs):
         return {"run_info": "ok"}
 
-    async def resolve(data, user=None, dataset_id=None, branch=None):
+    async def resolve(data, user=None, dataset_id=None, branch=None, **options):
         branches.append(branch)
+        repository_options.append(options)
         return data
 
     monkeypatch.setattr(run_tasks_module, "run_tasks_data_item", item_run)
     monkeypatch.setattr(run_tasks_module, "resolve_data_directories", resolve)
 
-    for extras in ({"repo_branch": "dev"}, None):
+    config = {"repo_credentials": "t", "include_documents": False, "treat_as_repository": True}
+    for extras in ({"repo_branch": "dev", "codegraph_config": config}, None):
         async for _event in run_tasks_module.run_tasks(
             tasks=["TASKS"],
             dataset_id=dataset.id,
@@ -44,3 +47,8 @@ async def test_the_branch_in_extras_reaches_the_repository_resolution(monkeypatc
             pass
 
     assert branches == ["dev", None]
+    # add()'s codegraph_config reaches the same resolution (SDK-793).
+    assert repository_options == [
+        {"credentials": "t", "include_documents": False, "treat_as_repository": True},
+        {"credentials": None, "include_documents": True, "treat_as_repository": False},
+    ]

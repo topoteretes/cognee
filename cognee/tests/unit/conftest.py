@@ -72,3 +72,19 @@ def _keyless_gates_see_a_usable_llm():
         for target in KEYLESS_GATE_PATCH_TARGETS:
             stack.enter_context(patch(target, return_value=True))
         yield
+
+
+@pytest.fixture(autouse=True)
+def _git_server_probe_answers_no(monkeypatch):
+    """add() asks an http(s) URL's server whether it is a git repository.
+
+    Unit tests must not send that request: every probe answers "not a
+    repository", so URLs keep their web-page reading. Probe tests restore the
+    real check themselves.
+    """
+    from unittest.mock import AsyncMock
+
+    from cognee.tasks.code_graph import resolve_repo
+
+    monkeypatch.setattr(resolve_repo, "_answers_as_git_server", AsyncMock(return_value=False))
+    monkeypatch.setattr(resolve_repo, "_probe_cache", {})

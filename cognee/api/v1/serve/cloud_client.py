@@ -11,6 +11,20 @@ import aiohttp
 from cognee.modules.ingestion.data_types.TextData import create_text_data
 from cognee.shared.logging_utils import get_logger
 
+
+def _is_repository_spec(item: str, treat_as_repository: bool) -> bool:
+    """Whether a string input names a repository the server should resolve.
+
+    Only the shapes add() recognises without a request: GitHub/GitLab and
+    ``.git`` URLs and ssh remotes. Other URLs keep their text upload, as before.
+    """
+    if treat_as_repository:
+        return True
+    from cognee.tasks.code_graph.resolve_repo import code_repo_clone_url, code_repo_ssh_url
+
+    return code_repo_clone_url(item) is not None or code_repo_ssh_url(item) is not None
+
+
 logger = get_logger("serve.cloud_client")
 
 
@@ -138,22 +152,36 @@ class CloudClient:
         if kwargs.get("import_mode") is not None:
             form.add_field("import_mode", str(kwargs["import_mode"]))
 
-        # Code repos travel as spec strings in the 'raw_data' form field —
-        # the server clones git URLs itself and reads local paths from its own
-        # filesystem (only useful when it shares the caller's filesystem).
-        # Nothing is uploaded.
-        if content_type_kw == "code":
-            specs = data if isinstance(data, list) else [data]
-            for spec in specs:
-                form.add_field("raw_data", str(spec))
-            if kwargs.get("index_vectors"):
-                form.add_field("index_vectors", "true")
+        codegraph_config = kwargs.get("codegraph_config") or {}
+        if codegraph_config:
+            form.add_field("codegraph_config", json.dumps(codegraph_config))
+        treat_as_repository = bool(codegraph_config.get("treat_as_repository"))
+        sent_repository = False
+
+        def _add_string(item: str) -> None:
+            # Repositories travel as spec strings in the 'raw_data' form field,
+            # where the server resolves them as add() would: it clones remotes
+            # itself and reads local paths from its own filesystem (only useful
+            # when it shares the caller's). An upload would arrive as a text
+            # document holding the URL.
+            nonlocal sent_repository
+            if _is_repository_spec(item, treat_as_repository):
+                form.add_field("raw_data", item)
+                sent_repository = True
+            else:
+                form.add_field(
+                    "data",
+                    io.BytesIO(item.encode("utf-8")),
+                    filename=_text_upload_filename(item),
+                    content_type="text/plain",
+                )
+
         # Skills are local SKILL.md files. The server's add_skills() reads
         # paths from its own filesystem — sending the path string verbatim
         # would have the server look for that path on the POD, not the
         # caller. For content_type="skills", read each SKILL.md and upload
         # its bytes so the server can write them to a tempdir.
-        elif content_type_kw == "skills" and isinstance(data, (str, Path)):
+        if content_type_kw == "skills" and isinstance(data, (str, Path)):
             source = Path(data).expanduser()
             if source.is_file():
                 skill_files = [source] if source.name == "SKILL.md" else []
@@ -170,22 +198,12 @@ class CloudClient:
                 rel = skill_path.relative_to(base).as_posix()
                 form.add_field("data", skill_path.open("rb"), filename=rel)
         # Handle data — string or file-like objects
-        elif isinstance(data, str):
-            form.add_field(
-                "data",
-                io.BytesIO(data.encode("utf-8")),
-                filename=_text_upload_filename(data),
-                content_type="text/plain",
-            )
+        elif isinstance(data, (str, Path)) and (isinstance(data, str) or treat_as_repository):
+            _add_string(str(data))
         elif isinstance(data, list):
             for item in data:
-                if isinstance(item, str):
-                    form.add_field(
-                        "data",
-                        io.BytesIO(item.encode("utf-8")),
-                        filename=_text_upload_filename(item),
-                        content_type="text/plain",
-                    )
+                if isinstance(item, str) or (treat_as_repository and isinstance(item, Path)):
+                    _add_string(str(item))
                 elif hasattr(item, "read"):
                     name = getattr(item, "name", "upload")
                     form.add_field("data", item, filename=name)
@@ -193,12 +211,12 @@ class CloudClient:
             name = getattr(data, "name", "upload")
             form.add_field("data", data, filename=name)
 
-        # Code ingestion can block on a clone + whole-repo parse; the archive
+        # A repository can block on a clone + whole-repo parse; the archive
         # timeout (no total cap) fits both. Prefer run_in_background=True for
         # large repos regardless.
         timeout = (
             self.UPLOAD_TIMEOUT
-            if kwargs.get("content_type") in ("cogx-archive", "code")
+            if sent_repository or kwargs.get("content_type") == "cogx-archive"
             else self.DEFAULT_TIMEOUT
         )
         async with session.post(

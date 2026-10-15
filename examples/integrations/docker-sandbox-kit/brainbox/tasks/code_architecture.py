@@ -4,7 +4,7 @@ Runs INSIDE the sandbox. Three moves, each against a different wall:
 
   1. recall  — ask the brain a question with the scoped identity (only the
                granted datasets answer; the brain does the LLM work).
-  2. build   — `cognee.remember(repo, content_type="code")` locally: the enola
+  2. build   — `cognee.remember(repo)` locally, as one repository: the enola
                code graph, deterministic, no LLM, no embeddings, no network.
                Then the module-level `architecture` view with a Mermaid diagram.
   3. promote — `cognee.push(...)`: export the local graph as a COGX archive and
@@ -84,8 +84,15 @@ async def main(args: argparse.Namespace) -> None:
 
     step("2/3 build the code graph locally (no LLM, no network)")
     t = time.time()
+    # run.sh copies the repo without .git, and the repo may be a package
+    # subdirectory with no project file: say it is one repository rather than
+    # let add() split it into files. Its README and docs are skipped: the
+    # sandbox has no LLM key.
     result = await cognee.remember(
-        args.repo, dataset_name=args.dataset, content_type="code", self_improvement=False
+        args.repo,
+        dataset_name=args.dataset,
+        self_improvement=False,
+        codegraph_config={"treat_as_repository": True, "include_documents": False},
     )
     arch = await cognee.search(
         query_type=cognee.SearchType.CODE,

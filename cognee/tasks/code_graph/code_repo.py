@@ -26,10 +26,10 @@ pipeline's incremental check sees it; re-adding a changed repo then resets
 pipeline status through the normal content-change detection. The clear is
 unconditional, so an unchanged repo's small manifest is stored again on every
 add; its cognify stamps are kept and nothing is rebuilt. The
-repository itself is read from its original location at cognify time — like
-``remember(content_type="code")``, the enola run happens in place.
+repository itself is read from its original location at cognify time: the
+enola run happens in place.
 
-A GitHub/GitLab repository URL passed to ``add()`` takes the same path after a
+A repository URL or ssh remote passed to ``add()`` takes the same path after a
 shallow clone (``resolve_code_repository_url``): the clone directory is the
 "original location" the manifest points at.
 """
@@ -46,6 +46,7 @@ from cognee.tasks.code_graph.resolve_repo import (
     CodeRepositoryError,
     clone_dir,
     code_repo_clone_url,
+    code_repo_ssh_url,
     redact_repo_spec,
     resolve_repo_source,
 )
@@ -262,7 +263,7 @@ async def resolve_code_repository(
     time, text is LLM-chunked at cognify), so they would only fail later. The
     code graph itself never needs one — a key-less repo add still works fully.
     ``include_documents=False`` returns no document paths at all, for callers
-    that index the code graph only (``remember(content_type="code")``).
+    that index the code graph only (``codegraph_config["include_documents"]``).
     """
     from cognee.infrastructure.llm.config import get_llm_config
     from cognee.tasks.ingestion.data_item import DataItem
@@ -329,33 +330,45 @@ async def resolve_code_repository(
 
 
 async def resolve_code_repository_url(
-    spec: str, user=None, dataset_id=None, branch: str | None = None
+    spec: str,
+    user=None,
+    dataset_id=None,
+    branch: str | None = None,
+    credentials: str | None = None,
+    include_documents: bool = True,
+    clone_url: str | None = None,
 ):
-    """Clone a hosted repository URL and build its repo-level DataItem.
+    """Clone a remote repository and build its repo-level DataItem.
 
-    ``add()``'s implicit counterpart of ``remember(content_type="code")``: a
-    GitHub/GitLab repository URL (see ``resolve_repo.code_repo_clone_url``) is
-    shallow-cloned into the shared clones directory and then partitioned
-    exactly like a local code project -- one ``code_repo`` manifest for the
-    CODE_REPO cognify route plus the repository's documents as individual
-    items. Returns ``(manifest_item, document_paths, skip_count)``; the
-    manifest carries the credential-free URL as ``repo_url``. ``branch`` clones
-    that branch instead of the remote's default; a dataset still holds one data
-    row per URL, so adding it on another branch replaces that row's code graph.
+    The remote (a GitHub/GitLab or ``.git`` URL, see
+    ``resolve_repo.code_repo_clone_url``, or an ssh remote, see
+    ``resolve_repo.code_repo_ssh_url``) is shallow-cloned into the shared
+    clones directory and then partitioned exactly like a local code project --
+    one ``code_repo`` manifest for the CODE_REPO cognify route plus the
+    repository's documents as individual items. ``clone_url`` passes a URL the
+    caller already established is a repository (a probed git server, or
+    ``treat_as_repository``) instead of having it recognised here. Returns
+    ``(manifest_item, document_paths, skip_count)``; the manifest carries the
+    credential-free URL as ``repo_url``. ``branch`` clones that branch instead
+    of the remote's default; a dataset still holds one data row per URL, so
+    adding it on another branch replaces that row's code graph.
+    ``credentials`` authenticates an https clone (see ``resolve_repo_source``).
     """
-    clone_url = code_repo_clone_url(spec)
+    clone_url = clone_url or code_repo_clone_url(spec) or code_repo_ssh_url(spec)
     if clone_url is None:
         raise ValueError(
             f"'{redact_repo_spec(spec)}' is not a repository URL add() can clone; "
-            "expected https://github.com/<owner>/<repo>, a gitlab.com project, or a .git URL."
+            "expected https://github.com/<owner>/<repo>, a gitlab.com project, a .git URL "
+            "or an ssh remote."
         )
-    repo_path = await resolve_repo_source(clone_url, branch=branch)
+    repo_path = await resolve_repo_source(clone_url, credentials=credentials, branch=branch)
     source_url = redact_repo_spec(clone_url)
     return await resolve_code_repository(
         repo_path,
         user=user,
         dataset_id=dataset_id,
         source_url=source_url,
+        include_documents=include_documents,
         # Keyed on the default branch's clone, as every URL row was before branches:
         # existing rows keep their ids, and branches of one URL share the row, since
         # their code graphs share the repository's node ids.
@@ -363,67 +376,18 @@ async def resolve_code_repository_url(
     )
 
 
-async def add_code_repository(
-    repo_path: Path,
-    user,
-    dataset,
-    source_url: str | None = None,
-    skip_connection_test: bool = False,
-):
-    """Store a resolved repository as its one code_repo Data row, without cognifying it.
-
-    ``remember(content_type="code")`` builds the graph itself (the
-    code_graph_pipeline over this row) and needs the row only for its id and
-    its dataset listing. It is the same manifest item ``add(<repo>)`` ingests,
-    pinned to the same identity, so both routes keep one record per repository.
-    The repository's documents are not ingested. Returns the stored Data row.
-    """
-    from cognee.api.v1.add import add
-    from cognee.modules.data.methods import get_data
-    from cognee.modules.pipelines.models.PipelineRunInfo import get_errored_run_info
-
-    manifest_item, _documents, _skipped = await resolve_code_repository(
-        repo_path,
-        user=user,
-        dataset_id=dataset.id,
-        source_url=source_url,
-        include_documents=False,
-    )
-    add_result = await add(
-        manifest_item,
-        dataset_name=dataset.name,
-        dataset_id=dataset.id,
-        user=user,
-        skip_connection_test=skip_connection_test,
-    )
-    # With RAISE_INCREMENTAL_LOADING_ERRORS=false a failed ingest returns an
-    # errored run instead of raising; surface its cause, not a missing row.
-    errored = get_errored_run_info(add_result)
-    if errored is not None:
-        raise CodeRepositoryError(
-            message=f"Could not store code repository '{repo_path}': "
-            f"{errored.error_message or errored.error_class or 'ingestion failed'}"
-        )
-
-    data = await get_data(user.id, manifest_item.data_id, dataset.id)
-    if data is None:
-        raise ValueError(
-            f"Code repository '{repo_path}' was added but its data record "
-            f"{manifest_item.data_id} is missing from dataset {dataset.id}."
-        )
-    return data
-
-
 async def extract_code_repo_graph(
     data_documents: list,
     ctx: Optional["PipelineContext"] = None,
+    index_vectors: bool = False,
 ) -> list:
     """Cognify CODE_REPO-route adapter: one enola run over the whole project.
 
     Reads the stored manifest for the repo path and runs the standard code
     graph tasks on the ORIGINAL directory (enola writes its .enola snapshot
-    there, exactly like remember(content_type="code")). One repository node,
-    cross-file edges, one graph read per repo. No LLM, no embeddings.
+    there). One repository node, cross-file edges, one graph read per repo. No
+    LLM, and no embeddings unless ``index_vectors`` (``codegraph_config``) asks
+    for the code facts to be embedded too.
 
     A call-level node_set (add()/remember()'s ``node_set`` argument) reaches
     every document this manifest's repo carries, but not the code nodes
@@ -462,7 +426,7 @@ async def extract_code_repo_graph(
         node_set = validate_node_set_names(metadata.get("node_set")) if metadata else None
 
         data_points = await extract_code_graph(repo_path=repo_path, node_set=node_set)
-        state = await add_code_graph_data_points(data_points, ctx=ctx, graph_only=True)
+        state = await add_code_graph_data_points(data_points, ctx=ctx, graph_only=not index_vectors)
         await add_code_graph_edges(state, repo_path=repo_path, ctx=ctx, node_set=node_set)
 
         logger.info("Code repo graph extracted for %s (%s).", repo_path, data_item.id)
@@ -470,8 +434,8 @@ async def extract_code_repo_graph(
     return data_documents
 
 
-def get_code_repo_tasks() -> list:
+def get_code_repo_tasks(index_vectors: bool = False) -> list:
     """The cognify CODE_REPO-route task list: one adapter task, no LLM stages."""
     from cognee.modules.pipelines.tasks.task import Task
 
-    return [Task(extract_code_repo_graph, needs_llm=False)]
+    return [Task(extract_code_repo_graph, index_vectors=index_vectors, needs_llm=False)]

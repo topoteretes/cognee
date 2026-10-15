@@ -135,11 +135,15 @@ async def run_tasks(
                     data = [data]
 
                 if data_cache or incremental_loading:
+                    codegraph_config = (extras or {}).get("codegraph_config") or {}
                     data = await resolve_data_directories(
                         data,
                         user=user,
                         dataset_id=dataset.id,
                         branch=(extras or {}).get("repo_branch"),
+                        credentials=codegraph_config.get("repo_credentials"),
+                        include_documents=codegraph_config.get("include_documents", True),
+                        treat_as_repository=codegraph_config.get("treat_as_repository", False),
                     )
 
                 # Build (item, item_tasks) work pairs: a resolver picks each

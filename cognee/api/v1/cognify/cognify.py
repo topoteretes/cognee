@@ -44,6 +44,7 @@ from cognee.shared.data_models import KnowledgeGraph
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.code_graph.code_files import get_code_file_tasks
 from cognee.tasks.code_graph.code_repo import get_code_repo_tasks
+from cognee.tasks.code_graph.config import CodeGraphConfig, validate_codegraph_config
 from cognee.tasks.documents import (
     classify_documents,
     extract_chunks_from_documents,
@@ -153,6 +154,7 @@ async def cognify(
     extractor: Literal["llm", "gliner_demo", "gliner"] | None = None,
     ontology_file_path: str | None = None,
     summary_method: Literal["llm", "from_extraction"] | None = None,
+    codegraph_config: CodeGraphConfig | None = None,
     **kwargs,
 ):
     """
@@ -259,6 +261,15 @@ async def cognify(
                  with no relations gets no summary. The explicit argument wins over
                  the SUMMARY_METHOD setting ("llm" by default). Raises while
                  connected to a remote instance.
+        codegraph_config: Options for code repositories
+                 (``cognee.tasks.code_graph.config.CodeGraphConfig``). cognify()
+                 reads ``index_vectors``: also embed the code facts it builds for a
+                 repository, so completion search types reach the code (off by
+                 default; SearchType.CODE reads the graph only). It applies when a
+                 repository is built, so an unchanged repository needs
+                 ``incremental_loading=False`` to be embedded. The other keys are
+                 add()'s and ignored here. ``index_vectors`` raises while connected
+                 to a remote instance.
 
     Returns:
         Union[dict, list[PipelineRunInfo], DryRunEstimate]:
@@ -345,6 +356,7 @@ async def cognify(
             "use improve(review_conflicts=True)"
         )
     drop_deprecated_temporal_cognify(kwargs)
+    codegraph_config = validate_codegraph_config(codegraph_config)
 
     cognify_config = get_cognify_config()
     # The extractor decision is made once, here, before any branch. Branches
@@ -393,6 +405,12 @@ async def cognify(
             raise ValueError(
                 "extractor is not supported while connected to a remote Cognee "
                 "instance. Call cognee.disconnect() to choose the extractor locally."
+            )
+        if codegraph_config.get("index_vectors"):
+            # Same as extractor: client.cognify() has no codegraph_config field.
+            raise ValueError(
+                "codegraph_config is not supported by cognify() while connected to a "
+                "remote Cognee instance. Call cognee.disconnect() to cognify locally."
             )
         if summary_method is not None:
             # Same as extractor: client.cognify() has no summary_method field.
@@ -511,7 +529,9 @@ async def cognify(
                 chunk_size=chunk_size, chunks_per_batch=chunks_per_batch
             ),
             CognifyRoute.CODE: get_code_file_tasks(),
-            CognifyRoute.CODE_REPO: get_code_repo_tasks(),
+            CognifyRoute.CODE_REPO: get_code_repo_tasks(
+                index_vectors=codegraph_config.get("index_vectors", False)
+            ),
         }
 
         def resolve_cognify_tasks(data_item):

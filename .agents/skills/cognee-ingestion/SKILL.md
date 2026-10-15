@@ -34,12 +34,14 @@ All cognee functions are async. Without `dataset_name` data goes to
 - **URLs** are fetched and scraped (needs `ALLOW_HTTP_REQUESTS=true`, the
   default).
 - **Folders** are ingested file by file. A folder that looks like a code
-  project, or a GitHub/GitLab URL, becomes one code repository (needs `git`
-  on PATH).
+  project, a GitHub/GitLab or `.git` URL, an ssh remote, or a URL a git
+  server answers for becomes one code repository (needs `git` on PATH).
 - **Code files** (`.py`, `.ts`, `.go`, …) go down the code-graph route: a
   deterministic graph, no LLM calls, searchable only with
-  `SearchType.CODE`. To index a whole repository explicitly, pass
-  `content_type="code"`.
+  `SearchType.CODE`. To index a folder with no project file as one
+  repository, pass `codegraph_config={"treat_as_repository": True}`;
+  `include_documents=False` in it skips the repo's README and docs.
+  `content_type="code"` is accepted and ignored.
 - **Databases and dlt sources**: a SQL connection string, a dlt
   `DltResource` / `DltSource`, or a CSV. dlt is a core dependency, so no
   extra is needed (`cognee[dlt]` is an empty compatibility extra). Options: `primary_key` (default `"id"`),

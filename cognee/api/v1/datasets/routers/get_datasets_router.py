@@ -62,8 +62,8 @@ StatusPipelineNamesQuery = Annotated[
         alias="pipeline",
         description=(
             "Pipeline names to check: 'add_pipeline', 'cognify_pipeline', or"
-            " 'code_graph_pipeline' (code ingestion via remember"
-            " content_type='code'). Omit to default to cognify_pipeline."
+            " 'code_graph_pipeline' (custom code-graph pipelines; repositories"
+            " are built under cognify_pipeline). Omit to default to cognify_pipeline."
         ),
         examples=[["cognify_pipeline"]],
     ),
@@ -665,8 +665,8 @@ def get_datasets_router() -> APIRouter:
         - **dataset** (List[UUID]): Dataset UUIDs to check (from GET /api/v1/datasets). Omit to get
           status for all datasets you can read.
         - **pipeline** (List[str]): Pipeline names to check: 'add_pipeline', 'cognify_pipeline', or
-          'code_graph_pipeline' (code ingestion via remember content_type='code'). Omit to default
-          to cognify_pipeline.
+          'code_graph_pipeline' (custom code-graph pipelines; repositories are built under
+          cognify_pipeline). Omit to default to cognify_pipeline.
 
         ## Response
         - Single pipeline (default): {dataset_id: {status, progress}}

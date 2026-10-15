@@ -1,20 +1,19 @@
 """Sync a GitHub installation's repositories into the code graph.
 
-Thin orchestration over the existing ``remember(content_type="code")`` path:
-mint a fresh installation token, resolve which repositories to index, and
-hand authenticated clone URLs to the code-graph pipeline. All the heavy
-lifting — clone reuse, snapshot-identity skip on unchanged repos, per-repo
-failure isolation (``raise_on_error=False``) — already lives in
-``resolve_repo_source`` and ``remember``, which is what makes re-running this
-on every webhook cheap and idempotent.
+Thin orchestration over ``remember()``: mint a fresh installation token,
+resolve which repositories to index, and hand each clone URL to remember(),
+which stores it as one repository and builds its code graph through cognify's
+CODE_REPO route. Clone reuse and the incremental skip of unchanged repos live
+in ``resolve_repo_source`` and the pipeline, which is what makes re-running
+this on every webhook cheap and idempotent.
 
-The indexed graph is searchable via ``SearchType.CODE`` (the code route
-produces no chunks or embeddings by design); ``index_vectors`` stays off.
+Only the code graph is indexed (``include_documents=False``, no improve), and
+it is searchable via ``SearchType.CODE``; ``index_vectors`` stays off.
 
-One dataset per installation (``github_<org>``), not per repository —
-``remember`` already accepts a list of repo specs targeting one dataset, and
-per-repo datasets would mean one isolated database per repo under backend
-access control.
+One dataset per installation (``github_<org>``), not per repository: per-repo
+datasets would mean one isolated database per repo under backend access
+control. Each repository is remembered in its own call, so one that fails
+(clone, auth, pipeline) is logged and the rest still sync.
 """
 
 import logging
@@ -116,19 +115,32 @@ async def sync_repositories(
         account_login,
         dataset_name_for_account(account_login),
     )
-    result = await cognee_remember(
-        [clone_url(full_name) for full_name in repo_full_names],
-        dataset_name=dataset_name_for_account(account_login),
-        user=owner,
-        content_type="code",
-        repo_credentials=token,
-        # Report a repo that fails (clone, auth, pipeline) as an errored item
-        # and keep syncing the rest, instead of aborting the whole batch.
-        raise_on_error=False,
-    )
-    if getattr(result, "status", None) == "errored":
+    failed = []
+    for full_name in repo_full_names:
+        try:
+            result = await cognee_remember(
+                clone_url(full_name),
+                dataset_name=dataset_name_for_account(account_login),
+                user=owner,
+                codegraph_config={"repo_credentials": token, "include_documents": False},
+                self_improvement=False,
+                raise_on_error=False,
+            )
+        except Exception:
+            # Logged by name; the token rides the environment, never the URL,
+            # so the error cannot carry it.
+            logger.exception("GitHub sync of %s failed", full_name)
+            failed.append(full_name)
+            continue
+        if getattr(result, "status", None) == "errored":
+            logger.warning(
+                "GitHub sync of %s errored: %s", full_name, getattr(result, "error", None)
+            )
+            failed.append(full_name)
+    if failed:
         logger.warning(
-            "GitHub sync for %s finished with errors: %s",
+            "GitHub sync for %s finished with %d failed repositories: %s",
             account_login,
-            getattr(result, "error", None),
+            len(failed),
+            ", ".join(failed),
         )

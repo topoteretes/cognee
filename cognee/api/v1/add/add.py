@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Any, BinaryIO
 from uuid import UUID
 
@@ -25,6 +26,7 @@ from cognee.modules.pipelines.models.PipelineRunInfo import (
 )
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.code_graph.config import CodeGraphConfig, validate_codegraph_config
 from cognee.tasks.ingestion import ingest_data, resolve_data_directories
 from cognee.tasks.ingestion.data_item import DataItem
 from cognee.tasks.ingestion.dlt_config import resolve_dlt_options, with_csv_loader_options
@@ -56,6 +58,7 @@ async def add(
     data_cache: bool = True,
     skip_connection_test: bool = False,
     branch: str | None = None,
+    codegraph_config: CodeGraphConfig | None = None,
     **kwargs,
 ):
     """
@@ -148,6 +151,14 @@ async def add(
                 a URL at a time: adding it on another branch re-indexes the code graph, but the
                 documents ingested from the previous branch stay. A missing branch raises
                 ``CodeRepositoryError``; not supported while connected to a remote instance.
+        codegraph_config: Options for the code repositories in ``data``
+                (``cognee.tasks.code_graph.config.CodeGraphConfig``). add() reads
+                ``include_documents`` (default True; False stores the code graph's
+                manifest only, not the repository's README and docs),
+                ``repo_credentials`` (token for private https clones) and
+                ``treat_as_repository`` (every item is a repository: a directory
+                needs no project marker, any remote URL is cloned, and an item that
+                is neither raises). ``index_vectors`` is cognify()'s and ignored here.
 
     Returns:
         PipelineRunInfo: Information about the ingestion pipeline execution including:
@@ -236,8 +247,23 @@ async def add(
     # Route to remote instance if connected via serve()
     from cognee.api.v1.serve.state import get_remote_client
 
+    codegraph_config = validate_codegraph_config(codegraph_config)
+
     client = get_remote_client()
     if client is not None:
+        if (
+            codegraph_config.get("repo_credentials")
+            or codegraph_config.get("treat_as_repository")
+            or codegraph_config.get("include_documents") is False
+        ):
+            # client.add() sends only the data and the dataset name: the remote
+            # would guess what the items are and ingest the repo's documents,
+            # and a token must not travel at all.
+            raise ValueError(
+                "codegraph_config is not supported by add() while connected to a remote "
+                "Cognee instance. Use remember(), or call cognee.disconnect() to add "
+                "the repository locally."
+            )
         if branch is not None:
             # client.add() sends only the data and the dataset name, so the remote would
             # clone the default branch instead.
@@ -256,6 +282,11 @@ async def add(
 
         # Before anything is written, and before the name can reach git.
         check_branch_name(branch)
+
+    if codegraph_config.get("treat_as_repository"):
+        # Before anything is written: an item that is not a repository would
+        # otherwise be ingested as text (or a file) the caller did not ask for.
+        _check_repository_specs(data)
 
     if preferred_loaders is not None:
         transformed = {}
@@ -316,6 +347,9 @@ async def add(
             resolve_data_directories,
             include_subdirectories=True,
             branch=branch,
+            credentials=codegraph_config.get("repo_credentials"),
+            include_documents=codegraph_config.get("include_documents", True),
+            treat_as_repository=codegraph_config.get("treat_as_repository", False),
             needs_llm=False,
         ),
         Task(
@@ -383,7 +417,7 @@ async def add(
         data_cache=data_cache,
         skip_connection_test=skip_connection_test,
         # run_tasks resolves repository URLs itself, before this task list runs.
-        extras={"repo_branch": branch},
+        extras={"repo_branch": branch, "codegraph_config": codegraph_config},
     )
 
     # run_pipeline_blocking returns {dataset_id: PipelineRunInfo} but callers
@@ -409,3 +443,34 @@ async def add(
     increment_items_stored(item_count, _attrs)
 
     return result
+
+
+def _check_repository_specs(data) -> None:
+    """Raise unless every item is a local directory or a remote repository URL.
+
+    ``codegraph_config["treat_as_repository"]`` turns off add()'s guessing, so
+    an item that is neither has no reading left: refuse it rather than ingest
+    it as something else.
+    """
+    from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
+    from cognee.tasks.code_graph.resolve_repo import is_remote_repo, redact_repo_spec
+
+    for item in data if isinstance(data, list) else [data]:
+        if not isinstance(item, (str, Path)):
+            raise ValueError(
+                "codegraph_config['treat_as_repository'] expects repository paths or git URLs, "
+                f"got {type(item).__name__}."
+            )
+        spec = str(item).strip()
+        if is_remote_repo(spec):
+            continue
+        try:
+            is_directory = resolve_local_path(spec, must_exist=True).is_dir()
+        except (OSError, ValueError):
+            is_directory = False
+        if not is_directory:
+            raise ValueError(
+                f"'{redact_repo_spec(spec)}' is not a repository: with "
+                "codegraph_config['treat_as_repository'] every item must be a local "
+                "directory or a git remote URL."
+            )

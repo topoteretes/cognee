@@ -98,7 +98,13 @@ async def index_code(cognee, root):
     print("\nIndexing the sample code:", flush=True)
     # index_vectors writes CodeSymbol embeddings too, so the final
     # GRAPH_COMPLETION answer can reach the code alongside text and lessons.
-    await cognee.remember(str(repo), dataset_name=DATASET, content_type="code", index_vectors=True)
+    # treat_as_repository: the sample folder has no project file, so add()
+    # would otherwise split it into files instead of building one repository.
+    await cognee.remember(
+        str(repo),
+        dataset_name=DATASET,
+        codegraph_config={"treat_as_repository": True, "index_vectors": True},
+    )
     facts = await cognee.search(
         query_type=cognee.SearchType.CODE,
         query_text="",

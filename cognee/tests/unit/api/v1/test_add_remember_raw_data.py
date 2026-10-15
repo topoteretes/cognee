@@ -5,10 +5,10 @@ GitHub/GitLab repository URL — and joins the uploads as a single list, uploads
 first. The router does no interpretation of its own: the strings reach add()
 exactly as an SDK caller would pass them, and labels/external_metadata pair
 with the combined list. Empty entries (Swagger UI submits untouched array items
-as "") are dropped. A request with neither uploads nor raw_data is a 400. With
-content_type="code" the raw_data entries are the repository specs; remember
-rejects raw_data together with content_type="skills" or "cogx-archive" because
-those paths never run string inputs through add().
+as "") are dropped. A request with neither uploads nor raw_data is a 400.
+content_type="code" is accepted and ignored; remember rejects raw_data together
+with content_type="skills" or "cogx-archive" because those paths never run
+string inputs through add().
 """
 
 import importlib
@@ -199,7 +199,7 @@ def test_remember_combines_uploads_and_raw_data_uploads_first(client):
         assert sent[1] == REPO_URL
 
 
-def test_remember_code_content_type_takes_repo_specs_from_raw_data(client):
+def test_remember_code_content_type_is_ignored(client):
     with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
         mock_remember.return_value = remember_completed()
 
@@ -214,7 +214,7 @@ def test_remember_code_content_type_takes_repo_specs_from_raw_data(client):
 
         assert response.status_code == 200, response.text
         assert mock_remember.call_args.args[0] == [REPO_URL, "/srv/other/repo"]
-        assert mock_remember.call_args.kwargs["content_type"] == "code"
+        assert mock_remember.call_args.kwargs["content_type"] is None
 
 
 @pytest.mark.parametrize("content_type", ["skills", "cogx-archive"])

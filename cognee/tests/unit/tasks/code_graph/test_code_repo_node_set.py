@@ -288,8 +288,8 @@ async def test_coderepository_keeps_its_tag_after_the_snapshot_stamp(tmp_path, m
 
 @pytest.mark.asyncio
 async def test_untagged_repo_is_never_detagged(tmp_path, monkeypatch):
-    """No node_set now, none stored before: zero detag calls -- the legacy
-    per-file/remember(content_type="code") path pays nothing for this."""
+    """No node_set now, none stored before: zero detag calls -- the
+    per-file CODE route pays nothing for this."""
     _write_snapshot(tmp_path, FACTS)
     existing_nodes = [(REPO_NODE_ID, {"type": "CodeRepository", "name": REPO})]
     engine = _mock_engine(monkeypatch, existing_nodes, [])

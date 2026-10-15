@@ -1,9 +1,10 @@
 """Resolve repository specs (local paths or remote git URLs) to local clones.
 
-Used by ``remember(..., content_type="code")`` so callers can pass a GitHub
-URL (or a list of them) and get the enola code-graph pipeline run on a local
-shallow clone, and by ``add()`` to recognise a GitHub/GitLab repository URL
-(:func:`code_repo_clone_url`) and clone it the same way. Clones live under
+Used by ``add()`` to recognise a repository among its inputs -- a GitHub/GitLab
+URL or ``.git`` URL (:func:`code_repo_clone_url`), an ssh remote
+(:func:`code_repo_ssh_url`), or a URL a git server answers for
+(:func:`probe_git_remote`) -- and clone it, so cognify's CODE_REPO route can run
+enola on a local shallow clone. Clones live under
 ``BaseConfig.repos_root_directory`` (``~/.cognee/repos`` by default) and are
 reused across calls; an existing clone is refreshed with a best-effort
 ``git pull``. A ``branch`` can be chosen for a remote repository; each branch is
@@ -99,7 +100,9 @@ class CodeRepositoryError(CogneeSystemError):
 
 def is_remote_repo(spec) -> bool:
     """Whether the spec is a remote git URL rather than a local path."""
-    return isinstance(spec, str) and spec.startswith(_REMOTE_PREFIXES)
+    return isinstance(spec, str) and (
+        spec.startswith(_REMOTE_PREFIXES) or _SCP_REMOTE.fullmatch(spec) is not None
+    )
 
 
 def code_repo_clone_url(spec) -> str | None:
@@ -112,9 +115,9 @@ def code_repo_clone_url(spec) -> str | None:
     prefix, query or fragment -- and any http(s) URL ending in ``.git`` on any
     host. Deeper forge URLs (``/blob/``, ``/tree/``, ``/issues``, ``/pull/``,
     GitLab's ``/-/`` pages) and forge site pages (``/topics/x``, ``/explore``)
-    name pages, not repositories, and are left to the web-page path. ``git@``
-    and ``ssh://`` specs are not detected: they have no web-page reading to
-    disambiguate from and stay explicit via ``remember(content_type="code")``.
+    name pages, not repositories, and are left to the web-page path. ssh remotes
+    are :func:`code_repo_ssh_url`'s, and other hosts' repository URLs without
+    ``.git`` are found by asking the server (:func:`probe_git_remote`).
 
     The returned URL is normalised for ``git clone``: query and fragment
     dropped, trailing slash removed, userinfo (a token) kept -- redact it with
@@ -142,6 +145,112 @@ def code_repo_clone_url(spec) -> str | None:
     if not is_repo:
         return None
     return urlunsplit((parts.scheme, parts.netloc, "/" + "/".join(segments), "", ""))
+
+
+# scp-like ssh remote, e.g. git@github.com:owner/repo.git. The path must name a
+# repository (contain a '/' or end in '.git'), so "bob@example.com:42" is text.
+_SCP_REMOTE = re.compile(r"[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:(?!//)[A-Za-z0-9._~/-]+")
+
+
+def code_repo_ssh_url(spec) -> str | None:
+    """The spec when it is a single ssh remote token, else None.
+
+    Recognised: ``ssh://[user@]host[:port]/path`` and the scp-like
+    ``user@host:owner/repo[.git]`` (or ``user@host:repo.git``). The whole
+    string must be the remote -- prose that merely contains one is text.
+    """
+    if not isinstance(spec, str):
+        return None
+    spec = spec.strip()
+    if not spec or any(character.isspace() for character in spec):
+        return None
+    if spec.lower().startswith("ssh://"):
+        parts = urlsplit(spec)
+        if parts.hostname and parts.path.strip("/"):
+            return spec
+        return None
+    if _SCP_REMOTE.fullmatch(spec):
+        path = spec.split(":", 1)[1]
+        if "/" in path.strip("/") or path.endswith(".git"):
+            return spec
+    return None
+
+
+_PROBE_TIMEOUT_SECONDS = 5.0
+_PROBE_CACHE_TTL_SECONDS = 300.0
+_GIT_UPLOAD_PACK_ADVERTISEMENT = "application/x-git-upload-pack-advertisement"
+# Probe answers per credential-free URL. add() resolves its items twice (the
+# runner's pre-resolve, then the add task), and a web page must not cost two
+# extra requests for that.
+_probe_cache: dict[str, tuple[float, bool]] = {}
+
+
+async def probe_git_remote(spec) -> str | None:
+    """The clone URL when a git server answers for an http(s) URL, else None.
+
+    For repository URLs :func:`code_repo_clone_url` cannot recognise by shape:
+    Bitbucket, Gitea, self-hosted GitLab and other forges without a ``.git``
+    suffix. Asks ``<url>/info/refs?service=git-upload-pack``, the request git
+    itself makes first, and counts the URL as a repository only when the answer
+    is a 200 with git's advertisement content type. A web page never answers
+    that way. Any other answer, a timeout, an address the SSRF check refuses,
+    or ``ALLOW_HTTP_REQUESTS=false`` means "not a repository", so the URL is
+    read as a web page, as before.
+
+    The probe sends no credentials and follows no redirects. A private
+    repository therefore reads as a page: use its ``.git`` URL or
+    ``codegraph_config={"treat_as_repository": True}``.
+    """
+    if not isinstance(spec, str):
+        return None
+    spec = spec.strip()
+    if any(character.isspace() for character in spec):
+        return None  # prose that starts with a URL, not a clone URL
+    parts = urlsplit(spec)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return None
+    host = parts.hostname.lower().removeprefix("www.")
+    if host in ("github.com", "gitlab.com"):
+        # Shape decides there: code_repo_clone_url has already said no.
+        return None
+    segments = [segment for segment in parts.path.split("/") if segment]
+    if not segments:
+        return None
+    clone_url = urlunsplit((parts.scheme, parts.netloc, "/" + "/".join(segments), "", ""))
+    probe_url = redact_repo_spec(clone_url)
+
+    now = asyncio.get_running_loop().time()
+    cached = _probe_cache.get(probe_url)
+    if cached is not None and now - cached[0] < _PROBE_CACHE_TTL_SECONDS:
+        return clone_url if cached[1] else None
+
+    is_repo = await _answers_as_git_server(probe_url)
+    _probe_cache[probe_url] = (now, is_repo)
+    return clone_url if is_repo else None
+
+
+async def _answers_as_git_server(url: str) -> bool:
+    import httpx
+
+    from cognee.tasks.web_scraper.ssrf_protection import (
+        SSRFProtectionError,
+        validate_outbound_url,
+    )
+
+    try:
+        # Also refuses everything when ALLOW_HTTP_REQUESTS=false.
+        await validate_outbound_url(url)
+    except SSRFProtectionError:
+        return False
+    try:
+        async with httpx.AsyncClient(
+            timeout=_PROBE_TIMEOUT_SECONDS, follow_redirects=False
+        ) as client:
+            response = await client.get(f"{url}/info/refs", params={"service": "git-upload-pack"})
+    except httpx.HTTPError:
+        return False
+    content_type = response.headers.get("content-type", "")
+    return response.status_code == 200 and content_type.startswith(_GIT_UPLOAD_PACK_ADVERTISEMENT)
 
 
 def redact_repo_spec(spec: str | Path) -> str:
@@ -234,6 +343,35 @@ def _credential_env(token: str) -> dict:
     }
 
 
+async def _noninteractive_env(git_binary: str) -> dict:
+    """Environment that makes git fail instead of waiting for input.
+
+    A server process has no one to answer a password, passphrase or host-key
+    prompt, so an unanswered prompt would hang the call until the git timeout.
+    ``GIT_TERMINAL_PROMPT=0`` covers https; ssh gets ``BatchMode=yes``, appended
+    to the ssh command the user already chose (``GIT_SSH_COMMAND``, else
+    ``core.sshCommand``) so their keys and options still apply. A legacy
+    ``GIT_SSH`` program is left alone: ``GIT_SSH_COMMAND`` would override it.
+    """
+    env = {"GIT_TERMINAL_PROMPT": "0"}
+    ssh_command = os.environ.get("GIT_SSH_COMMAND")
+    if not ssh_command:
+        if os.environ.get("GIT_SSH"):
+            return env
+        process = await asyncio.create_subprocess_exec(
+            git_binary,
+            "config",
+            "--get",
+            "core.sshCommand",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _stderr = await process.communicate()
+        ssh_command = stdout.decode(errors="replace").strip() or "ssh"
+    env["GIT_SSH_COMMAND"] = f"{ssh_command} -o BatchMode=yes"
+    return env
+
+
 async def _run_git(args, cwd: Path | None = None, env: dict | None = None) -> tuple:
     git_binary = shutil.which("git")
     if git_binary is None:
@@ -244,7 +382,7 @@ async def _run_git(args, cwd: Path | None = None, env: dict | None = None) -> tu
         git_binary,
         *args,
         cwd=str(cwd) if cwd else None,
-        env={**os.environ, **env} if env else None,
+        env={**os.environ, **(await _noninteractive_env(git_binary)), **(env or {})},
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -329,6 +467,15 @@ async def resolve_repo_source(
         )
 
     url = str(spec)
+
+    if credentials and not url.lower().startswith(("http://", "https://")):
+        # The token rides an http.extraHeader, which ssh never reads: refuse
+        # instead of cloning without the authentication the caller asked for.
+        raise CodeRepositoryError(
+            message=f"repo_credentials only apply to https remotes, not '{redact_repo_spec(url)}'. "
+            "An ssh remote authenticates with the host's ssh keys.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
 
     # SSRF: the URL is caller-supplied and git runs server-side, so an http(s)
     # remote must clear the same outbound check add()'s http items already clear --

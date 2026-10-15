@@ -3,8 +3,8 @@
 Multipart has no encoding for an empty array, so clients that render a list
 field with one blank item (Swagger UI) send ``data=""``. Before
 ``cognee.api.upload_fields`` the ``UploadFile`` validator rejected that part
-before the handler ran, which made e.g. ``POST /v1/remember`` with
-``content_type="code"`` unusable from Swagger UI.
+before the handler ran, which made e.g. ``POST /v1/remember`` with only
+``raw_data`` entries unusable from Swagger UI.
 """
 
 import importlib
@@ -105,7 +105,8 @@ def test_drop_blank_uploads_rejects_text_with_actionable_message():
 
 
 def test_remember_code_ingestion_with_blank_data_part(client, fake_remember):
-    """The Swagger UI shape: content_type=code, raw_data filled, data left blank."""
+    """The Swagger UI shape: raw_data filled, data left blank. content_type=code is
+    accepted and ignored."""
     response = client.post(
         "/remember",
         files=BLANK_PART,
@@ -119,7 +120,8 @@ def test_remember_code_ingestion_with_blank_data_part(client, fake_remember):
     )
     assert response.status_code == 200, response.text
     assert fake_remember["data"] == ["https://github.com/topoteretes/cognee"]
-    assert fake_remember["kwargs"]["content_type"] == "code"
+    assert fake_remember["kwargs"]["content_type"] is None
+    assert "index_vectors" not in fake_remember["kwargs"]
 
 
 def test_remember_blank_data_part_without_content_type_is_treated_as_no_uploads(
@@ -157,14 +159,16 @@ def test_remember_real_upload_still_reaches_handler_as_uploadfile(client, fake_r
     assert hasattr(upload, "file")
 
 
-def test_remember_code_still_rejects_real_upload(client, fake_remember):
+def test_remember_code_content_type_takes_uploads_like_normal_ingestion(client, fake_remember):
     response = client.post(
         "/remember",
         files=PY_FILE,
         data={"datasetName": "ds", "content_type": "code", "raw_data": "/repo"},
     )
-    assert response.status_code == 400
-    assert "does not accept file uploads" in response.json()["detail"]
+    assert response.status_code == 200, response.text
+    assert len(fake_remember["data"]) == 2
+    assert fake_remember["data"][1] == "/repo"
+    assert fake_remember["kwargs"]["content_type"] is None
 
 
 def test_remember_openapi_keeps_binary_schema_and_empty_list_examples(client):
