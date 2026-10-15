@@ -284,12 +284,11 @@ async def test_resolve_code_repository_url_rejects_non_repository_specs():
 
 
 @pytest.mark.asyncio
-async def test_repository_urls_are_cloned_with_credentials_ahead_of_the_pipeline(
-    tmp_path, monkeypatch, llm_key_set
-):
-    """add(codegraph_config={"repo_credentials": ...}) clones private repos up front."""
+async def test_repository_urls_are_cloned_with_credentials(tmp_path, monkeypatch, llm_key_set):
+    """add(codegraph_config={"repo_credentials": ...}) hands the token to the cloner."""
     import cognee.tasks.code_graph.code_repo as code_repo_module
     from cognee.tasks.ingestion.data_item import DataItem
+    from cognee.tasks.ingestion.resolve_data_directories import resolve_data_directories
 
     clone = _make_repo(tmp_path)
     clones = []
@@ -300,7 +299,7 @@ async def test_repository_urls_are_cloned_with_credentials_ahead_of_the_pipeline
 
     monkeypatch.setattr(code_repo_module, "resolve_repo_source", fake_resolve_repo_source)
 
-    resolved = await code_repo_module.resolve_code_repositories(
+    resolved = await resolve_data_directories(
         ["plain text note", "https://github.com/org/private"], credentials="tok123"
     )
 
@@ -314,16 +313,44 @@ async def test_repository_urls_are_cloned_with_credentials_ahead_of_the_pipeline
 
 
 @pytest.mark.asyncio
-async def test_data_without_repository_urls_is_returned_unchanged(monkeypatch):
+async def test_credentials_do_not_make_a_web_page_a_repository(monkeypatch):
     import cognee.tasks.code_graph.code_repo as code_repo_module
+    from cognee.tasks.ingestion.resolve_data_directories import resolve_data_directories
 
     async def refuse(*_args, **_kwargs):
         raise AssertionError("nothing here is a repository URL")
 
     monkeypatch.setattr(code_repo_module, "resolve_repo_source", refuse)
-    data = "https://example.com/article"
+    data = ["https://example.com/article"]
 
-    assert await code_repo_module.resolve_code_repositories(data, credentials="tok") is data
+    assert await resolve_data_directories(data, credentials="tok") == data
+
+
+@pytest.mark.asyncio
+async def test_resolution_is_idempotent_on_its_own_output(tmp_path, monkeypatch, llm_key_set):
+    """add() resolves ahead of the pipeline runner, which resolves again with defaults."""
+    import cognee.tasks.code_graph.code_repo as code_repo_module
+    from cognee.tasks.ingestion.resolve_data_directories import resolve_data_directories
+
+    clone = _make_repo(tmp_path)
+    clones = []
+
+    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None):
+        clones.append(spec)
+        return clone
+
+    monkeypatch.setattr(code_repo_module, "resolve_repo_source", fake_resolve_repo_source)
+
+    first = await resolve_data_directories(
+        ["note", "https://github.com/org/private", str(clone)],
+        credentials="tok",
+        include_documents=False,
+    )
+    second = await resolve_data_directories(first)
+
+    assert second == first
+    # The second pass neither clones again nor re-emits the suppressed documents.
+    assert clones == ["https://github.com/org/private"]
 
 
 @pytest.fixture
@@ -489,14 +516,14 @@ async def test_documents_omitted_for_a_code_graph_only_caller(tmp_path, llm_key_
 
 
 @pytest.mark.asyncio
-async def test_local_project_resolves_eagerly_without_documents(tmp_path, llm_key_set):
-    """A local code project is intercepted ahead of the pipeline for include_documents."""
-    import cognee.tasks.code_graph.code_repo as code_repo_module
+async def test_local_project_resolves_without_documents(tmp_path, llm_key_set):
+    """include_documents=False leaves a local code project's README/docs out."""
     from cognee.tasks.ingestion.data_item import DataItem
+    from cognee.tasks.ingestion.resolve_data_directories import resolve_data_directories
 
     repo = _make_repo(tmp_path)
 
-    resolved = await code_repo_module.resolve_code_repositories(
+    resolved = await resolve_data_directories(
         ["plain text note", str(repo)], include_documents=False
     )
 
@@ -507,19 +534,20 @@ async def test_local_project_resolves_eagerly_without_documents(tmp_path, llm_ke
 
 
 @pytest.mark.asyncio
-async def test_local_project_resolves_eagerly_with_documents(tmp_path, llm_key_set):
-    import cognee.tasks.code_graph.code_repo as code_repo_module
+async def test_local_project_resolves_with_documents(tmp_path, llm_key_set):
+    from cognee.tasks.ingestion.resolve_data_directories import resolve_data_directories
 
     repo = _make_repo(tmp_path)
 
-    resolved = await code_repo_module.resolve_code_repositories([str(repo)], include_documents=True)
+    resolved = await resolve_data_directories([str(repo)], include_documents=True)
 
     assert {Path(item).name for item in resolved[1:]} == {"README.md", "notes.txt"}
 
 
 @pytest.mark.asyncio
-async def test_repository_url_resolves_eagerly_without_documents(tmp_path, monkeypatch):
+async def test_repository_url_resolves_without_documents(tmp_path, monkeypatch):
     import cognee.tasks.code_graph.code_repo as code_repo_module
+    from cognee.tasks.ingestion.resolve_data_directories import resolve_data_directories
 
     clone = _make_repo(tmp_path)
 
@@ -528,7 +556,7 @@ async def test_repository_url_resolves_eagerly_without_documents(tmp_path, monke
 
     monkeypatch.setattr(code_repo_module, "resolve_repo_source", fake_resolve_repo_source)
 
-    resolved = await code_repo_module.resolve_code_repositories(
+    resolved = await resolve_data_directories(
         ["https://github.com/org/private"], credentials="tok123", include_documents=False
     )
 
@@ -537,13 +565,14 @@ async def test_repository_url_resolves_eagerly_without_documents(tmp_path, monke
 
 
 @pytest.mark.asyncio
-async def test_plain_directory_is_left_to_the_pipeline(tmp_path):
-    """Only code projects are intercepted; an ordinary folder passes through."""
-    import cognee.tasks.code_graph.code_repo as code_repo_module
+async def test_plain_directory_is_not_a_repository(tmp_path):
+    """include_documents applies to repositories; an ordinary folder still flattens."""
+    from cognee.tasks.ingestion.resolve_data_directories import resolve_data_directories
 
     folder = tmp_path / "notes"
     folder.mkdir()
     (folder / "a.md").write_text("# a")
-    data = [str(folder)]
 
-    assert await code_repo_module.resolve_code_repositories(data, include_documents=False) is data
+    assert await resolve_data_directories([str(folder)], include_documents=False) == [
+        str(folder / "a.md")
+    ]

@@ -42,7 +42,11 @@ from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
 )
 from cognee.shared.logging_utils import get_logger
-from cognee.tasks.code_graph.config import CodeGraphConfig, validate_codegraph_config
+from cognee.tasks.code_graph.config import (
+    CodeGraphConfig,
+    validate_codegraph_config,
+    with_legacy_code_content_type,
+)
 from cognee.tasks.ingestion.data_item import DataItem
 
 logger = get_logger("remember")
@@ -1111,22 +1115,13 @@ async def remember(
 
     # content_type="code" was removed (SDK-793): a repository is ordinary data
     # and builds through add() + cognify(). Callers still passing it keep
-    # working -- and keep the behaviour they had, which is why the value is
-    # translated rather than dropped. It said two things, and both have to
-    # survive the translation or the deprecation changes results silently:
-    # the removed route indexed the code graph only (include_documents=False),
-    # and it took every item as a repository spec, cloning any git remote
-    # (treat_as_repository=True). Without the second, a Bitbucket or
-    # self-hosted forge URL -- which add()'s own detection deliberately does
-    # not claim -- would be scraped as a web page instead of cloned. An
-    # explicit codegraph_config still wins over both. Translated here, before
-    # any path reads content_type.
+    # working -- and keep the behaviour they had, so the value is translated
+    # (with_legacy_code_content_type, shared with the HTTP route) rather than
+    # dropped. An explicit codegraph_config key wins over the translation.
+    # Translated here, before any path reads content_type.
     if kwargs.get("content_type") == "code":
         kwargs.pop("content_type")
-        codegraph_config = dict(kwargs.get("codegraph_config") or {})
-        codegraph_config.setdefault("include_documents", False)
-        codegraph_config.setdefault("treat_as_repository", True)
-        kwargs["codegraph_config"] = codegraph_config
+        kwargs["codegraph_config"] = with_legacy_code_content_type(kwargs.get("codegraph_config"))
         logger.warning(
             "remember(content_type='code') is deprecated: pass the repository path or URL "
             'as data with codegraph_config={"include_documents": False, '

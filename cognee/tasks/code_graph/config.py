@@ -62,3 +62,41 @@ def validate_codegraph_config(codegraph_config: CodeGraphConfig | None) -> CodeG
             f"Supported: {', '.join(sorted(CODEGRAPH_CONFIG_KEYS))}."
         )
     return cast(CodeGraphConfig, dict(codegraph_config))
+
+
+# What the removed ``remember(content_type="code")`` meant, as codegraph_config:
+# the route indexed the code graph only and took every item as a repository
+# spec, cloning any git remote. Both halves have to survive the translation or
+# the deprecation changes results silently (a Bitbucket or self-hosted forge
+# URL, which add()'s detection does not claim, would be scraped as a web page).
+LEGACY_CODE_CONTENT_TYPE_CONFIG: CodeGraphConfig = {
+    "include_documents": False,
+    "treat_as_repository": True,
+}
+
+
+def with_legacy_code_content_type(codegraph_config: CodeGraphConfig | None) -> CodeGraphConfig:
+    """The config a deprecated ``content_type="code"`` call means.
+
+    The legacy pair is applied as defaults: an explicit key in
+    ``codegraph_config`` wins over it. Used wherever the removed value is
+    still accepted (the SDK and ``POST /remember``), so every surface reads
+    it the same way.
+    """
+    return cast(
+        CodeGraphConfig, {**LEGACY_CODE_CONTENT_TYPE_CONFIG, **dict(codegraph_config or {})}
+    )
+
+
+def is_legacy_code_content_type(codegraph_config: CodeGraphConfig | None) -> bool:
+    """Whether the config's repository options are exactly the legacy pair.
+
+    ``POST /remember`` has no field for ``treat_as_repository``; the one wire
+    form that carries it is the deprecated ``content_type="code"``, which the
+    server reads back through :func:`with_legacy_code_content_type`. A config
+    is sent that way only when that reading reproduces it, so nothing is
+    built differently from what the caller asked. An absent
+    ``include_documents`` counts as the legacy value, as the server defaults it.
+    """
+    config = codegraph_config or {}
+    return bool(config.get("treat_as_repository")) and not config.get("include_documents", False)

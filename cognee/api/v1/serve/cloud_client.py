@@ -153,16 +153,18 @@ class CloudClient:
         if codegraph_config.get("index_vectors") or kwargs.get("index_vectors"):
             form.add_field("index_vectors", "true")
 
-        # POST /remember carries the code graph options as one legacy field,
-        # content_type='code', which the server reads back as
-        # include_documents=False + treat_as_repository=True. A config that
-        # means exactly that travels as that field -- every spec then goes in
-        # 'raw_data' and the server resolves it as a repository, whatever the
-        # host. Any other combination has no wire representation, and
-        # forwarding it would silently build something else.
+        # POST /remember carries the repository options as one legacy field,
+        # content_type='code', which the server reads back through
+        # with_legacy_code_content_type. A config that means exactly that
+        # travels as that field -- every spec then goes in 'raw_data' and the
+        # server resolves it as a repository, whatever the host. Any other
+        # combination has no wire representation, and forwarding it would
+        # silently build something else.
+        from cognee.tasks.code_graph.config import is_legacy_code_content_type
+
         declared_repositories = bool(codegraph_config.get("treat_as_repository"))
         if declared_repositories:
-            if codegraph_config.get("include_documents", False):
+            if not is_legacy_code_content_type(codegraph_config):
                 raise ValueError(
                     "codegraph_config treat_as_repository with include_documents=True is "
                     "not supported while connected to a remote Cognee instance; "

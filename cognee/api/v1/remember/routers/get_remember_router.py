@@ -16,6 +16,7 @@ from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
 from cognee.shared.utils import send_telemetry
+from cognee.tasks.code_graph.config import with_legacy_code_content_type
 from cognee.tasks.ingestion.data_item import (
     pair_labels_with_data,
     parse_external_metadata,
@@ -390,13 +391,9 @@ def get_remember_router() -> APIRouter:
 
         # content_type='code' was removed (SDK-793): a repository in raw_data is
         # ordinary data. Clients still sending it keep working, and keep the
-        # behaviour they had, so the value is read rather than dropped: that
-        # route indexed the code graph only (include_documents=False) and took
-        # every raw_data entry as a repository spec, cloning any git remote
-        # (treat_as_repository=True). The second half matters as much as the
-        # first -- without it a Bitbucket or self-hosted forge URL, which
-        # add()'s own detection does not claim, would be fetched and stored as
-        # a web page instead of cloned.
+        # behaviour they had: the value is read as the codegraph_config it
+        # meant (with_legacy_code_content_type, shared with the SDK) rather
+        # than dropped.
         code_only = content_type == "code"
         if code_only:
             content_type = None
@@ -531,6 +528,9 @@ def get_remember_router() -> APIRouter:
                 status_code=400,
                 detail="index_vectors is only supported for normal ingestion.",
             )
+        codegraph_config = {"index_vectors": True} if index_vectors else {}
+        if code_only:
+            codegraph_config = with_legacy_code_content_type(codegraph_config)
 
         # After the field-specific checks above, so a misused field is
         # reported as such rather than as "nothing to ingest".
@@ -612,20 +612,7 @@ def get_remember_router() -> APIRouter:
                 content_type=content_type or None,
                 skills_text=skills_text or None,
                 skill_name=skill_name or None,
-                **(
-                    {
-                        "codegraph_config": {
-                            **({"index_vectors": True} if index_vectors else {}),
-                            **(
-                                {"include_documents": False, "treat_as_repository": True}
-                                if code_only
-                                else {}
-                            ),
-                        }
-                    }
-                    if index_vectors or code_only
-                    else {}
-                ),
+                **({"codegraph_config": codegraph_config} if codegraph_config else {}),
                 **({"config": config_to_use} if config_to_use else {}),
                 **({"graph_model": graph_model_parsed} if graph_model_parsed else {}),
                 # HTTP contract: an errored blocking run is reported as the 409

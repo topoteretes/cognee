@@ -25,6 +25,7 @@ from uuid import uuid4
 import pytest
 
 from cognee.modules.ingestion.exceptions import IngestionError
+from cognee.tasks.ingestion.resolve_data_directories import resolve_data_directories
 
 code_repo = importlib.import_module("cognee.tasks.code_graph.code_repo")
 remember_module = importlib.import_module("cognee.api.v1.remember.remember")
@@ -70,7 +71,7 @@ def cloned(monkeypatch, tmp_path):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("spec", UNDETECTED_REMOTES)
 async def test_a_declared_remote_is_cloned_not_sniffed(cloned, spec):
-    resolved = await code_repo.resolve_code_repositories([spec], treat_as_repository=True)
+    resolved = await resolve_data_directories([spec], treat_as_repository=True)
 
     assert cloned == [(spec, None)], "the spec never reached the cloner"
     assert len(resolved) == 2
@@ -85,9 +86,9 @@ async def test_without_the_declaration_the_same_spec_is_left_alone(cloned, spec)
     # the web-page path, which is right for a URL nobody declared.
     if spec.startswith(("git@", "ssh://")):
         with pytest.raises(IngestionError, match="ssh git remotes"):
-            await code_repo.resolve_code_repositories([spec])
+            await resolve_data_directories([spec])
         return
-    assert await code_repo.resolve_code_repositories([spec]) == [spec]
+    assert await resolve_data_directories([spec]) == [spec]
     assert cloned == []
 
 
@@ -98,7 +99,7 @@ async def test_a_declared_directory_needs_no_project_marker(cloned, tmp_path):
     (plain / "pkg").mkdir(parents=True)
     (plain / "pkg" / "a.py").write_text("def a():\n    return 1\n")
 
-    resolved = await code_repo.resolve_code_repositories([str(plain)], treat_as_repository=True)
+    resolved = await resolve_data_directories([str(plain)], treat_as_repository=True)
 
     assert cloned == [(str(plain), None)]
     assert resolved[0].system_metadata["source"] == "code_repo"
@@ -111,7 +112,7 @@ async def test_a_declared_directory_needs_no_project_marker(cloned, tmp_path):
 async def test_a_declared_clone_marks_its_documents_as_cognees_own(cloned):
     from cognee.tasks.ingestion.repo_clone_file import RepoCloneFile
 
-    resolved = await code_repo.resolve_code_repositories(
+    resolved = await resolve_data_directories(
         ["https://bitbucket.org/acme/api"], treat_as_repository=True
     )
 
@@ -120,7 +121,7 @@ async def test_a_declared_clone_marks_its_documents_as_cognees_own(cloned):
 
 @pytest.mark.asyncio
 async def test_credentials_reach_the_cloner(cloned):
-    await code_repo.resolve_code_repositories(
+    await resolve_data_directories(
         ["https://git.acme.com/team/api"], credentials="tok123", treat_as_repository=True
     )
 
@@ -131,7 +132,7 @@ async def test_credentials_reach_the_cloner(cloned):
 async def test_a_url_credential_is_redacted_before_it_is_stored(cloned):
     spec = "https://x-access-token:secret@git.acme.com/team/api"
 
-    resolved = await code_repo.resolve_code_repositories([spec], treat_as_repository=True)
+    resolved = await resolve_data_directories([spec], treat_as_repository=True)
 
     stored = resolved[0].system_metadata["repo_url"]
     assert "secret" not in stored
@@ -140,7 +141,7 @@ async def test_a_url_credential_is_redacted_before_it_is_stored(cloned):
 
 @pytest.mark.asyncio
 async def test_include_documents_false_still_suppresses_them(cloned):
-    resolved = await code_repo.resolve_code_repositories(
+    resolved = await resolve_data_directories(
         ["https://bitbucket.org/acme/api"], include_documents=False, treat_as_repository=True
     )
 
@@ -152,7 +153,7 @@ async def test_a_non_spec_item_raises_instead_of_being_stored_as_text(cloned):
     # The declaration says every item is a repository; an upload among them is
     # a mistake, and storing it silently is what the old route refused to do.
     with pytest.raises(IngestionError, match="treat_as_repository expects repository paths"):
-        await code_repo.resolve_code_repositories(
+        await resolve_data_directories(
             [SimpleNamespace(file=b"", filename="notes.txt")], treat_as_repository=True
         )
 
@@ -165,10 +166,10 @@ async def test_local_specs_are_still_gated_by_accept_local_file_path(cloned, mon
     monkeypatch.setattr(save_data_settings, "accept_local_file_path", False)
 
     with pytest.raises(IngestionError, match="ACCEPT_LOCAL_FILE_PATH=false"):
-        await code_repo.resolve_code_repositories([str(tmp_path)], treat_as_repository=True)
+        await resolve_data_directories([str(tmp_path)], treat_as_repository=True)
 
     # A remote spec is unaffected: nothing is read from this machine.
-    assert await code_repo.resolve_code_repositories(
+    assert await resolve_data_directories(
         ["https://bitbucket.org/acme/api"], treat_as_repository=True
     )
 
