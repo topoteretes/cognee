@@ -2,14 +2,15 @@
 
 Flow (default backends: sqlite + lancedb + ladybug, real LLM from .env):
 
-1. add + cognify lorem ipsum (TRIPLET_EMBEDDING=true) -> authentic graph,
-   vector (IndexSchema payloads!), ledger and triplet data.
+1. add + cognify lorem ipsum -> authentic graph, vector (IndexSchema
+   payloads!) and ledger data. Cognify no longer writes Triplet_text
+   (SDK-1115), so the migration's triplet re-keying finds no collection here.
 2. DOWNGRADE via the migration's own down() (runner.downgrade_database_migrations):
    graph node ids, embedded edge-property endpoint ids, vector point ids
-   (vectors preserved on LanceDB/PGVector), triplet point ids, ledger
+   (vectors preserved on LanceDB/PGVector), ledger
    slugs/edge endpoints; revisions stamped back to NULL.
 3. Run the real startup migration (run_database_migrations).
-4. VERIFY graph / vector / triplet / ledger consistency, search, re-cognify
+4. VERIFY graph / vector / ledger consistency, search, re-cognify
    (the #2510 EntityAlreadyExists scenario) and delete-by-ledger-slug.
 
 Works in BOTH access-control modes: with it on, stores resolve through the
@@ -18,7 +19,7 @@ ENABLE_BACKEND_ACCESS_CONTROL=False, the global engines are used directly and
 revisions live in the single-row global_database_version table.
 
 Run (add ENABLE_BACKEND_ACCESS_CONTROL=False for the global-mode variant):
-    TRIPLET_EMBEDDING=true SYSTEM_ROOT_DIRECTORY=... DATA_ROOT_DIRECTORY=... \
+    SYSTEM_ROOT_DIRECTORY=... DATA_ROOT_DIRECTORY=... \
     python cognee/tests/migrations/test_migration_lockstep.py <seed|downgrade|migrate|verify|recognify|delete>
 """
 
@@ -56,10 +57,6 @@ CHECKS: list[tuple[str, bool, str]] = []
 def check(name: str, ok: bool, detail: str = ""):
     CHECKS.append((name, ok, detail))
     print(f"  [{'PASS' if ok else 'FAIL'}] {name}{(' — ' + detail) if detail else ''}")
-
-
-def _triplet_id(source: str, rel: str, target: str) -> str:
-    return str(generate_node_id(source + rel + target))
 
 
 async def verify(stage: str):
@@ -127,15 +124,6 @@ async def verify(stage: str):
             leftovers = await vector_engine.retrieve(f"{kind}_{field}", old_ids)
             stale = [r for r in leftovers if str(r.id) not in set(ids)]
             check(f"{stage}: no {kind} points left at old ids", not stale, f"{len(stale)} stale")
-
-        # Triplets: ids must be recomputable from CURRENT edge endpoints.
-        triplet_ids = [_triplet_id(s, r, t) for s, t, r, _ in real_edges]
-        triplet_rows = await vector_engine.retrieve("Triplet_text", triplet_ids)
-        check(
-            f"{stage}: triplet points keyed by current endpoints",
-            len(triplet_rows) > 0,
-            f"{len(triplet_rows)}/{len(triplet_ids)} resolvable",
-        )
 
         # EdgeType points: ids must be recomputable via the live lookup
         # derivation (EdgeType.id_for) — this is the retrieval/delete join key.
@@ -208,7 +196,7 @@ async def main(phase: str):
     version, restart, serve. LanceDB table handles are per-process, so phases
     must not share one."""
     if phase == "seed":
-        print("\n[1] add + cognify (real pipeline, triplet embeddings on)")
+        print("\n[1] add + cognify (real pipeline)")
         await cognee.add(TEXT, dataset_name=DATASET)
         await cognee.cognify(datasets=[DATASET])
 
