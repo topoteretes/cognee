@@ -844,7 +844,11 @@ class CogneeClient:
                 return None
             return max(minimum, deadline - asyncio.get_running_loop().time())
 
-        pipelines = ["add_pipeline", "cognify_pipeline", "code_graph_pipeline"]
+        # Not code_graph_pipeline: code repositories are built under
+        # cognify_pipeline, and the server answers that deprecated name with the
+        # same cognify run, so asking for both counts one build twice and
+        # classify_recall_state drops the "indexing N/M" tick.
+        pipelines = ["add_pipeline", "cognify_pipeline"]
         if self.use_api:
             hop = remaining()
             visible = await self.list_datasets(timeout=hop if hop is not None else 2.0)

@@ -64,8 +64,9 @@ StatusPipelineNamesQuery = Annotated[
             "Pipeline names to check: 'add_pipeline' or 'cognify_pipeline' (code"
             " repositories are built under it), or a custom pipeline's name. Omit to"
             " default to cognify_pipeline. 'code_graph_pipeline' is a deprecated alias:"
-            " it reports whichever of the dataset's latest code_graph_pipeline and"
-            " cognify_pipeline runs is newer, under the 'code_graph_pipeline' key."
+            " it reports the dataset's latest code_graph_pipeline or cognify_pipeline"
+            " run (one still in progress first, else the newer), under the"
+            " 'code_graph_pipeline' key."
         ),
         examples=[["cognify_pipeline"]],
     ),
@@ -590,9 +591,9 @@ def get_datasets_router() -> APIRouter:
           - If multiple pipelines are provided, response is nested per dataset and pipeline
           - **Available options: add_pipeline, cognify_pipeline** (code repositories are
             built under cognify_pipeline), or a custom pipeline's name
-          - **code_graph_pipeline** is a deprecated alias: it reports whichever of the
-            dataset's latest code_graph_pipeline and cognify_pipeline runs is newer, keyed
-            as requested
+          - **code_graph_pipeline** is a deprecated alias: it reports the dataset's latest
+            code_graph_pipeline or cognify_pipeline run (one still in progress first, else
+            the newer), keyed as requested
           - Note: a background remember of a repository URL creates its pipeline run only
             once the repository is cloned — a dataset missing from the response means the run
             has not started yet, not that it failed
@@ -672,8 +673,9 @@ def get_datasets_router() -> APIRouter:
           status for all datasets you can read.
         - **pipeline** (List[str]): Pipeline names to check: 'add_pipeline' or 'cognify_pipeline'
           (code repositories are built under it), or a custom pipeline's name. Omit to default
-          to cognify_pipeline. `code_graph_pipeline` is a deprecated alias that reports whichever
-          of the dataset's latest code_graph_pipeline and cognify_pipeline runs is newer.
+          to cognify_pipeline. `code_graph_pipeline` is a deprecated alias that reports the
+          dataset's latest code_graph_pipeline or cognify_pipeline run (one still in progress
+          first, else the newer).
 
         ## Response
         - Single pipeline (default): {dataset_id: {status, progress}}

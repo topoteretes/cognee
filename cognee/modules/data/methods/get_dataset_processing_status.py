@@ -13,7 +13,10 @@ from .publish_updated_data import COGNIFY_PIPELINE_NAME
 
 
 async def get_dataset_processing_status(
-    dataset_id: UUID, pipeline_name: str = COGNIFY_PIPELINE_NAME
+    dataset_id: UUID,
+    pipeline_name: str = COGNIFY_PIPELINE_NAME,
+    *,
+    also_completed_by: tuple[str, ...] = (),
 ) -> dict:
     """Report a dataset's items by per-item completion for ``pipeline_name``.
 
@@ -33,6 +36,10 @@ async def get_dataset_processing_status(
     representation). Rows with a ``NULL`` ``pipeline_status`` are pending.
     Per-item errored state is not persisted today, so a pending item may be
     untouched, in progress, or failed.
+
+    ``also_completed_by`` names further pipelines whose stamp also counts an
+    item as completed (the deprecated ``code_graph_pipeline`` status alias
+    accepts either stamp), checked against the same single read of the rows.
     """
     # Imported on use: the pipeline layer imports this package at module
     # scope, so a top-level import here would close a cycle (see
@@ -42,14 +49,19 @@ async def get_dataset_processing_status(
     data_items = await get_dataset_data(dataset_id, order_by="created_at")
     dataset_key = str(dataset_id)
 
+    pipeline_names = (pipeline_name, *also_completed_by)
+
     items = []
     for item in data_items:
-        status_for_pipeline = (item.pipeline_status or {}).get(pipeline_name) or {}
+        pipeline_status = item.pipeline_status or {}
         items.append(
             {
                 "id": item.id,
                 "name": item.name,
-                "completed": is_data_item_completed(status_for_pipeline.get(dataset_key)),
+                "completed": any(
+                    is_data_item_completed((pipeline_status.get(name) or {}).get(dataset_key))
+                    for name in pipeline_names
+                ),
             }
         )
 
