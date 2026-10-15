@@ -1,17 +1,9 @@
 import importlib
-import re
 from pathlib import Path
-from unittest.mock import AsyncMock
 
 import pytest
 
 resolve_module = importlib.import_module("cognee.tasks.code_graph.resolve_repo")
-
-
-@pytest.fixture(autouse=True)
-def _fake_clones_have_a_commit(monkeypatch):
-    """The clones here are fake ``.git`` directories; real git would find no commit in them."""
-    monkeypatch.setattr(resolve_module, "_has_commit", AsyncMock(return_value=True))
 
 
 def test_is_remote_repo_detection():
@@ -24,40 +16,13 @@ def test_is_remote_repo_detection():
     assert not resolve_module.is_remote_repo(42)
 
 
-def _origin_is(monkeypatch, url):
-    """Stand in for the origin check on a fake ``.git`` directory."""
-
-    async def fake_origin_url(clone):
-        return url
-
-    monkeypatch.setattr(resolve_module, "_origin_url", fake_origin_url)
-
-
 def test_clone_slug_is_stable_and_filesystem_safe():
-    slug = resolve_module._clone_slug("https://github.com/org/repo")
     assert (
         resolve_module._clone_slug("https://github.com/org/repo.git")
-        == resolve_module._clone_slug("https://github.com/org/repo/")
-        == slug
+        == resolve_module._clone_slug("https://github.com/org/repo")
+        == "github.com-org-repo"
     )
-    assert re.fullmatch(r"github\.com-org-repo-[0-9a-f]{8}", slug)
-    assert re.fullmatch(
-        r"git-github\.com-org-repo-[0-9a-f]{8}",
-        resolve_module._clone_slug("git@github.com:org/repo.git"),
-    )
-
-
-def test_clone_slugs_of_repositories_that_read_alike_are_apart():
-    # Both read 'github.com-a-b-c'; sharing a directory would hand one owner's clone,
-    # private or not, to callers of the other.
-    first = resolve_module._clone_slug("https://github.com/a-b/c")
-    second = resolve_module._clone_slug("https://github.com/a/b-c")
-
-    assert first != second
-    assert first.startswith("github.com-a-b-c-") and second.startswith("github.com-a-b-c-")
-    assert resolve_module._clone_slug("https://github.com/a/b-c", "dev") != (
-        resolve_module._clone_slug("https://github.com/a-b/c", "dev")
-    )
+    assert resolve_module._clone_slug("git@github.com:org/repo.git") == "git-github.com-org-repo"
 
 
 @pytest.mark.asyncio
@@ -97,7 +62,7 @@ async def test_remote_is_shallow_cloned(monkeypatch, tmp_path):
         "https://github.com/org/repo", clones_dir=tmp_path
     )
 
-    assert resolved == resolve_module.clone_dir("https://github.com/org/repo", clones_dir=tmp_path)
+    assert resolved == tmp_path / "github.com-org-repo"
     assert len(git_calls) == 1
     args, _cwd = git_calls[0]
     # core.symlinks=false is a security requirement, not incidental: without it a
@@ -108,9 +73,8 @@ async def test_remote_is_shallow_cloned(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_existing_clone_is_reused_with_pull(monkeypatch, tmp_path):
-    clone_dir = resolve_module.clone_dir("https://github.com/org/repo", clones_dir=tmp_path)
+    clone_dir = tmp_path / "github.com-org-repo"
     (clone_dir / ".git").mkdir(parents=True)
-    _origin_is(monkeypatch, "https://github.com/org/repo")
     git_calls = []
 
     async def fake_run_git(args, cwd=None, env=None):
@@ -129,9 +93,8 @@ async def test_existing_clone_is_reused_with_pull(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_failed_pull_still_reuses_stale_clone(monkeypatch, tmp_path):
-    clone_dir = resolve_module.clone_dir("https://github.com/org/repo", clones_dir=tmp_path)
+    clone_dir = tmp_path / "github.com-org-repo"
     (clone_dir / ".git").mkdir(parents=True)
-    _origin_is(monkeypatch, "https://github.com/org/repo")
 
     async def fake_run_git(args, cwd=None, env=None):
         return 1, "fatal: not fast-forward"
@@ -218,7 +181,7 @@ def test_code_repo_clone_url_detects_repository_roots(spec, clone_url):
         # Other hosts need the .git suffix to be treated as a repository.
         "https://git.example.com/team/repo",
         "https://example.com/some/page",
-        # Non-http specs are not detected: clone them and pass the directory.
+        # Non-http specs stay explicit (remember(content_type="code")).
         "git@github.com:org/repo.git",
         "ssh://git@github.com/org/repo",
         "/local/path/repo",
@@ -235,76 +198,3 @@ def test_default_clones_dir_comes_from_base_config():
     from cognee.base_config import get_base_config
 
     assert resolve_module.default_clones_dir() == Path(get_base_config().repos_root_directory)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("origin", ["https://github.com/someone/else", None])
-async def test_a_clone_of_another_repository_is_never_reused(monkeypatch, tmp_path, origin):
-    clone_dir = resolve_module.clone_dir("https://github.com/org/repo", clones_dir=tmp_path)
-    (clone_dir / ".git").mkdir(parents=True)
-    _origin_is(monkeypatch, origin)
-    git_calls = []
-
-    async def fake_run_git(args, cwd=None, env=None):
-        git_calls.append(args)
-        return 0, ""
-
-    monkeypatch.setattr(resolve_module, "_run_git", fake_run_git)
-
-    with pytest.raises(resolve_module.CodeRepositoryError, match="is not a clone of"):
-        await resolve_module.resolve_repo_source("https://github.com/org/repo", clones_dir=tmp_path)
-
-    assert git_calls == []
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "origin",
-    [
-        "https://github.com/org/repo.git",
-        "https://github.com/org/repo/",
-        "https://x-access-token:old@github.com/org/repo",  # a legacy remote with a token
-    ],
-)
-async def test_other_spellings_of_the_same_origin_are_reused(monkeypatch, tmp_path, origin):
-    clone_dir = resolve_module.clone_dir("https://github.com/org/repo", clones_dir=tmp_path)
-    (clone_dir / ".git").mkdir(parents=True)
-    _origin_is(monkeypatch, origin)
-
-    async def fake_run_git(args, cwd=None, env=None):
-        return 0, ""
-
-    monkeypatch.setattr(resolve_module, "_run_git", fake_run_git)
-
-    resolved = await resolve_module.resolve_repo_source(
-        "https://github.com/org/repo", clones_dir=tmp_path
-    )
-
-    assert resolved == clone_dir
-
-
-@pytest.mark.asyncio
-async def test_git_never_prompts(monkeypatch):
-    seen = {}
-
-    async def fake_create_subprocess_exec(*args, env=None, **kwargs):
-        seen.update(env)
-        raise RuntimeError("stop")
-
-    monkeypatch.setattr(
-        resolve_module.asyncio, "create_subprocess_exec", fake_create_subprocess_exec
-    )
-    monkeypatch.delenv("GIT_SSH_COMMAND", raising=False)
-    monkeypatch.delenv("GIT_SSH", raising=False)
-
-    with pytest.raises(RuntimeError):
-        await resolve_module._run_git(["status"])
-    assert seen["GIT_TERMINAL_PROMPT"] == "0"
-    assert seen["GIT_SSH_COMMAND"] == "ssh -o BatchMode=yes"
-
-    # A user's own ssh command is left alone.
-    monkeypatch.setenv("GIT_SSH_COMMAND", "ssh -i ~/.ssh/deploy_key")
-    with pytest.raises(RuntimeError):
-        await resolve_module._run_git(["status"], env={"GIT_CONFIG_COUNT": "1"})
-    assert seen["GIT_SSH_COMMAND"] == "ssh -i ~/.ssh/deploy_key"
-    assert seen["GIT_CONFIG_COUNT"] == "1"

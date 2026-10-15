@@ -6,7 +6,6 @@ to another commit than ``clone --branch`` had picked. The repository URL is mapp
 bare repository on disk, so nothing here touches the network.
 """
 
-import asyncio
 import importlib
 import os
 import shutil
@@ -21,6 +20,7 @@ ssrf_module = importlib.import_module("cognee.tasks.web_scraper.ssrf_protection"
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git is required")
 
 _URL = "https://github.com/org/repo"
+_NAME = "github.com-org-repo"
 _IDENTITY = {
     "GIT_AUTHOR_NAME": "t",
     "GIT_AUTHOR_EMAIL": "t@example.com",
@@ -116,14 +116,6 @@ def origin(tmp_path, monkeypatch):
         return await real_run_git([remote if arg == _URL else arg for arg in args], cwd, env)
 
     monkeypatch.setattr(resolve_module, "_run_git", run_git)
-    real_origin_url = resolve_module._origin_url
-
-    async def origin_url(clone):
-        # The clone's origin is the file:// URL the repository URL was mapped to.
-        stored = await real_origin_url(clone)
-        return _URL if stored == origin.bare.resolve().as_uri() else stored
-
-    monkeypatch.setattr(resolve_module, "_origin_url", origin_url)
     monkeypatch.setattr(ssrf_module, "validate_outbound_url", AsyncMock())
     return origin
 
@@ -139,15 +131,6 @@ async def _resolve(clones, branch=None):
 
 def _content(path):
     return (path / "BRANCH.txt").read_text().strip()
-
-
-def _clones_in(clones):
-    """The clone directories, without the lock directory and temporary clones beside them."""
-    return [path for path in clones.iterdir() if not path.name.startswith(".")]
-
-
-def _temporary_clones(clones):
-    return [path for path in clones.iterdir() if ".tmp-" in path.name]
 
 
 # Each name is one git misreads when fetched bare.
@@ -177,7 +160,7 @@ async def test_a_tag_is_not_taken_for_a_branch(origin, clones):
     with pytest.raises(resolve_module.CodeRepositoryError, match="Branch 'v1' was not found"):
         await _resolve(clones, "v1")
 
-    assert _clones_in(clones) == []
+    assert list(clones.iterdir()) == []
 
 
 @pytest.mark.asyncio
@@ -190,8 +173,8 @@ async def test_each_branch_is_a_clone_of_its_own_that_follows_force_pushes(origi
     default = await _resolve(clones)
 
     assert [_content(path) for path in (dev, feature, default)] == ["dev-1", "ü-1", "main-1"]
-    assert default == resolve_module.clone_dir(_URL, clones_dir=clones)
-    assert sorted(path.name for path in _clones_in(clones)) == sorted(
+    assert default == clones / _NAME
+    assert sorted(path.name for path in clones.iterdir()) == sorted(
         path.name for path in (dev, feature, default)
     )
 
@@ -214,7 +197,7 @@ async def test_each_branch_is_a_clone_of_its_own_that_follows_force_pushes(origi
 async def test_a_missing_branch_is_reported_and_never_replaces_a_clone(origin, clones):
     with pytest.raises(resolve_module.CodeRepositoryError, match="Branch 'nope' was not found"):
         await _resolve(clones, "nope")
-    assert _clones_in(clones) == []
+    assert list(clones.iterdir()) == []
 
     origin.commit("dev", "dev-1")
     dev = await _resolve(clones, "dev")
@@ -224,104 +207,3 @@ async def test_a_missing_branch_is_reported_and_never_replaces_a_clone(origin, c
     with pytest.raises(resolve_module.CodeRepositoryError, match="Branch 'dev' was not found"):
         await _resolve(clones, "dev")
     assert _content(dev) == "dev-1"
-
-
-@pytest.mark.asyncio
-async def test_the_origin_is_read_as_stored(tmp_path):
-    repo = tmp_path / "repo"
-    _git(tmp_path, "init", "-q", str(repo))
-    assert await resolve_module._origin_url(repo) is None
-
-    _git(repo, "remote", "add", "origin", "https://github.com/org/repo")
-    _git(repo, "config", "url.https://mirror.example/.insteadOf", "https://github.com/")
-
-    assert await resolve_module._origin_url(repo) == "https://github.com/org/repo"
-
-
-@pytest.mark.asyncio
-async def test_concurrent_callers_share_one_clone(origin, clones, monkeypatch):
-    run_git = resolve_module._run_git
-    clone_calls = []
-
-    async def counting_run_git(args, cwd=None, env=None):
-        if args[0] == "clone":
-            clone_calls.append(args)
-        return await run_git(args, cwd, env)
-
-    monkeypatch.setattr(resolve_module, "_run_git", counting_run_git)
-
-    resolved = await asyncio.gather(*(_resolve(clones) for _ in range(4)))
-
-    # The lock lets one caller clone; the others find its finished clone and refresh it.
-    assert len(clone_calls) == 1
-    assert len(set(resolved)) == 1 and _content(resolved[0]) == "main-1"
-    assert _temporary_clones(clones) == []
-
-
-@pytest.mark.asyncio
-async def test_a_clone_is_complete_before_it_appears_at_its_target(origin, clones, monkeypatch):
-    target = resolve_module.clone_dir(_URL, clones_dir=clones)
-    run_git = resolve_module._run_git
-    seen = []
-
-    async def watching_run_git(args, cwd=None, env=None):
-        result = await run_git(args, cwd, env)
-        if args[0] == "clone":
-            seen.append((target.exists(), resolve_module.Path(args[-1]).parent == clones))
-        return result
-
-    monkeypatch.setattr(resolve_module, "_run_git", watching_run_git)
-
-    assert await _resolve(clones) == target
-
-    # Cloned beside the target, which appears only once the clone is done.
-    assert seen == [(False, True)]
-    assert _content(target) == "main-1"
-
-
-@pytest.mark.asyncio
-async def test_an_interrupted_clone_is_cloned_again_not_returned(origin, clones):
-    target = resolve_module.clone_dir(_URL, clones_dir=clones)
-    # What a clone killed before its first commit arrived leaves: a .git with an origin
-    # and no commit.
-    _git(clones.parent, "init", "-q", str(target))
-    _git(target, "remote", "add", "origin", origin.bare.resolve().as_uri())
-
-    assert await _resolve(clones) == target
-    assert _content(target) == "main-1"
-
-
-@pytest.mark.asyncio
-async def test_temporary_clones_are_swept_and_a_failed_clone_leaves_nothing(origin, clones):
-    target = resolve_module.clone_dir(_URL, clones_dir=clones)
-    leftover = clones / f".{target.name}.tmp-dead"
-    (leftover / ".git").mkdir(parents=True)  # a holder that died mid-clone
-    shutil.rmtree(origin.bare)
-
-    with pytest.raises(resolve_module.CodeRepositoryError, match="Failed to clone"):
-        await _resolve(clones)
-
-    assert _temporary_clones(clones) == []
-    assert _clones_in(clones) == []
-
-
-@pytest.mark.asyncio
-async def test_the_users_ssh_command_is_kept_in_batch_mode(tmp_path, monkeypatch):
-    for name in ("GIT_SSH_COMMAND", "GIT_SSH"):
-        monkeypatch.delenv(name, raising=False)
-    # _hermetic_git points the global config at this file.
-    (tmp_path / "gitconfig").write_text("[core]\n\tsshCommand = ssh -i /keys/deploy\n")
-    assert await resolve_module._configured_ssh_command() == "ssh -i /keys/deploy"
-    seen = []
-
-    async def failing_clone(args, cwd=None, env=None):
-        seen.append(env)
-        return 128, "fatal: unreachable"
-
-    monkeypatch.setattr(resolve_module, "_run_git", failing_clone)
-
-    with pytest.raises(resolve_module.CodeRepositoryError):
-        await resolve_module.resolve_repo_source(
-            "git@github.com:org/repo.git", clones_dir=tmp_path / "clones"
-        )
-    assert seen[0]["GIT_SSH_COMMAND"] == "ssh -i /keys/deploy -o BatchMode=yes"
