@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import BinaryIO
+from typing import Any, BinaryIO
 from urllib.parse import urlparse
 
 from cognee.infrastructure.files.storage.s3_config import get_s3_config
@@ -23,7 +23,7 @@ def _resolve_existing_local_path(item: str) -> Path | None:
 
 
 async def resolve_data_directories(
-    data: BinaryIO | list[BinaryIO] | str | list[str],
+    data: BinaryIO | list[BinaryIO] | str | list[str] | Any,
     include_subdirectories: bool = True,
     user=None,
     dataset_id=None,

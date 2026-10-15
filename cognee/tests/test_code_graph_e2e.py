@@ -46,6 +46,7 @@ from cognee import SearchType
 from cognee.api.v1.datasets.datasets import datasets
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.llm.config import get_llm_config
 from cognee.modules.data.methods.get_dataset_processing_status import (
     get_dataset_processing_status,
 )
@@ -366,6 +367,11 @@ def _single_code_payload(result, dataset_name: str):
 
 
 async def main():
+    # Keyless by design: an LLM key (a .env one included, which overrides the
+    # shell) would send the fixture's README to the LLM pipeline in step 4.
+    os.environ["LLM_API_KEY"] = ""
+    get_llm_config.cache_clear()
+
     data_directory_path = str((TESTS_DIR / ".data_storage" / "test_code_graph_e2e").resolve())
     cognee_directory_path = str((TESTS_DIR / ".cognee_system" / "test_code_graph_e2e").resolve())
     cognee.config.data_root_directory(data_directory_path)

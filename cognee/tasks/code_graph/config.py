@@ -1,5 +1,6 @@
 """Per-call options for the code graph routes (CODE and CODE_REPO)."""
 
+from collections.abc import Mapping
 from typing import TypedDict, cast
 
 
@@ -75,7 +76,7 @@ def validate_codegraph_config(codegraph_config: CodeGraphConfig | None) -> CodeG
     return cast(CodeGraphConfig, config)
 
 
-def requests_codegraph_options(codegraph_config: CodeGraphConfig | None) -> bool:
+def requests_codegraph_options(codegraph_config: Mapping[str, object] | None) -> bool:
     """Whether the config asks for anything beyond the defaults.
 
     The defaults are ``index_vectors=False``, ``include_documents=True``,

@@ -245,7 +245,9 @@ async def _attach_item_identity(result: "RememberResult") -> None:
                 .scalars()
                 .all()
             )
-            metadata_by_id = {row.id: dict(row.system_metadata or {}) for row in rows}
+            metadata_by_id = {
+                row.id: dict(getattr(row, "system_metadata", None) or {}) for row in rows
+            }
 
         for data_id, matching_items in by_id.items():
             metadata = metadata_by_id.get(data_id) or {}
@@ -1847,9 +1849,9 @@ async def _remember_inner(
 
     # Route kwargs to add(), cognify(), or both
     remaining = dict(kwargs)
-    add_kwargs = {}
-    cognify_kwargs = {}
-    shared_kwargs = {}
+    add_kwargs: dict[str, Any] = {}
+    cognify_kwargs: dict[str, Any] = {}
+    shared_kwargs: dict[str, Any] = {}
 
     for key in list(remaining):
         if key in _SHARED:
