@@ -305,6 +305,10 @@ async def test_git_never_prompts(monkeypatch):
     # A user's own ssh command is left alone.
     monkeypatch.setenv("GIT_SSH_COMMAND", "ssh -i ~/.ssh/deploy_key")
     with pytest.raises(RuntimeError):
-        await resolve_module._run_git(["status"], env={"GIT_CONFIG_COUNT": "1"})
+        await resolve_module._run_git(
+            ["status"],
+            env={"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "a.b", "GIT_CONFIG_VALUE_0": "c"},
+        )
     assert seen["GIT_SSH_COMMAND"] == "ssh -i ~/.ssh/deploy_key"
-    assert seen["GIT_CONFIG_COUNT"] == "1"
+    # The caller's config entries come first; the no-stored-credentials ones follow.
+    assert (seen["GIT_CONFIG_COUNT"], seen["GIT_CONFIG_KEY_0"]) == ("3", "a.b")

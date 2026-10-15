@@ -325,3 +325,72 @@ def test_git_sends_the_scoped_header_to_the_remote_host_only(tmp_path):
     assert header_for("https://github.com/other/repo").startswith("Authorization: Basic ")
     assert header_for("https://evil.example/org/repo.git") == ""
     assert header_for("http://github.com/org/repo.git") == ""
+
+
+def test_git_runs_without_stored_credentials_or_askpass(monkeypatch):
+    """Every git call drops credential helpers and askpass programs, so a refresh
+    authenticates only with what the caller passed. Config entries from the process,
+    from the caller's env and the hardening are renumbered into one list."""
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "user.name")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "someone")
+    monkeypatch.setenv("GIT_ASKPASS", "/usr/bin/ksshaskpass")
+    monkeypatch.setenv("SSH_ASKPASS", "/usr/bin/ksshaskpass")
+
+    env = resolve_module._git_env(resolve_module._credential_env("tok-SECRET", _CLEAN_URL))
+
+    assert resolve_module._git_config_entries(env) == [
+        ("user.name", "someone"),
+        ("http.https://github.com/.extraHeader", env["GIT_CONFIG_VALUE_1"]),
+        ("credential.helper", ""),
+        ("core.askPass", ""),
+    ]
+    assert env["GIT_CONFIG_VALUE_1"].startswith("Authorization: Basic ")
+    assert (env["GIT_ASKPASS"], env["SSH_ASKPASS"], env["GIT_TERMINAL_PROMPT"]) == ("", "", "0")
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git is required")
+def test_git_never_fills_a_credential_from_a_configured_helper(tmp_path):
+    global_config = tmp_path / "gitconfig"
+    global_config.write_text(
+        '[credential]\n\thelper = "!f() { echo username=u; echo password=stored-SECRET; }; f"\n'
+    )
+    isolated = {"GIT_CONFIG_GLOBAL": str(global_config), "GIT_CONFIG_NOSYSTEM": "1"}
+
+    def fill(env):
+        return subprocess.run(
+            ["git", "credential", "fill"],
+            input="protocol=https\nhost=github.com\n\n",
+            env=env,
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+
+    # The helper works when git is left alone...
+    assert "stored-SECRET" in fill({**os.environ, **isolated, "GIT_TERMINAL_PROMPT": "0"}).stdout
+    # ...and is never asked under the environment cognee runs git with.
+    hardened = fill(resolve_module._git_env(isolated))
+    assert hardened.returncode != 0
+    assert "stored-SECRET" not in hardened.stdout
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "spec", ["git@github.com:org/repo.git", "ssh://git:pw-SECRET@github.com/org/repo.git"]
+)
+async def test_credentials_for_an_ssh_remote_are_refused(monkeypatch, tmp_path, spec):
+    """They would only ride an http header an ssh remote never sends, while the clone
+    would still be marked as made with credentials."""
+    run_git = AsyncMock(return_value=(0, ""))
+    monkeypatch.setattr(resolve_module, "_run_git", run_git)
+    monkeypatch.setattr(resolve_module, "_exec_git", AsyncMock(return_value=(1, "", "")))
+
+    with pytest.raises(resolve_module.CodeRepositoryError, match="only supported for http") as err:
+        await resolve_module.resolve_repo_source(spec, clones_dir=tmp_path, credentials="tok")
+
+    assert "pw-SECRET" not in str(err.value)
+    run_git.assert_not_awaited()
+    assert not any(tmp_path.iterdir())

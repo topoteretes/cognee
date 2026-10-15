@@ -9,8 +9,10 @@ reused across calls once its ``origin`` is checked; an existing clone is
 refreshed with a best-effort ``git pull`` (a clone made with credentials is
 refused when that refresh fails). A ``branch`` can be chosen for a remote
 repository; each branch is cloned into a directory of its own. A new clone is
-made in a temporary sibling directory and renamed into place once complete, and
-all work on one clone directory is serialized by a file lock, across processes.
+made in a temporary sibling directory and renamed into place once complete.
+Cloning and refreshing one clone directory are serialized by a file lock, across
+processes; reading the clone afterwards (building its code graph, adding its
+documents) runs outside that lock.
 """
 
 import asyncio
@@ -341,6 +343,63 @@ def _noninteractive_env(ssh_command: str | None = None) -> dict:
     return env
 
 
+# Git config every invocation carries: no credential helper and no askpass
+# program, so git authenticates only with what the caller passed (the
+# environment-level header of _credential_env, or URL userinfo). Without these a
+# refresh of a private clone could succeed on the server's stored credentials (a
+# helper, a keychain) for a caller who brought none, and unlock that clone. An
+# empty credential.helper resets the helper list built from the system, global
+# and repository config, which git reads before the environment's entries.
+_NO_STORED_CREDENTIALS_CONFIG = (("credential.helper", ""), ("core.askPass", ""))
+
+
+def _git_config_entries(env) -> list[tuple[str, str]]:
+    """The ``GIT_CONFIG_COUNT`` / ``GIT_CONFIG_KEY_<n>`` / ``GIT_CONFIG_VALUE_<n>`` entries of ``env``."""
+    try:
+        count = int(env.get("GIT_CONFIG_COUNT", "0"))
+    except ValueError:
+        count = 0
+    return [
+        (env.get(f"GIT_CONFIG_KEY_{index}", ""), env.get(f"GIT_CONFIG_VALUE_{index}", ""))
+        for index in range(count)
+    ]
+
+
+def _is_git_config_entry(name: str) -> bool:
+    return name == "GIT_CONFIG_COUNT" or name.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"))
+
+
+def _git_env(env: dict | None = None) -> dict:
+    """The environment git runs with: the process's, non-interactive, ``env`` on top,
+    and no stored credentials (see :data:`_NO_STORED_CREDENTIALS_CONFIG`).
+
+    Environment-level config entries are renumbered into one list: the process's own
+    first, then ``env``'s (e.g. :func:`_credential_env`), then the hardening entries
+    last, so they win and no index of one source overwrites another's. GIT_ASKPASS
+    and SSH_ASKPASS are set empty: git then skips every askpass program, and with
+    GIT_TERMINAL_PROMPT=0 a missing credential fails instead of being asked for.
+    """
+    extra = env or {}
+    entries = (
+        _git_config_entries(os.environ)
+        + _git_config_entries(extra)
+        + list(_NO_STORED_CREDENTIALS_CONFIG)
+    )
+    merged = {
+        name: value
+        for source in (os.environ, _noninteractive_env(), extra)
+        for name, value in source.items()
+        if not _is_git_config_entry(name)
+    }
+    merged["GIT_ASKPASS"] = ""
+    merged["SSH_ASKPASS"] = ""
+    merged["GIT_CONFIG_COUNT"] = str(len(entries))
+    for index, (key, value) in enumerate(entries):
+        merged[f"GIT_CONFIG_KEY_{index}"] = key
+        merged[f"GIT_CONFIG_VALUE_{index}"] = value
+    return merged
+
+
 async def _exec_git(args, cwd: Path | None = None, env: dict | None = None) -> tuple:
     git_binary = shutil.which("git")
     if git_binary is None:
@@ -351,7 +410,7 @@ async def _exec_git(args, cwd: Path | None = None, env: dict | None = None) -> t
         git_binary,
         *args,
         cwd=str(cwd) if cwd else None,
-        env={**os.environ, **_noninteractive_env(), **(env or {})},
+        env=_git_env(env),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -555,10 +614,20 @@ async def resolve_repo_source(
             text = text.replace(url, clean_url)
         return re.sub(r"://[^/\s@]+@", "://", text)
 
+    is_http_remote = clean_url.lower().startswith(("http://", "https://"))
+    if credentials and not is_http_remote:
+        # They would reach git as an http header, which an ssh remote never sends:
+        # cloning without them would still mark the clone as credentialed.
+        raise CodeRepositoryError(
+            message=f"credentials are only supported for http(s) remotes, but "
+            f"'{clean_url}' is an ssh remote: configure an ssh key for it instead, "
+            "or pass its https:// URL."
+        )
+
     # The caller's credentials, if any, only ever reach the remote's own host.
     git_env = _credential_env(credentials, clean_url) if credentials else {}
     ssh_overridden = "GIT_SSH_COMMAND" in os.environ or "GIT_SSH" in os.environ
-    if not ssh_overridden and not clean_url.lower().startswith(("http://", "https://")):
+    if not ssh_overridden and not is_http_remote:
         # ssh runs only for an ssh remote: the user's core.sshCommand is read only then.
         git_env = {**_noninteractive_env(await _configured_ssh_command()), **git_env}
     git_env = git_env or None
@@ -621,11 +690,7 @@ async def resolve_repo_source(
         # Cloned beside the target and renamed into place once the remote and the
         # marker are written: the target directory is always a complete clone, so
         # an interrupted clone is never found there and taken for one.
-        partial = Path(
-            await asyncio.to_thread(
-                tempfile.mkdtemp, prefix=f".{target.name}.tmp-", dir=target.parent
-            )
-        )
+        partial = await asyncio.to_thread(_make_partial_clone_dir, target)
         try:
             # core.symlinks=false: git otherwise materializes symlinks committed in the
             # remote, and nothing re-validates paths under the clone afterwards -- a repo
@@ -669,6 +734,11 @@ async def resolve_repo_source(
             if partial.exists():
                 await asyncio.to_thread(shutil.rmtree, partial, True)
         return target
+
+
+def _make_partial_clone_dir(target: Path) -> Path:
+    """A new empty directory beside ``target`` that a clone is made in before its rename."""
+    return Path(tempfile.mkdtemp(prefix=f".{target.name}.tmp-", dir=target.parent))
 
 
 async def _refresh_clone(

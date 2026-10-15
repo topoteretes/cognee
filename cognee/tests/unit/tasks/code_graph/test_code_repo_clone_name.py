@@ -151,3 +151,50 @@ async def test_the_code_repo_route_passes_the_name_to_both_graph_tasks(
     assert edges.await_args.kwargs["repo_name"] == expected
     assert Path(extract.await_args.kwargs["repo_path"]) == repo
     assert add_points.await_args.kwargs["graph_only"] is (not index_vectors)
+
+
+# The ``code_repo:`` row identity origin/dev produced for github.com/topoteretes/cognee
+# with clones under /srv/repos: ``clone_dir(source_url)``, the default branch's
+# directory, whatever branch was cloned and whatever token the URL carried. Pinned as a
+# literal so a slug change can never re-key (and duplicate) stored repository rows.
+_DEV_ROW_IDENTITY = "code_repo:/srv/repos/github.com-topoteretes-cognee"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "spec, branch, credentials, declared",
+    [
+        ("https://github.com/topoteretes/cognee", None, None, False),
+        ("https://github.com/topoteretes/cognee.git", "dev", None, False),
+        ("https://x-access-token:tok-SECRET@github.com/topoteretes/cognee", None, None, False),
+        ("https://github.com/topoteretes/cognee", "dev", "tok-SECRET", True),
+        ("https://x-access-token:tok-SECRET@github.com/topoteretes/cognee.git", None, None, True),
+    ],
+    ids=["url", "url-git-branch", "url-token", "declared-branch-credentials", "declared-token"],
+)
+async def test_the_row_identity_of_a_remote_matches_origin_dev(
+    monkeypatch, tmp_path, spec, branch, credentials, declared
+):
+    code_repo_module = importlib.import_module("cognee.tasks.code_graph.code_repo")
+    resolve_module = importlib.import_module("cognee.tasks.code_graph.resolve_repo")
+    unique_id_module = importlib.import_module("cognee.modules.data.methods.get_unique_data_id")
+    monkeypatch.setattr(resolve_module, "default_clones_dir", lambda: Path("/srv/repos"))
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    monkeypatch.setattr(code_repo_module, "resolve_repo_source", AsyncMock(return_value=clone))
+    identities = []
+
+    async def fake_unique_data_id(identity, user, dataset_id):
+        identities.append(identity)
+
+    monkeypatch.setattr(unique_id_module, "get_unique_data_id", fake_unique_data_id)
+    user = SimpleNamespace(id="u1")
+
+    if declared:
+        await code_repo_module.resolve_declared_repositories(
+            spec, credentials=credentials, branch=branch, user=user
+        )
+    else:
+        await code_repo_module.resolve_code_repository_url(spec, user=user, branch=branch)
+
+    assert identities == [_DEV_ROW_IDENTITY]

@@ -469,10 +469,10 @@ async def resolve_declared_repositories(
     resolved = []
     for item in items:
         repo_path = await resolve_repo_source(item, credentials=credentials, branch=branch)
-        remote = is_remote_repo(item)
         # redact: a spec may carry a token in its userinfo, and this is
         # stored on the row as repo_url.
-        source_url = redact_repo_spec(item) if remote else None
+        source_url = redact_repo_spec(item) if is_remote_repo(item) else None
+        remote = source_url is not None
         manifest_item, document_paths, _skipped = await resolve_code_repository(
             repo_path,
             user=user,
@@ -482,7 +482,7 @@ async def resolve_declared_repositories(
             # A remote is keyed on its default-branch clone, as on the detected URL
             # path: one row per URL whatever branch is cloned. A local repository
             # keys on its own directory.
-            identity=repo_identity(source_url) if remote else None,
+            identity=repo_identity(source_url) if source_url is not None else None,
         )
         resolved.append(manifest_item)
         # A clone is cognee's own directory, so its documents are stored
