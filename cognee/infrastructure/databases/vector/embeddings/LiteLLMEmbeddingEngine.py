@@ -311,7 +311,11 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 isinstance(error, litellm.exceptions.ContextWindowExceededError)
                 or _EMBED_LENGTH_ERROR_RE.search(str(error))
             ):
-                if self.encoding_format == "base64":
+                # UnsupportedParamsError is litellm refusing the call client-side, so
+                # the server never saw the encoding and the hint would mislead.
+                if self.encoding_format == "base64" and not isinstance(
+                    error, litellm.exceptions.UnsupportedParamsError
+                ):
                     logger.error(ENCODING_FORMAT_HINT)
                 raise
             if isinstance(text, list) and len(text) > 1:
