@@ -699,6 +699,36 @@ jobs:
           EMBEDDING_MAX_TOKENS: "8191"
         run: uv run python ./examples/guides/simple_cognee_example.py
 
+  test-bedrock-base64-first-call:
+    name: Run Bedrock base64 First-Call Error Test
+    # Same fork guard as the other Bedrock jobs: provider secrets are not
+    # available to fork PRs.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+          extra-dependencies: "aws"
+
+      # One short Titan request and no LLM call: Bedrock cannot return base64
+      # vectors, and the engine must say so on the first reply instead of
+      # storing Titan's binary vectors or retrying.
+      - name: Run Bedrock base64 first-call check
+        env:
+          AWS_REGION_NAME: "eu-west-1"
+          EMBEDDING_PROVIDER: "bedrock"
+          EMBEDDING_API_KEY: ${{ secrets.BEDROCK_API_KEY }}
+          EMBEDDING_MODEL: "amazon.titan-embed-text-v2:0"
+          EMBEDDING_DIMENSIONS: "1024"
+          EMBEDDING_MAX_TOKENS: "8191"
+          EMBEDDING_ENCODING_FORMAT: "base64"
+        run: uv run python ./cognee/tests/e2e/embeddings/bedrock_base64_check.py
+
   test-bedrock-aws-credentials:
     name: Run Bedrock AWS Credentials Test
     # Same fork guard every other job here carries: this workflow triggers on
