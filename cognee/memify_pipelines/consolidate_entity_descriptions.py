@@ -10,8 +10,8 @@ The actual work lives in ``cognee.tasks.memify.consolidate_entity_descriptions``
 
 import warnings
 
-from cognee import memify
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
+from cognee.modules.memify import run_memify_tasks
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -129,7 +129,7 @@ async def consolidate_entity_descriptions_pipeline(
         Task(add_data_points),
     ]
 
-    result = await memify(
+    result = await run_memify_tasks(
         extraction_tasks=extraction_tasks,
         enrichment_tasks=enrichment_tasks,
         data=[{}],  # A placeholder to prevent fetching the entire graph

@@ -223,7 +223,7 @@ async def record_provenance(
                 )
 
             for entry in getattr(chunk, "contains", None) or []:
-                # ``contains`` entries are Entity/Event nodes or (Edge, node) tuples.
+                # ``contains`` entries are Entity/Timestamp nodes or (Edge, node) tuples.
                 edge = entry[0] if isinstance(entry, tuple) else None
                 entity = entry[1] if isinstance(entry, tuple) else entry
                 entity_id = getattr(entity, "id", None)

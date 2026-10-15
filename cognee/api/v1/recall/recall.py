@@ -44,6 +44,7 @@ from cognee.modules.retrieval.exceptions import SearchTypeNotSupported
 from cognee.modules.search.exceptions import UnsupportedSearchTypeError
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.types import SearchResult, SearchType
+from cognee.modules.search.types.SearchType import resolve_deprecated_search_type
 from cognee.modules.users.exceptions.exceptions import UserNotFoundError
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
@@ -437,6 +438,8 @@ async def recall(
         Search results. When searching session-only, returns a list of
         matching QA entries with ``source="session"``.
     """
+    # 3: the warning skips this frame and @telemetry_on_error's wrapper.
+    query_type = resolve_deprecated_search_type(query_type, stacklevel=3)
     from cognee import __version__ as cognee_version
     from cognee.shared.utils import send_telemetry
 

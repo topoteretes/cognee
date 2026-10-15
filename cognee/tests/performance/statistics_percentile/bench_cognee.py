@@ -157,6 +157,9 @@ def _install_document_embedding_mock(embeddings_file: Path) -> None:
         f"(model: {payload.get('model')}); unseen texts embed live"
     )
 
+    from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
+        EmbeddingResult,
+    )
     from cognee.infrastructure.databases.vector.embeddings.get_embedding_engine import (
         get_embedding_engine,
     )
@@ -166,13 +169,15 @@ def _install_document_embedding_mock(embeddings_file: Path) -> None:
 
     async def replay_embed(self, text):
         missing = [item for item in text if item not in stored_vectors]
+        tokens = 0  # replayed vectors cost nothing
         if missing:
             fetched = await original(self, missing)
             for item, vector in zip(missing, fetched):
                 stored_vectors[item] = vector  # in-memory only; repeat queries hit once
+            tokens = fetched.tokens
             _DOC_EMBED_STATS["embedded_live"] += len(missing)
         _DOC_EMBED_STATS["served"] += len(text) - len(missing)
-        return [stored_vectors[item] for item in text]
+        return EmbeddingResult([stored_vectors[item] for item in text], tokens=tokens)
 
     engine_cls.embed_text = replay_embed
 
