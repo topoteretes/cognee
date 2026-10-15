@@ -31,7 +31,6 @@ from cognee.infrastructure.databases.provenance.source_ref_state import (
     provenance_attach_inputs,
 )
 from cognee.infrastructure.engine import DataPoint
-from cognee.modules.engine.utils.generate_timestamp_datapoint import date_to_int
 from cognee.modules.observability import OtelStatusCode as StatusCode
 from cognee.modules.observability import new_span
 from cognee.modules.observability.tracing import (
@@ -42,7 +41,6 @@ from cognee.modules.observability.tracing import (
 )
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.shared.logging_utils import ERROR, get_logger
-from cognee.tasks.temporal_graph.models import Timestamp
 
 from .deadlock_retry import deadlock_retry
 from .neo4j_metrics_utils import (
@@ -2448,93 +2446,6 @@ class Neo4jAdapter(GraphDBInterface):
         """
         result = await self.query(query)
         return [record["n"] for record in result] if result else []
-
-    async def collect_events(self, ids: list[str]) -> Any:
-        """
-        Collect all Event-type nodes reachable within 1..2 hops
-        from the given node IDs.
-
-        Args:
-            graph_engine: Object exposing an async .query(str) -> Any
-            ids: List of node IDs (strings)
-
-        Returns:
-            List of events
-        """
-
-        event_collection_cypher = """UNWIND [{quoted}] AS uid
-            MATCH (start {{id: uid}})
-            MATCH (start)-[*1..2]-(event)
-            WHERE event.type = 'Event'
-            WITH DISTINCT event
-            RETURN collect(event) AS events;
-        """
-
-        query = event_collection_cypher.format(quoted=ids)
-        return await self.query(query)
-
-    async def collect_time_ids(
-        self,
-        time_from: Timestamp | None = None,
-        time_to: Timestamp | None = None,
-    ) -> str:
-        """
-        Collect IDs of Timestamp nodes between time_from and time_to.
-
-        Args:
-            graph_engine: Object exposing an async .query(query, params) -> list[dict]
-            time_from: Lower bound int (inclusive), optional
-            time_to: Upper bound int (inclusive), optional
-
-        Returns:
-            A string of quoted IDs:  "'id1', 'id2', 'id3'"
-            (ready for use in a Cypher UNWIND clause).
-        """
-
-        ids: list[str] = []
-
-        if time_from and time_to:
-            time_from = date_to_int(time_from)
-            time_to = date_to_int(time_to)
-
-            cypher = """
-            MATCH (n)
-            WHERE n.type = 'Timestamp'
-              AND n.time_at >= $time_from
-              AND n.time_at <= $time_to
-            RETURN n.id AS id
-            """
-            params = {"time_from": time_from, "time_to": time_to}
-
-        elif time_from:
-            time_from = date_to_int(time_from)
-
-            cypher = """
-            MATCH (n)
-            WHERE n.type = 'Timestamp'
-              AND n.time_at >= $time_from
-            RETURN n.id AS id
-            """
-            params = {"time_from": time_from}
-
-        elif time_to:
-            time_to = date_to_int(time_to)
-
-            cypher = """
-            MATCH (n)
-            WHERE n.type = 'Timestamp'
-              AND n.time_at <= $time_to
-            RETURN n.id AS id
-            """
-            params = {"time_to": time_to}
-
-        else:
-            return ids
-
-        time_nodes = await self.query(cypher, params)
-        time_ids_list = [item["id"] for item in time_nodes if "id" in item]
-
-        return ", ".join(f"'{uid}'" for uid in time_ids_list)
 
     async def get_timestamps_in_range(
         self, start: int | None, end: int | None

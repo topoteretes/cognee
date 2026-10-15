@@ -19,8 +19,7 @@ def _utc(*parts: int) -> datetime:
 
 
 def _query_interval(start: dict | None = None, end: dict | None = None):
-    from cognee.tasks.temporal_graph.models import QueryInterval
-    from cognee.tasks.temporal_graph.models import Timestamp as QueryTime
+    from cognee.modules.retrieval.temporal_hybrid.models import QueryInterval, QueryTime
 
     return QueryInterval(
         starts_at=None if start is None else QueryTime(**start),

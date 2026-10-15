@@ -125,8 +125,8 @@ it with `await cognee.remember(report)`, or pass `auto_apply=True`.
 `extractor="gliner"` builds the graph and summaries with a local GLiNER2
 model, with no LLM call (embeddings still run). Install
 `pip install "cognee[gliner]"`; the model (about 750 MB) downloads on first use.
-It cannot be combined with a custom `graph_model`, `dry_run`,
-`session_id`, or a remote instance.
+It cannot be combined with a custom `graph_model`, `dry_run`, `session_id`,
+or a remote instance.
 
 > **For production:** the open-source GLiNER extractor is a demo. cognee's
 > enterprise GLiNER extraction is more accurate and covers more labels. The
