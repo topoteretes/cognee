@@ -44,6 +44,8 @@ def test_the_flag_is_dropped_with_a_deprecation_warning(value):
     assert kwargs == {"graph_model": None}
     message = str(warned[0].message)
     assert "removed in the next release" in message
+    # Users on an old temporal setup need to know which release to pin.
+    assert "1.6.2 was the last release" in message
     assert "memory_only=True" in message
     # Logged too: asyncio.run(cognify(...)) attributes the warning to asyncio, where
     # the default filters hide it.

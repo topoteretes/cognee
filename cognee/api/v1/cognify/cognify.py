@@ -56,7 +56,8 @@ logger = get_logger("cognify")
 
 TEMPORAL_COGNIFY_DEPRECATED = (
     "temporal_cognify is deprecated and ignored, and will be removed in the next release: "
-    "cognify() now extracts dates as Timestamp nodes by default, and SearchType.TEMPORAL "
+    "cognee 1.6.2 was the last release in which temporal_cognify=True built the event "
+    "graph; since 1.6.3 the flag has no effect. cognify() now extracts dates as Timestamp nodes by default, and SearchType.TEMPORAL "
     "reranks by them. Drop the argument. A dataset built with temporal_cognify=True holds "
     "Event nodes that current code no longer indexes: TEMPORAL search ignores them, graph "
     "completion no longer searches their names, and the next triplet enrichment re-embeds "
