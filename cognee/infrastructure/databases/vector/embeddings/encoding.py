@@ -25,8 +25,8 @@ from cognee.infrastructure.databases.exceptions import EmbeddingEncodingError
 EncodingFormat = Literal["base64", "float"]
 
 ENCODING_FORMAT_HINT = (
-    "EMBEDDING_ENCODING_FORMAT=base64 is set; if this endpoint does not support "
-    "base64 embeddings, set EMBEDDING_ENCODING_FORMAT=float."
+    "EMBEDDING_ENCODING_FORMAT=base64 is set, and this endpoint rejected the request. "
+    "Fix: comment out or remove EMBEDDING_ENCODING_FORMAT in your .env file or environment."
 )
 
 _OPENAI_API_HOST = "api.openai.com"
