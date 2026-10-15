@@ -205,13 +205,22 @@ def test_the_streamed_chunk_is_valid_json(client):
     assert json.loads(data_lines[1]) == {"index": 0, "nodes": [{"id": "a"}], "links": []}
 
 
-def test_the_json_path_hands_over_the_dataset_it_authorized(client):
-    """Passing the Dataset, not its id, is what spares visualize_graph_json a
-    second permission check (SDK-972)."""
+def test_the_json_path_leaves_the_permission_check_to_the_sdk_function(client):
+    """The route passes the id through and checks nothing itself, so the one
+    check per request is visualize_graph_json's (SDK-972)."""
     _get(client)
 
-    assert client.json_path.await_args.kwargs["dataset"] is client.authorized_dataset
-    assert client.json_path.await_args.kwargs["already_authorized"] is True
+    assert client.json_path.await_args.kwargs["dataset"] == UUID(DATASET_ID)
+    router_module.get_authorized_existing_datasets.assert_not_awaited()
+
+
+def test_the_stream_path_checks_permission_itself(client):
+    """The stream reads the Dataset row directly and never calls the SDK
+    function, so this branch is the one that authorizes."""
+    _get(client, "&stream=true")
+
+    router_module.get_authorized_existing_datasets.assert_awaited_once()
+    client.json_path.assert_not_awaited()
 
 
 def test_session_events_are_collected_unless_the_request_opts_out(client):

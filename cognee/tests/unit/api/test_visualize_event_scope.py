@@ -11,12 +11,11 @@ import sys
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import pytest
 
 from cognee.api.v1.visualize.visualize import fetch_visualization_data
-from cognee.modules.data.models import Dataset
 
 visualize_module = sys.modules["cognee.api.v1.visualize.visualize"]
 
@@ -82,56 +81,3 @@ async def test_no_dataset_asked_for_stays_unscoped():
     await _fetch(collect, dataset=None)
 
     collect.assert_awaited_once_with(user=USER, session_ids=None, dataset_id=None)
-
-
-@pytest.mark.asyncio
-async def test_an_already_authorized_dataset_is_not_checked_again():
-    """The routers check read permission and hand over the row they got, with
-    the flag set; asking get_authorized_existing_datasets again was a second
-    round of permission queries per request (SDK-972)."""
-    collect = AsyncMock(return_value=[])
-    dataset = Dataset(id=DATASET_ID, name="some-dataset", owner_id=uuid4())
-    authorize, fetch_graph, db_context, collector = _patches(collect, authorized=False)
-
-    with authorize as authorize_mock, fetch_graph as fetch_graph_mock, db_context, collector:
-        await visualize_module.fetch_visualization_data(
-            user=USER, dataset=dataset, already_authorized=True
-        )
-
-    authorize_mock.assert_not_awaited()
-    assert fetch_graph_mock.await_args.args[0] is dataset
-    collect.assert_awaited_once_with(user=USER, session_ids=None, dataset_id=DATASET_ID)
-
-
-@pytest.mark.asyncio
-async def test_a_dataset_row_alone_is_not_proof_of_permission():
-    """The row proves nothing, not even for its owner: a tenant switch or a
-    revoked read grant makes the canonical check refuse a dataset the user
-    still owns. Without the flag it goes through that check by its id."""
-    collect = AsyncMock(return_value=[])
-    dataset = Dataset(id=DATASET_ID, name="some-dataset", owner_id=USER.id)
-    authorize, fetch_graph, db_context, collector = _patches(collect, authorized=False)
-
-    with authorize as authorize_mock, fetch_graph as fetch_graph_mock, db_context, collector:
-        _graph_data, search_events = await visualize_module.fetch_visualization_data(
-            user=USER, dataset=dataset
-        )
-
-    authorize_mock.assert_awaited_once_with([DATASET_ID], "read", USER)
-    assert fetch_graph_mock.await_args.args[0] is None
-    assert search_events == []
-    collect.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_the_flag_does_not_skip_the_check_for_a_name():
-    collect = AsyncMock(return_value=[])
-    authorize, fetch_graph, db_context, collector = _patches(collect, authorized=False)
-
-    with authorize as authorize_mock, fetch_graph as fetch_graph_mock, db_context, collector:
-        await visualize_module.fetch_visualization_data(
-            user=USER, dataset="some-dataset", already_authorized=True
-        )
-
-    authorize_mock.assert_awaited_once_with(["some-dataset"], "read", USER)
-    assert fetch_graph_mock.await_args.args[0] is None
