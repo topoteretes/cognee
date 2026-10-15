@@ -10,8 +10,8 @@ answers questions over it: over every agent's history at once, and over each age
 
 cognee's databases are local files on your machine. The LLM is the one your key belongs to.
 
-Agents run this cookbook through the `import-agent-sessions` skill,
-[`.agents/skills/import-agent-sessions/SKILL.md`](../../../.agents/skills/import-agent-sessions/SKILL.md).
+Agents run this cookbook through the `multiagent-memory-setup` skill,
+[`.agents/skills/multiagent-memory-setup/SKILL.md`](../../../.agents/skills/multiagent-memory-setup/SKILL.md).
 
 ## Try it on sample sessions
 

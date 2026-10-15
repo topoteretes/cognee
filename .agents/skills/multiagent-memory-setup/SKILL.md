@@ -1,5 +1,5 @@
 ---
-name: import-agent-sessions
+name: multiagent-memory-setup
 description: Import the user's own Claude Code and/or Codex session history (the prompts they typed and the agents' answers) into one cognee dataset, then answer questions over it, across every agent and per agent. Use when someone wants to load, import or backfill their previous coding-agent sessions into cognee, give several coding agents one shared memory of past work, or ask what their earlier sessions were about. Runs locally; reads ~/.claude and ~/.codex read-only, writes only to cognee's memory.
 ---
 
