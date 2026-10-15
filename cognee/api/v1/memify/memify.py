@@ -4,7 +4,7 @@ Triplet embeddings were removed, and with them the default memify tasks that
 built them. ``cognee.memify()`` still runs the tasks a caller names, but warns
 that it goes away in the next release: ``cognee.improve()`` enriches a dataset
 and ``cognee.run_custom_pipeline()`` runs custom tasks. The internal runner the
-improve stages use is ``cognee.modules.memify.memify``; it stays.
+improve stages use is ``cognee.modules.memify.run_memify_tasks``; it stays.
 """
 
 import warnings
@@ -161,6 +161,24 @@ async def run_legacy_memify(
     """
     resolved_extraction_tasks = resolve_memify_tasks(extraction_tasks)
     resolved_enrichment_tasks = resolve_memify_tasks(enrichment_tasks)
+
+    from cognee.context_global_variables import set_database_global_context_variables
+    from cognee.modules.engine.operations.setup import setup
+    from cognee.modules.migrations.startup import run_migrations_and_block
+    from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
+        resolve_authorized_user_datasets,
+    )
+    from cognee.modules.retrieval.utils.brute_force_triplet_search import get_memory_fragment
+
+    # Same order as before SDK-1115: the migration gate comes before dataset
+    # resolution (which can write the Dataset row and its ACL) and before the
+    # graph read, and an unknown or unauthorized dataset still raises when no
+    # tasks are given.
+    await setup()
+    await run_migrations_and_block(dataset, user)
+    user, authorized_datasets = await resolve_authorized_user_datasets(dataset, user)
+    authorized_dataset = authorized_datasets[0]
+
     if not resolved_extraction_tasks and not resolved_enrichment_tasks:
         logger.warning(
             "memify() was called without tasks; nothing ran. Its default tasks built "
@@ -169,33 +187,20 @@ async def run_legacy_memify(
         return {}
 
     if not data:
-        from cognee.context_global_variables import set_database_global_context_variables
-        from cognee.modules.engine.operations.setup import setup
-        from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
-            resolve_authorized_user_datasets,
-        )
-        from cognee.modules.retrieval.utils.brute_force_triplet_search import (
-            get_memory_fragment,
-        )
-
-        await setup()
-        user, authorized_datasets = await resolve_authorized_user_datasets(dataset, user)
-        authorized_dataset = authorized_datasets[0]
         async with set_database_global_context_variables(
             authorized_dataset.id, authorized_dataset.owner_id
         ):
             memory_fragment = await get_memory_fragment(node_type=node_type, node_name=node_name)
         # One element: the whole subgraph is one data item.
         data = [memory_fragment]
-        dataset = authorized_dataset.id
 
-    from cognee.modules.memify import memify as run_memify
+    from cognee.modules.memify import run_memify_tasks
 
-    return await run_memify(
+    return await run_memify_tasks(
         resolved_extraction_tasks,
         resolved_enrichment_tasks,
         data=data,
-        dataset=dataset,
+        dataset=authorized_dataset.id,
         user=user,
         vector_db_config=vector_db_config,
         graph_db_config=graph_db_config,

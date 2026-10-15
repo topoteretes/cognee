@@ -438,7 +438,8 @@ async def recall(
         Search results. When searching session-only, returns a list of
         matching QA entries with ``source="session"``.
     """
-    query_type = resolve_deprecated_search_type(query_type)
+    # 3: the warning skips this frame and @telemetry_on_error's wrapper.
+    query_type = resolve_deprecated_search_type(query_type, stacklevel=3)
     from cognee import __version__ as cognee_version
     from cognee.shared.utils import send_telemetry
 

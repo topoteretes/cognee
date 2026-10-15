@@ -38,7 +38,7 @@ async def test_wrapper_passes_work_to_memify_and_reports_failed_entities(monkeyp
         write.default_params["kwargs"]["state"].unreviewed_entity_ids = ["failed-entity"]
         return {dataset_id: result}
 
-    monkeypatch.setattr(module, "memify", memify)
+    monkeypatch.setattr(module, "run_memify_tasks", memify)
     returned = await module.review_conflicts_pipeline("test", user, entity_ids=[], since=since)
     assert returned[dataset_id] is result
     assert result.payload == {"unreviewed_entity_ids": ["failed-entity"]}
@@ -49,7 +49,7 @@ async def test_wrapper_passes_work_to_memify_and_reports_failed_entities(monkeyp
 async def test_wrapper_checks_write_access_before_running(monkeypatch):
     monkeypatch.setattr(module, "get_authorized_existing_datasets", AsyncMock(return_value=[]))
     memify = AsyncMock()
-    monkeypatch.setattr(module, "memify", memify)
+    monkeypatch.setattr(module, "run_memify_tasks", memify)
     with pytest.raises(CogneeValidationError, match="No write access"):
         await module.review_conflicts_pipeline("missing", SimpleNamespace(id=uuid4()))
     memify.assert_not_awaited()

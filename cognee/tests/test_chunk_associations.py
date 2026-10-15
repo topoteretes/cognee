@@ -7,7 +7,7 @@ import pytest_asyncio
 import cognee
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.low_level import setup
-from cognee.modules.memify import memify
+from cognee.modules.memify import run_memify_tasks
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.tasks.chunks.create_chunk_associations import create_chunk_associations
 
@@ -76,7 +76,7 @@ async def test_chunk_associations_creates_edges_between_similar_chunks(clean_tes
         )
     ]
 
-    await memify(
+    await run_memify_tasks(
         extraction_tasks=extraction_tasks,
         enrichment_tasks=enrichment_tasks,
     )
@@ -117,7 +117,7 @@ async def test_chunk_associations_respects_similarity_threshold(clean_test_envir
         )
     ]
 
-    await memify(
+    await run_memify_tasks(
         extraction_tasks=extraction_tasks,
         enrichment_tasks=enrichment_tasks,
     )
@@ -152,7 +152,7 @@ async def test_chunk_associations_includes_metadata(clean_test_environment):
         )
     ]
 
-    await memify(
+    await run_memify_tasks(
         extraction_tasks=extraction_tasks,
         enrichment_tasks=enrichment_tasks,
     )
@@ -192,7 +192,7 @@ async def test_chunk_associations_with_cypher_query(clean_test_environment):
         )
     ]
 
-    await memify(
+    await run_memify_tasks(
         extraction_tasks=extraction_tasks,
         enrichment_tasks=enrichment_tasks,
     )
@@ -226,7 +226,7 @@ async def test_chunk_associations_handles_single_chunk(clean_test_environment):
         )
     ]
 
-    await memify(
+    await run_memify_tasks(
         extraction_tasks=extraction_tasks,
         enrichment_tasks=enrichment_tasks,
     )
@@ -259,7 +259,7 @@ async def test_chunk_associations_configurable_parameters(clean_test_environment
         )
     ]
 
-    await memify(
+    await run_memify_tasks(
         extraction_tasks=extraction_tasks,
         enrichment_tasks=enrichment_tasks,
     )

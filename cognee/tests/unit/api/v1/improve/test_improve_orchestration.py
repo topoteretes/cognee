@@ -654,6 +654,49 @@ async def test_deprecated_custom_tasks_run_last_and_fill_memify_run(harness, mon
 
 
 @pytest.mark.asyncio
+async def test_custom_tasks_memify_run_is_serialized_for_rest_clients(harness, monkeypatch):
+    """The deprecated memify_run stays in the JSON body (and so in the REST
+    response) for the deprecation release, and a remote result keeps it."""
+    from unittest.mock import AsyncMock
+
+    harness.use_stages([FakeStage("a")])
+    monkeypatch.setattr(_memify_shim(), "run_legacy_memify", AsyncMock(return_value={"raw": "run"}))
+
+    with pytest.warns(FutureWarning):
+        result = await harness.improve(extraction_tasks=["extract_subgraph"])
+
+    body = result.model_dump(mode="json")
+    assert body["memify_run"] == {"raw": "run"}
+    assert "legacy_memify_run" not in body
+    remote = ImproveResult.from_remote_payload(body, [])
+    with pytest.warns(FutureWarning, match="memify_run"):
+        assert remote.memify_run == {"raw": "run"}
+
+
+@pytest.mark.asyncio
+async def test_lock_held_result_lists_the_dropped_custom_tasks(harness, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    harness.use_stages([FakeStage("a")])
+    run_legacy = AsyncMock()
+    monkeypatch.setattr(_memify_shim(), "run_legacy_memify", run_legacy)
+    key = f"dataset:{harness.dataset.id}"
+    assert await session_lock.try_acquire_improve_lock_many([key])
+    try:
+        with pytest.warns(FutureWarning):
+            result = await harness.improve(extraction_tasks=["extract_subgraph"])
+    finally:
+        await session_lock.release_improve_lock_many([key])
+
+    assert _lock_held(result)
+    assert [(s.stage, s.reason) for s in result.stages] == [
+        ("a", REASON_LOCK_HELD),
+        ("custom_tasks", REASON_LOCK_HELD),
+    ]
+    run_legacy.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_a_failing_custom_task_is_recorded_not_raised(harness, monkeypatch):
     from unittest.mock import AsyncMock
 

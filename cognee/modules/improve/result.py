@@ -220,7 +220,12 @@ class ImproveResult(BaseModel):
     background run and returns the same, now finished, object.
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        validate_by_name=True,
+        validate_by_alias=True,
+        serialize_by_alias=True,
+    )
 
     dataset_id: UUID | None = None
     dataset_name: str | None = None
@@ -240,11 +245,19 @@ class ImproveResult(BaseModel):
     rerun_requested: bool = False
     rerun_passes: list[list[StageResult]] = Field(default_factory=list)
 
+    # Backs the deprecated ``memify_run`` (SDK-1115): ``{}``, the first pass's
+    # ``custom_tasks`` raw return, or an older server's legacy memify run
+    # mapping. Serialized and validated under ``memify_run`` so REST clients
+    # and remote results keep the key for the deprecation release; removed
+    # together with the property.
+    legacy_memify_run: Any = Field(
+        default_factory=dict,
+        alias="memify_run",
+        json_schema_extra={"deprecated": True},
+    )
+
     _task: asyncio.Task | None = PrivateAttr(default=None)
     _current_pass: list[StageResult] | None = PrivateAttr(default=None)
-    # Backs the deprecated ``memify_run`` property: ``{}``, or an older server's
-    # legacy memify run mapping.
-    _legacy_memify_run: Any = PrivateAttr(default_factory=dict)
 
     @property
     def memify_run(self) -> Any:
@@ -260,7 +273,7 @@ class ImproveResult(BaseModel):
             FutureWarning,
             stacklevel=2,
         )
-        return self._legacy_memify_run
+        return self.legacy_memify_run
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -307,8 +320,9 @@ class ImproveResult(BaseModel):
         """
         target = self._current_pass if self._current_pass is not None else self.stages
         target.append(stage_result)
-        if stage_result.stage == LEGACY_CUSTOM_TASKS_STAGE_NAME:
-            self._legacy_memify_run = (
+        # First pass only, like ``stages``.
+        if stage_result.stage == LEGACY_CUSTOM_TASKS_STAGE_NAME and self._current_pass is None:
+            self.legacy_memify_run = (
                 stage_result.raw_run if stage_result.raw_run is not None else {}
             )
 
@@ -365,9 +379,7 @@ class ImproveResult(BaseModel):
             "improve: the remote server returned a legacy memify result with no stage "
             "detail; it is kept on the deprecated ImproveResult.memify_run"
         )
-        result = cls(session_ids=list(session_ids), stages=[])
-        result._legacy_memify_run = payload
-        return result
+        return cls(session_ids=list(session_ids), stages=[], legacy_memify_run=payload)
 
     @classmethod
     def all_skipped(

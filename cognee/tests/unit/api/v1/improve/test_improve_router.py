@@ -90,7 +90,8 @@ def test_response_is_the_improve_result_with_one_entry_per_stage(client, improve
     assert body["stages"][1]["counts"] == {"entries": 3}
     # A pipeline-backed stage carries its run info.
     assert body["stages"][2]["run"]["status"] == "completed"
-    assert "memify_run" not in body
+    # Deprecated (SDK-1115) but still on the wire for one release.
+    assert body["memify_run"] == {}
 
 
 def test_forwards_every_option_to_improve(client, improve_stub):

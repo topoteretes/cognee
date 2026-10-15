@@ -56,6 +56,7 @@ from cognee.modules.improve import (
     stage_names,
     validate_stages_disabled,
 )
+from cognee.modules.improve.result import LEGACY_CUSTOM_TASKS_STAGE_NAME
 from cognee.modules.improve.stages import LegacyCustomTasksStage
 from cognee.modules.migrations.startup import run_migrations_and_block
 from cognee.modules.observability import (
@@ -244,7 +245,8 @@ async def improve(
         release itself checks for that request and, when one is pending,
         consumes it and keeps the lock, so the stages run again over whatever
         landed above the watermarks meanwhile — cheap, since every stage is
-        watermark-gated. Bounded by ``IMPROVE_MAX_RERUN_PASSES``.
+        watermark-gated; the deprecated ``custom_tasks`` stage, which is not,
+        runs on the first pass only. Bounded by ``IMPROVE_MAX_RERUN_PASSES``.
         """
         stages = list(DEFAULT_STAGES)
         if inputs.legacy_memify is not None:
@@ -263,7 +265,14 @@ async def improve(
                 if passes > 1:
                     result.start_rerun_pass()
                 budget_exhausted = False
-                for index, stage in enumerate(stages):
+                # Custom tasks run on the first pass only: unlike the registry
+                # stages they have no watermark, so a rerun would repeat them.
+                pass_stages = (
+                    stages
+                    if passes == 1
+                    else [stage for stage in stages if stage.name != LEGACY_CUSTOM_TASKS_STAGE_NAME]
+                )
+                for index, stage in enumerate(pass_stages):
                     stage_result = await execute_stage(stage, inputs)
                     result.record(stage_result)
                     if stage_result.run_info_stamp:
@@ -273,7 +282,7 @@ async def improve(
                         operation.merge_run_info(
                             stage_result.run_info_stamp, allow_overwrite=passes > 1
                         )
-                    remaining_stages = stages[index + 1 :]
+                    remaining_stages = pass_stages[index + 1 :]
                     # An exhausted LLM budget is not this stage's problem alone:
                     # every later stage would spend one more failing call on it.
                     # The stage stays recorded as it ended; the rest is skipped
@@ -599,8 +608,12 @@ def _skip_lock_held_run(
         " (rerun requested from the holder)" if rerun_requested else "",
     )
     operation.set_outcome(OperationOutcome.NOOP)
+    skipped_stages = stage_names(DEFAULT_STAGES)
+    if inputs.legacy_memify is not None:
+        # The deprecated custom tasks were dropped too; say so.
+        skipped_stages.append(LEGACY_CUSTOM_TASKS_STAGE_NAME)
     result = ImproveResult.all_skipped(
-        stage_names(DEFAULT_STAGES),
+        skipped_stages,
         REASON_LOCK_HELD,
         dataset_id=inputs.dataset_id,
         dataset_name=inputs.dataset_name,

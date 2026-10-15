@@ -34,8 +34,15 @@ DEPRECATED_SEARCH_TYPES: dict[SearchType, SearchType] = {
 }
 
 
-def resolve_deprecated_search_type(query_type: SearchType | None) -> SearchType | None:
-    """Return the replacement for a deprecated search type, warning once per call site."""
+def resolve_deprecated_search_type(
+    query_type: SearchType | None, *, stacklevel: int = 2
+) -> SearchType | None:
+    """Return the replacement for a deprecated search type, warning once per call site.
+
+    ``stacklevel`` is what the calling API function would pass to its own
+    ``warnings.warn`` to point at its caller: 2 for an undecorated function,
+    one more per wrapping decorator frame.
+    """
     replacement = DEPRECATED_SEARCH_TYPES.get(query_type) if query_type is not None else None
     if replacement is None:
         return query_type
@@ -43,6 +50,6 @@ def resolve_deprecated_search_type(query_type: SearchType | None) -> SearchType 
         f"SearchType.{query_type.name} is deprecated and will be removed in the next release; "
         f"it now runs SearchType.{replacement.name}. Use SearchType.{replacement.name} instead.",
         FutureWarning,
-        stacklevel=3,
+        stacklevel=stacklevel + 1,
     )
     return replacement

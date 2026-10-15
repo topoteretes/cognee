@@ -29,7 +29,7 @@ async def test_global_context_index_pipeline_calls_memify(monkeypatch):
     from cognee.memify_pipelines import global_context_index as pipeline_module
 
     memify_mock = AsyncMock(return_value={"status": "ok"})
-    monkeypatch.setattr(pipeline_module, "memify", memify_mock)
+    monkeypatch.setattr(pipeline_module, "run_memify_tasks", memify_mock)
 
     user = SimpleNamespace(id="user-id")
 

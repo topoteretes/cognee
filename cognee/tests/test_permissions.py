@@ -378,7 +378,7 @@ async def test_improve_permission_matrix(permissions_example_env):
 
         def __init__(self):
             self._memify = patch(
-                "cognee.memify_pipelines.global_context_index.memify",
+                "cognee.memify_pipelines.global_context_index.run_memify_tasks",
                 new_callable=AsyncMock,
                 return_value={},
             )
@@ -423,7 +423,7 @@ async def test_improve_permission_matrix(permissions_example_env):
     assert others_datasets[0].id != dataset_id
 
     # 5. memify (improve's engine) enforces the same write requirement directly.
-    from cognee.modules.memify import memify as real_memify
+    from cognee.modules.memify import run_memify_tasks
     from cognee.modules.pipelines.tasks.task import Task
 
     async def passthrough(data):
@@ -432,4 +432,4 @@ async def test_improve_permission_matrix(permissions_example_env):
     await cognee.add(["second fixture"], dataset_name="IMPROVE_PERMS_2", user=owner)
     dataset_2_id = (await get_datasets_by_name(["IMPROVE_PERMS_2"], owner.id))[0].id
     with pytest.raises(PermissionDeniedError):
-        await real_memify([Task(passthrough)], [], dataset=dataset_2_id, user=other)
+        await run_memify_tasks([Task(passthrough)], [], dataset=dataset_2_id, user=other)

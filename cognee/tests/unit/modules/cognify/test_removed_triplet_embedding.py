@@ -92,3 +92,17 @@ async def test_deprecated_embed_triplets_warns_and_indexes_no_triplets(
 def test_no_triplet_writer_is_left():
     assert "triplet_embedding" not in CognifyConfig.model_fields
     assert "triplet_enrichment" not in stage_names()
+
+
+def test_add_data_points_keeps_its_positional_order():
+    """embed_triplets keeps its old third place for the deprecation release, so a
+    positional ``add_data_points(dps, edges, False, ctx)`` still binds ctx."""
+    import inspect
+
+    assert list(inspect.signature(add_data_points).parameters)[:5] == [
+        "data_points",
+        "custom_edges",
+        "embed_triplets",
+        "ctx",
+        "graph_only",
+    ]

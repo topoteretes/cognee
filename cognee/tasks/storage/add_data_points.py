@@ -69,9 +69,11 @@ def _group_by_extra_keys(owner_map: dict) -> dict:
 async def add_data_points(
     data_points: list[DataPoint],
     custom_edges: list | None = None,
+    # Deprecated, kept in its old position so positional callers still bind
+    # ctx and graph_only correctly. Removed in the next release.
+    embed_triplets: bool | None = None,
     ctx: Optional["PipelineContext"] = None,
     graph_only: bool = False,
-    embed_triplets: bool | None = None,
 ) -> list[DataPoint]:
     """
     Add a batch of data points to the graph database by extracting nodes and edges,
@@ -80,12 +82,12 @@ async def add_data_points(
     Args:
         data_points: Data points to process and insert into the graph.
         custom_edges: Custom edges between datapoints.
-        ctx: Pipeline runtime context (user, dataset, data_item).
-        graph_only: Persist graph nodes and edges without initializing or writing
-            a vector engine. Intended for deterministic extraction pipelines.
         embed_triplets: Deprecated and ignored (SDK-1115); removed in the next
             release. Triplet embeddings were removed: graph completion searches
             edges through the ``EdgeType_relationship_name`` index written here.
+        ctx: Pipeline runtime context (user, dataset, data_item).
+        graph_only: Persist graph nodes and edges without initializing or writing
+            a vector engine. Intended for deterministic extraction pipelines.
     """
     if embed_triplets is not None:
         warnings.warn(

@@ -3,7 +3,7 @@ from cognee.exceptions import CogneeValidationError
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.improve.constants import AGENT_TRACE_FEEDBACKS_NODE_SET
-from cognee.modules.memify import memify
+from cognee.modules.memify import run_memify_tasks
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -78,7 +78,7 @@ async def persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
         ),
     ]
 
-    result = await memify(
+    result = await run_memify_tasks(
         extraction_tasks=extraction_tasks,
         enrichment_tasks=enrichment_tasks,
         dataset=dataset_to_write[0].id,

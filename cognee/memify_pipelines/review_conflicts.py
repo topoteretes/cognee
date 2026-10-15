@@ -6,7 +6,7 @@ from uuid import UUID
 from cognee.exceptions import CogneeValidationError
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.improve.result import first_run_info
-from cognee.modules.memify import memify
+from cognee.modules.memify import run_memify_tasks
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.models import User
@@ -53,7 +53,7 @@ async def review_conflicts_pipeline(
     """Read this dataset's facts, review them in bounded LLM calls, write each verdict."""
     dataset_id = await _writable_dataset_id(dataset, user)
     state = ReviewWriteState()
-    result = await memify(
+    result = await run_memify_tasks(
         extraction_tasks=[
             Task(read_entity_facts, entity_ids=entity_ids, since=since, needs_llm=False)
         ],

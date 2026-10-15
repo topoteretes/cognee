@@ -19,7 +19,7 @@ from cognee.modules.search.types.SearchType import resolve_deprecated_search_typ
 from cognee.modules.users.methods import get_authenticated_user
 
 shim_module = importlib.import_module("cognee.api.v1.memify.memify")
-runner_module = importlib.import_module("cognee.modules.memify.memify")
+runner_module = importlib.import_module("cognee.modules.memify.run_memify_tasks")
 router_module = importlib.import_module("cognee.api.v1.memify.routers.get_memify_router")
 
 
@@ -49,7 +49,7 @@ def runner_executor(monkeypatch):
 @pytest.mark.asyncio
 async def test_runner_refuses_an_empty_task_list(runner_executor):
     with pytest.raises(ValueError, match="at least one"):
-        await runner_module.memify([], [])
+        await runner_module.run_memify_tasks([], [])
     runner_executor.assert_not_awaited()
 
 
@@ -59,7 +59,7 @@ async def test_runner_refuses_an_empty_task_list(runner_executor):
     [(None, [{}]), ([], []), ([{"seed": 1}], [{"seed": 1}])],
 )
 async def test_runner_seeds_only_when_data_is_none(runner_executor, data, expected):
-    await runner_module.memify(
+    await runner_module.run_memify_tasks(
         [Task(_passthrough)],
         [],
         data=data,
@@ -81,14 +81,59 @@ def test_cognee_memify_is_the_deprecated_shim():
 
 
 @pytest.fixture
-def run_memify(monkeypatch):
-    runner = AsyncMock(return_value={"ran": True})
-    monkeypatch.setattr("cognee.modules.memify.memify", runner)
-    return runner
+def legacy_env(monkeypatch):
+    """Stub what the shim calls before the runner; record the order of the calls."""
+    dataset = SimpleNamespace(id=uuid.uuid4(), owner_id=uuid.uuid4())
+    order = []
+
+    def recorder(name, value=None):
+        async def call(*args, **kwargs):
+            order.append(name)
+            return value
+
+        return AsyncMock(side_effect=call)
+
+    @asynccontextmanager
+    async def database_context(*_args):
+        yield
+
+    fragment = object()
+    env = SimpleNamespace(
+        dataset=dataset,
+        order=order,
+        fragment=fragment,
+        resolve=recorder("resolve", ("user", [dataset])),
+        get_fragment=recorder("fragment", fragment),
+        runner=AsyncMock(return_value={"ran": True}),
+    )
+    monkeypatch.setattr("cognee.modules.engine.operations.setup.setup", recorder("setup"))
+    monkeypatch.setattr(
+        "cognee.modules.migrations.startup.run_migrations_and_block", recorder("migrations")
+    )
+    monkeypatch.setattr(
+        "cognee.modules.pipelines.layers.resolve_authorized_user_datasets."
+        "resolve_authorized_user_datasets",
+        env.resolve,
+    )
+    monkeypatch.setattr(
+        "cognee.context_global_variables.set_database_global_context_variables",
+        database_context,
+    )
+    monkeypatch.setattr(
+        "cognee.modules.retrieval.utils.brute_force_triplet_search.get_memory_fragment",
+        env.get_fragment,
+    )
+    monkeypatch.setattr("cognee.modules.memify.run_memify_tasks", env.runner)
+    return env
+
+
+@pytest.fixture
+def run_memify(legacy_env):
+    return legacy_env.runner
 
 
 @pytest.mark.asyncio
-async def test_memify_warns_and_runs_the_given_tasks(run_memify):
+async def test_memify_warns_and_runs_the_given_tasks(legacy_env, run_memify):
     task = Task(_passthrough)
 
     with pytest.warns(FutureWarning, match=r"cognee\.improve\(\)"):
@@ -98,13 +143,34 @@ async def test_memify_warns_and_runs_the_given_tasks(run_memify):
     args, kwargs = run_memify.await_args
     assert args == ([task], [])
     assert kwargs["data"] == ["x"]
-    assert kwargs["dataset"] == "ds"
+    assert kwargs["dataset"] == legacy_env.dataset.id
+    assert legacy_env.resolve.await_args.args == ("ds", None)
 
 
 @pytest.mark.asyncio
-async def test_memify_without_tasks_runs_nothing(run_memify):
+async def test_memify_gates_on_migrations_before_touching_the_dataset(legacy_env):
+    with pytest.warns(FutureWarning):
+        await cognee.memify(extraction_tasks=[Task(_passthrough)], dataset="ds")
+    assert legacy_env.order == ["setup", "migrations", "resolve", "fragment"]
+
+
+@pytest.mark.asyncio
+async def test_memify_without_tasks_runs_nothing_but_still_checks_the_dataset(
+    legacy_env, run_memify
+):
     with pytest.warns(FutureWarning):
         assert await cognee.memify(dataset="ds") == {}
+    assert legacy_env.order == ["setup", "migrations", "resolve"]
+    run_memify.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_memify_without_tasks_still_rejects_an_unauthorized_dataset(legacy_env, run_memify):
+    from cognee.modules.users.exceptions import PermissionDeniedError
+
+    legacy_env.resolve.side_effect = PermissionDeniedError("no access")
+    with pytest.warns(FutureWarning), pytest.raises(PermissionDeniedError):
+        await cognee.memify(dataset=uuid.uuid4())
     run_memify.assert_not_awaited()
 
 
@@ -113,10 +179,11 @@ async def test_memify_without_tasks_runs_nothing(run_memify):
     ("name", "message"),
     [("get_triplet_datapoints", "removed"), ("no_such_task", "Unknown memify task name")],
 )
-async def test_memify_rejects_removed_and_unknown_task_names(run_memify, name, message):
+async def test_memify_rejects_removed_and_unknown_task_names(legacy_env, run_memify, name, message):
     with pytest.warns(FutureWarning), pytest.raises(CogneeValidationError, match=message):
         await cognee.memify(extraction_tasks=[name], data=["x"])
     run_memify.assert_not_awaited()
+    assert legacy_env.order == []  # rejected before any database work
 
 
 @pytest.mark.asyncio
@@ -128,38 +195,50 @@ async def test_memify_resolves_registry_names(run_memify):
 
 
 @pytest.mark.asyncio
-async def test_memify_without_data_passes_the_graph(monkeypatch, run_memify):
-    dataset = SimpleNamespace(id=uuid.uuid4(), owner_id=uuid.uuid4())
-    fragment = object()
-    get_fragment = AsyncMock(return_value=fragment)
-
-    @asynccontextmanager
-    async def database_context(*_args):
-        yield
-
-    monkeypatch.setattr("cognee.modules.engine.operations.setup.setup", AsyncMock())
-    monkeypatch.setattr(
-        "cognee.modules.pipelines.layers.resolve_authorized_user_datasets."
-        "resolve_authorized_user_datasets",
-        AsyncMock(return_value=("user", [dataset])),
-    )
-    monkeypatch.setattr(
-        "cognee.context_global_variables.set_database_global_context_variables",
-        database_context,
-    )
-    monkeypatch.setattr(
-        "cognee.modules.retrieval.utils.brute_force_triplet_search.get_memory_fragment",
-        get_fragment,
-    )
-
+async def test_memify_without_data_passes_the_graph(legacy_env, run_memify):
     with pytest.warns(FutureWarning):
-        await cognee.memify(extraction_tasks=[Task(_passthrough)], node_name=["Alice"])
+        await cognee.memify(
+            extraction_tasks=[Task(_passthrough)], node_name=["Alice"], node_type=None
+        )
 
-    assert get_fragment.await_args.kwargs["node_name"] == ["Alice"]
+    assert legacy_env.get_fragment.await_args.kwargs == {"node_type": None, "node_name": ["Alice"]}
     kwargs = run_memify.await_args.kwargs
-    assert kwargs["data"] == [fragment]
-    assert kwargs["dataset"] == dataset.id
+    assert kwargs["data"] == [legacy_env.fragment]
+    assert kwargs["dataset"] == legacy_env.dataset.id
     assert kwargs["user"] == "user"
+
+
+@pytest.mark.asyncio
+async def test_old_module_path_is_the_same_deprecated_memify(legacy_env, run_memify):
+    """Before SDK-1115 cognee.memify *was* cognee.modules.memify.memify."""
+    from cognee.modules.memify import memify as old_path_memify
+
+    task = Task(_passthrough)
+    with pytest.warns(FutureWarning, match=r"cognee\.memify\(\) is deprecated") as record:
+        await old_path_memify(extraction_tasks=[task], data=["x"])
+    assert record[0].filename == __file__
+    assert run_memify.await_args.args == ([task], [])
+
+
+def test_old_task_registry_path_still_resolves_names():
+    import sys
+
+    sys.modules.pop("cognee.memify_pipelines.memify_task_registry", None)
+    with pytest.warns(FutureWarning, match="memify_task_registry is deprecated"):
+        registry = importlib.import_module("cognee.memify_pipelines.memify_task_registry")
+
+    assert registry.resolve_memify_tasks(None) is None
+    assert registry.resolve_memify_tasks([]) is None
+    [task] = registry.resolve_memify_tasks(["extract_subgraph"])
+    assert task.executable.__name__ == "extract_subgraph"
+    assert "extract_subgraph" in registry.supported_memify_task_names()
+    assert "get_triplet_datapoints" not in registry.supported_memify_task_names()
+
+
+def test_memify_task_package_still_exports_the_subgraph_tasks():
+    from cognee.tasks.memify import extract_subgraph, extract_subgraph_chunks
+
+    assert callable(extract_subgraph) and callable(extract_subgraph_chunks)
 
 
 # --- POST /api/v1/memify ---------------------------------------------------
@@ -230,26 +309,39 @@ def test_route_rejects_a_removed_task_name(client, run_memify):
 # --- cognee-cli memify -----------------------------------------------------
 
 
-def test_cli_memify_warns_and_calls_the_shim(monkeypatch):
+def test_cli_memify_warns_and_runs_nothing(monkeypatch):
     from cognee.cli._cognee import _discover_commands
     from cognee.cli.commands import memify_command
 
     assert memify_command.MemifyCommand in _discover_commands()
     shim = AsyncMock(return_value={})
     monkeypatch.setattr(cognee, "memify", shim)
-    monkeypatch.setattr(
-        "cognee.cli.user_resolution.resolve_cli_user", AsyncMock(return_value="user")
-    )
     echo = MagicMock()
     monkeypatch.setattr(memify_command, "fmt", echo)
 
     args = SimpleNamespace(
-        dataset_name="ds", dataset_id=None, data=None, node_name=None, background=False
+        dataset_name="ds", dataset_id=None, data=None, node_name=["A"], background=False
     )
     memify_command.MemifyCommand().execute(args)
 
-    assert "deprecated" in echo.warning.call_args.args[0]
-    assert shim.await_args.kwargs["dataset"] == "ds"
+    echo.warning.assert_called_once()
+    assert "cognee-cli improve" in echo.warning.call_args.args[0]
+    echo.success.assert_not_called()
+    shim.assert_not_awaited()
+
+
+def test_cli_memify_over_the_api_warns_and_calls_no_server(monkeypatch):
+    from cognee.cli import api_dispatch
+
+    client = MagicMock()
+    echo = MagicMock()
+    monkeypatch.setattr(api_dispatch, "fmt", echo)
+
+    api_dispatch._dispatch_memify(client, SimpleNamespace(dataset_name="ds", dataset_id=None))
+
+    echo.warning.assert_called_once()
+    echo.success.assert_not_called()
+    client.memify.assert_not_called()
 
 
 # --- SearchType.TRIPLET_COMPLETION -----------------------------------------
@@ -280,13 +372,16 @@ def remote_client(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_search_runs_triplet_completion_as_graph_completion(remote_client):
-    with pytest.warns(FutureWarning, match="TRIPLET_COMPLETION"):
+    with pytest.warns(FutureWarning, match="TRIPLET_COMPLETION") as record:
         await cognee.search("q", query_type=SearchType.TRIPLET_COMPLETION)
+    assert record[0].filename == __file__
     assert remote_client.search.await_args.kwargs["search_type"] is SearchType.GRAPH_COMPLETION
 
 
 @pytest.mark.asyncio
 async def test_recall_runs_triplet_completion_as_graph_completion(remote_client):
-    with pytest.warns(FutureWarning, match="TRIPLET_COMPLETION"):
+    with pytest.warns(FutureWarning, match="TRIPLET_COMPLETION") as record:
         await cognee.recall("q", query_type=SearchType.TRIPLET_COMPLETION)
+    # Points at the caller, not at recall()'s telemetry decorator.
+    assert record[0].filename == __file__
     assert remote_client.recall.await_args.args[1] is SearchType.GRAPH_COMPLETION

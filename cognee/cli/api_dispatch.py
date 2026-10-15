@@ -152,25 +152,10 @@ def _dispatch_search(client: CogneeApiClient, args: argparse.Namespace) -> None:
 
 
 def _dispatch_memify(client: CogneeApiClient, args: argparse.Namespace) -> None:
-    fmt.warning(
-        "cognee-cli memify is deprecated and will be removed in the next release. "
-        "Use cognee-cli improve instead."
-    )
-    label = args.dataset_id or args.dataset_name
-    fmt.echo(f"Running memify on '{label}'...")
-    result = client.memify(
-        dataset_name=args.dataset_name,
-        dataset_id=args.dataset_id,
-        data=getattr(args, "data", None),
-        node_name=getattr(args, "node_name", None),
-        run_in_background=getattr(args, "background", False),
-    )
-    if getattr(args, "background", False):
-        fmt.success("Memify started in background.")
-    else:
-        fmt.success("Memify completed.")
-    if result:
-        fmt.echo(json.dumps(result, indent=2, default=str))
+    from cognee.cli.commands.memify_command import MEMIFY_CLI_DEPRECATION_MESSAGE
+
+    # Same as the local command: nothing left to run, so the server is not called.
+    fmt.warning(MEMIFY_CLI_DEPRECATION_MESSAGE)
 
 
 def _dispatch_datasets(client: CogneeApiClient, args: argparse.Namespace) -> None:

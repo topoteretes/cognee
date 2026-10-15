@@ -9,7 +9,7 @@ on edges or weights — live here.
 
 Curated from the implementation:
   * cognee/api/v1/cognify/cognify.py
-  * cognee/modules/memify/memify.py + cognee/memify_pipelines/*
+  * cognee/modules/memify/run_memify_tasks.py + cognee/memify_pipelines/*
   * cognee/api/v1/forget/forget.py
   * cognee/tasks/codingagents/coding_rule_associations.py
 
