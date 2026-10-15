@@ -64,6 +64,12 @@ _PROVIDERS: dict[str, _Provider] = {
         source_name="gmail_source",
         service_builder=_google_service_builder("gmail", "v1"),
     ),
+    "google_calendar": _Provider(
+        prefix="google_calendar_events",
+        source_module="cognee.tasks.ingestion.connectors.google_calendar",
+        source_name="google_calendar_source",
+        service_builder=_google_service_builder("calendar", "v3"),
+    ),
     "linear": _Provider(
         prefix="linear",
         source_module="cognee.tasks.ingestion.connectors.linear",

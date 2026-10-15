@@ -1420,6 +1420,11 @@ gmail = [
     { name = "google-auth" },
     { name = "google-auth-oauthlib" },
 ]
+google-calendar = [
+    { name = "google-api-python-client" },
+    { name = "google-auth" },
+    { name = "google-auth-oauthlib" },
+]
 google-drive = [
     { name = "google-api-python-client" },
     { name = "google-auth" },
@@ -1544,10 +1549,13 @@ requires-dist = [
     { name = "gitpython", marker = "extra == 'dev'", specifier = ">=3.1.43,<4" },
     { name = "gliner2", extras = ["local"], marker = "extra == 'gliner'", specifier = ">=2.0.0,<3" },
     { name = "google-api-python-client", marker = "extra == 'gmail'", specifier = ">=2.100.0,<3" },
+    { name = "google-api-python-client", marker = "extra == 'google-calendar'", specifier = ">=2.100.0,<3" },
     { name = "google-api-python-client", marker = "extra == 'google-drive'", specifier = ">=2.100.0,<3" },
     { name = "google-auth", marker = "extra == 'gmail'", specifier = ">=2.23.0,<3" },
+    { name = "google-auth", marker = "extra == 'google-calendar'", specifier = ">=2.23.0,<3" },
     { name = "google-auth", marker = "extra == 'google-drive'", specifier = ">=2.23.0,<3" },
     { name = "google-auth-oauthlib", marker = "extra == 'gmail'", specifier = ">=1.1.0,<2" },
+    { name = "google-auth-oauthlib", marker = "extra == 'google-calendar'", specifier = ">=1.1.0,<2" },
     { name = "google-auth-oauthlib", marker = "extra == 'google-drive'", specifier = ">=1.1.0,<2" },
     { name = "groq", marker = "extra == 'groq'", specifier = ">=0.8.0,<1.0.0" },
     { name = "gunicorn", specifier = ">=20.1.0,<24" },
@@ -1646,7 +1654,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.34.0,<1.0.0" },
     { name = "websockets", specifier = ">=15.0.1,<16.0.0" },
 ]
-provides-extras = ["api", "scraping", "fastembed", "neo4j", "neptune", "postgres", "postgres-binary", "turso", "notebook", "langchain", "llama-index", "huggingface", "ollama", "mistral", "anthropic", "azure", "deepeval", "posthog", "groq", "llama-cpp", "docs", "codegraph", "evals", "aws", "dlt", "gmail", "google-drive", "baml", "dev", "debug", "redis", "tracing", "docling", "docling-full", "gliner", "rapidocr"]
+provides-extras = ["api", "scraping", "fastembed", "neo4j", "neptune", "postgres", "postgres-binary", "turso", "notebook", "langchain", "llama-index", "huggingface", "ollama", "mistral", "anthropic", "azure", "deepeval", "posthog", "groq", "llama-cpp", "docs", "codegraph", "evals", "aws", "dlt", "gmail", "google-drive", "google-calendar", "baml", "dev", "debug", "redis", "tracing", "docling", "docling-full", "gliner", "rapidocr"]
 
 [package.metadata.requires-dev]
 dev = [
