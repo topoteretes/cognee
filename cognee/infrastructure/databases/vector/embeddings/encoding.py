@@ -27,16 +27,36 @@ ENCODING_FORMAT_HINT = (
 _OPENAI_API_HOST = "api.openai.com"
 
 
-def _routes_to_openai_api(model: str | None, endpoint: str | None) -> bool:
-    """Whether litellm sends this model to OpenAI's own embeddings API."""
-    if endpoint and urlparse(endpoint).hostname != _OPENAI_API_HOST:
-        return False
+def _routes_through_openai_handler(model: str | None) -> bool:
+    """Whether litellm sends this model through its OpenAI handler, which forwards
+    encoding_format unchanged. Other handlers translate or reject it."""
     if not model:
         return False
     if "/" in model:
         return model.split("/", 1)[0].lower() == "openai"
     # An unprefixed model resolves by litellm's model registry.
     return litellm.model_cost.get(model, {}).get("litellm_provider") == "openai"
+
+
+def _routes_to_openai_api(model: str | None, endpoint: str | None) -> bool:
+    """Whether litellm sends this model to OpenAI's own embeddings API."""
+    if endpoint and urlparse(endpoint).hostname != _OPENAI_API_HOST:
+        return False
+    return _routes_through_openai_handler(model)
+
+
+def base64_supported(provider: str, model: str | None) -> bool:
+    """Whether EMBEDDING_ENCODING_FORMAT=base64 may be set for this provider and model.
+
+    Only routes that send OpenAI's embeddings request unchanged, which are the ones
+    tested: the openai_compatible engine and litellm's OpenAI handler. litellm maps
+    base64 to other providers' own formats, e.g. Bedrock's 1-bit "binary" vectors.
+    """
+    if provider == "openai_compatible":
+        return True
+    if provider in ("fastembed", "ollama"):
+        return False
+    return _routes_through_openai_handler(model)
 
 
 def resolve_encoding_format(

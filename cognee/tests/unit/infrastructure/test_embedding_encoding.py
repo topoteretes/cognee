@@ -7,6 +7,7 @@ import pytest
 
 from cognee.exceptions import CogneeConfigurationError
 from cognee.infrastructure.databases.vector.embeddings.encoding import (
+    base64_supported,
     decode_embedding,
     resolve_encoding_format,
 )
@@ -59,12 +60,45 @@ def test_decode_embedding_handles_both_formats():
     assert decode_embedding(float32_vector) is float32_vector
 
 
-@pytest.mark.parametrize("provider", ["fastembed", "ollama"])
-def test_base64_with_local_engines_is_a_configuration_error(provider):
+@pytest.mark.parametrize(
+    ("provider", "model", "supported"),
+    [
+        # Tested: OpenAI's embeddings request, sent unchanged.
+        ("openai", "openai/text-embedding-3-large", True),
+        ("openai", "text-embedding-3-small", True),
+        ("custom", "openai/BAAI/bge-m3", True),
+        ("openai_compatible", "nomic-embed-text", True),
+        # Untested, or litellm translates encoding_format for the provider.
+        ("azure", "azure/my-deployment", False),
+        ("bedrock", "bedrock/amazon.titan-embed-text-v2:0", False),
+        ("cohere", "cohere/embed-english-v3.0", False),
+        ("gemini", "gemini/text-embedding-004", False),
+        ("mistral", "mistral/mistral-embed", False),
+        ("custom", "openrouter/openai/text-embedding-3-small", False),
+        ("custom", "hosted_vllm/BAAI/bge-m3", False),
+        ("custom", "BAAI/bge-m3", False),
+        ("fastembed", "BAAI/bge-small-en-v1.5", False),
+        ("ollama", "nomic-embed-text", False),
+    ],
+)
+def test_base64_supported_only_on_tested_routes(provider, model, supported):
+    assert base64_supported(provider, model) is supported
+
+
+@pytest.mark.parametrize(
+    ("provider", "model"),
+    [
+        ("fastembed", "BAAI/bge-small-en-v1.5"),
+        ("ollama", "nomic-embed-text"),
+        ("bedrock", "bedrock/amazon.titan-embed-text-v2:0"),
+        ("azure", "azure/my-deployment"),
+    ],
+)
+def test_base64_on_an_unsupported_route_is_a_configuration_error(provider, model):
     with pytest.raises(CogneeConfigurationError, match="EMBEDDING_ENCODING_FORMAT"):
         create_embedding_engine(
             provider,
-            "some-model",
+            model,
             4,
             None,
             None,

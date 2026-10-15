@@ -10,6 +10,7 @@ from cognee.infrastructure.llm.config import (
 )
 
 from .EmbeddingEngine import EmbeddingEngine
+from .encoding import base64_supported
 
 
 def get_embedding_engine() -> EmbeddingEngine:
@@ -90,10 +91,13 @@ def create_embedding_engine(
 
         Returns an instance of an embedding engine based on the specified provider.
     """
-    if embedding_provider in ("fastembed", "ollama") and embedding_encoding_format == "base64":
+    if embedding_encoding_format == "base64" and not base64_supported(
+        embedding_provider, embedding_model
+    ):
         raise CogneeConfigurationError(
             f"EMBEDDING_ENCODING_FORMAT=base64 is not supported with "
-            f"EMBEDDING_PROVIDER={embedding_provider}.",
+            f"EMBEDDING_PROVIDER={embedding_provider} and EMBEDDING_MODEL={embedding_model}; "
+            f"it is supported for openai/ models and EMBEDDING_PROVIDER=openai_compatible.",
             remediation="Unset EMBEDDING_ENCODING_FORMAT.",
         )
 
