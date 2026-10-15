@@ -109,6 +109,8 @@ async def main():
     # code_query={"operation": "query_facts", "kind": "dependency", "prop": "type",
     #             "prop_value": "package"}   # declared packages from manifests (purl names)
     # code_query={"operation": "delta"}    # last ingestion's changes + the snapshot receipt
+    # code_query={"operation": "ask", "question": "How is an order placed?"}
+    #     # seeds, flows, one-hop neighbourhood and file:line citations to read
 
 
 if __name__ == "__main__":
