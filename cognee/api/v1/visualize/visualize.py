@@ -75,12 +75,15 @@ async def fetch_visualization_data(
     # is set with None: a no-op when access control is off, and an (expected)
     # error in multi-user mode where a dataset is required.
     resolved_dataset = None
-    if isinstance(dataset, Dataset):
-        # The caller authorized this dataset itself, e.g. a router that
-        # already checked read permission, so it is not checked again.
+    if isinstance(dataset, Dataset) and dataset.owner_id == user.id:
+        # An owner can always read their own dataset, so a caller that already
+        # holds the row (the routers, after their own check) skips a second
+        # one. The row proves nothing for anyone else, so it is not trusted.
         resolved_dataset = dataset
     elif dataset:
-        authorized = await get_authorized_existing_datasets([dataset], "read", user)
+        # A name, a UUID, or a Dataset the user does not own: checked by id.
+        dataset_id = dataset.id if isinstance(dataset, Dataset) else dataset
+        authorized = await get_authorized_existing_datasets([dataset_id], "read", user)
         resolved_dataset = authorized[0] if authorized else None
 
     graph_data = await fetch_dataset_graph_data(
@@ -233,9 +236,9 @@ async def visualize_graph(
             first authorized match selects which user+dataset database is
             visualized. Defaults to "main_dataset" (the same default used by
             add/cognify/remember). Pass None to skip dataset resolution and
-            render the current context's graph. A ``Dataset`` instance is
-            taken as already authorized and used as is, with no permission
-            check: only pass one you got from get_authorized_existing_datasets.
+            render the current context's graph. A ``Dataset`` the user owns
+            is used as is; any other ``Dataset`` is checked by its id like a
+            name or UUID would be.
         full: When True, render the entire graph (legacy behavior).
         query: Optional query string; its nearest vector hits seed the subgraph.
         seed_node_ids: Explicit seed node ids for neighborhood expansion.

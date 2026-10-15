@@ -3,9 +3,10 @@
 Each route authorized the dataset itself and then called an SDK function that
 authorized it again (SDK-972), which is a handful of sequential permission
 queries paid twice. The routers now hand the SDK function the Dataset they
-authorized. Only the edges are faked here (permission lookup, graph read,
-event collection, HTML and semantic rendering), so a second check anywhere in
-the route or the SDK function counts as a second call.
+authorized, which it takes as is when the user owns it. Only the edges are
+faked here (permission lookup, graph read, event collection, HTML and semantic
+rendering), so a second check anywhere in the route or the SDK function counts
+as a second call.
 """
 
 import sys
@@ -30,7 +31,8 @@ EVENTS = [{"kind": "search", "qa_id": "q1"}]
 
 @pytest.fixture
 def client(monkeypatch):
-    dataset = Dataset(id=DATASET_ID, name="some-dataset", owner_id=uuid4())
+    user = SimpleNamespace(id=uuid4())
+    dataset = Dataset(id=DATASET_ID, name="some-dataset", owner_id=user.id)
     authorize = AsyncMock(return_value=[dataset])
     fetch_graph = AsyncMock(return_value=([], []))
     collect_events = AsyncMock(return_value=EVENTS)
@@ -49,7 +51,7 @@ def client(monkeypatch):
 
     app = FastAPI()
     app.include_router(router_module.get_visualize_router(), prefix="/api/v1/visualize")
-    app.dependency_overrides[get_authenticated_user] = lambda: SimpleNamespace(id=uuid4())
+    app.dependency_overrides[get_authenticated_user] = lambda: user
     with TestClient(app) as test_client:
         test_client.dataset = dataset
         test_client.authorize = authorize
