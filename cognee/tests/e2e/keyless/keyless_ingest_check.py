@@ -78,6 +78,8 @@ async def main() -> None:
     )
     from cognee.infrastructure.llm.config import get_llm_config
     from cognee.modules.cognify.config import get_cognify_config, resolve_extractor
+    from cognee.modules.pipelines.models import PipelineRunStatus
+    from cognee.tests.utils.get_latest_pipeline_run import get_latest_pipeline_run
 
     assert not get_llm_config().llm_api_key, "an LLM key leaked into the environment"
     extractor = resolve_extractor(None, get_cognify_config())
@@ -100,6 +102,11 @@ async def main() -> None:
     )
 
     await cognee.cognify(["keyless"])
+
+    cognify_run = await get_latest_pipeline_run(
+        pipeline_name="cognify_pipeline", status=PipelineRunStatus.DATASET_PROCESSING_COMPLETED
+    )
+    assert cognify_run.embedding_tokens > 0, "cognify recorded no embedding tokens"
 
     chunks = await cognee.search(
         "Where was Marie Curie born?", query_type=SearchType.CHUNKS, datasets=["keyless"], top_k=3
@@ -134,6 +141,28 @@ async def main() -> None:
     html_path = ROOT / "graph.html"
     await cognee.visualize_graph(str(html_path), dataset="keyless", full=True)
     assert html_path.stat().st_size > 0, "visualization is empty"
+
+    # update() takes the same extractor decision as cognify(): the chunk-level
+    # path extracts the replaced chunk with GLiNER, so an edit stays keyless.
+    from cognee.modules.data.methods import get_datasets_by_name
+    from cognee.modules.data.methods.get_dataset_data import get_dataset_data
+    from cognee.modules.users.methods import get_default_user
+
+    [dataset] = await get_datasets_by_name("keyless", (await get_default_user()).id)
+    [row] = await get_dataset_data(dataset.id)
+    updated = await cognee.update(
+        row.id, TEXT + " In 1911 she won a second Nobel Prize, in Chemistry.", dataset.id
+    )
+    assert updated["status"] == "incremental", updated
+    assert updated["added_chunks"] >= 1 and updated["data_id"] == row.id, updated
+    edited = await cognee.search(
+        "Which second prize did Marie Curie win?",
+        query_type=SearchType.CHUNKS,
+        datasets=["keyless"],
+        top_k=3,
+    )
+    assert any("Chemistry" in str(getattr(r, "result", r)) for r in edited), edited
+    print(f"update: {updated['status']}, added {updated['added_chunks']} chunk(s) with GLiNER")
 
     # remember() is the primary API: same routing, then improve() with no
     # session ids, which runs no LLM stage.
@@ -214,6 +243,9 @@ async def main() -> None:
     assert recalled and recalled[0].search_type == "CHUNKS", [
         getattr(r, "search_type", None) for r in recalled
     ]
+    recall_run = await get_latest_pipeline_run(operation_name="recall")
+    assert recall_run.embedding_tokens > 0, "recall recorded no embedding tokens"
+    assert recall_run.tokens_in == 0, "recall's embedding tokens were counted as LLM tokens"
     missing_key_logs = [
         message for message in LOG_CAPTURE.messages if "LLMAPIKeyNotSetError" in message
     ]

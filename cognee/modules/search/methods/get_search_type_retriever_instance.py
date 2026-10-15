@@ -7,6 +7,13 @@ from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.retrieval.agentic_retriever import AgenticRetriever
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.bm25_retriever import BM25ChunksRetriever
+from cognee.modules.retrieval.broad_retriever import (
+    BROAD_BATCH_MB,
+    BROAD_CONTEXT_TOKENS,
+    BROAD_READING_TOKENS,
+    BROAD_STORE_MB,
+    BroadRetriever,
+)
 
 # Retrievers
 from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
@@ -31,7 +38,7 @@ from cognee.modules.retrieval.hybrid_retriever import DEFAULT_HYBRID_LANE_TOP_K,
 from cognee.modules.retrieval.natural_language_retriever import NaturalLanguageRetriever
 from cognee.modules.retrieval.skills_retriever import SkillsRetriever
 from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
-from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
+from cognee.modules.retrieval.temporal_hybrid_retriever import TemporalHybridRetriever
 from cognee.modules.retrieval.triplet_retriever import TripletRetriever
 from cognee.modules.search.exceptions import UnsupportedSearchTypeError
 from cognee.modules.search.operations import select_search_type
@@ -116,6 +123,24 @@ async def get_search_type_retriever_instance(
                 "top_k": top_k,
                 "node_name": node_name,
                 "node_name_filter_operator": node_name_filter_operator,
+            },
+        ),
+        # No top_k: BROAD reads the whole dataset (SDK-324).
+        SearchType.BROAD: (
+            BroadRetriever,
+            {
+                "system_prompt_path": "broad_answer.txt",
+                "system_prompt": system_prompt,
+                "session_id": session_id,
+                "response_model": retriever_specific_config.get("response_model", str),
+                "context_tokens": retriever_specific_config.get(
+                    "context_tokens", BROAD_CONTEXT_TOKENS
+                ),
+                "reading_tokens": retriever_specific_config.get(
+                    "reading_tokens", BROAD_READING_TOKENS
+                ),
+                "batch_mb": retriever_specific_config.get("batch_mb", BROAD_BATCH_MB),
+                "store_mb": retriever_specific_config.get("store_mb", BROAD_STORE_MB),
             },
         ),
         SearchType.RAG_COMPLETION: (
@@ -323,27 +348,31 @@ async def get_search_type_retriever_instance(
             },
         ),
         SearchType.TEMPORAL: (
-            TemporalRetriever,
+            TemporalHybridRetriever,
             {
+                # Hybrid runs with a larger candidate set (4x top_k unless configured) so
+                # the temporal filter has something left after it drops off-window chunks.
+                "candidate_top_k": retriever_specific_config.get("candidate_top_k"),
                 "top_k": top_k,
-                "wide_search_top_k": wide_search_top_k,
-                "triplet_distance_penalty": triplet_distance_penalty,
-                "feedback_influence": feedback_influence,
-                "session_id": session_id,
-                "response_model": retriever_specific_config.get("response_model", str),
-                "user_prompt_path": retriever_specific_config.get(
-                    "user_prompt_path", "graph_context_for_question.txt"
-                ),
-                "system_prompt_path": retriever_specific_config.get(
-                    "system_prompt_path", "answer_simple_question.txt"
-                ),
-                "time_extraction_prompt_path": retriever_specific_config.get(
-                    "time_extraction_prompt_path", "extract_query_time.txt"
-                ),
-                "node_type": node_type,
+                "max_edges_per_entity": retriever_specific_config.get("max_edges_per_entity", 10),
                 "node_name": node_name,
                 "node_name_filter_operator": node_name_filter_operator,
+                "system_prompt_path": system_prompt_path,
+                "system_prompt": system_prompt,
+                "session_id": session_id,
+                "response_model": retriever_specific_config.get("response_model", str),
+                "use_importance_weight": retriever_specific_config.get(
+                    "use_importance_weight", True
+                ),
+                "use_truth_weight": retriever_specific_config.get("use_truth_weight", False),
                 "include_references": include_references,
+                "include_external_metadata": retriever_specific_config.get(
+                    "include_external_metadata", False
+                ),
+                # Same option HYBRID_COMPLETION forwards: without it the inherited
+                # projection sees an empty key list and strips the metadata the
+                # caller asked for as soon as the question names a date.
+                "external_metadata_keys": retriever_specific_config.get("external_metadata_keys"),
             },
         ),
         SearchType.CHUNKS_LEXICAL: (BM25ChunksRetriever, {"top_k": top_k}),

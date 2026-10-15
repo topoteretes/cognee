@@ -346,6 +346,7 @@ def _dispatch_improve(client: CogneeApiClient, args: argparse.Namespace) -> None
         run_in_background=getattr(args, "background", False),
         build_global_context_index=getattr(args, "build_global_context_index", False),
         build_truth_subspace=getattr(args, "build_truth_subspace", False),
+        review_conflicts=getattr(args, "review_conflicts", False),
         feedback_alpha=getattr(args, "feedback_alpha", None),
     )
     if isinstance(result, dict) and "stages" in result:

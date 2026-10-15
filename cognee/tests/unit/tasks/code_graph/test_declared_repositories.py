@@ -46,7 +46,7 @@ def cloned(monkeypatch, tmp_path):
     """Record what resolve_repo_source is asked for; hand back a fake clone."""
     seen = []
 
-    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None):
+    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
         seen.append((str(spec), credentials))
         clone = tmp_path / "clone"
         clone.mkdir(exist_ok=True)

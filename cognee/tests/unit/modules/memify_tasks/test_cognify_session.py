@@ -356,3 +356,32 @@ async def test_cognify_session_passes_user_to_add_and_cognify():
             user=user,
         )
         mock_cognify.assert_called_once_with(datasets=["123"], user=user, raise_on_error=False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("date_key", ["effective_date", "published_on"])
+async def test_cognify_session_preserves_last_entry_time_as_source_metadata(monkeypatch, date_key):
+    from dataclasses import replace
+
+    from cognee.modules.improve.config import ImproveConfig
+    from cognee.tasks.ingestion.data_item import DataItem
+
+    monkeypatch.setattr(
+        cognify_session_module,
+        "get_improve_config",
+        lambda: ImproveConfig(effective_date_key=date_key),
+    )
+    window = replace(_window("Alice is CEO."), last_entry_time="2025-01-02T12:00:00+00:00")
+    with (
+        patch("cognee.add", new_callable=AsyncMock) as add,
+        patch("cognee.cognify", new_callable=AsyncMock),
+        patch.object(
+            cognify_session_module, "get_session_manager", return_value=_mock_session_manager()
+        ),
+    ):
+        await cognify_session(window, dataset_id="123")
+    content = add.call_args.args[0]
+    assert isinstance(content, DataItem)
+    assert content.data == window.text
+    assert content.external_metadata == {date_key: window.last_entry_time}
+    assert content.literal_text is True

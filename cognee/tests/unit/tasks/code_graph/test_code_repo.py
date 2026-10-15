@@ -6,6 +6,7 @@ partition semantics: code and manifests go to the repo item, prose stays in
 the document pipeline, and binaries/dotfiles can never abort an add.
 """
 
+import importlib
 import json
 from pathlib import Path
 
@@ -202,18 +203,18 @@ async def test_repository_url_is_cloned_and_resolved_like_a_project(
     _make_repo(clone)
     cloned_specs = []
 
-    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None):
-        cloned_specs.append(spec)
+    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
+        cloned_specs.append((spec, branch))
         return clone
 
     monkeypatch.setattr(code_repo_module, "resolve_repo_source", fake_resolve_repo_source)
 
     resolved = await resolve_data_directories(
-        ["https://github.com/org/repo?tab=readme-ov-file", "plain text note"]
+        ["https://github.com/org/repo?tab=readme-ov-file", "plain text note"], branch="dev"
     )
 
-    # git gets the normalised URL, not the browser one.
-    assert cloned_specs == ["https://github.com/org/repo"]
+    # The clone gets the normalised URL, not the browser one, and the branch asked for.
+    assert cloned_specs == [("https://github.com/org/repo", "dev")]
     manifest_items = [item for item in resolved if isinstance(item, DataItem)]
     assert len(manifest_items) == 1
     manifest = manifest_items[0]
@@ -241,7 +242,7 @@ async def test_repository_url_credentials_are_redacted_from_the_manifest(
     clone = _make_repo(tmp_path)
     cloned_specs = []
 
-    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None):
+    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
         cloned_specs.append(spec)
         return clone
 
@@ -254,6 +255,47 @@ async def test_repository_url_credentials_are_redacted_from_the_manifest(
     manifest = next(item for item in resolved if isinstance(item, DataItem))
     assert manifest.system_metadata["repo_url"] == "https://github.com/org/repo"
     assert "tok" not in json.dumps(manifest.system_metadata)
+
+
+@pytest.mark.asyncio
+async def test_a_repository_url_keeps_one_data_row_whatever_the_branch(tmp_path, monkeypatch):
+    """Each branch is cloned into its own directory, but a dataset keeps one row per URL,
+    keyed as every URL row was before branches existed, so existing rows keep their ids."""
+    from unittest.mock import AsyncMock, Mock
+    from uuid import uuid4
+
+    import cognee.tasks.code_graph.code_repo as code_repo_module
+    from cognee.tasks.code_graph.resolve_repo import clone_dir
+
+    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
+        directory = tmp_path / (branch or "default")
+        directory.mkdir()
+        return _make_repo(directory)
+
+    keys = []
+
+    async def record_key(identifier, user, dataset_id=None):
+        keys.append(identifier)
+        return uuid4()
+
+    monkeypatch.setattr(code_repo_module, "resolve_repo_source", fake_resolve_repo_source)
+    monkeypatch.setattr(
+        importlib.import_module("cognee.modules.data.methods.get_unique_data_id"),
+        "get_unique_data_id",
+        record_key,
+    )
+    monkeypatch.setattr(
+        importlib.import_module("cognee.modules.data.methods"),
+        "reset_data_pipeline_status",
+        AsyncMock(),
+    )
+
+    for branch in (None, "dev"):
+        await code_repo_module.resolve_code_repository_url(
+            "https://github.com/org/repo", user=Mock(), dataset_id=uuid4(), branch=branch
+        )
+
+    assert keys == [f"code_repo:{clone_dir('https://github.com/org/repo')}"] * 2
 
 
 @pytest.mark.asyncio
@@ -293,7 +335,7 @@ async def test_repository_urls_are_cloned_with_credentials(tmp_path, monkeypatch
     clone = _make_repo(tmp_path)
     clones = []
 
-    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None):
+    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
         clones.append((spec, credentials))
         return clone
 
@@ -335,7 +377,7 @@ async def test_resolution_is_idempotent_on_its_own_output(tmp_path, monkeypatch,
     clone = _make_repo(tmp_path)
     clones = []
 
-    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None):
+    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
         clones.append(spec)
         return clone
 
@@ -394,7 +436,7 @@ async def test_repository_urls_still_resolve_when_local_paths_are_disabled(
 
     clone = _make_repo(tmp_path)
 
-    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None):
+    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
         return clone
 
     monkeypatch.setattr(code_repo_module, "resolve_repo_source", fake_resolve_repo_source)
@@ -418,7 +460,7 @@ async def test_clone_documents_are_stored_when_local_paths_are_disabled(
     storage = importlib.import_module("cognee.tasks.ingestion.save_data_item_to_storage")
     clone = _make_repo(tmp_path)
 
-    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None):
+    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
         return clone
 
     monkeypatch.setattr(code_repo_module, "resolve_repo_source", fake_resolve_repo_source)
@@ -491,7 +533,10 @@ async def test_code_repo_route_embeds_only_with_index_vectors(tmp_path, monkeypa
     monkeypatch.setattr(extract_module, "add_code_graph_edges", AsyncMock())
 
     data_item = SimpleNamespace(
-        id="d1", raw_data_location="unused", system_metadata={"source": "code_repo"}
+        id="d1",
+        raw_data_location="unused",
+        system_metadata={"source": "code_repo"},
+        external_metadata=None,
     )
     await extract_code_repo_graph([data_item], index_vectors=index_vectors)
 
@@ -551,7 +596,7 @@ async def test_repository_url_resolves_without_documents(tmp_path, monkeypatch):
 
     clone = _make_repo(tmp_path)
 
-    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None):
+    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
         return clone
 
     monkeypatch.setattr(code_repo_module, "resolve_repo_source", fake_resolve_repo_source)

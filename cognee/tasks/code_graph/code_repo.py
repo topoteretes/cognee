@@ -39,8 +39,11 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
+from cognee.modules.chunking.external_metadata import decode_external_metadata
+from cognee.modules.engine.models.node_set import validate_node_set_names
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.code_graph.resolve_repo import (
+    clone_dir,
     code_repo_clone_url,
     redact_repo_spec,
     resolve_repo_source,
@@ -239,6 +242,7 @@ async def resolve_code_repository(
     dataset_id=None,
     source_url: str | None = None,
     include_documents: bool = True,
+    identity: Path | None = None,
 ):
     """Build the repo-level DataItem (and the document file list) for a project.
 
@@ -246,6 +250,7 @@ async def resolve_code_repository(
     to the stable identity (user, dataset, repo path) — mirroring DLT source
     manifests — so re-adding the same repo updates one record instead of
     accreting new ones; without a user context the id is left content-derived.
+    ``identity`` stands in for the repo path in that id.
     With a pinned id and a dataset, the stored row's add stamp is cleared so
     the re-add reaches ingestion's content comparison (see the reset below).
     ``source_url`` (credential-free) records where a cloned repository came
@@ -284,7 +289,7 @@ async def resolve_code_repository(
     if user is not None:
         from cognee.modules.data.methods.get_unique_data_id import get_unique_data_id
 
-        data_id = await get_unique_data_id(f"code_repo:{directory}", user, dataset_id)
+        data_id = await get_unique_data_id(f"code_repo:{identity or directory}", user, dataset_id)
 
     if data_id is not None and dataset_id is not None:
         from cognee.modules.data.methods import reset_data_pipeline_status
@@ -329,6 +334,7 @@ async def resolve_code_repository_url(
     dataset_id=None,
     credentials: str | None = None,
     include_documents: bool = True,
+    branch: str | None = None,
 ):
     """Clone a hosted repository URL and build its repo-level DataItem.
 
@@ -342,7 +348,9 @@ async def resolve_code_repository_url(
     ``ACCEPT_LOCAL_FILE_PATH=false`` refuses caller-supplied paths.
     ``credentials`` authenticates the clone of a private repository (see
     ``resolve_repo_source``). ``include_documents=False`` returns the manifest
-    alone (see ``resolve_code_repository``).
+    alone (see ``resolve_code_repository``). ``branch`` clones that branch
+    instead of the remote's default; a dataset still holds one data row per
+    URL, so adding it on another branch replaces that row's code graph.
     """
     from cognee.tasks.ingestion.repo_clone_file import RepoCloneFile
 
@@ -352,13 +360,18 @@ async def resolve_code_repository_url(
             f"'{redact_repo_spec(spec)}' is not a repository URL add() can clone; "
             "expected https://github.com/<owner>/<repo>, a gitlab.com project, or a .git URL."
         )
-    repo_path = await resolve_repo_source(clone_url, credentials=credentials)
+    repo_path = await resolve_repo_source(clone_url, credentials=credentials, branch=branch)
+    source_url = redact_repo_spec(clone_url)
     manifest_item, document_paths, skip_count = await resolve_code_repository(
         repo_path,
         user=user,
         dataset_id=dataset_id,
-        source_url=redact_repo_spec(clone_url),
+        source_url=source_url,
         include_documents=include_documents,
+        # Keyed on the default branch's clone, as every URL row was before branches:
+        # existing rows keep their ids, and branches of one URL share the row, since
+        # their code graphs share the repository's node ids.
+        identity=clone_dir(source_url),
     )
     return manifest_item, [RepoCloneFile(Path(path)) for path in document_paths], skip_count
 
@@ -367,6 +380,7 @@ async def resolve_declared_repositories(
     data,
     credentials: str | None = None,
     include_documents: bool = True,
+    branch: str | None = None,
     user=None,
     dataset_id=None,
 ):
@@ -385,6 +399,11 @@ async def resolve_declared_repositories(
     http(s) URLs are web pages, so without an explicit declaration a Bitbucket
     URL would be scraped as one. A spec that resolves to neither a directory
     nor a clonable remote raises rather than being stored as its own text.
+
+    ``branch`` clones that branch of every remote spec; a local spec rejects
+    it. A remote's row is keyed on its default-branch clone, as on the
+    detected URL path, so a dataset holds one row per URL whatever branch is
+    cloned.
 
     Returns the manifest items (plus each repository's documents) in input
     order.
@@ -415,18 +434,33 @@ async def resolve_declared_repositories(
             "(ACCEPT_LOCAL_FILE_PATH=false). Pass a git URL instead."
         )
 
+    # Checked before anything is cloned: resolve_repo_source rejects a branch
+    # for a local path too, but only when the loop reaches it.
+    if branch is not None:
+        local_spec = next((item for item in items if not is_remote_repo(item)), None)
+        if local_spec is not None:
+            raise IngestionError(
+                message=f"branch is only supported for remote repositories, but '{local_spec}' "
+                "is a local path. Check the branch out in that directory instead."
+            )
+
     resolved = []
     for item in items:
-        repo_path = await resolve_repo_source(item, credentials=credentials)
+        repo_path = await resolve_repo_source(item, credentials=credentials, branch=branch)
         remote = is_remote_repo(item)
+        # redact: a spec may carry a token in its userinfo, and this is
+        # stored on the row as repo_url.
+        source_url = redact_repo_spec(item) if remote else None
         manifest_item, document_paths, _skipped = await resolve_code_repository(
             repo_path,
             user=user,
             dataset_id=dataset_id,
-            # redact: a spec may carry a token in its userinfo, and this is
-            # stored on the row as repo_url.
-            source_url=redact_repo_spec(item) if remote else None,
+            source_url=source_url,
             include_documents=include_documents,
+            # A remote is keyed on its default-branch clone, as on the detected URL
+            # path: one row per URL whatever branch is cloned. A local repository
+            # keys on its own directory.
+            identity=clone_dir(source_url) if remote else None,
         )
         resolved.append(manifest_item)
         # A clone is cognee's own directory, so its documents are stored
@@ -449,6 +483,14 @@ async def extract_code_repo_graph(
     graph tasks on the ORIGINAL directory (enola writes its .enola snapshot
     there). One repository node, cross-file edges, one graph read per repo.
     No LLM; embeddings only with ``index_vectors`` (``cognify(codegraph_config={"index_vectors": True})``).
+
+    A call-level node_set (add()/remember()'s ``node_set`` argument) reaches
+    every document this manifest's repo carries, but not the code nodes
+    themselves -- add_data_points only tags the DataPoints it is given, and
+    the code graph tasks build their own DataPoints straight from the enola
+    snapshot. This reads the same tag back off the manifest row's
+    external_metadata (identical shape to classify_documents) and passes it
+    down so every code node -- CodeRepository included -- carries it too.
     """
     from cognee.infrastructure.files.utils.open_data_file import open_data_file
     from cognee.tasks.code_graph.extract_code_graph import (
@@ -475,9 +517,12 @@ async def extract_code_repo_graph(
                 "its current location."
             )
 
-        data_points = await extract_code_graph(repo_path=repo_path)
+        metadata = decode_external_metadata(data_item.external_metadata)
+        node_set = validate_node_set_names(metadata.get("node_set")) if metadata else None
+
+        data_points = await extract_code_graph(repo_path=repo_path, node_set=node_set)
         state = await add_code_graph_data_points(data_points, ctx=ctx, graph_only=not index_vectors)
-        await add_code_graph_edges(state, repo_path=repo_path, ctx=ctx)
+        await add_code_graph_edges(state, repo_path=repo_path, ctx=ctx, node_set=node_set)
 
         logger.info("Code repo graph extracted for %s (%s).", repo_path, data_item.id)
 

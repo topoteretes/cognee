@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import JSON, UUID, Boolean, Column, DateTime, Float, Integer, false
+from sqlalchemy import JSON, Boolean, Column, DateTime, Float, Integer, Uuid, false
 from sqlalchemy.sql import func
 
 from cognee.infrastructure.databases.relational import Base
@@ -20,7 +20,7 @@ class GraphMetrics(Base):
     __tablename__ = "graph_metrics"
 
     # TODO: Change ID to reflect unique id of graph database
-    id = Column(UUID, primary_key=True, default=uuid4)
+    id = Column(Uuid, primary_key=True, default=uuid4)
     # False on a row holding only node/edge counts. Without it, the cheap
     # counting path would look to `get_pipeline_run_metrics` like a finished
     # cache entry, and that run's token count and connectivity metrics would

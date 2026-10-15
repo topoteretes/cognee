@@ -266,6 +266,7 @@ class CloudClient:
         dataset_name: str = "main_dataset",
         session_id: str | None = None,
         skill_improvement: dict | None = None,
+        dataset_id: str | None = None,
     ) -> dict:
         """POST /api/v1/remember/entry — store a typed MemoryEntry.
 
@@ -282,6 +283,9 @@ class CloudClient:
             "session_id": session_id,
             "skill_improvement": skill_improvement,
         }
+
+        if dataset_id is not None:
+            payload["dataset_id"] = str(dataset_id)
 
         async with session.post(
             f"{self.service_url}/api/v1/remember/entry",
@@ -358,6 +362,8 @@ class CloudClient:
             payload["build_global_context_index"] = True
         if kwargs.get("build_truth_subspace"):
             payload["build_truth_subspace"] = True
+        if kwargs.get("review_conflicts"):
+            payload["review_conflicts"] = True
         if kwargs.get("feedback_alpha") is not None:
             payload["feedback_alpha"] = kwargs["feedback_alpha"]
         # Memify passthrough: the improve DTO takes registry task names and a

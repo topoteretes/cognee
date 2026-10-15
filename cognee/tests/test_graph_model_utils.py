@@ -32,7 +32,6 @@ DATAPOINT_INFRA_FIELDS = {
     "feedback_weight",
     "importance_weight",
     "ontology_uri",
-    "valid_to",
     "metadata",
 }
 

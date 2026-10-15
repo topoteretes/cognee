@@ -30,12 +30,14 @@ async def resolve_data_directories(
     credentials: str | None = None,
     include_documents: bool = True,
     treat_as_repository: bool = False,
+    branch: str | None = None,
 ):
     """
     Resolves directories by replacing them with their contained files.
 
     A GitHub/GitLab repository URL (``code_repo_clone_url``) is shallow-cloned
-    and then resolved exactly like a local code project directory, below.
+    (``branch``, when given, instead of the remote's default) and then resolved
+    exactly like a local code project directory, below.
     Other http(s) URLs pass through untouched and are fetched as web pages by
     ``save_data_item_to_storage``.
 
@@ -65,6 +67,8 @@ async def resolve_data_directories(
         credentials: Token for cloning private repository URLs (optional).
         include_documents: Also emit a repository's document files (default True).
         treat_as_repository: Resolve every item as a declared repository spec.
+        branch: Branch to clone for each remote repository in ``data``, including
+            declared specs (optional).
 
     Returns:
         A list of resolved files, DataItems, and binary streams.
@@ -79,6 +83,7 @@ async def resolve_data_directories(
             data,
             credentials=credentials,
             include_documents=include_documents,
+            branch=branch,
             user=user,
             dataset_id=dataset_id,
         )
@@ -153,6 +158,7 @@ async def resolve_data_directories(
                     dataset_id=dataset_id,
                     credentials=credentials,
                     include_documents=include_documents,
+                    branch=branch,
                 )
                 resolved_data.append(manifest_item)
                 resolved_data.extend(documents)
