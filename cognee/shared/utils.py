@@ -13,9 +13,8 @@ from threading import Thread
 from typing import Any
 from uuid import NAMESPACE_OID, UUID, uuid4, uuid5
 
-import aiohttp
-
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.telemetry_sender import TelemetrySender
 
 logger = get_logger()
 
@@ -27,11 +26,6 @@ TELEMETRY_REQUEST_TIMEOUT: int = int(os.getenv("TELEMETRY_REQUEST_TIMEOUT", "5")
 _TELEMETRY_API_KEY_TRACKING_SALT_ENV = "TELEMETRY_API_KEY_TRACKING_SALT"
 _DEFAULT_TELEMETRY_API_KEY_TRACKING_SALT = b"cognee.telemetry.api-key-tracking.v1"
 _TELEMETRY_API_KEY_TRACKING_ITERATIONS = 100_000
-
-# Strong refs for fire-and-forget telemetry tasks. asyncio only holds a weak
-# reference to a task, so without anchoring here the gc can collect an
-# in-flight telemetry request mid-run. Tasks remove themselves on done.
-_TELEMETRY_TASKS: set = set()
 
 
 def as_uuid(value) -> UUID | None:
@@ -383,123 +377,19 @@ def _sanitize_nested_properties(obj: Any, property_names: list[str]) -> Any:
         return obj
 
 
-# A single ClientSession is reused across telemetry calls to avoid the
-# per-call DNS + TCP + TLS handshake to `proxy_url`. The session is bound to
-# the asyncio loop it was created on; if the loop changes (tests, reload), the
-# helper rebuilds it transparently.
-_telemetry_session: aiohttp.ClientSession | None = None
-_telemetry_session_loop: asyncio.AbstractEventLoop | None = None
-_telemetry_session_lock: asyncio.Lock | None = None
-_telemetry_session_lock_loop: asyncio.AbstractEventLoop | None = None
+# One sender per process: events are queued and posted to `proxy_url` in
+# batches from a background thread (see telemetry_sender.py).
+_telemetry_sender = TelemetrySender(proxy_url, TELEMETRY_REQUEST_TIMEOUT)
 
 
-async def _get_telemetry_session() -> aiohttp.ClientSession:
-    """Return a process-wide aiohttp.ClientSession for telemetry, creating it lazily.
+async def flush_telemetry() -> None:
+    """Send queued telemetry and stop the sender thread, waiting at most one request timeout.
 
-    The session is bound to the asyncio loop it was created on. If the running
-    loop changes (e.g. across tests or `asyncio.run` boundaries) or the session
-    has been closed, a fresh session is built. Concurrent callers are
-    serialized by an `asyncio.Lock` that is itself re-created when the loop
-    changes, because `asyncio.Lock` captures its loop on construction. Intended
-    for use only from inside a running event loop.
+    Called from the FastAPI lifespan shutdown; scripts are covered by the
+    sender's own ``atexit`` hook. Telemetry sent afterwards starts a new thread.
     """
-    global _telemetry_session, _telemetry_session_loop
-    global _telemetry_session_lock, _telemetry_session_lock_loop
-
-    loop = asyncio.get_running_loop()
-
-    # `asyncio.Lock` captures the running loop on creation, so a lock from a
-    # previous loop is unusable. Recreate it when the loop changes.
-    if _telemetry_session_lock is None or _telemetry_session_lock_loop is not loop:
-        _telemetry_session_lock = asyncio.Lock()
-        _telemetry_session_lock_loop = loop
-
-    async with _telemetry_session_lock:
-        if (
-            _telemetry_session is None
-            or _telemetry_session.closed
-            or _telemetry_session_loop is not loop
-        ):
-            # Close the stale session instead of dropping it: aiohttp accepts
-            # close() from a different loop, and an unowned session emits
-            # "Unclosed client session" at garbage collection.
-            if _telemetry_session is not None and not _telemetry_session.closed:
-                try:
-                    await _telemetry_session.close()
-                except Exception:
-                    logger.debug("Ignoring exception in _get_telemetry_session", exc_info=True)
-            timeout = aiohttp.ClientTimeout(total=TELEMETRY_REQUEST_TIMEOUT)
-            _telemetry_session = aiohttp.ClientSession(timeout=timeout)
-            _telemetry_session_loop = loop
-            _register_telemetry_session_atexit()
-        return _telemetry_session
-
-
-async def close_telemetry_session() -> None:
-    """Flush in-flight telemetry tasks and close the shared aiohttp session.
-
-    Safe to call repeatedly and from any loop; ``_get_telemetry_session``
-    rebuilds transparently if telemetry fires again afterwards. Called from the
-    FastAPI lifespan shutdown and, as a last resort, from an ``atexit`` hook so
-    SDK scripts don't print "Unclosed client session" at interpreter exit.
-    """
-    global _telemetry_session, _telemetry_session_loop
-
-    if _TELEMETRY_TASKS:
-        try:
-            await asyncio.gather(*list(_TELEMETRY_TASKS), return_exceptions=True)
-        except Exception:
-            logger.debug("Ignoring exception in close_telemetry_session", exc_info=True)
-    session = _telemetry_session
-    _telemetry_session = None
-    _telemetry_session_loop = None
-    if session is not None and not session.closed:
-        try:
-            await session.close()
-        except Exception:
-            logger.debug("Ignoring exception in close_telemetry_session", exc_info=True)
-
-
-_telemetry_atexit_registered = False
-
-
-def _register_telemetry_session_atexit() -> None:
-    global _telemetry_atexit_registered
-    if _telemetry_atexit_registered:
-        return
-    _telemetry_atexit_registered = True
-
-    import atexit
-
-    def _close_at_exit() -> None:
-        # The loop that owned the session is gone by now; run the closer on a
-        # fresh one. In-flight tasks died with their loop, so gather() over
-        # them is a no-op here — this exists purely to release the session.
-        if _telemetry_session is None or _telemetry_session.closed:
-            return
-        try:
-            asyncio.run(close_telemetry_session())
-        except Exception:
-            logger.debug(
-                "Ignoring exception in _register_telemetry_session_atexit._close_at_exit",
-                exc_info=True,
-            )
-
-    atexit.register(_close_at_exit)
-
-
-async def _send_telemetry_request(payload: dict) -> None:
-    """Send telemetry payload via async HTTP. Best-effort, never raises."""
-    try:
-        session = await _get_telemetry_session()
-        async with session.post(proxy_url, json=payload) as response:
-            if response.status != 200:
-                logger.debug("Telemetry proxy returned status %s", response.status)
-    except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError) as e:
-        # RuntimeError covers the case where the loop was closed between task
-        # creation and session use (fire-and-forget telemetry tasks can outlive
-        # the loop that scheduled them).
-        logger.debug("Telemetry request failed: %s", e)
+    # close() blocks; keep the event loop free while it waits.
+    await asyncio.to_thread(_telemetry_sender.close)
 
 
 def _get_api_key_tracking_id() -> str:
@@ -632,6 +522,9 @@ def send_telemetry(
     payload = {
         "anonymous_id": anonymous_id,
         "event_name": event_name,
+        # When the event happened; batching delays delivery, so the proxy's
+        # receive time is no longer accurate.
+        "event_time": current_time.isoformat(),
         "user_properties": {
             "user_id": resolved_user_id,
             "tenant_id": resolved_tenant_id or "Single User Tenant",
@@ -653,14 +546,11 @@ def send_telemetry(
     }
 
     try:
-        loop = asyncio.get_running_loop()
-        task = loop.create_task(_send_telemetry_request(payload))
-        _TELEMETRY_TASKS.add(task)
-        task.add_done_callback(_TELEMETRY_TASKS.discard)
-    except RuntimeError:
-        # No running event loop (shutdown, sync context, etc.) — telemetry is
+        _telemetry_sender.enqueue(payload)
+    except Exception:
+        # Starting the sender thread fails at interpreter shutdown — telemetry is
         # best-effort; dropping the event is better than crashing the caller.
-        pass
+        logger.debug("Ignoring exception in send_telemetry", exc_info=True)
 
 
 def embed_logo(p: Any, layout_scale: float, logo_alpha: float, position: str):
