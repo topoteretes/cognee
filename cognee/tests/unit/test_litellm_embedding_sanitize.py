@@ -204,6 +204,37 @@ async def test_rejected_base64_logs_the_setting_to_change(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_default_base64_does_not_blame_an_unset_setting(monkeypatch):
+    """On OpenAI's API base64 is the default, so a 400 there must not name the setting."""
+    monkeypatch.setenv("MOCK_EMBEDDING", "false")
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_API_BASE", raising=False)
+
+    import cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine as mod
+
+    monkeypatch.setattr(mod.litellm, "api_base", None)
+    with patch.object(LiteLLMEmbeddingEngine, "get_tokenizer", return_value=Mock()):
+        engine = LiteLLMEmbeddingEngine(
+            model="openai/text-embedding-ada-002", dimensions=2, api_key="test-key"
+        )
+    assert engine.encoding_format == "base64"
+
+    error = mod.litellm.exceptions.BadRequestError(
+        message="This model does not support specifying dimensions.",
+        model="openai/text-embedding-ada-002",
+        llm_provider="openai",
+    )
+    monkeypatch.setattr(mod.litellm, "aembedding", AsyncMock(side_effect=error))
+    logged = Mock()
+    monkeypatch.setattr(mod.logger, "error", logged)
+
+    with pytest.raises(mod.litellm.exceptions.BadRequestError):
+        await engine.embed_text(["hello"])
+
+    assert all(call.args[:1] != (mod.ENCODING_FORMAT_HINT,) for call in logged.call_args_list)
+
+
+@pytest.mark.asyncio
 async def test_client_side_param_rejection_does_not_blame_the_encoding(monkeypatch):
     """litellm refusing a param before sending says nothing about base64 support."""
     monkeypatch.setenv("MOCK_EMBEDDING", "false")

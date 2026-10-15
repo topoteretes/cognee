@@ -158,6 +158,8 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         self.input_type = input_type
         self._uses_nvidia_nim = _uses_nvidia_nim(self.provider, self.model)
         self.encoding_format = resolve_encoding_format(model, endpoint, encoding_format)
+        # The hint names a setting, so it only applies when the user set it.
+        self._base64_configured = encoding_format == "base64"
 
         enable_mocking = os.getenv("MOCK_EMBEDDING", "false")
         if isinstance(enable_mocking, bool):
@@ -326,7 +328,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             ):
                 # UnsupportedParamsError is litellm refusing the call client-side, so
                 # the server never saw the encoding and the hint would mislead.
-                if self.encoding_format == "base64" and not isinstance(
+                if self._base64_configured and not isinstance(
                     error, litellm.exceptions.UnsupportedParamsError
                 ):
                     logger.error(ENCODING_FORMAT_HINT)

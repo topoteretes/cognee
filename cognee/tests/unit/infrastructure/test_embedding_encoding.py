@@ -3,6 +3,7 @@
 import base64
 import struct
 
+import litellm
 import pytest
 
 from cognee.exceptions import CogneeConfigurationError
@@ -38,8 +39,38 @@ from cognee.infrastructure.databases.vector.embeddings.get_embedding_engine impo
         (None, None, "float"),
     ],
 )
-def test_default_format_per_route(model, endpoint, expected):
+def test_default_format_per_route(model, endpoint, expected, monkeypatch):
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_API_BASE", raising=False)
+    monkeypatch.setattr(litellm, "api_base", None)
     assert resolve_encoding_format(model, endpoint, None) == expected
+
+
+@pytest.mark.parametrize(
+    ("setting", "value", "expected"),
+    [
+        # litellm sends an endpoint-less OpenAI request to these when set.
+        ("OPENAI_BASE_URL", "http://localhost:4000", "float"),
+        ("OPENAI_API_BASE", "https://gateway.example.com/v1", "float"),
+        ("litellm.api_base", "http://localhost:4000", "float"),
+        ("OPENAI_BASE_URL", "https://api.openai.com/v1", "base64"),
+    ],
+)
+def test_default_format_follows_litellm_base_url(setting, value, expected, monkeypatch):
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_API_BASE", raising=False)
+    monkeypatch.setattr(litellm, "api_base", None)
+    if setting == "litellm.api_base":
+        monkeypatch.setattr(litellm, "api_base", value)
+    else:
+        monkeypatch.setenv(setting, value)
+
+    assert resolve_encoding_format("openai/text-embedding-3-large", None, None) == expected
+    # An explicit endpoint still wins over litellm's fallbacks.
+    assert (
+        resolve_encoding_format("openai/text-embedding-3-large", "https://api.openai.com/v1", None)
+        == "base64"
+    )
 
 
 @pytest.mark.parametrize("configured", ["base64", "float"])

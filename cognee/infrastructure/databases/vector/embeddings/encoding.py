@@ -11,6 +11,7 @@ unless EMBEDDING_ENCODING_FORMAT=base64 opts it in.
 """
 
 import base64
+import os
 from typing import Literal
 from urllib.parse import urlparse
 
@@ -38,8 +39,16 @@ def _routes_through_openai_handler(model: str | None) -> bool:
     return litellm.model_cost.get(model, {}).get("litellm_provider") == "openai"
 
 
+def _litellm_openai_endpoint(endpoint: str | None) -> str | None:
+    """The base URL litellm's OpenAI handler sends to, in litellm's own order."""
+    return (
+        endpoint or litellm.api_base or os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE")
+    )
+
+
 def _routes_to_openai_api(model: str | None, endpoint: str | None) -> bool:
     """Whether litellm sends this model to OpenAI's own embeddings API."""
+    endpoint = _litellm_openai_endpoint(endpoint)
     if endpoint and urlparse(endpoint).hostname != _OPENAI_API_HOST:
         return False
     return _routes_through_openai_handler(model)
