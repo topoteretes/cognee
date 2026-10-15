@@ -259,3 +259,5 @@ Then: make sure it runs with `uv run python <path>` after `uv sync` and a config
 and add a row to the matching table in this README.
 
 See [`CONTRIBUTING.md`](../CONTRIBUTING.md) for the broader contribution flow.
+
+- [Sampled answer evaluations](guides/answer_evaluations/README.md): opt-in local/cloud trace capture, bounded replay, privacy controls and score APIs.

@@ -25,6 +25,7 @@ import cognee.modules.integrations.google_drive
 import cognee.modules.integrations.linear
 from cognee.api.exception_telemetry import send_api_exception_telemetry
 from cognee.api.startup_checks import report_default_user_login_posture
+from cognee.api.v1.evaluations.routers import get_evaluations_router
 from cognee.api.v1.activity.routers import get_activity_router
 from cognee.api.v1.add.routers import get_add_router
 from cognee.api.v1.agents.routers import get_agents_router
@@ -356,6 +357,8 @@ async def exception_handler(request: Request, exc: CogneeApiError) -> JSONRespon
         content["remediation"] = remediation
     return JSONResponse(status_code=status_code, content=content)
 
+
+app.include_router(get_evaluations_router(), prefix="/api/v1/evaluations", tags=["evaluations"])
 
 app.include_router(get_auth_router(), prefix="/api/v1/auth", tags=["auth"])
 
