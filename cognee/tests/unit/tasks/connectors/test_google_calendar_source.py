@@ -10,6 +10,7 @@ finished calendars' state with it. No Google libraries and no network needed.
 
 import os
 import stat
+import sys
 from datetime import datetime, timezone
 
 import pytest
@@ -143,6 +144,21 @@ def test_first_login_writes_a_private_token_file_with_only_the_readonly_scope(
     assert calls["built"] == ("calendar", "v3")
     assert calls["scopes"] == ["https://www.googleapis.com/auth/calendar.readonly"]
     assert calls["browser"] is True
+
+
+# Windows has no POSIX file modes: os.stat reports 0o666 whatever the code asked for.
+posix_only = pytest.mark.skipif(sys.platform == "win32", reason="POSIX file modes")
+
+
+@posix_only
+def test_first_login_token_file_is_private(tmp_path, monkeypatch):
+    monkeypatch.setattr(module, "_google_libraries", _fake_libraries({}))
+    secrets = tmp_path / "client_secret.json"
+    secrets.write_text("{}")
+    token = tmp_path / "token.json"
+
+    build_calendar_service(str(secrets), str(token))
+
     assert stat.S_IMODE(os.stat(token).st_mode) == 0o600
 
 
@@ -162,14 +178,24 @@ def test_expired_token_is_refreshed_and_written_back_without_the_browser(tmp_pat
     monkeypatch.setattr(module, "_google_libraries", _fake_libraries(calls, _ExpiredCreds))
     token = tmp_path / "token.json"
     token.write_text("{}")
-    token.chmod(0o644)
 
     build_calendar_service(str(tmp_path / "missing.json"), str(token))
 
     assert calls["refreshed"] is True
     assert "browser" not in calls
     assert token.read_text() == '{"token": "t"}'
-    assert stat.S_IMODE(os.stat(token).st_mode) == 0o600, "a loose old token file is tightened"
+
+
+@posix_only
+def test_a_loose_old_token_file_is_tightened_on_refresh(tmp_path, monkeypatch):
+    monkeypatch.setattr(module, "_google_libraries", _fake_libraries({}, _ExpiredCreds))
+    token = tmp_path / "token.json"
+    token.write_text("{}")
+    token.chmod(0o644)
+
+    build_calendar_service(str(tmp_path / "missing.json"), str(token))
+
+    assert stat.S_IMODE(os.stat(token).st_mode) == 0o600
 
 
 def test_expired_token_without_a_refresh_token_asks_for_consent_again(tmp_path, monkeypatch):
