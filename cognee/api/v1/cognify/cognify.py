@@ -131,54 +131,6 @@ def raise_if_cognify_errored(result) -> None:
         )
 
 
-_CODE_ROUTES = frozenset({CognifyRoute.CODE, CognifyRoute.CODE_REPO})
-
-
-async def _pending_items_are_code_only(datasets, user: User | None, incremental_loading) -> bool:
-    """Whether every item this cognify will process takes a code route.
-
-    Code files and code-repo manifests run the deterministic enola lists and never
-    reach the graph extractor, so a run made only of them needs no extractor
-    runtime. Reads the same rows the pipeline will: the user's existing writable
-    datasets among ``datasets`` (all of them when None) and their data, minus the
-    items incremental loading would skip as already completed. A requested
-    dataset that does not exist yet would be created empty, so it adds no items.
-
-    Nothing pending (an unchanged code repository re-remembered) answers True:
-    the extractor never runs then either. Any non-code item, or any error while
-    looking (permissions, a tombstoned DLT row, ...) answers False, so the caller
-    keeps the runtime check and the pipeline reports the real error.
-    An item added between this check and the run would still meet the extractor
-    without its runtime; the extractor then raises its own not-installed error.
-    """
-    try:
-        from cognee.modules.data.methods import (
-            get_authorized_existing_datasets,
-            get_dataset_data,
-        )
-        from cognee.modules.pipelines.models import is_data_item_completed
-        from cognee.modules.users.methods import get_default_user
-
-        if user is None:
-            user = await get_default_user()
-        requested = [datasets] if isinstance(datasets, (str, UUID)) else datasets
-        target_datasets = await get_authorized_existing_datasets(requested, "write", user)
-
-        pending = []
-        for dataset in target_datasets:
-            for data_item in await get_dataset_data(dataset_id=dataset.id):
-                if incremental_loading:
-                    status = (data_item.pipeline_status or {}).get("cognify_pipeline") or {}
-                    if is_data_item_completed(status.get(str(dataset.id))):
-                        continue
-                pending.append(data_item)
-
-        return all(cognify_route_for(item) in _CODE_ROUTES for item in pending)
-    except Exception as error:  # noqa: BLE001 - any doubt keeps the runtime check
-        logger.debug("Code-only check failed; keeping the extractor runtime check: %s", error)
-        return False
-
-
 async def cognify(
     datasets: str | list[str] | list[UUID] | None = None,
     user: User = None,
@@ -478,6 +430,11 @@ async def cognify(
             run_in_background=run_in_background,
         )
 
+    # After the argument checks and the remote route: a cognify that raises above,
+    # or runs remotely, must not install anything locally. Awaited, so the pipeline
+    # below never starts before the GLiNER runtime is importable.
+    await ensure_extractor_runtime(resolved_extractor, cognify_config)
+
     import time as _time
 
     _cognify_start_ns = _time.monotonic_ns()
@@ -492,19 +449,6 @@ async def cognify(
         from cognee.modules.migrations.startup import run_migrations_and_block
 
         await run_migrations_and_block(datasets, user)
-
-        # A run whose pending items all take the code routes runs enola only: it
-        # never calls the graph extractor or the LLM, and embeds only with
-        # index_vectors. So it neither installs nor requires the GLiNER runtime
-        # (a keyless code-only remember must not pull in torch) and skips the
-        # provider probes it has no use for (SDK-795).
-        code_only = await _pending_items_are_code_only(datasets, user, incremental_loading)
-
-        # After the argument checks and the remote route: a cognify that raises
-        # above, or runs remotely, must not install anything locally. Awaited, so
-        # the pipeline below never starts before the GLiNER runtime is importable.
-        if not code_only:
-            await ensure_extractor_runtime(resolved_extractor, cognify_config)
 
         resolved_resolver = get_configured_ontology_resolver(
             config, ontology_file_path=ontology_file_path
@@ -599,14 +543,9 @@ async def cognify(
         # passes a resolver — so pass the union over every wired route: the
         # tasks that can actually run are the authority on whether the LLM
         # connection probe is needed.
-        # A code-only run can only reach the LLM-free code routes, so it needs no
-        # LLM probe, and no embedding probe unless it indexes vectors. The
-        # caller-scoped skip marks nothing done: a later run that needs a
-        # provider still probes it.
-        needs_llm = not code_only and pipeline_needs_llm(
+        needs_llm = pipeline_needs_llm(
             task for route_tasks in tasks_by_route.values() for task in route_tasks
         )
-        skip_connection_test = code_only and not index_vectors
 
         try:
             result = await pipeline_executor_func(
@@ -620,7 +559,6 @@ async def cognify(
                 incremental_loading=incremental_loading,
                 data_per_batch=data_per_batch,
                 needs_llm=needs_llm,
-                skip_connection_test=skip_connection_test,
                 rollback_handler=cognify_rollback_handler,
                 llm_config=llm_config,
                 embedding_config=embedding_config,

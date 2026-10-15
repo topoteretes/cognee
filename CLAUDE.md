@@ -900,7 +900,6 @@ Supported code files (`.py`, `.go`, `.ts`, `.java`, `.rs`, … — the extension
   The GitHub sync remembers each repository in its own call.
   Repositories are built under `cognify_pipeline`;
   status polling for the old `code_graph_pipeline` name falls back to it when the dataset has no run of its own under that name.
-  A cognify whose pending items are all code files or code repositories resolves no graph extractor, so a keyless code-only run never installs the GLiNER runtime.
   Private repositories: pass the token as `codegraph_config={"repo_credentials": token}` (SDK only; `add()` clones with it before the pipeline, and it reaches git only through environment config).
   A local directory is refused when `ACCEPT_LOCAL_FILE_PATH=false`. The CODE route is per-file.
 
