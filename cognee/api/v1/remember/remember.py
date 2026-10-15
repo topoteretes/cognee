@@ -506,7 +506,8 @@ async def _dispatch_session_entry(
 
         run, dataset = await remember_skill_run_entry(
             entry,
-            dataset_name=dataset_id or dataset_name,
+            dataset_name=dataset_name,
+            dataset_id=dataset_id,
             session_id=session_id,
             user=user,
         )
