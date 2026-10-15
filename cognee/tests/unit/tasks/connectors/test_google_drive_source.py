@@ -92,9 +92,11 @@ class _FakeFilesResource:
         ]
         return _FakeRequest({"files": files})
 
-    def get(self, fileId, fields, supportsAllDrives):
+    def get(self, fileId, fields=None, supportsAllDrives=True):
         assert supportsAllDrives is True
         self._service.get_calls.append(fileId)
+        if fileId == "root" and self._service.root_id is not None:
+            return _FakeRequest({"id": self._service.root_id})
         meta = self._service.file_by_id.get(fileId)
         if meta is None:
             return _FakeRequest(error=FakeHttpError(404))
@@ -118,11 +120,19 @@ class _FakeChangesResource:
 
 
 class FakeDriveService:
-    def __init__(self, files_by_folder, file_by_id, start_token="token-0", subfolders=None):
+    def __init__(
+        self,
+        files_by_folder,
+        file_by_id,
+        start_token="token-0",
+        subfolders=None,
+        root_id=None,
+    ):
         self.files_by_folder = files_by_folder
         self.file_by_id = file_by_id
         self.start_token = start_token
         self.subfolders = subfolders or {}
+        self.root_id = root_id
         self.changes_by_token = {}
         self.get_calls = []
         self.list_calls = []
@@ -273,7 +283,7 @@ def test_incremental_sync_only_touches_changed_file(fake_content_extraction):
     rows = list(gd_source._iter_rows(service, _config(), state))
 
     assert [row["id"] for row in rows] == ["fileA"]
-    assert service.get_calls == ["fileA"]
+    assert [call for call in service.get_calls if call != "root"] == ["fileA"]
     assert fake_content_extraction == ["fileA"]  # fileB was never re-extracted
     assert state["page_token"] == "t1"
 
@@ -453,3 +463,94 @@ def test_file_diagnostics_report_reasons_and_retry_failed_extraction(monkeypatch
     assert stats["failed"] == 0
     assert stats["scanned"] == 5
     assert state["page_token"] == "t0"
+
+
+def test_incremental_sync_retains_edited_root_files_with_canonical_root_id(fake_content_extraction):
+    """Verify that edited and newly created files in My Drive (where parents carry
+    the canonical folder ID instead of the literal alias 'root') are retained and
+    extracted rather than tombstoned during incremental sync (#5639)."""
+    canonical_root = "0ACanonicalRootFolderId"
+    file_a = _file_meta("fileA", parents=[canonical_root])
+    file_b = _file_meta("fileB", parents=[canonical_root])
+    file_c = _file_meta("fileC", parents=[canonical_root])
+
+    service = FakeDriveService(
+        files_by_folder={"root": [file_a, file_b]},
+        file_by_id={"fileA": file_a, "fileB": file_b, "fileC": file_c},
+        root_id=canonical_root,
+    )
+    service.changes_by_token["t0"] = {
+        "changes": [
+            {"fileId": "fileA", "removed": False, "file": {"trashed": False}},
+            {"fileId": "fileC", "removed": False, "file": {"trashed": False}},
+        ],
+        "newStartPageToken": "t1",
+    }
+    state = {"page_token": "t0", "known_ids": ["fileA", "fileB"]}
+    stats = {}
+
+    rows = list(gd_source._iter_rows(service, _config(folder_id="root"), state, stats))
+
+    assert sorted(row["id"] for row in rows) == ["fileA", "fileC"]
+    assert all(not row.get("_deleted", False) for row in rows)
+    assert stats["deleted"] == 0
+    assert stats["scanned"] == 2
+    assert "root" in service.get_calls
+    assert sorted(fake_content_extraction) == ["fileA", "fileC"]
+    assert state["page_token"] == "t1"
+    assert state["known_ids"] == ["fileA", "fileB", "fileC"]
+
+
+def test_incremental_sync_tombstones_file_moved_out_of_canonical_root(fake_content_extraction):
+    """Files moved from canonical My Drive to an untracked external folder
+    must be correctly tombstoned."""
+    canonical_root = "0ACanonicalRootFolderId"
+    moved_file = _file_meta("fileMoved", parents=["outside_folder_id"])
+
+    service = FakeDriveService(
+        files_by_folder={"root": []},
+        file_by_id={"fileMoved": moved_file},
+        root_id=canonical_root,
+    )
+    service.changes_by_token["t0"] = {
+        "changes": [
+            {"fileId": "fileMoved", "removed": False, "file": {"trashed": False}},
+        ],
+        "newStartPageToken": "t1",
+    }
+    state = {"page_token": "t0", "known_ids": ["fileMoved"]}
+    stats = {}
+
+    rows = list(gd_source._iter_rows(service, _config(folder_id="root"), state, stats))
+
+    assert len(rows) == 1
+    assert rows[0]["id"] == "fileMoved"
+    assert rows[0]["_deleted"] is True
+    assert stats["deleted"] == 1
+    assert stats["scanned"] == 0
+    assert state["known_ids"] == []
+
+
+def test_incremental_sync_handles_root_resolution_failure_gracefully(fake_content_extraction):
+    """If resolving canonical root ID encounters an error, the sync should continue
+    without crashing, evaluating against default scope folder IDs."""
+    file_a = _file_meta("fileA", parents=["root"])
+    service = FakeDriveService(
+        files_by_folder={"root": [file_a]},
+        file_by_id={"fileA": file_a},
+        root_id=None,  # get("root") will 404
+    )
+    service.changes_by_token["t0"] = {
+        "changes": [
+            {"fileId": "fileA", "removed": False, "file": {"trashed": False}},
+        ],
+        "newStartPageToken": "t1",
+    }
+    state = {"page_token": "t0", "known_ids": ["fileA"]}
+    stats = {}
+
+    rows = list(gd_source._iter_rows(service, _config(folder_id="root"), state, stats))
+
+    assert len(rows) == 1
+    assert rows[0]["id"] == "fileA"
+    assert rows[0]["_deleted"] is False
