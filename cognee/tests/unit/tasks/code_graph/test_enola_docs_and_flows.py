@@ -428,6 +428,81 @@ def test_flow_refs_resolve_by_fact_id_before_name(tmp_path):
     }
 
 
+def test_flows_sharing_a_route_name_stay_separate_nodes_with_their_own_edges(tmp_path):
+    """Two services serving GET /health: two flows, never one node with both edge sets."""
+    facts = [
+        {"kind": "symbol", "name": "svc_a/app.health", "file": "svc_a/app.py", "repo": REPO},
+        {"kind": "symbol", "name": "svc_b/app.health", "file": "svc_b/app.py", "repo": REPO},
+        {"kind": "symbol", "name": "svc_a/app.work", "file": "svc_a/app.py", "repo": REPO},
+        {"kind": "symbol", "name": "svc_b/app.work", "file": "svc_b/app.py", "repo": REPO},
+        {"kind": "symbol", "name": "orders.save", "file": "orders.py", "repo": REPO},
+    ]
+    flows = {
+        "flows": [
+            {
+                "name": "GET /health",
+                "repo": REPO,
+                "id": ID_A,
+                "summary": "svc_a health",
+                "entry": {"name": "svc_a/app.health"},
+                "stages": [{"order": 1, "depth": 1, "name": "svc_a/app.work"}],
+            },
+            {
+                "name": "GET /health",
+                "repo": REPO,
+                "id": ID_B,
+                "summary": "svc_b health",
+                "entry": {"name": "svc_b/app.health"},
+                "stages": [{"order": 1, "depth": 1, "name": "svc_b/app.work"}],
+            },
+            {"name": "POST /orders", "repo": REPO, "entry": {"name": "orders.save"}},
+        ]
+    }
+    parsed, _receipt = parse_enola_snapshot(_write_snapshot(tmp_path, facts, flows))
+    data_points = map_facts_to_data_points(parsed, repo_path=f"/tmp/{REPO}")
+    edges, skipped = build_code_graph_edges(parsed, repo_path=f"/tmp/{REPO}")
+
+    flow_nodes = {point.name: point for point in data_points if isinstance(point, CodeFlow)}
+    assert set(flow_nodes) == {
+        "GET /health (svc_a/app.health)",
+        "GET /health (svc_b/app.health)",
+        # A flow whose name is not shared keeps it, and so its node id.
+        "POST /orders",
+    }
+    assert flow_nodes["POST /orders"].id == fact_node_id(REPO, "flow", "POST /orders")
+    assert skipped == 0
+    flow_edges = {triple for triple in _edge_triples(edges, data_points) if triple[0] in flow_nodes}
+    assert flow_edges == {
+        ("GET /health (svc_a/app.health)", "flow_entry", "svc_a/app.health"),
+        ("GET /health (svc_a/app.health)", "flow_stage", "svc_a/app.work"),
+        ("GET /health (svc_b/app.health)", "flow_entry", "svc_b/app.health"),
+        ("GET /health (svc_b/app.health)", "flow_stage", "svc_b/app.work"),
+        ("POST /orders", "flow_entry", "orders.save"),
+    }
+
+
+def test_flows_sharing_a_name_and_an_entry_fall_back_to_their_ids(tmp_path):
+    facts = [{"kind": "symbol", "name": "app.health", "file": "app.py", "repo": REPO}]
+    flows = {
+        "flows": [
+            {"name": "GET /health", "repo": REPO, "id": flow_id, "entry": {"name": "app.health"}}
+            for flow_id in (ID_A, ID_B)
+        ]
+        + [{"name": "GET /ping", "repo": REPO, "entry": {"name": "app.health"}} for _ in range(2)]
+    }
+    parsed, _receipt = parse_enola_snapshot(_write_snapshot(tmp_path, facts, flows))
+
+    names = sorted(fact["name"] for fact in parsed if fact["kind"] == "flow")
+
+    assert names == [
+        f"GET /health (app.health) ({ID_A})",
+        f"GET /health (app.health) ({ID_B})",
+        # Nothing tells these apart: numbered in flows.json order.
+        "GET /ping (app.health) #1",
+        "GET /ping (app.health) #2",
+    ]
+
+
 def test_a_flow_named_like_its_entry_leaves_name_resolution_unambiguous():
     facts = [
         {"kind": "symbol", "name": "jobs.send_receipt", "repo": REPO},

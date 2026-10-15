@@ -12,11 +12,14 @@ class CodeRepository(DataPoint):
     loaded (and swept) ingestion; extract_code_graph skips re-loading when the
     current snapshot carries the same id. It is stamped only after a load
     completes, so a crashed run can never be mistaken for an up-to-date one.
+    last_mapping_version records the CODE_GRAPH_MAPPING_VERSION that load ran
+    with: an unchanged snapshot mapped by an older cognee is loaded again.
     """
 
     name: str
     path: str
     last_snapshot_id: str | None = None
+    last_mapping_version: int | None = None
     last_delta: dict | None = None
     # Projection of the snapshot's receipt.json (format_version, enola version,
     # git provenance, counts and the extraction-quality block) stamped with

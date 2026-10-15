@@ -769,6 +769,60 @@ async def test_flows_need_flows_json_and_a_valid_mode():
     assert bad_mode.value.error_param == "mode"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("config", "param"),
+    [
+        ({"operation": "flows", "limit": -1}, "limit"),
+        ({"operation": "flows", "offset": "x"}, "offset"),
+        ({"operation": "flows", "mechanism": 5}, "mechanism"),
+        ({"operation": "flows", "include_side": "maybe"}, "include_side"),
+        ({"operation": "flows", "repo": 7}, "repo"),
+        ({"operation": "flows", "mode": "show", "id": ["F1"]}, "id"),
+        ({"operation": "flows", "mode": "show", "name": 3}, "name"),
+        ({"operation": "flows", "mode": "through", "symbol": ["create"]}, "symbol"),
+    ],
+)
+async def test_flows_reject_bad_arguments_before_reporting_missing_flows(config, param):
+    """feature_unavailable is softened into a per-dataset miss, so checking for flows
+    first would hide a caller's bad argument behind a silent empty result."""
+    with pytest.raises(CodeSearchValidationError) as error:
+        await _run(config, with_flows=False)
+    assert (error.value.error_code, error.value.error_param) == ("invalid_argument", param)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("config", "param"),
+    [
+        ({"operation": "neighbors", "id": ["create"]}, "id"),
+        ({"operation": "neighbors", "node_id": {"id": "create"}}, "node_id"),
+        ({"operation": "neighbors", "name": 5}, "name"),
+        ({"operation": "neighbors", "name": "orders.create_order", "repo": 1}, "repo"),
+        ({"operation": "flows", "mode": "show", "id": True}, "id"),
+        ({"operation": "flows", "mode": "show", "flow": ["POST /orders"]}, "flow"),
+        ({"operation": "flows", "mode": "through", "through": 1.5}, "through"),
+        ({"operation": "flows", "mode": "through", "symbol": "create", "id": [1]}, "id"),
+    ],
+)
+async def test_ids_and_names_of_the_wrong_type_are_invalid_not_missing(config, param):
+    """A list or number is the caller's mistake (invalid_argument), never an identifier
+    that fails to resolve (not_found, which recall and multi-dataset search swallow)."""
+    with pytest.raises(CodeSearchValidationError) as error:
+        await _run(config)
+    assert not isinstance(error.value, CodeSeedNotFoundError)
+    assert (error.value.error_code, error.value.error_param) == ("invalid_argument", param)
+
+
+@pytest.mark.asyncio
+async def test_a_uuid_id_is_an_identifier_not_a_type_error():
+    from uuid import uuid4
+
+    with pytest.raises(CodeSeedNotFoundError) as missing:
+        await _run({"operation": "neighbors", "id": uuid4()})
+    assert missing.value.error_code == "not_found"
+
+
 # --- hubs ----------------------------------------------------------------------------
 
 

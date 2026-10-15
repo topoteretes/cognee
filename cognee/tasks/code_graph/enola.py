@@ -513,7 +513,47 @@ def _synthesize_flow_facts(snapshot_dir: Path, repos: set[str], receipt: dict | 
         if is_enola_id(flow.get("id")):
             fact["id"] = flow["id"]
         facts.append(fact)
+    _disambiguate_flow_names(facts)
     return facts
+
+
+def _disambiguate_flow_names(facts: list[dict]) -> None:
+    """Give flows that share a name within a repo distinct names, in place.
+
+    A node's identity is (repo, kind, name), and a route flow is named after
+    its route: two services serving ``GET /health`` write two flows with
+    different ids under one name, which would collapse into one node carrying
+    both flows' edges. Each such flow is named after its entry symbol as well,
+    then its enola id if that still collides. A flow with a unique name keeps
+    it, so its node id does not change; looking up the shared name now
+    reports both flows as ambiguous instead of merging them.
+    """
+
+    def _groups() -> dict[tuple[str | None, str], list[dict]]:
+        groups: dict[tuple[str | None, str], list[dict]] = {}
+        for fact in facts:
+            groups.setdefault((fact.get("repo"), fact["name"]), []).append(fact)
+        return groups
+
+    def _entry_name(fact: dict) -> str | None:
+        entry = fact["props"].get("entry")
+        name = entry.get("name") if isinstance(entry, dict) else None
+        return name if isinstance(name, str) and name else None
+
+    for qualifier in (_entry_name, lambda fact: fact.get("id")):
+        for (_repo, name), group in _groups().items():
+            if len(group) < 2:
+                continue
+            for fact in group:
+                tag = qualifier(fact)
+                if tag and not fact["name"].endswith(f"({tag})"):
+                    fact["name"] = f"{name} ({tag})"
+    # Still shared (no entry name and no id to tell them apart): number them in
+    # flows.json order, which enola ranks deterministically.
+    for (_repo, name), group in _groups().items():
+        if len(group) > 1:
+            for index, fact in enumerate(group, start=1):
+                fact["name"] = f"{name} #{index}"
 
 
 def _receipt_vouches_for_flows(receipt: dict | None, content: bytes) -> bool:

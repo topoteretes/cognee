@@ -89,6 +89,12 @@ _RECEIPT_PROJECTION_KEYS = (
 # the subprocess engine's per-call deadline.
 _SWEEP_CHUNK_SIZE = 2000
 
+# Version of how cognee maps an enola snapshot onto graph nodes and edges.
+# Bump it whenever that mapping changes, so a repository whose snapshot did not
+# change is still loaded again by the new mapping instead of being skipped.
+# 1: doc fields, CodeFlow nodes and declaration-view resolution (SDK-1119).
+CODE_GRAPH_MAPPING_VERSION = 1
+
 
 def _is_mappable_fact(kind: Any, name: Any) -> bool:
     """Whether a fact will become a graph node (known kind, non-empty name)."""
@@ -703,14 +709,19 @@ async def extract_code_graph(
     if snapshot_id is not None:
         fallback_repo = _resolve_fallback_repo(facts, repo_path)
         try:
-            stored_id, stored_tagged = await _stored_repository_state(fallback_repo)
+            stored_id, stored_version, stored_tagged = await _stored_repository_state(fallback_repo)
         except Exception as error:
             # The skip check is an optimization; never let it break ingestion.
             logger.warning(
                 "Could not read the stored snapshot id (%s); loading fully.", error, exc_info=True
             )
-            stored_id, stored_tagged = None, False
-        if stored_id == snapshot_id and not node_set and not stored_tagged:
+            stored_id, stored_version, stored_tagged = None, None, False
+        if (
+            stored_id == snapshot_id
+            and stored_version == CODE_GRAPH_MAPPING_VERSION
+            and not node_set
+            and not stored_tagged
+        ):
             logger.info(
                 "Code graph for '%s' already matches snapshot %s; skipping load.",
                 fallback_repo,
@@ -747,8 +758,11 @@ def _read_repo_node_property(node: Any, key: str) -> Any:
     return None
 
 
-async def _stored_repository_state(repo: str) -> tuple[str | None, bool]:
-    """(last_snapshot_id, whether it carries a node_set) off the repository node.
+async def _stored_repository_state(repo: str) -> tuple[str | None, int | None, bool]:
+    """(last_snapshot_id, last_mapping_version, whether it carries a node_set).
+
+    Read off the repository node. A node stamped before the mapping version
+    existed has none, so its unchanged snapshot is loaded once more.
 
     The snapshot id lives on the CodeRepository node in the graph itself, not
     in the relational metastore: this pipeline persists no Data row to key it
@@ -759,10 +773,28 @@ async def _stored_repository_state(repo: str) -> tuple[str | None, bool]:
     graph_engine = await get_graph_engine()
     node = await graph_engine.get_node(str(fact_node_id(repo, "repository", repo)))
     stored_id = _read_repo_node_property(node, "last_snapshot_id")
+    stored_version = _read_repo_node_property(node, "last_mapping_version")
     tags = _read_repo_node_property(node, "belongs_to_set")
     if isinstance(tags, str):
         tags = json.loads(tags)
-    return stored_id if isinstance(stored_id, str) and stored_id else None, bool(tags)
+    return (
+        stored_id if isinstance(stored_id, str) and stored_id else None,
+        _as_mapping_version(stored_version),
+        bool(tags),
+    )
+
+
+def _as_mapping_version(value: Any) -> int | None:
+    """The stored mapping version as an int, whatever scalar type the adapter returned."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
 
 
 def _snapshot_repos(facts: list[dict], fallback_repo: str) -> set:
@@ -1260,6 +1292,7 @@ async def _stamp_snapshot_identity(
             name=repo,
             path=str(repo_path) if repo_path and repo == fallback_repo else repo,
             last_snapshot_id=snapshot_id,
+            last_mapping_version=CODE_GRAPH_MAPPING_VERSION,
             last_delta=delta,
             last_receipt=last_receipt,
             belongs_to_set=list(node_set) if node_set else None,

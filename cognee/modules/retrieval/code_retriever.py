@@ -2190,6 +2190,27 @@ class CodeRetriever(BaseRetriever):
                 return value.strip()
         return (query or "").strip()
 
+    def _identifier_arg(self, *fields: str) -> str | None:
+        """The first non-empty id, name or repo among config fields, as a string.
+
+        A list, number or other non-string is a usage error (``invalid_argument``),
+        not an identifier that fails to resolve: ``not_found`` is softened into a
+        per-dataset miss, which would hide the caller's mistake.
+        """
+        for field in fields:
+            value = self.config.get(field)
+            if value is None:
+                continue
+            if isinstance(value, UUID):
+                return str(value)
+            if not isinstance(value, str):
+                raise CodeSearchValidationError(
+                    f"CODE {field} must be a string, got {type(value).__name__}.", param=field
+                )
+            if value.strip():
+                return value.strip()
+        return None
+
     def _include_tests(self) -> bool:
         return bool(_optional_bool(self.config.get("include_tests"), field="include_tests"))
 
@@ -2401,10 +2422,13 @@ class CodeRetriever(BaseRetriever):
         kinds = _node_types(self.config.get("kinds"), "kinds")
         limit = self._limit("neighbors", "limit")
         offset = _offset(self.config.get("offset"))
+        name = self._identifier_arg("name")
+        node_id = self._identifier_arg("id", "node_id")
+        repo = self._identifier_arg("repo")
         anchor = graph.resolve(
-            name=self.config.get("name") or query,
-            node_id=self.config.get("id") or self.config.get("node_id"),
-            repo=self.config.get("repo"),
+            name=name or query,
+            node_id=node_id,
+            repo=repo,
             role="neighbors anchor",
         )
 
@@ -2668,6 +2692,23 @@ class CodeRetriever(BaseRetriever):
             raise CodeSearchValidationError(
                 "CODE flows mode must be 'list', 'show', or 'through'.", param="mode"
             )
+        # Arguments first, like _neighbors: a bad one is a usage error whether or
+        # not this graph has flows. The "no flows" miss below is softened into a
+        # per-dataset miss, which would otherwise hide the caller's mistake.
+        repo = self._identifier_arg("repo")
+        if mode == "list":
+            mechanisms = set(_as_strings(self.config.get("mechanism"), "mechanism"))
+            include_side = bool(
+                _optional_bool(self.config.get("include_side"), field="include_side")
+            )
+            limit = self._limit("flows", "limit")
+            offset = _offset(self.config.get("offset"))
+        elif mode == "show":
+            self._identifier_arg("id")
+            self._identifier_arg("name", "flow")
+        else:
+            self._identifier_arg("symbol", "through", "name")
+            self._identifier_arg("id")
         if not graph.flows:
             if not graph.nodes:
                 raise CodeGraphUnavailableError(_NO_CODE_GRAPH_MESSAGE)
@@ -2680,11 +2721,6 @@ class CodeRetriever(BaseRetriever):
         if mode == "through":
             return self._flows_through(graph, query)
 
-        repo = self.config.get("repo") or None
-        mechanisms = set(_as_strings(self.config.get("mechanism"), "mechanism"))
-        include_side = bool(_optional_bool(self.config.get("include_side"), field="include_side"))
-        limit = self._limit("flows", "limit")
-        offset = _offset(self.config.get("offset"))
         matched = []
         for flow_id in graph.flow_order:
             flow = graph.flows[flow_id]
@@ -2709,10 +2745,10 @@ class CodeRetriever(BaseRetriever):
 
     def _resolve_flow(self, graph: _CodeGraphSnapshot, query: str) -> str:
         """A flow by cognee or Enola id, else by name: exact, then suffix, then substring."""
-        repo = self.config.get("repo") or None
-        raw_id = self.config.get("id")
+        repo = self._identifier_arg("repo")
+        raw_id = self._identifier_arg("id")
         if raw_id:
-            flow_id = str(raw_id)
+            flow_id = raw_id
             if flow_id not in graph.flows:
                 flow_id = graph.flow_by_enola_id.get(flow_id, flow_id)
             if flow_id not in graph.flows or (repo and graph.flows[flow_id].get("repo") != repo):
@@ -2721,7 +2757,7 @@ class CodeRetriever(BaseRetriever):
                 )
             return flow_id
 
-        term = str(self.config.get("name") or self.config.get("flow") or query or "").strip()
+        term = (self._identifier_arg("name", "flow") or query or "").strip()
         if not term:
             raise CodeSearchValidationError(
                 "CODE flows show requires a flow id or name.", param="name"
@@ -2759,14 +2795,9 @@ class CodeRetriever(BaseRetriever):
 
     def _flows_through(self, graph: _CodeGraphSnapshot, query: str) -> dict[str, Any]:
         symbol = graph.resolve(
-            name=(
-                self.config.get("symbol")
-                or self.config.get("through")
-                or self.config.get("name")
-                or query
-            ),
-            node_id=self.config.get("id"),
-            repo=self.config.get("repo"),
+            name=self._identifier_arg("symbol", "through", "name") or query,
+            node_id=self._identifier_arg("id"),
+            repo=self._identifier_arg("repo"),
             role="flows symbol",
         )
         reached, truncated = graph.calls_reach(symbol)
