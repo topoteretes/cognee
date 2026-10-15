@@ -137,9 +137,6 @@ async def main():
     # 지식 그래프 생성
     await cognee.cognify()
 
-    # 그래프에 메모리 알고리즘 추가
-    await cognee.memify()
-
     # 지식 그래프 쿼리
     results = await cognee.search("What does Cognee do?")
 

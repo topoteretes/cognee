@@ -364,6 +364,7 @@ async def remember(
     background: bool = False,
     ontology_key: str | list[str] | None = None,
     self_improvement: bool = True,
+    node_set: list[str] | None = None,
 ) -> list:
     """Store data in memory.
 
@@ -417,6 +418,14 @@ async def remember(
         deadline shorter than ingestion takes. Ignored with session_id, which
         is already fast. Errors surface via cognify_status, not the return
         value.
+    node_set : list[str], optional
+        Node-set names to file the data under, the same names recall filters
+        on with node_name. Permanent memory tags the ingested data. With
+        session_id the first write that carries one pins it on the session;
+        later writes must repeat it or omit it, and a different set is
+        refused, so one session never spans two node sets. improve() keeps
+        the pinned set on everything it bridges from the session into the
+        graph. Used for per-project memory.
     """
     if content_base64 and data:
         return [
@@ -482,6 +491,7 @@ async def remember(
                 custom_prompt=custom_prompt,
                 ontology_key=ontology_key,
                 self_improvement=self_improvement,
+                node_set=node_set,
             ),
             dataset=dataset_name,
         )
@@ -509,6 +519,7 @@ async def remember(
                 custom_prompt=custom_prompt,
                 ontology_key=ontology_key,
                 self_improvement=self_improvement,
+                node_set=node_set,
             )
             status = result.get("status", "completed")
             if session_id:
@@ -556,8 +567,8 @@ async def recall(
         (answer written by an LLM): HYBRID_COMPLETION (the default when
         routing is off), GRAPH_COMPLETION, GRAPH_COMPLETION_COT,
         GRAPH_COMPLETION_CONTEXT_EXTENSION, GRAPH_COMPLETION_DECOMPOSITION,
-        GRAPH_SUMMARY_COMPLETION, RAG_COMPLETION, TRIPLET_COMPLETION,
-        TEMPORAL, AGENTIC_COMPLETION. Retrieval-only types (no LLM):
+        GRAPH_SUMMARY_COMPLETION, RAG_COMPLETION, TEMPORAL,
+        AGENTIC_COMPLETION. Retrieval-only types (no LLM):
         CHUNKS, CHUNKS_LEXICAL, SUMMARIES, SKILLS, CODE. Other: CYPHER,
         NATURAL_LANGUAGE, CODING_RULES, GRAPH_REPORT, FEELING_LUCKY.
         An unknown name is rejected with a validation error.
@@ -803,13 +814,12 @@ async def forget(
 async def improve(
     dataset_name: str | None = None,
     session_ids: str | None = None,
-    node_name: str | None = None,
     build_global_context_index: bool = False,
     build_truth_subspace: bool = False,
 ) -> list:
     """Run the self-improvement loop over a dataset and report what each stage did.
 
-    Ten stages run in a fixed order; each first declines work it cannot do
+    Nine stages run in a fixed order; each first declines work it cannot do
     under the current settings (no LLM calls) and only then runs:
     1. feedback_weights        - scored session answers move graph weights
     2. persist_session_qa      - session Q&A is cognified into the graph
@@ -819,8 +829,7 @@ async def improve(
     6. update_user_preferences - ratings fold into preference weights
     7. build_truth_subspace    - opt-in (build_truth_subspace=True)
     8. review_conflicts        - opt-in (IMPROVE_REVIEW_CONFLICTS=true)
-    9. triplet_enrichment      - triplet embeddings, when the graph changed
-    10. global_context_index   - opt-in (build_global_context_index=True)
+    9. global_context_index    - opt-in (build_global_context_index=True)
 
     Stages 1-7 need session_ids and are skipped with `no_session_ids`
     otherwise. The reply lists every stage with its status (completed,
@@ -834,10 +843,8 @@ async def improve(
         detected.
     session_ids : str, optional
         Comma-separated session IDs to bridge into the permanent graph.
-    node_name : str, optional
-        Comma-separated entity names; restricts enrichment to those nodes.
     build_global_context_index : bool
-        Also build the global context index after enrichment.
+        Also build the global context index.
     build_truth_subspace : bool
         Also build the truth subspace from the sessions' distilled learnings
         (needs session_ids and a graph backend with truth state).
@@ -846,11 +853,9 @@ async def improve(
     with redirect_stdout(sys.stderr):
         try:
             session_list = parse_csv_list(session_ids)
-            node_list = parse_csv_list(node_name)
             result = await cognee_client.improve(
                 dataset_name=dataset_name,
                 session_ids=session_list,
-                node_name=node_list,
                 build_global_context_index=build_global_context_index,
                 build_truth_subspace=build_truth_subspace,
             )

@@ -17,7 +17,6 @@ DEFAULT_TOOLS = [
                         "CODE",
                         "GRAPH_COMPLETION",
                         "HYBRID_COMPLETION",
-                        "NATURAL_LANGUAGE",
                     ],
                 },
                 "top_k": {
