@@ -118,7 +118,7 @@ dependencies = [
     "urllib3>=2.6.0",
     "cbor2>=5.8.0",
     "langdetect>=1.0.9",
-    "datamodel-code-generator>=0.54.0",
+    "datamodel-code-generator>=0.56.0",
     # Enola powers the built-in deterministic code-graph route. Keep this pinned:
     # its snapshot contract and known answers are validated by test_code_graph_e2e.py.
     "enola-cli==0.4.30",
@@ -207,6 +207,11 @@ gmail = [
     "google-auth-oauthlib>=1.1.0,<2",
 ]
 google-drive = [
+    "google-api-python-client>=2.100.0,<3",
+    "google-auth>=2.23.0,<3",
+    "google-auth-oauthlib>=1.1.0,<2",
+]
+google-calendar = [
     "google-api-python-client>=2.100.0,<3",
     "google-auth>=2.23.0,<3",
     "google-auth-oauthlib>=1.1.0,<2",
