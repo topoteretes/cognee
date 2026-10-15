@@ -11,12 +11,16 @@ unless EMBEDDING_ENCODING_FORMAT=base64 opts it in.
 """
 
 import base64
+import binascii
 import os
+import re
 from typing import Literal
 from urllib.parse import urlparse
 
 import litellm
 import numpy as np
+
+from cognee.infrastructure.databases.exceptions import EmbeddingEncodingError
 
 EncodingFormat = Literal["base64", "float"]
 
@@ -40,7 +44,12 @@ def _routes_through_openai_handler(model: str | None) -> bool:
 
 
 def _litellm_openai_endpoint(endpoint: str | None) -> str | None:
-    """The base URL litellm's OpenAI handler sends to, in litellm's own order."""
+    """The base URL litellm's OpenAI handler sends to, in litellm's own order.
+
+    Mirrors litellm's lookup (api_base, litellm.api_base, OPENAI_BASE_URL,
+    OPENAI_API_BASE), which cognee cannot call before the request is built. A
+    mismatch only affects the default: base64 to a proxy that then rejects it, loudly.
+    """
     return (
         endpoint or litellm.api_base or os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE")
     )
@@ -77,11 +86,33 @@ def resolve_encoding_format(
     return "base64" if _routes_to_openai_api(model, endpoint) else "float"
 
 
-def decode_embedding(embedding: list[float] | str) -> list[float]:
-    """Return the vector as floats; a base64 payload holds little-endian float32 values.
+def decode_embedding(embedding: list[float] | str, encoding_format: EncodingFormat) -> list[float]:
+    """Return the vector as floats.
 
-    A float list passes through unchanged, since a server may ignore encoding_format.
+    With base64 requested, the server must answer with a base64 string of little-endian
+    float32 values. A list means a provider or proxy translated the request into its own
+    format (a LiteLLM proxy in front of Bedrock returns 1-bit vectors as a list of 0/1),
+    so it raises EmbeddingEncodingError instead of storing garbage. With float, the list
+    passes through unchanged.
     """
-    if isinstance(embedding, str):
-        return np.frombuffer(base64.b64decode(embedding), dtype="<f4").tolist()
-    return embedding
+    if encoding_format == "float":
+        return embedding
+    if not isinstance(embedding, str):
+        raise EmbeddingEncodingError(f"got {type(embedding).__name__}")
+    try:
+        return np.frombuffer(base64.b64decode(embedding, validate=True), dtype="<f4").tolist()
+    except (binascii.Error, ValueError) as error:
+        raise EmbeddingEncodingError(f"payload does not decode as float32: {error}") from error
+
+
+_ENCODING_REJECTION_RE = re.compile(r"encoding_format|base64", re.IGNORECASE)
+
+
+def rejects_encoding_format(error: BaseException) -> bool:
+    """Whether a 400/422 is about the encoding, so ENCODING_FORMAT_HINT fits it.
+
+    A server that rejects base64 says so ("unsupported encoding_format", "Input should
+    be 'float' or 'base64'"); a bad model name or dimensions does not, and the hint
+    would send the user after the wrong fix.
+    """
+    return bool(_ENCODING_REJECTION_RE.search(str(error)))

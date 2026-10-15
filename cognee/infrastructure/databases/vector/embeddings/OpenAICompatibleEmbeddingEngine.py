@@ -31,6 +31,7 @@ from tenacity import (
 from cognee.infrastructure.databases.exceptions import (
     EmbeddingContextWindowTooSmallError,
     EmbeddingCredentialsError,
+    EmbeddingEncodingError,
     EmbeddingException,
 )
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
@@ -41,6 +42,7 @@ from cognee.infrastructure.databases.vector.embeddings.encoding import (
     ENCODING_FORMAT_HINT,
     EncodingFormat,
     decode_embedding,
+    rejects_encoding_format,
 )
 from cognee.infrastructure.databases.vector.embeddings.input_limit import (
     init_input_limit,
@@ -143,6 +145,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         retry=embedding_retry_condition(
             EmbeddingContextWindowTooSmallError,
             EmbeddingCredentialsError,
+            EmbeddingEncodingError,
             ValueError,
             asyncio.CancelledError,
         ),
@@ -191,7 +194,14 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
                     self._client.embeddings.create(**create_kwargs),
                     timeout=300.0,
                 )
-            embeddings = [decode_embedding(item.embedding) for item in response.data]
+            embeddings = [
+                decode_embedding(item.embedding, self.encoding_format) for item in response.data
+            ]
+
+        except EmbeddingEncodingError:
+            # Terminal: the server answered in another format, so a retry gets the
+            # same answer. Reaches tenacity unwrapped, like EmbeddingCredentialsError.
+            raise
 
         except Exception as error:
             # A proxy spend cap is terminal, and none of the branches below can
@@ -293,7 +303,11 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
                 str(error),
                 self.endpoint,
             )
-            if self.encoding_format == "base64" and isinstance(error, openai.BadRequestError):
+            if (
+                self.encoding_format == "base64"
+                and isinstance(error, (openai.BadRequestError, openai.UnprocessableEntityError))
+                and rejects_encoding_format(error)
+            ):
                 logger.error(ENCODING_FORMAT_HINT)
             raise EmbeddingException(
                 "Embedding failed. Verify EMBEDDING_ENDPOINT and server status."

@@ -3,6 +3,7 @@ import struct
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
+import httpx
 import pytest
 
 from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
@@ -15,7 +16,8 @@ async def test_embed_text_filters_invalid_inputs(monkeypatch):
     # Use monkeypatch so env is restored automatically
     monkeypatch.setenv("MOCK_EMBEDDING", "false")
 
-    engine = LiteLLMEmbeddingEngine(dimensions=4)
+    # Float JSON, so the stub below can answer with plain lists.
+    engine = LiteLLMEmbeddingEngine(dimensions=4, encoding_format="float")
 
     # Stub litellm call to return distinct vectors for each valid input
     UNIQUE_A = [1.0, 1.0, 1.0, 1.0]
@@ -122,7 +124,14 @@ async def test_embed_text_sets_encoding_format_per_route(
             encoding_format=configured,
         )
 
-    response = SimpleNamespace(data=[{"embedding": [0.1, 0.2]}])
+    # Answer in the format the route asked for; both values are exact in float32.
+    vector = [0.5, 0.25]
+    payload = (
+        base64.b64encode(struct.pack("<2f", *vector)).decode()
+        if engine.encoding_format == "base64"
+        else vector
+    )
+    response = SimpleNamespace(data=[{"embedding": payload}])
     mock_aembedding = AsyncMock(return_value=response)
 
     import cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine as mod
@@ -143,7 +152,7 @@ async def test_embed_text_sets_encoding_format_per_route(
         expected_kwargs["encoding_format"] = expected_encoding_format
 
     mock_aembedding.assert_awaited_once_with(**expected_kwargs)
-    assert result == [[0.1, 0.2]]
+    assert result == [vector]
 
 
 @pytest.mark.asyncio
@@ -162,7 +171,7 @@ async def test_embed_text_decodes_base64_vectors(monkeypatch):
     vector = [0.0123, -0.5, 0.25, 1e-7]
     float32_vector = [struct.unpack("<f", struct.pack("<f", v))[0] for v in vector]
     encoded = base64.b64encode(struct.pack("<4f", *vector)).decode()
-    response = SimpleNamespace(data=[{"embedding": encoded}, {"embedding": float32_vector}])
+    response = SimpleNamespace(data=[{"embedding": encoded}, {"embedding": encoded}])
 
     import cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine as mod
 
@@ -172,6 +181,68 @@ async def test_embed_text_decodes_base64_vectors(monkeypatch):
 
     assert result == [float32_vector, float32_vector]
     assert all(isinstance(v, float) for v in result[0])
+
+
+@pytest.mark.asyncio
+async def test_float_list_on_a_base64_route_fails_without_retry(monkeypatch):
+    """A proxy that translates base64 for Bedrock answers with a list of 0/1: raise, once."""
+    monkeypatch.setenv("MOCK_EMBEDDING", "false")
+
+    with patch.object(LiteLLMEmbeddingEngine, "get_tokenizer", return_value=Mock()):
+        engine = LiteLLMEmbeddingEngine(
+            model="openai/titan",
+            dimensions=4,
+            api_key="test-key",
+            endpoint="http://litellm-proxy:4000",
+            encoding_format="base64",
+        )
+
+    import cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine as mod
+
+    response = SimpleNamespace(data=[{"embedding": [1.0, 0.0, 1.0, 1.0]}])
+    aembedding = AsyncMock(return_value=response)
+    monkeypatch.setattr(mod.litellm, "aembedding", aembedding)
+
+    with pytest.raises(mod.EmbeddingEncodingError, match="EMBEDDING_ENCODING_FORMAT"):
+        await engine.embed_text(["hello"])
+
+    assert aembedding.await_count == 1
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        # pydantic 2.10
+        (
+            "Pydantic serializer warnings:\n  Expected `list[float]` but got `str` with value "
+            "`'AAAA'` - serialized value may not be as expected"
+        ),
+        # pydantic 2.11
+        (
+            "Pydantic serializer warnings:\n  PydanticSerializationUnexpectedValue(Expected "
+            "`list[float]` - serialized value may not be as expected [input_value='AAAA', "
+            "input_type=str])"
+        ),
+        # pydantic 2.12+
+        (
+            "Pydantic serializer warnings:\n  PydanticSerializationUnexpectedValue(Expected "
+            "`list[float]` - serialized value may not be as expected [field_name='embedding', "
+            "input_value='AAAA', input_type=str])"
+        ),
+    ],
+)
+def test_base64_serializer_warning_is_filtered_on_every_pydantic(message):
+    import re
+
+    import cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine as mod
+
+    assert re.match(mod._BASE64_SERIALIZER_WARNING, message)
+    # Any other value type, or any other field type, is still shown.
+    other_type = message.replace("but got `str`", "but got `dict`").replace(
+        "input_type=str", "input_type=dict"
+    )
+    assert not re.match(mod._BASE64_SERIALIZER_WARNING, other_type)
+    assert not re.match(mod._BASE64_SERIALIZER_WARNING, message.replace("list[float]", "int"))
 
 
 @pytest.mark.asyncio
@@ -198,6 +269,69 @@ async def test_rejected_base64_logs_the_setting_to_change(monkeypatch):
     monkeypatch.setattr(mod.logger, "error", logged)
 
     with pytest.raises(mod.litellm.exceptions.BadRequestError):
+        await engine.embed_text(["hello"])
+
+    logged.assert_called_with(mod.ENCODING_FORMAT_HINT)
+
+
+@pytest.mark.asyncio
+async def test_unrelated_400_does_not_blame_the_encoding(monkeypatch):
+    """With base64 set, a 400 that is not about the encoding gets no hint."""
+    monkeypatch.setenv("MOCK_EMBEDDING", "false")
+
+    with patch.object(LiteLLMEmbeddingEngine, "get_tokenizer", return_value=Mock()):
+        engine = LiteLLMEmbeddingEngine(
+            model="openai/m",
+            dimensions=2,
+            api_key="test-key",
+            endpoint="http://localhost:8000/v1",
+            encoding_format="base64",
+        )
+
+    import cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine as mod
+
+    error = mod.litellm.exceptions.BadRequestError(
+        message="This model does not support specifying dimensions.",
+        model="openai/m",
+        llm_provider="openai",
+    )
+    monkeypatch.setattr(mod.litellm, "aembedding", AsyncMock(side_effect=error))
+    logged = Mock()
+    monkeypatch.setattr(mod.logger, "error", logged)
+
+    with pytest.raises(mod.litellm.exceptions.BadRequestError):
+        await engine.embed_text(["hello"])
+
+    assert all(call.args[:1] != (mod.ENCODING_FORMAT_HINT,) for call in logged.call_args_list)
+
+
+@pytest.mark.asyncio
+async def test_rejected_base64_as_422_logs_the_setting_to_change(monkeypatch):
+    """A server that validates the format as an enum answers 422; the hint still fits."""
+    monkeypatch.setenv("MOCK_EMBEDDING", "false")
+
+    with patch.object(LiteLLMEmbeddingEngine, "get_tokenizer", return_value=Mock()):
+        engine = LiteLLMEmbeddingEngine(
+            model="openai/m",
+            dimensions=2,
+            api_key="test-key",
+            endpoint="http://localhost:8000/v1",
+            encoding_format="base64",
+        )
+
+    import cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine as mod
+
+    error = mod.litellm.exceptions.UnprocessableEntityError(
+        message="encoding_format: Input should be 'float'",
+        model="openai/m",
+        llm_provider="openai",
+        response=httpx.Response(422, request=httpx.Request("POST", "http://localhost:8000/v1")),
+    )
+    monkeypatch.setattr(mod.litellm, "aembedding", AsyncMock(side_effect=error))
+    logged = Mock()
+    monkeypatch.setattr(mod.logger, "error", logged)
+
+    with pytest.raises(mod.litellm.exceptions.UnprocessableEntityError):
         await engine.embed_text(["hello"])
 
     logged.assert_called_with(mod.ENCODING_FORMAT_HINT)

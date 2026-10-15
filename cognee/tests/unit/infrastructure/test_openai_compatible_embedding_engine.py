@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 from openai import AsyncOpenAI
+from tenacity import stop_after_attempt
 
 
 class TestOpenAICompatibleEmbeddingEngine:
@@ -116,6 +117,80 @@ class TestOpenAICompatibleEmbeddingEngine:
         assert sent_bodies[0]["encoding_format"] == "base64"
         assert result == [float32_vector, float32_vector]
         assert all(isinstance(v, float) for v in result[0])
+
+    @pytest.mark.asyncio
+    async def test_float_list_on_base64_fails_without_retry(self, monkeypatch):
+        """A server that answers base64 with a float list is a terminal configuration error."""
+        monkeypatch.delenv("MOCK_EMBEDDING", raising=False)
+        from cognee.infrastructure.databases.exceptions import EmbeddingEncodingError
+
+        calls = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            calls.append(request)
+            return httpx.Response(
+                200,
+                json={
+                    "object": "list",
+                    "data": [
+                        {"object": "embedding", "index": 0, "embedding": [1.0, 0.0, 1.0, 1.0]}
+                    ],
+                    "model": "test-model",
+                    "usage": {"prompt_tokens": 1, "total_tokens": 1},
+                },
+            )
+
+        engine = self._make_engine(dimensions=4, encoding_format="base64")
+        engine._client = AsyncOpenAI(
+            api_key="test-key",
+            base_url="http://localhost:8099",
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        )
+
+        with pytest.raises(EmbeddingEncodingError, match="EMBEDDING_ENCODING_FORMAT"):
+            await engine.embed_text(["a"])
+
+        assert len(calls) == 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("status", "message", "hinted"),
+        [
+            (400, "unsupported encoding_format", True),
+            (422, "encoding_format: Input should be 'float'", True),
+            (400, "model 'nope' not found", False),
+        ],
+    )
+    async def test_hint_only_when_the_rejection_names_the_encoding(
+        self, monkeypatch, status, message, hinted
+    ):
+        monkeypatch.delenv("MOCK_EMBEDDING", raising=False)
+        import cognee.infrastructure.databases.vector.embeddings.OpenAICompatibleEmbeddingEngine as mod
+        from cognee.infrastructure.databases.exceptions import EmbeddingException
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(status, json={"error": {"message": message}})
+
+        engine = self._make_engine(dimensions=4, encoding_format="base64")
+        engine._client = AsyncOpenAI(
+            api_key="test-key",
+            base_url="http://localhost:8099",
+            max_retries=0,
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        )
+        logged = MagicMock()
+        monkeypatch.setattr(mod.logger, "error", logged)
+        # A 400/422 is wrapped in EmbeddingException, which tenacity retries with
+        # backoff; one attempt is enough to see whether the hint was logged.
+        engine.embed_text = engine.embed_text.retry_with(stop=stop_after_attempt(1)).__get__(engine)
+
+        with pytest.raises(EmbeddingException):
+            await engine.embed_text(["a"])
+
+        assert (
+            any(call.args[:1] == (mod.ENCODING_FORMAT_HINT,) for call in logged.call_args_list)
+            is hinted
+        )
 
     def test_get_vector_size(self):
         """get_vector_size returns the configured dimensions."""

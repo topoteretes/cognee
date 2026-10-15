@@ -18,6 +18,7 @@ from tenacity import (
 
 from cognee.infrastructure.databases.exceptions import (
     EmbeddingContextWindowTooSmallError,
+    EmbeddingEncodingError,
     EmbeddingException,
 )
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
@@ -28,6 +29,7 @@ from cognee.infrastructure.databases.vector.embeddings.encoding import (
     ENCODING_FORMAT_HINT,
     EncodingFormat,
     decode_embedding,
+    rejects_encoding_format,
     resolve_encoding_format,
 )
 from cognee.infrastructure.databases.vector.embeddings.input_limit import (
@@ -53,14 +55,13 @@ litellm.set_verbose = False
 
 # litellm dumps the openai SDK response model, whose embedding field is typed
 # list[float], so a base64 payload trips a harmless pydantic serializer warning.
-warnings.filterwarnings(
-    "ignore",
-    message=(
-        r"Pydantic serializer warnings:[\s\S]*"
-        r"field_name='embedding', input_value='[^']*', input_type=str\]"
-    ),
-    category=UserWarning,
+# Matches the wording of every supported pydantic: 2.10 says "but got `str`",
+# 2.11+ "input_type=str" (2.12+ also names the field, which 2.11 does not).
+_BASE64_SERIALIZER_WARNING = (
+    r"Pydantic serializer warnings:[\s\S]*Expected `list\[float\]`"
+    r"[\s\S]*(but got `str`|input_type=str)"
 )
+warnings.filterwarnings("ignore", message=_BASE64_SERIALIZER_WARNING, category=UserWarning)
 logger = get_logger("LiteLLMEmbeddingEngine")
 
 observe = get_observe()
@@ -202,6 +203,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         # wrapping hides the class: see embeddings/retry_config.py.
         retry=embedding_retry_condition(
             EmbeddingContextWindowTooSmallError,
+            EmbeddingEncodingError,
             litellm.exceptions.BadRequestError,
             litellm.exceptions.NotFoundError,
             litellm.exceptions.UnprocessableEntityError,
@@ -297,7 +299,10 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                         timeout=300.0,
                     )
 
-                embedding_response = [decode_embedding(data["embedding"]) for data in response.data]
+                embedding_response = [
+                    decode_embedding(data["embedding"], self.encoding_format)
+                    for data in response.data
+                ]
                 return EmbeddingResult(
                     vectors=handle_embedding_response(text, embedding_response, self.dimensions),
                     tokens=count_input_tokens(response, sanitized_text_input, self.tokenizer),
@@ -326,11 +331,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 isinstance(error, litellm.exceptions.ContextWindowExceededError)
                 or _EMBED_LENGTH_ERROR_RE.search(str(error))
             ):
-                # UnsupportedParamsError is litellm refusing the call client-side, so
-                # the server never saw the encoding and the hint would mislead.
-                if self._base64_configured and not isinstance(
-                    error, litellm.exceptions.UnsupportedParamsError
-                ):
+                if self._base64_configured and rejects_encoding_format(error):
                     logger.error(ENCODING_FORMAT_HINT)
                 raise
             if isinstance(text, list) and len(text) > 1:
@@ -422,6 +423,13 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 str(self.model),
                 str(error),
             )
+            if self._base64_configured and rejects_encoding_format(error):
+                logger.error(ENCODING_FORMAT_HINT)
+            raise
+
+        except EmbeddingEncodingError:
+            # Terminal like the branches above: the route answered in another
+            # format, so a retry gets the same answer. Reaches tenacity unwrapped.
             raise
 
         except Exception as error:

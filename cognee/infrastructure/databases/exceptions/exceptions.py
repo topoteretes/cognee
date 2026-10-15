@@ -149,6 +149,25 @@ class EmbeddingContextWindowTooSmallError(EmbeddingException):
         super().__init__(message, name, status_code)
 
 
+class EmbeddingEncodingError(EmbeddingException):
+    """Raised when base64 vectors were requested but the server answered otherwise.
+
+    The route does not support EMBEDDING_ENCODING_FORMAT=base64: a provider or proxy
+    translated the request into its own format (Bedrock answers with 1-bit binary
+    vectors, as a list), or the payload does not decode as little-endian float32.
+    Terminal: the same request gets the same answer, so the engines never retry it.
+    """
+
+    def __init__(self, detail: str):
+        super().__init__(
+            f"The embedding server did not return base64 vectors ({detail}). This "
+            "provider or route does not support EMBEDDING_ENCODING_FORMAT=base64. "
+            "Fix: comment out or remove EMBEDDING_ENCODING_FORMAT in your .env file "
+            "or environment.",
+            name="EmbeddingEncodingError",
+        )
+
+
 class EmbeddingCredentialsError(EmbeddingException):
     """
     Raised when the embedding endpoint rejects the request's credentials.
