@@ -3,7 +3,7 @@ Tests for OpenAICompatibleEmbeddingEngine.
 
 Verifies that the engine:
 - Returns mock embeddings when MOCK_EMBEDDING is set
-- Leaves encoding_format to the OpenAI SDK, which requests and decodes base64
+- Requests float by default and base64 only when EMBEDDING_ENCODING_FORMAT opts in
 - Reports correct vector size and batch size
 """
 
@@ -49,8 +49,8 @@ class TestOpenAICompatibleEmbeddingEngine:
         assert all(v == 0.0 for v in result[0])
 
     @pytest.mark.asyncio
-    async def test_embed_text_leaves_encoding_format_to_the_sdk(self, monkeypatch):
-        """embed_text must not pin encoding_format, so the SDK's base64 default applies."""
+    async def test_embed_text_calls_openai_with_encoding_format_float(self, monkeypatch):
+        """embed_text must call OpenAI SDK with encoding_format='float' by default."""
         monkeypatch.delenv("MOCK_EMBEDDING", raising=False)
 
         engine = self._make_engine()
@@ -71,14 +71,15 @@ class TestOpenAICompatibleEmbeddingEngine:
         engine._client.embeddings.create.assert_called_once_with(
             model="test-model",
             input=["test text"],
+            encoding_format="float",
         )
 
         assert len(result) == 1
         assert len(result[0]) == 4096
 
     @pytest.mark.asyncio
-    async def test_embed_text_requests_and_decodes_base64(self, monkeypatch):
-        """Over the wire the SDK asks for base64; the engine returns the float32 values."""
+    async def test_opted_in_base64_is_requested_and_decoded(self, monkeypatch):
+        """With encoding_format='base64' the wire asks for base64; floats come back."""
         monkeypatch.delenv("MOCK_EMBEDDING", raising=False)
 
         vector = [0.0123, -0.5, 0.25, 1e-7]
@@ -103,7 +104,7 @@ class TestOpenAICompatibleEmbeddingEngine:
                 },
             )
 
-        engine = self._make_engine(dimensions=4)
+        engine = self._make_engine(dimensions=4, encoding_format="base64")
         engine._client = AsyncOpenAI(
             api_key="test-key",
             base_url="http://localhost:8099",

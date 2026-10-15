@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from cognee.exceptions import CogneeConfigurationError
 from cognee.infrastructure.databases.vector.embeddings.config import (
     get_embedding_context_config,
     resolve_embedding_defaults,
@@ -42,6 +43,7 @@ def get_embedding_engine() -> EmbeddingEngine:
         llm_config.llm_api_key,
         llm_config.llm_provider,
         config.embedding_input_type,
+        config.embedding_encoding_format,
     )
 
 
@@ -59,6 +61,7 @@ def create_embedding_engine(
     llm_api_key,
     llm_provider,
     embedding_input_type=None,
+    embedding_encoding_format=None,
 ):
     """
     Create and return an embedding engine based on the specified provider.
@@ -87,6 +90,13 @@ def create_embedding_engine(
 
         Returns an instance of an embedding engine based on the specified provider.
     """
+    if embedding_provider in ("fastembed", "ollama") and embedding_encoding_format == "base64":
+        raise CogneeConfigurationError(
+            f"EMBEDDING_ENCODING_FORMAT=base64 is not supported with "
+            f"EMBEDDING_PROVIDER={embedding_provider}.",
+            remediation="Unset EMBEDDING_ENCODING_FORMAT.",
+        )
+
     if embedding_provider == "fastembed":
         from .FastembedEmbeddingEngine import FastembedEmbeddingEngine
 
@@ -120,6 +130,7 @@ def create_embedding_engine(
             api_key=embedding_api_key or llm_api_key,
             batch_size=embedding_batch_size,
             input_type=embedding_input_type,
+            encoding_format=embedding_encoding_format,
         )
 
     from .LiteLLMEmbeddingEngine import LiteLLMEmbeddingEngine
@@ -135,4 +146,5 @@ def create_embedding_engine(
         max_completion_tokens=embedding_max_completion_tokens,
         batch_size=embedding_batch_size,
         input_type=embedding_input_type,
+        encoding_format=embedding_encoding_format,
     )

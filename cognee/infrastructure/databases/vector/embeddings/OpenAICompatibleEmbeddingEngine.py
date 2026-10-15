@@ -36,6 +36,11 @@ from cognee.infrastructure.databases.exceptions import (
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
     EmbeddingEngine,
 )
+from cognee.infrastructure.databases.vector.embeddings.encoding import (
+    ENCODING_FORMAT_HINT,
+    EncodingFormat,
+    decode_embedding,
+)
 from cognee.infrastructure.databases.vector.embeddings.input_limit import (
     init_input_limit,
     litellm_input_limit,
@@ -97,6 +102,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         api_key: str | None = "no-key-required",
         batch_size: int = 36,
         input_type: str | None = None,
+        encoding_format: EncodingFormat | None = None,
     ):
         self.model = model or "default"
         self.dimensions = dimensions
@@ -108,6 +114,8 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         # that isn't part of the OpenAI embeddings spec. Sent via extra_body
         # so it has no effect on servers that ignore unknown fields.
         self.input_type = input_type
+        # The servers behind this engine vary, so base64 is opt-in only.
+        self.encoding_format = encoding_format or "float"
         self.tokenizer = self.get_tokenizer()
         init_input_limit(self, max_completion_tokens)
 
@@ -164,11 +172,10 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
             return handle_embedding_response(original_texts, embeddings, self.dimensions)
 
         try:
-            # encoding_format is left unset: the openai SDK then requests base64 and
-            # decodes it with numpy, instead of parsing float JSON one element at a time.
             create_kwargs = {
                 "model": self.model,
                 "input": sanitized_text,
+                "encoding_format": self.encoding_format,
             }
             if self.input_type:
                 create_kwargs["extra_body"] = {"input_type": self.input_type}
@@ -178,7 +185,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
                     self._client.embeddings.create(**create_kwargs),
                     timeout=300.0,
                 )
-            embeddings = [item.embedding for item in response.data]
+            embeddings = [decode_embedding(item.embedding) for item in response.data]
 
         except Exception as error:
             # A proxy spend cap is terminal, and none of the branches below can
@@ -269,6 +276,8 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
                 str(error),
                 self.endpoint,
             )
+            if self.encoding_format == "base64" and isinstance(error, openai.BadRequestError):
+                logger.error(ENCODING_FORMAT_HINT)
             raise EmbeddingException(
                 "Embedding failed. Verify EMBEDDING_ENDPOINT and server status."
             ) from error

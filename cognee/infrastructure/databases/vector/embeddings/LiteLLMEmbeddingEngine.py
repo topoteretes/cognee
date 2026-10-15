@@ -1,5 +1,4 @@
 import asyncio
-import base64
 import logging
 import math
 import os
@@ -22,6 +21,12 @@ from cognee.infrastructure.databases.exceptions import (
     EmbeddingException,
 )
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
+from cognee.infrastructure.databases.vector.embeddings.encoding import (
+    ENCODING_FORMAT_HINT,
+    EncodingFormat,
+    decode_embedding,
+    resolve_encoding_format,
+)
 from cognee.infrastructure.databases.vector.embeddings.input_limit import (
     init_input_limit,
     litellm_input_limit,
@@ -43,7 +48,7 @@ from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 litellm.set_verbose = False
 
 # litellm dumps the openai SDK response model, whose embedding field is typed
-# list[float], so a base64 payload trips a pydantic serializer warning on every call.
+# list[float], so a base64 payload trips a harmless pydantic serializer warning.
 warnings.filterwarnings(
     "ignore",
     message=r"Pydantic serializer warnings:[\s\S]*field_name='embedding'",
@@ -98,31 +103,6 @@ def _uses_nvidia_nim(provider: str | None, model: str | None) -> bool:
     )
 
 
-# litellm routes whose APIs accept encoding_format="base64".
-_BASE64_PROVIDERS = {"openai", "azure"}
-
-
-def _requests_base64(model: str | None, endpoint: str | None) -> bool:
-    """Whether litellm routes this model to an OpenAI or Azure OpenAI embeddings API.
-
-    Those APIs return each vector as one base64 string of little-endian float32
-    values when asked. The float JSON alternative is parsed by the openai SDK one
-    element at a time, which costs about 25x more CPU per vector on the event loop.
-    """
-    try:
-        _, resolved_provider, _, _ = litellm.get_llm_provider(model=model, api_base=endpoint)
-    except litellm.exceptions.BadRequestError:
-        return False
-    return resolved_provider in _BASE64_PROVIDERS
-
-
-def _decode_embedding(embedding: list[float] | str) -> list[float]:
-    """Return the vector as floats, decoding a base64 float32 payload."""
-    if isinstance(embedding, str):
-        return np.frombuffer(base64.b64decode(embedding), dtype="<f4").tolist()
-    return embedding
-
-
 class LiteLLMEmbeddingEngine(EmbeddingEngine):
     """
     Engine for embedding text using a specific LLM model, supporting mock and actual
@@ -153,6 +133,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         max_completion_tokens: int | None = None,
         batch_size: int = 100,
         input_type: str | None = None,
+        encoding_format: EncodingFormat | None = None,
     ):
         self.api_key = api_key
         self.endpoint = endpoint
@@ -169,7 +150,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         # providers that don't recognize the field (e.g. plain OpenAI).
         self.input_type = input_type
         self._uses_nvidia_nim = _uses_nvidia_nim(self.provider, self.model)
-        self._requests_base64 = _requests_base64(self.model, self.endpoint)
+        self.encoding_format = resolve_encoding_format(model, endpoint, encoding_format)
 
         enable_mocking = os.getenv("MOCK_EMBEDDING", "false")
         if isinstance(enable_mocking, bool):
@@ -260,9 +241,9 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                         "api_version": self.api_version,
                     }
                     # Older LiteLLM releases serialize an omitted encoding format as null,
-                    # which OpenRouter rejects (it only accepts "float"/"base64"). Cognee
-                    # always consumes float vectors, so make the valid format explicit for
-                    # every OpenRouter route: the "openrouter/" model prefix, an explicit
+                    # which OpenRouter rejects (it only accepts "float"/"base64"). Unless
+                    # this engine requests base64 (see embeddings/encoding.py), make
+                    # "float" explicit for every OpenRouter route: the "openrouter/" model prefix, an explicit
                     # provider, or a custom endpoint aimed at openrouter.ai. The last case
                     # (an unprefixed model + endpoint) is driven through litellm's OpenAI
                     # handler -- the branch that historically injected the null -- so it is
@@ -274,10 +255,10 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                         or (self.model or "").lower().startswith("openrouter/")
                         or "openrouter.ai" in (self.endpoint or "").lower()
                     )
-                    if routed_to_openrouter:
-                        embedding_kwargs["encoding_format"] = "float"
-                    elif self._requests_base64:
+                    if self.encoding_format == "base64":
                         embedding_kwargs["encoding_format"] = "base64"
+                    elif routed_to_openrouter:
+                        embedding_kwargs["encoding_format"] = "float"
 
                     # Pass through target embedding dimensions when supported.
                     # Some providers (e.g. NVIDIA NIM) reject this param outright,
@@ -304,9 +285,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                         timeout=300.0,
                     )
 
-                embedding_response = [
-                    _decode_embedding(data["embedding"]) for data in response.data
-                ]
+                embedding_response = [decode_embedding(data["embedding"]) for data in response.data]
                 return handle_embedding_response(text, embedding_response, self.dimensions)
 
         except litellm.exceptions.BadRequestError as error:
@@ -332,6 +311,8 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 isinstance(error, litellm.exceptions.ContextWindowExceededError)
                 or _EMBED_LENGTH_ERROR_RE.search(str(error))
             ):
+                if self.encoding_format == "base64":
+                    logger.error(ENCODING_FORMAT_HINT)
                 raise
             if isinstance(text, list) and len(text) > 1:
                 mid = math.ceil(len(text) / 2)

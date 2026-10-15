@@ -64,39 +64,51 @@ async def test_embed_text_filters_invalid_inputs(monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("provider", "model", "endpoint", "expected_encoding_format"),
+    ("provider", "model", "endpoint", "configured", "expected_encoding_format"),
     [
         # Documented OpenRouter config (issue #3660): "openrouter/" model prefix.
         (
             "custom",
             "openrouter/openai/text-embedding-3-small",
             "https://example.invalid/v1",
+            None,
             "float",
         ),
         # Explicit provider name.
-        ("openrouter", "text-embedding-3-small", "https://example.invalid/v1", "float"),
+        ("openrouter", "text-embedding-3-small", "https://example.invalid/v1", None, "float"),
         # Prefix detection is case-insensitive.
         (
             "custom",
             "OpenRouter/openai/text-embedding-3-small",
             "https://example.invalid/v1",
+            None,
             "float",
         ),
         # Custom endpoint aimed at openrouter.ai with an unprefixed model: litellm
         # drives this through its OpenAI handler (the branch that injected the null),
         # so the guard must still fire based on the endpoint host.
-        ("custom", "openai/text-embedding-3-small", "https://openrouter.ai/api/v1", "float"),
-        # OpenAI and Azure OpenAI routes ask for base64 vectors.
-        ("openai", "openai/text-embedding-3-large", None, "base64"),
-        ("openai", "text-embedding-3-large", None, "base64"),
-        ("openai", "openai/text-embedding-3-large", "https://proxy.invalid/v1", "base64"),
-        ("azure", "azure/my-embedding-deployment", "https://example.invalid", "base64"),
-        # Providers that reject encoding_format must be left untouched (omitted).
-        ("gemini", "gemini/text-embedding-004", "https://example.invalid/v1", None),
+        (
+            "custom",
+            "openai/text-embedding-3-small",
+            "https://openrouter.ai/api/v1",
+            None,
+            "float",
+        ),
+        # OpenAI's own API asks for base64 vectors.
+        ("openai", "openai/text-embedding-3-large", None, None, "base64"),
+        ("openai", "text-embedding-3-large", None, None, "base64"),
+        # Every other route sends the request it always did.
+        ("openai", "openai/text-embedding-3-large", "https://proxy.invalid/v1", None, None),
+        ("azure", "azure/my-embedding-deployment", "https://example.invalid", None, None),
+        ("gemini", "gemini/text-embedding-004", "https://example.invalid/v1", None, None),
+        # EMBEDDING_ENCODING_FORMAT opts a route in or out.
+        ("openai", "openai/text-embedding-3-large", "https://proxy.invalid/v1", "base64", "base64"),
+        ("openrouter", "text-embedding-3-small", "https://example.invalid/v1", "base64", "base64"),
+        ("openai", "openai/text-embedding-3-large", None, "float", None),
     ],
 )
 async def test_embed_text_sets_encoding_format_per_route(
-    monkeypatch, provider, model, endpoint, expected_encoding_format
+    monkeypatch, provider, model, endpoint, configured, expected_encoding_format
 ):
     monkeypatch.setenv("MOCK_EMBEDDING", "false")
 
@@ -107,6 +119,7 @@ async def test_embed_text_sets_encoding_format_per_route(
             dimensions=2,
             api_key="test-key",
             endpoint=endpoint,
+            encoding_format=configured,
         )
 
     response = SimpleNamespace(data=[{"embedding": [0.1, 0.2]}])
@@ -159,3 +172,32 @@ async def test_embed_text_decodes_base64_vectors(monkeypatch):
 
     assert result == [float32_vector, float32_vector]
     assert all(isinstance(v, float) for v in result[0])
+
+
+@pytest.mark.asyncio
+async def test_rejected_base64_logs_the_setting_to_change(monkeypatch):
+    """A 400 while base64 is requested names EMBEDDING_ENCODING_FORMAT and still raises."""
+    monkeypatch.setenv("MOCK_EMBEDDING", "false")
+
+    with patch.object(LiteLLMEmbeddingEngine, "get_tokenizer", return_value=Mock()):
+        engine = LiteLLMEmbeddingEngine(
+            model="openai/m",
+            dimensions=2,
+            api_key="test-key",
+            endpoint="http://localhost:8000/v1",
+            encoding_format="base64",
+        )
+
+    import cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine as mod
+
+    error = mod.litellm.exceptions.BadRequestError(
+        message="unsupported encoding_format", model="openai/m", llm_provider="openai"
+    )
+    monkeypatch.setattr(mod.litellm, "aembedding", AsyncMock(side_effect=error))
+    logged = Mock()
+    monkeypatch.setattr(mod.logger, "error", logged)
+
+    with pytest.raises(mod.litellm.exceptions.BadRequestError):
+        await engine.embed_text(["hello"])
+
+    logged.assert_called_with(mod.ENCODING_FORMAT_HINT)
