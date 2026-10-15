@@ -266,6 +266,47 @@ async def _attach_item_identity(result: "RememberResult") -> None:
         logger.debug("Could not attach item identity to the remember result", exc_info=True)
 
 
+def _repositories_error(items: list[dict]) -> str:
+    return "; ".join(f"{item['source']}: {item['error']}" for item in items)
+
+
+def _run_error_text(run_info) -> str | None:
+    """What an errored ``PipelineRunInfo`` says went wrong, or None if it did not error.
+
+    Accepts a single run info (``add()``) or cognify's ``{dataset_id: run_info}``.
+    """
+    if isinstance(run_info, dict):
+        for value in run_info.values():
+            error = _run_error_text(value)
+            if error is not None:
+                return error
+        return None
+    if "Errored" not in str(getattr(run_info, "status", "")):
+        return None
+    return (
+        getattr(run_info, "error_message", None)
+        or getattr(run_info, "payload", None)
+        or "Pipeline run errored."
+    )
+
+
+def _ingested_data_ids(add_result) -> list:
+    """The data ids one ``add()`` run stored (or found already stored).
+
+    Read from the run's per-item results. Items the add skipped as already
+    added still carry their id; items that errored do not count. Empty when the
+    add ran without incremental loading and data cache, which report no ids.
+    """
+    data_ids = []
+    for entry in getattr(add_result, "data_ingestion_info", None) or []:
+        if not isinstance(entry, dict) or entry.get("data_id") is None:
+            continue
+        if "Errored" in str(getattr(entry.get("run_info"), "status", "")):
+            continue
+        data_ids.append(entry["data_id"])
+    return data_ids
+
+
 PRESORT_FOLDERS_ENV = "PRESORT_FOLDERS_ENABLED"
 
 
@@ -1025,6 +1066,31 @@ class RememberResult:
                         self.items.append({"id": str(entry["data_id"])})
                 self.items_processed = processed
 
+    def _resolve_repositories(self, built: list):
+        """Fold the per-repository cognify results of an isolating remember.
+
+        ``built`` holds one cognify return value per repository that built
+        (the caller appends the errored items of the others). Each built item
+        carries the ``pipeline_run_id`` of its own run; the result's own
+        ``pipeline_run_id`` and ``raw_result`` are the last built run's.
+        """
+        items: list[dict] = []
+        processed = 0
+        for cognify_result in built:
+            self.items = []
+            self.items_processed = 0
+            self._resolve(cognify_result)
+            for item in self.items:
+                if self.pipeline_run_id:
+                    item.setdefault("pipeline_run_id", self.pipeline_run_id)
+            items.extend(self.items)
+            processed += self.items_processed
+        self.items = items
+        self.items_processed = processed
+        self.elapsed_seconds = time.monotonic() - self._started_at
+        if not built:
+            self.status = "errored"
+
     def _fail(self, exc: BaseException):
         """Mark the result as failed with an error message and elapsed time."""
         self.status = "errored"
@@ -1143,7 +1209,11 @@ async def remember(
             ``treat_as_repository=True`` to take every item as a repository
             spec -- needed for a git remote ``add()`` does not claim on its
             own, such as a Bitbucket or self-hosted forge URL with no ``.git``
-            suffix, or an ssh remote. The top-level ``index_vectors=`` /
+            suffix, or an ssh remote. With ``raise_on_error=False`` or
+            ``run_in_background=True`` each declared repository is added and
+            built in a run of its own: one that fails becomes an errored item
+            (``kind``, ``source``, ``status``, ``error``) and the others keep
+            their graphs. The top-level ``index_vectors=`` /
             ``repo_credentials=`` spellings are still accepted. The removed
             ``content_type="code"`` is accepted and ignored: such a call is a
             plain ``remember(data)``, with a ``FutureWarning`` naming
@@ -2022,38 +2092,127 @@ async def _remember_inner(
         )
         result.improve_skipped = improve_skipped
 
+        # Declared repositories (treat_as_repository) are cloned one by one
+        # inside add(). Where a failure is reported rather than raised --
+        # background runs, and raise_on_error=False as the HTTP router and the
+        # GitHub sync pass -- one failing repository must not cost the others,
+        # one repository or many. So each is added and built on its own: add()
+        # stores its rows and cognify(data_ids=...) builds exactly those rows in
+        # a cognify_pipeline run of their own. A failed clone or a failed build
+        # then rolls back that repository's run only and becomes an errored item
+        # naming it; the repositories that built keep their graphs, and a
+        # repository left pending by an earlier failure is not rebuilt (and
+        # failed again) by every later one.
+        repo_specs = data if isinstance(data, list) else [data]
+        isolate_repositories = bool(codegraph_config.get("treat_as_repository")) and (
+            run_in_background or not raise_on_error
+        )
+        datasets_arg = [dataset_name] if dataset_id is None else [dataset_id]
+
+        async def _build_repositories() -> bool:
+            """Add and cognify each repository on its own; False when none built."""
+            from cognee.tasks.code_graph.resolve_repo import redact_repo_spec
+
+            built = []
+            failed = []
+            for position, spec in enumerate(repo_specs, start=1):
+                failed_run_id = None
+                try:
+                    add_result = await add(
+                        data=spec,
+                        dataset_name=dataset_name,
+                        dataset_id=dataset_id,
+                        **shared_kwargs,
+                        **add_kwargs,
+                    )
+                    error = _run_error_text(add_result)
+                    if error is None:
+                        # No ids (an add without incremental loading or data
+                        # cache reports none): build the dataset, as a plain
+                        # cognify would.
+                        data_ids = _ingested_data_ids(add_result) or None
+                        cognify_result = await cognify(
+                            datasets=datasets_arg,
+                            data_ids=data_ids,
+                            chunker=chunker,
+                            chunk_size=chunk_size,
+                            custom_prompt=custom_prompt,
+                            run_in_background=False,
+                            raise_on_error=False,
+                            **shared_kwargs,
+                            **cognify_kwargs,
+                        )
+                        error = _run_error_text(cognify_result)
+                        if error is None:
+                            built.append(cognify_result)
+                        else:
+                            logger.warning(
+                                "remember: repository %d of %d failed to build",
+                                position,
+                                len(repo_specs),
+                            )
+                            run_info = next(iter(cognify_result.values()), None)
+                            failed_run_id = getattr(run_info, "pipeline_run_id", None)
+                except Exception as exc:
+                    # Specs can embed URL credentials: never log spec-derived values.
+                    logger.exception(
+                        "remember: repository %d of %d failed", position, len(repo_specs)
+                    )
+                    error = str(exc)
+                if error is None:
+                    continue
+                failed_item = {
+                    "kind": "code_repo",
+                    "source": redact_repo_spec(spec),
+                    "status": "errored",
+                    "error": error,
+                }
+                if failed_run_id is not None:
+                    failed_item["pipeline_run_id"] = str(failed_run_id)
+                failed.append(failed_item)
+
+            result._resolve_repositories(built)
+            await _attach_item_identity(result)
+            if failed:
+                result.items.extend(failed)
+                result.status = "errored"
+                result.error = _repositories_error(failed)
+            return bool(built)
+
         # Permanent memory: add + cognify (+ optional improve)
         async def _run():
-            await add(
-                data=data,
-                dataset_name=dataset_name,
-                dataset_id=dataset_id,
-                **shared_kwargs,
-                **add_kwargs,
-            )
+            if isolate_repositories:
+                if not await _build_repositories():
+                    return
+            else:
+                await add(
+                    data=data,
+                    dataset_name=dataset_name,
+                    dataset_id=dataset_id,
+                    **shared_kwargs,
+                    **add_kwargs,
+                )
 
-            datasets_arg = [dataset_name] if dataset_id is None else [dataset_id]
+                cognify_result = await cognify(
+                    datasets=datasets_arg,
+                    chunker=chunker,
+                    chunk_size=chunk_size,
+                    custom_prompt=custom_prompt,
+                    run_in_background=False,
+                    # Loud-by-default: a failed build raises CognifyFailedError
+                    # (typed, classified, with a remedy) out of blocking remember()
+                    # instead of returning a silently "errored" result nobody
+                    # inspects. In background remember() a raise has nowhere to go
+                    # and would skip _resolve(), losing pipeline_run_id/dataset_id/
+                    # raw_result — so take the errored-run-info path there and let
+                    # _resolve() record the failure on the result.
+                    raise_on_error=raise_on_error and not run_in_background,
+                    **shared_kwargs,
+                    **cognify_kwargs,
+                )
 
-            cognify_result = await cognify(
-                datasets=datasets_arg,
-                chunker=chunker,
-                chunk_size=chunk_size,
-                custom_prompt=custom_prompt,
-                run_in_background=False,
-                # Loud-by-default: a failed build raises CognifyFailedError
-                # (typed, classified, with a remedy) out of blocking remember()
-                # instead of returning a silently "errored" result nobody
-                # inspects. In background remember() a raise has nowhere to go
-                # and would skip _resolve(), losing pipeline_run_id/dataset_id/
-                # raw_result — so take the errored-run-info path there and let
-                # _resolve() record the failure on the result.
-                raise_on_error=raise_on_error and not run_in_background,
-                **shared_kwargs,
-                **cognify_kwargs,
-            )
-
-            result._resolve(cognify_result)
-            await _attach_item_identity(result)
+                result._resolve(cognify_result)
+                await _attach_item_identity(result)
 
             if auto_improve:
                 from cognee.api.v1.improve import improve

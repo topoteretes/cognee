@@ -897,7 +897,7 @@ Supported code files (`.py`, `.go`, `.ts`, `.java`, `.rs`, … — the extension
   `codegraph_config={"include_documents": False}` indexes the code graph only, leaving the repo's README and docs un-ingested; the GitHub sync uses it.
   `codegraph_config={"treat_as_repository": True}` takes every item in `data` as a repository spec instead of sniffing it, which is how you reach a remote `add()` does not claim on its own — a Bitbucket or self-hosted forge URL with no `.git` suffix (it would otherwise be scraped as a web page), an ssh remote, or a source tree with no build manifest and no `.git`.
   The removed `content_type="code"` is accepted and ignored: such a call is a plain `remember(data)`.
-  The GitHub sync remembers each repository in its own call.
+  With `treat_as_repository`, a background run or `raise_on_error=False` adds and builds each repository on its own (`cognify(data_ids=...)`: a `cognify_pipeline` run scoped to that repository's rows), so a failing clone or build is an errored item naming the repository and rolls back only its own run; the other repositories keep their graphs. The GitHub sync passes all of an installation's repositories in one such call.
   Repositories are built under `cognify_pipeline`.
   A cognify whose pending items are all code files or code repositories resolves no graph extractor, so a keyless code-only run never installs the GLiNER runtime.
   Private repositories: pass the token as `codegraph_config={"repo_credentials": token}` (SDK only; `add()` clones with it before the pipeline, and it reaches git only through environment config).
