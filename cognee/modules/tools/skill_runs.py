@@ -68,10 +68,15 @@ async def remember_skill_run_entry(
     entry: SkillRunEntry,
     *,
     dataset_name: str,
+    dataset_id: UUID | None = None,
     session_id: str | None,
     user=None,
 ) -> tuple[SkillRun, object]:
-    """Persist a dataset-scoped SkillRun from the remember() typed-entry path."""
+    """Persist a dataset-scoped SkillRun from the remember() typed-entry path.
+
+    An explicit ``dataset_id`` wins over ``dataset_name``; a name may create
+    the dataset, an id must already exist and be writable.
+    """
     await setup()
 
     if user is None:
@@ -79,7 +84,9 @@ async def remember_skill_run_entry(
 
         user = await get_default_user()
 
-    user, authorized_datasets = await resolve_authorized_user_datasets(dataset_name, user)
+    user, authorized_datasets = await resolve_authorized_user_datasets(
+        dataset_id or dataset_name, user
+    )
     dataset = authorized_datasets[0]
 
     owner_id = getattr(dataset, "owner_id", None) or getattr(user, "id", None)
