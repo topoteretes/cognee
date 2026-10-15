@@ -49,6 +49,24 @@ _DEFAULT_FAILED_TTL_SECONDS = 15.0
 # returns early and takes no slot, so there the cache only saves the traversal.
 _uncached_counts: dict[UUID, tuple["DatasetGraphCounts", float]] = {}
 
+# pipeline_run_id -> the count currently running for it.
+#
+# The cache above only answers a *later* poll. Pollers that all miss before any
+# of them returns would each enter the database context and take a slot, which
+# is the same starvation by a different route: brains-summary fans out over
+# every readable dataset, and several tabs on a 5s cadence arrive while the
+# first recount of a broken dataset is still waiting on its graph-store
+# timeout. They share that one count instead.
+#
+# The future carries the counts, or None meaning "no answer, count it
+# yourself" -- a leader that is cancelled mid-count resolves it that way in its
+# finally, so a follower is never left waiting on a count that will not finish
+# and never inherits the leader's cancellation. Followers await through
+# asyncio.shield, so one client disconnecting cannot cancel the count the
+# others are waiting on. Same key and same scope as the cache, and no lock for
+# the same reason: nothing here awaits between the read and the write.
+_inflight_counts: dict[UUID, "asyncio.Future[DatasetGraphCounts | None]"] = {}
+
 
 @dataclass(frozen=True)
 class DatasetGraphCounts:
@@ -121,6 +139,7 @@ def _uncached_ttl_seconds(counted: bool) -> float:
 def clear_uncached_counts() -> None:
     """Drop the in-process fallback cache. Test seam; also safe at runtime."""
     _uncached_counts.clear()
+    _inflight_counts.clear()
 
 
 def _evict_expired_uncached() -> None:
@@ -198,12 +217,32 @@ async def _count_and_cache(dataset: Dataset, pipeline_run_id: UUID) -> DatasetGr
 
     Whatever the durable cache does not end up holding is remembered
     in-process instead, so a later poll answers from memory rather than
-    re-entering the dataset database context and taking a queue slot.
+    re-entering the dataset database context and taking a queue slot. A poll
+    that arrives while this run is already being counted waits for that count
+    rather than starting its own.
     """
-    counts, persisted, counted = await _count_one_dataset(dataset, pipeline_run_id)
-    if not persisted:
-        _remember_uncached_counts(pipeline_run_id, counts, _uncached_ttl_seconds(counted))
-    return counts
+    inflight = _inflight_counts.get(pipeline_run_id)
+    if inflight is not None:
+        shared = await asyncio.shield(inflight)
+        if shared is not None:
+            return shared
+        # The leader did not finish. Fall through and count it ourselves.
+
+    future: asyncio.Future[DatasetGraphCounts | None] = asyncio.get_running_loop().create_future()
+    _inflight_counts[pipeline_run_id] = future
+    try:
+        counts, persisted, counted = await _count_one_dataset(dataset, pipeline_run_id)
+        if not persisted:
+            _remember_uncached_counts(pipeline_run_id, counts, _uncached_ttl_seconds(counted))
+        if not future.done():
+            future.set_result(counts)
+        return counts
+    finally:
+        _inflight_counts.pop(pipeline_run_id, None)
+        # Only reachable when the count did not return: this task was
+        # cancelled. Release the followers rather than stranding them.
+        if not future.done():
+            future.set_result(None)
 
 
 async def _count_one_dataset(
@@ -296,8 +335,10 @@ async def get_datasets_graph_counts(
     stops new results of that kind being held. That matters more than the
     query it saves: with backend access control on (its default) a recount
     enters the dataset database context and takes one of the process's six
-    dataset-queue slots. Note this holds back a *repeat* poll -- pollers that
-    all miss before the first one returns still each take a slot.
+    dataset-queue slots. Pollers that all miss at once do not each pay for
+    that either: they share the one count already running for that run id.
+    What is still per-dataset is the fan-out, since one poll across N broken
+    datasets is N distinct run ids and so N slots.
 
     Callers are expected to have authorized the datasets already; this does no
     permission checking of its own.

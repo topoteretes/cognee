@@ -292,6 +292,27 @@ async def _tracking_context(entered, *_args, **_kwargs):
     yield
 
 
+async def _spin(predicate, turns=200):
+    """Yield to the loop until predicate holds.
+
+    get_datasets_graph_counts awaits two relational reads before it reaches
+    the miss branch, so a single sleep(0) does not get concurrent pollers
+    there. Spinning on the condition keeps the test deterministic instead of
+    guessing a turn count.
+    """
+    for _ in range(turns):
+        if predicate():
+            return
+        await asyncio.sleep(0)
+    raise AssertionError("condition never held")
+
+
+async def _settle(turns=50):
+    """Let every runnable task reach its next suspension point."""
+    for _ in range(turns):
+        await asyncio.sleep(0)
+
+
 def _dead_graph_patches(dataset, run_id, entered):
     """A dataset whose latest run has no cached row and whose graph is down."""
     return (
@@ -682,3 +703,93 @@ async def test_two_datasets_in_one_batch_do_not_cross():
         assert counts[remembered.id] == DatasetGraphCounts(pipeline_run_id=remembered_run)
         assert counts[fresh.id].num_nodes == 55
         assert counts[fresh.id].num_edges == 77
+
+
+@pytest.mark.asyncio
+async def test_concurrent_pollers_share_one_count():
+    """The fan-in axis the cache alone does not cover.
+
+    Several tabs on a 5s cadence hit a broken dataset while the first recount
+    is still waiting on its graph-store timeout. Without single-flight each
+    one enters the database context and takes a queue slot.
+    """
+    dataset = _dataset()
+    run_id = uuid4()
+    entered = []
+    release = asyncio.Event()
+
+    @asynccontextmanager
+    async def _slow_context(*_args, **_kwargs):
+        entered.append(True)
+        await release.wait()
+        yield
+
+    with (
+        patch.object(
+            counts_module,
+            "_get_latest_cognify_runs",
+            AsyncMock(return_value={dataset.id: _run(dataset.id, run_id)}),
+        ),
+        patch.object(counts_module, "_get_cached_metrics", AsyncMock(return_value={})),
+        patch.object(counts_module, "set_database_global_context_variables", _slow_context),
+        patch.object(counts_module, "get_graph_engine", _graph_engine(41, 42)),
+        patch.object(counts_module, "get_relational_engine", lambda: _fake_engine([])),
+    ):
+        pollers = [asyncio.create_task(get_datasets_graph_counts([dataset])) for _ in range(5)]
+        # The leader blocks inside the context; the rest must reach the miss
+        # branch and attach to its in-flight count before anything is released.
+        await _spin(lambda: bool(entered))
+        await _settle()
+        release.set()
+        # Bounded: a regression that strands a follower must fail here, not
+        # hang until CI's job timeout.
+        results = await asyncio.wait_for(asyncio.gather(*pollers), timeout=5)
+
+    assert len(entered) == 1, "concurrent pollers each took a dataset-queue slot"
+    for counts in results:
+        assert counts[dataset.id].num_nodes == 41
+        assert counts[dataset.id].num_edges == 42
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_leader_does_not_strand_its_followers():
+    """A client disconnecting mid-count must not hang everyone waiting on it,
+    and must not cancel them either: they count it themselves instead."""
+    dataset = _dataset()
+    run_id = uuid4()
+    entered = []
+    release = asyncio.Event()
+
+    @asynccontextmanager
+    async def _slow_context(*_args, **_kwargs):
+        entered.append(True)
+        await release.wait()
+        yield
+
+    with (
+        patch.object(
+            counts_module,
+            "_get_latest_cognify_runs",
+            AsyncMock(return_value={dataset.id: _run(dataset.id, run_id)}),
+        ),
+        patch.object(counts_module, "_get_cached_metrics", AsyncMock(return_value={})),
+        patch.object(counts_module, "set_database_global_context_variables", _slow_context),
+        patch.object(counts_module, "get_graph_engine", _graph_engine(8, 9)),
+        patch.object(counts_module, "get_relational_engine", lambda: _fake_engine([])),
+    ):
+        leader = asyncio.create_task(get_datasets_graph_counts([dataset]))
+        await _spin(lambda: bool(entered))
+        follower = asyncio.create_task(get_datasets_graph_counts([dataset]))
+        await _spin(lambda: counts_module._inflight_counts != {})
+        await _settle()
+
+        leader.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await leader
+
+        # The follower is now the leader; let it through.
+        release.set()
+        counts = await asyncio.wait_for(follower, timeout=5)
+
+    assert counts[dataset.id].num_nodes == 8
+    assert counts_module._inflight_counts == {}, "in-flight entry leaked"
