@@ -1,3 +1,5 @@
+import base64
+import struct
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -84,11 +86,16 @@ async def test_embed_text_filters_invalid_inputs(monkeypatch):
         # drives this through its OpenAI handler (the branch that injected the null),
         # so the guard must still fire based on the endpoint host.
         ("custom", "openai/text-embedding-3-small", "https://openrouter.ai/api/v1", "float"),
-        # Non-OpenRouter providers must be left untouched (encoding_format omitted).
+        # OpenAI and Azure OpenAI routes ask for base64 vectors.
+        ("openai", "openai/text-embedding-3-large", None, "base64"),
+        ("openai", "text-embedding-3-large", None, "base64"),
+        ("openai", "openai/text-embedding-3-large", "https://proxy.invalid/v1", "base64"),
+        ("azure", "azure/my-embedding-deployment", "https://example.invalid", "base64"),
+        # Providers that reject encoding_format must be left untouched (omitted).
         ("gemini", "gemini/text-embedding-004", "https://example.invalid/v1", None),
     ],
 )
-async def test_embed_text_sets_encoding_format_only_for_openrouter(
+async def test_embed_text_sets_encoding_format_per_route(
     monkeypatch, provider, model, endpoint, expected_encoding_format
 ):
     monkeypatch.setenv("MOCK_EMBEDDING", "false")
@@ -124,3 +131,31 @@ async def test_embed_text_sets_encoding_format_only_for_openrouter(
 
     mock_aembedding.assert_awaited_once_with(**expected_kwargs)
     assert result == [[0.1, 0.2]]
+
+
+@pytest.mark.asyncio
+async def test_embed_text_decodes_base64_vectors(monkeypatch):
+    """A base64 payload decodes to the float32 values it carries; float lists pass through."""
+    monkeypatch.setenv("MOCK_EMBEDDING", "false")
+
+    with patch.object(LiteLLMEmbeddingEngine, "get_tokenizer", return_value=Mock()):
+        engine = LiteLLMEmbeddingEngine(
+            provider="openai",
+            model="openai/text-embedding-3-large",
+            dimensions=4,
+            api_key="test-key",
+        )
+
+    vector = [0.0123, -0.5, 0.25, 1e-7]
+    float32_vector = [struct.unpack("<f", struct.pack("<f", v))[0] for v in vector]
+    encoded = base64.b64encode(struct.pack("<4f", *vector)).decode()
+    response = SimpleNamespace(data=[{"embedding": encoded}, {"embedding": float32_vector}])
+
+    import cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine as mod
+
+    monkeypatch.setattr(mod.litellm, "aembedding", AsyncMock(return_value=response))
+
+    result = await engine.embed_text(["a", "b"])
+
+    assert result == [float32_vector, float32_vector]
+    assert all(isinstance(v, float) for v in result[0])

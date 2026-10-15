@@ -1,8 +1,10 @@
 import asyncio
+import base64
 import logging
 import math
 import os
 import re
+import warnings
 from urllib.parse import urlparse
 
 import httpx
@@ -39,6 +41,14 @@ from cognee.shared.logging_utils import get_logger
 from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 
 litellm.set_verbose = False
+
+# litellm dumps the openai SDK response model, whose embedding field is typed
+# list[float], so a base64 payload trips a pydantic serializer warning on every call.
+warnings.filterwarnings(
+    "ignore",
+    message=r"Pydantic serializer warnings:[\s\S]*field_name='embedding'",
+    category=UserWarning,
+)
 logger = get_logger("LiteLLMEmbeddingEngine")
 
 observe = get_observe()
@@ -88,6 +98,31 @@ def _uses_nvidia_nim(provider: str | None, model: str | None) -> bool:
     )
 
 
+# litellm routes whose APIs accept encoding_format="base64".
+_BASE64_PROVIDERS = {"openai", "azure"}
+
+
+def _requests_base64(model: str | None, endpoint: str | None) -> bool:
+    """Whether litellm routes this model to an OpenAI or Azure OpenAI embeddings API.
+
+    Those APIs return each vector as one base64 string of little-endian float32
+    values when asked. The float JSON alternative is parsed by the openai SDK one
+    element at a time, which costs about 25x more CPU per vector on the event loop.
+    """
+    try:
+        _, resolved_provider, _, _ = litellm.get_llm_provider(model=model, api_base=endpoint)
+    except litellm.exceptions.BadRequestError:
+        return False
+    return resolved_provider in _BASE64_PROVIDERS
+
+
+def _decode_embedding(embedding: list[float] | str) -> list[float]:
+    """Return the vector as floats, decoding a base64 float32 payload."""
+    if isinstance(embedding, str):
+        return np.frombuffer(base64.b64decode(embedding), dtype="<f4").tolist()
+    return embedding
+
+
 class LiteLLMEmbeddingEngine(EmbeddingEngine):
     """
     Engine for embedding text using a specific LLM model, supporting mock and actual
@@ -134,6 +169,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         # providers that don't recognize the field (e.g. plain OpenAI).
         self.input_type = input_type
         self._uses_nvidia_nim = _uses_nvidia_nim(self.provider, self.model)
+        self._requests_base64 = _requests_base64(self.model, self.endpoint)
 
         enable_mocking = os.getenv("MOCK_EMBEDDING", "false")
         if isinstance(enable_mocking, bool):
@@ -240,6 +276,8 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                     )
                     if routed_to_openrouter:
                         embedding_kwargs["encoding_format"] = "float"
+                    elif self._requests_base64:
+                        embedding_kwargs["encoding_format"] = "base64"
 
                     # Pass through target embedding dimensions when supported.
                     # Some providers (e.g. NVIDIA NIM) reject this param outright,
@@ -266,7 +304,9 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                         timeout=300.0,
                     )
 
-                embedding_response = [data["embedding"] for data in response.data]
+                embedding_response = [
+                    _decode_embedding(data["embedding"]) for data in response.data
+                ]
                 return handle_embedding_response(text, embedding_response, self.dimensions)
 
         except litellm.exceptions.BadRequestError as error:
