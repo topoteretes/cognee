@@ -14,6 +14,7 @@ from uuid import uuid4
 import pytest
 
 from cognee.modules.improve import graph_changes
+from cognee.modules.pipelines.models import PipelineRunStatus
 
 
 def _stamp(started_at=None, status="completed"):
@@ -282,3 +283,130 @@ async def test_stamp_survives_long_history_and_excludes_failed_rows(monkeypatch,
         )
     finally:
         await engine.dispose()
+
+
+# --- the global context index's stricter check -------------------------------
+
+STAMPED_RUN = uuid4()
+OWN_BUILD = uuid4()  # a pipeline run the stamped run started
+STAMP_START = datetime(2025, 1, 1, tzinfo=timezone.utc)
+
+
+@asynccontextmanager
+async def _pipeline_runs_on_sqlite(monkeypatch, tmp_path, dataset_id, rows):
+    """A real pipeline_runs table: the run that stamped ``dataset_id``, then ``rows``.
+
+    Every row is created now, after the stamp -- the stamped run's own row too,
+    since a run's row is written when the run ends.
+    """
+    import importlib
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from cognee.modules.pipelines.models import PipelineRun
+
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path}/runs.db")
+    session_factory = async_sessionmaker(engine)
+    relational = importlib.import_module("cognee.infrastructure.databases.relational")
+    monkeypatch.setattr(
+        relational,
+        "get_relational_engine",
+        lambda: SimpleNamespace(get_async_session=session_factory),
+    )
+    stamped = {
+        "pipeline_run_id": STAMPED_RUN,
+        "operation_name": "improve",
+        "outcome": "succeeded",
+        "ended_at": STAMP_START,
+        "run_info": graph_changes.watermark_stamp(
+            graph_changes.GLOBAL_CONTEXT_WATERMARK_KEY, "completed", STAMP_START
+        ),
+    }
+    # The build's terminal row names its parent; its start row (a case below) does not.
+    build = {
+        "pipeline_run_id": OWN_BUILD,
+        "operation_name": "memify_pipeline",
+        "status": PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
+        "parent_operation_id": STAMPED_RUN,
+    }
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(PipelineRun.__table__.create)
+        async with session_factory() as session:
+            session.add_all(
+                PipelineRun(**{"pipeline_run_id": uuid4(), "dataset_id": dataset_id, **row})
+                for row in [stamped, build, *rows]
+            )
+            await session.commit()
+        yield
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("row", "changed"),
+    [
+        ({"operation_name": "search"}, False),
+        ({"operation_name": "memify_pipeline", "pipeline_run_id": OWN_BUILD}, False),
+        (
+            {
+                "operation_name": "cognify_pipeline",
+                "status": PipelineRunStatus.DATASET_PROCESSING_STARTED,
+            },
+            True,
+        ),
+        (
+            {
+                "operation_name": "cognify_pipeline",
+                "status": PipelineRunStatus.DATASET_PROCESSING_ERRORED,
+            },
+            True,
+        ),
+        ({"operation_name": "forget", "outcome": "succeeded"}, True),
+        ({"operation_name": "add_pipeline"}, True),
+        ({"operation_name": "improve", "outcome": "succeeded"}, True),
+        ({"operation_name": "improve", "outcome": "noop"}, False),
+    ],
+    ids=[
+        "read",
+        "the stamped run's own build",
+        "another run's start row",
+        "failed write",
+        "deletion",
+        "add",
+        "another improve",
+        "noop improve",
+    ],
+)
+@pytest.mark.asyncio
+async def test_every_run_but_a_read_a_noop_or_the_stamped_one_changes_the_dataset(
+    monkeypatch, tmp_path, row, changed
+):
+    """A failed write may have written part of its data, a deletion runs no
+    pipeline, and add() can drop a source's stale documents. A noop improve ran
+    no stage."""
+    dataset_id = uuid4()
+
+    async with _pipeline_runs_on_sqlite(monkeypatch, tmp_path, dataset_id, [row]):
+        assert (
+            await graph_changes.has_dataset_changed_since_last_improve(
+                dataset_id, graph_changes.GLOBAL_CONTEXT_WATERMARK_KEY
+            )
+            is changed
+        )
+
+
+@pytest.mark.asyncio
+async def test_another_datasets_run_counts_only_when_the_graph_is_shared(monkeypatch, tmp_path):
+    dataset_id = uuid4()
+    other_write = {"dataset_id": uuid4(), "operation_name": "cognify_pipeline"}
+    key = graph_changes.GLOBAL_CONTEXT_WATERMARK_KEY
+
+    async with _pipeline_runs_on_sqlite(monkeypatch, tmp_path, dataset_id, [other_write]):
+        assert await graph_changes.has_dataset_changed_since_last_improve(dataset_id, key) is False
+        assert (
+            await graph_changes.has_dataset_changed_since_last_improve(
+                dataset_id, key, any_dataset=True
+            )
+            is True
+        )

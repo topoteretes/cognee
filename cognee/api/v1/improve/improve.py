@@ -129,7 +129,7 @@ async def improve(
     ``no_session_ids`` when no ``session_ids`` were given. Stages named in
     ``IMPROVE_STAGES_DISABLED`` are skipped with ``disabled_by_config``. The
     stages that draft text with an LLM (``extract_agent_context``,
-    ``distill_sessions``, ``review_conflicts``, ``global_context_index``) are skipped with
+    ``distill_sessions``, ``review_conflicts``) are skipped with
     ``no_llm_configured`` when no usable LLM is configured, so a keyless
     install still bridges sessions and traces into the graph. A run
     that loses the improve lock — another run is already touching the same

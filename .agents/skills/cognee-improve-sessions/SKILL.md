@@ -65,7 +65,7 @@ spends any LLM or embedding cost, and reports one `StageResult`.
 | 7 | `build_truth_subspace` | Builds the truth subspace from distilled learnings | `session_ids`, `build_truth_subspace=True`, a Ladybug graph |
 | 8 | `review_conflicts` | Reviews dated source facts, stores conflicts and rewrites Entity descriptions | `review_conflicts=True` or `IMPROVE_REVIEW_CONFLICTS=true`, an LLM, edge evidence |
 | 9 | `triplet_enrichment` | Triplet embeddings over the graph (memify) | `TRIPLET_EMBEDDING=true` (**default false**), or custom tasks/data passed |
-| 10 | `global_context_index` | Bucket and root summaries for global questions | `build_global_context_index=True`, an LLM |
+| 10 | `global_context_index` | Bucket and root summaries for global questions | `build_global_context_index=True` |
 
 Stages 1–7 need `session_ids`; 8–10 work on the graph alone. The order
 matters: 4 feeds 5, 5 feeds 7, and 7 and 8 run before 9.
@@ -94,7 +94,7 @@ CLI, and `RememberResult.improve`.
 | `opt_in_disabled` | Pass `build_truth_subspace=True` / `review_conflicts=True` / `build_global_context_index=True` |
 | `personalization_disabled` | Set `PERSONALIZATION_ENABLED=true` |
 | `auto_feedback_disabled` | Stage 4 needs `CACHING=true` and `AUTO_FEEDBACK=true` |
-| `no_llm_configured` | Stages 4, 5, 8, 10 draft text with an LLM; none configured |
+| `no_llm_configured` | Stages 4, 5, 8 draft text with an LLM; none configured |
 | `edge_evidence_disabled` | Conflict review needs `EDGE_EVIDENCE_ENABLED=true` |
 | `backend_unsupported` | The graph adapter lacks the feature (feedback weights, truth subspace) |
 | `session_manager_unavailable` | The session cache is not reachable |
