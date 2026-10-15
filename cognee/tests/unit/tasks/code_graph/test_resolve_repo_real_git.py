@@ -89,17 +89,17 @@ class Origin:
         _git(self.work, "push", "-q", "origin", f":refs/heads/{branch}")
 
 
-@pytest.fixture(autouse=True, params=["files", "reftable"])
-def _hermetic_git(request, tmp_path, monkeypatch):
-    """Run every git command, the test's and resolve_repo's, on a bare configuration,
-    once per ref storage: a reftable repository (git 3.0's default) has no ref files.
+@pytest.fixture(autouse=True)
+def _hermetic_git(tmp_path, monkeypatch):
+    """Run every git command, the test's and resolve_repo's, on a bare configuration.
 
-    The developer's global config (``commit.gpgsign``, ``core.hooksPath``) would fail the
-    commits made here, and a run from a git hook would act on its repository via GIT_DIR.
+    The developer's global config (``commit.gpgsign`` with a signer that is not running,
+    ``core.hooksPath``, ``init.templateDir``) would fail the commits made here, and a test
+    run from a git hook would act on that hook's repository through GIT_DIR.
     """
-    config = tmp_path / "gitconfig"  # git before 2.45 ignores the key and stays on files
-    config.write_text(f"[init]\n\tdefaultRefFormat = {request.param}\n")
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    empty_config = tmp_path / "gitconfig"  # stands in for /dev/null, absent on Windows
+    empty_config.write_text("")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(empty_config))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     for name in ("GIT_TEMPLATE_DIR", "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
         monkeypatch.delenv(name, raising=False)
@@ -154,40 +154,38 @@ async def test_a_refresh_follows_the_branch_and_not_a_namesake(origin, clones, b
 
 
 @pytest.mark.asyncio
-async def test_a_tag_is_refused_because_it_is_not_a_branch(origin, clones):
+async def test_a_tag_is_not_taken_for_a_branch(origin, clones):
     origin.tag("v1", "v1-a")  # 'clone --branch v1' would take it and leave HEAD detached
 
-    with pytest.raises(resolve_module.CodeRepositoryError, match="'v1' .* is not a branch"):
+    with pytest.raises(resolve_module.CodeRepositoryError, match="Branch 'v1' was not found"):
         await _resolve(clones, "v1")
 
     assert list(clones.iterdir()) == []
 
 
 @pytest.mark.asyncio
-async def test_switching_branches_replaces_the_one_clone(origin, clones):
+async def test_each_branch_is_a_clone_of_its_own_that_follows_force_pushes(origin, clones):
     origin.commit("dev", "dev-1")
-    origin.commit("feature/ü", "ü-1")  # read back from HEAD, whatever the locale
+    origin.commit("feature/ü", "ü-1")
 
-    assert _content(await _resolve(clones, "dev")) == "dev-1"
-    on_feature = await _resolve(clones, "feature/ü")
-    assert _content(on_feature) == "ü-1"
-    assert resolve_module.read_clone_branch(on_feature) == "feature/ü"
+    dev = await _resolve(clones, "dev")
+    feature = await _resolve(clones, "feature/ü")
     default = await _resolve(clones)
-    assert _content(default) == "main-1"
-    assert resolve_module.read_clone_branch(default) is None  # git's own record of a default clone
+
+    assert [_content(path) for path in (dev, feature, default)] == ["dev-1", "ü-1", "main-1"]
+    assert default == clones / _NAME
+    assert sorted(path.name for path in clones.iterdir()) == sorted(
+        path.name for path in (dev, feature, default)
+    )
 
     origin.commit("feature/ü", "ü-2")
     assert _content(await _resolve(clones, "feature/ü")) == "ü-2"
     origin.rewrite("feature/ü", "ü-3")  # a force push is not a fast-forward
-    clone = await _resolve(clones, "feature/ü")
-
-    assert _content(clone) == "ü-3"
-    # One URL is one directory, and nothing is left beside it.
-    assert clone == clones / _NAME
-    assert [path.name for path in clones.iterdir()] == [_NAME]
+    assert _content(await _resolve(clones, "feature/ü")) == "ü-3"
+    assert _content(dev) == "dev-1"  # the other branches' clones are never touched
     shallow = subprocess.run(
         ["git", "rev-parse", "--is-shallow-repository"],
-        cwd=clone,
+        cwd=feature,
         capture_output=True,
         text=True,
         check=True,
@@ -202,10 +200,10 @@ async def test_a_missing_branch_is_reported_and_never_replaces_a_clone(origin, c
     assert list(clones.iterdir()) == []
 
     origin.commit("dev", "dev-1")
-    await _resolve(clones, "dev")
+    dev = await _resolve(clones, "dev")
     origin.delete("dev")
     origin.tag("dev", "dev-tag")  # a bare 'dev' would still match, and hide the deletion
 
     with pytest.raises(resolve_module.CodeRepositoryError, match="Branch 'dev' was not found"):
         await _resolve(clones, "dev")
-    assert _content(clones / _NAME) == "dev-1"
+    assert _content(dev) == "dev-1"

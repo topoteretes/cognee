@@ -1274,6 +1274,9 @@ async def remember(
         raise ValueError("extractor is not supported when session_id is provided.")
     if session_id is not None and kwargs.get("summary_method") is not None:
         raise ValueError("summary_method is not supported when session_id is provided.")
+    if session_id is not None and kwargs.get("branch") is not None:
+        # The session path never calls add(), so the branch would be dropped silently.
+        raise ValueError("branch is not supported when session_id is provided.")
 
     data_size = _estimate_data_size(data)
     item_count = len(data) if isinstance(data, list) else 1
@@ -1394,6 +1397,12 @@ async def _remember_inner(
             raise ValueError(
                 "summary_method is not supported while connected to a remote Cognee "
                 "instance. Call cognee.disconnect() to choose the summary method locally."
+            )
+        if kwargs.get("branch") is not None:
+            # Same as extractor: client.remember() would drop it.
+            raise ValueError(
+                "branch is not supported while connected to a remote Cognee instance. "
+                "Call cognee.disconnect() to clone the branch locally."
             )
         if session_ids:
             # Same discipline as extractor: POST /remember carries no

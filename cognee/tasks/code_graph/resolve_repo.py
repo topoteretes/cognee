@@ -6,18 +6,16 @@ shallow clone, and by ``add()`` to recognise a GitHub/GitLab repository URL
 (:func:`code_repo_clone_url`) and clone it the same way. Clones live under
 ``BaseConfig.repos_root_directory`` (``~/.cognee/repos`` by default) and are
 reused across calls; an existing clone is refreshed with a best-effort
-``git pull``. A ``branch`` can be chosen for a remote repository; the clone
-directory is still keyed on the URL alone (see :func:`resolve_repo_source`).
+``git pull``. A ``branch`` can be chosen for a remote repository; each branch is
+cloned into a directory of its own.
 """
 
 import asyncio
 import base64
+import hashlib
 import os
 import re
 import shutil
-import stat
-import subprocess
-import sys
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
@@ -164,27 +162,32 @@ def redact_repo_spec(spec: str | Path) -> str:
     return urlunsplit((parts.scheme, host, parts.path, parts.query, parts.fragment))
 
 
-def _clone_slug(url: str) -> str:
+def _clone_slug(url: str, branch: str | None = None) -> str:
     """A stable directory name for a remote URL, e.g. 'github.com-org-repo'.
 
-    Deliberately blind to the branch: the code_repo data row is keyed on this
-    directory's path, and the code graph keys node ids and the stale sweep on the
-    repository's name (enola takes it from the clone's origin remote, or from this
-    directory's name when there is none), so one URL stays one repository, with
-    one data row, whatever branch it holds.
+    A chosen branch gets its own directory beside it, e.g. 'github.com-org-repo@dev-<hash>',
+    so no clone is ever replaced under another caller. The hash of the exact name keeps
+    apart branches the readable part merges: case-insensitive file systems, and the
+    characters replaced here.
     """
     tail = url.split("://")[-1].replace(":", "/").rstrip("/")
     tail = tail.removesuffix(".git")
-    return re.sub(r"[^A-Za-z0-9._-]+", "-", tail).strip("-.")
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", tail).strip("-.")
+    if branch is None:
+        return slug
+    readable = re.sub(r"[^A-Za-z0-9._-]+", "-", branch)[:40]
+    return f"{slug}@{readable}-{hashlib.sha256(branch.encode()).hexdigest()[:8]}"
+
+
+def clone_dir(url: str, branch: str | None = None, clones_dir: Path | None = None) -> Path:
+    """Where :func:`resolve_repo_source` clones the credential-free ``url`` on ``branch``
+    (None: the remote's default branch, in the directory every clone had before)."""
+    return (Path(clones_dir) if clones_dir else default_clones_dir()) / _clone_slug(url, branch)
 
 
 # git's refname rules that cannot appear anywhere in a branch name: control
 # characters, space, ~ ^ : ? * [ and backslash.
 _BRANCH_FORBIDDEN_CHARS = re.compile(r"[\x00-\x20\x7f~^:?*\[\\]")
-
-# Stands for a clone that is on no branch (a tag, a detached HEAD): it contains a space,
-# so it can never equal a requested branch name.
-_NOT_A_BRANCH = "(not a branch)"
 
 
 def _invalid_branch_reason(branch) -> str | None:
@@ -215,63 +218,6 @@ def check_branch_name(branch) -> None:
         raise ValueError(f"Invalid branch name {branch!r}: {reason}.")
 
 
-def _symbolic_ref(git_dir: Path, ref: str) -> str | None:
-    """Where the symbolic ref ``ref`` of the repository at ``git_dir`` points, or None."""
-    result = subprocess.run(
-        [_git_binary(), f"--git-dir={git_dir}", "symbolic-ref", "-q", ref],
-        capture_output=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
-    )
-    return result.stdout.strip() if result.returncode == 0 else None
-
-
-def read_clone_branch(target: Path) -> str | None:
-    """The branch a clone is on, None for a clone of the remote's default branch.
-
-    A clone without ``--branch`` records origin's HEAD, one with ``--branch`` does not,
-    and HEAD names the branch (checked on git 2.50.1); that also holds for every clone
-    made before ``branch`` existed. Asked of git: with reftable, .git holds no ref files.
-    """
-    git_dir = target / ".git"
-    if _symbolic_ref(git_dir, "refs/remotes/origin/HEAD") is not None:
-        return None
-    head = _symbolic_ref(git_dir, "HEAD") or ""
-    prefix = "refs/heads/"
-    return head.removeprefix(prefix) if head.startswith(prefix) else _NOT_A_BRANCH
-
-
-def _clear_read_only_and_retry(function, path, _error) -> None:
-    """``shutil.rmtree`` error handler: git writes its object files read-only, and
-    Windows will not delete those, so make the path writable and try again."""
-    os.chmod(path, stat.S_IRWXU)
-    function(path)
-
-
-def _remove_tree(path: Path) -> None:
-    """Remove a directory tree, a clone's read-only files included; best effort."""
-    if not os.path.lexists(path):
-        return
-    try:
-        if sys.version_info >= (3, 12):
-            shutil.rmtree(path, onexc=_clear_read_only_and_retry)
-        else:
-            shutil.rmtree(path, onerror=_clear_read_only_and_retry)
-    except OSError as error:
-        logger.warning("Could not remove %s: %s", path, error)
-
-
-# One lock per clone directory, held while it is cloned, replaced or refreshed. It is
-# process-local, like the dataset lock, and waits on nothing else, so taking it under
-# the dataset lock (the order add() reaches it in) cannot deadlock.
-_clone_locks: dict[str, asyncio.Lock] = {}
-
-
-def _clone_lock(target: Path) -> asyncio.Lock:
-    return _clone_locks.setdefault(os.path.realpath(target), asyncio.Lock())
-
-
 def _credential_env(token: str) -> dict:
     """Auth for git over https, injected as environment-level git config.
 
@@ -288,18 +234,14 @@ def _credential_env(token: str) -> dict:
     }
 
 
-def _git_binary() -> str:
+async def _run_git(args, cwd: Path | None = None, env: dict | None = None) -> tuple:
     git_binary = shutil.which("git")
     if git_binary is None:
         raise CodeRepositoryError(
             message="git is required to clone remote repositories but was not found on PATH."
         )
-    return git_binary
-
-
-async def _run_git(args, cwd: Path | None = None, env: dict | None = None) -> tuple:
     process = await asyncio.create_subprocess_exec(
-        _git_binary(),
+        git_binary,
         *args,
         cwd=str(cwd) if cwd else None,
         env={**os.environ, **env} if env else None,
@@ -342,10 +284,10 @@ async def resolve_repo_source(
     existing clone is reused after a best-effort ``git pull --ff-only``.
     Remote resolution honors ``ALLOW_HTTP_REQUESTS=false``.
 
-    ``branch`` clones that branch instead of the remote's default. A URL has one clone
-    directory: a clone made for another branch is removed and cloned again, one for the
-    same branch is fetched and reset, which follows a force push. A branch gone from the
-    remote raises. A local path rejects ``branch``.
+    ``branch`` clones that branch instead of the remote's default, into a directory of
+    its own (see :func:`_clone_slug`); reusing it fetches and resets, which follows a
+    force push. A branch the remote does not have raises, and a local path rejects
+    ``branch``.
 
     ``credentials`` is the preferred way to authenticate against a private
     https remote (e.g. a GitHub App installation token): it reaches git only
@@ -430,7 +372,7 @@ async def resolve_repo_source(
     auth_env = _credential_env(credentials) if credentials else None
 
     base = Path(clones_dir) if clones_dir else default_clones_dir()
-    target = base / _clone_slug(clean_url)
+    target = clone_dir(clean_url, branch, base)
     # The slug regex already forbids separators and dot-runs; keep an
     # explicit containment check so a clone can never land outside the
     # clones directory regardless of what the URL decomposed into.
@@ -441,80 +383,54 @@ async def resolve_repo_source(
     def _branch_not_found() -> CodeRepositoryError:
         return CodeRepositoryError(message=f"Branch '{branch}' was not found in '{clean_url}'.")
 
-    async with _clone_lock(target):
-        # A directory without .git is not a clone (a clone that was never completed),
-        # and a clone made for another branch must not be refreshed under this
-        # request: both fall through to a new clone that replaces them.
-        is_clone = (target / ".git").is_dir()
-        if is_clone and await asyncio.to_thread(read_clone_branch, target) == branch:
-            # Legacy URL-embedded credentials: fetch from the explicit URL
-            # instead of the stored remote (which is deliberately
-            # credential-free). Out-of-band credentials ride the environment.
-            if branch is None:
-                pull_args = ["pull", "--ff-only"] + ([url] if has_credentials else [])
-                returncode, stderr = await _run_git(pull_args, cwd=target, env=auth_env)
-                refresh = "git pull"
-            else:
-                # Fetch and reset, not pull: a rebased or force-pushed branch is not a
-                # fast-forward. The ref is spelled out because git resolves a bare name
-                # itself (a tag before a branch, '+x' as a force refspec) and could land
-                # on another commit than 'clone --branch'.
-                remote = url if has_credentials else "origin"
-                returncode, stderr = await _run_git(
-                    ["fetch", "--depth", "1", remote, f"refs/heads/{branch}"],
-                    cwd=target,
-                    env=auth_env,
-                )
-                refresh = "git fetch"
-                if returncode != 0 and await _remote_ref_missing(url, branch, auth_env):
-                    raise _branch_not_found()
-                if returncode == 0:
-                    returncode, stderr = await _run_git(
-                        ["reset", "--hard", "FETCH_HEAD"], cwd=target
-                    )
-                    refresh = "git reset"
-            if returncode != 0:
-                # A stale clone is still indexable; the caller asked for the repo,
-                # not for freshness guarantees.
-                logger.warning(
-                    "Reusing existing clone at %s (%s failed: %s)",
-                    target,
-                    refresh,
-                    _scrub(stderr[-500:]),
-                )
-            return target
-
-        target.parent.mkdir(parents=True, exist_ok=True)
-        if os.path.lexists(target):
-            # A clone made for another branch, or what an interrupted clone left behind.
-            logger.info(
-                "Replacing the clone at %s: it is not a clone of %s",
-                target,
-                branch or "the default branch",
-            )
-            await asyncio.to_thread(_remove_tree, target)
-        logger.info("Cloning %s on %s into %s", clean_url, branch or "the default branch", target)
-        # core.symlinks=false: git otherwise materializes symlinks committed in the
-        # remote, and nothing re-validates paths under the clone afterwards -- a repo
-        # containing '.enola -> ~/.ssh' would have the enola snapshot written through it,
-        # and 'mod.py -> /proc/self/environ' would be read into the code graph. With this
-        # set, git writes each symlink as a regular file containing its target path.
-        # Passed via -c on clone so it is persisted into the new repo's config and the
-        # later 'git pull --ff-only' honours it too.
-        clone_args = ["clone", "-c", "core.symlinks=false", "--depth", "1"]
-        if branch is not None:
-            clone_args += ["--branch", branch]
-        returncode, stderr = await _run_git(clone_args + [url, str(target)], env=auth_env)
-        if returncode != 0:
-            if branch is not None and await _remote_ref_missing(url, branch, auth_env):
+    if (target / ".git").is_dir():
+        # Legacy URL-embedded credentials: fetch from the explicit URL
+        # instead of the stored remote (which is deliberately
+        # credential-free). Out-of-band credentials ride the environment.
+        if branch is None:
+            pull_args = ["pull", "--ff-only"] + ([url] if has_credentials else [])
+            returncode, stderr = await _run_git(pull_args, cwd=target, env=auth_env)
+        else:
+            # Fetch and reset, not pull: a rebased or force-pushed branch is not a
+            # fast-forward. The ref is spelled out because git resolves a bare name
+            # itself (a tag before a branch, '+x' as a force refspec).
+            remote = url if has_credentials else "origin"
+            fetch_args = ["fetch", "--depth", "1", remote, f"refs/heads/{branch}"]
+            returncode, stderr = await _run_git(fetch_args, cwd=target, env=auth_env)
+            if returncode != 0 and await _remote_ref_missing(url, branch, auth_env):
                 raise _branch_not_found()
-            raise CodeRepositoryError(
-                message=f"Failed to clone '{clean_url}': {_scrub(stderr[-1000:])}"
+            if returncode == 0:
+                returncode, stderr = await _run_git(["reset", "--hard", "FETCH_HEAD"], cwd=target)
+        if returncode != 0:
+            # A stale clone is still indexable; the caller asked for the repo,
+            # not for freshness guarantees.
+            logger.warning(
+                "Reusing existing clone at %s (refresh failed: %s)", target, _scrub(stderr[-500:])
             )
-        if branch is not None and await asyncio.to_thread(read_clone_branch, target) != branch:
-            # 'clone --branch' also accepts a tag, which leaves HEAD detached.
-            await asyncio.to_thread(_remove_tree, target)
-            raise CodeRepositoryError(message=f"'{branch}' in '{clean_url}' is not a branch.")
-        if has_credentials:
-            await _run_git(["remote", "set-url", "origin", clean_url], cwd=target)
         return target
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    # Checked first: 'clone --branch' falls back to a tag of that name and leaves HEAD
+    # detached, which no later fetch of the branch would follow.
+    if branch is not None and await _remote_ref_missing(url, branch, auth_env):
+        raise _branch_not_found()
+    logger.info("Cloning %s into %s", clean_url, target)
+    # core.symlinks=false: git otherwise materializes symlinks committed in the
+    # remote, and nothing re-validates paths under the clone afterwards -- a repo
+    # containing '.enola -> ~/.ssh' would have the enola snapshot written through it,
+    # and 'mod.py -> /proc/self/environ' would be read into the code graph. With this
+    # set, git writes each symlink as a regular file containing its target path.
+    # Passed via -c on clone so it is persisted into the new repo's config and the
+    # later 'git pull --ff-only' honours it too.
+    branch_args = ["--branch", branch] if branch is not None else []
+    returncode, stderr = await _run_git(
+        ["clone", "-c", "core.symlinks=false", "--depth", "1", *branch_args, url, str(target)],
+        env=auth_env,
+    )
+    if returncode != 0:
+        raise CodeRepositoryError(
+            message=f"Failed to clone '{clean_url}': {_scrub(stderr[-1000:])}"
+        )
+    if has_credentials:
+        await _run_git(["remote", "set-url", "origin", clean_url], cwd=target)
+    return target

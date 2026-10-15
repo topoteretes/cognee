@@ -6,6 +6,7 @@ partition semantics: code and manifests go to the repo item, prose stays in
 the document pipeline, and binaries/dotfiles can never abort an add.
 """
 
+import importlib
 import json
 from pathlib import Path
 
@@ -360,6 +361,47 @@ async def test_repository_url_credentials_are_redacted_from_the_manifest(
     manifest = next(item for item in resolved if isinstance(item, DataItem))
     assert manifest.system_metadata["repo_url"] == "https://github.com/org/repo"
     assert "tok" not in json.dumps(manifest.system_metadata)
+
+
+@pytest.mark.asyncio
+async def test_a_repository_url_keeps_one_data_row_whatever_the_branch(tmp_path, monkeypatch):
+    """Each branch is cloned into its own directory, but a dataset keeps one row per URL,
+    keyed as every URL row was before branches existed, so existing rows keep their ids."""
+    from unittest.mock import AsyncMock, Mock
+    from uuid import uuid4
+
+    import cognee.tasks.code_graph.code_repo as code_repo_module
+    from cognee.tasks.code_graph.resolve_repo import clone_dir
+
+    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
+        directory = tmp_path / (branch or "default")
+        directory.mkdir()
+        return _make_repo(directory)
+
+    keys = []
+
+    async def record_key(identifier, user, dataset_id=None):
+        keys.append(identifier)
+        return uuid4()
+
+    monkeypatch.setattr(code_repo_module, "resolve_repo_source", fake_resolve_repo_source)
+    monkeypatch.setattr(
+        importlib.import_module("cognee.modules.data.methods.get_unique_data_id"),
+        "get_unique_data_id",
+        record_key,
+    )
+    monkeypatch.setattr(
+        importlib.import_module("cognee.modules.data.methods"),
+        "reset_data_pipeline_status",
+        AsyncMock(),
+    )
+
+    for branch in (None, "dev"):
+        await code_repo_module.resolve_code_repository_url(
+            "https://github.com/org/repo", user=Mock(), dataset_id=uuid4(), branch=branch
+        )
+
+    assert keys == [f"code_repo:{clone_dir('https://github.com/org/repo')}"] * 2
 
 
 @pytest.mark.asyncio

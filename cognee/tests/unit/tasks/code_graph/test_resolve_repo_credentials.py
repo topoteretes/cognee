@@ -10,8 +10,6 @@ import importlib
 
 import pytest
 
-from cognee.tests.utils.clone_state import write_clone_state
-
 resolve_module = importlib.import_module("cognee.tasks.code_graph.resolve_repo")
 
 _TOKEN_URL = "https://x-access-token:tok-SECRET@github.com/org/repo.git"
@@ -62,7 +60,7 @@ async def test_clone_slug_and_remote_never_carry_the_token(monkeypatch, tmp_path
 @pytest.mark.asyncio
 async def test_existing_clone_pulls_from_the_credentialed_url(monkeypatch, tmp_path):
     clone_dir = tmp_path / "github.com-org-repo"
-    write_clone_state(clone_dir)
+    (clone_dir / ".git").mkdir(parents=True)
     git_calls = []
 
     async def fake_run_git(args, cwd=None, env=None):
@@ -81,7 +79,7 @@ async def test_existing_clone_pulls_from_the_credentialed_url(monkeypatch, tmp_p
 @pytest.mark.asyncio
 async def test_credential_free_urls_keep_the_bare_pull(monkeypatch, tmp_path):
     clone_dir = tmp_path / "github.com-org-repo"
-    write_clone_state(clone_dir)
+    (clone_dir / ".git").mkdir(parents=True)
     git_calls = []
 
     async def fake_run_git(args, cwd=None, env=None):
@@ -136,7 +134,7 @@ async def test_out_of_band_credentials_ride_the_environment(monkeypatch, tmp_pat
 @pytest.mark.asyncio
 async def test_out_of_band_credentials_apply_to_pulls_too(monkeypatch, tmp_path):
     clone_dir = tmp_path / "github.com-org-repo"
-    write_clone_state(clone_dir)
+    (clone_dir / ".git").mkdir(parents=True)
     git_calls = []
 
     async def fake_run_git(args, cwd=None, env=None):

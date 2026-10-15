@@ -143,11 +143,11 @@ async def add(
         tavily_config: Optional configuration for Tavily API, including API key and extraction settings
         soup_crawler_config: Optional configuration for BeautifulSoup crawler, specifying concurrency, crawl delay, and extraction rules.
         branch: Branch to clone for the GitHub/GitLab repository URL(s) in ``data``, instead of
-                the remote's default. A URL holds one branch at a time, shared by every dataset
-                that adds it: another add on a different branch replaces the clone, and
-                ``cognify()`` indexes whatever the clone holds when it runs. Switching re-indexes
-                the code graph; the repository's documents are separate items that a switch does
-                not remove. A missing branch raises ``CodeRepositoryError``.
+                the remote's default. Each branch is cloned into its own directory, so adds on
+                different branches never touch each other's clone. A dataset holds one branch of
+                a URL at a time: adding it on another branch re-indexes the code graph, but the
+                documents ingested from the previous branch stay. A missing branch raises
+                ``CodeRepositoryError``; not supported while connected to a remote instance.
 
     Returns:
         PipelineRunInfo: Information about the ingestion pipeline execution including:
@@ -238,6 +238,13 @@ async def add(
 
     client = get_remote_client()
     if client is not None:
+        if branch is not None:
+            # client.add() sends only the data and the dataset name, so the remote would
+            # clone the default branch instead.
+            raise ValueError(
+                "branch is not supported while connected to a remote Cognee instance. "
+                "Call cognee.disconnect() to clone the branch locally."
+            )
         result = await client.add(data, dataset_name)
         # Wrap in a simple namespace so callers expecting .model_dump() still work
         from types import SimpleNamespace

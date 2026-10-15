@@ -2,7 +2,8 @@
 
 The branch reaches the clone from two places: run_tasks, which resolves repository URLs
 before any task list runs, and the add task itself. remember() passes it on to add(),
-and refuses it with a content_type, whose route never reads it.
+and refuses it wherever it would be dropped: with a content_type or a session_id, or
+while connected to a remote instance.
 """
 
 import importlib
@@ -90,8 +91,9 @@ async def test_remember_passes_the_branch_to_add_and_not_to_cognify():
 
 
 @pytest.mark.asyncio
-async def test_remember_refuses_a_branch_with_a_content_type(monkeypatch):
-    # The content_type="code" route clones without it, so it would be dropped silently.
+async def test_a_branch_that_would_be_dropped_is_refused(monkeypatch):
+    # content_type and session_id never reach add(), and a remote instance gets no branch
+    # field: each would ingest the default branch while the caller asked for another.
     monkeypatch.setattr(serve_state, "get_remote_client", lambda: None)
     monkeypatch.setattr(
         importlib.import_module("cognee.modules.migrations.startup"),
@@ -101,3 +103,14 @@ async def test_remember_refuses_a_branch_with_a_content_type(monkeypatch):
 
     with pytest.raises(ValueError, match="branch is supported only without content_type"):
         await remember_module.remember(_REPO, content_type="code", branch="dev")
+    with pytest.raises(ValueError, match="branch is not supported when session_id"):
+        await remember_module.remember(_REPO, session_id="s1", branch="dev")
+
+    client = Mock(add=AsyncMock(), remember=AsyncMock())
+    monkeypatch.setattr(serve_state, "get_remote_client", lambda: client)
+    with pytest.raises(ValueError, match="connected to a remote Cognee instance"):
+        await add_module.add(_REPO, branch="dev")
+    with pytest.raises(ValueError, match="connected to a remote Cognee instance"):
+        await remember_module.remember(_REPO, branch="dev")
+    client.add.assert_not_awaited()
+    client.remember.assert_not_awaited()
