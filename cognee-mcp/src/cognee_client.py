@@ -523,12 +523,16 @@ class CogneeClient:
             response.raise_for_status()
             return response.json()
         else:
-            # Direct mode: Call cognee directly
-            from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
+            # Direct mode: Call cognee directly, through the same lookup the
+            # status endpoint uses, so the deprecated code_graph_pipeline alias
+            # (and the cognify_pipeline default for an empty name) behave as
+            # in API mode.
+            from cognee.api.v1.datasets.datasets import datasets
 
             with redirect_stdout(sys.stderr):
-                status = await get_pipeline_status(dataset_ids, pipeline_name)
-                return status
+                return await datasets.get_status(
+                    dataset_ids, [pipeline_name] if pipeline_name else None
+                )
 
     async def list_datasets(self, *, timeout: float | None = None) -> list[dict[str, Any]]:
         """
@@ -840,7 +844,11 @@ class CogneeClient:
                 return None
             return max(minimum, deadline - asyncio.get_running_loop().time())
 
-        pipelines = ["add_pipeline", "cognify_pipeline", "code_graph_pipeline"]
+        # Not code_graph_pipeline: code repositories are built under
+        # cognify_pipeline, and the server answers that deprecated name with the
+        # same cognify run, so asking for both counts one build twice and
+        # classify_recall_state drops the "indexing N/M" tick.
+        pipelines = ["add_pipeline", "cognify_pipeline"]
         if self.use_api:
             hop = remaining()
             visible = await self.list_datasets(timeout=hop if hop is not None else 2.0)

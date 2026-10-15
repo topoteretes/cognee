@@ -22,6 +22,8 @@ from cognee.modules.graph.methods import (
 from cognee.modules.graph.methods.deleted_graph_elements import DeletedGraphElements
 from cognee.modules.ingestion import discover_directory_datasets
 from cognee.modules.operations import record_operation
+from cognee.modules.pipelines.methods import get_latest_pipeline_runs_by_datasets
+from cognee.modules.pipelines.models.PipelineRun import PipelineRunStatus
 from cognee.modules.pipelines.operations.get_pipeline_status import (
     get_pipeline_progress,
     get_pipeline_status,
@@ -34,6 +36,111 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger()
 
 
+# Deprecated status alias: code repositories are built under cognify_pipeline
+# now (before, they ran under this name), so only pre-upgrade runs and custom
+# pipelines still write runs under it. A status query for it reports the
+# dataset's latest code_graph_pipeline or cognify_pipeline run, preferring one
+# still in progress and otherwise the newer, so legacy pollers (e.g. cognee-mcp)
+# see a post-upgrade build finish even on a dataset whose last pre-upgrade build
+# left a code_graph_pipeline run.
+LEGACY_CODE_GRAPH_PIPELINE = "code_graph_pipeline"
+COGNIFY_PIPELINE = "cognify_pipeline"
+
+_UNFINISHED_RUN_STATUSES = frozenset(
+    {
+        PipelineRunStatus.DATASET_PROCESSING_STARTED,
+        PipelineRunStatus.DATASET_PROCESSING_INITIATED,
+    }
+)
+
+
+def _alias_run_rank(run) -> tuple[bool, object]:
+    """Sort key for the alias: an unfinished run beats a terminal one, then the newer wins."""
+    return (run.status in _UNFINISHED_RUN_STATUSES, run.created_at)
+
+
+async def _resolve_legacy_alias(dataset_ids: list[UUID]) -> dict[UUID, str]:
+    """Per dataset, the pipeline whose latest run answers a ``code_graph_pipeline``
+    status query: a run still in progress (STARTED/INITIATED) beats a terminal
+    one, then the newer by ``created_at`` wins; a full tie goes to
+    cognify_pipeline. Datasets with no run under either name are left out.
+    """
+    legacy_runs = await get_latest_pipeline_runs_by_datasets(
+        dataset_ids, LEGACY_CODE_GRAPH_PIPELINE
+    )
+    cognify_runs = await get_latest_pipeline_runs_by_datasets(dataset_ids, COGNIFY_PIPELINE)
+
+    resolved = {}
+    for dataset_id in dataset_ids:
+        legacy_run = legacy_runs.get(dataset_id)
+        cognify_run = cognify_runs.get(dataset_id)
+        if legacy_run is None and cognify_run is None:
+            continue
+        if cognify_run is None or (
+            legacy_run is not None and _alias_run_rank(legacy_run) > _alias_run_rank(cognify_run)
+        ):
+            resolved[dataset_id] = LEGACY_CODE_GRAPH_PIPELINE
+        else:
+            resolved[dataset_id] = COGNIFY_PIPELINE
+    return resolved
+
+
+_legacy_alias_warned = False
+
+
+def _warn_legacy_code_graph_alias() -> None:
+    """Warn once per process: pollers hit the alias every few seconds."""
+    global _legacy_alias_warned
+    if _legacy_alias_warned:
+        return
+    _legacy_alias_warned = True
+    logger.warning(
+        "Pipeline status for '%s' is deprecated: code repositories are built under"
+        " cognify_pipeline, so '%s' reports its own or cognify_pipeline's latest run"
+        " (an in-progress run first, else the newer). Query cognify_pipeline instead."
+        " Logged once per process.",
+        LEGACY_CODE_GRAPH_PIPELINE,
+        LEGACY_CODE_GRAPH_PIPELINE,
+    )
+
+
+async def _fetch_with_legacy_fallback(fetch, dataset_ids: list[UUID], pipeline_name: str):
+    if pipeline_name != LEGACY_CODE_GRAPH_PIPELINE:
+        return await fetch(dataset_ids, pipeline_name=pipeline_name)
+
+    _warn_legacy_code_graph_alias()
+    resolved = await _resolve_legacy_alias(dataset_ids)
+    statuses = {}
+    for resolved_name in (LEGACY_CODE_GRAPH_PIPELINE, COGNIFY_PIPELINE):
+        group = [dataset_id for dataset_id, name in resolved.items() if name == resolved_name]
+        if group:
+            statuses.update(await fetch(group, pipeline_name=resolved_name))
+    return statuses
+
+
+async def get_processing_status_with_legacy_alias(dataset_id: UUID, pipeline_name: str) -> dict:
+    """get_dataset_processing_status, honouring the ``code_graph_pipeline`` alias.
+
+    Items built before the upgrade carry only the ``code_graph_pipeline`` stamp
+    and items built after it only the ``cognify_pipeline`` one, so for the alias
+    an item counts as completed when either stamp is. The dataset's rows are
+    read once.
+    """
+    from cognee.modules.data import methods as data_methods
+
+    if pipeline_name != LEGACY_CODE_GRAPH_PIPELINE:
+        return await data_methods.get_dataset_processing_status(
+            dataset_id, pipeline_name=pipeline_name
+        )
+
+    _warn_legacy_code_graph_alias()
+    return await data_methods.get_dataset_processing_status(
+        dataset_id,
+        pipeline_name=COGNIFY_PIPELINE,
+        also_completed_by=(LEGACY_CODE_GRAPH_PIPELINE,),
+    )
+
+
 async def _fan_out_by_pipeline(dataset_ids: list[UUID], pipeline_names: list[str] | None, fetch):
     """Shared flat/nested shaping for get_status and get_progress.
 
@@ -44,19 +151,19 @@ async def _fan_out_by_pipeline(dataset_ids: list[UUID], pipeline_names: list[str
     """
     # Backward-compatible default: cognify-only flat map.
     if not pipeline_names:
-        return await fetch(dataset_ids, pipeline_name="cognify_pipeline")
+        return await fetch(dataset_ids, pipeline_name=COGNIFY_PIPELINE)
 
     # Preserve order while removing duplicates.
     requested_pipelines = list(dict.fromkeys(pipeline_names))
 
     # For one pipeline, keep flat shape.
     if len(requested_pipelines) == 1:
-        return await fetch(dataset_ids, pipeline_name=requested_pipelines[0])
+        return await _fetch_with_legacy_fallback(fetch, dataset_ids, requested_pipelines[0])
 
     # For multiple pipelines, return nested shape.
     statuses_by_dataset = {str(dataset_id): {} for dataset_id in dataset_ids}
     for pipeline_name in requested_pipelines:
-        pipeline_status = await fetch(dataset_ids, pipeline_name=pipeline_name)
+        pipeline_status = await _fetch_with_legacy_fallback(fetch, dataset_ids, pipeline_name)
         for dataset_id, status in pipeline_status.items():
             statuses_by_dataset.setdefault(dataset_id, {})[pipeline_name] = status
 
