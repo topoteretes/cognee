@@ -369,6 +369,40 @@ def _add_client_route_edges(
     return skipped
 
 
+# Fact kinds a framework extractor derives from a declaration and names after
+# it: an ORM model's storage (Eloquent, JPA, ActiveRecord) and a relation
+# method's association. code_retriever resolves names the same way.
+_DECLARATION_VIEW_KINDS = frozenset({"storage", "association"})
+
+
+def _without_declaration_views(
+    candidates: set[tuple[str, str, str]],
+    fact_index: dict[tuple[str, str, str], dict],
+) -> set[tuple[str, str, str]]:
+    """Name candidates minus the views of a symbol that is itself a candidate.
+
+    A view is a storage or association fact carrying the symbol's own name,
+    repo and file. Anything else sharing the name (a fact from another file or
+    repo, a second same-named symbol) stays a rival candidate. When one repo
+    declares the symbol name in several files, the file compared is that of the
+    first such fact, the one its node keeps.
+    """
+
+    def _is_view(candidate: tuple[str, str, str]) -> bool:
+        repo, kind, name = candidate
+        symbol = (repo, "symbol", name)
+        if kind not in _DECLARATION_VIEW_KINDS or symbol not in candidates:
+            return False
+        symbol_file = fact_index[symbol].get("file")
+        return (
+            isinstance(symbol_file, str)
+            and symbol_file != ""
+            and fact_index[candidate].get("file") == symbol_file
+        )
+
+    return {candidate for candidate in candidates if not _is_view(candidate)}
+
+
 def build_code_graph_edges(
     facts: list[dict],
     repo_path: str | Path | None = None,
@@ -379,7 +413,9 @@ def build_code_graph_edges(
     to that fact directly — it is enola's own unambiguous answer. Otherwise
     the target is matched by fact name within the same snapshot; on ambiguity
     same-repo targets are preferred, then the relation is skipped rather than
-    bound to an arbitrary fact. repo_path must be the same value given to
+    bound to an arbitrary fact. A storage or association fact sharing a
+    symbol's name, repo and file is a view of that symbol, not a rival: the
+    name means the symbol. repo_path must be the same value given to
     map_facts_to_data_points so that edge endpoint ids match the node ids.
     Returns (edges, skipped_count).
     """
@@ -435,6 +471,12 @@ def build_code_graph_edges(
             candidates = set(short_name_index.get(target_name, ()))
         if allowed_repos is not None:
             candidates = {candidate for candidate in candidates if candidate[0] in allowed_repos}
+        # A framework extractor may describe one declaration twice under one
+        # name: the class or method as a ``symbol`` and what it stands for (an
+        # ORM model as ``storage``, a relation method as ``association``). The
+        # writer then withholds ``target_id`` (two identities), but the two are
+        # not rival targets: a reference to the name means the declaration.
+        candidates = _without_declaration_views(candidates, fact_index)
         same_repo = {candidate for candidate in candidates if candidate[0] == source_repo}
         if len(same_repo) == 1:
             return next(iter(same_repo))

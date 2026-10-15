@@ -83,6 +83,10 @@ _FLOW_TYPE = "CodeFlow"
 _FACT_TYPE_BY_KIND = {
     kind: node_type for kind, node_type in _TYPE_BY_KIND.items() if node_type != _FLOW_TYPE
 }
+# The facts a framework extractor derives from a declaration and names after it
+# (an ORM model's storage, a relation method's association), as node types;
+# extract_code_graph._DECLARATION_VIEW_KINDS holds the same kinds.
+_DECLARATION_VIEW_TYPES = frozenset({_TYPE_BY_KIND["storage"], _TYPE_BY_KIND["association"]})
 _OPERATIONS = {
     "query_facts",
     "explore",
@@ -551,6 +555,7 @@ class _CodeGraphSnapshot:
             for key, value in self.properties_of(node).items():
                 self._index_property(node_id, key, value)
 
+        self.declaration_of = self._index_declarations()
         self.documented = {node_id for node_id, node in self.nodes.items() if self.doc_of(node)}
         # Test code (see _is_test_path), judged once per file: search, ask and
         # hubs leave it out unless include_tests is set.
@@ -561,6 +566,29 @@ class _CodeGraphSnapshot:
         self._index_flows(flow_edges)
         self._text_index: _CodeTextIndex | None = None
         self._text_index_lock = Lock()
+
+    def _index_declarations(self) -> dict[str, str]:
+        """Storage and association node ids -> the CodeSymbol each was derived from.
+
+        A framework extractor names such a view after its declaration (an ORM
+        model, a relation method) and places it in the same file. A view whose
+        name, repo and file match no single symbol maps to nothing.
+        """
+        declarations = {}
+        for node_type in _DECLARATION_VIEW_TYPES:
+            for view_id in self.by_type.get(node_type, ()):
+                view = self.nodes[view_id]
+                file_path = self.file_of(view)
+                symbols = [
+                    node_id
+                    for node_id in self.by_name.get(str(view.get("name", "")), ())
+                    if self.nodes[node_id].get("type") == "CodeSymbol"
+                    and self.nodes[node_id].get("repo") == view.get("repo")
+                    and self.file_of(self.nodes[node_id]) == file_path
+                ]
+                if file_path and len(symbols) == 1:
+                    declarations[view_id] = symbols[0]
+        return declarations
 
     def _index_property(self, node_id: str, name: str, value: Any) -> None:
         self.by_property[name][_scalar_text(value)].add(node_id)
@@ -810,6 +838,13 @@ class _CodeGraphSnapshot:
                 f"CODE could not resolve {role} name {term!r}.", param="name"
             )
         if len(best) > 1:
+            # One declaration seen twice (a class or method symbol plus the
+            # storage or association view a framework extractor names after
+            # it) is one candidate: the symbol.
+            matched = set(best)
+            rivals = [item for item in best if self.declaration_of.get(item) not in matched]
+            if len(rivals) == 1:
+                return rivals[0]
             choices = ", ".join(
                 f"{self.nodes[item].get('name')} [{self.nodes[item].get('type')}, "
                 f"repo={self.nodes[item].get('repo') or '-'}, id={item}]"
@@ -2213,7 +2248,7 @@ class CodeRetriever(BaseRetriever):
         index = graph.text_index()
         matches = index.bm25.search(terms)
         lowered = text.strip().casefold()
-        ranked = []
+        hits = []
         for key in set(matches).union(index.name_forms.get(lowered, ())):
             entity = graph.entity(key)
             if kinds is not None and entity.get("type") not in kinds:
@@ -2224,11 +2259,18 @@ class CodeRetriever(BaseRetriever):
                 continue
             if not include_tests and graph.is_test(key):
                 continue
+            hits.append((key, entity))
+        # A storage or association view named after its declaration leaves the
+        # name bonus to that declaration when both are hits: the name means
+        # the declaration (see _CodeGraphSnapshot.declaration_of).
+        hit_set = {key for key, _entity in hits}
+        ranked = []
+        for key, entity in hits:
             match = matches.get(key)
             score = match.score if match else 0.0
             fields = match.fields if match else ()
             tier = _match_tier(str(entity.get("name") or ""), lowered)
-            if tier in _EXACT_NAME_BONUS:
+            if tier in _EXACT_NAME_BONUS and graph.declaration_of.get(key) not in hit_set:
                 score += _EXACT_NAME_BONUS[tier]
                 if "name" not in fields:
                     fields = ("name", *fields)
