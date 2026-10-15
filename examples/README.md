@@ -20,7 +20,7 @@ They double as the smoke-test corpus the team uses to verify behaviour across th
 
 | Folder | What lives there | Count |
 |---|---|---|
-| [`guides/`](guides/) | One feature per script: concise, self-contained how-tos | 38 |
+| [`guides/`](guides/) | One feature per script: concise, self-contained how-tos | 42 |
 | [`advanced_guides/`](advanced_guides/) | Deeper takes on topics a guide already covers | 8 |
 | [`demos/`](demos/) | Multiple features stitched into use cases, grouped by topic | 28 |
 | [`cookbooks/`](cookbooks/) | Applications you build and keep running: ingest, graph model, UI, live sync, an agent | 5 |
@@ -45,6 +45,7 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 |---|---|
 | [`review_conflicts.py`](guides/review_conflicts.py) | Review dated source facts, print stored conflicts and fact status marks |
 | [`sessions.py`](guides/sessions.py) | Session-scoped memory via `session_id` |
+| [`session_node_sets.py`](guides/session_node_sets.py) | Per-project session memory: pin a `node_set` on a session, bridge it with `improve()`, recall with `node_name` |
 | [`session_distillation.py`](guides/session_distillation.py) | Distilling a session into durable preferences |
 | [`global_context_index.py`](guides/global_context_index.py) | Building the index with `improve(build_global_context_index=True)` and updating it incrementally |
 | [`global_context_index_recall.py`](guides/global_context_index_recall.py) | What `include_global_context_index` adds to `GRAPH_COMPLETION` retrieval |
@@ -111,8 +112,7 @@ Each script names the simpler guide it builds on and states what it adds.
 | [`conversation_session_persistence_example.py`](advanced_guides/conversation_session_persistence_example.py) | `guides/sessions.py` | Recalls across two sessions, then persists both into the graph |
 | [`session_distillation_demo.py`](advanced_guides/session_distillation_demo.py) | `guides/session_distillation.py` | Eight-message session, hybrid recall, post-distillation verification |
 | [`global_context_index_smoke_demo.py`](advanced_guides/global_context_index_smoke_demo.py) | `guides/global_context_index.py` + `guides/global_context_index_recall.py` | 12-turn fixture, three-question sweep, pass/fail verdict |
-| [`temporal_awareness_example/`](advanced_guides/temporal_awareness_example/) | `guides/temporal_recall.py` | Real biography documents instead of inline text |
-| [`temporal_awareness_example/temporal_hybrid_demo.py`](advanced_guides/temporal_awareness_example/temporal_hybrid_demo.py) | `guides/temporal_recall.py` | Custom timestamp promotion task and direct temporal hybrid retrieval |
+| [`temporal_awareness_example/`](advanced_guides/temporal_awareness_example/) | `guides/temporal_recall.py` | Bundled real documents, the extracted Timestamp nodes, and TEMPORAL vs hybrid answers side by side |
 | [`ontology_reference_vocabulary/`](advanced_guides/ontology_reference_vocabulary/) | `guides/ontology_quickstart.py` | Bundled OWL + texts as a constraining vocabulary |
 | [`simple_document_qa/`](advanced_guides/simple_document_qa/) | `guides/simple_cognee_example.py` | Q&A over a real 150 KB document |
 | [`truth_centroid_slots_demo.py`](advanced_guides/truth_centroid_slots_demo.py) | `guides/truth_subspace_reranking.py` | Centroid slots, epochs, and rebuilds behind truth-subspace reranking |
@@ -143,7 +143,7 @@ Every demo lives in a topic folder.
 ### [`comprehensive_example/`](demos/comprehensive_example/) — everything at once
 | Script | Demonstrates |
 |---|---|
-| [`cognee_comprehensive_example.py`](demos/comprehensive_example/cognee_comprehensive_example.py) | Three sources, node sets, ontology, memify, filtered recall — stitched together |
+| [`cognee_comprehensive_example.py`](demos/comprehensive_example/cognee_comprehensive_example.py) | Three sources, node sets, ontology, filtered recall — stitched together |
 
 ### [`agentic/`](demos/agentic/) — agents reasoning over memory
 | Script | Demonstrates |
@@ -184,7 +184,6 @@ Every demo lives in a topic folder.
 |---|---|
 | [`custom_cognify_pipeline_example.py`](demos/custom_pipelines/custom_cognify_pipeline_example.py) | Replacing the default `cognify` task list |
 | [`custom_pipeline_single_object_example.py`](demos/custom_pipelines/custom_pipeline_single_object_example.py) | Deferred-call pipeline pattern with typed `DataPoint`s |
-| [`memify_coding_agent_rule_extraction_example.py`](demos/custom_pipelines/memify_coding_agent_rule_extraction_example.py) | Distilling coding-agent traces into reusable rules |
 | [`relational_database_to_knowledge_graph_migration_example.py`](demos/custom_pipelines/relational_database_to_knowledge_graph_migration_example.py) | Migration config + tuned recalls |
 | [`dynamic_steps_resume_analysis_hr_example.py`](demos/custom_pipelines/dynamic_steps_resume_analysis_hr_example.py) | Self-coded run stages toggled per run, over a CV corpus |
 | [`organizational_hierarchy/`](demos/custom_pipelines/organizational_hierarchy/) | Org-chart ingestion — high-level and low-level variants |

@@ -30,6 +30,7 @@ from cognee.modules.observability import (
 from cognee.modules.operations import record_operation
 from cognee.modules.search.methods import search as search_function
 from cognee.modules.search.types import SearchResult, SearchType
+from cognee.modules.search.types.SearchType import resolve_deprecated_search_type
 from cognee.modules.users.exceptions.exceptions import UserNotFoundError
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
@@ -122,6 +123,8 @@ async def search(
             Direct graph database queries using Cypher syntax.
             Best for: Advanced users, specific graph traversals, debugging.
             Returns: Raw graph query results.
+            Disabled by default; set ALLOW_CYPHER_QUERY=true to enable it
+            (also covers NATURAL_LANGUAGE).
 
         **FEELING_LUCKY**:
             Intelligently selects and runs the most appropriate search type.
@@ -234,6 +237,7 @@ async def search(
         - GRAPH_DATABASE_PROVIDER: Must match what was used during cognify
 
     """
+    query_type = resolve_deprecated_search_type(query_type)
     if neighborhood_depth is not None and (
         not isinstance(neighborhood_depth, int) or neighborhood_depth < 1
     ):
