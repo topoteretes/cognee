@@ -23,6 +23,7 @@ from cognee.modules.graph.utils import (
 from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.modules.provenance.edge_evidence.capture import capture_graph_provenance
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.provenance.record_provenance import record_provenance_at_storage
 from cognee.tasks.storage.exceptions import (
     InvalidDataPointsInAddDataPointsError,
 )
@@ -418,6 +419,11 @@ async def add_data_points(
     # rebuilds nodes as stripped copies, and the chunks a cognify batch carries are
     # nested under its TextSummary objects — capture walks the object graph itself.
     await capture_graph_provenance(data_points, edges, ctx)
+
+    # Audit ledger (PROVENANCE_TRACKING): recorded here, at the one seam every
+    # DataPoint batch crosses, so improve(), code graph, skills and custom
+    # pipelines are covered the same as cognify. Non-fatal, no-op when off.
+    await record_provenance_at_storage(data_points, ctx)
 
     return data_points
 

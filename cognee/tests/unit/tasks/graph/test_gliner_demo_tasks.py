@@ -773,7 +773,7 @@ async def test_get_gliner_demo_tasks_shape():
 
 
 @pytest.mark.asyncio
-async def test_get_gliner_demo_tasks_appends_provenance_after_storage():
+async def test_get_gliner_demo_tasks_ledger_is_never_a_task():
     with patch.object(tasks_module, "require_gliner2"):
         tasks = await get_gliner_demo_tasks(
             ["person"],
@@ -781,10 +781,10 @@ async def test_get_gliner_demo_tasks_appends_provenance_after_storage():
             chunk_size=512,
         )
 
-    assert [task.executable.__name__ for task in tasks][-2:] == [
-        "add_data_points",
-        "record_provenance",
-    ]
+    names = [task.executable.__name__ for task in tasks]
+    assert names[-1] == "add_data_points"
+    # The ledger is written by add_data_points itself, never as a task.
+    assert "record_provenance" not in names
 
 
 @pytest.mark.asyncio
