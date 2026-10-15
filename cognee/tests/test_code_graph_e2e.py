@@ -380,10 +380,6 @@ async def main():
     # Enola output must not depend on a previous run's snapshot.
     scratch_root = tempfile.mkdtemp(prefix="cognee_code_graph_e2e_")
 
-    # No LLM key in CI: the documented switch keeps the run independent of provider
-    # configuration (no GLiNER install, no provider probes).
-    os.environ["COGNEE_SKIP_CONNECTION_TEST"] = "true"
-
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
@@ -558,6 +554,11 @@ async def main():
         _assert_typed_code_graph(nodes, edges, repo_name=good_repo_path.name)
 
         # --- 4. add(<project dir>) + cognify(): the CODE_REPO route -----------
+        # The remember() steps above ran with no switch at all, proving a
+        # keyless code-only remember() needs neither the GLiNER runtime nor a
+        # provider probe (SDK-795). From here on the documented switch keeps
+        # the remaining steps independent of provider configuration.
+        os.environ["COGNEE_SKIP_CONNECTION_TEST"] = "true"
         cognify_repo_path = _copy_fixture(os.path.join(scratch_root, "cognify"))
         await cognee.add(str(cognify_repo_path), dataset_name=COGNIFY_DATASET)
 
