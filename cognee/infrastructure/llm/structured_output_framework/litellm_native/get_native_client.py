@@ -7,6 +7,7 @@ adapter serves every provider — and construction is pure attribute assignment
 active (possibly per-request) config and builds a fresh adapter.
 """
 
+from collections.abc import Callable
 from functools import lru_cache
 
 from cognee.infrastructure.llm.config import get_llm_context_config
@@ -69,6 +70,33 @@ def _qualify_model(model: str, provider: str) -> str:
         return f"{prefix}/{model}" if prefix else model
 
 
+# The token audience of Azure OpenAI (Azure AI Services), as in the instructor
+# AzureOpenAIAdapter.
+_AZURE_COGNITIVE_SERVICES_SCOPE = "https://cognitiveservices.azure.com/.default"
+
+
+@lru_cache(maxsize=1)
+def _azure_ad_token_provider() -> Callable[[], str]:
+    """The process-wide Entra ID token provider for Azure managed identity.
+
+    Built once: the provider caches its token and refreshes it before expiry, and
+    get_native_client builds a fresh adapter per call, so a provider per adapter
+    would fetch a new token from the identity endpoint for every LLM request.
+    """
+    try:
+        from azure.identity import (  # ty:ignore[unresolved-import]
+            DefaultAzureCredential,
+            get_bearer_token_provider,
+        )
+    except ImportError as error:
+        raise ImportError(
+            "azure-identity is required for Azure managed identity authentication. "
+            'Install it with: pip install "cognee[azure]"'
+        ) from error
+
+    return get_bearer_token_provider(DefaultAzureCredential(), _AZURE_COGNITIVE_SERVICES_SCOPE)
+
+
 def get_native_client(raise_api_key_error: bool = True) -> NativeLiteLLMAdapter:
     """Build a ``NativeLiteLLMAdapter`` from the active LLM configuration.
 
@@ -83,11 +111,19 @@ def get_native_client(raise_api_key_error: bool = True) -> NativeLiteLLMAdapter:
     # Provider-aware key requirement (Azure may authenticate via managed identity).
     api_key = llm_config.llm_api_key
     provider = (llm_config.llm_provider or "").lower()
-    requires_api_key = provider not in _NO_API_KEY_PROVIDERS and not (
-        provider == "azure" and llm_config.llm_azure_use_managed_identity
-    )
+    use_managed_identity = provider == "azure" and llm_config.llm_azure_use_managed_identity
+    requires_api_key = provider not in _NO_API_KEY_PROVIDERS and not use_managed_identity
     if raise_api_key_error and requires_api_key and (api_key is None or api_key.strip() == ""):
         raise LLMAPIKeyNotSetError()
+
+    azure_ad_token_provider = None
+    if use_managed_identity:
+        if not llm_config.llm_endpoint:
+            raise ValueError(
+                "LLM_ENDPOINT must be set to your Azure OpenAI endpoint "
+                "(e.g. https://YOUR-RESOURCE.openai.azure.com) when using Azure managed identity."
+            )
+        azure_ad_token_provider = _azure_ad_token_provider()
 
     # Cap generation at the model's ceiling when LiteLLM knows it, else the user's
     # configured limit — same computation as get_llm_client.
@@ -98,7 +134,8 @@ def get_native_client(raise_api_key_error: bool = True) -> NativeLiteLLMAdapter:
     max_completion_tokens = min(model_max, user_max) if model_max is not None else user_max
 
     return NativeLiteLLMAdapter(
-        api_key=api_key or "",
+        # Under managed identity the token is the credential; no key goes alongside it.
+        api_key=None if use_managed_identity else api_key or "",
         model=_qualify_model(llm_config.llm_model, provider),
         max_completion_tokens=max_completion_tokens,
         endpoint=llm_config.llm_endpoint or None,
@@ -109,4 +146,5 @@ def get_native_client(raise_api_key_error: bool = True) -> NativeLiteLLMAdapter:
         llm_args=llm_config.llm_args or None,
         transcription_model=_qualify_model(llm_config.transcription_model, provider),
         image_transcribe_model=_qualify_model(llm_config.image_transcribe_model, provider) or None,
+        azure_ad_token_provider=azure_ad_token_provider,
     )
