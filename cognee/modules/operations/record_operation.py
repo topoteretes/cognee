@@ -183,6 +183,7 @@ async def _write_operation_row(
         error_message=error_message,
         tokens_in=context.usage.tokens_in,
         tokens_out=context.usage.tokens_out,
+        embedding_tokens=context.usage.embedding_tokens,
         origin=get_operation_origin(),
         session_id=context.session_id,
         parent_operation_id=context.parent_operation_id,
