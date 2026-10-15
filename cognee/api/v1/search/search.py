@@ -123,6 +123,8 @@ async def search(
             Direct graph database queries using Cypher syntax.
             Best for: Advanced users, specific graph traversals, debugging.
             Returns: Raw graph query results.
+            Disabled by default; set ALLOW_CYPHER_QUERY=true to enable it
+            (also covers NATURAL_LANGUAGE).
 
         **FEELING_LUCKY**:
             Intelligently selects and runs the most appropriate search type.

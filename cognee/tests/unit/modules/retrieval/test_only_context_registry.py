@@ -64,7 +64,8 @@ def test_every_search_type_has_a_pinned_only_context_contract():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("search_type", CONSTRUCTIBLE, ids=lambda s: s.name)
-async def test_registered_retriever_matches_the_pinned_contract(search_type):
+async def test_registered_retriever_matches_the_pinned_contract(search_type, monkeypatch):
+    monkeypatch.setenv("ALLOW_CYPHER_QUERY", "true")
     retriever = await get_search_type_retriever_instance(
         search_type,
         query_text="q",
