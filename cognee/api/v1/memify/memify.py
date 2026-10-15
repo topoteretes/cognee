@@ -22,7 +22,9 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("memify")
 
 MEMIFY_DEPRECATION_MESSAGE = (
-    "cognee.memify() is deprecated and will be removed in the next release. "
+    "cognee.memify() is deprecated and will be removed in the next release: "
+    "cognee 1.6.4 was the last release in which memify() ran its default tasks "
+    "(triplet embeddings); since then, a call without tasks runs nothing. "
     "Use cognee.improve() to enrich a dataset, or cognee.run_custom_pipeline() "
     "to run your own tasks."
 )
