@@ -129,6 +129,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+answer-evaluations = ["duckdb>=1.5.0,<2"]
 api=[]
 
 scraping = [
