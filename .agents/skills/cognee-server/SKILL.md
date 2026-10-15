@@ -46,7 +46,7 @@ auth off you must set `ENABLE_BACKEND_ACCESS_CONTROL=false`.
 - **HTTP**: main routes live under `/api/v1/` — the memory API is `remember`
   (plus `remember/entry`), `recall`, `improve`, `forget`; `sessions` covers
   session memory; `datasets`, `users`, `visualize` handle the rest. The legacy
-  `add`, `cognify`, `search`, `memify`, and `delete` routes still exist and are
+  `add`, `cognify`, `search`, and `delete` routes still exist and are
   what the memory routes call underneath (see `cognee/api/client.py` for the
   registered routers, or `GET /openapi.json` on a running server).
 

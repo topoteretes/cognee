@@ -106,6 +106,7 @@ class RememberKwargs(TypedDict, total=False):
     skill_improvement: dict[str, Any]
     index_vectors: bool
     repo_credentials: str
+    branch: str
     skills_text: str
     skill_name: str
     # DLT options: grouped in dlt_config (preferred), or the four bare spellings
@@ -147,10 +148,11 @@ _ADD_ONLY = frozenset(
         "write_disposition",
         "query",
         "max_rows_per_table",
+        "branch",
     }
 )
 _COGNIFY_ONLY = frozenset(
-    {"graph_model", "extractor", "summary_method", "chunks_per_batch", "config", "temporal_cognify"}
+    {"graph_model", "extractor", "summary_method", "chunks_per_batch", "config"}
 )
 _SHARED = frozenset(
     {
@@ -272,16 +274,27 @@ def _data_to_text(data) -> str:
 _SESSION_PLACEHOLDER_PREFIXES = ("[UploadFile]", "[file:", "[BinaryIO", "[SpooledTemporaryFile")
 
 
-async def _add_to_session(session_id: str, data, user):
+async def _add_to_session(session_id: str, data, user, node_set: list[str] | None = None):
     """Add a Q&A entry to the session cache.
 
     Sessions store chat-shaped content (prompts, assistant answers,
     Q&A turns). File-upload data coerces to placeholder strings like
     ``[UploadFile]`` / ``[file: name]`` — those are useless in the
     session cache and pollute recall results, so they're skipped.
+
+    ``node_set`` is the call-level ``remember(..., node_set=[...])``: it pins the
+    session's node set before the entry is written, exactly as the field on a
+    typed entry does, and raises ``SessionNodeSetConflictError`` when the
+    session already carries a different set. It is validated first, by the same
+    rule as the field, so an invalid value fails even when nothing is written.
     """
     from cognee.infrastructure.session.get_session_manager import get_session_manager
+    from cognee.infrastructure.session.session_node_set import (
+        normalize_node_set,
+        pin_session_node_set,
+    )
 
+    node_set = normalize_node_set(node_set)
     sm = get_session_manager()
     if not sm.is_available:
         logger.warning("remember: session cache not available (enable CACHING=true)")
@@ -306,6 +319,9 @@ async def _add_to_session(session_id: str, data, user):
         )
         return
 
+    if node_set:
+        await pin_session_node_set(sm, user_id, session_id, node_set)
+
     await sm.add_qa(
         user_id=user_id,
         session_id=session_id,
@@ -314,6 +330,36 @@ async def _add_to_session(session_id: str, data, user):
         answer=text,
     )
     logger.info("remember: added entry to session '%s'", session_id)
+
+
+def _entry_with_node_set(entry: "MemoryEntry", node_set) -> "MemoryEntry":
+    """Apply the call-level ``node_set`` kwarg to a typed entry.
+
+    The field on the entry and the kwarg are two spellings of one thing, and
+    both go through ``normalize_node_set``: the kwarg fills an empty field,
+    agrees with an equal one, and is an error against a different one or on an
+    entry type that cannot carry a node set. An empty kwarg means "no node set"
+    and changes nothing. The filled entry is rebuilt through validation, never
+    copied around it, so the field's rule always runs.
+    """
+    from cognee.infrastructure.session.session_node_set import normalize_node_set
+
+    requested = normalize_node_set(node_set)
+    if not requested:
+        return entry
+    if not isinstance(entry, (QAEntry, TraceEntry)):
+        raise TypeError(
+            f"node_set is not supported for {type(entry).__name__}; only QAEntry and "
+            "TraceEntry carry a session node_set"
+        )
+    if not entry.node_set:
+        return type(entry).model_validate({**entry.model_dump(), "node_set": requested})
+    if entry.node_set != requested:
+        raise ValueError(
+            f"node_set given twice with different values: entry.node_set={entry.node_set}, "
+            f"node_set={requested}; pass one of them"
+        )
+    return entry
 
 
 async def _rearm_session_improve_debounce(session_id: str, user) -> None:
@@ -529,6 +575,14 @@ async def _dispatch_session_entry(
     row = await get_session_row(session_id=session_id, user_id=user.id)
     if row is None or row.dataset_id != dataset.id:
         raise ValueError("Session is already bound to another dataset or cannot be bound")
+
+    if isinstance(entry, (QAEntry, TraceEntry)) and entry.node_set:
+        from cognee.infrastructure.session.session_node_set import pin_session_node_set
+
+        # Pins the session's node_set before anything is written, or raises
+        # SessionNodeSetConflictError (HTTP 409) when the session already carries a
+        # different set.
+        await pin_session_node_set(sm, user_id, session_id, entry.node_set)
 
     result = RememberResult(
         status="session_stored",
@@ -934,8 +988,7 @@ async def remember(
         custom_prompt: Custom prompt for entity extraction.
         run_in_background: If *True*, run as a background task.
         self_improvement: If *True* (default), automatically runs
-            ``improve()`` after cognify to enrich the graph with
-            triplet embeddings and indexing. The outcome lands on
+            ``improve()`` after cognify to enrich the graph. The outcome lands on
             ``RememberResult.improve`` / ``.improve_error``; a failed
             improve never marks the remember itself as errored.
             ``IMPROVE_AUTO_ENABLED=false`` overrides this to off, and a
@@ -990,7 +1043,8 @@ async def remember(
         skill_improvement: Internal skill-improvement control dict used with
             ``SkillRunEntry`` or ``content_type="skills"``. ``apply=True``
             requires an existing ``proposal_id``.
-        **kwargs: Additional options -- see ``RememberKwargs``.
+        **kwargs: Additional options -- see ``RememberKwargs``. ``branch`` (without
+            ``content_type``) clones that branch of a repository URL; see ``add()``.
 
     Returns:
         RememberResult or DryRunEstimate: A promise-like object for normal
@@ -1014,7 +1068,10 @@ async def remember(
         result.raw_result    # {dataset_id: PipelineRunInfo}
     """
     from cognee import __version__ as cognee_version
+    from cognee.api.v1.cognify.cognify import drop_deprecated_temporal_cognify
     from cognee.shared.utils import send_telemetry
+
+    drop_deprecated_temporal_cognify(kwargs)
 
     # Migration dispatch: a MemorySource streams COGX records from an external
     # memory system (Mem0, Zep/Graphiti, Letta, a COGX archive, ...). The
@@ -1082,6 +1139,8 @@ async def remember(
     if isinstance(data, MEMORY_ENTRY_TYPES):
         if dry_run:
             raise ValueError("dry_run is supported for add+cognify remember inputs only.")
+        if kwargs.get("node_set") is not None:
+            data = _entry_with_node_set(data, kwargs["node_set"])
         return await _remember_entry(
             data,
             dataset_name=dataset_name,
@@ -1271,6 +1330,9 @@ async def remember(
         raise ValueError("extractor is not supported when session_id is provided.")
     if session_id is not None and kwargs.get("summary_method") is not None:
         raise ValueError("summary_method is not supported when session_id is provided.")
+    if session_id is not None and kwargs.get("branch") is not None:
+        # The session path never calls add(), so the branch would be dropped silently.
+        raise ValueError("branch is not supported when session_id is provided.")
 
     data_size = _estimate_data_size(data)
     item_count = len(data) if isinstance(data, list) else 1
@@ -1392,6 +1454,12 @@ async def _remember_inner(
                 "summary_method is not supported while connected to a remote Cognee "
                 "instance. Call cognee.disconnect() to choose the summary method locally."
             )
+        if kwargs.get("branch") is not None:
+            # Same as extractor: client.remember() would drop it.
+            raise ValueError(
+                "branch is not supported while connected to a remote Cognee instance. "
+                "Call cognee.disconnect() to clone the branch locally."
+            )
         if session_ids:
             # Same discipline as extractor: POST /remember carries no
             # session_ids field, so forwarding would silently drop them.
@@ -1484,6 +1552,12 @@ async def _remember_inner(
         raise ValueError("index_vectors is supported only for content_type='code'.")
     if repo_credentials is not None and content_type != "code":
         raise ValueError("repo_credentials is supported only for content_type='code'.")
+    if kwargs.get("branch") is not None and content_type is not None:
+        # Only the add() route reads it, so a content_type call would drop it silently.
+        raise ValueError(
+            "branch is supported only without content_type: pass the repository URL "
+            "to remember() directly."
+        )
     if content_type == "code" and session_id is not None:
         raise ValueError(
             "session_id is not applicable to content_type='code'; code graphs are "
@@ -1883,7 +1957,7 @@ async def _remember_inner(
         # Session memory: store in session cache, then optionally bridge to graph
         if session_id:
             operation_context.set_session_id(session_id)
-            await _add_to_session(session_id, data, user)
+            await _add_to_session(session_id, data, user, node_set=add_kwargs.get("node_set"))
             result = RememberResult(
                 status="session_stored",
                 dataset_name=dataset_name,

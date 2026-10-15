@@ -28,12 +28,16 @@ from cognee.infrastructure.databases.exceptions import (
     EmbeddingContextWindowTooSmallError,
     EmbeddingException,
 )
-from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
+    EmbeddingEngine,
+    EmbeddingResult,
+)
 from cognee.infrastructure.databases.vector.embeddings.input_limit import (
     init_input_limit,
     sane_limit,
 )
 from cognee.infrastructure.databases.vector.embeddings.utils import (
+    count_input_tokens,
     handle_embedding_response,
     sanitize_embedding_text_inputs,
 )
@@ -213,9 +217,9 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    async def embed_text(self, text: list[str]) -> list[list[float]]:
+    async def embed_text(self, text: list[str]) -> EmbeddingResult:
         """
-        Embed the given text into numerical vectors.
+        Embed the given text into numerical vectors; returns them and the input-token count.
 
         This method generates embeddings for a list of text strings. If mocking is enabled, it
         returns zero vectors instead. It handles exceptions by logging the error and raising an
@@ -229,8 +233,8 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
         Returns:
         --------
 
-            - List[List[float]]: A list of embeddings, where each embedding is a list of floats
-              representing the vector form of the input text.
+            - EmbeddingResult: A vector per input text and the input tokens, counted with
+              the model's own tokenizer.
         """
         original_texts = text if isinstance(text, list) else [text]
         sanitized_text = sanitize_embedding_text_inputs(original_texts)
@@ -273,7 +277,11 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
                 f"Failed to index data points using model {self.model}"
             ) from error
 
-        return handle_embedding_response(original_texts, embeddings, self.dimensions)
+        return EmbeddingResult(
+            vectors=handle_embedding_response(original_texts, embeddings, self.dimensions),
+            # A mock embeds nothing; fastembed itself reports no usage.
+            tokens=0 if self.mock else count_input_tokens(None, sanitized_text, self.tokenizer),
+        )
 
     input_limit_source = "fastembed model tokenizer"
 
@@ -307,19 +315,22 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
             logger.debug("Could not check input length with the fastembed tokenizer", exc_info=True)
             return False
 
-    async def _embed_in_parts(self, original_texts: list[str]) -> list[list[float]]:
+    async def _embed_in_parts(self, original_texts: list[str]) -> EmbeddingResult:
         """Embed over-length input in parts: a batch is split in two, a single text
         into two overlapping halves whose embeddings are pooled. Each part goes back
         through :meth:`embed_text`, which splits further while it is still too long.
         """
         if len(original_texts) > 1:
             mid = math.ceil(len(original_texts) / 2)
-            left_vecs, right_vecs = await asyncio.gather(
+            left_result, right_result = await asyncio.gather(
                 self.embed_text(original_texts[:mid]),
                 self.embed_text(original_texts[mid:]),
             )
-            return handle_embedding_response(
-                original_texts, left_vecs + right_vecs, self.dimensions
+            return EmbeddingResult(
+                vectors=handle_embedding_response(
+                    original_texts, left_result + right_result, self.dimensions
+                ),
+                tokens=left_result.tokens + right_result.tokens,
             )
 
         s = original_texts[0]
@@ -334,12 +345,19 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
             self.max_completion_tokens,
         )
         left_part, right_part = s[: third * 2], s[third:]
-        (left_vec,), (right_vec,) = await asyncio.gather(
+        left_result, right_result = await asyncio.gather(
             self.embed_text([left_part]),
             self.embed_text([right_part]),
         )
+        (left_vec,), (right_vec,) = left_result, right_result
         pooled = (np.array(left_vec) + np.array(right_vec)) / 2
-        return handle_embedding_response(original_texts, [pooled.tolist()], self.dimensions)
+        # Tokens are what the model processed, overlaps included - as the hosted
+        # engines that count what they were billed for; with recursive splitting
+        # this can be several times the text's own count.
+        return EmbeddingResult(
+            vectors=handle_embedding_response(original_texts, [pooled.tolist()], self.dimensions),
+            tokens=left_result.tokens + right_result.tokens,
+        )
 
     def get_vector_size(self) -> int:
         """

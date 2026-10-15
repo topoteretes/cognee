@@ -24,6 +24,7 @@ async def log_pipeline_run_error(
     started_at: datetime | None = None,
     tokens_in: int | None = None,
     tokens_out: int | None = None,
+    embedding_tokens: int | None = None,
     data_info: Any = None,
     origin: str | None = None,
     parent_operation_id: UUID | None = None,
@@ -62,6 +63,7 @@ async def log_pipeline_run_error(
         error_message=scrub_error_message(e),
         tokens_in=tokens_in,
         tokens_out=tokens_out,
+        embedding_tokens=embedding_tokens,
         origin=origin if origin is not None else get_operation_origin(),
         # This writer runs inside the pipeline's own parent_run_scope —
         # exclude it so the row parents to the next enclosing run.
