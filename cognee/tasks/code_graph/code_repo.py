@@ -325,7 +325,9 @@ async def resolve_code_repository(
     return manifest_item, documents, len(skipped)
 
 
-async def resolve_code_repository_url(spec: str, user=None, dataset_id=None):
+async def resolve_code_repository_url(
+    spec: str, user=None, dataset_id=None, branch: str | None = None
+):
     """Clone a hosted repository URL and build its repo-level DataItem.
 
     ``add()``'s implicit counterpart of ``remember(content_type="code")``: a
@@ -334,7 +336,8 @@ async def resolve_code_repository_url(spec: str, user=None, dataset_id=None):
     exactly like a local code project -- one ``code_repo`` manifest for the
     CODE_REPO cognify route plus the repository's documents as individual
     items. Returns ``(manifest_item, document_paths, skip_count)``; the
-    manifest carries the credential-free URL as ``repo_url``.
+    manifest carries the credential-free URL as ``repo_url``. ``branch`` clones
+    that branch instead of the remote's default.
     """
     clone_url = code_repo_clone_url(spec)
     if clone_url is None:
@@ -342,7 +345,7 @@ async def resolve_code_repository_url(spec: str, user=None, dataset_id=None):
             f"'{redact_repo_spec(spec)}' is not a repository URL add() can clone; "
             "expected https://github.com/<owner>/<repo>, a gitlab.com project, or a .git URL."
         )
-    repo_path = await resolve_repo_source(clone_url)
+    repo_path = await resolve_repo_source(clone_url, branch=branch)
     return await resolve_code_repository(
         repo_path, user=user, dataset_id=dataset_id, source_url=redact_repo_spec(clone_url)
     )

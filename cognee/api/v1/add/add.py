@@ -55,6 +55,7 @@ async def add(
     embedding_config: EmbeddingConfig | None = None,
     data_cache: bool = True,
     skip_connection_test: bool = False,
+    branch: str | None = None,
     **kwargs,
 ):
     """
@@ -87,7 +88,8 @@ async def add(
           project, or any URL ending in .git) is shallow-cloned and ingested as ONE
           code-repo item that cognify runs through the enola code graph pipeline
           (cross-file edges), plus the repo's documents; same as adding a local code
-          project directory. Requires ALLOW_HTTP_REQUESTS and git on PATH.
+          project directory. Requires ALLOW_HTTP_REQUESTS and git on PATH. Pass
+          ``branch`` to clone a branch other than the remote's default.
         - **Lists**: Multiple files or text strings in a single call
 
     Supported File Formats:
@@ -140,6 +142,12 @@ async def add(
         extraction_rules: Optional dictionary of rules (e.g., CSS selectors, XPath) for extracting specific content from web pages using BeautifulSoup
         tavily_config: Optional configuration for Tavily API, including API key and extraction settings
         soup_crawler_config: Optional configuration for BeautifulSoup crawler, specifying concurrency, crawl delay, and extraction rules.
+        branch: Branch to clone for the GitHub/GitLab repository URL(s) in ``data``, instead of
+                the remote's default. A URL holds one branch at a time, shared by every dataset
+                that adds it: another add on a different branch replaces the clone, and
+                ``cognify()`` indexes whatever the clone holds when it runs. Switching re-indexes
+                the code graph; the repository's documents are separate items that a switch does
+                not remove. A missing branch raises ``CodeRepositoryError``.
 
     Returns:
         PipelineRunInfo: Information about the ingestion pipeline execution including:
@@ -236,6 +244,12 @@ async def add(
 
         return SimpleNamespace(**result)
 
+    if branch is not None:
+        from cognee.tasks.code_graph.resolve_repo import check_branch_name
+
+        # Before anything is written, and before the name can reach git.
+        check_branch_name(branch)
+
     if preferred_loaders is not None:
         transformed = {}
         for item in preferred_loaders:
@@ -291,7 +305,12 @@ async def add(
     # every item (the pipeline also passes the dataset via ctx — this keeps the
     # non-pipeline fallback on the cheap branch too).
     tasks = [
-        Task(resolve_data_directories, include_subdirectories=True, needs_llm=False),
+        Task(
+            resolve_data_directories,
+            include_subdirectories=True,
+            branch=branch,
+            needs_llm=False,
+        ),
         Task(
             ingest_data,
             dataset_name,
@@ -356,6 +375,8 @@ async def add(
         embedding_config=embedding_config,
         data_cache=data_cache,
         skip_connection_test=skip_connection_test,
+        # run_tasks resolves repository URLs itself, before this task list runs.
+        extras={"repo_branch": branch},
     )
 
     # run_pipeline_blocking returns {dataset_id: PipelineRunInfo} but callers

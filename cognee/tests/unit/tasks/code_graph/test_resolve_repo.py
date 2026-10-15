@@ -3,6 +3,8 @@ from pathlib import Path
 
 import pytest
 
+from cognee.tests.utils.clone_state import write_clone_state
+
 resolve_module = importlib.import_module("cognee.tasks.code_graph.resolve_repo")
 
 
@@ -74,7 +76,7 @@ async def test_remote_is_shallow_cloned(monkeypatch, tmp_path):
 @pytest.mark.asyncio
 async def test_existing_clone_is_reused_with_pull(monkeypatch, tmp_path):
     clone_dir = tmp_path / "github.com-org-repo"
-    (clone_dir / ".git").mkdir(parents=True)
+    write_clone_state(clone_dir)
     git_calls = []
 
     async def fake_run_git(args, cwd=None, env=None):
@@ -94,7 +96,7 @@ async def test_existing_clone_is_reused_with_pull(monkeypatch, tmp_path):
 @pytest.mark.asyncio
 async def test_failed_pull_still_reuses_stale_clone(monkeypatch, tmp_path):
     clone_dir = tmp_path / "github.com-org-repo"
-    (clone_dir / ".git").mkdir(parents=True)
+    write_clone_state(clone_dir)
 
     async def fake_run_git(args, cwd=None, env=None):
         return 1, "fatal: not fast-forward"

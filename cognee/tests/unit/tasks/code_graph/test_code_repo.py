@@ -308,18 +308,18 @@ async def test_repository_url_is_cloned_and_resolved_like_a_project(
     _make_repo(clone)
     cloned_specs = []
 
-    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None):
-        cloned_specs.append(spec)
+    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
+        cloned_specs.append((spec, branch))
         return clone
 
     monkeypatch.setattr(code_repo_module, "resolve_repo_source", fake_resolve_repo_source)
 
     resolved = await resolve_data_directories(
-        ["https://github.com/org/repo?tab=readme-ov-file", "plain text note"]
+        ["https://github.com/org/repo?tab=readme-ov-file", "plain text note"], branch="dev"
     )
 
-    # git gets the normalised URL, not the browser one.
-    assert cloned_specs == ["https://github.com/org/repo"]
+    # The clone gets the normalised URL, not the browser one, and the branch asked for.
+    assert cloned_specs == [("https://github.com/org/repo", "dev")]
     manifest_items = [item for item in resolved if isinstance(item, DataItem)]
     assert len(manifest_items) == 1
     manifest = manifest_items[0]
@@ -347,7 +347,7 @@ async def test_repository_url_credentials_are_redacted_from_the_manifest(
     clone = _make_repo(tmp_path)
     cloned_specs = []
 
-    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None):
+    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
         cloned_specs.append(spec)
         return clone
 
