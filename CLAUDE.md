@@ -898,7 +898,8 @@ Supported code files (`.py`, `.go`, `.ts`, `.java`, `.rs`, … — the extension
   `codegraph_config={"treat_as_repository": True}` takes every item in `data` as a repository spec instead of sniffing it, which is how you reach a remote `add()` does not claim on its own — a Bitbucket or self-hosted forge URL with no `.git` suffix (it would otherwise be scraped as a web page), an ssh remote, or a source tree with no build manifest and no `.git`.
   The removed `content_type="code"` is accepted and ignored: such a call is a plain `remember(data)`.
   The GitHub sync remembers each repository in its own call.
-  Repositories are built under `cognify_pipeline`.
+  Repositories are built under `cognify_pipeline`;
+  status polling for the old `code_graph_pipeline` name falls back to it when the dataset has no run of its own under that name.
   Private repositories: pass the token as `codegraph_config={"repo_credentials": token}` (SDK only; `add()` clones with it before the pipeline, and it reaches git only through environment config).
   A local directory is refused when `ACCEPT_LOCAL_FILE_PATH=false`. The CODE route is per-file.
   A `content_type="code"` call warns with a `FutureWarning` naming `codegraph_config={"treat_as_repository": True, "include_documents": False}` as the replacement; while connected to a remote instance its strings still go out as `raw_data`, so a server-side path is not stored as text.

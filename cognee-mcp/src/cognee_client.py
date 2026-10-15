@@ -523,12 +523,16 @@ class CogneeClient:
             response.raise_for_status()
             return response.json()
         else:
-            # Direct mode: Call cognee directly
-            from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
+            # Direct mode: Call cognee directly, through the same lookup the
+            # status endpoint uses, so the deprecated code_graph_pipeline alias
+            # (and the cognify_pipeline default for an empty name) behave as
+            # in API mode.
+            from cognee.api.v1.datasets.datasets import datasets
 
             with redirect_stdout(sys.stderr):
-                status = await get_pipeline_status(dataset_ids, pipeline_name)
-                return status
+                return await datasets.get_status(
+                    dataset_ids, [pipeline_name] if pipeline_name else None
+                )
 
     async def list_datasets(self, *, timeout: float | None = None) -> list[dict[str, Any]]:
         """

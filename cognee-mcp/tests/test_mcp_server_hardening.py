@@ -1338,3 +1338,24 @@ async def test_api_pipeline_status_omits_an_empty_pipeline_name():
     status_calls = [r for r in requests if r.url.path == "/api/v1/datasets/status"]
     assert status_calls[0].url.params.get_list("pipeline") == []
     assert status_calls[0].url.params.get_list("dataset") == [dataset_id]
+
+
+@pytest.mark.asyncio
+async def test_direct_pipeline_status_resolves_the_legacy_code_graph_alias(monkeypatch):
+    """Direct mode delegates to datasets.get_status, the lookup the status endpoint
+    uses, so the deprecated code_graph_pipeline alias resolves the same way."""
+    from unittest.mock import AsyncMock
+    from uuid import uuid4
+
+    datasets_module = importlib.import_module("cognee.api.v1.datasets.datasets")
+    get_status = AsyncMock(return_value={"status": "ok"})
+    monkeypatch.setattr(datasets_module.datasets, "get_status", get_status)
+    dataset_id = uuid4()
+
+    client = CogneeClient()
+    assert not client.use_api
+
+    assert await client.get_pipeline_status([dataset_id], "code_graph_pipeline") == {"status": "ok"}
+    get_status.assert_awaited_with([dataset_id], ["code_graph_pipeline"])
+    await client.get_pipeline_status([dataset_id], "")
+    get_status.assert_awaited_with([dataset_id], None)
