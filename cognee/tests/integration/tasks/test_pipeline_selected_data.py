@@ -145,40 +145,50 @@ def test_row_changed_after_selection_is_processed_as_current(local_env):
     asyncio.run(scenario())
 
 
-def test_row_changed_while_waiting_for_the_lock_is_processed_as_current(local_env):
-    """The selection is read under the dataset lock, not when the run is called."""
+def test_row_forgotten_while_the_run_waits_for_the_lock_is_skipped(local_env):
+    """forget() holds the dataset lock while the run waits on it: the run reads the
+    selection after forget() has deleted the row, so the row is skipped."""
 
     async def scenario():
-        from cognee.infrastructure.databases.relational import get_relational_engine
+        import cognee
         from cognee.infrastructure.locks import get_dataset_lock
-        from cognee.modules.data.models import Data
         from cognee.modules.pipelines.operations import pipeline
 
-        dataset, row = await _add_one("Document changed while the run waits.", "selected_locked")
+        lock_module = importlib.import_module("cognee.infrastructure.locks.dataset_lock")
+        dataset, row = await _add_one("Document forgotten while the run waits.", "selected_locked")
 
-        waiting = asyncio.Event()
-        original_get_dataset_lock = pipeline.get_dataset_lock
+        def signalling(get_lock, event):
+            async def get_lock_and_signal(dataset_id):
+                lock = await get_lock(dataset_id)
+                event.set()  # the caller queues on the lock right after this returns
+                return lock
 
-        async def get_dataset_lock_and_signal(dataset_id):
-            lock = await original_get_dataset_lock(dataset_id)
-            waiting.set()
-            return lock
+            return get_lock_and_signal
 
+        forget_waiting, run_waiting = asyncio.Event(), asyncio.Event()
         mp = pytest.MonkeyPatch()
-        mp.setattr(pipeline, "get_dataset_lock", get_dataset_lock_and_signal)
+        mp.setattr(
+            lock_module,
+            "get_dataset_lock",
+            signalling(lock_module.get_dataset_lock, forget_waiting),
+        )
+        mp.setattr(pipeline, "get_dataset_lock", signalling(pipeline.get_dataset_lock, run_waiting))
         try:
+            # Queue forget() first and the run second, so forget() deletes the row
+            # while the run is already waiting with the row selected.
             async with await get_dataset_lock(dataset.id):
+                forgetting = asyncio.create_task(
+                    cognee.forget(data_id=row.id, dataset_id=dataset.id)
+                )
+                await forget_waiting.wait()
                 run = asyncio.create_task(_run_selected([row], "selected_locked"))
-                await waiting.wait()
+                await run_waiting.wait()
 
-                async with get_relational_engine().get_async_session() as session:
-                    (await session.get(Data, row.id)).name = "changed while waiting"
-                    await session.commit()
-
+            await forgetting
             seen = await run
         finally:
             mp.undo()
 
-        assert [item.name for item in seen] == ["changed while waiting"]
+        assert seen == []
 
     asyncio.run(scenario())
