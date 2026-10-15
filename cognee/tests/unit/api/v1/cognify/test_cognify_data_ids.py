@@ -29,9 +29,17 @@ REPO_B = _item()
 DOCUMENT = _item(source=None)
 
 
-async def _cognify(datasets=("repos",), **cognify_kwargs):
+async def _fake_dataset_data(dataset_id, data_ids=None, **_kwargs):
+    rows = [REPO_A, REPO_B, DOCUMENT]
+    return rows if data_ids is None else [row for row in rows if row.id in data_ids]
+
+
+async def _cognify(datasets=("repos",), authorized=None, **cognify_kwargs):
     pipeline = AsyncMock(return_value={DATASET.id: SimpleNamespace(status="done")})
     runtime = AsyncMock()
+    if authorized is None:
+        authorized = AsyncMock(return_value=[DATASET])
+    dataset_data = AsyncMock(side_effect=_fake_dataset_data)
 
     with (
         patch.object(cognify_module, "ensure_extractor_runtime", runtime),
@@ -40,23 +48,17 @@ async def _cognify(datasets=("repos",), **cognify_kwargs):
             "cognee.modules.users.methods.get_default_user",
             AsyncMock(return_value=SimpleNamespace(id=uuid4())),
         ),
-        patch(
-            "cognee.modules.data.methods.get_authorized_existing_datasets",
-            AsyncMock(return_value=[DATASET]),
-        ),
-        patch(
-            "cognee.modules.data.methods.get_dataset_data",
-            AsyncMock(return_value=[REPO_A, REPO_B, DOCUMENT]),
-        ),
+        patch("cognee.modules.data.methods.get_authorized_existing_datasets", authorized),
+        patch("cognee.modules.data.methods.get_dataset_data", dataset_data),
         patch.object(cognify_module, "get_pipeline_executor", return_value=pipeline),
     ):
         result = await cognify_module.cognify(datasets=list(datasets), **cognify_kwargs)
-    return result, pipeline, runtime
+    return result, pipeline, runtime, dataset_data
 
 
 @pytest.mark.asyncio
 async def test_data_ids_scope_the_run_to_those_rows():
-    _result, pipeline, runtime = await _cognify(data_ids=[REPO_B.id])
+    _result, pipeline, runtime, dataset_data = await _cognify(data_ids=[REPO_B.id])
 
     pipeline.assert_awaited_once()
     kwargs = pipeline.await_args.kwargs
@@ -68,12 +70,14 @@ async def test_data_ids_scope_the_run_to_those_rows():
     assert kwargs["rollback_handler"] is cognify_module.cognify_rollback_handler
     # The pending document outside the scope does not pull in the extractor.
     runtime.assert_not_awaited()
+    # Only the requested rows are read, never the whole dataset.
+    assert [call.kwargs.get("data_ids") for call in dataset_data.await_args_list] == [{REPO_B.id}]
 
 
 @pytest.mark.asyncio
 async def test_ids_outside_the_dataset_run_nothing():
     # An empty data list would make the runner fall back to the whole dataset.
-    result, pipeline, _runtime = await _cognify(data_ids=[uuid4()])
+    result, pipeline, _runtime, _data = await _cognify(data_ids=[uuid4()])
 
     assert result == {}
     pipeline.assert_not_awaited()
@@ -91,3 +95,19 @@ async def test_ids_outside_the_dataset_run_nothing():
 async def test_data_ids_are_refused(cognify_kwargs, message):
     with pytest.raises(ValueError, match=message):
         await _cognify(data_ids=[REPO_A.id], **cognify_kwargs)
+
+
+@pytest.mark.asyncio
+async def test_a_misspelled_dataset_name_raises():
+    from cognee.modules.data.exceptions import DatasetNotFoundError
+
+    async def strict_lookup(datasets, permission_type, user, strict=False):
+        assert (permission_type, strict) == ("write", True)
+        raise DatasetNotFoundError(message="Dataset 'repso' not found.")
+
+    with pytest.raises(DatasetNotFoundError):
+        await _cognify(
+            datasets=["repso"],
+            authorized=AsyncMock(side_effect=strict_lookup),
+            data_ids=[REPO_A.id],
+        )

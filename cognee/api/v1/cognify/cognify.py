@@ -194,7 +194,10 @@ async def _resolve_scoped_data(datasets, user: User | None, data_ids) -> list:
     A ``data_ids`` run builds those items only, so its pipeline run (and the
     rollback scoped to that run) cannot reach the rest of the dataset. Read with
     the same write check the pipeline applies; the pipeline still takes the
-    dataset lock and checks permissions itself.
+    dataset lock and checks permissions itself. Only the requested rows are
+    read, and ids of another dataset's rows are left out. A dataset name that
+    does not resolve raises ``DatasetNotFoundError``: a misspelled name must
+    not pass for a scope with nothing in it.
     """
     from cognee.modules.data.methods import (
         get_authorized_existing_datasets,
@@ -207,15 +210,11 @@ async def _resolve_scoped_data(datasets, user: User | None, data_ids) -> list:
     requested = [datasets] if isinstance(datasets, (str, UUID)) else datasets
     if not requested or len(requested) != 1:
         raise ValueError("cognify(data_ids=...) requires exactly one dataset in datasets.")
-    target_datasets = await get_authorized_existing_datasets(requested, "write", user)
+    target_datasets = await get_authorized_existing_datasets(requested, "write", user, strict=True)
     if not target_datasets:
         return []
     wanted = {UUID(str(data_id)) for data_id in data_ids}
-    return [
-        data_item
-        for data_item in await get_dataset_data(dataset_id=target_datasets[0].id)
-        if data_item.id in wanted
-    ]
+    return await get_dataset_data(dataset_id=target_datasets[0].id, data_ids=wanted)
 
 
 async def cognify(

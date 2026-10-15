@@ -91,6 +91,9 @@ async def sync_repositories(
     with ``raise_on_error=False`` makes remember add and build each repository
     on its own: a repository that fails (clone, auth, pipeline) comes back as
     an errored item and is logged, and the others are built and kept.
+    Anything else that fails (minting the token, listing repositories, a
+    remember that raises) propagates: the callers run the sync detached and
+    log it.
 
     The minted token lives ~1 hour and repos are cloned sequentially, so a
     very large installation can outlive the token mid-batch; the affected
@@ -126,29 +129,28 @@ async def sync_repositories(
         dataset_name,
     )
     full_name_by_url = {clone_url(full_name): full_name for full_name in repo_full_names}
-    try:
-        result = await cognee_remember(
-            list(full_name_by_url),
-            dataset_name=dataset_name,
-            user=owner,
-            codegraph_config={
-                "repo_credentials": token,
-                # Every URL is a repository: clone it, never sniff it.
-                "treat_as_repository": True,
-                # The code graph is the point of the sync: indexing every
-                # repository's README and docs would mean LLM extraction
-                # and embeddings for an installation's whole prose, on
-                # every webhook.
-                "include_documents": False,
-            },
-            # The code graph is the point of the sync; no session to bridge.
-            self_improvement=False,
-            # Per-repository failures come back as errored items instead.
-            raise_on_error=False,
-        )
-    except Exception:
-        logger.exception("GitHub sync failed for %s", account_login)
-        return
+    # No try/except: a remember that raises (setup, the database) fails the whole
+    # sync, and every caller runs it detached behind a guard that logs it, as it
+    # does a failing token mint or repository listing.
+    result = await cognee_remember(
+        list(full_name_by_url),
+        dataset_name=dataset_name,
+        user=owner,
+        codegraph_config={
+            "repo_credentials": token,
+            # Every URL is a repository: clone it, never sniff it.
+            "treat_as_repository": True,
+            # The code graph is the point of the sync: indexing every
+            # repository's README and docs would mean LLM extraction
+            # and embeddings for an installation's whole prose, on
+            # every webhook.
+            "include_documents": False,
+        },
+        # The code graph is the point of the sync; no session to bridge.
+        self_improvement=False,
+        # Per-repository failures come back as errored items instead.
+        raise_on_error=False,
+    )
 
     failed: list[str] = []
     for item in getattr(result, "items", None) or []:

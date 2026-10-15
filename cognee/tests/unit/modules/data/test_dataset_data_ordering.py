@@ -91,6 +91,10 @@ async def test_method_issues_the_indexed_ordering(monkeypatch):
     assert "created_at DESC NULLS LAST" in order_by
     assert order_by.endswith("data.id"), "id tiebreak keeps paging stable"
 
+    # A data_ids selection reads only those rows of the dataset.
+    await module.get_dataset_data(uuid.uuid4(), data_ids={uuid.uuid4()})
+    assert "data.dataset_id = " in captured["sql"] and "data.id IN " in captured["sql"]
+
 
 def _migration():
     import importlib.util

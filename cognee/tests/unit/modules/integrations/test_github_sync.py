@@ -126,13 +126,14 @@ async def test_per_repo_failures_are_logged_by_repository(mocks, caplog):
 
 
 @pytest.mark.asyncio
-async def test_a_raising_remember_is_logged_not_raised(mocks, caplog):
-    mocks.remember.side_effect = RuntimeError("database down")
+@pytest.mark.parametrize("failing", ["mint", "remember"])
+async def test_a_sync_wide_failure_propagates_to_the_detached_caller(mocks, failing):
+    """Only per-repository failures are summarised here; anything that fails the
+    whole sync (minting the token alike) reaches the caller's logging guard."""
+    getattr(mocks, failing).side_effect = RuntimeError("database down")
 
-    with caplog.at_level(logging.ERROR, logger=sync_module.logger.name):
+    with pytest.raises(RuntimeError, match="database down"):
         await sync_module.sync_repositories(_credential())
-
-    assert "GitHub sync failed for Acme-Org" in caplog.text
 
 
 @pytest.mark.asyncio

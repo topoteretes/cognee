@@ -174,8 +174,9 @@ def _run_info(status, **fields):
 def failing_repo_add(monkeypatch):
     """Stub add()/cognify() per repository.
 
-    add() fails (a clone error) for any spec containing 'bad' and otherwise
-    stores one row whose id is derived from the spec; cognify() records its
+    add() fails (a clone error) for any spec containing 'bad', reports no stored
+    ids for one containing 'noids', and otherwise stores one row whose id is
+    derived from the spec; cognify() records its
     calls and fails the build (an errored run, as an enola failure is
     reported) of any row whose spec contains 'unbuildable'.
     """
@@ -187,6 +188,8 @@ def failing_repo_add(monkeypatch):
         calls["add"].append(spec)
         if "bad" in str(spec):
             raise RuntimeError("clone failed")
+        if "noids" in str(spec):
+            return _run_info("PipelineRunCompleted", data_ingestion_info=[])
         data_id = uuid4()
         spec_by_id[data_id] = str(spec)
         return _run_info(
@@ -313,6 +316,38 @@ async def test_background_run_isolates_repository_failures(failing_repo_add, dat
     assert len(failing_repo_add["cognify"]) == cognify_runs
     assert result.status == "errored"
     assert [item for item in result.items if item.get("status") == "errored"] == [BAD_ITEM]
+
+
+@pytest.mark.asyncio
+async def test_an_add_reporting_no_ids_never_builds_the_whole_dataset(failing_repo_add):
+    result = await _remember(
+        ["https://bitbucket.org/acme/noids", "https://bitbucket.org/acme/good"],
+        raise_on_error=False,
+        **DECLARED,
+    )
+
+    assert [len(call["data_ids"]) for call in failing_repo_add["cognify"]] == [1]
+    errored = [item for item in result.items if item.get("status") == "errored"]
+    assert [item["source"] for item in errored] == ["https://bitbucket.org/acme/noids"]
+    assert "reported no stored data" in errored[0]["error"]
+
+
+@pytest.mark.asyncio
+async def test_without_incremental_loading_and_data_cache_repositories_build_together(
+    failing_repo_add, caplog
+):
+    """Such an add reports no ids, so nothing could scope a per-repository cognify:
+    the batch is added and built in one run instead, with a warning."""
+    data = ["https://bitbucket.org/acme/a", "https://bitbucket.org/acme/b"]
+    with caplog.at_level("WARNING"):
+        await _remember(
+            data, raise_on_error=False, incremental_loading=False, data_cache=False, **DECLARED
+        )
+
+    assert failing_repo_add["add"] == [data]
+    ((cognify_call,),) = [failing_repo_add["cognify"]]
+    assert "data_ids" not in cognify_call
+    assert "report no data ids" in caplog.text
 
 
 @pytest.mark.asyncio

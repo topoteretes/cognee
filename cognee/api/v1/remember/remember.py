@@ -1213,7 +1213,9 @@ async def remember(
             ``run_in_background=True`` each declared repository is added and
             built in a run of its own: one that fails becomes an errored item
             (``kind``, ``source``, ``status``, ``error``) and the others keep
-            their graphs. The top-level ``index_vectors=`` /
+            their graphs. With both ``incremental_loading`` and ``data_cache``
+            off, add() reports no data ids, so the batch is added and built in
+            one run instead (with a warning). The top-level ``index_vectors=`` /
             ``repo_credentials=`` spellings are still accepted. The removed
             ``content_type="code"`` is accepted and ignored: such a call is a
             plain ``remember(data)``, with a ``FutureWarning`` naming
@@ -2107,6 +2109,18 @@ async def _remember_inner(
         isolate_repositories = bool(codegraph_config.get("treat_as_repository")) and (
             run_in_background or not raise_on_error
         )
+        if isolate_repositories and not (
+            shared_kwargs.get("incremental_loading", True) or shared_kwargs.get("data_cache", True)
+        ):
+            # Without both, add() reports no data ids, so nothing could scope a
+            # repository's cognify to its own rows: building "the dataset" once per
+            # repository would rebuild every earlier repository again each time.
+            logger.warning(
+                "remember: incremental_loading=False and data_cache=False report no data "
+                "ids, so the declared repositories are added and built in one run: one "
+                "that fails fails the whole batch."
+            )
+            isolate_repositories = False
         datasets_arg = [dataset_name] if dataset_id is None else [dataset_id]
 
         async def _build_repositories() -> bool:
@@ -2126,11 +2140,13 @@ async def _remember_inner(
                         **add_kwargs,
                     )
                     error = _run_error_text(add_result)
+                    data_ids = _ingested_data_ids(add_result)
+                    if error is None and not data_ids:
+                        # Never cognify without ids: that would build the whole
+                        # dataset (every other repository included) in this
+                        # repository's run.
+                        error = "add() reported no stored data for this repository."
                     if error is None:
-                        # No ids (an add without incremental loading or data
-                        # cache reports none): build the dataset, as a plain
-                        # cognify would.
-                        data_ids = _ingested_data_ids(add_result) or None
                         cognify_result = await cognify(
                             datasets=datasets_arg,
                             data_ids=data_ids,
