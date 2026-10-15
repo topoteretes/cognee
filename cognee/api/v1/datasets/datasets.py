@@ -34,6 +34,52 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger()
 
 
+# Deprecated status alias: code repositories are built under cognify_pipeline
+# now, so only custom pipelines still write runs under this name. A status
+# query for it falls back to cognify_pipeline for datasets with no run of
+# their own, so legacy pollers (e.g. cognee-mcp) still see the build finish.
+LEGACY_CODE_GRAPH_PIPELINE = "code_graph_pipeline"
+
+
+async def resolve_legacy_status_pipeline(dataset_id: UUID, pipeline_name: str) -> str:
+    """The pipeline whose state answers a status query for ``pipeline_name``.
+
+    Unchanged except for the deprecated ``code_graph_pipeline`` alias on a
+    dataset with no run under that name, which resolves to cognify_pipeline.
+    """
+    if pipeline_name != LEGACY_CODE_GRAPH_PIPELINE:
+        return pipeline_name
+    if await get_pipeline_status([dataset_id], pipeline_name=pipeline_name):
+        return pipeline_name
+    _warn_legacy_code_graph_fallback()
+    return "cognify_pipeline"
+
+
+def _warn_legacy_code_graph_fallback() -> None:
+    logger.warning(
+        "Pipeline status for '%s' is deprecated: code repositories are built under"
+        " cognify_pipeline, so datasets without a '%s' run report cognify_pipeline's"
+        " status. Query cognify_pipeline instead.",
+        LEGACY_CODE_GRAPH_PIPELINE,
+        LEGACY_CODE_GRAPH_PIPELINE,
+    )
+
+
+async def _fetch_with_legacy_fallback(fetch, dataset_ids: list[UUID], pipeline_name: str):
+    statuses = await fetch(dataset_ids, pipeline_name=pipeline_name)
+    if pipeline_name != LEGACY_CODE_GRAPH_PIPELINE:
+        return statuses
+
+    missing = [dataset_id for dataset_id in dataset_ids if str(dataset_id) not in statuses]
+    if not missing:
+        return statuses
+
+    fallback = await fetch(missing, pipeline_name="cognify_pipeline")
+    if fallback:
+        _warn_legacy_code_graph_fallback()
+    return {**statuses, **fallback}
+
+
 async def _fan_out_by_pipeline(dataset_ids: list[UUID], pipeline_names: list[str] | None, fetch):
     """Shared flat/nested shaping for get_status and get_progress.
 
@@ -51,12 +97,12 @@ async def _fan_out_by_pipeline(dataset_ids: list[UUID], pipeline_names: list[str
 
     # For one pipeline, keep flat shape.
     if len(requested_pipelines) == 1:
-        return await fetch(dataset_ids, pipeline_name=requested_pipelines[0])
+        return await _fetch_with_legacy_fallback(fetch, dataset_ids, requested_pipelines[0])
 
     # For multiple pipelines, return nested shape.
     statuses_by_dataset = {str(dataset_id): {} for dataset_id in dataset_ids}
     for pipeline_name in requested_pipelines:
-        pipeline_status = await fetch(dataset_ids, pipeline_name=pipeline_name)
+        pipeline_status = await _fetch_with_legacy_fallback(fetch, dataset_ids, pipeline_name)
         for dataset_id, status in pipeline_status.items():
             statuses_by_dataset.setdefault(dataset_id, {})[pipeline_name] = status
 

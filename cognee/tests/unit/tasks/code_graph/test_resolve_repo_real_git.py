@@ -20,7 +20,6 @@ ssrf_module = importlib.import_module("cognee.tasks.web_scraper.ssrf_protection"
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git is required")
 
 _URL = "https://github.com/org/repo"
-_NAME = "github.com-org-repo"
 _IDENTITY = {
     "GIT_AUTHOR_NAME": "t",
     "GIT_AUTHOR_EMAIL": "t@example.com",
@@ -116,6 +115,14 @@ def origin(tmp_path, monkeypatch):
         return await real_run_git([remote if arg == _URL else arg for arg in args], cwd, env)
 
     monkeypatch.setattr(resolve_module, "_run_git", run_git)
+    real_origin_url = resolve_module._origin_url
+
+    async def origin_url(clone):
+        # The clone's origin is the file:// URL the repository URL was mapped to.
+        stored = await real_origin_url(clone)
+        return _URL if stored == origin.bare.resolve().as_uri() else stored
+
+    monkeypatch.setattr(resolve_module, "_origin_url", origin_url)
     monkeypatch.setattr(ssrf_module, "validate_outbound_url", AsyncMock())
     return origin
 
@@ -173,7 +180,7 @@ async def test_each_branch_is_a_clone_of_its_own_that_follows_force_pushes(origi
     default = await _resolve(clones)
 
     assert [_content(path) for path in (dev, feature, default)] == ["dev-1", "ü-1", "main-1"]
-    assert default == clones / _NAME
+    assert default == resolve_module.clone_dir(_URL, clones_dir=clones)
     assert sorted(path.name for path in clones.iterdir()) == sorted(
         path.name for path in (dev, feature, default)
     )
@@ -207,3 +214,24 @@ async def test_a_missing_branch_is_reported_and_never_replaces_a_clone(origin, c
     with pytest.raises(resolve_module.CodeRepositoryError, match="Branch 'dev' was not found"):
         await _resolve(clones, "dev")
     assert _content(dev) == "dev-1"
+
+
+@pytest.mark.asyncio
+async def test_the_origin_is_read_as_stored(tmp_path):
+    repo = tmp_path / "repo"
+    _git(tmp_path, "init", "-q", str(repo))
+    assert await resolve_module._origin_url(repo) is None
+
+    _git(repo, "remote", "add", "origin", "https://github.com/org/repo")
+    _git(repo, "config", "url.https://mirror.example/.insteadOf", "https://github.com/")
+
+    assert await resolve_module._origin_url(repo) == "https://github.com/org/repo"
+
+
+@pytest.mark.asyncio
+async def test_a_clone_whose_origin_was_changed_is_refused(origin, clones):
+    default = await _resolve(clones)
+    _git(default, "remote", "set-url", "origin", "https://github.com/someone/else")
+
+    with pytest.raises(resolve_module.CodeRepositoryError, match="is not a clone of"):
+        await _resolve(clones)

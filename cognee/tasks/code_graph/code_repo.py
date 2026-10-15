@@ -34,6 +34,7 @@ shallow clone (``resolve_code_repository_url``): the clone directory is the
 "original location" the manifest points at.
 """
 
+import asyncio
 import hashlib
 import json
 from pathlib import Path
@@ -43,9 +44,9 @@ from cognee.modules.chunking.external_metadata import decode_external_metadata
 from cognee.modules.engine.models.node_set import validate_node_set_names
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.code_graph.resolve_repo import (
-    clone_dir,
     code_repo_clone_url,
     redact_repo_spec,
+    repo_identity,
     resolve_repo_source,
 )
 from cognee.tasks.ingestion.dlt_utils import metadata_source
@@ -267,7 +268,9 @@ async def resolve_code_repository(
     from cognee.infrastructure.llm.config import get_llm_config
     from cognee.tasks.ingestion.data_item import DataItem
 
-    covered, documents, skipped = partition_repo_files(directory)
+    # Both walk and hash the whole tree: off the event loop, which add() now
+    # reaches from the request path.
+    covered, documents, skipped = await asyncio.to_thread(partition_repo_files, directory)
 
     if not include_documents:
         documents = []
@@ -283,7 +286,7 @@ async def resolve_code_repository(
         skipped = skipped + documents
         documents = []
 
-    manifest_text = build_repo_manifest(directory, covered)
+    manifest_text = await asyncio.to_thread(build_repo_manifest, directory, covered)
 
     data_id = None
     if user is not None:
@@ -371,7 +374,7 @@ async def resolve_code_repository_url(
         # Keyed on the default branch's clone, as every URL row was before branches:
         # existing rows keep their ids, and branches of one URL share the row, since
         # their code graphs share the repository's node ids.
-        identity=clone_dir(source_url),
+        identity=repo_identity(source_url),
     )
     return manifest_item, [RepoCloneFile(Path(path)) for path in document_paths], skip_count
 
@@ -460,7 +463,7 @@ async def resolve_declared_repositories(
             # A remote is keyed on its default-branch clone, as on the detected URL
             # path: one row per URL whatever branch is cloned. A local repository
             # keys on its own directory.
-            identity=clone_dir(source_url) if remote else None,
+            identity=repo_identity(source_url) if remote else None,
         )
         resolved.append(manifest_item)
         # A clone is cognee's own directory, so its documents are stored

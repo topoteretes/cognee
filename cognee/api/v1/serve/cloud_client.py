@@ -150,7 +150,7 @@ class CloudClient:
             form.add_field("import_mode", str(kwargs["import_mode"]))
 
         codegraph_config = kwargs.get("codegraph_config") or {}
-        if codegraph_config.get("index_vectors") or kwargs.get("index_vectors"):
+        if codegraph_config.get("index_vectors"):
             form.add_field("index_vectors", "true")
 
         # POST /remember carries the repository options as one legacy field,
@@ -163,6 +163,13 @@ class CloudClient:
         from cognee.tasks.code_graph.config import is_legacy_code_content_type
 
         declared_repositories = bool(codegraph_config.get("treat_as_repository"))
+        if codegraph_config.get("include_documents", True) is False and not declared_repositories:
+            raise ValueError(
+                "codegraph_config include_documents=False without treat_as_repository is "
+                "not supported while connected to a remote Cognee instance; POST /remember "
+                "would ingest the repository's documents. Add treat_as_repository=True, or "
+                "call cognee.disconnect() to ingest locally."
+            )
         if declared_repositories:
             if not is_legacy_code_content_type(codegraph_config):
                 raise ValueError(
@@ -231,12 +238,14 @@ class CloudClient:
                 rel = skill_path.relative_to(base).as_posix()
                 form.add_field("data", skill_path.open("rb"), filename=rel)
         # Handle data — string or file-like objects
-        elif isinstance(data, str):
-            _add_string(data)
+        elif isinstance(data, str) or (declared_repositories and isinstance(data, Path)):
+            _add_string(str(data))
         elif isinstance(data, list):
             for item in data:
-                if isinstance(item, str):
-                    _add_string(item)
+                if isinstance(item, str) or (declared_repositories and isinstance(item, Path)):
+                    # A declared repository may be spelled as a Path; it travels
+                    # as its spec like a str.
+                    _add_string(str(item))
                 elif hasattr(item, "read"):
                     name = getattr(item, "name", "upload")
                     form.add_field("data", item, filename=name)

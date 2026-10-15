@@ -47,10 +47,15 @@ class CodeGraphConfig(TypedDict, total=False):
 
 
 CODEGRAPH_CONFIG_KEYS = frozenset(CodeGraphConfig.__annotations__)
+_BOOL_KEYS = ("index_vectors", "include_documents", "treat_as_repository")
 
 
 def validate_codegraph_config(codegraph_config: CodeGraphConfig | None) -> CodeGraphConfig:
-    """Return the config as a dict, rejecting keys the code graph routes do not read."""
+    """Return the config as a dict, rejecting unknown keys and mistyped values.
+
+    A key set to ``None`` counts as absent and is dropped. The flags must be
+    real bools: ``"false"`` is truthy, so accepting strings would invert them.
+    """
     if codegraph_config is None:
         return {}
     if not isinstance(codegraph_config, dict):
@@ -61,7 +66,34 @@ def validate_codegraph_config(codegraph_config: CodeGraphConfig | None) -> CodeG
             f"Unknown codegraph_config keys: {', '.join(sorted(unknown))}. "
             f"Supported: {', '.join(sorted(CODEGRAPH_CONFIG_KEYS))}."
         )
-    return cast(CodeGraphConfig, dict(codegraph_config))
+    config = {key: value for key, value in codegraph_config.items() if value is not None}
+    for key in _BOOL_KEYS:
+        if key in config and not isinstance(config[key], bool):
+            raise TypeError(
+                f"codegraph_config[{key!r}] must be a bool, got {type(config[key]).__name__}."
+            )
+    credentials = config.get("repo_credentials")
+    if credentials is not None and (not isinstance(credentials, str) or not credentials):
+        raise TypeError("codegraph_config['repo_credentials'] must be a non-empty str.")
+    return cast(CodeGraphConfig, config)
+
+
+def requests_codegraph_options(codegraph_config: CodeGraphConfig | None) -> bool:
+    """Whether the config asks for anything beyond the defaults.
+
+    The defaults are ``index_vectors=False``, ``include_documents=True``,
+    ``treat_as_repository=False`` and no credentials, so a config that only
+    restates them -- ``{"index_vectors": False}`` from an explicit top-level
+    ``index_vectors=False`` -- changes nothing and must not trip the checks
+    that reject codegraph options on other paths.
+    """
+    config = codegraph_config or {}
+    return bool(
+        config.get("index_vectors")
+        or config.get("repo_credentials")
+        or config.get("treat_as_repository")
+        or config.get("include_documents", True) is False
+    )
 
 
 # What the removed ``remember(content_type="code")`` meant, as codegraph_config:

@@ -219,9 +219,9 @@ def test_remember_forwards_index_vectors_with_repo_urls(client):
 
 def test_remember_reads_the_removed_code_content_type_as_code_only(client):
     # The old request shape (content_type=code + a repository in raw_data) keeps
-    # working AND keeps its behaviour: that route indexed the code graph only
-    # (include_documents) and cloned every raw_data entry as a repository
-    # whatever its host (treat_as_repository).
+    # working: the route hands the value to remember() as itself, which reads it
+    # as code-graph-only ingestion of declared repositories (pinned in
+    # test_remember_codegraph_config.py) and keeps the legacy result shape.
     with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
         mock_remember.return_value = remember_completed()
 
@@ -232,11 +232,8 @@ def test_remember_reads_the_removed_code_content_type_as_code_only(client):
 
         assert response.status_code == 200, response.text
         assert mock_remember.call_args.args[0] == [REPO_URL]
-        assert mock_remember.call_args.kwargs["content_type"] is None
-        assert mock_remember.call_args.kwargs["codegraph_config"] == {
-            "include_documents": False,
-            "treat_as_repository": True,
-        }
+        assert mock_remember.call_args.kwargs["content_type"] == "code"
+        assert "codegraph_config" not in mock_remember.call_args.kwargs
 
 
 def test_remember_declares_a_repository_url_add_would_not_claim(client):
@@ -257,7 +254,8 @@ def test_remember_declares_a_repository_url_add_would_not_claim(client):
 
         assert response.status_code == 200, response.text
         assert mock_remember.call_args.args[0] == ["https://bitbucket.org/acme/api"]
-        assert mock_remember.call_args.kwargs["codegraph_config"]["treat_as_repository"] is True
+        # remember() reads content_type="code" as treat_as_repository.
+        assert mock_remember.call_args.kwargs["content_type"] == "code"
 
 
 def test_remember_combines_code_content_type_with_index_vectors(client):
@@ -275,11 +273,8 @@ def test_remember_combines_code_content_type_with_index_vectors(client):
         )
 
         assert response.status_code == 200, response.text
-        assert mock_remember.call_args.kwargs["codegraph_config"] == {
-            "index_vectors": True,
-            "include_documents": False,
-            "treat_as_repository": True,
-        }
+        assert mock_remember.call_args.kwargs["content_type"] == "code"
+        assert mock_remember.call_args.kwargs["codegraph_config"] == {"index_vectors": True}
 
 
 def test_remember_rejects_code_content_type_with_session_id(client):

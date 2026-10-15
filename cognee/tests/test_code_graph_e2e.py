@@ -367,12 +367,6 @@ async def main():
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
-    # Until SDK-795: cognify() resolves the graph extractor and runs the
-    # provider preflight before routing, so a keyless install without gliner2
-    # fails even when every item takes an LLM-free code route. The documented
-    # switch skips both; nothing below calls an LLM or embeds.
-    os.environ["COGNEE_SKIP_CONNECTION_TEST"] = "true"
-
     async def _remember_repo(path, **kwargs):
         # self_improvement=False: this test is about the code graph, and the
         # improve stages over a code-only dataset have nothing to enrich.
@@ -503,6 +497,11 @@ async def main():
         assert [str(row.id) for row in remaining_rows] == [second_data_id]
 
         # --- 4. add(<project dir>) + cognify(): the CODE_REPO route -----------
+        # The remember() steps above ran with no switch at all, proving a
+        # keyless code-only remember() needs neither the GLiNER runtime nor a
+        # provider probe (SDK-795). From here on the documented switch keeps
+        # the remaining steps independent of provider configuration.
+        os.environ["COGNEE_SKIP_CONNECTION_TEST"] = "true"
         cognify_repo_path = _copy_fixture(os.path.join(scratch_root, "cognify"))
         await cognee.add(str(cognify_repo_path), dataset_name=COGNIFY_DATASET)
 

@@ -16,13 +16,25 @@ from cognee.tasks.code_graph.resolve_repo import (
     is_ssh_repo_spec,
 )
 
-SSH_SPECS = ["git@github.com:org/repo.git", "ssh://git@github.com/org/repo"]
+SSH_SPECS = [
+    "git@github.com:org/repo.git",
+    "ssh://git@github.com/org/repo",
+    "git@gitlab.company.internal:group/sub/repo",
+    "  git@github.com:org/repo.git\n",  # surrounding whitespace is stripped
+    "ssh://git@host.example:2222/srv/repo.git",
+]
 NOT_SSH = [
     "https://github.com/org/repo",
     "https://example.com/article",
     "http://news.site/post/1",
     "/srv/repos/foo",
     "just some text",
+    # Prose that merely starts like a remote is a note, not a repository.
+    "git@company.com is the bot account",
+    "git@github.com:org/repo is where the code lives",
+    "ssh:// is disabled on the build hosts",
+    "git@company.com",
+    "git@:repo",
 ]
 
 
@@ -60,3 +72,11 @@ async def test_a_web_page_still_passes_through_untouched():
     assert await resolve_data_directories(["https://example.com/article"]) == [
         "https://example.com/article"
     ]
+
+
+@pytest.mark.asyncio
+async def test_prose_starting_like_a_remote_is_ingested_as_text():
+    from cognee.tasks.ingestion.resolve_data_directories import resolve_data_directories
+
+    note = "git@company.com is the bot account"
+    assert await resolve_data_directories([note]) == [note]

@@ -273,8 +273,16 @@ async def add(
             raise ValueError(
                 "treat_as_repository is not supported by add() while connected to a "
                 "remote Cognee instance. Use remember(..., "
-                'codegraph_config={"treat_as_repository": True}), or call '
-                "cognee.disconnect() to clone the repository locally."
+                'codegraph_config={"treat_as_repository": True, "include_documents": False}), '
+                "or call cognee.disconnect() to clone the repository locally."
+            )
+        if codegraph_config.get("include_documents", True) is False:
+            # Same whitelist: the remote would ingest the repository's documents.
+            raise ValueError(
+                "include_documents=False is not supported by add() while connected to a "
+                "remote Cognee instance. Use remember(..., "
+                'codegraph_config={"treat_as_repository": True, "include_documents": False}), '
+                "or call cognee.disconnect() to ingest locally."
             )
         if branch is not None:
             # client.add() sends only the data and the dataset name, so the remote would
@@ -376,16 +384,23 @@ async def add(
     include_documents = codegraph_config.get("include_documents", True)
     treat_as_repository = bool(codegraph_config.get("treat_as_repository"))
     if codegraph_config.get("repo_credentials") or not include_documents or treat_as_repository:
-        data = await resolve_data_directories(
-            data,
-            include_subdirectories=True,
-            user=user,
-            dataset_id=authorized_dataset.id,
-            credentials=codegraph_config.get("repo_credentials"),
-            include_documents=include_documents,
-            treat_as_repository=treat_as_repository,
-            branch=branch,
-        )
+        from cognee.infrastructure.locks import dataset_lock
+
+        # Resolving a repository resets the manifest row's pipeline stamps (a
+        # read-modify-write of pipeline_status). The runner does that under the
+        # dataset lock; running it here, before the pipeline, needs the same lock
+        # or a concurrent cognify of the dataset can lose a stamp.
+        async with dataset_lock(authorized_dataset.id):
+            data = await resolve_data_directories(
+                data,
+                include_subdirectories=True,
+                user=user,
+                dataset_id=authorized_dataset.id,
+                credentials=codegraph_config.get("repo_credentials"),
+                include_documents=include_documents,
+                treat_as_repository=treat_as_repository,
+                branch=branch,
+            )
 
     # Expand DLT resources (and auto-detected CSV/connection strings) into
     # standard DataItems before the pipeline sees them. orphan_cleanup (when

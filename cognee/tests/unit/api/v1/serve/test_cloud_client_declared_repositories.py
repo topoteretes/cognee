@@ -146,3 +146,34 @@ async def test_index_vectors_still_rides_alongside(form):
 
     assert form.values_for("index_vectors") == ["true"]
     assert form.values_for("raw_data") == ["https://bitbucket.org/acme/api"]
+
+
+@pytest.mark.asyncio
+async def test_a_declared_path_travels_as_raw_data(form, tmp_path):
+    # A scalar Path matched none of the data branches, so the server got
+    # content_type=code with nothing to ingest.
+    await _client().remember(
+        tmp_path, "ds", codegraph_config={"treat_as_repository": True, "include_documents": False}
+    )
+
+    assert form.values_for("raw_data") == [str(tmp_path)]
+
+
+@pytest.mark.asyncio
+async def test_declared_paths_in_a_list_are_not_skipped(form, tmp_path):
+    specs = [tmp_path, "https://bitbucket.org/acme/api"]
+
+    await _client().remember(specs, "ds", codegraph_config={"treat_as_repository": True})
+
+    assert form.values_for("raw_data") == [str(tmp_path), "https://bitbucket.org/acme/api"]
+
+
+@pytest.mark.asyncio
+async def test_include_documents_false_alone_raises_instead_of_vanishing(form):
+    # POST /remember has no field for it: the server would ingest the
+    # repository's documents, with LLM cost, against what was asked.
+    with pytest.raises(ValueError, match="include_documents=False without treat_as_repository"):
+        await _client().remember(
+            "https://github.com/acme/api", "ds", codegraph_config={"include_documents": False}
+        )
+    assert form.values_for("raw_data") == [] and form.values_for("data") == []

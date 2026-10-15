@@ -197,13 +197,13 @@ async def test_a_declared_remote_keeps_one_row_whatever_branch_is_cloned(cloned)
     # Same rule as the detected URL path: the row is keyed on the default branch's
     # clone, so another branch replaces that row's graph instead of adding a row.
     # The key is credential-free, so a rotating token does not mint a new row either.
-    from cognee.tasks.code_graph.resolve_repo import clone_dir
+    from cognee.tasks.code_graph.resolve_repo import repo_identity
 
     spec = "https://x-access-token:secret@bitbucket.org/acme/api"
     on_default = await resolve_data_directories([spec], treat_as_repository=True)
     on_dev = await resolve_data_directories([spec], branch="dev", treat_as_repository=True)
 
-    expected = clone_dir("https://bitbucket.org/acme/api")
+    expected = repo_identity("https://bitbucket.org/acme/api")
     assert on_default[0].kwargs["identity"] == expected
     assert on_dev[0].kwargs["identity"] == expected
 
@@ -256,3 +256,19 @@ async def test_the_deprecated_content_type_still_declares_its_repositories(monke
     )
 
     assert calls["add"]["codegraph_config"]["treat_as_repository"] is True
+
+
+@pytest.mark.asyncio
+async def test_declared_local_specs_honour_the_allowed_local_roots(monkeypatch, tmp_path):
+    # A declaration is not a licence to read outside COGNEE_ALLOWED_LOCAL_FILE_ROOTS:
+    # the HTTP route (content_type=code) reaches this path with caller paths.
+    from cognee.tasks.code_graph.resolve_repo import CodeRepositoryError
+
+    allowed = tmp_path / "allowed"
+    outside = tmp_path / "outside"
+    allowed.mkdir()
+    outside.mkdir()
+    monkeypatch.setenv("COGNEE_ALLOWED_LOCAL_FILE_ROOTS", str(allowed))
+
+    with pytest.raises(CodeRepositoryError, match="outside the allowed local roots"):
+        await code_repo.resolve_declared_repositories(str(outside))

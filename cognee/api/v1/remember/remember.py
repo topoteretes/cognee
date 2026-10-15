@@ -44,6 +44,7 @@ from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.code_graph.config import (
     CodeGraphConfig,
+    requests_codegraph_options,
     validate_codegraph_config,
     with_legacy_code_content_type,
 )
@@ -254,6 +255,47 @@ async def _attach_item_identity(result: "RememberResult") -> None:
         logger.debug("Could not attach item identity to the remember result", exc_info=True)
 
 
+class _RepositoriesFailed(Exception):
+    """Every declared repository of an isolating remember failed to ingest."""
+
+    def __init__(self, items: list[dict]):
+        super().__init__(_repositories_error(items))
+        self.items = items
+
+
+def _repositories_error(items: list[dict]) -> str:
+    return "; ".join(f"{item['source']}: {item['error']}" for item in items)
+
+
+def _restore_legacy_code_items(result: "RememberResult", specs: list) -> None:
+    """Give a deprecated ``content_type="code"`` call the result items it used to get.
+
+    The removed route reported each repository as ``kind="code_repository"``
+    with the caller's (redacted) spec as ``source`` and the run's
+    ``pipeline_run_id``; :func:`_attach_item_identity` names the same rows
+    ``code_repo`` with the stored URL or resolved path. Map them back so
+    existing callers keep reading the shape they had.
+    """
+    from cognee.tasks.code_graph.resolve_repo import is_remote_repo, redact_repo_spec
+
+    spec_by_source = {}
+    for spec in specs:
+        if not isinstance(spec, (str, Path)):
+            continue
+        redacted = redact_repo_spec(spec)
+        spec_by_source[redacted] = redacted
+        if not is_remote_repo(spec):
+            spec_by_source[str(Path(spec).expanduser().resolve())] = redacted
+
+    for item in result.items:
+        if item.get("kind") != "code_repo":
+            continue
+        item["kind"] = "code_repository"
+        item["source"] = spec_by_source.get(item.get("source"), item.get("source"))
+        if result.pipeline_run_id:
+            item["pipeline_run_id"] = result.pipeline_run_id
+
+
 PRESORT_FOLDERS_ENV = "PRESORT_FOLDERS_ENABLED"
 
 
@@ -274,7 +316,7 @@ def _should_auto_presort(data, dataset_name, dataset_id, session_id, kwargs) -> 
         session_id is not None
         or dataset_id is not None
         or kwargs.get("content_type")
-        or kwargs.get("codegraph_config")
+        or requests_codegraph_options(kwargs.get("codegraph_config"))
     ):
         return False
 
@@ -990,7 +1032,7 @@ async def remember(
     chunker: Any | None = None,
     custom_prompt: str | None = None,
     run_in_background: bool = False,
-    self_improvement: bool = True,
+    self_improvement: bool | None = None,
     session_ids: list[str] | None = None,
     dry_run: bool | Literal["presort"] = False,
     raise_on_error: bool = True,
@@ -1126,7 +1168,10 @@ async def remember(
     # (with_legacy_code_content_type, shared with the HTTP route) rather than
     # dropped. An explicit codegraph_config key wins over the translation.
     # Translated here, before any path reads content_type.
-    if kwargs.get("content_type") == "code":
+    legacy_code_content_type = kwargs.get("content_type") == "code"
+    if legacy_code_content_type:
+        if session_id is not None:
+            raise ValueError("session_id is not applicable to content_type='code'.")
         kwargs.pop("content_type")
         kwargs["codegraph_config"] = with_legacy_code_content_type(kwargs.get("codegraph_config"))
         logger.warning(
@@ -1135,6 +1180,10 @@ async def remember(
             '"treat_as_repository": True} for the same code-graph-only ingestion. '
             "Reading it as that for now."
         )
+    # None means "not passed": True, except for the deprecated code content
+    # type, whose route never ran improve() and so keeps not running it.
+    if self_improvement is None:
+        self_improvement = not legacy_code_content_type
 
     # Migration dispatch: a MemorySource streams COGX records from an external
     # memory system (Mem0, Zep/Graphiti, Letta, a COGX archive, ...). The
@@ -1143,6 +1192,16 @@ async def remember(
     if isinstance(data, MemorySource):
         if dry_run:
             raise ValueError("dry_run is not supported for MemorySource imports.")
+        # The import never reaches add()/cognify(), so a code graph option would
+        # be dropped (or break the import's own kwargs). Top-level index_vectors
+        # keeps its archive meaning and is read below.
+        if requests_codegraph_options(kwargs.pop("codegraph_config", None)) or kwargs.pop(
+            "repo_credentials", None
+        ):
+            raise ValueError(
+                "codegraph_config and repo_credentials are not supported for MemorySource "
+                "imports (including the deprecated content_type='code')."
+            )
         if dataset_id is not None:
             raise ValueError(
                 "dataset_id is not supported for MemorySource imports; use dataset_name."
@@ -1206,6 +1265,11 @@ async def remember(
     if isinstance(data, MEMORY_ENTRY_TYPES):
         if dry_run:
             raise ValueError("dry_run is supported for add+cognify remember inputs only.")
+        if requests_codegraph_options(kwargs.get("codegraph_config")):
+            raise ValueError(
+                "codegraph_config is not supported for memory entries; they are stored "
+                "without add()/cognify()."
+            )
         return await _remember_entry(
             data,
             dataset_name=dataset_name,
@@ -1279,7 +1343,7 @@ async def remember(
     if dry_run == "presort":
         if session_id is not None:
             raise ValueError("dry_run='presort' is not applicable to session memory.")
-        if kwargs.get("content_type") or kwargs.get("codegraph_config"):
+        if kwargs.get("content_type") or requests_codegraph_options(kwargs.get("codegraph_config")):
             raise ValueError("dry_run='presort' is supported for folder inputs only.")
 
         from cognee.api.v1.serve.state import get_remote_client
@@ -1348,7 +1412,7 @@ async def remember(
     if dry_run:
         if session_id is not None:
             raise ValueError("dry_run is supported for permanent add+cognify remember inputs only.")
-        if kwargs.get("content_type") or kwargs.get("codegraph_config"):
+        if kwargs.get("content_type") or requests_codegraph_options(kwargs.get("codegraph_config")):
             # codegraph_config covers the deprecated content_type="code" too (translated
             # into it above): the estimate prices LLM extraction of documents, which a
             # code-graph run does not do.
@@ -1448,6 +1512,7 @@ async def remember(
             session_ids=session_ids,
             span=span,
             raise_on_error=raise_on_error,
+            legacy_code_content_type=legacy_code_content_type,
             **kwargs,
         )
 
@@ -1503,18 +1568,24 @@ async def _remember_inner(
     session_ids,
     span,
     raise_on_error: bool = True,
+    legacy_code_content_type: bool = False,
     **kwargs,
 ) -> "RememberResult":
     from cognee.api.v1.serve.state import get_remote_client
 
     _fold_codegraph_kwargs(kwargs)
     codegraph_config = validate_codegraph_config(kwargs.get("codegraph_config"))
-    if codegraph_config and (session_id or kwargs.get("content_type")):
+    if codegraph_config:
+        kwargs["codegraph_config"] = codegraph_config
+    else:
+        kwargs.pop("codegraph_config", None)
+    if requests_codegraph_options(codegraph_config) and (session_id or kwargs.get("content_type")):
         # Only the add + cognify path reads it; the session-cache and skills
         # paths would ignore it silently (the HTTP route rejects it the same way).
         raise ValueError(
-            "codegraph_config (index_vectors, repo_credentials) is only supported for "
-            "normal ingestion, not with session_id or content_type."
+            "codegraph_config (index_vectors, include_documents, treat_as_repository, "
+            "repo_credentials) is only supported for normal ingestion, not with "
+            "session_id or content_type."
         )
 
     client = get_remote_client()
@@ -1938,15 +2009,70 @@ async def _remember_inner(
         )
         result.improve_skipped = improve_skipped
 
+        # Declared repositories (treat_as_repository, which the deprecated
+        # content_type="code" is read as) are cloned one by one inside add().
+        # Where a failure is reported rather than raised -- background runs, and
+        # raise_on_error=False as the HTTP router and the GitHub sync pass -- one
+        # failing repository must not abort the others, so each is added on its
+        # own and a failure becomes an errored item of the result.
+        repo_specs = data if isinstance(data, list) else [data]
+        isolate_repositories = (
+            bool(codegraph_config.get("treat_as_repository"))
+            and len(repo_specs) > 1
+            and (run_in_background or not raise_on_error)
+        )
+
+        async def _add() -> list[dict]:
+            if not isolate_repositories:
+                await add(
+                    data=data,
+                    dataset_name=dataset_name,
+                    dataset_id=dataset_id,
+                    **shared_kwargs,
+                    **add_kwargs,
+                )
+                return []
+
+            from cognee.tasks.code_graph.resolve_repo import redact_repo_spec
+
+            failed = []
+            for position, spec in enumerate(repo_specs, start=1):
+                try:
+                    await add(
+                        data=spec,
+                        dataset_name=dataset_name,
+                        dataset_id=dataset_id,
+                        **shared_kwargs,
+                        **add_kwargs,
+                    )
+                except Exception as exc:
+                    # Specs can embed URL credentials: never log spec-derived values.
+                    logger.exception(
+                        "remember: repository %d of %d failed to ingest", position, len(repo_specs)
+                    )
+                    failed.append(
+                        {
+                            "kind": "code_repository" if legacy_code_content_type else "code_repo",
+                            "source": redact_repo_spec(spec),
+                            "status": "errored",
+                            "error": str(exc),
+                        }
+                    )
+            if len(failed) == len(repo_specs):
+                # Nothing was stored, so there is nothing to cognify.
+                raise _RepositoriesFailed(failed)
+            return failed
+
         # Permanent memory: add + cognify (+ optional improve)
         async def _run():
-            await add(
-                data=data,
-                dataset_name=dataset_name,
-                dataset_id=dataset_id,
-                **shared_kwargs,
-                **add_kwargs,
-            )
+            try:
+                failed_repositories = await _add()
+            except _RepositoriesFailed as exc:
+                result.items.extend(exc.items)
+                result.status = "errored"
+                result.error = _repositories_error(exc.items)
+                result.elapsed_seconds = time.monotonic() - result._started_at
+                return
 
             datasets_arg = [dataset_name] if dataset_id is None else [dataset_id]
 
@@ -1970,6 +2096,12 @@ async def _remember_inner(
 
             result._resolve(cognify_result)
             await _attach_item_identity(result)
+            if legacy_code_content_type:
+                _restore_legacy_code_items(result, repo_specs)
+            if failed_repositories:
+                result.items.extend(failed_repositories)
+                result.status = "errored"
+                result.error = _repositories_error(failed_repositories)
 
             if auto_improve:
                 from cognee.api.v1.improve import improve

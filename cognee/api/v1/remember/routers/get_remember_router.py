@@ -16,7 +16,6 @@ from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
 from cognee.shared.utils import send_telemetry
-from cognee.tasks.code_graph.config import with_legacy_code_content_type
 from cognee.tasks.ingestion.data_item import (
     pair_labels_with_data,
     parse_external_metadata,
@@ -529,8 +528,6 @@ def get_remember_router() -> APIRouter:
                 detail="index_vectors is only supported for normal ingestion.",
             )
         codegraph_config = {"index_vectors": True} if index_vectors else {}
-        if code_only:
-            codegraph_config = with_legacy_code_content_type(codegraph_config)
 
         # After the field-specific checks above, so a misused field is
         # reported as such rather than as "nothing to ingest".
@@ -609,7 +606,10 @@ def get_remember_router() -> APIRouter:
                 chunks_per_batch=chunks_per_batch,
                 # Swagger UI submits every rendered form field, so an untouched
                 # content_type arrives as "" — treat it as omitted.
-                content_type=content_type or None,
+                # The deprecated value travels to remember() as itself: the SDK
+                # translates it (with_legacy_code_content_type) and keeps the
+                # legacy result shape and improve default for it.
+                content_type="code" if code_only else (content_type or None),
                 skills_text=skills_text or None,
                 skill_name=skill_name or None,
                 **({"codegraph_config": codegraph_config} if codegraph_config else {}),

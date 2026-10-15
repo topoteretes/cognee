@@ -7,13 +7,27 @@ token rotations), not the stored git remote, not error messages.
 """
 
 import importlib
+from unittest.mock import AsyncMock
 
 import pytest
 
 resolve_module = importlib.import_module("cognee.tasks.code_graph.resolve_repo")
+ssrf_module = importlib.import_module("cognee.tasks.web_scraper.ssrf_protection")
 
 _TOKEN_URL = "https://x-access-token:tok-SECRET@github.com/org/repo.git"
 _CLEAN_URL = "https://github.com/org/repo.git"
+
+
+@pytest.fixture(autouse=True)
+def _origin_matches(monkeypatch):
+    """The clones here are fake ``.git`` directories; their origin is the clean URL."""
+
+    async def fake_origin_url(clone):
+        return _CLEAN_URL
+
+    monkeypatch.setattr(resolve_module, "_origin_url", fake_origin_url)
+    # git is mocked, so resolving the host would only tie these tests to the network.
+    monkeypatch.setattr(ssrf_module, "validate_outbound_url", AsyncMock())
 
 
 def test_redact_repo_spec_strips_userinfo():
@@ -45,7 +59,7 @@ async def test_clone_slug_and_remote_never_carry_the_token(monkeypatch, tmp_path
 
     # Slug comes from the clean URL — same directory a credential-free call
     # (or a later sync with a rotated token) would use.
-    assert resolved == tmp_path / "github.com-org-repo"
+    assert resolved == resolve_module.clone_dir(_CLEAN_URL, clones_dir=tmp_path)
 
     clone_args, _ = git_calls[0]
     # core.symlinks=false is a security requirement, not incidental: without it a
@@ -59,7 +73,7 @@ async def test_clone_slug_and_remote_never_carry_the_token(monkeypatch, tmp_path
 
 @pytest.mark.asyncio
 async def test_existing_clone_pulls_from_the_credentialed_url(monkeypatch, tmp_path):
-    clone_dir = tmp_path / "github.com-org-repo"
+    clone_dir = resolve_module.clone_dir(_CLEAN_URL, clones_dir=tmp_path)
     (clone_dir / ".git").mkdir(parents=True)
     git_calls = []
 
@@ -78,7 +92,7 @@ async def test_existing_clone_pulls_from_the_credentialed_url(monkeypatch, tmp_p
 
 @pytest.mark.asyncio
 async def test_credential_free_urls_keep_the_bare_pull(monkeypatch, tmp_path):
-    clone_dir = tmp_path / "github.com-org-repo"
+    clone_dir = resolve_module.clone_dir(_CLEAN_URL, clones_dir=tmp_path)
     (clone_dir / ".git").mkdir(parents=True)
     git_calls = []
 
@@ -113,7 +127,7 @@ async def test_out_of_band_credentials_ride_the_environment(monkeypatch, tmp_pat
         _CLEAN_URL, clones_dir=tmp_path, credentials="tok-SECRET"
     )
 
-    assert resolved == tmp_path / "github.com-org-repo"
+    assert resolved == resolve_module.clone_dir(_CLEAN_URL, clones_dir=tmp_path)
     ((clone_args, _cwd, clone_env),) = git_calls
     # argv carries only the clean URL; the token is nowhere in it.
     assert clone_args == [
@@ -133,7 +147,7 @@ async def test_out_of_band_credentials_ride_the_environment(monkeypatch, tmp_pat
 
 @pytest.mark.asyncio
 async def test_out_of_band_credentials_apply_to_pulls_too(monkeypatch, tmp_path):
-    clone_dir = tmp_path / "github.com-org-repo"
+    clone_dir = resolve_module.clone_dir(_CLEAN_URL, clones_dir=tmp_path)
     (clone_dir / ".git").mkdir(parents=True)
     git_calls = []
 
@@ -168,3 +182,101 @@ async def test_failed_clone_error_is_scrubbed(monkeypatch, tmp_path):
     message = str(exc_info.value)
     assert "tok-SECRET" not in message
     assert _CLEAN_URL in message
+
+
+def _marker(clone_dir):
+    return clone_dir / ".git" / resolve_module._CREDENTIALED_MARKER
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "spec, credentials", [(_TOKEN_URL, None), (_CLEAN_URL, "tok-SECRET")], ids=["url", "argument"]
+)
+async def test_a_clone_made_with_credentials_is_marked(monkeypatch, tmp_path, spec, credentials):
+    async def fake_run_git(args, cwd=None, env=None):
+        if args[0] == "clone":
+            (resolve_module.Path(args[-1]) / ".git").mkdir(parents=True)
+        return 0, ""
+
+    monkeypatch.setattr(resolve_module, "_run_git", fake_run_git)
+
+    resolved = await resolve_module.resolve_repo_source(
+        spec, clones_dir=tmp_path, credentials=credentials
+    )
+
+    assert _marker(resolved).is_file()
+
+
+@pytest.mark.asyncio
+async def test_a_public_clone_is_not_marked(monkeypatch, tmp_path):
+    async def fake_run_git(args, cwd=None, env=None):
+        if args[0] == "clone":
+            (resolve_module.Path(args[-1]) / ".git").mkdir(parents=True)
+        return 0, ""
+
+    monkeypatch.setattr(resolve_module, "_run_git", fake_run_git)
+
+    resolved = await resolve_module.resolve_repo_source(_CLEAN_URL, clones_dir=tmp_path)
+
+    assert not _marker(resolved).exists()
+
+
+async def _failing_refresh(args, cwd=None, env=None):
+    return 128, "fatal: could not read Username for 'https://github.com': terminal prompts disabled"
+
+
+@pytest.mark.asyncio
+async def test_a_credentialed_clone_is_refused_when_a_caller_without_credentials_cannot_refresh(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(resolve_module, "_run_git", _failing_refresh)
+
+    for branch in (None, "dev"):
+        target = resolve_module.clone_dir(_CLEAN_URL, branch, tmp_path)
+        (target / ".git").mkdir(parents=True, exist_ok=True)
+        _marker(target).touch()
+        with pytest.raises(resolve_module.CodeRepositoryError, match="made with credentials"):
+            await resolve_module.resolve_repo_source(_CLEAN_URL, clones_dir=tmp_path, branch=branch)
+
+
+@pytest.mark.asyncio
+async def test_a_credentialed_caller_still_gets_the_stale_clone_and_keeps_the_marker(
+    monkeypatch, tmp_path
+):
+    clone_dir = resolve_module.clone_dir(_CLEAN_URL, clones_dir=tmp_path)
+    (clone_dir / ".git").mkdir(parents=True)
+    _marker(clone_dir).touch()
+    monkeypatch.setattr(resolve_module, "_run_git", _failing_refresh)
+
+    resolved = await resolve_module.resolve_repo_source(
+        _CLEAN_URL, clones_dir=tmp_path, credentials="tok-SECRET"
+    )
+
+    assert resolved == clone_dir
+    assert _marker(clone_dir).is_file()
+
+
+@pytest.mark.asyncio
+async def test_a_public_clone_is_still_reused_stale(monkeypatch, tmp_path):
+    clone_dir = resolve_module.clone_dir(_CLEAN_URL, clones_dir=tmp_path)
+    (clone_dir / ".git").mkdir(parents=True)
+    monkeypatch.setattr(resolve_module, "_run_git", _failing_refresh)
+
+    resolved = await resolve_module.resolve_repo_source(_CLEAN_URL, clones_dir=tmp_path)
+
+    assert resolved == clone_dir
+
+
+@pytest.mark.asyncio
+async def test_a_credentialed_refresh_marks_the_clone(monkeypatch, tmp_path):
+    clone_dir = resolve_module.clone_dir(_CLEAN_URL, clones_dir=tmp_path)
+    (clone_dir / ".git").mkdir(parents=True)
+
+    async def fake_run_git(args, cwd=None, env=None):
+        return 0, ""
+
+    monkeypatch.setattr(resolve_module, "_run_git", fake_run_git)
+
+    await resolve_module.resolve_repo_source(_TOKEN_URL, clones_dir=tmp_path)
+
+    assert _marker(clone_dir).is_file()

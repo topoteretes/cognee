@@ -5,9 +5,10 @@ Used by ``add()`` to recognise a GitHub/GitLab repository URL
 route, and by the GitHub integration sync to clone private repositories with
 an installation token (``resolve_repo_source(credentials=...)``). Clones live under
 ``BaseConfig.repos_root_directory`` (``~/.cognee/repos`` by default) and are
-reused across calls; an existing clone is refreshed with a best-effort
-``git pull``. A ``branch`` can be chosen for a remote repository; each branch is
-cloned into a directory of its own.
+reused across calls once its ``origin`` is checked; an existing clone is
+refreshed with a best-effort ``git pull`` (a clone made with credentials is
+refused to a caller without them when that refresh fails). A ``branch`` can be
+chosen for a remote repository; each branch is cloned into a directory of its own.
 """
 
 import asyncio
@@ -28,8 +29,14 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("code_graph")
 
 _REMOTE_PREFIXES = ("https://", "http://", "git@", "ssh://")
-# The ssh half of the above: unambiguously a git remote, never a web page.
-_SSH_REPO_PREFIXES = ("git@", "ssh://")
+# The ssh half of the above, as one whitespace-free token: unambiguously a git
+# remote, never a web page -- and never a sentence that merely starts with one.
+_SSH_REPO_SPEC = re.compile(r"(?:git@[\w.-]+:|ssh://)\S+")
+
+# Written into .git of a clone made with credentials. Such a clone may hold a
+# private repository, so a caller without credentials whose refresh fails is
+# refused instead of handed the stale copy.
+_CREDENTIALED_MARKER = "cognee-credentialed"
 
 _FALSEY = {"false", "0", "no", "off"}
 
@@ -112,7 +119,7 @@ def is_ssh_repo_spec(spec) -> bool:
     ingestion would otherwise store the spec string as a text document. Callers
     refuse them with the instruction in :data:`SSH_REPO_SPEC_MESSAGE`.
     """
-    return isinstance(spec, str) and spec.strip().startswith(_SSH_REPO_PREFIXES)
+    return isinstance(spec, str) and _SSH_REPO_SPEC.fullmatch(spec.strip()) is not None
 
 
 SSH_REPO_SPEC_MESSAGE = (
@@ -182,17 +189,30 @@ def redact_repo_spec(spec: str | Path) -> str:
     return urlunsplit((parts.scheme, host, parts.path, parts.query, parts.fragment))
 
 
-def _clone_slug(url: str, branch: str | None = None) -> str:
-    """A stable directory name for a remote URL, e.g. 'github.com-org-repo'.
+def _repo_key(url: str) -> str:
+    """The part of a credential-free remote URL that names the repository.
 
-    A chosen branch gets its own directory beside it, e.g. 'github.com-org-repo@dev-<hash>',
-    so no clone is ever replaced under another caller. The hash of the exact name keeps
-    apart branches the readable part merges: case-insensitive file systems, and the
-    characters replaced here.
+    The scheme, a trailing slash and a ``.git`` suffix are dropped, so the
+    spellings of one repository share a clone and pass its origin check.
     """
-    tail = url.split("://")[-1].replace(":", "/").rstrip("/")
-    tail = tail.removesuffix(".git")
-    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", tail).strip("-.")
+    return url.split("://")[-1].rstrip("/").removesuffix(".git")
+
+
+def _clone_slug(url: str, branch: str | None = None) -> str:
+    """A stable directory name for a remote URL, e.g. 'github.com-org-repo-<hash>'.
+
+    The readable part merges every run of other characters into one '-', so
+    'github.com/a-b/c' and 'github.com/a/b-c' read the same; the hash of the
+    repository's exact name (:func:`_repo_key`) keeps their clones apart.
+
+    A chosen branch gets its own directory beside it, e.g.
+    'github.com-org-repo-<hash>@dev-<hash>', so no clone is ever replaced under another
+    caller. The hash of the exact name keeps apart branches the readable part merges:
+    case-insensitive file systems, and the characters replaced here.
+    """
+    key = _repo_key(url)
+    readable_url = re.sub(r"[^A-Za-z0-9._-]+", "-", key.replace(":", "/")).strip("-.")
+    slug = f"{readable_url}-{hashlib.sha256(key.encode()).hexdigest()[:8]}"
     if branch is None:
         return slug
     readable = re.sub(r"[^A-Za-z0-9._-]+", "-", branch)[:40]
@@ -201,8 +221,21 @@ def _clone_slug(url: str, branch: str | None = None) -> str:
 
 def clone_dir(url: str, branch: str | None = None, clones_dir: Path | None = None) -> Path:
     """Where :func:`resolve_repo_source` clones the credential-free ``url`` on ``branch``
-    (None: the remote's default branch, in the directory every clone had before)."""
+    (None: the remote's default branch, in a directory of its own)."""
     return (Path(clones_dir) if clones_dir else default_clones_dir()) / _clone_slug(url, branch)
+
+
+def repo_identity(url: str) -> Path:
+    """The Data-row identity of the credential-free remote ``url``.
+
+    The path its default-branch clone had before clone directories carried a
+    hash (:func:`_clone_slug`). Rows are keyed on it, so repositories already
+    stored keep their row: keying on the hashed directory would add a second
+    manifest row for each of them on the next add. Not a directory anything is
+    cloned into.
+    """
+    readable = re.sub(r"[^A-Za-z0-9._-]+", "-", _repo_key(url).replace(":", "/")).strip("-.")
+    return default_clones_dir() / readable
 
 
 # git's refname rules that cannot appear anywhere in a branch name: control
@@ -254,7 +287,17 @@ def _credential_env(token: str) -> dict:
     }
 
 
-async def _run_git(args, cwd: Path | None = None, env: dict | None = None) -> tuple:
+def _noninteractive_env() -> dict:
+    """Git never waits for input: no username/password prompt over https, and
+    ssh in batch mode (no passphrase or host-key prompt). A user's own
+    GIT_SSH_COMMAND or GIT_SSH is left in charge of ssh."""
+    env = {"GIT_TERMINAL_PROMPT": "0"}
+    if "GIT_SSH_COMMAND" not in os.environ and "GIT_SSH" not in os.environ:
+        env["GIT_SSH_COMMAND"] = "ssh -oBatchMode=yes"
+    return env
+
+
+async def _exec_git(args, cwd: Path | None = None, env: dict | None = None) -> tuple:
     git_binary = shutil.which("git")
     if git_binary is None:
         raise CodeRepositoryError(
@@ -264,19 +307,31 @@ async def _run_git(args, cwd: Path | None = None, env: dict | None = None) -> tu
         git_binary,
         *args,
         cwd=str(cwd) if cwd else None,
-        env={**os.environ, **env} if env else None,
+        env={**os.environ, **_noninteractive_env(), **(env or {})},
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
     try:
-        _stdout, stderr = await asyncio.wait_for(
-            process.communicate(), timeout=_GIT_TIMEOUT_SECONDS
-        )
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=_GIT_TIMEOUT_SECONDS)
     except asyncio.TimeoutError:
         process.kill()
         await process.wait()
         raise CodeRepositoryError(message=f"git {args[0]} timed out after {_GIT_TIMEOUT_SECONDS}s.")
-    return process.returncode, stderr.decode(errors="replace")
+    return process.returncode, stdout.decode(errors="replace"), stderr.decode(errors="replace")
+
+
+async def _run_git(args, cwd: Path | None = None, env: dict | None = None) -> tuple:
+    returncode, _stdout, stderr = await _exec_git(args, cwd, env)
+    return returncode, stderr
+
+
+async def _origin_url(clone: Path) -> str | None:
+    """The remote URL stored for ``origin`` in ``clone``, as written (no
+    ``insteadOf`` rewrite), or None when it has none."""
+    returncode, stdout, _stderr = await _exec_git(
+        ["config", "--get", "remote.origin.url"], cwd=clone
+    )
+    return stdout.strip() if returncode == 0 else None
 
 
 async def _remote_ref_missing(remote: str, branch: str, env: dict | None) -> bool:
@@ -390,6 +445,7 @@ async def resolve_repo_source(
         return re.sub(r"://[^/\s@]+@", "://", text)
 
     auth_env = _credential_env(credentials) if credentials else None
+    credentialed = has_credentials or bool(credentials)
 
     base = Path(clones_dir) if clones_dir else default_clones_dir()
     target = clone_dir(clean_url, branch, base)
@@ -403,7 +459,18 @@ async def resolve_repo_source(
     def _branch_not_found() -> CodeRepositoryError:
         return CodeRepositoryError(message=f"Branch '{branch}' was not found in '{clean_url}'.")
 
+    marker = target / ".git" / _CREDENTIALED_MARKER
+
     if (target / ".git").is_dir():
+        # The slug is shared by every caller, so never index a clone of another
+        # repository that happens to sit where this one would.
+        origin = await _origin_url(target)
+        if origin is None or _repo_key(redact_repo_spec(origin)) != _repo_key(clean_url):
+            raise CodeRepositoryError(
+                message=f"The existing clone at {target} is not a clone of '{clean_url}' "
+                f"(its origin is '{redact_repo_spec(origin) if origin else 'unset'}'). "
+                "Remove that directory to clone the repository again."
+            )
         # Legacy URL-embedded credentials: fetch from the explicit URL
         # instead of the stored remote (which is deliberately
         # credential-free). Out-of-band credentials ride the environment.
@@ -422,11 +489,20 @@ async def resolve_repo_source(
             if returncode == 0:
                 returncode, stderr = await _run_git(["reset", "--hard", "FETCH_HEAD"], cwd=target)
         if returncode != 0:
+            # A clone made with credentials may be private: a caller without
+            # them gets it only through a refresh that proves access.
+            if not credentialed and marker.is_file():
+                raise CodeRepositoryError(
+                    message=f"Could not refresh '{clean_url}' without credentials, and its "
+                    f"existing clone was made with credentials: {_scrub(stderr[-500:])}"
+                )
             # A stale clone is still indexable; the caller asked for the repo,
             # not for freshness guarantees.
             logger.warning(
                 "Reusing existing clone at %s (refresh failed: %s)", target, _scrub(stderr[-500:])
             )
+        elif credentialed:
+            marker.touch()
         return target
 
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -453,4 +529,6 @@ async def resolve_repo_source(
         )
     if has_credentials:
         await _run_git(["remote", "set-url", "origin", clean_url], cwd=target)
+    if credentialed and marker.parent.is_dir():
+        marker.touch()
     return target
