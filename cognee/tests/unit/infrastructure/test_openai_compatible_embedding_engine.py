@@ -161,14 +161,21 @@ class TestOpenAICompatibleEmbeddingEngine:
             (400, "model 'nope' not found", False),
         ],
     )
-    async def test_hint_only_when_the_rejection_names_the_encoding(
+    async def test_rejection_naming_the_encoding_is_terminal(
         self, monkeypatch, status, message, hinted
     ):
+        """A 400/422 about base64 raises EmbeddingEncodingError on the first attempt; an
+        unrelated 400 keeps the engine's generic wrapper and retry policy."""
         monkeypatch.delenv("MOCK_EMBEDDING", raising=False)
-        import cognee.infrastructure.databases.vector.embeddings.OpenAICompatibleEmbeddingEngine as mod
-        from cognee.infrastructure.databases.exceptions import EmbeddingException
+        from cognee.infrastructure.databases.exceptions import (
+            EmbeddingEncodingError,
+            EmbeddingException,
+        )
+
+        calls = []
 
         def handler(request: httpx.Request) -> httpx.Response:
+            calls.append(request)
             return httpx.Response(status, json={"error": {"message": message}})
 
         engine = self._make_engine(dimensions=4, encoding_format="base64")
@@ -178,19 +185,18 @@ class TestOpenAICompatibleEmbeddingEngine:
             max_retries=0,
             http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
         )
-        logged = MagicMock()
-        monkeypatch.setattr(mod.logger, "error", logged)
-        # A 400/422 is wrapped in EmbeddingException, which tenacity retries with
-        # backoff; one attempt is enough to see whether the hint was logged.
-        engine.embed_text = engine.embed_text.retry_with(stop=stop_after_attempt(1)).__get__(engine)
+        # The generic wrapper is retried with backoff; cap it so the unrelated case
+        # finishes. The encoding error must stop on its own, before any retry.
+        engine.embed_text = engine.embed_text.retry_with(stop=stop_after_attempt(2)).__get__(engine)
 
-        with pytest.raises(EmbeddingException):
-            await engine.embed_text(["a"])
-
-        assert (
-            any(call.args[:1] == (mod.ENCODING_FORMAT_HINT,) for call in logged.call_args_list)
-            is hinted
-        )
+        if hinted:
+            with pytest.raises(EmbeddingEncodingError, match="EMBEDDING_ENCODING_FORMAT"):
+                await engine.embed_text(["a"])
+            assert len(calls) == 1
+        else:
+            with pytest.raises(EmbeddingException):
+                await engine.embed_text(["a"])
+            assert len(calls) == 2
 
     def test_get_vector_size(self):
         """get_vector_size returns the configured dimensions."""

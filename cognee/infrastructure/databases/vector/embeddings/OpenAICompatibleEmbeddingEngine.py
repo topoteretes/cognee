@@ -39,10 +39,10 @@ from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
     EmbeddingResult,
 )
 from cognee.infrastructure.databases.vector.embeddings.encoding import (
-    ENCODING_FORMAT_HINT,
     EncodingFormat,
     decode_embedding,
     rejects_encoding_format,
+    validate_encoding_format,
 )
 from cognee.infrastructure.databases.vector.embeddings.input_limit import (
     init_input_limit,
@@ -119,7 +119,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         # so it has no effect on servers that ignore unknown fields.
         self.input_type = input_type
         # The servers behind this engine vary, so base64 is opt-in only.
-        self.encoding_format = encoding_format or "float"
+        self.encoding_format = validate_encoding_format(encoding_format) or "float"
         self.tokenizer = self.get_tokenizer()
         init_input_limit(self, max_completion_tokens)
 
@@ -308,7 +308,8 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
                 and isinstance(error, (openai.BadRequestError, openai.UnprocessableEntityError))
                 and rejects_encoding_format(error)
             ):
-                logger.error(ENCODING_FORMAT_HINT)
+                # Terminal, like a list reply: the server said it will not do base64.
+                raise EmbeddingEncodingError(f"the server rejected the request: {error}") from error
             raise EmbeddingException(
                 "Embedding failed. Verify EMBEDDING_ENDPOINT and server status."
             ) from error

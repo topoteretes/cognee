@@ -156,3 +156,18 @@ def test_configured_base64_is_trusted_at_creation(provider, model, monkeypatch):
     monkeypatch.setenv("MOCK_EMBEDDING", "true")
     engine = _create(provider, model, "base64")
     assert engine.encoding_format == "base64"
+
+
+@pytest.mark.parametrize("value", ["Base64", "FLOAT", "b64", ""])
+def test_a_value_outside_the_two_formats_is_a_configuration_error(value, monkeypatch):
+    """The env path is typed; the SDK setter is not, so the engines check the value."""
+    monkeypatch.setenv("MOCK_EMBEDDING", "true")
+    with pytest.raises(CogneeConfigurationError, match="must be 'base64' or 'float'"):
+        _create("openai", "openai/text-embedding-3-large", value)
+    with pytest.raises(CogneeConfigurationError, match="must be 'base64' or 'float'"):
+        _create("openai_compatible", "nomic-embed-text", value)
+
+
+def test_decode_embedding_rejects_an_empty_payload():
+    with pytest.raises(EmbeddingEncodingError, match="empty"):
+        decode_embedding("", "base64")

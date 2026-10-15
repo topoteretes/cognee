@@ -22,14 +22,31 @@ from urllib.parse import urlparse
 import litellm
 import numpy as np
 
+from cognee.exceptions import CogneeConfigurationError
 from cognee.infrastructure.databases.exceptions import EmbeddingEncodingError
 
 EncodingFormat = Literal["base64", "float"]
+ENCODING_FORMATS = ("base64", "float")
 
 ENCODING_FORMAT_HINT = (
-    "EMBEDDING_ENCODING_FORMAT=base64 is set, and this endpoint rejected the request. "
+    "EMBEDDING_ENCODING_FORMAT=base64 is set, and this route rejected it. "
     "Fix: comment out or remove EMBEDDING_ENCODING_FORMAT in your .env file or environment."
 )
+
+
+def validate_encoding_format(configured: str | None) -> EncodingFormat | None:
+    """The configured format, or a configuration error for anything but the two values.
+
+    The env path is typed, but cognee.config.set_embedding_config() stores whatever it
+    is given, and a value like "Base64" would send no format and then reject the reply.
+    """
+    if configured is None or configured in ENCODING_FORMATS:
+        return configured
+    raise CogneeConfigurationError(
+        f"EMBEDDING_ENCODING_FORMAT must be 'base64' or 'float', got {configured!r}.",
+        remediation="Set EMBEDDING_ENCODING_FORMAT to base64 or float, or remove it.",
+    )
+
 
 _OPENAI_API_HOST = "api.openai.com"
 
@@ -79,6 +96,7 @@ def resolve_encoding_format(
     model: str | None, endpoint: str | None, configured: EncodingFormat | None
 ) -> EncodingFormat:
     """The format to request: the configured one, else base64 only for OpenAI's own API."""
+    configured = validate_encoding_format(configured)
     if configured is not None:
         return configured
     return "base64" if _routes_to_openai_api(model, endpoint) else "float"
@@ -98,9 +116,12 @@ def decode_embedding(embedding: list[float] | str, encoding_format: EncodingForm
     if not isinstance(embedding, str):
         raise EmbeddingEncodingError(f"got {type(embedding).__name__}")
     try:
-        return np.frombuffer(base64.b64decode(embedding, validate=True), dtype="<f4").tolist()
+        vector = np.frombuffer(base64.b64decode(embedding, validate=True), dtype="<f4").tolist()
     except (binascii.Error, ValueError) as error:
         raise EmbeddingEncodingError(f"payload does not decode as float32: {error}") from error
+    if not vector:
+        raise EmbeddingEncodingError("payload is empty")
+    return vector
 
 
 _ENCODING_REJECTION_RE = re.compile(r"encoding_format|base64", re.IGNORECASE)
