@@ -5,10 +5,12 @@ on:
     types: [opened, reopened, synchronize, ready_for_review, edited]
 
 # pull_request_target runs in the context of the base branch with a token that
-# can write to the repository, so nothing from the pull request may be checked
-# out or executed here. The core-team list is read from the base ref through the
-# API, and the PR author reaches the shell through an environment variable
-# rather than expression interpolation (OSSF Scorecard: Dangerous-Workflow).
+# can write to the repository, so nothing is checked out or executed from the
+# pull request here; there is no checkout at all. The core-team list is read
+# from the base ref through the API, and the PR author reaches the shell through
+# an environment variable rather than expression interpolation (OSSF Scorecard:
+# Dangerous-Workflow, which also flags a checkout whose ref is taken from the
+# pull_request event).
 permissions:
   contents: read
 
@@ -21,12 +23,6 @@ jobs:
       issues: write         # PR labels are issue labels
       pull-requests: write
     steps:
-      - name: Check out base repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          repository: ${{ github.repository }}
-          ref: ${{ github.event.pull_request.base.ref }}
-
       - name: Determine if PR author is a core team member
         id: check_core
         shell: bash

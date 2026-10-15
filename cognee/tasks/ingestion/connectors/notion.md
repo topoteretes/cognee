@@ -65,9 +65,8 @@ changed since the previous run. Block listing still happens every run, for the p
 container blocks (columns, toggles, synced blocks, callouts), since that is how nested sub-pages
 and databases are discovered. A synced block that copies another page's original is not searched,
 since its sub-pages belong to the original: they are only synced when the original's page is
-under a selected root. A tree nested deeper than 50 container blocks, or 100 page and database
-levels below a root, aborts the run instead of forgetting what is below, and keeps aborting on
-every run until that part of the tree is changed in Notion.
+under a selected root. There is no nesting limit: pages, databases and container blocks are
+walked and rendered at any depth.
 
 A run costs at least one request per page even when nothing changed: a 20,000-page tree is tens
 of thousands of requests, hours at Notion's rate limit of about 3 requests per second. The

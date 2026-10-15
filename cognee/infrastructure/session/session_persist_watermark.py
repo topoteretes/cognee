@@ -209,6 +209,7 @@ class SessionPersistWindow:
     session_id: str
     text: str
     persisted_qa_count: int
+    last_entry_time: str | None = None
 
 
 async def get_persisted_qa_count(session_manager, user_id: str, session_id: str) -> int:

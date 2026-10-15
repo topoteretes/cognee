@@ -142,7 +142,7 @@ It cannot be combined with a custom `graph_model`, `dry_run`,
   | Option | Workaround through remember() |
   |---|---|
   | `ontology_file_path` | `config={"ontology_config": ...}` or `ONTOLOGY_FILE_PATH` (above) |
-  | `functional_relationships`, `chunk_attachment` | None yet. Only `cognee.cognify()` accepts them. |
+  | `chunk_attachment` | None yet. Only `cognee.cognify()` accepts it. |
   | `extraction_rules` | Pass it through the loader: `preferred_loaders={"beautiful_soup_loader": {"extraction_rules": {...}}}` (works in `remember()` and `add()`). Needs the `scraping` extra: without it the loader is not registered and the rules are silently ignored |
   | `tavily_config`, `soup_crawler_config` | Not honoured by `add()` or `remember()`; only the `cognee/tasks/web_scraper` tasks use them |
   | `column_value_columns` (dlt) | None yet. Only `cognee.add()` accepts it. |
