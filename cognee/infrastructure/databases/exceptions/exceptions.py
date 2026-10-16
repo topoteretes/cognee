@@ -155,9 +155,10 @@ class EmbeddingEncodingError(EmbeddingException):
     The route does not support base64, whether picked by default for OpenAI's API or
     set via EMBEDDING_ENCODING_FORMAT: a provider or proxy translated the request into
     its own format (Bedrock answers with 1-bit binary vectors, as a list), the payload
-    does not decode as little-endian float32, or the server refused the parameter. Only
-    the openai_compatible engine raises this for a refusal; the LiteLLM engine re-raises
-    litellm's 400/422 and logs ENCODING_FORMAT_HINT. Terminal: the same request gets the
+    does not decode as little-endian float32, or the route refused the parameter (a
+    server's 400/422 naming it, or litellm refusing it before sending for a provider such
+    as Gemini). Raised only when base64 was set, never for the OpenAI default, so the
+    message always names a setting the user made. Terminal: the same request gets the
     same answer, so the engines never retry it.
     """
 

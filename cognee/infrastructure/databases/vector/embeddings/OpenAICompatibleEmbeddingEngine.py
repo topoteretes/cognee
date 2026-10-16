@@ -279,11 +279,9 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
                 # cannot use (the generic wrap below would hide it from the
                 # predicate anyway), and staying inside CogneeApiError is what
                 # keeps the API's 422 instead of falling through a router's
-                # ``except Exception`` into a 500. Diverges from
-                # LiteLLMEmbeddingEngine, which re-raises litellm's class bare so
-                # the CLI's remediation can match its message; that message shape
-                # is litellm's, not this SDK's, so the rationale does not carry
-                # over. The provider's text is preserved in the message instead.
+                # ``except Exception`` into a 500. LiteLLMEmbeddingEngine raises
+                # the same class for a refusal. The provider's text is preserved
+                # in the message.
                 #
                 # NotFoundError is deliberately left retryable here, unlike in
                 # LiteLLMEmbeddingEngine: an ingress or reverse proxy in front of

@@ -30,11 +30,6 @@ from cognee.infrastructure.databases.exceptions import EmbeddingEncodingError, E
 EncodingFormat = Literal["base64", "float"]
 ENCODING_FORMATS = ("base64", "float")
 
-ENCODING_FORMAT_HINT = (
-    "EMBEDDING_ENCODING_FORMAT=base64 is set, and this route rejected it. "
-    "Fix: comment out or remove EMBEDDING_ENCODING_FORMAT in your .env file or environment."
-)
-
 
 def validate_encoding_format(configured: str | None) -> EncodingFormat | None:
     """The configured format, or a configuration error for anything but the two values.
@@ -207,7 +202,7 @@ def _names_encoding(body: object) -> bool:
 
 
 def rejects_encoding_format(error: BaseException) -> bool:
-    """Whether a 400/422 is about the encoding, so ENCODING_FORMAT_HINT fits it.
+    """Whether a 400/422 is about the encoding, so EmbeddingEncodingError fits it.
 
     A server that rejects base64 says so ("unsupported encoding_format", a validation
     error located at encoding_format); a bad model name or dimensions does not, and the

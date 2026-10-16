@@ -26,7 +26,6 @@ from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
     EmbeddingResult,
 )
 from cognee.infrastructure.databases.vector.embeddings.encoding import (
-    ENCODING_FORMAT_HINT,
     EncodingFormat,
     decode_embedding,
     rejects_encoding_format,
@@ -100,6 +99,7 @@ logger = get_logger("LiteLLMEmbeddingEngine")
 
 observe = get_observe()
 
+
 # Over-length embedding input: litellm maps chat "context length" 400s to
 # ContextWindowExceededError, but the embeddings API returns a plain
 # BadRequestError (e.g. OpenAI 400 "maximum input length is 8192 tokens"). Match
@@ -109,6 +109,23 @@ observe = get_observe()
 # the per-prediction instance cap ("2048 instance(s) is allowed per prediction")
 # and the per-model batch cap ("a batchSize value of 1234 but the supported
 # range is from 1 (inclusive) to 251 (exclusive)" -- "too many instances").
+_LITELLM_DROP_PARAMS_ADVICE_RE = re.compile(
+    r"\s*To drop these, set `litellm\.drop_params=True`.*", re.DOTALL
+)
+_LITELLM_CLASS_PREFIX_RE = re.compile(r"^litellm\.\w+: ")
+
+
+def _refusal_text(error: BaseException) -> str:
+    """The provider's refusal, without litellm's class prefix and its drop_params advice.
+
+    That advice is the wrong fix here: cognee's knob is EMBEDDING_ENCODING_FORMAT, which
+    the EmbeddingEncodingError that wraps this text names.
+    """
+    text = _LITELLM_DROP_PARAMS_ADVICE_RE.sub("", str(error))
+    text = _LITELLM_CLASS_PREFIX_RE.sub("", text).strip()
+    return text or type(error).__name__
+
+
 _EMBED_LENGTH_ERROR_RE = re.compile(
     r"maximum\s+input\s+length"
     r"|instance\(s\)\s+is\s+allowed\s+per\s+prediction"
@@ -367,7 +384,12 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 or _EMBED_LENGTH_ERROR_RE.search(str(error))
             ):
                 if self._base64_configured and rejects_encoding_format(error):
-                    logger.error(ENCODING_FORMAT_HINT)
+                    # The caller sees the fix, not litellm's advice to drop the
+                    # parameter: a typed, terminal error like the one a float
+                    # answer raises (EmbeddingEncodingError is in the terminal list).
+                    raise EmbeddingEncodingError(
+                        f"the route refused encoding_format=base64: {_refusal_text(error)}"
+                    ) from error
                 raise
             if isinstance(text, list) and len(text) > 1:
                 mid = math.ceil(len(text) / 2)
@@ -459,7 +481,9 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 str(error),
             )
             if self._base64_configured and rejects_encoding_format(error):
-                logger.error(ENCODING_FORMAT_HINT)
+                raise EmbeddingEncodingError(
+                    f"the route refused encoding_format=base64: {_refusal_text(error)}"
+                ) from error
             raise
 
         except EmbeddingEncodingError:

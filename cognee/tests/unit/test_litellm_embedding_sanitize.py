@@ -439,48 +439,45 @@ async def test_a_base64_reply_survives_a_strict_warning_filter(monkeypatch):
     assert result == [vector]
 
 
-@pytest.mark.asyncio
-async def test_rejected_base64_logs_the_setting_to_change(monkeypatch):
-    """A 400 while base64 is requested names EMBEDDING_ENCODING_FORMAT and still raises."""
-    monkeypatch.setenv("MOCK_EMBEDDING", "false")
-
+def _base64_engine(model="openai/m", endpoint="http://localhost:8000/v1"):
     with patch.object(LiteLLMEmbeddingEngine, "get_tokenizer", return_value=Mock()):
-        engine = LiteLLMEmbeddingEngine(
-            model="openai/m",
+        return LiteLLMEmbeddingEngine(
+            model=model,
             dimensions=2,
             api_key="test-key",
-            endpoint="http://localhost:8000/v1",
+            endpoint=endpoint,
             encoding_format="base64",
         )
+
+
+@pytest.mark.asyncio
+async def test_rejected_base64_raises_the_typed_error_naming_the_setting(monkeypatch):
+    """A 400 refusing the format while base64 is set surfaces as EmbeddingEncodingError,
+    chained from litellm's error, so every caller gets the fix: SDK, API, CLI, MCP."""
+    monkeypatch.setenv("MOCK_EMBEDDING", "false")
+    engine = _base64_engine()
 
     import cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine as mod
 
     error = mod.litellm.exceptions.BadRequestError(
         message="unsupported encoding_format", model="openai/m", llm_provider="openai"
     )
-    monkeypatch.setattr(mod.litellm, "aembedding", AsyncMock(side_effect=error))
-    logged = Mock()
-    monkeypatch.setattr(mod.logger, "error", logged)
+    aembedding = AsyncMock(side_effect=error)
+    monkeypatch.setattr(mod.litellm, "aembedding", aembedding)
 
-    with pytest.raises(mod.litellm.exceptions.BadRequestError):
+    with pytest.raises(mod.EmbeddingEncodingError, match="EMBEDDING_ENCODING_FORMAT") as raised:
         await engine.embed_text(["hello"])
 
-    logged.assert_called_with(mod.ENCODING_FORMAT_HINT)
+    assert raised.value.__cause__ is error
+    assert "unsupported encoding_format" in str(raised.value)
+    assert aembedding.await_count == 1
 
 
 @pytest.mark.asyncio
 async def test_unrelated_400_does_not_blame_the_encoding(monkeypatch):
-    """With base64 set, a 400 that is not about the encoding gets no hint."""
+    """With base64 set, a 400 that is not about the encoding is re-raised as it came."""
     monkeypatch.setenv("MOCK_EMBEDDING", "false")
-
-    with patch.object(LiteLLMEmbeddingEngine, "get_tokenizer", return_value=Mock()):
-        engine = LiteLLMEmbeddingEngine(
-            model="openai/m",
-            dimensions=2,
-            api_key="test-key",
-            endpoint="http://localhost:8000/v1",
-            encoding_format="base64",
-        )
+    engine = _base64_engine()
 
     import cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine as mod
 
@@ -490,28 +487,18 @@ async def test_unrelated_400_does_not_blame_the_encoding(monkeypatch):
         llm_provider="openai",
     )
     monkeypatch.setattr(mod.litellm, "aembedding", AsyncMock(side_effect=error))
-    logged = Mock()
-    monkeypatch.setattr(mod.logger, "error", logged)
 
-    with pytest.raises(mod.litellm.exceptions.BadRequestError):
+    with pytest.raises(mod.litellm.exceptions.BadRequestError) as raised:
         await engine.embed_text(["hello"])
 
-    assert all(call.args[:1] != (mod.ENCODING_FORMAT_HINT,) for call in logged.call_args_list)
+    assert raised.value is error
 
 
 @pytest.mark.asyncio
-async def test_rejected_base64_as_422_logs_the_setting_to_change(monkeypatch):
-    """A server that validates the format as an enum answers 422; the hint still fits."""
+async def test_rejected_base64_as_422_raises_the_typed_error(monkeypatch):
+    """A server that validates the format as an enum answers 422; same typed error."""
     monkeypatch.setenv("MOCK_EMBEDDING", "false")
-
-    with patch.object(LiteLLMEmbeddingEngine, "get_tokenizer", return_value=Mock()):
-        engine = LiteLLMEmbeddingEngine(
-            model="openai/m",
-            dimensions=2,
-            api_key="test-key",
-            endpoint="http://localhost:8000/v1",
-            encoding_format="base64",
-        )
+    engine = _base64_engine()
 
     import cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine as mod
 
@@ -521,21 +508,21 @@ async def test_rejected_base64_as_422_logs_the_setting_to_change(monkeypatch):
         llm_provider="openai",
         response=httpx.Response(422, request=httpx.Request("POST", "http://localhost:8000/v1")),
     )
-    monkeypatch.setattr(mod.litellm, "aembedding", AsyncMock(side_effect=error))
-    logged = Mock()
-    monkeypatch.setattr(mod.logger, "error", logged)
+    aembedding = AsyncMock(side_effect=error)
+    monkeypatch.setattr(mod.litellm, "aembedding", aembedding)
 
-    with pytest.raises(mod.litellm.exceptions.UnprocessableEntityError):
+    with pytest.raises(mod.EmbeddingEncodingError, match="EMBEDDING_ENCODING_FORMAT") as raised:
         await engine.embed_text(["hello"])
 
-    logged.assert_called_with(mod.ENCODING_FORMAT_HINT)
+    assert raised.value.__cause__ is error
+    assert aembedding.await_count == 1
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", [400, 422])
 async def test_default_base64_does_not_blame_an_unset_setting(monkeypatch, status):
     """On OpenAI's API base64 is the default, so even a refusal of it must not name the
-    setting: the user never set it. Both status branches carry the hint."""
+    setting: the user never set it. Both status branches re-raise litellm's error."""
     monkeypatch.setenv("MOCK_EMBEDDING", "false")
     monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
     monkeypatch.delenv("OPENAI_API_BASE", raising=False)
@@ -563,43 +550,38 @@ async def test_default_base64_does_not_blame_an_unset_setting(monkeypatch, statu
             response=httpx.Response(422, request=httpx.Request("POST", "https://api.openai.com")),
         )
     monkeypatch.setattr(mod.litellm, "aembedding", AsyncMock(side_effect=error))
-    logged = Mock()
-    monkeypatch.setattr(mod.logger, "error", logged)
 
-    with pytest.raises(type(error)):
+    with pytest.raises(type(error)) as raised:
         await engine.embed_text(["hello"])
 
-    assert all(call.args[:1] != (mod.ENCODING_FORMAT_HINT,) for call in logged.call_args_list)
+    assert raised.value is error
 
 
 @pytest.mark.asyncio
-async def test_client_side_refusal_of_the_format_gets_the_hint(monkeypatch):
+async def test_client_side_refusal_of_the_format_raises_the_typed_error(monkeypatch):
     """litellm refuses encoding_format before sending for some providers (gemini, ollama);
-    its message names the parameter, so the hint fits and the call stops at once."""
+    its message names the parameter, so the typed error fits and the call stops at once.
+    Only the first line of litellm's message is kept: its drop_params advice is the
+    wrong fix for cognee, whose setting is EMBEDDING_ENCODING_FORMAT."""
     monkeypatch.setenv("MOCK_EMBEDDING", "false")
-
-    with patch.object(LiteLLMEmbeddingEngine, "get_tokenizer", return_value=Mock()):
-        engine = LiteLLMEmbeddingEngine(
-            model="gemini/text-embedding-004",
-            dimensions=2,
-            api_key="test-key",
-            encoding_format="base64",
-        )
+    engine = _base64_engine(model="gemini/gemini-embedding-001", endpoint=None)
 
     import cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine as mod
 
     error = mod.litellm.exceptions.UnsupportedParamsError(
-        message="gemini does not support parameters: {'encoding_format': 'base64'}",
-        model="gemini/text-embedding-004",
+        message="gemini does not support parameters: {'encoding_format': 'base64'}, for "
+        "model=gemini-embedding-001. To drop these, set `litellm.drop_params=True` or for "
+        "proxy:\n\n`litellm_settings:\n drop_params: true`",
+        model="gemini/gemini-embedding-001",
         llm_provider="gemini",
     )
     aembedding = AsyncMock(side_effect=error)
     monkeypatch.setattr(mod.litellm, "aembedding", aembedding)
-    logged = Mock()
-    monkeypatch.setattr(mod.logger, "error", logged)
 
-    with pytest.raises(mod.litellm.exceptions.UnsupportedParamsError):
+    with pytest.raises(mod.EmbeddingEncodingError, match="EMBEDDING_ENCODING_FORMAT") as raised:
         await engine.embed_text(["hello"])
 
-    logged.assert_called_with(mod.ENCODING_FORMAT_HINT)
+    assert raised.value.__cause__ is error
+    assert "gemini does not support parameters" in str(raised.value)
+    assert "drop_params" not in str(raised.value)
     assert aembedding.await_count == 1

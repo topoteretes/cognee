@@ -7,7 +7,8 @@ outcome and fails on anything else:
 
 - honoured: a real float vector of the configured size, never 0/1 values;
 - ignored (float answered): EmbeddingEncodingError at once, naming the setting;
-- rejected: a 400/422 whose message names the encoding, so the hint fits it.
+- rejected: the same EmbeddingEncodingError, chained from litellm's 400/422 that names
+  the encoding (the engine converts the refusal, so the setting is named either way).
 
 One short embedding request, no LLM call. Config comes from the environment:
 EMBEDDING_PROVIDER=custom, an openrouter/ model, OPENROUTER key as
@@ -53,16 +54,15 @@ async def main() -> None:
         elapsed = time.perf_counter() - started
         assert "EMBEDDING_ENCODING_FORMAT" in str(error), str(error)
         assert attempts == 1, f"terminal error after {attempts} requests: it was retried"
-        print(f"OK (ignored): EmbeddingEncodingError after {elapsed:.1f}s: {error}")
-        return
-    except (
-        litellm.exceptions.BadRequestError,
-        litellm.exceptions.UnprocessableEntityError,
-    ) as error:
-        elapsed = time.perf_counter() - started
-        assert rejects_encoding_format(error), f"rejection does not name the encoding: {error}"
-        assert attempts == 1, f"terminal error after {attempts} requests: it was retried"
-        print(f"OK (rejected): {type(error).__name__} after {elapsed:.1f}s: {error}")
+        cause = error.__cause__
+        if isinstance(
+            cause,
+            (litellm.exceptions.BadRequestError, litellm.exceptions.UnprocessableEntityError),
+        ):
+            assert rejects_encoding_format(cause), f"rejection does not name the encoding: {cause}"
+            print(f"OK (rejected): {type(cause).__name__} after {elapsed:.1f}s: {error}")
+        else:
+            print(f"OK (ignored): EmbeddingEncodingError after {elapsed:.1f}s: {error}")
         return
 
     (vector,) = vectors
