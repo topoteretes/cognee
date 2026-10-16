@@ -51,7 +51,27 @@ async def relational_db_migration():
     schema = await migration_engine.extract_schema()
 
     graph_engine = await get_graph_engine()
-    await migrate_relational_database(graph_engine, schema=schema)
+    migrated_nodes, _ = await migrate_relational_database(graph_engine, schema=schema)
+
+    # The primary key column must never become a ColumnValue node: that maps a row to
+    # its own id. The column names and `primary_key` come from two separate SQLAlchemy
+    # reflection calls, so the skip check has to compare by value - on Postgres/MySQL
+    # the two strings are equal but are not the same object.
+    primary_key_columns = {
+        table_name: (details["primary_key"] or details["columns"][0]["name"])
+        for table_name, details in schema.items()
+    }
+    primary_key_column_nodes = []
+    for _node_id, node_data in migrated_nodes:
+        # ColumnValue nodes are named "<table>:<column>:<value>".
+        parts = (node_data.get("name") or "").split(":", 2)
+        if len(parts) == 3 and primary_key_columns.get(parts[0]) == parts[1]:
+            primary_key_column_nodes.append(node_data["name"])
+
+    assert not primary_key_column_nodes, (
+        "Primary key columns were mapped to ColumnValue nodes: "
+        f"{sorted(primary_key_column_nodes)[:5]}"
+    )
 
     # Create the dataset so search can find it by name
     user = await get_default_user()
@@ -204,8 +224,8 @@ async def relational_db_migration():
 
         # NOTE: Because of the different size of the postgres and sqlite databases,
         #       different number of nodes and edges are expected
-        assert node_count == 522, f"Expected 522 nodes, got {node_count}"
-        assert edge_count == 961, f"Expected 961 edges, got {edge_count}"
+        assert node_count == 430, f"Expected 430 nodes, got {node_count}"
+        assert edge_count == 869, f"Expected 869 edges, got {edge_count}"
 
     print(f"Node & edge count validated: node_count={node_count}, edge_count={edge_count}.")
 
