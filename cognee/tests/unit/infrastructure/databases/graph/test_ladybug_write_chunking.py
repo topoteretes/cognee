@@ -31,6 +31,12 @@ def _fake_edges(count):
     return [(f"from-{index}", f"to-{index}", "relates_to", {}) for index in range(count)]
 
 
+def _statements(adapter, param: str):
+    """The (query, params) calls carrying ``param``: writes carry nodes/edges,
+    the learned-property reads before them carry node_ids/edge_keys."""
+    return [call.args for call in adapter.query.await_args_list if param in call.args[1]]
+
+
 @pytest.mark.asyncio
 async def test_add_nodes_chunks_large_batches():
     adapter = _adapter_with_mocked_writes()
@@ -38,9 +44,19 @@ async def test_add_nodes_chunks_large_batches():
 
     await adapter.add_nodes(_fake_nodes(total))
 
-    assert adapter.query.await_count == 3
-    chunk_sizes = [len(call.args[1]["nodes"]) for call in adapter.query.await_args_list]
-    assert chunk_sizes == [_WRITE_CHUNK_SIZE, _WRITE_CHUNK_SIZE, 1]
+    writes = _statements(adapter, "nodes")
+    assert [len(params["nodes"]) for _, params in writes] == [
+        _WRITE_CHUNK_SIZE,
+        _WRITE_CHUNK_SIZE,
+        1,
+    ]
+    reads = _statements(adapter, "node_ids")
+    assert [len(params["node_ids"]) for _, params in reads] == [
+        _WRITE_CHUNK_SIZE,
+        _WRITE_CHUNK_SIZE,
+        1,
+    ]
+    assert adapter.query.await_count == 6
     adapter.checkpoint.assert_awaited_once()
 
 
@@ -50,7 +66,8 @@ async def test_add_nodes_small_batch_is_single_statement():
 
     await adapter.add_nodes(_fake_nodes(5))
 
-    assert adapter.query.await_count == 1
+    assert len(_statements(adapter, "nodes")) == 1
+    assert len(_statements(adapter, "node_ids")) == 1
 
 
 @pytest.mark.asyncio
@@ -60,9 +77,11 @@ async def test_add_edges_chunks_large_batches():
 
     await adapter.add_edges(_fake_edges(total))
 
-    assert adapter.query.await_count == 2
-    chunk_sizes = [len(call.args[1]["edges"]) for call in adapter.query.await_args_list]
-    assert chunk_sizes == [_WRITE_CHUNK_SIZE, 1]
+    writes = _statements(adapter, "edges")
+    assert [len(params["edges"]) for _, params in writes] == [_WRITE_CHUNK_SIZE, 1]
+    reads = _statements(adapter, "edge_keys")
+    assert [len(params["edge_keys"]) for _, params in reads] == [_WRITE_CHUNK_SIZE, 1]
+    assert adapter.query.await_count == 4
     adapter.checkpoint.assert_awaited_once()
 
 
@@ -74,7 +93,7 @@ async def test_add_edges_matches_endpoints_by_primary_key():
 
     await adapter.add_edges(_fake_edges(1))
 
-    query = adapter.query.await_args_list[0].args[0]
+    (query, _), *_ = _statements(adapter, "edges")
     assert "MATCH (from:Node {id: edge.from_id}), (to:Node {id: edge.to_id})" in query
     assert "MATCH (from:Node), (to:Node)" not in query
 
@@ -92,7 +111,7 @@ async def test_add_edges_matches_both_endpoints_in_one_clause():
 
     await adapter.add_edges(_fake_edges(1))
 
-    query = adapter.query.await_args_list[0].args[0]
+    (query, _), *_ = _statements(adapter, "edges")
     match_clauses = [line for line in query.splitlines() if line.strip().startswith("MATCH ")]
     assert len(match_clauses) == 1, f"endpoints must bind in one MATCH clause, got: {match_clauses}"
     assert "MATCH (to:Node {id: edge.to_id})" not in query

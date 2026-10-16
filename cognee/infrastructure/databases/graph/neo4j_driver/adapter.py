@@ -323,12 +323,13 @@ class Neo4jAdapter(GraphDBInterface):
         # additive; this keeps the property consistent with them).
         query = dedent(
             f"""MERGE (node: `{BASE_LABEL}`{{id: $node_id}})
-                WITH node, apoc.coll.toSet(
+                WITH node, node.feedback_weight AS kept_feedback_weight, apoc.coll.toSet(
                     coalesce(node.belongs_to_set, [])
                     + coalesce($properties.belongs_to_set, [])
                 ) AS merged_belongs_to_set
                 SET node += $properties, node.updated_at = timestamp()
                 SET node.belongs_to_set = merged_belongs_to_set
+                SET node.feedback_weight = coalesce(kept_feedback_weight, node.feedback_weight)
                 WITH node, $node_label AS label
                 CALL apoc.create.addLabels(node, [label]) YIELD node AS labeledNode
                 RETURN ID(labeledNode) AS internal_id, labeledNode.id AS nodeId"""
@@ -379,12 +380,13 @@ class Neo4jAdapter(GraphDBInterface):
         query = f"""
         UNWIND $nodes AS node
         MERGE (n: `{BASE_LABEL}`{{id: node.node_id}})
-        WITH n, node, apoc.coll.toSet(
+        WITH n, node, n.feedback_weight AS kept_feedback_weight, apoc.coll.toSet(
             coalesce(n.belongs_to_set, [])
             + coalesce(node.properties.belongs_to_set, [])
         ) AS merged_belongs_to_set
         SET n += node.properties, n.updated_at = timestamp()
         SET n.belongs_to_set = merged_belongs_to_set
+        SET n.feedback_weight = coalesce(kept_feedback_weight, n.feedback_weight)
         {fold_clause}
         WITH n, node.label AS label
         CALL apoc.create.addLabels(n, [label]) YIELD node AS labeledNode
@@ -1153,8 +1155,9 @@ class Neo4jAdapter(GraphDBInterface):
             MATCH (from_node :`{BASE_LABEL}`{{id: $from_node}}),
                   (to_node :`{BASE_LABEL}`{{id: $to_node}})
             MERGE (from_node)-[r:`{relationship_name}`]->(to_node)
-            ON CREATE SET r += $properties, r.updated_at = timestamp()
-            ON MATCH SET r += $properties, r.updated_at = timestamp()
+            WITH r, r.feedback_weight AS kept_feedback_weight
+            SET r += $properties, r.updated_at = timestamp()
+            SET r.feedback_weight = coalesce(kept_feedback_weight, r.feedback_weight)
             RETURN r
             """
         )
@@ -1246,9 +1249,11 @@ class Neo4jAdapter(GraphDBInterface):
                 {{}},
                 to_node
             ) YIELD rel
+            WITH rel, rel.feedback_weight AS kept_feedback_weight, edge
             SET rel += edge.properties,
                 rel.updated_at = timestamp(),
                 rel.created_at = coalesce(rel.created_at, timestamp())
+            SET rel.feedback_weight = coalesce(kept_feedback_weight, rel.feedback_weight)
             {fold_clause}
             RETURN rel"""
 
