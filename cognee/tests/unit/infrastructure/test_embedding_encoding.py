@@ -10,6 +10,7 @@ import httpx
 import litellm
 import openai
 import pytest
+from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
 
 from cognee.exceptions import CogneeConfigurationError
 from cognee.infrastructure.databases.exceptions import EmbeddingEncodingError
@@ -110,6 +111,13 @@ def test_default_format_stays_float_when_litellm_routes_to_its_proxy(switch, mon
     assert resolve_encoding_format("openai/text-embedding-3-large", None, None) == "float"
     assert resolve_encoding_format("text-embedding-3-large", None, None) == "float"
     assert resolve_encoding_format("openai/text-embedding-3-large", None, "base64") == "base64"
+
+
+def test_a_prefix_litellm_cannot_route_is_not_asked_about(capsys):
+    """litellm's provider prefixes are case-sensitive, and asking it about one it does not
+    know prints its provider list to stdout."""
+    assert resolve_encoding_format("OpenAI/text-embedding-3-large", None, None) == "float"
+    assert "Provider List" not in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("setting", ["EMBEDDING_ENDPOINT", "OPENAI_BASE_URL"])
@@ -248,16 +256,31 @@ async def _sdk_error(status, body):
     return info.value
 
 
-def _raised_by_litellm(error):
-    """litellm's error for the same reply: its own class, with the SDK's in the chain."""
-    try:
-        raise litellm.exceptions.BadRequestError(
-            message=f"litellm.BadRequestError: OpenAIException - {error}",
-            model="openai/m",
-            llm_provider="openai",
-        ) from error
-    except litellm.exceptions.BadRequestError as wrapped:
-        return wrapped
+async def _litellm_error(model, status, body):
+    """The error litellm itself raises for this reply: through the openai SDK for an
+    openai/ model, through its own HTTP handler for hosted_vllm/ and the like."""
+    reply = httpx.MockTransport(lambda request: httpx.Response(status, json=body))
+    if model.startswith("openai/"):
+        client = openai.AsyncOpenAI(
+            api_key="test-key",
+            base_url="http://localhost:8000/v1",
+            max_retries=0,
+            http_client=httpx.AsyncClient(transport=reply),
+        )
+    else:
+        # Set after construction: AsyncHTTPHandler takes a transport only from litellm 1.105.
+        client = AsyncHTTPHandler()
+        client.client = httpx.AsyncClient(transport=reply)
+    with pytest.raises(openai.APIStatusError) as info:
+        await litellm.aembedding(
+            model=model,
+            input=["a"],
+            encoding_format="base64",
+            api_base="http://localhost:8000/v1",
+            api_key="test-key",
+            client=client,
+        )
+    return info.value
 
 
 _ECHOED_REQUEST = {"input": ["a"], "model": "m", "encoding_format": "base64"}
@@ -293,6 +316,33 @@ _ECHOED_REQUEST = {"input": ["a"], "model": "m", "encoding_format": "base64"}
             },
             True,
         ),
+        # The openai SDK keeps only "error" ("Bad Request") of this reply.
+        (
+            400,
+            {
+                "statusCode": 400,
+                "code": "FST_ERR_VALIDATION",
+                "error": "Bad Request",
+                "message": "body/encoding_format must be equal to one of the allowed values",
+            },
+            True,
+        ),
+        (
+            400,
+            {
+                "error": {
+                    "message": "Provider returned error",
+                    "code": 400,
+                    "metadata": {
+                        "raw": '{"error": {"message": "Unsupported encoding_format: base64"}}',
+                        "provider_name": "Example",
+                    },
+                }
+            },
+            True,
+        ),
+        # Errors keyed by field name.
+        (400, {"encoding_format": ["is not included in the list"]}, True),
         # Errors about something else, echoing the request or the input texts.
         (
             422,
@@ -340,9 +390,9 @@ _ECHOED_REQUEST = {"input": ["a"], "model": "m", "encoding_format": "base64"}
     ],
 )
 async def test_a_refusal_is_read_from_the_error_not_the_echoed_request(status, body, refused):
-    error = await _sdk_error(status, body)
-    assert rejects_encoding_format(error) is refused
-    assert rejects_encoding_format(_raised_by_litellm(error)) is refused
+    assert rejects_encoding_format(await _sdk_error(status, body)) is refused
+    for model in ("openai/m", "hosted_vllm/m", "openrouter/openai/text-embedding-3-small"):
+        assert rejects_encoding_format(await _litellm_error(model, status, body)) is refused, model
 
 
 @pytest.mark.parametrize(
