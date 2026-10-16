@@ -13,10 +13,13 @@ from uuid import uuid4
 import pytest
 
 from cognee.infrastructure.databases.cache.models import SessionAgentTraceEntry
+from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
 from cognee.infrastructure.session.session_persist_watermark import TRACE_PERSIST_WATERMARK
 from cognee.modules.improve import GraphCapabilities, ImproveConfig, ImproveRunInputs
 from cognee.modules.improve.result import StageResult
+from cognee.modules.improve.stage import execute_stage
 from cognee.modules.improve.stages import PersistAgentTracesStage
+from cognee.modules.pipelines.exceptions import CognifyFailedError
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunErrored
 from cognee.tasks.memify.cognify_agent_trace_feedback import cognify_agent_trace_feedback
 from cognee.tasks.memify.extract_agent_trace_feedbacks import extract_agent_trace_feedbacks
@@ -64,31 +67,49 @@ class FakeSessionManager:
         return True
 
 
-class FakeCognee:
-    """Records each document handed to cognify; fails the builds listed in ``fail_builds``.
+def _session_of(document: str) -> str:
+    return document.split("\n", 1)[0].replace("Session ID: ", "")
 
-    ``on_cognify`` runs on every build, to model an agent still writing steps.
+
+class FakeCognee:
+    """Records each document handed to add and each cognify run over them.
+
+    A cognify run covers every document added since the previous completed
+    run, as the real one does: a failed run is rolled back as a whole, its
+    documents stay pending for the next run, and it raises CognifyFailedError
+    with the cause (a budget rejection raises LLMPaymentRequiredError). It
+    fails when its number is in ``fail_calls`` or when one of its documents
+    belongs to a session in ``fail_sessions``. ``on_cognify`` runs on every
+    build, to model an agent still writing steps.
     """
 
-    def __init__(self, fail_builds=(), on_cognify=None):
+    def __init__(self, fail_calls=(), fail_sessions=(), on_cognify=None):
         self.documents: list[str] = []
-        self.fail_builds = set(fail_builds)
+        self.pending: list[str] = []
+        self.runs: list[list[str]] = []  # sessions per cognify run
+        self.fail_calls = set(fail_calls)
+        self.fail_sessions = set(fail_sessions)
         self.on_cognify = on_cognify
 
     async def add(self, text, **kwargs):
         self.documents.append(text)
+        self.pending.append(text)
 
     async def cognify(self, **kwargs):
         if self.on_cognify is not None:
             self.on_cognify()
-        if len(self.documents) in self.fail_builds:
-            return PipelineRunErrored(
-                pipeline_run_id=uuid4(),
-                dataset_id=uuid4(),
+        sessions = [_session_of(document) for document in self.pending]
+        self.runs.append(sessions)
+        if len(self.runs) in self.fail_calls or self.fail_sessions & set(sessions):
+            # Rolled back: the documents stay pending, the next run picks them up.
+            if self.error_class == "LLMPaymentRequiredError":
+                raise LLMPaymentRequiredError(self.error_message)
+            raise CognifyFailedError(
                 dataset_name="docs",
                 error_class=self.error_class,
                 error_message=self.error_message,
             )
+        self.pending = []
         return {}
 
     error_class = "RateLimitError"
@@ -129,14 +150,20 @@ def _use(monkeypatch, cognee_fake, after_pass=None, **settings) -> ImproveConfig
             "cognee.tasks.memify.extract_agent_trace_feedbacks"
         )
         monkeypatch.setattr(extract_module, "session_user", types.SimpleNamespace(get=lambda: user))
-        async for window in extract_agent_trace_feedbacks(
-            [{}],
-            session_ids=session_ids,
-            raw_trace_content=raw_trace_content,
-            last_n_steps=last_n_steps,
-            persist_up_to=persist_up_to,
-        ):
-            await cognify_agent_trace_feedback(window, dataset_id=uuid4(), user=user)
+        windows = [
+            window
+            async for window in extract_agent_trace_feedbacks(
+                [{}],
+                session_ids=session_ids,
+                raw_trace_content=raw_trace_content,
+                last_n_steps=last_n_steps,
+                persist_up_to=persist_up_to,
+            )
+        ]
+        # The runner hands the enrichment task the pass's windows as one batch,
+        # and re-raises what the task raises after recording the errored run.
+        if windows:
+            await cognify_agent_trace_feedback(windows, dataset_id=uuid4(), user=user)
         if after_pass is not None:
             await after_pass()
         return {}
@@ -275,35 +302,52 @@ async def test_watermark_moved_past_the_start_count_by_another_persister_is_done
 @pytest.mark.asyncio
 async def test_failed_window_keeps_earlier_windows_and_stops_the_stage(store, monkeypatch):
     store.add_steps("s1", 95)
-    cognee_fake = FakeCognee(fail_builds={2})
+    cognee_fake = FakeCognee(fail_calls={2})
     inputs = _inputs(_use(monkeypatch, cognee_fake, trace_window_steps=30))
 
-    result = await PersistAgentTracesStage().run(inputs)
+    result = await execute_stage(PersistAgentTracesStage(), inputs)
 
     assert result.status == "errored"
-    assert result.counts["sessions_stuck"] == 1
+    assert "rate limit exceeded" in (result.error or "")
     assert cognee_fake.steps_per_document() == [30, 30]
     assert await _watermark(store, inputs) == 30
 
 
 @pytest.mark.asyncio
-async def test_stuck_session_does_not_stall_the_others(store, monkeypatch):
-    """Session a's first window fails to build; b still drains to the end in the
-    same run, and the stage reports the stuck session."""
+async def test_a_failed_pass_ends_the_run_with_its_cause(store, monkeypatch):
+    """One cognify builds the pass. When it fails, the run is rolled back and the
+    error raises through the memify run with its cause: nothing is built, no
+    watermark moves, the stage reports the cause, and the next run retries."""
     store.add_steps("a", 95)
     store.add_steps("b", 95)
-    cognee_fake = FakeCognee(fail_builds={1})  # the very first document is a's
+    cognee_fake = FakeCognee(fail_sessions={"a"})
     inputs = _inputs(_use(monkeypatch, cognee_fake, trace_window_steps=30), ("a", "b"))
+
+    result = await execute_stage(PersistAgentTracesStage(), inputs)
+
+    assert result.status == "errored"
+    assert "rate limit exceeded" in (result.error or "")
+    assert cognee_fake.runs == [["a", "b"]]
+    assert await _watermark(store, inputs, "a") == 0
+    assert await _watermark(store, inputs, "b") == 0
+
+
+@pytest.mark.asyncio
+async def test_a_pass_builds_its_windows_in_one_cognify_run(store, monkeypatch):
+    """Ten sessions in a pass are one cognify run, not ten: the run builds them
+    concurrently, so a pass costs about one window of LLM time."""
+    session_ids = [f"s{i}" for i in range(10)]
+    for session_id in session_ids:
+        store.add_steps(session_id, 30)
+    cognee_fake = FakeCognee()
+    inputs = _inputs(_use(monkeypatch, cognee_fake, trace_window_steps=30), session_ids)
 
     result = await PersistAgentTracesStage().run(inputs)
 
-    assert result.status == "errored"
-    assert "a" in (result.error or "")
-    assert result.counts["sessions_stuck"] == 1
-    assert await _watermark(store, inputs, "a") == 0
-    assert await _watermark(store, inputs, "b") == 95
-    # a was tried once, then left alone for the rest of the run.
-    assert len(cognee_fake.documents) == 1 + 4
+    assert result.status == "completed"
+    assert cognee_fake.runs == [session_ids]
+    for session_id in session_ids:
+        assert await _watermark(store, inputs, session_id) == 30
 
 
 @pytest.mark.asyncio
@@ -312,7 +356,7 @@ async def test_exhausted_budget_stops_the_stage_and_is_classified(store, monkeyp
     from cognee.modules.improve.stage import execute_stage
 
     store.add_steps("s1", 95)
-    cognee_fake = FakeCognee(fail_builds={2})
+    cognee_fake = FakeCognee(fail_calls={2})
     cognee_fake.error_class = "LLMPaymentRequiredError"
     cognee_fake.error_message = "insufficient credits"
     inputs = _inputs(_use(monkeypatch, cognee_fake, trace_window_steps=30))
@@ -327,7 +371,7 @@ async def test_exhausted_budget_stops_the_stage_and_is_classified(store, monkeyp
     # Through the orchestrator's stage runner the raise becomes an errored result
     # that classifies as budget exhaustion, so the later LLM stages are skipped.
     store.add_steps("s2", 10)
-    broke = FakeCognee(fail_builds={1})
+    broke = FakeCognee(fail_calls={1})
     broke.error_class = "LLMPaymentRequiredError"
     broke.error_message = "insufficient credits"
     result = await execute_stage(
@@ -379,7 +423,7 @@ async def test_exhausted_budget_survives_the_real_pipeline_runner(store, monkeyp
 
     runner = importlib.import_module("cognee.modules.pipelines.operations.run_tasks")
     store.add_steps("s1", 40)
-    broke = FakeCognee(fail_builds={1})
+    broke = FakeCognee(fail_calls={1})
     broke.error_class = "LLMPaymentRequiredError"
     broke.error_message = "insufficient credits"
     _use(monkeypatch, broke)

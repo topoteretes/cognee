@@ -79,6 +79,9 @@ async def persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
             node_set_name=node_set_name,
             user=user,
             needs_llm=False,
+            # Extraction yields at most one window per session, so this hands the
+            # task every window of the run in one call: one cognify per run.
+            batch_size=max(1, len(session_ids or [])),
         ),
     ]
 

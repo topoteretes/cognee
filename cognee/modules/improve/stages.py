@@ -215,8 +215,8 @@ class PersistAgentTracesStage(BaseStage):
         # run; steps an agent writes meanwhile wait for the next run (the window
         # is cut at the starting count, persist_up_to), so a live
         # session cannot keep the run (and the dataset's improve lock) going. A
-        # session whose window did not advance is left out of the later passes
-        # of this run, so one stuck session never stalls the others. A pass
+        # pass's windows build in one cognify run; a failed build raises with its
+        # cause and ends the run, nothing built, every watermark in place. A pass
         # takes at most TRACE_SESSIONS_PER_PASS sessions, those with the fewest
         # windows so far, so the dataset lock is released between passes and
         # sessions late in the list get their turn before earlier ones drain.
@@ -232,7 +232,7 @@ class PersistAgentTracesStage(BaseStage):
         while pending:
             limit = TRACE_SESSIONS_PER_PASS
             if max_windows:
-                limit = min(limit, max_windows - windows)
+                limit = max(0, min(limit, max_windows - windows))
             candidates = sorted(
                 (sid for sid in pending if sid not in stuck), key=lambda sid: served.get(sid, 0)
             )
@@ -257,8 +257,9 @@ class PersistAgentTracesStage(BaseStage):
             )
             if stage_result.status == "errored":
                 break
-            # A failed window build is logged, not raised, so the pipeline still
-            # reports completed. Only an unmoved watermark shows the failure.
+            # A failed build raises and ended the run above. A session can still
+            # come back unmoved when extraction skipped it (its context could not
+            # be read): set it aside for the rest of the run and report it.
             pending = await _pending_trace_watermarks(inputs, backlog)
             if pending is None:
                 break
