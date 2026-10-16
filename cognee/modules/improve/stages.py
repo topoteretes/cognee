@@ -319,6 +319,7 @@ class DistillSessionsStage(BaseStage):
         distilled = 0
         completed = 0
         failed = 0
+        uncurated = 0
         last_error: BaseException | None = None
         for session_id in inputs.session_ids:
             try:
@@ -326,6 +327,7 @@ class DistillSessionsStage(BaseStage):
                     session_id, dataset=inputs.dataset_id, user=inputs.user
                 )
                 distilled += len(result.documents)
+                uncurated += result.uncurated_entries
                 if result.status == "completed":
                     completed += 1
                 logger.info(
@@ -347,6 +349,7 @@ class DistillSessionsStage(BaseStage):
             "documents": distilled,
             "sessions_completed": completed,
             "sessions_failed": failed,
+            "entries_uncurated": uncurated,
         }
         if failed:
             return StageResult.errored(self.name, last_error, **counts)

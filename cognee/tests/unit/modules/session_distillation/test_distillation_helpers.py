@@ -173,6 +173,60 @@ class TestIsEntryDistillable:
         assert [entry.content for entry in context_entries] == ["Survives."]
 
 
+class TestSelectSessionTurns:
+    def test_keeps_turns_from_the_earliest_new_entry_onward(self):
+        entries = [
+            _context_entry(created_at="2026-06-11T12:00:00+00:00"),
+            _context_entry(created_at="2026-06-11T10:00:00+00:00"),
+        ]
+        rows = [
+            _qa_row("before", time="2026-06-11T09:59:59+00:00"),
+            _qa_row("at", time="2026-06-11T10:00:00+00:00"),
+            _qa_row("after", time="2026-06-11T15:00:00+00:00"),
+        ]
+
+        kept = distill_module.select_session_turns(rows, entries)
+
+        assert [row["question"] for row in kept] == ["at", "after"]
+
+    def test_entry_without_timestamp_keeps_every_turn(self):
+        entries = [_context_entry(created_at="")]
+        rows = [_qa_row("any", time="2026-06-11T09:00:00+00:00")]
+
+        assert distill_module.select_session_turns(rows, entries) == rows
+
+
+class TestSelectCuratorInputs:
+    def test_uncapped_returns_everything(self):
+        entries = [_context_entry(confidence=0.8) for _ in range(50)]
+        rows = [_qa_row(f"q{i}") for i in range(50)]
+
+        kept_rows, kept_entries = distill_module.select_curator_inputs(rows, entries, 0)
+
+        assert kept_rows == rows
+        assert kept_entries == entries
+
+    def test_cap_keeps_the_most_confident_entries_then_recent_turns(self):
+        sure = [_context_entry(confidence=0.99, content="sure")]
+        bulk = [_context_entry(confidence=0.8, content=f"bulk {i}") for i in range(20)]
+        rows = [_qa_row(f"q{i}", time=f"2026-06-11T10:{i:02d}:00+00:00") for i in range(10)]
+
+        kept_rows, kept_entries = distill_module.select_curator_inputs(rows, bulk + sure, 1)
+
+        assert len(kept_entries) == CURATOR_BLOCKS_PER_BATCH
+        assert kept_entries[0].content == "sure"
+        assert kept_rows == []
+
+    def test_cap_fills_leftover_blocks_with_the_most_recent_turns(self):
+        entries = [_context_entry(confidence=0.9, content="one")]
+        rows = [_qa_row(f"q{i}", time=f"2026-06-11T10:{i:02d}:00+00:00") for i in range(10)]
+
+        kept_rows, kept_entries = distill_module.select_curator_inputs(rows, entries, 1)
+
+        assert kept_entries == entries
+        assert [row["question"] for row in kept_rows] == ["q5", "q6", "q7", "q8", "q9"]
+
+
 class TestBuildCuratorBatches:
     def test_small_session_is_one_batch_with_turns_and_candidates(self):
         context_entries = [_context_entry(content="Flashing wipes calibration.")]

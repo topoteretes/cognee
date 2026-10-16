@@ -17,6 +17,7 @@ Environment variables (prefix ``IMPROVE_``)::
     IMPROVE_EFFECTIVE_DATE_KEY=effective_date  # document metadata source-date key
     IMPROVE_TRACE_WINDOW_STEPS=30      # max agent trace steps per persisted document
     IMPROVE_TRACE_WINDOWS_PER_RUN=10   # max agent trace documents per stage pass
+    IMPROVE_DISTILL_MAX_BATCHES_PER_RUN=0  # curator batches per distill run; 0 = uncapped
 """
 
 from functools import lru_cache
@@ -55,6 +56,10 @@ class ImproveConfig(BaseSettings):
     # Windows one persist_agent_traces pass may cognify; the rest of a backlog
     # waits for the next improve().
     trace_windows_per_run: int = 10
+    # Session distillation curates every new gated entry of a session per run.
+    # A cap curates only the most relevant entries that fit in this many curator
+    # batches and seals the rest uncurated; 0 means no cap.
+    distill_max_batches_per_run: int = 0
 
     model_config = SettingsConfigDict(env_prefix="IMPROVE_", extra="ignore")
 
@@ -86,6 +91,13 @@ class ImproveConfig(BaseSettings):
     def _entries_non_negative(cls, value: int) -> int:
         if value < 0:
             raise ValueError("debounce_entries must be >= 0")
+        return value
+
+    @field_validator("distill_max_batches_per_run")
+    @classmethod
+    def _cap_non_negative(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("distill_max_batches_per_run must be >= 0 (0 = uncapped)")
         return value
 
     @field_validator("debounce_seconds")
