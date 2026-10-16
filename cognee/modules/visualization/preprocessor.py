@@ -18,6 +18,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from typing import Any
 
+from cognee.modules.engine.models.StructureContainer import CHILD_OF
 from cognee.modules.improve.constants import (
     AGENT_TRACE_FEEDBACKS_NODE_SET,
     SESSION_LEARNINGS_NODE_SET,
@@ -102,6 +103,7 @@ _STRUCTURAL_RELATIONS: frozenset = frozenset(
         "has_relationship",
         "made_from",
         "summarized_in",
+        CHILD_OF,
     }
 )
 
@@ -125,6 +127,7 @@ _TYPE_COLOR_MAP: dict[str, str] = {
     "DltRow": "#0DFF00",
     "SchemaTable": "#A550FF",
     "DatabaseSchema": "#6510F4",
+    "StructureContainer": "#94A3B8",
     "SchemaRelationship": "#323332",
     "default": "#7c3aed",
 }
