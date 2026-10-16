@@ -28,9 +28,8 @@ MIN_GATE_CONFIDENCE = GATE_CONFIDENCE
 # blocks plus separators stays below the budget, so the batching logic can stay simple.
 BATCH_CHAR_BUDGET = 16_000
 CURATOR_BLOCKS_PER_BATCH = 6
-# One run curates at most this many batches, so a session that gates thousands of
-# entries stays bounded; entries past the bound are sealed by the watermark, not carried over.
-MAX_CURATOR_BATCHES_PER_RUN = 20
+# A run curates every new gated entry unless ``IMPROVE_DISTILL_MAX_BATCHES_PER_RUN``
+# caps it; entries past a cap are sealed by the watermark, not carried over.
 MAX_QA_QUESTION_CHARS = 1_200
 MAX_QA_ANSWER_CHARS = 1_200
 MAX_CANDIDATE_CHARS = 280
@@ -107,3 +106,5 @@ class DistillationResult(BaseModel):
         "no_accepted_lessons",
     ]
     documents: list[str] = Field(default_factory=list)
+    # New gated entries sealed without curation because the run was capped.
+    uncurated_entries: int = 0
