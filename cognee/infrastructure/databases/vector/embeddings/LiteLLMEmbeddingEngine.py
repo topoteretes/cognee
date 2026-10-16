@@ -58,7 +58,8 @@ litellm.set_verbose = False
 # dump, one line per vector. Only a warning made entirely of such lines is ignored, so
 # any other serializer problem, in the same dump or anywhere else in the process, is
 # still shown. Line shapes: pydantic 2.10 ("but got `str`"), 2.11 (no field name) and
-# 2.12+ (field_name='embedding'). pydantic shortens a long value with "...".
+# 2.12+ (field_name='embedding'). Before 2.12 no field is named, so there a base64-looking
+# string in any list[float] field is ignored too. pydantic shortens long values with "...".
 _BASE64_VALUE = r"'[A-Za-z0-9+/=.]+'"
 _BASE64_SERIALIZER_LINE = (
     r"Expected `list\[float\]` but got `str` with value `" + _BASE64_VALUE + r"` - "
@@ -81,7 +82,11 @@ def _ignore_base64_serializer_warning() -> None:
     one), and a filter added after it, such as "error", would win and turn the warning
     into a failed embedding call.
     """
-    first = warnings.filters[0] if warnings.filters else None
+    # With context-aware warnings (Python 3.14), catch_warnings() keeps its filters in a
+    # context variable while warnings.filters stays the outer list: read the list in effect.
+    get_filters = getattr(warnings, "_get_filters", None)
+    filters = get_filters() if get_filters is not None else warnings.filters
+    first = filters[0] if filters else None
     if (
         first is not None
         and first[0] == "ignore"
