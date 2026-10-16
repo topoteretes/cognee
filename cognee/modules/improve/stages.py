@@ -314,6 +314,7 @@ class DistillSessionsStage(BaseStage):
         return None
 
     async def run(self, inputs: ImproveRunInputs) -> StageResult:
+        from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
         from cognee.modules.session_distillation import distill_session
 
         distilled = 0
@@ -339,6 +340,18 @@ class DistillSessionsStage(BaseStage):
                     result.status,
                     len(result.documents),
                 )
+            except LLMPaymentRequiredError as e:
+                # Every later session would fail the same way: stop here, and keep
+                # this error so the stage result reports the exhausted budget.
+                failed += 1
+                last_error = e
+                logger.warning(
+                    "improve: LLM budget exhausted distilling session '%s'; "
+                    "skipping the remaining sessions: %s",
+                    session_id,
+                    e,
+                )
+                break
             except Exception as e:
                 failed += 1
                 last_error = e

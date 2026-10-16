@@ -81,7 +81,7 @@ class TestLoadDistillableSessionInputs:
             SimpleNamespace(user_id="u-1", session_id="s-1")
         )
         qa_rows = await distill_module.load_session_qa_rows(
-            SimpleNamespace(user_id="u-1", session_id="s-1")
+            SimpleNamespace(user_id="u-1", session_id="s-1"), since=None
         )
 
         assert len(qa_rows) == 1
@@ -97,6 +97,8 @@ class TestLoadDistillableSessionInputs:
             user_id="u-1",
             session_id="s-1",
             formatted=False,
+            since=None,
+            lead_in=0,
         )
 
     @pytest.mark.asyncio
@@ -173,40 +175,31 @@ class TestIsEntryDistillable:
         assert [entry.content for entry in context_entries] == ["Survives."]
 
 
-class TestSelectSessionTurns:
-    def test_keeps_turns_from_the_one_before_the_earliest_new_entry_onward(self):
-        # An entry is written after the turn it judges, so the newest turn before
-        # the earliest new entry is the one that produced it and must be kept.
+class TestEarliestEntryTime:
+    def test_returns_the_earliest_created_at_as_an_aware_datetime(self):
+        from datetime import datetime, timezone
+
         entries = [
             _context_entry(created_at="2026-06-11T12:00:00+00:00"),
             _context_entry(created_at="2026-06-11T10:00:00.500000+00:00"),
         ]
-        rows = [
-            _qa_row("long before", time="2026-06-11T08:00:00+00:00"),
-            _qa_row("producing", time="2026-06-11T10:00:00+00:00"),
-            _qa_row("after", time="2026-06-11T15:00:00+00:00"),
-        ]
 
-        kept = distill_module.select_session_turns(rows, entries)
+        assert distill_module.earliest_entry_time(entries) == datetime(
+            2026, 6, 11, 10, 0, 0, 500000, tzinfo=timezone.utc
+        )
 
-        assert [row["question"] for row in kept] == ["producing", "after"]
+    def test_naive_created_at_is_read_as_utc(self):
+        from datetime import datetime, timezone
 
-    def test_no_turn_before_the_entry_keeps_the_rest(self):
-        entries = [_context_entry(created_at="2026-06-11T10:00:00+00:00")]
-        rows = [_qa_row("after", time="2026-06-11T11:00:00+00:00")]
+        entries = [_context_entry(created_at="2026-06-11T10:00:00")]
 
-        assert distill_module.select_session_turns(rows, entries) == rows
+        assert distill_module.earliest_entry_time(entries) == datetime(
+            2026, 6, 11, 10, 0, tzinfo=timezone.utc
+        )
 
-    def test_no_new_entries_keeps_every_turn(self):
-        rows = [_qa_row("any", time="2026-06-11T09:00:00+00:00")]
-
-        assert distill_module.select_session_turns(rows, []) == rows
-
-    def test_entry_without_timestamp_keeps_every_turn(self):
-        entries = [_context_entry(created_at="")]
-        rows = [_qa_row("any", time="2026-06-11T09:00:00+00:00")]
-
-        assert distill_module.select_session_turns(rows, entries) == rows
+    def test_no_timestamps_means_no_bound(self):
+        assert distill_module.earliest_entry_time([_context_entry(created_at="")]) is None
+        assert distill_module.earliest_entry_time([]) is None
 
 
 class TestSelectCuratorInputs:
