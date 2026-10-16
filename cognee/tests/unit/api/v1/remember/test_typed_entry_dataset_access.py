@@ -332,6 +332,36 @@ async def test_bound_session_skips_the_binding_reread(env, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_session_bound_to_a_deleted_dataset_says_so(env):
+    # forget(dataset=...) keeps the session row, so its binding outlives the dataset.
+    from cognee.modules.data.exceptions import DatasetNotFoundError
+    from cognee.modules.session_lifecycle.metrics import ensure_and_touch_session
+
+    await ensure_and_touch_session(
+        session_id="stale-session", user_id=env.owner.id, dataset_id=uuid4()
+    )
+
+    with pytest.raises(DatasetNotFoundError, match="no longer exists; use a new session_id"):
+        await cognee.remember(
+            QAEntry(question="q1", answer="a1"), session_id="stale-session", user=env.owner
+        )
+
+    assert await _cached_questions(env.owner, "stale-session") == []
+
+
+@pytest.mark.asyncio
+async def test_unknown_explicit_dataset_id_is_refused_like_a_forbidden_one(env):
+    # Callers must not learn whether a dataset id they cannot write exists.
+    with pytest.raises(PermissionDeniedError):
+        await cognee.remember(
+            QAEntry(question="q1", answer="a1"),
+            dataset_id=uuid4(),
+            session_id="fresh-session",
+            user=env.owner,
+        )
+
+
+@pytest.mark.asyncio
 async def test_remote_client_receives_dataset_id(monkeypatch):
     remember_module = importlib.import_module("cognee.api.v1.remember.remember")
     state = importlib.import_module("cognee.api.v1.serve.state")
