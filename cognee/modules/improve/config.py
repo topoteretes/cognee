@@ -16,7 +16,7 @@ Environment variables (prefix ``IMPROVE_``)::
     IMPROVE_REVIEW_CONFLICTS=false     # review source facts and dated conflicts
     IMPROVE_EFFECTIVE_DATE_KEY=effective_date  # document metadata source-date key
     IMPROVE_TRACE_WINDOW_STEPS=30      # max agent trace steps per persisted document
-    IMPROVE_TRACE_WINDOWS_PER_RUN=0    # max agent trace documents per stage pass; 0 = drain
+    IMPROVE_TRACE_WINDOWS_PER_RUN=0    # max agent trace documents per run; 0 = drain
 """
 
 from functools import lru_cache

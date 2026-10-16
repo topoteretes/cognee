@@ -2,10 +2,7 @@ from uuid import UUID
 
 import cognee
 from cognee.exceptions import CogneeSystemError, CogneeValidationError
-from cognee.infrastructure.llm.exceptions import (
-    LLMPaymentRequiredError,
-    is_budget_exhausted_record,
-)
+from cognee.infrastructure.llm.exceptions import raise_if_budget_exhausted_record
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.infrastructure.session.session_node_set import bridge_node_set
 from cognee.infrastructure.session.session_persist_watermark import (
@@ -93,17 +90,12 @@ async def cognify_agent_trace_feedback(
                 datasets=[dataset_id], user=user, raise_on_error=False
             )
             errored_run = get_errored_run_info(cognify_result)
-            if errored_run is not None and is_budget_exhausted_record(
-                errored_run.error_class, errored_run.error_message
-            ):
-                # Every later window would fail the same way; raise so improve
-                # stops the run instead of trying each one. The watermark stays
-                # put, so this window is retried once there is budget.
-                raise LLMPaymentRequiredError(
-                    f"LLM budget exhausted while cognifying agent trace content: "
-                    f"{errored_run.error_message}"
-                )
             if errored_run is not None:
+                # A recorded budget rejection is raised as LLMPaymentRequiredError:
+                # every later window would fail the same way, so improve stops the
+                # run instead of trying each one. The watermark stays put, so this
+                # window is retried once there is budget.
+                raise_if_budget_exhausted_record(errored_run.error_class, errored_run.error_message)
                 logger.error(
                     "Cognify failed for agent trace content (%s: %s); watermark not advanced, "
                     "continuing with the run",

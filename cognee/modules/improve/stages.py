@@ -86,11 +86,12 @@ async def _pending_trace_watermarks(
 ) -> dict[str, tuple[int, int]] | None:
     """``(persisted, total)`` step counts of each session with unpersisted steps.
 
-    ``persisted`` is the effective watermark (a stale one, above the current
+    ``persisted`` is the effective watermark (a stale one, above the LIVE
     count, reads as 0). With ``backlog``, the step counts a run started with,
     only sessions still below their starting count are pending: steps written
-    while the run goes on wait for the next run. None when the session store
-    cannot be read.
+    while the run goes on wait for the next run, and a watermark another
+    persister moved past the starting count reads as done, not stale. None
+    when the session store cannot be read.
     """
     try:
         from cognee.infrastructure.session.get_session_manager import get_session_manager
@@ -111,14 +112,16 @@ async def _pending_trace_watermarks(
             persisted = await TRACE_PERSIST_WATERMARK.read_count(
                 session_manager, user_id, session_id
             )
+            step_limit = None
             if backlog is not None:
                 if session_id not in backlog:
                     continue
-                total = min(total, backlog[session_id])
-            if total and resolve_trace_window(total, persisted, None, session_id=session_id)[1]:
-                effective = TRACE_PERSIST_WATERMARK.resolve_effective(
-                    persisted, total, session_id=session_id
-                )
+                step_limit = backlog[session_id]
+            # The live total drives the stale check; the limit only bounds the reach.
+            effective, pending_steps = resolve_trace_window(
+                total, persisted, None, session_id=session_id, step_limit=step_limit
+            )
+            if total and pending_steps:
                 pending[session_id] = (effective, total)
         return pending
     except Exception as error:

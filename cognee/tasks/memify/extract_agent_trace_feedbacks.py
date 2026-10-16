@@ -64,6 +64,7 @@ def resolve_trace_window(
     last_n_steps: int | None,
     *,
     session_id: str = "",
+    step_limit: int | None = None,
 ) -> tuple[int, int]:
     """The pending trace window as ``(start index, size)``.
 
@@ -74,19 +75,20 @@ def resolve_trace_window(
     so a backlog drains across bounded triggers instead of being sealed —
     capping at the newest N would leave the older pending steps below an
     advanced watermark forever, unreachable even for ``improve()``.
+
+    ``step_limit`` bounds how far the window may reach (a run draining the
+    backlog it started with). It never feeds the stale check: that compares
+    the watermark with the LIVE count, ``total_trace_count``, so a watermark
+    another persister moved past the limit meanwhile reads as done, not stale.
     """
     effective = TRACE_PERSIST_WATERMARK.resolve_effective(
         persisted_trace_count, total_trace_count, session_id=session_id
     )
-    pending = max(0, total_trace_count - effective)
+    reach = total_trace_count if step_limit is None else min(total_trace_count, step_limit)
+    pending = max(0, reach - effective)
     if last_n_steps is not None:
         pending = min(pending, max(0, int(last_n_steps)))
     return effective, pending
-
-
-def _cap_steps(total_trace_count: int, step_limit: int | None) -> int:
-    """The step count a window may reach: the live count, or less under a limit."""
-    return total_trace_count if step_limit is None else min(total_trace_count, step_limit)
 
 
 async def has_new_trace_steps(session_manager, user_id: str, session_ids: list[str]) -> bool:
@@ -198,10 +200,11 @@ async def extract_agent_trace_feedbacks(
                     step_limit = (persist_up_to or {}).get(session_id)
                     if (
                         resolve_trace_window(
-                            _cap_steps(total_trace_count, step_limit),
+                            total_trace_count,
                             persisted_count,
                             last_n_steps,
                             session_id=session_id,
+                            step_limit=step_limit,
                         )[1]
                         <= 0
                     ):
@@ -237,14 +240,14 @@ async def extract_agent_trace_feedbacks(
                         context_rows = await read_session_context_strict(
                             session_manager, user_id, session_id
                         )
-                    # Cut after the pin check above: it compares the whole fetch.
-                    trace_values = trace_values[: _cap_steps(total_trace_count, step_limit)]
-                    total_trace_count = len(trace_values)
+                    # The whole fetch stays: the stale check needs the live count.
+                    # step_limit only bounds how far the window reaches.
                     window_start, window_size = resolve_trace_window(
                         total_trace_count,
                         persisted_count,
                         last_n_steps,
                         session_id=session_id,
+                        step_limit=step_limit,
                     )
                     if window_size <= 0:
                         continue

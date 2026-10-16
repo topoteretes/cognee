@@ -110,8 +110,11 @@ def store(monkeypatch):
     return manager
 
 
-def _use(monkeypatch, cognee_fake, **settings) -> ImproveConfig:
-    """Install the fake cognee and pipeline; returns the config to hand to the run."""
+def _use(monkeypatch, cognee_fake, after_pass=None, **settings) -> ImproveConfig:
+    """Install the fake cognee and pipeline; returns the config to hand to the run.
+
+    ``after_pass`` runs after each pipeline call, between the stage's passes.
+    """
     config = ImproveConfig(**settings)
     for name in ("add", "cognify"):
         monkeypatch.setattr(
@@ -134,6 +137,8 @@ def _use(monkeypatch, cognee_fake, **settings) -> ImproveConfig:
             persist_up_to=persist_up_to,
         ):
             await cognify_agent_trace_feedback(window, dataset_id=uuid4(), user=user)
+        if after_pass is not None:
+            await after_pass()
         return {}
 
     monkeypatch.setattr(
@@ -234,6 +239,37 @@ async def test_last_window_stops_at_the_starting_count_while_the_agent_writes(st
 
     assert second.status == "completed"
     assert await _watermark(store, inputs) == 105
+
+
+@pytest.mark.asyncio
+async def test_watermark_moved_past_the_start_count_by_another_persister_is_done(
+    store, monkeypatch
+):
+    """The agent's own periodic persist runs outside improve with no cut. When it
+    moves the watermark past this run's starting count between two passes, the
+    run is done with that session: not stale, no second drain, no watermark
+    written backwards."""
+    inputs_box = {}
+
+    async def external_persist():
+        user_id = str(inputs_box["inputs"].user.id)
+        if await TRACE_PERSIST_WATERMARK.read_count(store, user_id, "s1") == 100:
+            store.add_steps("s1", 30)
+            await TRACE_PERSIST_WATERMARK.write_count(store, user_id, "s1", 130)
+
+    store.add_steps("s1", 100)
+    cognee_fake = FakeCognee()
+    inputs = _inputs(
+        _use(monkeypatch, cognee_fake, after_pass=external_persist, trace_window_steps=30)
+    )
+    inputs_box["inputs"] = inputs
+
+    result = await PersistAgentTracesStage().run(inputs)
+
+    assert result.status == "completed"
+    assert result.counts["windows"] == 4
+    assert cognee_fake.steps_per_document() == [30, 30, 30, 10]
+    assert await _watermark(store, inputs) == 130
 
 
 @pytest.mark.asyncio
