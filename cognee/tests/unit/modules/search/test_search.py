@@ -460,7 +460,8 @@ def test_verbose_results_carry_both_prompts_next_to_the_bare_context(
     assert out[1]["context_result"] == ["chunk"]
 
 
-# --- SDK-270: NoDataError names the datasets, and only fires when all are empty ---
+# --- SDK-270 / empty datasets: a dataset without searchable memory is an empty entry
+# with its reason on ``error``; the search never raises NoDataError for it ---
 
 
 def _fan_out_harness(monkeypatch, search_mod, *, datasets, graph_empty, data_items, outcomes):
@@ -533,9 +534,13 @@ async def _run_fan_out(search_mod, datasets):
 
 
 @pytest.mark.asyncio
-async def test_single_empty_dataset_error_names_it_and_says_to_cognify(monkeypatch, search_mod):
-    from cognee.modules.retrieval.exceptions.exceptions import NoDataError
-
+async def test_single_uncognified_dataset_returns_empty_entry_that_says_to_cognify(
+    monkeypatch, search_mod, caplog
+):
+    """A dataset with data but no graph yet is the normal state before the first
+    cognify: the search answers with no results, not a 404. The reason survives
+    on ``error`` so a caller that wants to tell "nothing matched" from "nothing
+    cognified" still can."""
     ds = _make_dataset(name="fresh_notes")
     _fan_out_harness(
         monkeypatch,
@@ -546,23 +551,24 @@ async def test_single_empty_dataset_error_names_it_and_says_to_cognify(monkeypat
         outcomes={"fresh_notes": _empty_graph_error()},
     )
 
-    with pytest.raises(NoDataError) as raised:
-        await _run_fan_out(search_mod, [ds])
+    with caplog.at_level("WARNING"):
+        results = await _run_fan_out(search_mod, [ds])
 
-    message = raised.value.message
-    assert message.startswith("No searchable memory in dataset 'fresh_notes'")
-    assert str(ds.id) in message
-    assert "3 data item(s)" in message
-    assert "cognify" in message
-    assert raised.value.status_code == 404
+    (empty,) = results
+    assert empty.result == []
+    assert empty.completion is None
+    assert empty.dataset_id == ds.id
+    assert empty.dataset_name == "fresh_notes"
+    assert empty.search_type == SearchType.GRAPH_COMPLETION
+    assert "3 data item(s)" in empty.error
+    assert "cognify" in empty.error
+    assert any("fresh_notes" in record.getMessage() for record in caplog.records)
 
 
 @pytest.mark.asyncio
-async def test_all_datasets_empty_raises_one_error_listing_each_with_its_reason(
+async def test_all_datasets_empty_returns_one_empty_entry_per_dataset_with_its_reason(
     monkeypatch, search_mod
 ):
-    from cognee.modules.retrieval.exceptions.exceptions import NoDataError
-
     never_cognified = _make_dataset(name="never_cognified")
     brand_new = _make_dataset(name="brand_new")
     _fan_out_harness(
@@ -574,14 +580,95 @@ async def test_all_datasets_empty_raises_one_error_listing_each_with_its_reason(
         outcomes={"never_cognified": _empty_graph_error(), "brand_new": _empty_graph_error()},
     )
 
-    with pytest.raises(NoDataError) as raised:
-        await _run_fan_out(search_mod, [never_cognified, brand_new])
+    results = await _run_fan_out(search_mod, [never_cognified, brand_new])
 
-    message = raised.value.message
-    assert "any of the 2 searched datasets" in message
-    assert f"'never_cognified' (id: {never_cognified.id}): holds 2 data item(s)" in message
-    assert f"'brand_new' (id: {brand_new.id}): no data has been added" in message
-    assert raised.value.status_code == 404
+    # One entry per dataset, in request order, each empty with its own reason.
+    assert [payload.dataset_name for payload in results] == ["never_cognified", "brand_new"]
+    assert all(payload.result == [] for payload in results)
+    uncognified, fresh = results
+    assert uncognified.error.startswith("holds 2 data item(s)")
+    assert fresh.error == "no data has been added; add data and run cognify before searching."
+
+
+@pytest.mark.asyncio
+async def test_all_datasets_empty_through_search_is_an_empty_search_result(monkeypatch, search_mod):
+    """What the SDK caller sees: ``search()`` over nothing but empty datasets is a
+    list of entries whose ``search_result`` is ``[]`` -- the same shape as a miss --
+    with the reason on ``error``; it does not raise."""
+    ds = _make_dataset(name="fresh_notes")
+    _fan_out_harness(
+        monkeypatch,
+        search_mod,
+        datasets=[ds],
+        graph_empty={"fresh_notes": True},
+        data_items={"fresh_notes": []},
+        outcomes={"fresh_notes": _empty_graph_error()},
+    )
+
+    async def dummy_authorized_search(**kwargs):
+        return await search_mod.search_in_datasets_context(
+            search_datasets=[ds],
+            query_type=kwargs["query_type"],
+            query_text=kwargs["query_text"],
+            user=kwargs["user"],
+        )
+
+    monkeypatch.setattr(search_mod, "authorized_search", dummy_authorized_search)
+
+    out = await search_mod.search(
+        query_text="What did Jane propose?",
+        query_type=SearchType.GRAPH_COMPLETION,
+        dataset_ids=[ds.id],
+        user=_make_user(),
+    )
+
+    assert out == [
+        {
+            "dataset_id": ds.id,
+            "dataset_name": "fresh_notes",
+            "dataset_tenant_id": ds.tenant_id,
+            "search_result": [],
+            "error": "no data has been added; add data and run cognify before searching.",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_shared_graph_without_data_returns_empty_entry(monkeypatch, search_mod):
+    """With access control off there is one shared graph and no dataset to name;
+    an empty graph is still a result -- empty, with the retriever's reason -- not
+    a raised NoDataError."""
+    from contextlib import asynccontextmanager
+
+    ds1 = _make_dataset(name="ds1")
+    ds2 = _make_dataset(name="ds2")
+
+    @asynccontextmanager
+    async def dummy_context(*_args, **_kwargs):
+        yield
+
+    async def dummy_get_retriever_output(query_type, query_text, **kwargs):
+        assert kwargs["dataset"] is None
+        raise _empty_graph_error()
+
+    monkeypatch.setattr(search_mod, "backend_access_control_enabled", lambda: False)
+    monkeypatch.setattr(search_mod, "set_database_global_context_variables", dummy_context)
+    monkeypatch.setattr(search_mod, "get_retriever_output", dummy_get_retriever_output)
+
+    results = await search_mod.search_in_datasets_context(
+        search_datasets=[ds1, ds2],
+        query_type=SearchType.GRAPH_COMPLETION,
+        query_text="What did Jane propose?",
+        user=_make_user(),
+    )
+
+    (empty,) = results
+    assert empty.result == []
+    assert empty.dataset_id is None
+    assert empty.dataset_name is None
+    assert empty.error == (
+        "The knowledge graph is empty. Ingest data through Cognee before searching."
+    )
 
 
 @pytest.mark.asyncio
@@ -834,7 +921,7 @@ async def test_populated_graph_with_missing_collection_keeps_retriever_reason(
     monkeypatch, search_mod
 ):
     """RAG's missing chunk collection on a populated graph: the retriever's own
-    reason survives, prefixed with the dataset."""
+    reason survives on the dataset's empty entry."""
     from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 
     ds = _make_dataset(name="graph_only")
@@ -847,13 +934,11 @@ async def test_populated_graph_with_missing_collection_keeps_retriever_reason(
         outcomes={"graph_only": NoDataError("No data found in the system, please add data first.")},
     )
 
-    with pytest.raises(NoDataError) as raised:
-        await _run_fan_out(search_mod, [ds])
+    (empty,) = await _run_fan_out(search_mod, [ds])
 
-    assert raised.value.message == (
-        f"No searchable memory in dataset 'graph_only' (id: {ds.id}): "
-        "No data found in the system, please add data first."
-    )
+    assert empty.result == []
+    assert empty.dataset_id == ds.id
+    assert empty.error == "No data found in the system, please add data first."
 
 
 @pytest.mark.asyncio
