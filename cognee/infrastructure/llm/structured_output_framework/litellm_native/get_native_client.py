@@ -9,6 +9,10 @@ active (possibly per-request) config and builds a fresh adapter.
 
 from functools import lru_cache
 
+from cognee.infrastructure.llm.azure_identity import (
+    get_azure_ad_token_provider,
+    require_azure_endpoint,
+)
 from cognee.infrastructure.llm.config import get_llm_context_config
 from cognee.infrastructure.llm.exceptions import LLMAPIKeyNotSetError
 from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
@@ -83,11 +87,15 @@ def get_native_client(raise_api_key_error: bool = True) -> NativeLiteLLMAdapter:
     # Provider-aware key requirement (Azure may authenticate via managed identity).
     api_key = llm_config.llm_api_key
     provider = (llm_config.llm_provider or "").lower()
-    requires_api_key = provider not in _NO_API_KEY_PROVIDERS and not (
-        provider == "azure" and llm_config.llm_azure_use_managed_identity
-    )
+    use_managed_identity = provider == "azure" and llm_config.llm_azure_use_managed_identity
+    requires_api_key = provider not in _NO_API_KEY_PROVIDERS and not use_managed_identity
     if raise_api_key_error and requires_api_key and (api_key is None or api_key.strip() == ""):
         raise LLMAPIKeyNotSetError()
+
+    azure_ad_token_provider = None
+    if use_managed_identity:
+        require_azure_endpoint(llm_config.llm_endpoint)
+        azure_ad_token_provider = get_azure_ad_token_provider()
 
     # Cap generation at the model's ceiling when LiteLLM knows it, else the user's
     # configured limit — same computation as get_llm_client.
@@ -98,7 +106,8 @@ def get_native_client(raise_api_key_error: bool = True) -> NativeLiteLLMAdapter:
     max_completion_tokens = min(model_max, user_max) if model_max is not None else user_max
 
     return NativeLiteLLMAdapter(
-        api_key=api_key or "",
+        # Under managed identity the token is the credential; no key goes alongside it.
+        api_key=None if use_managed_identity else api_key or "",
         model=_qualify_model(llm_config.llm_model, provider),
         max_completion_tokens=max_completion_tokens,
         endpoint=llm_config.llm_endpoint or None,
@@ -109,4 +118,5 @@ def get_native_client(raise_api_key_error: bool = True) -> NativeLiteLLMAdapter:
         llm_args=llm_config.llm_args or None,
         transcription_model=_qualify_model(llm_config.transcription_model, provider),
         image_transcribe_model=_qualify_model(llm_config.image_transcribe_model, provider) or None,
+        azure_ad_token_provider=azure_ad_token_provider,
     )

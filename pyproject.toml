@@ -40,9 +40,10 @@ dependencies = [
     "huggingface-hub>=0.34,<1",
     "tokenizers>=0.22,<=0.23.0",
     "tiktoken>=0.8.0,<1.0.0",
-    # <1.97.0: 1.97.0 fails to build litellm.types.utils.Message on Python 3.10 (unresolved
-    # forward ref) and 1.98.0+ import typing.NotRequired (3.11+). See BerriAI/litellm#38202.
-    "litellm>=1.83.7,<1.97.0",
+    # >=1.102.2: earlier releases carry security advisories fixed in 1.100.4 and 1.102.2.
+    # 1.97.0 through 1.100.x do not import on Python 3.10 (BerriAI/litellm#38202, fixed in
+    # 1.101.0), so this floor also keeps every supported Python on a working release.
+    "litellm>=1.102.2,<2.0.0",
     "instructor>=1.9.1,<1.15.3",
     "filetype>=1.2.0,<2.0.0",
     "aiohttp>=3.13.5,<4.0.0",
@@ -194,9 +195,10 @@ evals = [
     "locust>=2.0.0,<3",
 ]
 
-# Note: New s3fs and boto3 versions don't work well together
-# Always use compatible fixed versions of these two dependencies
-aws = ["s3fs[boto3]==2025.3.2"]
+# s3fs pins fsspec and, through its boto3 extra, an aiobotocore whose botocore range has
+# to admit the boto3 litellm requires (>=1.43.1 since litellm 1.101). Keep it on one
+# fixed, known-compatible release and move it together with litellm.
+aws = ["s3fs[boto3]==2026.9.0"]
 # dlt is a core dependency. The empty extra keeps `cognee[dlt]` installable.
 dlt = []
 gmail = [
