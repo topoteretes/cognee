@@ -528,10 +528,8 @@ async def _resolve_entry_dataset(
             f"Session {session_id!r} is bound to dataset {bound_dataset_id}, which no longer "
             "exists; use a new session_id."
         ) from None
-    if dataset is None:
-        raise PermissionDeniedError(
-            f"Request owner does not have necessary permission: [write] for dataset {target_dataset_id}."
-        )
+    # get_authorized_dataset raises for an id the user cannot write, never returns None.
+    assert dataset is not None
 
     from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
