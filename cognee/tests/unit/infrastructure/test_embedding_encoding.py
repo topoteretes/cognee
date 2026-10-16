@@ -13,7 +13,7 @@ import pytest
 from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
 
 from cognee.exceptions import CogneeConfigurationError
-from cognee.infrastructure.databases.exceptions import EmbeddingEncodingError
+from cognee.infrastructure.databases.exceptions import EmbeddingEncodingError, EmbeddingException
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.databases.vector.embeddings.encoding import (
     base64_supported,
@@ -159,9 +159,6 @@ def test_decode_embedding_handles_both_formats():
         (base64.b64encode(b"\x00\x00\x00\x00\x00").decode(), "does not decode"),
         # Characters outside the base64 alphabet are refused, not skipped.
         ("AAAA AAAA AAAA AAAA", "does not decode"),
-        # Another type read as float32: int8 values [0, 0, -128, 127] make +infinity.
-        (base64.b64encode(bytes([0, 0, 0x80, 0x7F])).decode(), "NaN or infinity"),
-        (base64.b64encode(struct.pack("<2f", 0.5, float("nan"))).decode(), "NaN or infinity"),
     ],
 )
 def test_decode_embedding_rejects_what_is_not_base64_float32(payload, detail):
@@ -234,6 +231,22 @@ def test_a_value_outside_the_two_formats_is_a_configuration_error(value, monkeyp
     ]:
         with pytest.raises(CogneeConfigurationError, match="must be 'base64' or 'float'"):
             _create(provider, model, value)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        # int8 values [0, 0, -128, 127] read as float32 are +infinity.
+        base64.b64encode(bytes([0, 0, 0x80, 0x7F])).decode(),
+        base64.b64encode(struct.pack("<2f", 0.5, float("nan"))).decode(),
+    ],
+)
+def test_nan_or_infinity_is_retried_rather_than_blamed_on_base64(payload):
+    """A base64 reply can carry NaN as a transient glitch, which a retry clears, so it
+    is not the terminal error that tells the user base64 is unsupported."""
+    with pytest.raises(EmbeddingException, match="NaN or infinity") as info:
+        decode_embedding(payload, "base64")
+    assert not isinstance(info.value, EmbeddingEncodingError)
 
 
 def test_decode_embedding_rejects_an_empty_payload():

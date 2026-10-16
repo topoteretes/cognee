@@ -25,7 +25,7 @@ import numpy as np
 import openai
 
 from cognee.exceptions import CogneeConfigurationError
-from cognee.infrastructure.databases.exceptions import EmbeddingEncodingError
+from cognee.infrastructure.databases.exceptions import EmbeddingEncodingError, EmbeddingException
 
 EncodingFormat = Literal["base64", "float"]
 ENCODING_FORMATS = ("base64", "float")
@@ -144,10 +144,15 @@ def decode_embedding(embedding: list[float] | str, encoding_format: EncodingForm
         raise EmbeddingEncodingError(f"payload does not decode as float32: {error}") from error
     if not vector.size:
         raise EmbeddingEncodingError("payload is empty")
-    # Bytes of another type (int8, float16, big-endian float32) decode too, as other
-    # numbers. An embedding never holds NaN or infinity, so those give the misread away.
+    # NaN or infinity cannot be stored. A base64 reply can carry them as a transient glitch,
+    # which a retry clears, or as bytes of another type read as float32: int8, uint8 and
+    # byte-swapped float32 usually decode to them, float16 and float64 never do. So this is
+    # a retried EmbeddingException, not the terminal error that blames base64 support.
     if not np.isfinite(vector).all():
-        raise EmbeddingEncodingError("payload decodes to NaN or infinity, so it is not float32")
+        raise EmbeddingException(
+            "The embedding server returned NaN or infinity in a base64 vector. If this "
+            "persists, the server may not send float32: set EMBEDDING_ENCODING_FORMAT=float."
+        )
     return vector.tolist()
 
 

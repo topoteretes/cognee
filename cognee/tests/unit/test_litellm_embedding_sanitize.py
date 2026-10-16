@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import httpx
 import litellm
 import pytest
-from tenacity import stop_after_attempt
+from tenacity import stop_after_attempt, wait_none
 
 from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
     LiteLLMEmbeddingEngine,
@@ -194,6 +194,36 @@ async def test_embed_text_decodes_base64_vectors(monkeypatch):
 
     assert result == [float32_vector, float32_vector]
     assert all(isinstance(v, float) for v in result[0])
+
+
+@pytest.mark.asyncio
+async def test_a_base64_vector_with_nan_is_requested_again(monkeypatch):
+    """A base64 reply can carry NaN as a transient glitch, which a retry clears."""
+    monkeypatch.setenv("MOCK_EMBEDDING", "false")
+
+    with patch.object(LiteLLMEmbeddingEngine, "get_tokenizer", return_value=Mock()):
+        engine = LiteLLMEmbeddingEngine(
+            provider="openai", model="openai/text-embedding-3-large", dimensions=2, api_key="k"
+        )
+    assert engine.encoding_format == "base64"
+    retry = engine.embed_text.retry_with(stop=stop_after_attempt(2), wait=wait_none())
+    engine.embed_text = retry.__get__(engine)
+
+    good = [0.5, 0.25]
+    replies = [struct.pack("<2f", float("nan"), 0.25), struct.pack("<2f", *good)]
+    aembedding = AsyncMock(
+        side_effect=[
+            SimpleNamespace(data=[{"embedding": base64.b64encode(reply).decode()}])
+            for reply in replies
+        ]
+    )
+
+    import cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine as mod
+
+    monkeypatch.setattr(mod.litellm, "aembedding", aembedding)
+
+    assert await engine.embed_text(["hello"]) == [good]
+    assert aembedding.await_count == 2
 
 
 @pytest.mark.asyncio
