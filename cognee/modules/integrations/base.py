@@ -87,6 +87,8 @@ class OAuthIntegration(ABC):
     # Optional provider metadata key used by the generic resource picker.
     # ``None`` means this provider has no selectable sub-resources.
     resource_selection_key: ClassVar[str | None] = None
+    # Whether a stored ``null`` selection may mean "all resources" for this provider.
+    resource_selection_allows_all: ClassVar[bool] = True
 
     @abstractmethod
     def authorize_url(self, state: str) -> str:

@@ -1061,6 +1061,9 @@ async def test_typed_api_session_entry_never_runs_automatic_improvement(flag):
             "cognee.modules.session_lifecycle.metrics.get_session_row",
             AsyncMock(return_value=MagicMock(dataset_id=dataset.id)),
         ),
+        patch(
+            "cognee.modules.data.methods.get_authorized_dataset", AsyncMock(return_value=dataset)
+        ),
     ):
         kwargs = {} if flag is None else {"self_improvement": flag}
         result = await _get_remember_module().remember(
