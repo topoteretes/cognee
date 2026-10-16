@@ -44,8 +44,9 @@ HEARTBEAT_TICKS = 15
 def _parse_cursor(value: str | None) -> datetime | None:
     """A cursor string back into the datetime ``get_live_events`` expects.
 
-    Cursors come from event timestamps, which are written as naive UTC ISO
-    strings. An unparsable one keeps the previous cursor rather than resetting
+    Cursors come from event timestamps: aware UTC ISO strings from current
+    writers, naive UTC from older ones. ``get_live_events`` normalizes either.
+    An unparsable one keeps the previous cursor rather than resetting
     the stream to "everything", which would replay the whole timeline.
     """
     if not value:
