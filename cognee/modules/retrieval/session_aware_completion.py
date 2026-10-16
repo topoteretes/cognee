@@ -61,14 +61,12 @@ def _eligible_retriever_types() -> frozenset[type]:
     from cognee.modules.retrieval.completion_retriever import CompletionRetriever
     from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
     from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
-    from cognee.modules.retrieval.triplet_retriever import TripletRetriever
 
     return frozenset(
         {
             CompletionRetriever,
             GraphCompletionRetriever,
             HybridRetriever,
-            TripletRetriever,
         }
     )
 

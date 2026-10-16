@@ -9,7 +9,8 @@ of the providers' client libraries.
 
 import asyncio
 import json
-from collections.abc import Callable
+import re
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from hashlib import sha256
 from importlib import import_module
@@ -64,6 +65,12 @@ _PROVIDERS: dict[str, _Provider] = {
         source_name="gmail_source",
         service_builder=_google_service_builder("gmail", "v1"),
     ),
+    "google_calendar": _Provider(
+        prefix="google_calendar_events",
+        source_module="cognee.tasks.ingestion.connectors.google_calendar",
+        source_name="google_calendar_source",
+        service_builder=_google_service_builder("calendar", "v3"),
+    ),
     "linear": _Provider(
         prefix="linear",
         source_module="cognee.tasks.ingestion.connectors.linear",
@@ -93,6 +100,24 @@ def resource_name(provider: str, credential: Any, scope: str = "") -> str:
     identity = [str(credential.user_id), str(credential.provider_account_id), scope]
     digest = sha256(json.dumps(identity).encode()).hexdigest()[:24]
     return f"{prefix}_{digest}"
+
+
+def dataset_name_for_account(prefix: str, email: str, account_id: str = "") -> str:
+    """``{prefix}_{email slug}``, plus a 10 hex suffix of ``account_id`` when it is given.
+
+    The name is a stored identifier, so the slug rule and the suffix length must not change
+    once a provider has synced: every dataset already created under the old name would be
+    orphaned. The suffix keeps accounts apart whose slugs collide (``a.b`` and ``a_b``).
+    """
+    slug = re.sub(r"[^A-Za-z0-9_]+", "_", email or "").strip("_").lower()
+    name = f"{prefix}_{slug or 'account'}"
+    return f"{name}_{sha256(account_id.encode()).hexdigest()[:10]}" if account_id else name
+
+
+def dataset_name_for_credential(prefix: str, credential: Any) -> str:
+    """The dataset a connected account syncs into, named from its stored email and id."""
+    email = (credential.provider_metadata or {}).get("email") or ""
+    return dataset_name_for_account(prefix, str(email), str(credential.provider_account_id))
 
 
 def source_factory(provider: str) -> Callable[..., Any]:
@@ -267,6 +292,63 @@ async def sync_scopes(
         finally:
             add_source_counts(counts, source)
     return retained
+
+
+async def sync_selected_resources(
+    provider: str,
+    credential: Any,
+    counts: dict[str, int],
+    *,
+    selection: list[str] | None,
+    selection_kwarg: str,
+    dataset_name: str,
+    access_token_for: Callable[[Any], Awaitable[str]],
+) -> tuple[str, dict[str, int]]:
+    """Ingest the connection's whole selection through one source and return the sync outcome.
+
+    The source takes the selection as the ``selection_kwarg`` keyword (``label_ids``,
+    ``calendar_ids``) and keeps its own per-resource state, so a changed selection
+    needs no extra resource here. An empty selection ingests nothing and retires
+    everything the account synced. A failed ingestion keeps the old tables and marks
+    the sync degraded; the deselected ones are retired only after a clean run. The
+    caller checks the shape of ``selection``.
+    """
+    from cognee.api.v1.remember.remember import remember
+    from cognee.modules.users.methods import get_user
+
+    if selection == []:
+        await retire_resources(provider, credential, dataset_name, set())
+        return "ok", {"scanned": 0, "skipped": 0, "failed": 0}
+
+    make_source = source_factory(provider)
+    service = build_service(provider, await access_token_for(credential))
+    owner = await get_user(credential.user_id)
+    name = resource_name(provider, credential)
+    source = make_source(
+        **{selection_kwarg: selection},
+        service=service,
+        resource_name=name,
+        check_active=extraction_checkpoint(credential),
+    )
+    await require_active_credential(credential)
+    try:
+        result = await remember(
+            source,
+            dataset_name=dataset_name,
+            user=owner,
+            write_disposition="merge",
+            primary_key="id",
+            max_rows_per_table=0,
+            self_improvement=False,
+        )
+    finally:
+        add_source_counts(counts, source)
+    if getattr(result, "status", None) == "errored":
+        counts["failed"] += 1
+        counts["failed_ingestion"] = 1
+    else:
+        await retire_resources(provider, credential, dataset_name, {name})
+    return ("degraded" if counts["failed"] else "ok"), counts
 
 
 # This local API runs one worker. A multi-worker deployment must replace this

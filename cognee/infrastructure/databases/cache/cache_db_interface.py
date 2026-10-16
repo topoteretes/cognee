@@ -1,8 +1,15 @@
 import uuid
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
+from datetime import datetime, timezone
 
 from cognee.infrastructure.databases.cache.models import SessionAgentTraceEntry, SessionQAEntry
+
+
+def qa_entry_time(entry: SessionQAEntry) -> datetime:
+    """The entry's ``time`` as an aware datetime; a naive value is UTC."""
+    parsed = datetime.fromisoformat(entry.time)
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
 
 
 class CacheDBInterface(ABC):
@@ -110,6 +117,24 @@ class CacheDBInterface(ABC):
         """
         Retrieve all Q/A/context triplets for the given session.
         """
+
+    async def get_qa_entries_since(
+        self, user_id: str, session_id: str, since: datetime, lead_in: int = 0
+    ) -> list[SessionQAEntry]:
+        """
+        Retrieve the Q/A entries stored at or after ``since``, oldest first, preceded
+        by the ``lead_in`` entries stored just before it.
+
+        This default reads the whole session and filters on each entry's ``time``;
+        a backend that stores the time as a column overrides it with a query, so a
+        long session is not read in full on every call.
+        """
+        entries = await self.get_all_qa_entries(user_id, session_id)
+        first = next(
+            (index for index, entry in enumerate(entries) if qa_entry_time(entry) >= since),
+            len(entries),
+        )
+        return entries[max(first - lead_in, 0) :]
 
     @abstractmethod
     async def get_qa_entries_by_ids(

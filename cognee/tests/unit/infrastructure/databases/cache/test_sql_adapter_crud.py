@@ -768,6 +768,37 @@ async def test_add_qa_backward_compat(adapter):
 
 
 @pytest.mark.asyncio
+async def test_get_qa_entries_since_reads_only_from_the_bound(adapter):
+    """created_at is set from the payload's own time, so the column filter is exact."""
+    for index in range(4):
+        await adapter.create_qa_entry("u1", "s1", f"Q{index}", "C", "A", qa_id=f"id{index}")
+    await adapter.create_qa_entry("u1", "other", "Q-other", "C", "A", qa_id="other")
+    stored = await adapter.get_all_qa_entries("u1", "s1")
+    since = datetime.fromisoformat(stored[2].time)
+
+    assert [e.qa_id for e in await adapter.get_qa_entries_since("u1", "s1", since)] == [
+        "id2",
+        "id3",
+    ]
+    assert [e.qa_id for e in await adapter.get_qa_entries_since("u1", "s1", since, lead_in=1)] == [
+        "id1",
+        "id2",
+        "id3",
+    ]
+    assert [e.qa_id for e in await adapter.get_qa_entries_since("u1", "s1", since, lead_in=5)] == [
+        "id0",
+        "id1",
+        "id2",
+        "id3",
+    ]
+    far_future = datetime.now(timezone.utc) + timedelta(days=1)
+    assert [
+        e.qa_id for e in await adapter.get_qa_entries_since("u1", "s1", far_future, lead_in=1)
+    ] == ["id3"]
+    assert await adapter.get_qa_entries_since("u1", "s1", far_future) == []
+
+
+@pytest.mark.asyncio
 async def test_get_all_qas_backward_compat(adapter):
     """Legacy get_all_qas returns same as get_all_qa_entries."""
     await adapter.create_qa_entry("u1", "s1", "Q1", "C1", "A1", qa_id="id1")

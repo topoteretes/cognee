@@ -87,7 +87,14 @@ def hint_lines(text: str, base: Any) -> tuple[list[str], Any]:
     to the current base, so the hinted date is explicit about which parts came
     from context rather than the text.
     """
-    matches = search_dates(text, languages=["en"], settings=_SETTINGS, add_detected_language=False)
+    try:
+        matches = search_dates(
+            text, languages=["en"], settings=_SETTINGS, add_detected_language=False
+        )
+    except OverflowError:
+        # dateparser converts every match to UTC, and "9999-12-31 23:00 EST"
+        # lands past datetime.max. Hints are optional; the chunk is not.
+        return [], base
 
     lines: list[str] = []
     for source_text, resolved in matches or []:
