@@ -369,18 +369,24 @@ class DistillSessionsStage(BaseStage):
         return None
 
     async def run(self, inputs: ImproveRunInputs) -> StageResult:
+        from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
         from cognee.modules.session_distillation import distill_session
 
         distilled = 0
         completed = 0
         failed = 0
+        uncurated = 0
         last_error: BaseException | None = None
         for session_id in inputs.session_ids:
             try:
                 result = await distill_session(
-                    session_id, dataset=inputs.dataset_id, user=inputs.user
+                    session_id,
+                    dataset=inputs.dataset_id,
+                    user=inputs.user,
+                    max_batches=inputs.config.distill_max_batches_per_run,
                 )
                 distilled += len(result.documents)
+                uncurated += result.uncurated_entries
                 if result.status == "completed":
                     completed += 1
                 logger.info(
@@ -389,6 +395,18 @@ class DistillSessionsStage(BaseStage):
                     result.status,
                     len(result.documents),
                 )
+            except LLMPaymentRequiredError as e:
+                # Every later session would fail the same way: stop here, and keep
+                # this error so the stage result reports the exhausted budget.
+                failed += 1
+                last_error = e
+                logger.warning(
+                    "improve: LLM budget exhausted distilling session '%s'; "
+                    "skipping the remaining sessions: %s",
+                    session_id,
+                    e,
+                )
+                break
             except Exception as e:
                 failed += 1
                 last_error = e
@@ -402,6 +420,7 @@ class DistillSessionsStage(BaseStage):
             "documents": distilled,
             "sessions_completed": completed,
             "sessions_failed": failed,
+            "entries_uncurated": uncurated,
         }
         if failed:
             return StageResult.errored(self.name, last_error, **counts)
