@@ -130,8 +130,9 @@ class EmbeddingConfig(BaseSettings):
     # the EMBEDDING_INPUT_TYPE env var.
     embedding_input_type: str | None = None
     # Wire format of embedding responses. Unset: base64 on OpenAI's own API (much
-    # cheaper to parse), float everywhere else. "base64" opts an OpenAI-compatible
-    # server or proxy in; "float" opts out everywhere. See embeddings/encoding.py.
+    # cheaper to parse), float everywhere else. "base64" opts any provider in except
+    # fastembed and ollama, which have no wire format; the first reply shows whether the
+    # route honours it. "float" opts out everywhere. See embeddings/encoding.py.
     embedding_encoding_format: Literal["base64", "float"] | None = None
     # Rate-limiting for embedding requests. Lives here (not in LLMConfig) so the
     # knobs sit with the embedding settings they govern.

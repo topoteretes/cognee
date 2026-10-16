@@ -3,14 +3,18 @@ from functools import lru_cache
 from cognee.exceptions import CogneeConfigurationError
 from cognee.infrastructure.databases.vector.embeddings.config import (
     get_embedding_context_config,
+    keyless_embedding_defaults_apply,
     resolve_embedding_defaults,
 )
 from cognee.infrastructure.llm.config import (
     get_llm_context_config,
 )
+from cognee.shared.logging_utils import get_logger
 
 from .EmbeddingEngine import EmbeddingEngine
-from .encoding import base64_supported
+from .encoding import base64_supported, validate_encoding_format
+
+logger = get_logger("get_embedding_engine")
 
 
 def get_embedding_engine() -> EmbeddingEngine:
@@ -30,6 +34,12 @@ def get_embedding_engine() -> EmbeddingEngine:
     config = get_embedding_context_config()
     llm_config = get_llm_context_config()
     provider, model, dimensions = resolve_embedding_defaults(config, llm_config)
+    encoding_format = validate_encoding_format(config.embedding_encoding_format)
+    if encoding_format == "base64" and keyless_embedding_defaults_apply(config, llm_config):
+        # With no key configured, embeddings run on local fastembed, which has no wire
+        # format. The setting is for the provider a key will select, so it waits for it.
+        _warn_base64_waits_for_a_key()
+        encoding_format = None
     # Embedding engine has to be a singleton based on configuration to ensure too many requests won't be sent to HuggingFace
     return create_embedding_engine(
         provider,
@@ -44,7 +54,17 @@ def get_embedding_engine() -> EmbeddingEngine:
         llm_config.llm_api_key,
         llm_config.llm_provider,
         config.embedding_input_type,
-        config.embedding_encoding_format,
+        encoding_format,
+    )
+
+
+@lru_cache(maxsize=1)
+def _warn_base64_waits_for_a_key() -> None:
+    """Say once per process that EMBEDDING_ENCODING_FORMAT=base64 is not applied."""
+    logger.warning(
+        "EMBEDDING_ENCODING_FORMAT=base64 is not applied: no LLM or embedding key is "
+        "configured, so embeddings run locally on fastembed, which has no wire format. "
+        "It applies once a key selects a remote embedding provider."
     )
 
 
@@ -91,6 +111,7 @@ def create_embedding_engine(
 
         Returns an instance of an embedding engine based on the specified provider.
     """
+    embedding_encoding_format = validate_encoding_format(embedding_encoding_format)
     if embedding_encoding_format == "base64" and not base64_supported(embedding_provider):
         raise CogneeConfigurationError(
             f"The embedding provider '{embedding_provider}' has no wire format to request, "

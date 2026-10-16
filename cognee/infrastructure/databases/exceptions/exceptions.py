@@ -154,9 +154,10 @@ class EmbeddingEncodingError(EmbeddingException):
 
     The route does not support base64, whether picked by default for OpenAI's API or
     set via EMBEDDING_ENCODING_FORMAT: a provider or proxy translated the request into
-    its own format (Bedrock answers with 1-bit binary vectors, as a list), or the
-    payload does not decode as little-endian float32. Terminal: the same request gets
-    the same answer, so the engines never retry it.
+    its own format (Bedrock answers with 1-bit binary vectors, as a list), the server
+    refused the parameter, or the payload is not little-endian float32 (it does not
+    decode, or it decodes to NaN or infinity). Terminal: the same request gets the same
+    answer, so the engines never retry it.
     """
 
     def __init__(self, detail: str):

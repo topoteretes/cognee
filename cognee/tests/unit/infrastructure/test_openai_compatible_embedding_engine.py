@@ -154,15 +154,45 @@ class TestOpenAICompatibleEmbeddingEngine:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        ("status", "message", "hinted"),
+        ("status", "body", "hinted"),
         [
-            (400, "unsupported encoding_format", True),
-            (422, "encoding_format: Input should be 'float'", True),
-            (400, "model 'nope' not found", False),
+            (400, {"error": {"message": "unsupported encoding_format"}}, True),
+            (422, {"error": {"message": "encoding_format: Input should be 'float'"}}, True),
+            (400, {"error": {"message": "model 'nope' not found"}}, False),
+            # FastAPI's own 422 locates the refused field...
+            (
+                422,
+                {
+                    "detail": [
+                        {
+                            "type": "literal_error",
+                            "loc": ["body", "encoding_format"],
+                            "msg": "Input should be 'float'",
+                            "input": "base64",
+                        }
+                    ]
+                },
+                True,
+            ),
+            # ...and echoes the whole request when the error is about something else.
+            (
+                422,
+                {
+                    "detail": [
+                        {
+                            "type": "missing",
+                            "loc": ["body", "input_type"],
+                            "msg": "Field required",
+                            "input": {"input": ["a"], "encoding_format": "base64"},
+                        }
+                    ]
+                },
+                False,
+            ),
         ],
     )
     async def test_rejection_naming_the_encoding_is_terminal(
-        self, monkeypatch, status, message, hinted
+        self, monkeypatch, status, body, hinted
     ):
         """A 400/422 about base64 raises EmbeddingEncodingError on the first attempt; an
         unrelated 400 keeps the engine's generic wrapper and retry policy."""
@@ -176,7 +206,7 @@ class TestOpenAICompatibleEmbeddingEngine:
 
         def handler(request: httpx.Request) -> httpx.Response:
             calls.append(request)
-            return httpx.Response(status, json={"error": {"message": message}})
+            return httpx.Response(status, json=body)
 
         engine = self._make_engine(dimensions=4, encoding_format="base64")
         engine._client = AsyncOpenAI(
@@ -197,6 +227,32 @@ class TestOpenAICompatibleEmbeddingEngine:
             with pytest.raises(EmbeddingException):
                 await engine.embed_text(["a"])
             assert len(calls) == 2
+
+    @pytest.mark.asyncio
+    async def test_a_float_engine_never_blames_base64(self, monkeypatch):
+        """Only an engine that asked for base64 turns a refusal of it into
+        EmbeddingEncodingError; with float requested the setting is not the cause."""
+        monkeypatch.delenv("MOCK_EMBEDDING", raising=False)
+        from cognee.infrastructure.databases.exceptions import (
+            EmbeddingEncodingError,
+            EmbeddingException,
+        )
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(400, json={"error": {"message": "unsupported encoding_format"}})
+
+        engine = self._make_engine(dimensions=4)
+        engine._client = AsyncOpenAI(
+            api_key="test-key",
+            base_url="http://localhost:8099",
+            max_retries=0,
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        )
+        engine.embed_text = engine.embed_text.retry_with(stop=stop_after_attempt(1)).__get__(engine)
+
+        with pytest.raises(EmbeddingException) as info:
+            await engine.embed_text(["a"])
+        assert not isinstance(info.value, EmbeddingEncodingError)
 
     def test_get_vector_size(self):
         """get_vector_size returns the configured dimensions."""

@@ -54,14 +54,43 @@ from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 litellm.set_verbose = False
 
 # litellm dumps the openai SDK response model, whose embedding field is typed
-# list[float], so a base64 payload trips a harmless pydantic serializer warning.
-# Matches the wording of every supported pydantic: 2.10 says "but got `str`",
-# 2.11+ "input_type=str" (2.12+ also names the field, which 2.11 does not).
-_BASE64_SERIALIZER_WARNING = (
-    r"Pydantic serializer warnings:[\s\S]*Expected `list\[float\]`"
-    r"[\s\S]*(but got `str`|input_type=str)"
+# list[float], so a base64 reply trips a pydantic serializer warning: one warning per
+# dump, one line per vector. Only a warning made entirely of such lines is ignored, so
+# any other serializer problem, in the same dump or anywhere else in the process, is
+# still shown. Line shapes: pydantic 2.10 ("but got `str`"), 2.11 (no field name) and
+# 2.12+ (field_name='embedding'). pydantic shortens a long value with "...".
+_BASE64_VALUE = r"'[A-Za-z0-9+/=.]+'"
+_BASE64_SERIALIZER_LINE = (
+    r"Expected `list\[float\]` but got `str` with value `" + _BASE64_VALUE + r"` - "
+    r"serialized value may not be as expected"
+    r"|PydanticSerializationUnexpectedValue\(Expected `list\[float\]` - serialized value "
+    r"may not be as expected \[(?:field_name='embedding', )?input_value="
+    + _BASE64_VALUE
+    + r", input_type=str\]\)"
 )
-warnings.filterwarnings("ignore", message=_BASE64_SERIALIZER_WARNING, category=UserWarning)
+_BASE64_SERIALIZER_WARNING = (
+    r"Pydantic serializer warnings:(?:\n  (?:" + _BASE64_SERIALIZER_LINE + r"))+\Z"
+)
+
+
+def _ignore_base64_serializer_warning() -> None:
+    """Put the filter for that warning first among the warning filters, unless it is.
+
+    Called before every base64 request rather than once at import. A filter added inside
+    warnings.catch_warnings() is gone when the block exits (pytest runs every test in
+    one), and a filter added after it, such as "error", would win and turn the warning
+    into a failed embedding call.
+    """
+    first = warnings.filters[0] if warnings.filters else None
+    if (
+        first is not None
+        and first[0] == "ignore"
+        and getattr(first[1], "pattern", None) == _BASE64_SERIALIZER_WARNING
+    ):
+        return
+    warnings.filterwarnings("ignore", message=_BASE64_SERIALIZER_WARNING, category=UserWarning)
+
+
 logger = get_logger("LiteLLMEmbeddingEngine")
 
 observe = get_observe()
@@ -271,6 +300,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                     )
                     if self.encoding_format == "base64":
                         embedding_kwargs["encoding_format"] = "base64"
+                        _ignore_base64_serializer_warning()
                     elif routed_to_openrouter:
                         embedding_kwargs["encoding_format"] = "float"
 

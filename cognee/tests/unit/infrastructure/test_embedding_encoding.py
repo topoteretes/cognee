@@ -1,21 +1,45 @@
 """embeddings/encoding.py: which routes request base64, and how responses decode."""
 
 import base64
+import importlib
 import struct
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
+import httpx
 import litellm
+import openai
 import pytest
 
 from cognee.exceptions import CogneeConfigurationError
 from cognee.infrastructure.databases.exceptions import EmbeddingEncodingError
+from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.databases.vector.embeddings.encoding import (
     base64_supported,
     decode_embedding,
+    rejects_encoding_format,
     resolve_encoding_format,
 )
 from cognee.infrastructure.databases.vector.embeddings.get_embedding_engine import (
     create_embedding_engine,
 )
+from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
+    LiteLLMEmbeddingEngine,
+)
+
+# The module, not the function the package re-exports under the same name.
+_FACTORY = importlib.import_module(
+    "cognee.infrastructure.databases.vector.embeddings.get_embedding_engine"
+)
+
+
+@pytest.fixture(autouse=True)
+def _no_route_overrides(monkeypatch):
+    """The tests choose the route; a developer's .env or litellm settings must not."""
+    for var in ("OPENAI_BASE_URL", "OPENAI_API_BASE", "USE_LITELLM_PROXY"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setattr(litellm, "api_base", None)
+    monkeypatch.setattr(litellm, "use_litellm_proxy", False)
 
 
 @pytest.mark.parametrize(
@@ -74,6 +98,31 @@ def test_default_format_follows_litellm_base_url(setting, value, expected, monke
     )
 
 
+@pytest.mark.parametrize("switch", ["USE_LITELLM_PROXY", "litellm.use_litellm_proxy"])
+def test_default_format_stays_float_when_litellm_routes_to_its_proxy(switch, monkeypatch):
+    """litellm sends even an openai/ model to a LiteLLM proxy when told to, and the
+    proxy's backend may refuse base64, so only an explicit setting asks for it there."""
+    if switch == "USE_LITELLM_PROXY":
+        monkeypatch.setenv("USE_LITELLM_PROXY", "true")
+    else:
+        monkeypatch.setattr(litellm, "use_litellm_proxy", True)
+
+    assert resolve_encoding_format("openai/text-embedding-3-large", None, None) == "float"
+    assert resolve_encoding_format("text-embedding-3-large", None, None) == "float"
+    assert resolve_encoding_format("openai/text-embedding-3-large", None, "base64") == "base64"
+
+
+@pytest.mark.parametrize("setting", ["EMBEDDING_ENDPOINT", "OPENAI_BASE_URL"])
+def test_an_endpoint_that_does_not_parse_is_not_openais_api(setting, monkeypatch):
+    """urlparse raises on an unclosed IPv6 bracket. The engine reports a bad
+    EMBEDDING_ENDPOINT itself, so picking the format must not fail first."""
+    endpoint = "http://[fd00::1:8080/v1"
+    if setting == "OPENAI_BASE_URL":
+        monkeypatch.setenv("OPENAI_BASE_URL", endpoint)
+        endpoint = None
+    assert resolve_encoding_format("openai/text-embedding-3-large", endpoint, None) == "float"
+
+
 @pytest.mark.parametrize("configured", ["base64", "float"])
 def test_configured_format_wins(configured):
     assert resolve_encoding_format("openai/text-embedding-3-large", None, configured) == configured
@@ -100,6 +149,11 @@ def test_decode_embedding_handles_both_formats():
         ("not base64!", "does not decode"),
         # Five bytes: not a whole number of float32 values.
         (base64.b64encode(b"\x00\x00\x00\x00\x00").decode(), "does not decode"),
+        # Characters outside the base64 alphabet are refused, not skipped.
+        ("AAAA AAAA AAAA AAAA", "does not decode"),
+        # Another type read as float32: int8 values [0, 0, -128, 127] make +infinity.
+        (base64.b64encode(bytes([0, 0, 0x80, 0x7F])).decode(), "NaN or infinity"),
+        (base64.b64encode(struct.pack("<2f", 0.5, float("nan"))).decode(), "NaN or infinity"),
     ],
 )
 def test_decode_embedding_rejects_what_is_not_base64_float32(payload, detail):
@@ -147,7 +201,8 @@ def test_base64_on_an_engine_without_a_wire_is_a_configuration_error(provider, m
         # A proxy or gateway route: cognee cannot see what is behind it.
         ("custom", "litellm_proxy/text-embedding-3-large"),
         ("custom", "openai/text-embedding-3-large"),
-        # litellm translates the format for these; the first reply shows whether it held.
+        # litellm turns base64 into Bedrock's own type (Titan v2: 1-bit vectors, as a
+        # list), and forwards it to Azure unchanged. The first reply shows which held.
         ("bedrock", "bedrock/amazon.titan-embed-text-v2:0"),
         ("azure", "azure/my-deployment"),
     ],
@@ -160,14 +215,227 @@ def test_configured_base64_is_trusted_at_creation(provider, model, monkeypatch):
 
 @pytest.mark.parametrize("value", ["Base64", "FLOAT", "b64", ""])
 def test_a_value_outside_the_two_formats_is_a_configuration_error(value, monkeypatch):
-    """The env path is typed; the SDK setter is not, so the engines check the value."""
+    """The env path is typed; the SDK setter is not, so the factory checks the value,
+    also for the engines that have no wire format to apply it to."""
     monkeypatch.setenv("MOCK_EMBEDDING", "true")
-    with pytest.raises(CogneeConfigurationError, match="must be 'base64' or 'float'"):
-        _create("openai", "openai/text-embedding-3-large", value)
-    with pytest.raises(CogneeConfigurationError, match="must be 'base64' or 'float'"):
-        _create("openai_compatible", "nomic-embed-text", value)
+    for provider, model in [
+        ("openai", "openai/text-embedding-3-large"),
+        ("openai_compatible", "nomic-embed-text"),
+        ("fastembed", "BAAI/bge-small-en-v1.5"),
+        ("ollama", "nomic-embed-text"),
+    ]:
+        with pytest.raises(CogneeConfigurationError, match="must be 'base64' or 'float'"):
+            _create(provider, model, value)
 
 
 def test_decode_embedding_rejects_an_empty_payload():
     with pytest.raises(EmbeddingEncodingError, match="empty"):
         decode_embedding("", "base64")
+
+
+async def _sdk_error(status, body):
+    """The error the openai SDK raises for this reply, built by the SDK itself."""
+    client = openai.AsyncOpenAI(
+        api_key="test-key",
+        base_url="http://localhost:8000/v1",
+        max_retries=0,
+        http_client=httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda request: httpx.Response(status, json=body))
+        ),
+    )
+    with pytest.raises(openai.APIStatusError) as info:
+        await client.embeddings.create(model="m", input=["a"], encoding_format="base64")
+    return info.value
+
+
+def _raised_by_litellm(error):
+    """litellm's error for the same reply: its own class, with the SDK's in the chain."""
+    try:
+        raise litellm.exceptions.BadRequestError(
+            message=f"litellm.BadRequestError: OpenAIException - {error}",
+            model="openai/m",
+            llm_provider="openai",
+        ) from error
+    except litellm.exceptions.BadRequestError as wrapped:
+        return wrapped
+
+
+_ECHOED_REQUEST = {"input": ["a"], "model": "m", "encoding_format": "base64"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "body", "refused"),
+    [
+        # The server refuses the encoding, in the shapes servers say it.
+        (
+            422,
+            {
+                "detail": [
+                    {
+                        "type": "literal_error",
+                        "loc": ["body", "encoding_format"],
+                        "msg": "Input should be 'float'",
+                        "input": "base64",
+                    }
+                ]
+            },
+            True,
+        ),
+        (400, {"error": {"message": "Invalid value", "param": "encoding_format"}}, True),
+        (400, {"error": {"message": "Unsupported encoding_format: base64", "param": None}}, True),
+        (
+            422,
+            {
+                "error": "Failed to deserialize the JSON body into the target type: "
+                "encoding_format: unknown variant `base64`, expected `float`",
+                "error_type": "Unprocessable Entity",
+            },
+            True,
+        ),
+        # Errors about something else, echoing the request or the input texts.
+        (
+            422,
+            {
+                "detail": [
+                    {
+                        "type": "missing",
+                        "loc": ["body", "input_type"],
+                        "msg": "Field required",
+                        "input": _ECHOED_REQUEST,
+                    }
+                ]
+            },
+            False,
+        ),
+        (
+            422,
+            {
+                "detail": [
+                    {
+                        "type": "value_error",
+                        "loc": ["body"],
+                        "msg": "Value error, model 'm' is not served here",
+                        "input": _ECHOED_REQUEST,
+                    }
+                ]
+            },
+            False,
+        ),
+        (
+            422,
+            {
+                "detail": [
+                    {
+                        "type": "too_long",
+                        "loc": ["body", "input"],
+                        "msg": "List should have at most 1 item after validation, not 2",
+                        "input": ["a", "Images are inlined as base64 data URIs."],
+                    }
+                ]
+            },
+            False,
+        ),
+        (400, {"error": {"message": "The model `m` does not exist", "param": None}}, False),
+    ],
+)
+async def test_a_refusal_is_read_from_the_error_not_the_echoed_request(status, body, refused):
+    error = await _sdk_error(status, body)
+    assert rejects_encoding_format(error) is refused
+    assert rejects_encoding_format(_raised_by_litellm(error)) is refused
+
+
+@pytest.mark.parametrize(
+    ("message", "refused"),
+    [
+        # litellm refuses the parameter before sending, so there is no server body.
+        ("gemini does not support parameters: {'encoding_format': 'base64'}", True),
+        ("This model does not support specifying dimensions.", False),
+    ],
+)
+def test_an_error_without_a_body_is_matched_on_its_message(message, refused):
+    error = litellm.exceptions.UnsupportedParamsError(
+        message=message, model="gemini/text-embedding-004", llm_provider="gemini"
+    )
+    assert rejects_encoding_format(error) is refused
+
+
+def _llm(api_key):
+    return SimpleNamespace(
+        llm_provider="openai", llm_api_key=api_key, llm_azure_use_managed_identity=False
+    )
+
+
+def _engine_from_env(monkeypatch, llm_api_key, **env):
+    """get_embedding_engine() for these environment variables, read by EmbeddingConfig."""
+    for var in (
+        "EMBEDDING_PROVIDER",
+        "EMBEDDING_MODEL",
+        "EMBEDDING_DIMENSIONS",
+        "EMBEDDING_API_KEY",
+        "EMBEDDING_ENDPOINT",
+        "EMBEDDING_API_BASE",
+        "EMBEDDING_ENCODING_FORMAT",
+        "COGNEE_SKIP_PREFLIGHT",
+        "COGNEE_SKIP_CONNECTION_TEST",
+        "MOCK_EMBEDDING",
+    ):
+        monkeypatch.delenv(var, raising=False)
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    config = EmbeddingConfig(_env_file=None)
+    monkeypatch.setattr(_FACTORY, "get_embedding_context_config", lambda: config)
+    monkeypatch.setattr(_FACTORY, "get_llm_context_config", lambda: _llm(llm_api_key))
+    create_embedding_engine.cache_clear()
+    try:
+        with patch.object(LiteLLMEmbeddingEngine, "get_tokenizer", return_value=Mock()):
+            return _FACTORY.get_embedding_engine()
+    finally:
+        create_embedding_engine.cache_clear()
+
+
+@pytest.mark.parametrize(
+    ("env", "expected"),
+    [
+        # OpenAI's own API defaults to base64, and the setting opts out.
+        ({"EMBEDDING_ENCODING_FORMAT": "float"}, "float"),
+        # A proxy defaults to float, and the setting opts in.
+        (
+            {
+                "EMBEDDING_ENDPOINT": "http://localhost:4000/v1",
+                "EMBEDDING_ENCODING_FORMAT": "base64",
+            },
+            "base64",
+        ),
+    ],
+)
+def test_the_setting_reaches_the_engine_from_the_environment(env, expected, monkeypatch):
+    assert _engine_from_env(monkeypatch, "test-key", **env).encoding_format == expected
+
+
+def test_a_keyless_run_leaves_base64_for_the_provider_a_key_selects(monkeypatch):
+    """With no key, embeddings run on local fastembed, which has no wire format. The
+    setting is not applied, and that is said once, instead of failing a run that works
+    without it."""
+    import cognee.infrastructure.databases.vector.embeddings.FastembedEmbeddingEngine as local
+    from cognee.infrastructure.databases.vector.embeddings import config as config_module
+
+    class _LocalEngine:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    monkeypatch.setattr(config_module, "_resolve_embedding_dimensions", lambda *args: 384)
+    monkeypatch.setattr(local, "FastembedEmbeddingEngine", _LocalEngine)
+    warned = Mock()
+    monkeypatch.setattr(_FACTORY.logger, "warning", warned)
+    _FACTORY._warn_base64_waits_for_a_key.cache_clear()
+    try:
+        first = _engine_from_env(monkeypatch, None, EMBEDDING_ENCODING_FORMAT="base64")
+        second = _engine_from_env(monkeypatch, None, EMBEDDING_ENCODING_FORMAT="base64")
+    finally:
+        _FACTORY._warn_base64_waits_for_a_key.cache_clear()
+
+    assert isinstance(first, _LocalEngine)
+    assert isinstance(second, _LocalEngine)
+    warned.assert_called_once()
+    assert "EMBEDDING_ENCODING_FORMAT=base64" in warned.call_args.args[0]
