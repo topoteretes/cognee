@@ -1,9 +1,10 @@
 from pathlib import Path
-from typing import BinaryIO
+from typing import Any, BinaryIO
 from urllib.parse import urlparse
 
 from cognee.infrastructure.files.storage.s3_config import get_s3_config
 from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
+from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.tasks.ingestion.exceptions import S3FileSystemNotFoundError
 
 
@@ -22,10 +23,13 @@ def _resolve_existing_local_path(item: str) -> Path | None:
 
 
 async def resolve_data_directories(
-    data: BinaryIO | list[BinaryIO] | str | list[str],
+    data: BinaryIO | list[BinaryIO] | str | list[str] | Any,
     include_subdirectories: bool = True,
     user=None,
     dataset_id=None,
+    credentials: str | None = None,
+    include_documents: bool = True,
+    treat_as_repository: bool = False,
     branch: str | None = None,
 ):
     """
@@ -36,6 +40,15 @@ async def resolve_data_directories(
     exactly like a local code project directory, below.
     Other http(s) URLs pass through untouched and are fetched as web pages by
     ``save_data_item_to_storage``.
+
+    The three repository options are ``add()``'s ``codegraph_config``:
+    ``credentials`` authenticates the clone of a private repository URL,
+    ``include_documents=False`` emits a repository's manifest without its
+    README/docs, and ``treat_as_repository`` takes EVERY item as a repository
+    spec (``resolve_declared_repositories``) instead of detecting them. The
+    pipeline runner calls this with the defaults; ``add()`` calls it ahead of
+    the run when any option is set, and this function is idempotent on its
+    own output, so the later calls pass the resolved items through.
 
     A local directory that IS a code project (see
     ``cognee.tasks.code_graph.code_repo.PROJECT_MARKERS``) is not flattened:
@@ -51,11 +64,30 @@ async def resolve_data_directories(
         include_subdirectories: Whether to include files in subdirectories recursively.
         user: Owner used to pin repo-manifest data ids (optional).
         dataset_id: Dataset used to pin repo-manifest data ids (optional).
-        branch: Branch to clone for each repository URL in ``data`` (optional).
+        credentials: Token for cloning private repository URLs (optional).
+        include_documents: Also emit a repository's document files (default True).
+        treat_as_repository: Resolve every item as a declared repository spec.
+        branch: Branch to clone for each remote repository in ``data``, including
+            declared specs (optional).
 
     Returns:
         A list of resolved files, DataItems, and binary streams.
     """
+    if treat_as_repository:
+        # The caller has declared what these are: nothing is detected, every
+        # item is cloned or used in place. Deferred import: code_repo reaches
+        # back into this package (dlt_utils).
+        from cognee.tasks.code_graph.code_repo import resolve_declared_repositories
+
+        return await resolve_declared_repositories(
+            data,
+            credentials=credentials,
+            include_documents=include_documents,
+            branch=branch,
+            user=user,
+            dataset_id=dataset_id,
+        )
+
     # Ensure `data` is a list
     if not isinstance(data, list):
         data = [data]
@@ -104,21 +136,50 @@ async def resolve_data_directories(
             # clone it and resolve it like the local project directory below --
             # one code_repo manifest plus the repo's documents. Deferred import:
             # code_repo reaches back into this package (dlt_utils).
-            from cognee.tasks.code_graph.resolve_repo import code_repo_clone_url
+            from cognee.tasks.code_graph.resolve_repo import (
+                SSH_REPO_SPEC_MESSAGE,
+                code_repo_clone_url,
+                is_ssh_repo_spec,
+            )
+
+            # An ssh remote names a repository and nothing else, so falling
+            # through to the text path below would store the spec string as a
+            # document -- a silent wrong result. http(s) URLs are NOT checked
+            # this way: most of them really are web pages.
+            if is_ssh_repo_spec(item):
+                raise IngestionError(message=SSH_REPO_SPEC_MESSAGE)
 
             if code_repo_clone_url(item) is not None:
                 from cognee.tasks.code_graph.code_repo import resolve_code_repository_url
 
-                manifest_item, document_paths, _skipped = await resolve_code_repository_url(
-                    item, user=user, dataset_id=dataset_id, branch=branch
+                manifest_item, documents, _skipped = await resolve_code_repository_url(
+                    item,
+                    user=user,
+                    dataset_id=dataset_id,
+                    credentials=credentials,
+                    include_documents=include_documents,
+                    branch=branch,
                 )
                 resolved_data.append(manifest_item)
-                resolved_data.extend(str(path) for path in document_paths)
+                resolved_data.extend(documents)
                 continue
 
             local_path = _resolve_existing_local_path(item)
 
             if local_path and local_path.is_dir():  # If it's a directory
+                # Checked here, not only per file at storage time: a code project
+                # resolves to a manifest DataItem that never reaches that check,
+                # and cognify then reads the directory in place.
+                from cognee.tasks.ingestion.save_data_item_to_storage import (
+                    settings as save_data_settings,
+                )
+
+                if not save_data_settings.accept_local_file_path:
+                    raise IngestionError(
+                        message="Local directories are not accepted "
+                        "(ACCEPT_LOCAL_FILE_PATH=false). Pass a repository URL "
+                        "or upload the files instead."
+                    )
                 if include_subdirectories:
                     # A code project resolves to one repo item + its documents
                     # instead of a flat file list. Deferred import: code_repo
@@ -130,7 +191,10 @@ async def resolve_data_directories(
 
                     if detect_code_project(local_path):
                         manifest_item, document_paths, _skipped = await resolve_code_repository(
-                            local_path, user=user, dataset_id=dataset_id
+                            local_path,
+                            user=user,
+                            dataset_id=dataset_id,
+                            include_documents=include_documents,
                         )
                         resolved_data.append(manifest_item)
                         resolved_data.extend(str(path) for path in document_paths)

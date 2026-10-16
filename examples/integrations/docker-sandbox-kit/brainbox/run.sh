@@ -55,7 +55,7 @@ NAME="brainbox-$(printf '%s' "$TASK" | tr -c 'a-z0-9\n' '-')-$(openssl rand -hex
 WORK="$PWD/work/$NAME"
 OUT_DATASET="$NAME-out"
 mkdir -p "$WORK/out" "$WORK/tasks"
-rsync -a --exclude .git "$REPO"/ "$WORK/repo/"
+rsync -a --exclude .git --exclude __pycache__ "$REPO"/ "$WORK/repo/"
 cp tasks/*.py "$WORK/tasks/"
 
 say() { printf '\n\033[1m== %s\033[0m\n' "$*"; }

@@ -4,8 +4,8 @@ Runs INSIDE the sandbox. Three moves, each against a different wall:
 
   1. recall  — ask the brain a question with the scoped identity (only the
                granted datasets answer; the brain does the LLM work).
-  2. build   — `cognee.remember(repo, content_type="code")` locally: the enola
-               code graph, deterministic, no LLM, no embeddings, no network.
+  2. build   — `cognee.remember(repo)` locally: the enola code graph,
+               deterministic, no LLM, no embeddings, no network.
                Then the module-level `architecture` view with a Mermaid diagram.
   3. promote — `cognee.push(...)`: export the local graph as a COGX archive and
                import it into the brain, zero LLM calls. The target dataset is
@@ -84,9 +84,25 @@ async def main(args: argparse.Namespace) -> None:
 
     step("2/3 build the code graph locally (no LLM, no network)")
     t = time.time()
-    result = await cognee.remember(
-        args.repo, dataset_name=args.dataset, content_type="code", self_improvement=False
-    )
+    # The directory is taken as one repository (one code_repo item, built by
+    # cognify's CODE_REPO route) even without a build manifest or .git: run.sh
+    # copies it without .git, and the README's example is a package subdirectory,
+    # which would otherwise be split into per-file items. Its README and docs are
+    # skipped: the sandbox has no LLM key.
+    try:
+        result = await cognee.remember(
+            args.repo,
+            dataset_name=args.dataset,
+            self_improvement=False,
+            codegraph_config={"treat_as_repository": True, "include_documents": False},
+        )
+    except TypeError as error:
+        if "codegraph_config" not in str(error):
+            raise
+        # cognee <= 1.6.4 has no codegraph_config; content_type="code" did the same there.
+        result = await cognee.remember(
+            args.repo, dataset_name=args.dataset, self_improvement=False, content_type="code"
+        )
     arch = await cognee.search(
         query_type=cognee.SearchType.CODE,
         query_text="",

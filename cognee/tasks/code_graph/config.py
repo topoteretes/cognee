@@ -1,0 +1,94 @@
+"""Per-call options for the code graph routes (CODE and CODE_REPO)."""
+
+from collections.abc import Mapping
+from typing import TypedDict, cast
+
+
+class CodeGraphConfig(TypedDict, total=False):
+    """Options for code files and code repositories, passed as ``codegraph_config``.
+
+    ``add()`` reads ``repo_credentials``, ``include_documents`` and
+    ``treat_as_repository``; ``cognify()`` reads ``index_vectors``;
+    ``remember()`` hands the same dict to both, so each takes what it needs.
+    """
+
+    # Also embed the code facts the run builds, so completion search types can
+    # reach the code. Off by default: SearchType.CODE reads the graph only.
+    index_vectors: bool
+    # Also ingest the repository's document files (README, docs, ...) as
+    # ordinary documents, alongside its code graph. On by default, as a
+    # directory add has always done. False indexes the code graph only -- what
+    # the GitHub sync wants: no LLM extraction or embeddings for a repo's prose.
+    # Documents are excluded regardless when no LLM API key is configured,
+    # since their pipelines need one.
+    include_documents: bool
+    # Token for cloning private GitHub/GitLab repository URLs (e.g. a GitHub App
+    # installation token). It reaches git only through environment config,
+    # never the URL, so nothing stored or logged carries it.
+    repo_credentials: str
+    # Every item in this call's data IS a repository spec -- a local directory
+    # or a git remote -- rather than something to sniff. Off by default: add()
+    # recognises repositories on its own (``code_repo_clone_url`` for URLs,
+    # ``detect_code_project`` for directories), which is deliberately
+    # conservative because most http(s) URLs really are web pages and most
+    # directories really are document trees.
+    #
+    # Turn it on when that sniffing cannot see what you have: a Bitbucket or
+    # self-hosted forge URL with no ``.git`` suffix (guessing would scrape a web
+    # page instead), an ssh remote (``git@host:owner/repo``), or a source tree
+    # with no build manifest and no ``.git``.
+    #
+    # Every item is then resolved through ``resolve_repo_source``: a local
+    # directory is used in place, a remote URL is shallow-cloned. An item that
+    # is neither raises instead of being stored as text.
+    treat_as_repository: bool
+
+
+CODEGRAPH_CONFIG_KEYS = frozenset(CodeGraphConfig.__annotations__)
+_BOOL_KEYS = ("index_vectors", "include_documents", "treat_as_repository")
+
+
+def validate_codegraph_config(codegraph_config: CodeGraphConfig | None) -> CodeGraphConfig:
+    """Return the config as a dict, rejecting unknown keys and mistyped values.
+
+    A key set to ``None`` counts as absent and is dropped. The flags must be
+    real bools: ``"false"`` is truthy, so accepting strings would invert them.
+    """
+    if codegraph_config is None:
+        return {}
+    if not isinstance(codegraph_config, dict):
+        raise TypeError(f"codegraph_config must be a dict, got {type(codegraph_config).__name__}.")
+    unknown = set(codegraph_config) - CODEGRAPH_CONFIG_KEYS
+    if unknown:
+        raise ValueError(
+            f"Unknown codegraph_config keys: {', '.join(sorted(unknown))}. "
+            f"Supported: {', '.join(sorted(CODEGRAPH_CONFIG_KEYS))}."
+        )
+    config = {key: value for key, value in codegraph_config.items() if value is not None}
+    for key in _BOOL_KEYS:
+        if key in config and not isinstance(config[key], bool):
+            raise TypeError(
+                f"codegraph_config[{key!r}] must be a bool, got {type(config[key]).__name__}."
+            )
+    credentials = config.get("repo_credentials")
+    if credentials is not None and (not isinstance(credentials, str) or not credentials):
+        raise TypeError("codegraph_config['repo_credentials'] must be a non-empty str.")
+    return cast(CodeGraphConfig, config)
+
+
+def requests_codegraph_options(codegraph_config: Mapping[str, object] | None) -> bool:
+    """Whether the config asks for anything beyond the defaults.
+
+    The defaults are ``index_vectors=False``, ``include_documents=True``,
+    ``treat_as_repository=False`` and no credentials, so a config that only
+    restates them -- ``{"index_vectors": False}`` from an explicit top-level
+    ``index_vectors=False`` -- changes nothing and must not trip the checks
+    that reject codegraph options on other paths.
+    """
+    config = codegraph_config or {}
+    return bool(
+        config.get("index_vectors")
+        or config.get("repo_credentials")
+        or config.get("treat_as_repository")
+        or config.get("include_documents", True) is False
+    )

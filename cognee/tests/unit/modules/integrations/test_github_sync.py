@@ -1,12 +1,16 @@
 """Unit tests for cognee.modules.integrations.github.sync.
 
-Token minting, repo listing, and remember() are mocked — what's under test
-is the orchestration: one dataset per installation, authenticated clone
-URLs handed to the code path, and the full-installation default when no
-explicit repo list is given.
+Token minting, repo listing, and remember() are mocked — what's under test is
+the orchestration: one dataset per installation, each repo remembered in its
+own call by its credential-free clone URL with the installation token in
+``codegraph_config["repo_credentials"]``, declared repositories
+(``treat_as_repository``) and code-graph-only ingestion
+(``include_documents=False``), a failing repo logged without stopping the
+others, and the full-installation default when no explicit repo list is given.
 """
 
 import importlib
+import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -15,10 +19,8 @@ import pytest
 
 sync_module = importlib.import_module("cognee.modules.integrations.github.sync")
 
-# The remember package's __init__ rebinds `remember` to the function,
-# shadowing the submodule — string-target monkeypatching resolves the
-# function and fails. Importing the submodule explicitly sidesteps it (same
-# workaround as test_get_integrations_router.py).
+# The remember package's __init__ shadows the submodule with the function, so
+# patch the submodule itself.
 _remember_module = importlib.import_module("cognee.api.v1.remember.remember")
 _users_methods = importlib.import_module("cognee.modules.users.methods")
 
@@ -71,17 +73,22 @@ async def test_default_sync_covers_every_installation_repo(mocks):
 
     mocks.mint.assert_awaited_once_with(42)
     mocks.list_repos.assert_awaited_once_with("tok123")
-    mocks.remember.assert_awaited_once_with(
-        [
-            "https://github.com/acme/api.git",
-            "https://github.com/acme/web.git",
-        ],
-        dataset_name="github_acme_org",
-        user=mocks.owner,
-        content_type="code",
-        repo_credentials="tok123",
-        raise_on_error=False,
-    )
+    # One remember per repository, so a failing clone cannot stop the others.
+    assert [call.args for call in mocks.remember.await_args_list] == [
+        ("https://github.com/acme/api.git",),
+        ("https://github.com/acme/web.git",),
+    ]
+    assert mocks.remember.await_args.kwargs == {
+        "dataset_name": "github_acme_org",
+        "user": mocks.owner,
+        "codegraph_config": {
+            "repo_credentials": "tok123",
+            "treat_as_repository": True,
+            "include_documents": False,  # code graphs only, no README extraction
+        },
+        "self_improvement": False,
+        "raise_on_error": False,
+    }
 
 
 @pytest.mark.asyncio
@@ -90,9 +97,32 @@ async def test_explicit_repo_list_skips_the_listing_call(mocks):
 
     mocks.list_repos.assert_not_awaited()
     mocks.remember.assert_awaited_once()
-    (urls,) = mocks.remember.await_args.args
-    assert urls == ["https://github.com/acme/api.git"]
-    assert mocks.remember.await_args.kwargs["repo_credentials"] == "tok123"
+    assert mocks.remember.await_args.args == ("https://github.com/acme/api.git",)
+
+
+@pytest.mark.asyncio
+async def test_per_repo_failures_are_logged_by_repository(mocks, caplog):
+    completed = SimpleNamespace(status="completed", error=None)
+    mocks.remember.side_effect = [RuntimeError("clone failed"), completed]
+
+    with caplog.at_level(logging.WARNING, logger=sync_module.logger.name):
+        await sync_module.sync_repositories(_credential())
+
+    assert mocks.remember.await_count == 2
+    assert "GitHub sync for Acme-Org failed for acme/api" in caplog.text
+    assert "1 failed repositories: acme/api" in caplog.text
+    assert "acme/web" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_an_errored_result_is_logged_not_raised(mocks, caplog):
+    mocks.remember.return_value = SimpleNamespace(status="errored", error="enola failed")
+
+    with caplog.at_level(logging.WARNING, logger=sync_module.logger.name):
+        await sync_module.sync_repositories(_credential(), ["acme/api"])
+
+    assert "GitHub sync for acme/api errored: enola failed" in caplog.text
+    assert "1 failed repositories: acme/api" in caplog.text
 
 
 @pytest.mark.asyncio

@@ -12,6 +12,7 @@ tiny code fixture and default storage live beside this script under
 .cognee-readme-demo.
 Existing storage environment variables take precedence. No memory is deleted.
 Distillation is model-dependent; the script reports when no lesson is published.
+Re-running it is safe: a rule learned on an earlier run is reported, not re-added.
 """
 
 import argparse
@@ -96,9 +97,14 @@ async def index_code(cognee, root):
     repo.mkdir(parents=True, exist_ok=True)
     (repo / "payments.py").write_text(CODE)
     print("\nIndexing the sample code:", flush=True)
-    # index_vectors writes CodeSymbol embeddings too, so the final
+    # codegraph_config index_vectors writes CodeSymbol embeddings too, so the final
     # GRAPH_COMPLETION answer can reach the code alongside text and lessons.
-    await cognee.remember(str(repo), dataset_name=DATASET, content_type="code", index_vectors=True)
+    await cognee.remember(
+        str(repo),
+        dataset_name=DATASET,
+        codegraph_config={"index_vectors": True},
+        self_improvement=False,
+    )
     facts = await cognee.search(
         query_type=cognee.SearchType.CODE,
         query_text="",
@@ -145,10 +151,18 @@ async def main(args):
     print(f"Distillation: {distilled.status}; {len(distilled.documents)} lesson documents")
     for document in distilled.documents:
         print(document)
-    if distilled.status != "completed" or not distilled.documents:
+    if distilled.status == "no_accepted_lessons":
+        # Typically a re-run against the same storage: the rule was learned on
+        # an earlier run, and the writer rejects an equivalent lesson as a
+        # duplicate. The fresh-session answer below shows whether it is known.
+        print(
+            "No new lesson accepted; on a re-run this is the rule learned earlier "
+            "(duplicates are rejected)."
+        )
+    elif distilled.status != "completed" or not distilled.documents:
         raise RuntimeError(
-            "No new lesson was published. Inspect the distillation status and provider logs. "
-            "An existing equivalent lesson can also cause the curator to reject a duplicate."
+            f"No lesson was published (status: {distilled.status}). Inspect the "
+            "distillation status and provider logs."
         )
 
     print("5. Recall the document and learned rule in a fresh session.", flush=True)

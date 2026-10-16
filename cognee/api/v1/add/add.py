@@ -25,6 +25,7 @@ from cognee.modules.pipelines.models.PipelineRunInfo import (
 )
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.code_graph.config import CodeGraphConfig, validate_codegraph_config
 from cognee.tasks.ingestion import ingest_data, resolve_data_directories
 from cognee.tasks.ingestion.data_item import DataItem
 from cognee.tasks.ingestion.dlt_config import resolve_dlt_options, with_csv_loader_options
@@ -55,6 +56,7 @@ async def add(
     embedding_config: EmbeddingConfig | None = None,
     data_cache: bool = True,
     skip_connection_test: bool = False,
+    codegraph_config: CodeGraphConfig | None = None,
     branch: str | None = None,
     **kwargs,
 ):
@@ -139,15 +141,32 @@ async def add(
                            DLT orphan cleanup is skipped; propagating upstream deletions
                            requires a successful foreground sync.
                            If False (default), waits for completion before returning.
+        codegraph_config: Options for code repositories (``CodeGraphConfig``). add()
+                 reads ``repo_credentials``: a token used to clone private
+                 GitHub/GitLab repository URLs in ``data``. It reaches git only
+                 through environment config, never the URL or the stored rows.
+                 It also reads ``include_documents`` (default True): set it False
+                 to index a repository's code graph only, leaving its README and
+                 docs un-ingested. And ``treat_as_repository`` (default False):
+                 every item in ``data`` is then a repository spec, so a git
+                 remote add() would not recognise on its own — a Bitbucket or
+                 self-hosted forge URL without ``.git``, an ssh remote — is
+                 cloned instead of scraped as a web page.
+                 ``index_vectors`` is read by cognify() and ignored here.
+                 ``repo_credentials`` and ``treat_as_repository`` are not
+                 supported while connected to a remote instance.
         extraction_rules: Optional dictionary of rules (e.g., CSS selectors, XPath) for extracting specific content from web pages using BeautifulSoup
         tavily_config: Optional configuration for Tavily API, including API key and extraction settings
         soup_crawler_config: Optional configuration for BeautifulSoup crawler, specifying concurrency, crawl delay, and extraction rules.
-        branch: Branch to clone for the GitHub/GitLab repository URL(s) in ``data``, instead of
-                the remote's default. Each branch is cloned into its own directory, so adds on
-                different branches never touch each other's clone. A dataset holds one branch of
-                a URL at a time: adding it on another branch re-indexes the code graph, but the
-                documents ingested from the previous branch stay. A missing branch raises
-                ``CodeRepositoryError``; not supported while connected to a remote instance.
+        branch: Branch to clone for the GitHub/GitLab repository URL(s) in ``data`` -- or, with
+                ``codegraph_config={"treat_as_repository": True}``, for every remote spec --
+                instead of the remote's default. Each branch is cloned into its own directory,
+                so adds on different branches never touch each other's clone. A dataset holds
+                one branch of a URL at a time: adding it on another branch re-indexes the code
+                graph, but the documents ingested from the previous branch stay. A missing
+                branch raises ``CodeRepositoryError``; with ``treat_as_repository`` a local spec
+                raises ``IngestionError`` before anything is cloned. Not supported while
+                connected to a remote instance.
 
     Returns:
         PipelineRunInfo: Information about the ingestion pipeline execution including:
@@ -236,8 +255,35 @@ async def add(
     # Route to remote instance if connected via serve()
     from cognee.api.v1.serve.state import get_remote_client
 
+    codegraph_config = validate_codegraph_config(codegraph_config)
+
     client = get_remote_client()
     if client is not None:
+        if codegraph_config.get("repo_credentials"):
+            # client.add() has no credentials field; the remote would try an
+            # unauthenticated clone, so an explicit token has to raise.
+            raise ValueError(
+                "repo_credentials is not supported while connected to a remote Cognee "
+                "instance. Call cognee.disconnect() to clone the repository locally."
+            )
+        if codegraph_config.get("treat_as_repository"):
+            # client.add() whitelists its form fields and has none for this, so
+            # the remote would sniff the specs instead of cloning them -- the
+            # silent web-page ingest this option exists to prevent.
+            raise ValueError(
+                "treat_as_repository is not supported by add() while connected to a "
+                "remote Cognee instance. Use remember(..., "
+                'codegraph_config={"treat_as_repository": True, "include_documents": False}), '
+                "or call cognee.disconnect() to clone the repository locally."
+            )
+        if codegraph_config.get("include_documents", True) is False:
+            # Same whitelist: the remote would ingest the repository's documents.
+            raise ValueError(
+                "include_documents=False is not supported by add() while connected to a "
+                "remote Cognee instance. Use remember(..., "
+                'codegraph_config={"treat_as_repository": True, "include_documents": False}), '
+                "or call cognee.disconnect() to ingest locally."
+            )
         if branch is not None:
             # client.add() sends only the data and the dataset name, so the remote would
             # clone the default branch instead.
@@ -329,6 +375,32 @@ async def add(
             needs_llm=False,
         ),
     ]
+
+    # The pipeline runner resolves directories and repository URLs itself, but
+    # with the defaults: no credentials, documents included, only detected
+    # shapes. A call that sets any codegraph_config option runs the same
+    # resolver here first, with the options; the runner and the task above
+    # then see already-resolved items and pass them through.
+    include_documents = codegraph_config.get("include_documents", True)
+    treat_as_repository = bool(codegraph_config.get("treat_as_repository"))
+    if codegraph_config.get("repo_credentials") or not include_documents or treat_as_repository:
+        from cognee.infrastructure.locks import dataset_lock
+
+        # Resolving a repository resets the manifest row's pipeline stamps (a
+        # read-modify-write of pipeline_status). The runner does that under the
+        # dataset lock; running it here, before the pipeline, needs the same lock
+        # or a concurrent cognify of the dataset can lose a stamp.
+        async with dataset_lock(authorized_dataset.id):
+            data = await resolve_data_directories(
+                data,
+                include_subdirectories=True,
+                user=user,
+                dataset_id=authorized_dataset.id,
+                credentials=codegraph_config.get("repo_credentials"),
+                include_documents=include_documents,
+                treat_as_repository=treat_as_repository,
+                branch=branch,
+            )
 
     # Expand DLT resources (and auto-detected CSV/connection strings) into
     # standard DataItems before the pipeline sees them. orphan_cleanup (when

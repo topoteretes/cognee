@@ -65,6 +65,22 @@ async def test_the_branch_reaches_run_tasks_and_the_add_task(executor):
 
 
 @pytest.mark.asyncio
+async def test_the_branch_reaches_the_early_resolve_of_a_codegraph_config_add(
+    executor, monkeypatch
+):
+    # A codegraph_config add resolves (and clones) before the pipeline runs; the
+    # pipeline's own resolve then passes the items through, so this call is the
+    # only one that can clone the branch.
+    early = AsyncMock(return_value=["resolved"])
+    monkeypatch.setattr(add_module, "resolve_data_directories", early)
+
+    await add_module.add(_REPO, branch="dev", codegraph_config={"include_documents": False})
+
+    assert early.await_args.kwargs["branch"] == "dev"
+    assert early.await_args.kwargs["include_documents"] is False
+
+
+@pytest.mark.asyncio
 async def test_remember_passes_the_branch_to_add_and_not_to_cognify():
     import cognee
 
@@ -92,8 +108,8 @@ async def test_remember_passes_the_branch_to_add_and_not_to_cognify():
 
 @pytest.mark.asyncio
 async def test_a_branch_that_would_be_dropped_is_refused(monkeypatch):
-    # content_type and session_id never reach add(), and a remote instance gets no branch
-    # field: each would ingest the default branch while the caller asked for another.
+    # session_id never reaches add(), and a remote instance gets no branch field: each
+    # would ingest the default branch while the caller asked for another.
     monkeypatch.setattr(serve_state, "get_remote_client", lambda: None)
     monkeypatch.setattr(
         importlib.import_module("cognee.modules.migrations.startup"),
@@ -101,8 +117,6 @@ async def test_a_branch_that_would_be_dropped_is_refused(monkeypatch):
         AsyncMock(),
     )
 
-    with pytest.raises(ValueError, match="branch is supported only without content_type"):
-        await remember_module.remember(_REPO, content_type="code", branch="dev")
     with pytest.raises(ValueError, match="branch is not supported when session_id"):
         await remember_module.remember(_REPO, session_id="s1", branch="dev")
 

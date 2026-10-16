@@ -21,7 +21,7 @@ One run (≈55 s on a laptop) does, in order:
 | sandbox | host | created from `../cognee-memory-remote` under `deny-all`; a sandbox-scoped rule admits `localhost:<port>` only |
 | secret | host | the agent key becomes a sandbox-scoped proxy-managed secret; the VM sees `sbx-cs-…` |
 | recall | sandbox → brain | the question is answered from the granted dataset only; the brain does the LLM work |
-| build | sandbox | `cognee.remember(repo, content_type="code")`: enola code graph, no LLM, no embeddings, no network; `architecture` view + Mermaid |
+| build | sandbox | `cognee.remember(repo, codegraph_config={"treat_as_repository": True, "include_documents": False})`: the directory is one repository even without a build manifest or `.git` (the example is a package subdirectory), its docs are skipped; enola code graph, no LLM, no embeddings, no network; `architecture` view + Mermaid |
 | promote | sandbox → brain | `cognee.push`: COGX archive imported with zero LLM calls into an output dataset the identity owns |
 | walls | sandbox | `echo $COGNEE_API_KEY` → placeholder · `curl example.com` → 403 · recall on a non-granted dataset → 403 · `sbx policy log` |
 | revoke | host | sandbox, secret and rule removed; grants revoked (only 403/404 are tolerated — a 401 or 5xx fails the revoke instead of reporting success). Default keeps the identity + output dataset for review: **the agent's key still authenticates, it just holds no grant and an explicit deny everywhere** — there is no owner-side route to kill another principal's key. `--purge` drops the grants, then deletes the output dataset and the agent, which is what kills the key |

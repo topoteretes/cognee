@@ -1,9 +1,9 @@
 """Resolve repository specs (local paths or remote git URLs) to local clones.
 
-Used by ``remember(..., content_type="code")`` so callers can pass a GitHub
-URL (or a list of them) and get the enola code-graph pipeline run on a local
-shallow clone, and by ``add()`` to recognise a GitHub/GitLab repository URL
-(:func:`code_repo_clone_url`) and clone it the same way. Clones live under
+Used by ``add()`` to recognise a GitHub/GitLab repository URL
+(:func:`code_repo_clone_url`) and shallow-clone it for the enola code-graph
+route, and by the GitHub integration sync to clone private repositories with
+an installation token (``resolve_repo_source(credentials=...)``). Clones live under
 ``BaseConfig.repos_root_directory`` (``~/.cognee/repos`` by default) and are
 reused across calls; an existing clone is refreshed with a best-effort
 ``git pull``. A ``branch`` can be chosen for a remote repository; each branch is
@@ -28,6 +28,9 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("code_graph")
 
 _REMOTE_PREFIXES = ("https://", "http://", "git@", "ssh://")
+# The ssh half of the above, as one whitespace-free token: unambiguously a git
+# remote, never a web page -- and never a sentence that merely starts with one.
+_SSH_REPO_SPEC = re.compile(r"(?:git@[\w.-]+:|ssh://)\S+")
 
 _FALSEY = {"false", "0", "no", "off"}
 
@@ -102,6 +105,24 @@ def is_remote_repo(spec) -> bool:
     return isinstance(spec, str) and spec.startswith(_REMOTE_PREFIXES)
 
 
+def is_ssh_repo_spec(spec) -> bool:
+    """Whether the spec is an ssh-style git remote (``git@host:owner/repo``, ``ssh://``).
+
+    These name a repository and nothing else -- unlike an http(s) URL, which may
+    be a web page -- but :func:`code_repo_clone_url` does not accept them, so
+    ingestion would otherwise store the spec string as a text document. Callers
+    refuse them with the instruction in :data:`SSH_REPO_SPEC_MESSAGE`.
+    """
+    return isinstance(spec, str) and _SSH_REPO_SPEC.fullmatch(spec.strip()) is not None
+
+
+SSH_REPO_SPEC_MESSAGE = (
+    "ssh git remotes (git@host:owner/repo, ssh://...) are not recognised as repositories "
+    'by add(): pass codegraph_config={"treat_as_repository": True} to clone this one as a '
+    "repository, or give its https:// URL or a local clone's directory instead."
+)
+
+
 def code_repo_clone_url(spec) -> str | None:
     """The clone URL when an http(s) string names a whole git repository, else None.
 
@@ -113,8 +134,8 @@ def code_repo_clone_url(spec) -> str | None:
     host. Deeper forge URLs (``/blob/``, ``/tree/``, ``/issues``, ``/pull/``,
     GitLab's ``/-/`` pages) and forge site pages (``/topics/x``, ``/explore``)
     name pages, not repositories, and are left to the web-page path. ``git@``
-    and ``ssh://`` specs are not detected: they have no web-page reading to
-    disambiguate from and stay explicit via ``remember(content_type="code")``.
+    and ``ssh://`` specs are not detected: clone them yourself and pass the
+    local directory.
 
     The returned URL is normalised for ``git clone``: query and fragment
     dropped, trailing slash removed, userinfo (a token) kept -- redact it with

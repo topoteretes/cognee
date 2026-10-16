@@ -11,6 +11,7 @@ from cognee.modules.ingestion import StoredFile, save_data_to_file_detailed
 from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.data_item import DataItem
+from cognee.tasks.ingestion.repo_clone_file import RepoCloneFile
 from cognee.tasks.web_scraper.ssrf_protection import validate_outbound_url
 from cognee.tasks.web_scraper.utils import fetch_page_content
 
@@ -72,6 +73,13 @@ async def save_data_item_to_storage_detailed(
     # data is a file object coming from upload.
     if hasattr(data_item, "file"):
         return await save_data_to_file_detailed(data_item.file, filename=data_item.filename)
+
+    if isinstance(data_item, RepoCloneFile):
+        # A clone cognee made for this call, not a caller-supplied path: the
+        # ACCEPT_LOCAL_FILE_PATH gate below does not apply (see RepoCloneFile).
+        if not data_item.path.is_file():
+            raise IngestionError(message="Repository document does not exist or is not a file.")
+        return StoredFile(file_path=data_item.path.as_uri())
 
     if isinstance(data_item, str):
         parsed_url = urlparse(data_item)

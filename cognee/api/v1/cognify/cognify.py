@@ -44,6 +44,7 @@ from cognee.shared.data_models import KnowledgeGraph
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.code_graph.code_files import get_code_file_tasks
 from cognee.tasks.code_graph.code_repo import get_code_repo_tasks
+from cognee.tasks.code_graph.config import CodeGraphConfig, validate_codegraph_config
 from cognee.tasks.documents import (
     classify_documents,
     extract_chunks_from_documents,
@@ -152,6 +153,7 @@ async def cognify(
     chunk_attachment: Literal["direct", "all"] | None = None,
     extractor: Literal["llm", "gliner_demo", "gliner"] | None = None,
     ontology_file_path: str | None = None,
+    codegraph_config: CodeGraphConfig | None = None,
     summary_method: Literal["llm", "from_extraction"] | None = None,
     **kwargs,
 ):
@@ -253,6 +255,16 @@ async def cognify(
                  generic KnowledgeGraph, so a custom graph_model raises. Raises with
                  dry_run=True or while connected to a remote instance — neither path
                  can honour it yet.
+        codegraph_config: Options for the code files and code repositories this
+                 run builds (CODE and CODE_REPO routes), as a ``CodeGraphConfig``.
+                 cognify() reads ``index_vectors``: also embed the code facts, so
+                 completion search types can reach the code. Off by default:
+                 SearchType.CODE reads the graph only. It applies only to items the
+                 run actually builds — an unchanged, already-built item is skipped
+                 by incremental loading and keeps its previous vectors (or none).
+                 ``repo_credentials``, ``include_documents`` and
+                 ``treat_as_repository`` are read by add() and ignored here. Not
+                 supported while connected to a remote instance.
         summary_method: How the standard pipeline writes each chunk's summary. "llm"
                  makes one LLM call per chunk; "from_extraction" joins the chunk's
                  extracted types and relation texts with no LLM call, and a chunk
@@ -346,6 +358,7 @@ async def cognify(
         )
     drop_deprecated_temporal_cognify(kwargs)
 
+    index_vectors = bool(validate_codegraph_config(codegraph_config).get("index_vectors"))
     cognify_config = get_cognify_config()
     # The extractor decision is made once, here, before any branch. Branches
     # that cannot honour it raise below instead of silently running something
@@ -393,6 +406,15 @@ async def cognify(
             raise ValueError(
                 "extractor is not supported while connected to a remote Cognee "
                 "instance. Call cognee.disconnect() to choose the extractor locally."
+            )
+        if index_vectors:
+            # client.cognify() has no index_vectors field; the remote would
+            # silently build graph-only, so an explicit choice has to raise.
+            raise ValueError(
+                "codegraph_config index_vectors is not supported by cognify() while "
+                "connected to a remote Cognee instance. Use remember(..., "
+                'codegraph_config={"index_vectors": True}) or call cognee.disconnect() '
+                "to cognify locally."
             )
         if summary_method is not None:
             # Same as extractor: client.cognify() has no summary_method field.
@@ -510,8 +532,8 @@ async def cognify(
             CognifyRoute.DLT_SOURCE: await get_dlt_tasks(
                 chunk_size=chunk_size, chunks_per_batch=chunks_per_batch
             ),
-            CognifyRoute.CODE: get_code_file_tasks(),
-            CognifyRoute.CODE_REPO: get_code_repo_tasks(),
+            CognifyRoute.CODE: get_code_file_tasks(index_vectors=index_vectors),
+            CognifyRoute.CODE_REPO: get_code_repo_tasks(index_vectors=index_vectors),
         }
 
         def resolve_cognify_tasks(data_item):
