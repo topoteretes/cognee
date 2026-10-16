@@ -503,22 +503,12 @@ async def _resolve_entry_dataset(
         user, datasets = await resolve_authorized_user_datasets(dataset_name, user)
         return user, datasets[0], False
 
-    from cognee.modules.data.methods import dataset_exists, get_authorized_dataset
-    from cognee.modules.users.exceptions import PermissionDeniedError
+    from cognee.modules.data.methods import get_authorized_dataset
 
-    try:
-        dataset = await get_authorized_dataset(user, target_dataset_id, "write")
-    except PermissionDeniedError:
-        # A missing dataset is refused like a forbidden one. Only a binding the
-        # caller's own write created may say it is gone: that reveals nothing.
-        if bound_dataset_id is None or await dataset_exists(bound_dataset_id):
-            raise
-        from cognee.modules.data.exceptions import DatasetNotFoundError
-
-        raise DatasetNotFoundError(
-            f"Session {session_id!r} is bound to dataset {bound_dataset_id}, which no longer "
-            "exists; use a new session_id."
-        ) from None
+    # A missing dataset is refused exactly like a forbidden one, for an explicit
+    # id and for a session's binding alike: a caller who lost access must not
+    # learn from the answer whether the dataset still exists.
+    dataset = await get_authorized_dataset(user, target_dataset_id, "write")
     # get_authorized_dataset raises for an id the user cannot write, never returns None.
     assert dataset is not None
 

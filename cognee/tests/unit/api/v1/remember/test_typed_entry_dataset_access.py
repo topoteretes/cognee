@@ -332,18 +332,20 @@ async def test_bound_session_skips_the_binding_reread(env, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_session_bound_to_a_deleted_dataset_says_so(env):
-    # forget(dataset=...) keeps the session row, so its binding outlives the dataset.
-    from cognee.modules.data.exceptions import DatasetNotFoundError
+async def test_session_bound_to_a_deleted_dataset_is_refused_like_a_forbidden_one(env):
+    """Deleted and revoked must look the same, or a 403 would tell a revoked
+    caller by elimination that the dataset still exists."""
     from cognee.modules.session_lifecycle.metrics import ensure_and_touch_session
 
     await ensure_and_touch_session(
         session_id="stale-session", user_id=env.owner.id, dataset_id=uuid4()
     )
 
-    with pytest.raises(DatasetNotFoundError, match="no longer exists; use a new session_id"):
+    with pytest.raises(PermissionDeniedError):
         await cognee.remember(
-            QAEntry(question="q1", answer="a1"), session_id="stale-session", user=env.owner
+            QAEntry(question="q1", answer="a1"),
+            session_id="stale-session",
+            user=env.owner,
         )
 
     assert await _cached_questions(env.owner, "stale-session") == []
