@@ -277,6 +277,40 @@ async def test_skill_run_in_bound_session_targets_its_dataset(env, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_bound_session_accepts_its_dataset_id_as_a_string(env):
+    # Chaining a RememberResult back in passes its dataset_id, which is a str.
+    first = await cognee.remember(
+        QAEntry(question="q1", answer="a1"),
+        dataset_name="shared",
+        session_id="owner-session",
+        user=env.owner,
+    )
+
+    second = await cognee.remember(
+        QAEntry(question="q2", answer="a2"),
+        dataset_id=first.dataset_id,
+        session_id="owner-session",
+        user=env.owner,
+    )
+
+    assert second.dataset_id == str(env.shared.id)
+    assert await _cached_questions(env.owner, "owner-session") == ["q1", "q2"]
+
+
+@pytest.mark.asyncio
+async def test_dataset_id_that_is_not_a_uuid_is_rejected(env):
+    with pytest.raises(ValueError, match="dataset_id must be a dataset UUID"):
+        await cognee.remember(
+            QAEntry(question="q1", answer="a1"),
+            dataset_id="shared",
+            session_id="owner-session",
+            user=env.owner,
+        )
+
+    assert await _cached_questions(env.owner, "owner-session") == []
+
+
+@pytest.mark.asyncio
 async def test_remote_client_receives_dataset_id(monkeypatch):
     remember_module = importlib.import_module("cognee.api.v1.remember.remember")
     state = importlib.import_module("cognee.api.v1.serve.state")

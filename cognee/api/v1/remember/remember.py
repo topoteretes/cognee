@@ -544,6 +544,13 @@ async def _dispatch_session_entry(
     rejected; the ``"main_dataset"`` default is accepted because it cannot be
     told apart from no name at all.
     """
+    # RememberResult.dataset_id is a str; accept it back as the UUID it names.
+    if dataset_id is not None and not isinstance(dataset_id, UUID):
+        try:
+            dataset_id = UUID(str(dataset_id))
+        except ValueError:
+            raise ValueError(f"dataset_id must be a dataset UUID, got {dataset_id!r}") from None
+
     from cognee.modules.engine.operations.setup import setup
 
     await setup()
