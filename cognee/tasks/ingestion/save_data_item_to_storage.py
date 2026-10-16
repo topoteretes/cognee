@@ -130,7 +130,11 @@ async def save_data_item_to_storage_detailed(
         return await save_data_to_file_detailed(data_item)
 
     if isinstance(data_item, DataItem):
-        # If instance is DataItem use the underlying data
+        if data_item.literal_text and isinstance(data_item.data, str):
+            # Store verbatim: never read this string as a URL, s3 path or local
+            # path (see DataItem.literal_text). Every storage path ends here, so
+            # the flag holds on add(), its incremental pre-save, and update().
+            return await save_data_to_file_detailed(data_item.data)
         return await save_data_item_to_storage_detailed(data_item.data)
 
     # data is not a supported type

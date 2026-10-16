@@ -8,7 +8,13 @@ from unittest.mock import ANY, AsyncMock, Mock, patch
 import pytest
 
 from cognee.modules.integrations.google_drive import sync as sync_module
-from cognee.modules.integrations.google_drive.sync import dataset_name_for_account, sync_drive
+from cognee.modules.integrations.google_drive.sync import sync_drive
+
+
+def dataset_name_for_account(email, account_id):
+    return sync_module.ingestion.dataset_name_for_account(
+        sync_module.GOOGLE_DRIVE_DATASET_PREFIX, email, account_id
+    )
 
 
 def make_credential(**metadata):
@@ -80,7 +86,7 @@ async def test_selected_folders_use_stable_independent_sources(sync_mocks):
     for call in sync_mocks.remember.await_args_list:
         assert not isinstance(call.args[0], list)
         assert call.kwargs == {
-            "dataset_name": dataset_name_for_account("person@example.com", "subject"),
+            "dataset_name": sync_module._dataset_name(make_credential()),
             "user": "owner",
             "write_disposition": "merge",
             "primary_key": "id",

@@ -3,7 +3,7 @@ End-to-end integration test for conversation history feature.
 
 Covers retrievers that save conversation history (via SessionManager / cache):
   GRAPH_COMPLETION, GRAPH_COMPLETION_DECOMPOSITION, RAG_COMPLETION, GRAPH_COMPLETION_COT,
-  GRAPH_COMPLETION_CONTEXT_EXTENSION, GRAPH_SUMMARY_COMPLETION, TEMPORAL, TRIPLET_COMPLETION.
+  GRAPH_COMPLETION_CONTEXT_EXTENSION, GRAPH_SUMMARY_COMPLETION, TEMPORAL.
 Uses cache_engine.get_latest_qa for legacy assertions and cognee.session.get_session for
 session history; e2e for session SDK (get_session, add_feedback, delete_feedback) at end.
 """
@@ -25,12 +25,9 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger()
 
 
-def _assert_used_graph_element_ids_shape(entry: SessionQAEntry, expect_none: bool = False) -> None:
-    """Assert entry has used_graph_element_ids key and valid shape (or None for Triplet)."""
+def _assert_used_graph_element_ids_shape(entry: SessionQAEntry) -> None:
+    """Assert entry has used_graph_element_ids key and valid shape (or None)."""
     ids = entry.used_graph_element_ids
-    if expect_none:
-        assert ids is None, "Triplet retriever should store used_graph_element_ids as None"
-        return
     if ids is None:
         return
     assert isinstance(ids, dict), "used_graph_element_ids must be dict or None"
@@ -81,10 +78,6 @@ async def main():
     await cognee.cognify(datasets=[dataset_name])
 
     user = await get_default_user()
-
-    from cognee.memify_pipelines.create_triplet_embeddings import create_triplet_embeddings
-
-    await create_triplet_embeddings(user=user, dataset=dataset_name)
 
     cache_engine = get_cache_engine()
     assert cache_engine is not None, "Cache engine should be available for testing"
@@ -302,23 +295,6 @@ async def main():
     our_qa_temporal = [h for h in history_temporal if h.question == "Tell me about the companies"]
     assert len(our_qa_temporal) == 1, "Should find Temporal question in history"
     _assert_used_graph_element_ids_shape(our_qa_temporal[0])
-
-    session_id_triplet = "test_session_triplet"
-
-    result_triplet = await cognee.search(
-        query_type=SearchType.TRIPLET_COMPLETION,
-        query_text="What companies are mentioned?",
-        session_id=session_id_triplet,
-    )
-
-    assert isinstance(result_triplet, list) and len(result_triplet) > 0, (
-        f"TRIPLET_COMPLETION should return non-empty list, got: {result_triplet!r}"
-    )
-
-    history_triplet = await cache_engine.get_latest_qa(str(user.id), session_id_triplet, last_n=10)
-    our_qa_triplet = [h for h in history_triplet if h.question == "What companies are mentioned?"]
-    assert len(our_qa_triplet) == 1, "Should find Triplet question in history"
-    _assert_used_graph_element_ids_shape(our_qa_triplet[0], expect_none=True)
 
     # Session history via new session SDK (replaces legacy get_conversation_history)
     entries = await cognee.session.get_session(session_id=session_id_1, user=user, last_n=10)

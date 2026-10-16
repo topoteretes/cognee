@@ -100,6 +100,28 @@ def test_payload_carries_tenant_id(monkeypatch):
     assert payloads[0]["user_properties"]["tenant_id"] == str(tenant_id)
 
 
+def test_payload_accepts_stored_ids_without_a_user_model(monkeypatch):
+    payloads = _capture_telemetry(monkeypatch)
+    user_id, tenant_id = uuid.uuid4(), uuid.uuid4()
+
+    send_telemetry("Pipeline Run Errored", user_id, tenant_id=tenant_id)
+
+    for properties in (payloads[0]["properties"], payloads[0]["user_properties"]):
+        assert properties["user_id"] == str(user_id)
+        assert properties["tenant_id"] == str(tenant_id)
+
+
+def test_explicit_tenant_overrides_the_user_model_tenant(monkeypatch):
+    payloads = _capture_telemetry(monkeypatch)
+    user_id, tenant_id = uuid.uuid4(), uuid.uuid4()
+
+    send_telemetry("event", FakeUser(user_id, uuid.uuid4()), tenant_id=tenant_id)
+
+    for properties in (payloads[0]["properties"], payloads[0]["user_properties"]):
+        assert properties["user_id"] == str(user_id)
+        assert properties["tenant_id"] == str(tenant_id)
+
+
 def test_payload_records_a_real_uuid_for_a_forwarded_user_model(monkeypatch):
     """The regression test proper: the emitted user_id must be the UUID, not a repr."""
     payloads = _capture_telemetry(monkeypatch)

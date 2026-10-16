@@ -169,6 +169,10 @@ def test_parse_installation_splits_secrets_from_metadata():
         "organization_name": "Acme Co",
         "organization_url_key": "acme-co",
         "scope": "read,write,app:assignable,app:mentionable",
+        # a (re)install starts without the previous install's sync markers
+        "dlt_seeded": False,
+        "legacy_cleaned": False,
+        "resume_needed_at": None,
     }
     assert installation.account_label == "Acme Co"
     assert installation.auth_type == "oauth2"

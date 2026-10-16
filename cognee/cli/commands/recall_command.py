@@ -32,8 +32,9 @@ searches the session cache directly by keyword matching.
 Otherwise, this is a memory-oriented alias for `cognee search`.
 
 Without --query-type the query is auto-routed to a search strategy by a
-rule-based classifier (no LLM call); HYBRID_COMPLETION is the fallback.
-Pass --query-type to pin one. See docs/recall-vs-search.md.
+rule-based classifier (no LLM call); HYBRID_COMPLETION is the fallback and a
+question scoped to an absolute date ("what happened in 1898?") goes to
+TEMPORAL. Pass --query-type to pin one. See docs/recall-vs-search.md.
 
 With --query-type CODE, --code-query selects the code-graph operation and
 --diagram / --diagram-out draw the result (Mermaid or Graphviz).
