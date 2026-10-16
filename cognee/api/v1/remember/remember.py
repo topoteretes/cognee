@@ -15,6 +15,7 @@ from typing_extensions import TypedDict
 
 if TYPE_CHECKING:
     from cognee.modules.cognify.estimator import DryRunEstimate
+    from cognee.modules.data.models import Dataset
     from cognee.modules.improve import ImproveResult
     from cognee.tasks.presort.models import PresortReport
 
@@ -477,6 +478,54 @@ async def _remember_entry(
     )
 
 
+async def _resolve_entry_dataset(
+    *, session_id: str, dataset_name: str, dataset_id: UUID | None, user
+) -> tuple[Any, "Dataset", bool]:
+    """Pick the writable dataset a typed entry in ``session_id`` targets.
+
+    The session's binding decides the target dataset; only an unbound session
+    addressed by name may create one. A bound or explicit id is checked only,
+    so a refused entry leaves no dataset behind. The flag is True when the
+    session was already bound, which is then always to the returned dataset.
+    """
+    from cognee.modules.session_lifecycle.metrics import get_session_row
+
+    row = await get_session_row(session_id=session_id, user_id=user.id)
+    bound_dataset_id = row.dataset_id if row is not None else None
+
+    if dataset_id is not None and bound_dataset_id not in (None, dataset_id):
+        raise ValueError(
+            f"Session {session_id!r} is bound to dataset {bound_dataset_id}, not {dataset_id}"
+        )
+
+    target_dataset_id = dataset_id or bound_dataset_id
+    if target_dataset_id is None:
+        user, datasets = await resolve_authorized_user_datasets(dataset_name, user)
+        return user, datasets[0], False
+
+    from cognee.modules.data.methods import get_authorized_dataset
+
+    # A missing dataset is refused exactly like a forbidden one, for an explicit
+    # id and for a session's binding alike: a caller who lost access must not
+    # learn from the answer whether the dataset still exists.
+    dataset = await get_authorized_dataset(user, target_dataset_id, "write")
+    # get_authorized_dataset raises for an id the user cannot write, never returns None.
+    assert dataset is not None
+
+    from cognee.modules.data.constants import DEFAULT_DATASET_NAME
+
+    # An explicit id takes precedence over the name and already matched the binding.
+    if (
+        dataset_id is None
+        and bound_dataset_id is not None
+        and dataset_name not in (DEFAULT_DATASET_NAME, dataset.name)
+    ):
+        raise ValueError(
+            f"Session {session_id!r} is bound to dataset {dataset.name!r}, not {dataset_name!r}"
+        )
+    return user, dataset, bound_dataset_id is not None
+
+
 async def _dispatch_session_entry(
     entry: "MemoryEntry",
     *,
@@ -496,13 +545,37 @@ async def _dispatch_session_entry(
     A session is bound to one dataset by its first write (``remember`` or a
     ``recall`` that records activity). Later entries target that dataset:
     ``dataset_name`` only creates-or-resolves a dataset for a session that is
-    not bound yet. On a bound session an explicit ``dataset_id`` or a
-    ``dataset_name`` other than the default that disagrees with the binding is
-    rejected; the ``"main_dataset"`` default is accepted because it cannot be
-    told apart from no name at all.
+    not bound yet. On a bound session an explicit ``dataset_id`` that disagrees
+    with the binding is rejected, and so is a ``dataset_name`` other than the
+    default when no ``dataset_id`` is given (an id takes precedence over the
+    name); the ``"main_dataset"`` default is accepted because it cannot be told
+    apart from no name at all.
     """
+    # RememberResult.dataset_id is a str; accept it back as the UUID it names.
+    if dataset_id is not None and not isinstance(dataset_id, UUID):
+        try:
+            dataset_id = UUID(str(dataset_id))
+        except ValueError:
+            raise ValueError(f"dataset_id must be a dataset UUID, got {dataset_id!r}") from None
+
+    from cognee.modules.engine.operations.setup import setup
+
+    await setup()
+
+    if user is None:
+        from cognee.modules.users.methods import get_default_user
+
+        user = await get_default_user()
+
     if isinstance(entry, SkillRunEntry):
         from cognee.modules.tools.skill_runs import remember_skill_run_entry
+
+        if session_id:
+            # A run recorded in a session follows the session's dataset binding.
+            user, dataset, _ = await _resolve_entry_dataset(
+                session_id=session_id, dataset_name=dataset_name, dataset_id=dataset_id, user=user
+            )
+            dataset_id = dataset.id
 
         run, dataset = await remember_skill_run_entry(
             entry,
@@ -549,19 +622,11 @@ async def _dispatch_session_entry(
         return result
 
     from cognee.infrastructure.session.get_session_manager import get_session_manager
-    from cognee.modules.engine.operations.setup import setup
 
     if not session_id:
         raise ValueError(
             f"session_id is required for typed memory entries (got {type(entry).__name__})"
         )
-
-    await setup()
-
-    if user is None:
-        from cognee.modules.users.methods import get_default_user
-
-        user = await get_default_user()
 
     user_id = str(user.id) if user and hasattr(user, "id") else None
     if not user_id:
@@ -571,51 +636,24 @@ async def _dispatch_session_entry(
     if not sm.is_available:
         raise RuntimeError("Session cache unavailable — set CACHING=true to enable session memory")
 
-    # Resolve write access before caching any content. The session's binding
-    # decides the target dataset; only an unbound session addressed by name may
-    # create one. A bound or explicit id is checked only, so a refused entry
-    # leaves no dataset behind.
-    from cognee.modules.data.constants import DEFAULT_DATASET_NAME
-    from cognee.modules.data.methods import get_authorized_dataset
+    # Resolve write access before caching any content.
+    user, dataset, was_bound = await _resolve_entry_dataset(
+        session_id=session_id, dataset_name=dataset_name, dataset_id=dataset_id, user=user
+    )
+
     from cognee.modules.session_lifecycle.metrics import (
         ensure_and_touch_session,
         get_session_row,
     )
-    from cognee.modules.users.exceptions import PermissionDeniedError
-
-    row = await get_session_row(session_id=session_id, user_id=user.id)
-    bound_dataset_id = row.dataset_id if row is not None else None
-
-    if dataset_id is not None and bound_dataset_id not in (None, dataset_id):
-        raise ValueError(
-            f"Session {session_id!r} is bound to dataset {bound_dataset_id}, not {dataset_id}"
-        )
-
-    target_dataset_id = dataset_id or bound_dataset_id
-    if target_dataset_id is not None:
-        dataset = await get_authorized_dataset(user, target_dataset_id, "write")
-        if dataset is None:
-            raise PermissionDeniedError(
-                f"Request owner does not have necessary permission: [write] for dataset {target_dataset_id}."
-            )
-        if bound_dataset_id is not None and dataset_name not in (
-            DEFAULT_DATASET_NAME,
-            dataset.name,
-        ):
-            raise ValueError(
-                f"Session {session_id!r} is bound to dataset {dataset.name!r}, not {dataset_name!r}"
-            )
-    else:
-        user, datasets = await resolve_authorized_user_datasets(dataset_name, user)
-        dataset = datasets[0]
 
     # Every entry bumps the session's activity; the atomic upsert binds an unbound
-    # session and preserves an existing binding. Re-read it before caching: a
-    # concurrent writer may have bound a fresh session to another dataset first.
+    # session and preserves an existing binding. For a session that was unbound,
+    # re-read it before caching: a concurrent writer may have bound it first.
     await ensure_and_touch_session(session_id=session_id, user_id=user.id, dataset_id=dataset.id)
-    row = await get_session_row(session_id=session_id, user_id=user.id)
-    if row is None or row.dataset_id != dataset.id:
-        raise ValueError("Session is already bound to another dataset or cannot be bound")
+    if not was_bound:
+        row = await get_session_row(session_id=session_id, user_id=user.id)
+        if row is None or row.dataset_id != dataset.id:
+            raise ValueError("Session is already bound to another dataset or cannot be bound")
 
     if isinstance(entry, (QAEntry, TraceEntry)) and entry.node_set:
         from cognee.infrastructure.session.session_node_set import pin_session_node_set

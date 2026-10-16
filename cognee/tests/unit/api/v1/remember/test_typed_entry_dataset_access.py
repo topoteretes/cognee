@@ -15,7 +15,7 @@ import pytest
 import pytest_asyncio
 
 import cognee
-from cognee.memory import FeedbackEntry, QAEntry
+from cognee.memory import FeedbackEntry, QAEntry, SkillRunEntry
 from cognee.modules.users.exceptions import PermissionDeniedError
 
 
@@ -249,6 +249,141 @@ async def test_bound_session_without_grant_is_refused(env):
         )
 
     assert await _cached_questions(env.outsider, "outsider-session") == []
+
+
+@pytest.mark.asyncio
+async def test_skill_run_in_bound_session_targets_its_dataset(env, monkeypatch):
+    from cognee.modules.session_lifecycle.metrics import ensure_and_touch_session
+
+    skill_runs = importlib.import_module("cognee.modules.tools.skill_runs")
+    run = SimpleNamespace(
+        run_id="run-1", selected_skill_id="s", selected_skill_name="s", success_score=1.0
+    )
+    record_run = AsyncMock(return_value=(run, env.shared))
+    monkeypatch.setattr(skill_runs, "remember_skill_run_entry", record_run)
+    await ensure_and_touch_session(
+        session_id="skill-session", user_id=env.owner.id, dataset_id=env.shared.id
+    )
+
+    result = await cognee.remember(
+        SkillRunEntry(run_id="run-1", selected_skill_id="s", task_text="t"),
+        session_id="skill-session",
+        user=env.owner,
+    )
+
+    assert record_run.await_args.kwargs["dataset_id"] == env.shared.id
+    assert result.dataset_id == str(env.shared.id)
+    assert "main_dataset" not in await _owned_dataset_names(env.owner)
+
+
+@pytest.mark.asyncio
+async def test_bound_session_accepts_its_dataset_id_as_a_string(env):
+    # Chaining a RememberResult back in passes its dataset_id, which is a str.
+    first = await cognee.remember(
+        QAEntry(question="q1", answer="a1"),
+        dataset_name="shared",
+        session_id="owner-session",
+        user=env.owner,
+    )
+
+    second = await cognee.remember(
+        QAEntry(question="q2", answer="a2"),
+        dataset_id=first.dataset_id,
+        session_id="owner-session",
+        user=env.owner,
+    )
+
+    assert second.dataset_id == str(env.shared.id)
+    assert await _cached_questions(env.owner, "owner-session") == ["q1", "q2"]
+
+
+@pytest.mark.asyncio
+async def test_dataset_id_that_is_not_a_uuid_is_rejected(env):
+    with pytest.raises(ValueError, match="dataset_id must be a dataset UUID"):
+        await cognee.remember(
+            QAEntry(question="q1", answer="a1"),
+            dataset_id="shared",
+            session_id="owner-session",
+            user=env.owner,
+        )
+
+    assert await _cached_questions(env.owner, "owner-session") == []
+
+
+@pytest.mark.asyncio
+async def test_bound_session_skips_the_binding_reread(env, monkeypatch):
+    metrics = importlib.import_module("cognee.modules.session_lifecycle.metrics")
+    read_row = AsyncMock(wraps=metrics.get_session_row)
+    monkeypatch.setattr(metrics, "get_session_row", read_row)
+
+    for question in ("q1", "q2"):
+        await cognee.remember(
+            QAEntry(question=question, answer="a"),
+            dataset_name="shared",
+            session_id="owner-session",
+            user=env.owner,
+        )
+        if question == "q1":
+            # Binding a fresh session re-reads the row to catch a concurrent binder.
+            assert read_row.await_count == 2
+
+    assert read_row.await_count == 3
+    assert await _cached_questions(env.owner, "owner-session") == ["q1", "q2"]
+
+
+@pytest.mark.asyncio
+async def test_session_bound_to_a_deleted_dataset_is_refused_like_a_forbidden_one(env):
+    """Deleted and revoked must look the same, or a 403 would tell a revoked
+    caller by elimination that the dataset still exists."""
+    from cognee.modules.session_lifecycle.metrics import ensure_and_touch_session
+
+    await ensure_and_touch_session(
+        session_id="stale-session", user_id=env.owner.id, dataset_id=uuid4()
+    )
+
+    with pytest.raises(PermissionDeniedError):
+        await cognee.remember(
+            QAEntry(question="q1", answer="a1"),
+            session_id="stale-session",
+            user=env.owner,
+        )
+
+    assert await _cached_questions(env.owner, "stale-session") == []
+
+
+@pytest.mark.asyncio
+async def test_unknown_explicit_dataset_id_is_refused_like_a_forbidden_one(env):
+    # Callers must not learn whether a dataset id they cannot write exists.
+    with pytest.raises(PermissionDeniedError):
+        await cognee.remember(
+            QAEntry(question="q1", answer="a1"),
+            dataset_id=uuid4(),
+            session_id="fresh-session",
+            user=env.owner,
+        )
+
+
+@pytest.mark.asyncio
+async def test_bound_session_lets_an_explicit_id_override_the_name(env):
+    # dataset_id takes precedence over dataset_name, bound session or not.
+    await cognee.remember(
+        QAEntry(question="q1", answer="a1"),
+        dataset_name="shared",
+        session_id="owner-session",
+        user=env.owner,
+    )
+    names_before = await _owned_dataset_names(env.owner)
+
+    result = await cognee.remember(
+        QAEntry(question="q2", answer="a2"),
+        dataset_name="other",
+        dataset_id=env.shared.id,
+        session_id="owner-session",
+        user=env.owner,
+    )
+
+    assert result.dataset_id == str(env.shared.id)
+    assert await _owned_dataset_names(env.owner) == names_before
 
 
 @pytest.mark.asyncio
