@@ -185,6 +185,12 @@ class PersistSessionQAStage(BaseStage):
         return StageResult.from_pipeline_run(self.name, result, sessions=len(inputs.session_ids))
 
 
+# Sessions one persist_agent_traces pass cognifies, one window each. A pass is
+# one memify run, which holds the dataset lock until it ends, so this bounds how
+# long a remember() or cognify() on the dataset waits behind a draining run.
+TRACE_SESSIONS_PER_PASS = 10
+
+
 class PersistAgentTracesStage(BaseStage):
     """Stage 3: cognify per-step agent trace feedback (``agent_trace_feedbacks``)."""
 
@@ -207,19 +213,27 @@ class PersistAgentTracesStage(BaseStage):
         # is cut at the starting count, persist_up_to), so a live
         # session cannot keep the run (and the dataset's improve lock) going. A
         # session whose window did not advance is left out of the later passes
-        # of this run, so one stuck session never stalls the others.
+        # of this run, so one stuck session never stalls the others. A pass
+        # takes at most TRACE_SESSIONS_PER_PASS sessions, those with the fewest
+        # windows so far, so the dataset lock is released between passes and
+        # sessions late in the list get their turn before earlier ones drain.
         config = inputs.config
         max_windows = config.trace_windows_per_run
         sessions = len(inputs.session_ids)
         windows = 0
         stuck: list[str] = []
+        served: dict[str, int] = {}
         stage_result = None
         pending = await _pending_trace_watermarks(inputs)
         backlog = {sid: total for sid, (_mark, total) in (pending or {}).items()}
         while pending:
-            batch = {sid: mark for sid, (mark, _total) in pending.items() if sid not in stuck}
+            limit = TRACE_SESSIONS_PER_PASS
             if max_windows:
-                batch = dict(list(batch.items())[: max_windows - windows])
+                limit = min(limit, max_windows - windows)
+            candidates = sorted(
+                (sid for sid in pending if sid not in stuck), key=lambda sid: served.get(sid, 0)
+            )
+            batch = {sid: pending[sid][0] for sid in candidates[:limit]}
             if not batch:
                 break
             result = await persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
@@ -233,6 +247,8 @@ class PersistAgentTracesStage(BaseStage):
                 persist_up_to=backlog,
             )
             windows += len(batch)
+            for sid in batch:
+                served[sid] = served.get(sid, 0) + 1
             stage_result = StageResult.from_pipeline_run(
                 self.name, result, sessions=sessions, windows=windows
             )

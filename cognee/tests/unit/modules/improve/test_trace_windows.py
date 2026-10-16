@@ -302,6 +302,33 @@ async def test_exhausted_budget_stops_the_stage_and_is_classified(store, monkeyp
 
 
 @pytest.mark.asyncio
+async def test_a_pass_takes_a_bounded_number_of_sessions_in_turn(store, monkeypatch):
+    """Each pass is one memify run holding the dataset lock, so it takes at most
+    TRACE_SESSIONS_PER_PASS sessions; the least-served go first, so sessions late
+    in the list are not left until the earlier ones have drained."""
+    from cognee.modules.improve.stages import TRACE_SESSIONS_PER_PASS
+
+    session_ids = [f"s{i}" for i in range(12)]
+    for session_id in session_ids:
+        store.add_steps(session_id, 60)
+    inputs = _inputs(_use(monkeypatch, FakeCognee(), trace_window_steps=30), session_ids)
+    pipeline = importlib.import_module(
+        "cognee.memify_pipelines.persist_agent_trace_feedbacks_in_knowledge_graph"
+    ).persist_agent_trace_feedbacks_in_knowledge_graph_pipeline
+
+    result = await PersistAgentTracesStage().run(inputs)
+
+    passes = [call.kwargs["session_ids"] for call in pipeline.call_args_list]
+    assert TRACE_SESSIONS_PER_PASS == 10
+    assert [len(batch) for batch in passes] == [10, 10, 4]
+    assert passes[1][:2] == ["s10", "s11"]
+    assert result.status == "completed"
+    assert result.counts["windows"] == 24
+    for session_id in session_ids:
+        assert await _watermark(store, inputs, session_id) == 60
+
+
+@pytest.mark.asyncio
 async def test_window_cap_defers_the_rest_of_the_backlog_to_the_next_run(store, monkeypatch):
     store.add_steps("a", 95)
     store.add_steps("b", 95)
