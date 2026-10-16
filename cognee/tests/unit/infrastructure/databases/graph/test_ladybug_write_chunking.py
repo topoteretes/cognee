@@ -98,6 +98,27 @@ async def test_add_edges_matches_both_endpoints_in_one_clause():
     assert "MATCH (to:Node {id: edge.to_id})" not in query
 
 
+@pytest.mark.asyncio
+async def test_add_edges_collapses_duplicate_rows_in_one_statement():
+    """Two rows with the same (from, to, relationship_name) in one UNWIND+MERGE
+    statement crash ladybug 0.19.0 (issue #5221); they must be collapsed first.
+    The last row's properties win, matching sequential MERGE ... ON MATCH SET."""
+    adapter = _adapter_with_mocked_writes()
+
+    await adapter.add_edges(
+        [
+            ("a", "b", "contradicts", {"k": 1}),
+            ("a", "b", "contradicts", {"k": 2}),
+            ("b", "c", "contradicts", {"k": 3}),
+        ]
+    )
+
+    adapter.query.assert_awaited_once()
+    rows = adapter.query.await_args.args[1]["edges"]
+    assert [(row["from_id"], row["to_id"]) for row in rows] == [("a", "b"), ("b", "c")]
+    assert '"k": 2' in rows[0]["properties"]
+
+
 def _fake_edge_identities(count):
     from cognee.infrastructure.databases.provenance import EdgeIdentity
 
