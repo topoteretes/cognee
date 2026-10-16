@@ -16,7 +16,7 @@ Environment variables (prefix ``IMPROVE_``)::
     IMPROVE_REVIEW_CONFLICTS=false     # review source facts and dated conflicts
     IMPROVE_EFFECTIVE_DATE_KEY=effective_date  # document metadata source-date key
     IMPROVE_TRACE_WINDOW_STEPS=30      # max agent trace steps per persisted document
-    IMPROVE_TRACE_WINDOWS_PER_RUN=10   # max agent trace documents per stage pass
+    IMPROVE_TRACE_WINDOWS_PER_RUN=0    # max agent trace documents per stage pass; 0 = drain
     IMPROVE_DISTILL_MAX_BATCHES_PER_RUN=0  # curator batches per distill run; 0 = uncapped
 """
 
@@ -53,9 +53,9 @@ class ImproveConfig(BaseSettings):
     # Agent trace persistence cognifies a session's pending steps in windows of
     # at most this many steps, so no single LLM call grows with the backlog.
     trace_window_steps: int = 30
-    # Windows one persist_agent_traces pass may cognify; the rest of a backlog
-    # waits for the next improve().
-    trace_windows_per_run: int = 10
+    # Windows one persist_agent_traces pass may cognify. 0 (the default) drains
+    # the backlog in one run; with a cap, the rest waits for the next improve().
+    trace_windows_per_run: int = 0
     # Session distillation curates every new gated entry of a session per run.
     # A cap curates only the most relevant entries that fit in this many curator
     # batches and seals the rest uncurated; 0 means no cap.
@@ -79,11 +79,18 @@ class ImproveConfig(BaseSettings):
             raise ValueError("feedback_alpha must be in range (0, 1]")
         return value
 
-    @field_validator("trace_window_steps", "trace_windows_per_run")
+    @field_validator("trace_window_steps")
     @classmethod
     def _positive(cls, value: int) -> int:
         if value < 1:
-            raise ValueError("trace window settings must be >= 1")
+            raise ValueError("trace_window_steps must be >= 1")
+        return value
+
+    @field_validator("trace_windows_per_run")
+    @classmethod
+    def _windows_non_negative(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("trace_windows_per_run must be >= 0 (0 = drain the backlog)")
         return value
 
     @field_validator("debounce_entries")

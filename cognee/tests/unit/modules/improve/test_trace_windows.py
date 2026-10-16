@@ -1,4 +1,9 @@
-"""improve() persists agent traces in bounded windows, never as one unbounded document."""
+"""improve() persists agent traces in bounded windows, never as one unbounded document.
+
+By default one run drains a session's whole backlog, window by window; a stuck
+session is left out of the run's later passes so the others keep draining; the
+cap on windows per run is opt-in.
+"""
 
 import importlib
 import types
@@ -59,24 +64,34 @@ class FakeSessionManager:
 
 
 class FakeCognee:
-    """Records each document handed to cognify; fails the builds listed in ``fail_builds``."""
+    """Records each document handed to cognify; fails the builds listed in ``fail_builds``.
 
-    def __init__(self, fail_builds=()):
+    ``on_cognify`` runs on every build, to model an agent still writing steps.
+    """
+
+    def __init__(self, fail_builds=(), on_cognify=None):
         self.documents: list[str] = []
         self.fail_builds = set(fail_builds)
+        self.on_cognify = on_cognify
 
     async def add(self, text, **kwargs):
         self.documents.append(text)
 
     async def cognify(self, **kwargs):
+        if self.on_cognify is not None:
+            self.on_cognify()
         if len(self.documents) in self.fail_builds:
             return PipelineRunErrored(
                 pipeline_run_id=uuid4(),
                 dataset_id=uuid4(),
                 dataset_name="docs",
-                error_message="rate limit exceeded",
+                error_class=self.error_class,
+                error_message=self.error_message,
             )
         return {}
+
+    error_class = "RateLimitError"
+    error_message = "rate limit exceeded"
 
     def steps_per_document(self) -> list[int]:
         return [len(document.split("\n\n", 1)[1].splitlines()) for document in self.documents]
@@ -94,13 +109,9 @@ def store(monkeypatch):
     return manager
 
 
-def _use(monkeypatch, cognee_fake, **settings):
+def _use(monkeypatch, cognee_fake, **settings) -> ImproveConfig:
+    """Install the fake cognee and pipeline; returns the config to hand to the run."""
     config = ImproveConfig(**settings)
-    monkeypatch.setattr(
-        importlib.import_module("cognee.modules.improve.config"),
-        "get_improve_config",
-        lambda: config,
-    )
     for name in ("add", "cognify"):
         monkeypatch.setattr(
             importlib.import_module("cognee"), name, getattr(cognee_fake, name), raising=False
@@ -128,9 +139,10 @@ def _use(monkeypatch, cognee_fake, **settings):
         "persist_agent_trace_feedbacks_in_knowledge_graph_pipeline",
         AsyncMock(side_effect=pipeline),
     )
+    return config
 
 
-def _inputs(session_ids=("s1",)):
+def _inputs(config: ImproveConfig, session_ids=("s1",)):
     user = types.SimpleNamespace(id=uuid4())
     dataset = types.SimpleNamespace(id=uuid4(), name="docs", owner_id=user.id)
     return ImproveRunInputs(
@@ -138,7 +150,7 @@ def _inputs(session_ids=("s1",)):
         dataset_id=dataset.id,
         dataset=dataset,
         session_ids=tuple(session_ids),
-        config=ImproveConfig(),
+        config=config,
         capabilities=GraphCapabilities.assume_supported(),
     )
 
@@ -151,8 +163,7 @@ async def _watermark(store, inputs, session_id="s1"):
 async def test_backlog_is_persisted_in_documents_of_at_most_the_window_size(store, monkeypatch):
     store.add_steps("s1", 95)
     cognee_fake = FakeCognee()
-    _use(monkeypatch, cognee_fake, trace_window_steps=30)
-    inputs = _inputs()
+    inputs = _inputs(_use(monkeypatch, cognee_fake, trace_window_steps=30))
 
     result = await PersistAgentTracesStage().run(inputs)
 
@@ -162,17 +173,105 @@ async def test_backlog_is_persisted_in_documents_of_at_most_the_window_size(stor
 
 
 @pytest.mark.asyncio
+async def test_default_run_drains_a_backlog_larger_than_the_old_cap(store, monkeypatch):
+    """No cap by default: one run persists every pending step, however many windows."""
+    store.add_steps("s1", 30 * 25)
+    cognee_fake = FakeCognee()
+    inputs = _inputs(_use(monkeypatch, cognee_fake, trace_window_steps=30))
+
+    result = await PersistAgentTracesStage().run(inputs)
+
+    assert result.status == "completed"
+    assert result.counts["windows"] == 25
+    assert await _watermark(store, inputs) == 750
+
+
+@pytest.mark.asyncio
+async def test_steps_written_during_the_run_wait_for_the_next_run(store, monkeypatch):
+    """The run drains the backlog it started with. An agent that keeps writing
+    cannot keep the run, and the dataset's improve lock, going."""
+    store.add_steps("s1", 60)
+    cognee_fake = FakeCognee(on_cognify=lambda: store.add_steps("s1", 30))
+    inputs = _inputs(_use(monkeypatch, cognee_fake, trace_window_steps=30))
+
+    result = await PersistAgentTracesStage().run(inputs)
+
+    assert result.status == "completed"
+    assert result.counts["windows"] == 2
+    assert await _watermark(store, inputs) == 60
+    assert await store.get_agent_trace_count(user_id=str(inputs.user.id), session_id="s1") == 120
+
+    cognee_fake.on_cognify = None
+    second = await PersistAgentTracesStage().run(inputs)
+
+    assert second.status == "completed"
+    assert await _watermark(store, inputs) == 120
+
+
+@pytest.mark.asyncio
 async def test_failed_window_keeps_earlier_windows_and_stops_the_stage(store, monkeypatch):
     store.add_steps("s1", 95)
     cognee_fake = FakeCognee(fail_builds={2})
-    _use(monkeypatch, cognee_fake, trace_window_steps=30)
-    inputs = _inputs()
+    inputs = _inputs(_use(monkeypatch, cognee_fake, trace_window_steps=30))
 
     result = await PersistAgentTracesStage().run(inputs)
 
     assert result.status == "errored"
+    assert result.counts["sessions_stuck"] == 1
     assert cognee_fake.steps_per_document() == [30, 30]
     assert await _watermark(store, inputs) == 30
+
+
+@pytest.mark.asyncio
+async def test_stuck_session_does_not_stall_the_others(store, monkeypatch):
+    """Session a's first window fails to build; b still drains to the end in the
+    same run, and the stage reports the stuck session."""
+    store.add_steps("a", 95)
+    store.add_steps("b", 95)
+    cognee_fake = FakeCognee(fail_builds={1})  # the very first document is a's
+    inputs = _inputs(_use(monkeypatch, cognee_fake, trace_window_steps=30), ("a", "b"))
+
+    result = await PersistAgentTracesStage().run(inputs)
+
+    assert result.status == "errored"
+    assert "a" in (result.error or "")
+    assert result.counts["sessions_stuck"] == 1
+    assert await _watermark(store, inputs, "a") == 0
+    assert await _watermark(store, inputs, "b") == 95
+    # a was tried once, then left alone for the rest of the run.
+    assert len(cognee_fake.documents) == 1 + 4
+
+
+@pytest.mark.asyncio
+async def test_exhausted_budget_stops_the_stage_and_is_classified(store, monkeypatch):
+    from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
+    from cognee.modules.improve.stage import execute_stage
+
+    store.add_steps("s1", 95)
+    cognee_fake = FakeCognee(fail_builds={2})
+    cognee_fake.error_class = "LLMPaymentRequiredError"
+    cognee_fake.error_message = "insufficient credits"
+    inputs = _inputs(_use(monkeypatch, cognee_fake, trace_window_steps=30))
+
+    with pytest.raises(LLMPaymentRequiredError):
+        await PersistAgentTracesStage().run(inputs)
+
+    # The first window was persisted; the second is retried once there is budget.
+    assert await _watermark(store, inputs) == 30
+    assert len(cognee_fake.documents) == 2
+
+    # Through the orchestrator's stage runner the raise becomes an errored result
+    # that classifies as budget exhaustion, so the later LLM stages are skipped.
+    store.add_steps("s2", 10)
+    broke = FakeCognee(fail_builds={1})
+    broke.error_class = "LLMPaymentRequiredError"
+    broke.error_message = "insufficient credits"
+    result = await execute_stage(
+        PersistAgentTracesStage(), _inputs(_use(monkeypatch, broke), ("s2",))
+    )
+
+    assert result.status == "errored"
+    assert result.budget_exhausted
 
 
 @pytest.mark.asyncio
@@ -180,8 +279,10 @@ async def test_window_cap_defers_the_rest_of_the_backlog_to_the_next_run(store, 
     store.add_steps("a", 95)
     store.add_steps("b", 95)
     cognee_fake = FakeCognee()
-    _use(monkeypatch, cognee_fake, trace_window_steps=30, trace_windows_per_run=3)
-    inputs = _inputs(session_ids=("a", "b"))
+    inputs = _inputs(
+        _use(monkeypatch, cognee_fake, trace_window_steps=30, trace_windows_per_run=3),
+        ("a", "b"),
+    )
 
     first = await PersistAgentTracesStage().run(inputs)
 
@@ -198,7 +299,12 @@ async def test_window_cap_defers_the_rest_of_the_backlog_to_the_next_run(store, 
     assert max(cognee_fake.steps_per_document()) == 30
 
 
-@pytest.mark.parametrize("field", ["trace_window_steps", "trace_windows_per_run"])
-def test_window_settings_must_be_positive(field):
+def test_window_steps_must_be_positive():
     with pytest.raises(ValueError):
-        ImproveConfig(**{field: 0})
+        ImproveConfig(trace_window_steps=0)
+
+
+def test_windows_per_run_defaults_to_drain_and_rejects_negative():
+    assert ImproveConfig(_env_file=None).trace_windows_per_run == 0
+    with pytest.raises(ValueError):
+        ImproveConfig(trace_windows_per_run=-1)
