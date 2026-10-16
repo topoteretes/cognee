@@ -16,19 +16,10 @@ from cognee.modules.graph.legacy.has_nodes_in_legacy_ledger import has_nodes_in_
 from cognee.modules.graph.methods.delete_from_graph_and_vector import delete_from_graph_and_vector
 from cognee.modules.graph.models import Edge, Node
 from cognee.modules.pipelines.models.DataItemStatus import is_data_item_completed
-from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunAlreadyCompleted
+from cognee.modules.pipelines.utils import iter_ingestion_entries
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("cognify.rollback")
-
-
-def _to_uuid(value: Any) -> UUID | None:
-    if isinstance(value, UUID):
-        return value
-    try:
-        return UUID(str(value))
-    except (TypeError, ValueError):
-        return None
 
 
 def _extract_data_ids(data_ingestion_info: Any) -> set[UUID]:
@@ -49,19 +40,11 @@ def _extract_data_ids(data_ingestion_info: Any) -> set[UUID]:
     up disagreeing: the marker says "not extracted", the graph says otherwise, and
     the next ``cognify`` re-extracts the lot at full LLM cost.
     """
-    if not isinstance(data_ingestion_info, list):
-        return set()
-
-    data_ids: set[UUID] = set()
-    for entry in data_ingestion_info:
-        if not isinstance(entry, dict):
-            continue
-        if isinstance(entry.get("run_info"), PipelineRunAlreadyCompleted):
-            continue
-        maybe_data_id = _to_uuid(entry.get("data_id"))
-        if maybe_data_id:
-            data_ids.add(maybe_data_id)
-    return data_ids
+    return {
+        data_id
+        for status, data_id in iter_ingestion_entries(data_ingestion_info)
+        if status != "PipelineRunAlreadyCompleted" and data_id is not None
+    }
 
 
 async def _graph_provenance_affected_data_ids(graph_engine, pipeline_run_id: str) -> set[UUID]:
