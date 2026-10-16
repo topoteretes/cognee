@@ -1,3 +1,4 @@
+import asyncio
 import types
 from uuid import NAMESPACE_OID, uuid4, uuid5
 
@@ -141,3 +142,100 @@ def test_search_dto_carries_session_id_in_both_casings():
     assert SearchPayloadDTO(query="q", sessionId="s1").session_id == "s1"
     assert SearchPayloadDTO(query="q", session_id="s1").session_id == "s1"
     assert SearchPayloadDTO(query="q").session_id is None
+
+
+@pytest.mark.asyncio
+async def test_api_search_timeout_raises_timeout_error_when_exceeded(monkeypatch, api_search_mod):
+    user = _make_user()
+    dataset = _make_dataset()
+
+    async def dummy_set_session_user_context_variable(_user):
+        return None
+
+    async def slow_search_function(**kwargs):
+        await asyncio.sleep(0.5)
+        return ["late_result"]
+
+    monkeypatch.setattr(
+        api_search_mod,
+        "set_session_user_context_variable",
+        dummy_set_session_user_context_variable,
+    )
+    monkeypatch.setattr(api_search_mod, "search_function", slow_search_function)
+
+    with pytest.raises((asyncio.TimeoutError, TimeoutError)):
+        await api_search_mod.search(
+            query_text="q",
+            query_type=SearchType.GRAPH_COMPLETION,
+            user=user,
+            dataset_ids=[dataset.id],
+            timeout=0.01,
+        )
+
+
+@pytest.mark.asyncio
+async def test_api_search_timeout_from_env_var(monkeypatch, api_search_mod):
+    user = _make_user()
+    dataset = _make_dataset()
+
+    async def dummy_set_session_user_context_variable(_user):
+        return None
+
+    async def slow_search_function(**kwargs):
+        await asyncio.sleep(0.5)
+        return ["late_result"]
+
+    monkeypatch.setattr(
+        api_search_mod,
+        "set_session_user_context_variable",
+        dummy_set_session_user_context_variable,
+    )
+    monkeypatch.setattr(api_search_mod, "search_function", slow_search_function)
+    monkeypatch.setenv("COGNEE_SEARCH_TIMEOUT_SECONDS", "0.01")
+
+    with pytest.raises((asyncio.TimeoutError, TimeoutError)):
+        await api_search_mod.search(
+            query_text="q",
+            query_type=SearchType.GRAPH_COMPLETION,
+            user=user,
+            dataset_ids=[dataset.id],
+        )
+
+
+@pytest.mark.asyncio
+async def test_api_search_timeout_succeeds_within_bound(monkeypatch, api_search_mod):
+    user = _make_user()
+    dataset = _make_dataset()
+
+    async def dummy_set_session_user_context_variable(_user):
+        return None
+
+    async def fast_search_function(**kwargs):
+        return ["fast_result"]
+
+    monkeypatch.setattr(
+        api_search_mod,
+        "set_session_user_context_variable",
+        dummy_set_session_user_context_variable,
+    )
+    monkeypatch.setattr(api_search_mod, "search_function", fast_search_function)
+
+    result = await api_search_mod.search(
+        query_text="q",
+        query_type=SearchType.GRAPH_COMPLETION,
+        user=user,
+        dataset_ids=[dataset.id],
+        timeout=5.0,
+    )
+    assert result == ["fast_result"]
+
+
+@pytest.mark.asyncio
+async def test_api_search_rejects_invalid_timeout(api_search_mod):
+    with pytest.raises(CogneeValidationError, match="timeout must be a positive number"):
+        await api_search_mod.search(
+            query_text="q",
+            query_type=SearchType.CHUNKS,
+            user=_make_user(),
+            timeout=-2.0,
+        )
