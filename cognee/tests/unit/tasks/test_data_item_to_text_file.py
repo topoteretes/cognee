@@ -18,11 +18,12 @@ loader reopens it, and unlinks it afterwards. These tests lock that in:
 
 import os
 import tempfile
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 import cognee.tasks.ingestion.data_item_to_text_file as ditf
+from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.tasks.ingestion.data_item_to_text_file import data_item_to_text_file
 
 
@@ -87,3 +88,50 @@ async def test_s3_temp_file_reopened_by_name_and_cleaned_up():
 
     # And it must still be cleaned up afterwards (no temp-file leak).
     assert not os.path.exists(captured["name"])
+
+
+@pytest.mark.asyncio
+async def test_internal_storage_accepted_when_accept_local_file_path_false(monkeypatch):
+    """Internal storage files must be accepted by data_item_to_text_file even when
+    accept_local_file_path is False (e.g. multipart uploads saved to cognee storage)."""
+    monkeypatch.setattr(ditf.settings, "accept_local_file_path", False)
+    mock_loader = _FakeLoader()
+    mock_engine = MagicMock()
+    mock_engine.load_file = AsyncMock(return_value="OUTPUT_PATH")
+    mock_engine.get_loader = MagicMock(return_value=mock_loader)
+    monkeypatch.setattr(ditf, "get_loader_engine", lambda: mock_engine)
+
+    # Absolute path with is_internal_storage=True
+    abs_path = "C:\\cognee\\storage\\test.txt" if os.name == "nt" else "/cognee/storage/test.txt"
+    storage_path, loader = await data_item_to_text_file(abs_path, is_internal_storage=True)
+    assert storage_path == "OUTPUT_PATH"
+    assert loader is mock_loader
+
+    # file:// URI with is_internal_storage=True
+    file_uri = "file:///cognee/storage/test.txt"
+    storage_path, loader = await data_item_to_text_file(file_uri, is_internal_storage=True)
+    assert storage_path == "OUTPUT_PATH"
+    assert loader is mock_loader
+
+
+@pytest.mark.asyncio
+async def test_external_local_file_rejected_when_accept_local_file_path_false(monkeypatch):
+    """External local files must be rejected when accept_local_file_path is False
+    and is_internal_storage is False."""
+    monkeypatch.setattr(ditf.settings, "accept_local_file_path", False)
+
+    # Absolute path with default / False is_internal_storage
+    abs_path = "C:\\external\\note.txt" if os.name == "nt" else "/external/note.txt"
+    with pytest.raises(IngestionError, match="Local files are not accepted"):
+        await data_item_to_text_file(abs_path)
+
+    with pytest.raises(IngestionError, match="Local files are not accepted"):
+        await data_item_to_text_file(abs_path, is_internal_storage=False)
+
+    # file:// URI with default / False is_internal_storage
+    file_uri = "file:///external/note.txt"
+    with pytest.raises(IngestionError, match="Local files are not accepted"):
+        await data_item_to_text_file(file_uri)
+
+    with pytest.raises(IngestionError, match="Local files are not accepted"):
+        await data_item_to_text_file(file_uri, is_internal_storage=False)

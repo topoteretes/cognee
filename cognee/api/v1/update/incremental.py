@@ -118,7 +118,10 @@ from cognee.tasks.documents.classify_documents import document_class_for, update
 from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
 from cognee.tasks.ingestion.data_item import DataItem
 from cognee.tasks.ingestion.data_item_to_text_file import data_item_to_text_file
-from cognee.tasks.ingestion.save_data_item_to_storage import save_data_item_to_storage
+from cognee.tasks.ingestion.save_data_item_to_storage import (
+    save_data_item_to_storage,
+    save_data_item_to_storage_detailed,
+)
 from cognee.tasks.storage.add_data_points import add_data_points
 
 logger = get_logger("incremental_update")
@@ -484,12 +487,15 @@ async def _stage_new_content(data, preferred_loaders) -> StagedContent:
             source_data.file,
             filename=staged_filename,
         )
+        is_internal_storage = True
     else:
-        original_file_path = await save_data_item_to_storage(data)
+        stored = await save_data_item_to_storage_detailed(data)
+        original_file_path = stored.file_path
+        is_internal_storage = stored.is_internal_storage
     actual_file_path = get_data_file_path(original_file_path)
 
     storage_file_path, loader_engine = await data_item_to_text_file(
-        actual_file_path, preferred_loaders
+        actual_file_path, preferred_loaders, is_internal_storage=is_internal_storage
     )
     if loader_engine is None:
         raise IncrementalUpdateNotPossible(

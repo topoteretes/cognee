@@ -124,3 +124,12 @@ async def test_text_metadata_is_complete(storage_root):
     assert stored.metadata["extension"] == "txt"
     assert stored.metadata["mime_type"] == "text/plain"
     assert stored.metadata["file_size"] == len(b"a plain note")
+
+
+@pytest.mark.asyncio
+async def test_stored_file_provenance_is_internal_storage(storage_root):
+    stored = await save_data_to_file_detailed(_upload(b"internal payload"), filename="doc.txt")
+    assert stored.is_internal_storage is True
+
+    stored_text = await save_data_to_file_detailed("plain text note")
+    assert stored_text.is_internal_storage is True

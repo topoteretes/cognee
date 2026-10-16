@@ -48,9 +48,16 @@ async def pull_from_s3(file_path, destination_file) -> None:
 async def data_item_to_text_file(
     data_item_path: str,
     preferred_loaders: dict[str, dict[str, Any]] | None = None,
+    is_internal_storage: bool = False,
     **loader_kwargs: Any,
 ) -> tuple[str, LoaderInterface]:
     """Run the loader engine on a data item's file.
+
+    ``is_internal_storage`` indicates whether ``data_item_path`` points to a
+    file in cognee's internal data storage (such as a multipart file upload or
+    raw text). When True, the file is accepted even if
+    ``settings.accept_local_file_path`` is False. External paths continue to
+    respect ``settings.accept_local_file_path``.
 
     ``loader_kwargs`` (ingestion context: dataset_name, dataset_id, user,
     original_file_name) is forwarded to the selected loader's ``load()``;
@@ -90,7 +97,7 @@ async def data_item_to_text_file(
 
         # data is local file path
         elif parsed_url.scheme == "file":
-            if settings.accept_local_file_path:
+            if is_internal_storage or settings.accept_local_file_path:
                 loader = get_loader_engine()
                 return await loader.load_file(
                     data_item_path, preferred_loaders, **loader_kwargs
@@ -103,7 +110,7 @@ async def data_item_to_text_file(
             os.name == "nt" and len(data_item_path) > 1 and data_item_path[1] == ":"
         ):
             # Handle both Unix absolute paths (/path) and Windows absolute paths (C:\path)
-            if settings.accept_local_file_path:
+            if is_internal_storage or settings.accept_local_file_path:
                 loader = get_loader_engine()
                 return await loader.load_file(
                     data_item_path, preferred_loaders, **loader_kwargs

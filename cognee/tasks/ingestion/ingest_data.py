@@ -255,6 +255,7 @@ async def ingest_data(
 
             original_file_path = carried.file_path
             original_file_metadata = carried.metadata
+            is_internal_storage = getattr(carried, "is_internal_storage", False)
 
             actual_file_path = get_data_file_path(original_file_path)
 
@@ -272,6 +273,7 @@ async def ingest_data(
                 "original_file_path": original_file_path,
                 "actual_file_path": actual_file_path,
                 "original_file_metadata": original_file_metadata,
+                "is_internal_storage": is_internal_storage,
                 "item_content_hash": item_content_hash,
                 "item_data_id": item_data_id,
                 "data_id": None,  # resolved below
@@ -382,6 +384,7 @@ async def ingest_data(
             cognee_storage_file_path, loader_engine = await data_item_to_text_file(
                 actual_file_path,
                 preferred_loaders,
+                is_internal_storage=cached.get("is_internal_storage", False),
                 dataset_name=dataset.name,
                 dataset_id=dataset.id,
                 user=user,

@@ -153,3 +153,68 @@ async def test_path_item_reuses_wrapper_metadata_after_identity_changes():
     assert stored is not None
     assert stored.content_hash == "hash-1"
     save_mock.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_carried_internal_storage_forwarded_to_data_item_to_text_file(monkeypatch):
+    """When accept_local_file_path is False, carried internal storage items must
+    have is_internal_storage=True forwarded to data_item_to_text_file."""
+    from cognee.tasks.ingestion.data_item_to_text_file import settings
+
+    monkeypatch.setattr(settings, "accept_local_file_path", False)
+
+    data_item = object.__new__(object)
+    ctx = SimpleNamespace(
+        extras={
+            CARRIED_SOURCE_KEY: CarriedSource(
+                data_item_id=id(data_item),
+                stored=StoredFile(
+                    file_path="/tmp/internal_file.txt",
+                    metadata=_metadata(),
+                    is_internal_storage=True,
+                ),
+            )
+        }
+    )
+    save_mock = AsyncMock(side_effect=AssertionError("item should not be re-saved"))
+
+    def open_mock(*_a, **_k):
+        raise AssertionError("should not be re-read")
+
+    ditf_kwargs_seen = {}
+
+    async def spy_ditf(file_path, preferred_loaders=None, is_internal_storage=False, **kwargs):
+        ditf_kwargs_seen["is_internal_storage"] = is_internal_storage
+        return (
+            LoaderResult(file_path=file_path, file_metadata=_metadata()),
+            SimpleNamespace(loader_name="text_loader"),
+        )
+
+    engine, db_path = await _make_engine()
+    dataset = Dataset(id=DATASET_ID, name="ds", owner_id=USER.id)
+    ctx.dataset = dataset
+    ctx.user = USER
+    try:
+        with ExitStack() as stack:
+            stack.enter_context(
+                patch.object(ingest_module, "get_relational_engine", lambda: engine)
+            )
+            stack.enter_context(
+                patch.object(ingest_module, "save_data_item_to_storage_detailed", save_mock)
+            )
+            stack.enter_context(patch.object(ingest_module, "get_data_file_path", lambda p: p))
+            stack.enter_context(patch.object(ingest_module, "open_data_file", open_mock))
+            stack.enter_context(patch.object(ingest_module, "data_item_to_text_file", spy_ditf))
+
+            rows = await ingest_module.ingest_data(
+                data=data_item,
+                dataset_name="ds",
+                user=USER,
+                dataset_id=DATASET_ID,
+                ctx=ctx,
+            )
+        assert len(rows) == 1
+        assert ditf_kwargs_seen["is_internal_storage"] is True
+    finally:
+        await engine.engine.dispose()
+        os.unlink(db_path)
