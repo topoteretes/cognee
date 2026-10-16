@@ -19,7 +19,12 @@ from cognee.infrastructure.session.session_persist_watermark import (
     get_distilled_entry_ids,
     save_distilled_entry_ids,
 )
-from cognee.modules.session_distillation.models import ProposedLesson, WrittenLesson
+from cognee.modules.session_distillation import models as distill_models
+from cognee.modules.session_distillation.models import (
+    CuratorBatchOutput,
+    ProposedLesson,
+    WrittenLesson,
+)
 
 USER = SimpleNamespace(id=uuid4())
 DATASET_A = SimpleNamespace(id=uuid4(), name="team-a", owner_id=USER.id)
@@ -164,9 +169,8 @@ async def test_new_gated_entry_after_the_watermark_triggers_a_run(monkeypatch, d
     result = await distill_module.distill_session("s-1", dataset=DATASET_A.name, user=USER)
 
     assert result.status == "no_proposed_lessons"
-    # The curator still sees the whole gated timeline; the watermark only decides
-    # whether the run happens at all.
-    assert seen == [sorted([old_row["id"], new_row["id"]])]
+    # The curator sees only the entry the watermark does not cover yet.
+    assert seen == [[new_row["id"]]]
     # Both entries are now covered.
     assert await get_distilled_entry_ids(manager, str(USER.id), "s-1", str(DATASET_A.id)) == {
         old_row["id"],
@@ -409,3 +413,82 @@ async def test_idle_run_never_reads_the_qa_history(monkeypatch, datasets):
 
     assert result.status == "no_new_entries"
     assert CountingManager.qa_reads == 0
+
+
+def _record_curator_calls(monkeypatch, lessons_per_call=0):
+    curator_inputs: list[str] = []
+
+    async def fake_llm(*, text_input, system_prompt, response_model):
+        assert response_model is CuratorBatchOutput
+        curator_inputs.append(text_input)
+        return CuratorBatchOutput(
+            lessons=[
+                ProposedLesson(working_statement=f"Lesson {len(curator_inputs)}.{index}")
+                for index in range(lessons_per_call)
+            ]
+        )
+
+    monkeypatch.setattr(distill_module.LLMGateway, "acreate_structured_output", fake_llm)
+    monkeypatch.setattr(distill_module, "read_query_prompt", lambda name: "PROMPT")
+    return curator_inputs
+
+
+@pytest.mark.asyncio
+async def test_curator_sees_only_entries_not_yet_distilled(monkeypatch, datasets):
+    old_rows = [_context_row(f"Already distilled {index}.") for index in range(3)]
+    new_rows = [_context_row(f"Fresh lesson {index}.") for index in range(2)]
+    manager = FakeSessionManager(old_rows + new_rows)
+    _install_manager(monkeypatch, manager)
+    await save_distilled_entry_ids(
+        manager, str(USER.id), "s-1", str(DATASET_A.id), [row["id"] for row in old_rows]
+    )
+    curator_inputs = _record_curator_calls(monkeypatch)
+
+    result = await distill_module.distill_session("s-1", dataset=DATASET_A.name, user=USER)
+
+    assert result.status == "no_proposed_lessons"
+    curated = "\n".join(curator_inputs)
+    assert "Already distilled" not in curated
+    assert all(row["content"] in curated for row in new_rows)
+
+
+@pytest.mark.asyncio
+async def test_heavy_fan_out_session_is_bounded_per_run(monkeypatch, datasets):
+    """A session that gates thousands of entries must not fan out into thousands of
+    curator calls in one run. The overflow is sealed so it never becomes a backlog."""
+    cap = distill_models.MAX_CURATOR_BATCHES_PER_RUN
+    blocks_per_run = cap * distill_models.CURATOR_BLOCKS_PER_BATCH
+    sure_rows = [_context_row(f"High-confidence {index}.", confidence=0.99) for index in range(5)]
+    bulk_rows = [
+        _context_row(f"Subagent note {index}.", confidence=0.8)
+        for index in range(blocks_per_run * 3)
+    ]
+    manager = FakeSessionManager(bulk_rows + sure_rows)
+    _install_manager(monkeypatch, manager)
+    curator_inputs = _record_curator_calls(monkeypatch, lessons_per_call=2)
+    published: list[int] = []
+
+    async def accept_all(scope, proposed, context_entries):
+        return [WrittenLesson(accept=True, statement=p.working_statement) for p in proposed], 0
+
+    async def fake_publish(scope, accepted):
+        published.append(len(accepted))
+        return [lesson.statement for lesson in accepted]
+
+    monkeypatch.setattr(distill_module, "accept_proposed_lessons", accept_all)
+    monkeypatch.setattr(distill_module, "publish_distilled_lessons", fake_publish)
+
+    first = await distill_module.distill_session("s-1", dataset=DATASET_A.name, user=USER)
+
+    assert first.status == "completed"
+    assert 0 < len(curator_inputs) <= cap
+    assert sum(published) <= cap * 2
+    curated = "\n".join(curator_inputs)
+    assert all(row["content"] in curated for row in sure_rows)
+    assert await get_distilled_entry_ids(manager, str(USER.id), "s-1", str(DATASET_A.id)) == {
+        row["id"] for row in bulk_rows + sure_rows
+    }
+
+    _forbid_llm(monkeypatch)
+    second = await distill_module.distill_session("s-1", dataset=DATASET_A.name, user=USER)
+    assert second.status == "no_new_entries"

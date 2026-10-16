@@ -1,9 +1,8 @@
 """Configuration owned by the improve loop itself (plan Part 5.9).
 
 ``ImproveConfig`` holds only the knobs the loop owns. Shared knobs stay with
-their owners and are read where they live: ``triplet_embedding`` is cognify's
-(``get_cognify_config()``), ``caching`` / ``auto_feedback`` belong to the cache
-layer, ``default_feedback_influence`` and ``personalization_enabled`` to
+their owners and are read where they live: ``caching`` / ``auto_feedback``
+belong to the cache layer, ``default_feedback_influence`` and ``personalization_enabled`` to
 ``base_config``. Re-declaring one of those here is the drift this package
 removes.
 
@@ -14,6 +13,10 @@ Environment variables (prefix ``IMPROVE_``)::
     IMPROVE_DEBOUNCE_SECONDS=0         # ... or after T seconds
     IMPROVE_STAGES_DISABLED=a,b        # csv of stage names to skip
     IMPROVE_FEEDBACK_ALPHA=0.1         # learning rate for feedback weights, (0, 1]
+    IMPROVE_REVIEW_CONFLICTS=false     # review source facts and dated conflicts
+    IMPROVE_EFFECTIVE_DATE_KEY=effective_date  # document metadata source-date key
+    IMPROVE_TRACE_WINDOW_STEPS=30      # max agent trace steps per persisted document
+    IMPROVE_TRACE_WINDOWS_PER_RUN=10   # max agent trace documents per stage pass
 """
 
 from functools import lru_cache
@@ -22,13 +25,19 @@ from typing import Annotated, Any
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+from cognee.shared.logging_utils import get_logger
+
 from .constants import DEFAULT_FEEDBACK_ALPHA
+
+logger = get_logger("improve")
 
 
 class ImproveConfig(BaseSettings):
     """Settings for the self-improvement loop (env prefix ``IMPROVE_``)."""
 
     auto_enabled: bool = True
+    review_conflicts: bool = False
+    effective_date_key: str = "effective_date"
     # Debounce for automatic improves (plan item B6). The defaults mean "no
     # debounce": every trigger runs, exactly as today. With debounce_seconds
     # set and debounce_entries left at this default 1 — which fires on every
@@ -40,6 +49,12 @@ class ImproveConfig(BaseSettings):
     # ``disabled_by_config``. Read as a comma-separated string.
     stages_disabled: Annotated[list[str], NoDecode] = []
     feedback_alpha: float = DEFAULT_FEEDBACK_ALPHA
+    # Agent trace persistence cognifies a session's pending steps in windows of
+    # at most this many steps, so no single LLM call grows with the backlog.
+    trace_window_steps: int = 30
+    # Windows one persist_agent_traces pass may cognify; the rest of a backlog
+    # waits for the next improve().
+    trace_windows_per_run: int = 10
 
     model_config = SettingsConfigDict(env_prefix="IMPROVE_", extra="ignore")
 
@@ -57,6 +72,13 @@ class ImproveConfig(BaseSettings):
     def _alpha_in_unit_interval(cls, value: float) -> float:
         if value <= 0 or value > 1:
             raise ValueError("feedback_alpha must be in range (0, 1]")
+        return value
+
+    @field_validator("trace_window_steps", "trace_windows_per_run")
+    @classmethod
+    def _positive(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("trace window settings must be >= 1")
         return value
 
     @field_validator("debounce_entries")
@@ -86,7 +108,12 @@ def get_improve_config() -> ImproveConfig:
     later request.
     """
     config = ImproveConfig()
-    from .registry import DEFAULT_STAGES, validate_stages_disabled
+    from .registry import DEFAULT_STAGES, REMOVED_STAGE_NAMES, validate_stages_disabled
 
     validate_stages_disabled(config.stages_disabled, DEFAULT_STAGES)
+    # Warned here, behind the cache, so it fires once per process and not on
+    # every improve() run, which re-validates.
+    removed = sorted(set(config.stages_disabled) & REMOVED_STAGE_NAMES)
+    if removed:
+        logger.warning("IMPROVE_STAGES_DISABLED names removed stage(s) %s; ignoring them", removed)
     return config

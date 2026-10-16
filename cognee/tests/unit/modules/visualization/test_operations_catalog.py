@@ -37,7 +37,7 @@ def test_scope_comes_from_needs_sessions():
 def test_node_sets_are_derived_from_produces_effects():
     rows = {row["name"]: row for row in iter_improve_operations()}
     assert rows["persist_session_qa"]["node_sets"] == ["user_sessions_from_cache"]
-    assert rows["triplet_enrichment"]["node_sets"] == []
+    assert rows["build_truth_subspace"]["node_sets"] == []
 
 
 def test_catalog_appends_improve_rows_after_the_curated_ones():
@@ -45,3 +45,12 @@ def test_catalog_appends_improve_rows_after_the_curated_ones():
     names = [op["name"] for op in catalog]
     for stage_name in stage_names(DEFAULT_STAGES):
         assert stage_name in names
+
+
+def test_conflict_review_catalog_describes_its_stored_outputs():
+    row = next(row for row in iter_improve_operations() if row["name"] == "review_conflicts")
+    assert row["pipeline_name"] == "memify_pipeline"
+    assert {"effect": "produces", "target_type": "FactConflict"} in row["effects"]
+    assert {"effect": "modifies", "target_type": "Entity", "property": "description"} in row[
+        "effects"
+    ]

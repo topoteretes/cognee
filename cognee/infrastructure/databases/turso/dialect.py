@@ -86,7 +86,17 @@ class CogneeTursoDialect(AioTursoDialect):
         # non-DBAPI error is not re-wrapped by SQLAlchemy, so callers see it as is.
         database_path = cargs[0] if cargs else cparams.get("database", "")
         with explain_file_in_use(database_path):
-            return super().connect(*cargs, **cparams)
+            try:
+                return super().connect(*cargs, **cparams)
+            except Exception as error:
+                # pyturso neither exports nor maps its IoError (e.g. a missing directory),
+                # so SQLAlchemy would pass it through raw. Raise it as the DBAPI error
+                # stock sqlite3 raises, so callers catching OperationalError handle it.
+                if type(error).__name__ != "IoError":
+                    raise
+                import turso
+
+                raise turso.OperationalError(f"unable to open database file: {error}") from error
 
 
 _registered = False

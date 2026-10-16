@@ -112,7 +112,7 @@ If you want a quick local smoke test before changing code, bring up the default 
 
 ```shell
 cp .env.template .env
-# edit .env and set LLM_API_KEY
+# optional: set LLM_API_KEY in .env; without it cognee runs offline (GLiNER + fastembed)
 docker compose up
 ```
 

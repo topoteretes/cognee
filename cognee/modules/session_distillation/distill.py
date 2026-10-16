@@ -2,8 +2,8 @@
 
 Flow (curator calls parallel by batch; accept/write calls parallel by lesson):
 
-1. LOAD    session QA turns + distillable session-context entries.
-2. CURATE  pack the session timeline into batches; one curator LLM call per batch.
+1. LOAD    distillable session-context entries the watermark does not cover + QA turns.
+2. CURATE  pack a bounded slice of them into batches; one curator LLM call per batch.
 3. ACCEPT  per proposed lesson: search prior lessons/entities, then writer/rejecter LLM.
 4. PERSIST render accepted lessons as documents; add + cognify them in one pass.
 
@@ -31,6 +31,10 @@ from cognee.infrastructure.session.session_context_models import (
     MIN_GATE_CONFIDENCE,
     SessionContextEntry,
 )
+from cognee.infrastructure.session.session_node_set import (
+    bridge_node_set,
+    get_session_node_set,
+)
 from cognee.infrastructure.session.session_persist_watermark import (
     get_distilled_entry_ids,
     save_distilled_entry_ids,
@@ -49,6 +53,7 @@ from .models import (
     CURATOR_CONCURRENCY,
     GLOSSARY_ENTITIES_PER_LESSON,
     MAX_CANDIDATE_CHARS,
+    MAX_CURATOR_BATCHES_PER_RUN,
     MAX_QA_ANSWER_CHARS,
     MAX_QA_FEEDBACK_CHARS,
     MAX_QA_QUESTION_CHARS,
@@ -177,6 +182,25 @@ async def load_session_qa_rows(scope: SessionDistillationScope) -> list[dict]:
         entry.model_dump() if hasattr(entry, "model_dump") else dict(entry)
         for entry in (raw_qa if isinstance(raw_qa, list) else [])
     ]
+
+
+def select_curator_inputs(
+    qa_rows: list[dict],
+    new_entries: list[SessionContextEntry],
+) -> tuple[list[dict], list[SessionContextEntry]]:
+    """Pick what one run curates, so it packs into at most MAX_CURATOR_BATCHES_PER_RUN batches.
+
+    New entries come first, highest confidence then most recent; QA turns fill the
+    remaining blocks, most recent first. Entries left out are still sealed by the
+    watermark when the run completes, so a heavy session never builds a backlog.
+    """
+    budget = MAX_CURATOR_BATCHES_PER_RUN * CURATOR_BLOCKS_PER_BATCH
+    entries = sorted(
+        new_entries, key=lambda entry: (entry.confidence, entry.created_at or ""), reverse=True
+    )[:budget]
+    qa_budget = budget - len(entries)
+    recent_qa = sorted(qa_rows, key=lambda row: row.get("time") or "")[-qa_budget:]
+    return (recent_qa if qa_budget else []), entries
 
 
 def build_curator_batches(
@@ -432,7 +456,14 @@ async def publish_distilled_lessons(
     from cognee.api.v1.add import add
     from cognee.api.v1.cognify import cognify
 
-    node_set = [*DISTILLATE_NODE_SET, truth_session_node_set(scope.session_id)]
+    # Lessons inherit the session's pinned node set, like the Q&A and trace
+    # bridges do, so a node_name-scoped recall also sees what the session taught.
+    session_node_set = await get_session_node_set(
+        get_session_manager(), scope.user_id, scope.session_id
+    )
+    node_set = bridge_node_set(
+        [*DISTILLATE_NODE_SET, truth_session_node_set(scope.session_id)], session_node_set
+    )
     await add(documents, dataset_id=scope.dataset.id, user=scope.user, node_set=node_set)
     await cognify(datasets=[scope.dataset.id], user=scope.user)
     return documents
@@ -495,8 +526,18 @@ async def distill_session(
         )
         return scope.result("no_new_entries")
 
-    qa_rows = await load_session_qa_rows(scope)
-    proposed, curator_failures = await propose_lessons(qa_rows, context_entries)
+    qa_rows, curated_entries = select_curator_inputs(await load_session_qa_rows(scope), new_entries)
+    if len(curated_entries) < len(new_entries):
+        logger.warning(
+            "Session %s: curating %d of %d new gated entries (cap %d batches per run); "
+            "the other %d are sealed without curation",
+            scope.session_id,
+            len(curated_entries),
+            len(new_entries),
+            MAX_CURATOR_BATCHES_PER_RUN,
+            len(new_entries) - len(curated_entries),
+        )
+    proposed, curator_failures = await propose_lessons(qa_rows, curated_entries)
     if not proposed and not curator_failures:
         await advance_distillation_watermark(scope, context_entries)
         return scope.result("no_proposed_lessons")
@@ -504,7 +545,7 @@ async def distill_session(
     accepted: list[WrittenLesson] = []
     writer_failures = 0
     if proposed:
-        accepted, writer_failures = await accept_proposed_lessons(scope, proposed, context_entries)
+        accepted, writer_failures = await accept_proposed_lessons(scope, proposed, curated_entries)
 
     documents: list[str] = []
     if accepted:

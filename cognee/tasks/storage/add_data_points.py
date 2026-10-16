@@ -1,4 +1,5 @@
 import asyncio
+import warnings
 from typing import TYPE_CHECKING, Optional
 
 from cognee.infrastructure.databases.provenance import (
@@ -13,7 +14,6 @@ from cognee.infrastructure.databases.relational import get_async_session
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.databases.unified.capabilities import EngineCapability
 from cognee.infrastructure.engine import DataPoint
-from cognee.modules.engine.models import Triplet
 from cognee.modules.graph.methods import upsert_edges, upsert_nodes
 from cognee.modules.graph.utils import (
     deduplicate_nodes_and_edges,
@@ -27,7 +27,6 @@ from cognee.tasks.storage.exceptions import (
     InvalidDataPointsInAddDataPointsError,
 )
 
-from ...modules.engine.utils import generate_node_id
 from .chunk_ownership import collect_chunk_ownership
 from .index_data_points import index_data_points
 from .index_graph_edges import index_graph_edges
@@ -70,7 +69,9 @@ def _group_by_extra_keys(owner_map: dict) -> dict:
 async def add_data_points(
     data_points: list[DataPoint],
     custom_edges: list | None = None,
-    embed_triplets: bool = False,
+    # Deprecated, kept in its old position so positional callers still bind
+    # ctx and graph_only correctly. Removed in the next release.
+    embed_triplets: bool | None = None,
     ctx: Optional["PipelineContext"] = None,
     graph_only: bool = False,
 ) -> list[DataPoint]:
@@ -81,11 +82,22 @@ async def add_data_points(
     Args:
         data_points: Data points to process and insert into the graph.
         custom_edges: Custom edges between datapoints.
-        embed_triplets: If True, creates and indexes triplet embeddings.
+        embed_triplets: Deprecated and ignored (SDK-1115); removed in the next
+            release. Triplet embeddings were removed: graph completion searches
+            edges through the ``EdgeType_relationship_name`` index written here.
         ctx: Pipeline runtime context (user, dataset, data_item).
         graph_only: Persist graph nodes and edges without initializing or writing
             a vector engine. Intended for deterministic extraction pipelines.
     """
+    if embed_triplets is not None:
+        warnings.warn(
+            "add_data_points(embed_triplets=...) is deprecated and ignored: triplet embeddings "
+            "were removed, and graph completion uses the EdgeType_relationship_name index "
+            "that add_data_points writes. Drop the argument; it will be removed in "
+            "the next release.",
+            FutureWarning,
+            stacklevel=2,
+        )
     user = ctx.user if ctx else None
     data_item = ctx.data_item if ctx else None
     dataset = ctx.dataset if ctx else None
@@ -95,10 +107,6 @@ async def add_data_points(
         raise InvalidDataPointsInAddDataPointsError("data_points must be a list.")
     if not all(isinstance(dp, DataPoint) for dp in data_points):
         raise InvalidDataPointsInAddDataPointsError("data_points: each item must be a DataPoint.")
-    if graph_only and embed_triplets:
-        raise InvalidDataPointsInAddDataPointsError(
-            "embed_triplets cannot be enabled when graph_only is True."
-        )
 
     nodes = []
     edges = []
@@ -405,12 +413,6 @@ async def add_data_points(
         for ref_key, identities in attach_edges.items():
             await graph_engine.attach_edge_source_refs(identities, [ref_key], run_arg)
 
-    if embed_triplets:
-        triplets = _create_triplets_from_graph(nodes, edges)
-        if triplets:
-            await index_data_points(triplets, vector_engine=vector_engine)
-            logger.info(f"Created and indexed {len(triplets)} triplets from graph structure")
-
     # Capture only after graph/vector writes succeeded. This is memory-only for
     # normal documents and is flushed once at data-item completion; very large
     # documents use a bounded bulk flush configured by EDGE_EVIDENCE_FLUSH_THRESHOLD.
@@ -420,119 +422,3 @@ async def add_data_points(
     await capture_graph_provenance(data_points, edges, ctx)
 
     return data_points
-
-
-def _extract_embeddable_text_from_datapoint(data_point: DataPoint) -> str:
-    """
-    Extract embeddable text from a DataPoint using its index_fields metadata.
-    Uses the same approach as index_data_points.
-
-    Parameters:
-    -----------
-        - data_point (DataPoint): The data point to extract text from.
-
-    Returns:
-    --------
-        - str: Concatenated string of all embeddable property values, or empty string if none found.
-    """
-    if not data_point or not hasattr(data_point, "metadata"):
-        return ""
-
-    index_fields = data_point.metadata.get("index_fields", [])
-    if not index_fields:
-        return ""
-
-    embeddable_values = []
-    for field_name in index_fields:
-        field_value = getattr(data_point, field_name, None)
-        if field_value is not None:
-            field_value = str(field_value).strip()
-
-            if field_value:
-                embeddable_values.append(field_value)
-
-    return " ".join(embeddable_values) if embeddable_values else ""
-
-
-def _create_triplets_from_graph(nodes: list[DataPoint], edges: list[tuple]) -> list[Triplet]:
-    """
-    Create Triplet objects from graph nodes and edges.
-
-    This function processes graph edges and their corresponding nodes to create
-    triplet datapoints with embeddable text, similar to the triplet embeddings pipeline.
-
-    Parameters:
-    -----------
-        - nodes (List[DataPoint]): List of graph nodes extracted from data points
-        - edges (List[tuple]): List of edge tuples in format
-          (source_node_id, target_node_id, relationship_name, properties_dict)
-          Note: All edges including those from DocumentChunk.contains are already extracted
-          by get_graph_from_model and included in this list.
-
-    Returns:
-    --------
-        - List[Triplet]: List of Triplet objects ready for indexing
-    """
-    node_map: dict[str, DataPoint] = {}
-    for node in nodes:
-        if hasattr(node, "id"):
-            node_id = str(node.id)
-            if node_id not in node_map:
-                node_map[node_id] = node
-
-    triplets = []
-    skipped_count = 0
-    seen_ids = set()
-
-    for edge_tuple in edges:
-        if len(edge_tuple) < 4:
-            continue
-
-        source_node_id, target_node_id, relationship_name, edge_properties = (
-            edge_tuple[0],
-            edge_tuple[1],
-            edge_tuple[2],
-            edge_tuple[3],
-        )
-
-        source_node = node_map.get(str(source_node_id))
-        target_node = node_map.get(str(target_node_id))
-
-        if not source_node or not target_node or relationship_name is None:
-            skipped_count += 1
-            continue
-
-        source_node_text = _extract_embeddable_text_from_datapoint(source_node)
-        target_node_text = _extract_embeddable_text_from_datapoint(target_node)
-
-        relationship_text = ""
-        if isinstance(edge_properties, dict):
-            edge_text = edge_properties.get("edge_text")
-            if edge_text and isinstance(edge_text, str) and edge_text.strip():
-                relationship_text = edge_text.strip()
-
-        if not relationship_text and relationship_name:
-            relationship_text = relationship_name
-
-        if not source_node_text and not relationship_text and not relationship_name:
-            skipped_count += 1
-            continue
-
-        embeddable_text = f"{source_node_text} -› {relationship_text}-›{target_node_text}".strip()
-
-        triplet_id = generate_node_id(str(source_node_id) + relationship_name + str(target_node_id))
-
-        if triplet_id in seen_ids:
-            continue
-        seen_ids.add(triplet_id)
-
-        triplets.append(
-            Triplet(
-                id=triplet_id,
-                from_node_id=str(source_node_id),
-                to_node_id=str(target_node_id),
-                text=embeddable_text,
-            )
-        )
-
-    return triplets

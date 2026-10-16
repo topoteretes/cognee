@@ -147,10 +147,8 @@ def test_two_rows_that_name_a_container_differently_leave_it_the_newest_name():
     assert [container.name for container in plan.containers.values()] == ["New"]
 
 
-def test_child_of_counts_as_structure_for_visualization_and_contradictions():
+def test_child_of_counts_as_structure_for_visualization():
     from cognee.modules.engine.models import CHILD_OF
     from cognee.modules.visualization.preprocessor import _STRUCTURAL_RELATIONS
-    from cognee.tasks.graph.detect_contradictions import STRUCTURAL_RELATIONSHIPS
 
     assert CHILD_OF in _STRUCTURAL_RELATIONS
-    assert CHILD_OF in STRUCTURAL_RELATIONSHIPS

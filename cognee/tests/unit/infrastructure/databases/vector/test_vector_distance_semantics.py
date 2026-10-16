@@ -45,6 +45,7 @@ class _FakeLanceQuery:
         self.results = results
         self.distance_type_value = None
         self.where_value = None
+        self.select_value = None
 
     def distance_type(self, value):
         self.distance_type_value = value
@@ -54,7 +55,8 @@ class _FakeLanceQuery:
         self.where_value = value
         return self
 
-    def select(self, _columns):
+    def select(self, columns):
+        self.select_value = columns
         return self
 
     def limit(self, _limit):
@@ -150,6 +152,34 @@ async def test_lancedb_search_with_nodeset_filter_uses_cosine():
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb extra is not installed")
+@pytest.mark.parametrize("include_payload", [False, True])
+@pytest.mark.parametrize("node_name", [None, ["A"]])
+async def test_lancedb_search_never_selects_vector_column(include_payload, node_name):
+    # A limit=None search reads a whole collection; selecting the vector column
+    # there would materialize every stored embedding.
+    adapter = LanceDBAdapter(
+        url="memory://", api_key=None, embedding_engine=_DummyEmbeddingEngine()
+    )
+    collection = _FakeLanceCollection(
+        [{"id": str(uuid4()), "payload": {"belongs_to_set": ["A"]}, "_distance": 0.3}]
+    )
+    adapter.get_collection = AsyncMock(return_value=collection)
+
+    results = await adapter.search(
+        collection_name="EdgeType_relationship_name",
+        query_vector=[0.1, 0.2, 0.3],
+        limit=None,
+        include_payload=include_payload,
+        node_name=node_name,
+    )
+
+    assert len(results) == 1
+    expected = ["id", "payload", "_distance"] if include_payload else ["id", "_distance"]
+    assert collection.queries[0].select_value == expected
+
+
+@pytest.mark.asyncio
 @pytest.mark.skipif(not HAS_PGVECTOR, reason="pgvector extra is not installed")
 async def test_pgvector_search_returns_raw_distance(monkeypatch):
     import cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter as pg_module
@@ -186,3 +216,49 @@ async def test_pgvector_search_returns_raw_distance(monkeypatch):
 
     assert [r.score for r in results] == [1.19, 0.51]
     assert any(r.score > 1.0 for r in results)
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_PGVECTOR, reason="pgvector extra is not installed")
+@pytest.mark.parametrize("include_payload", [False, True])
+@pytest.mark.parametrize("node_name", [None, ["A"]])
+async def test_pgvector_search_never_selects_vector_column(monkeypatch, include_payload, node_name):
+    # A limit=None search reads a whole collection; selecting the vector column
+    # there decoded every stored embedding in Python and OOM-killed the process.
+    import cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter as pg_module
+
+    selected = []
+
+    def _select(*columns, **_kwargs):
+        selected.append(columns)
+        return _FakeQuery()
+
+    monkeypatch.setattr(pg_module, "select", _select)
+
+    distance = SimpleNamespace(label=lambda _l: "distance_col")
+    vector_col = SimpleNamespace(cosine_distance=lambda _v: distance)
+    table = SimpleNamespace(
+        c=SimpleNamespace(id="id_col", payload="payload_col", vector=vector_col)
+    )
+
+    adapter = PGVectorAdapter.__new__(PGVectorAdapter)
+    adapter.embedding_engine = _DummyEmbeddingEngine()
+    adapter.get_table = AsyncMock(return_value=table)
+    adapter.get_async_session = lambda: _AsyncContextManager(
+        _FakeSession([SimpleNamespace(id=str(uuid4()), payload={"text": "x"}, similarity=0.3)])
+    )
+
+    results = await PGVectorAdapter.search(
+        adapter,
+        collection_name="EdgeType_relationship_name",
+        query_vector=[0.1, 0.2, 0.3],
+        limit=5,
+        include_payload=include_payload,
+        node_name=node_name,
+    )
+
+    assert len(results) == 1
+    assert all(table not in columns and vector_col not in columns for columns in selected)
+    expected = ("id_col", "payload_col") if include_payload else ("id_col",)
+    assert selected[-1] == (*expected, "distance_col")
+    assert results[0].payload == ({"text": "x"} if include_payload else None)

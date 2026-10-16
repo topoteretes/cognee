@@ -35,6 +35,7 @@ from cognee.infrastructure.databases.exceptions import (
 )
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
     EmbeddingEngine,
+    EmbeddingResult,
 )
 from cognee.infrastructure.databases.vector.embeddings.input_limit import (
     init_input_limit,
@@ -45,6 +46,7 @@ from cognee.infrastructure.databases.vector.embeddings.retry_config import (
     embedding_retry_condition,
 )
 from cognee.infrastructure.databases.vector.embeddings.utils import (
+    count_input_tokens,
     handle_embedding_response,
     sanitize_embedding_text_inputs,
 )
@@ -74,7 +76,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
     and response-parsing issues with custom endpoints.
 
     Public methods:
-    - embed_text: Embed a list of strings into vector representations.
+    - embed_text: Embed a list of strings; returns their vectors and the input-token count.
     - get_vector_size: Retrieve the size of the embedding vectors.
     - get_batch_size: Return the configured batch size.
     """
@@ -95,7 +97,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         max_completion_tokens: int | None = None,
         endpoint: str | None = "http://localhost:8080",
         api_key: str | None = "no-key-required",
-        batch_size: int = 36,
+        batch_size: int = 32,
         input_type: str | None = None,
     ):
         self.model = model or "default"
@@ -139,9 +141,9 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    async def embed_text(self, text: list[str]) -> list[list[float]]:
+    async def embed_text(self, text: list[str]) -> EmbeddingResult:
         """
-        Embed a list of text strings into vector representations.
+        Embed a list of text strings; returns their vectors and the input-token count.
 
         If the input exceeds the model's context window, the method will recursively
         split the input and combine the results.
@@ -154,14 +156,18 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         Returns:
         --------
 
-            - List[List[float]]: A list of vectors representing the embedded texts.
+            - EmbeddingResult: A vector per input text and the input tokens consumed.
         """
         original_texts = text if isinstance(text, list) else [text]
         sanitized_text = sanitize_embedding_text_inputs(original_texts)
 
         if self.mock:
             embeddings = [[0.0] * (self.dimensions or 1) for _ in sanitized_text]
-            return handle_embedding_response(original_texts, embeddings, self.dimensions)
+            # No provider call, so nothing consumed.
+            return EmbeddingResult(
+                vectors=handle_embedding_response(original_texts, embeddings, self.dimensions),
+                tokens=0,
+            )
 
         try:
             create_kwargs = {
@@ -199,12 +205,17 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
             if any(pattern in error_str for pattern in context_error_patterns):
                 if isinstance(original_texts, list) and len(original_texts) > 1:
                     mid = math.ceil(len(original_texts) / 2)
-                    left_vecs, right_vecs = await asyncio.gather(
+                    left_result, right_result = await asyncio.gather(
                         self.embed_text(original_texts[:mid]),
                         self.embed_text(original_texts[mid:]),
                     )
-                    embeddings = left_vecs + right_vecs
-                    return handle_embedding_response(original_texts, embeddings, self.dimensions)
+                    embeddings = left_result + right_result
+                    return EmbeddingResult(
+                        vectors=handle_embedding_response(
+                            original_texts, embeddings, self.dimensions
+                        ),
+                        tokens=left_result.tokens + right_result.tokens,
+                    )
 
                 if isinstance(original_texts, list) and len(original_texts) == 1:
                     s = original_texts[0]
@@ -212,13 +223,19 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
                     if third == 0:
                         raise EmbeddingContextWindowTooSmallError from error
                     left_part, right_part = s[: third * 2], s[third:]
-                    (left_vec,), (right_vec,) = await asyncio.gather(
+                    left_result, right_result = await asyncio.gather(
                         self.embed_text([left_part]),
                         self.embed_text([right_part]),
                     )
+                    (left_vec,), (right_vec,) = left_result, right_result
                     pooled = (np.array(left_vec) + np.array(right_vec)) / 2
                     embeddings = [pooled.tolist()]
-                    return handle_embedding_response(original_texts, embeddings, self.dimensions)
+                    return EmbeddingResult(
+                        vectors=handle_embedding_response(
+                            original_texts, embeddings, self.dimensions
+                        ),
+                        tokens=left_result.tokens + right_result.tokens,
+                    )
 
             if isinstance(error, asyncio.TimeoutError):
                 logger.error(
@@ -272,7 +289,10 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
                 "Embedding failed. Verify EMBEDDING_ENDPOINT and server status."
             ) from error
 
-        return handle_embedding_response(original_texts, embeddings, self.dimensions)
+        return EmbeddingResult(
+            vectors=handle_embedding_response(original_texts, embeddings, self.dimensions),
+            tokens=count_input_tokens(response, sanitized_text, self.tokenizer),
+        )
 
     def get_vector_size(self) -> int:
         """

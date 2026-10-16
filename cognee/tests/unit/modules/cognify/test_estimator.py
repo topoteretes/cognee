@@ -48,7 +48,7 @@ class _FakeChunker:
 
 @pytest.fixture
 def offline_estimator(monkeypatch):
-    monkeypatch.setattr(estimator, "_llm_tokenizer", lambda: _FakeTokenizer())
+    monkeypatch.setattr(estimator, "get_llm_tokenizer", lambda: _FakeTokenizer())
     monkeypatch.setattr(
         estimator,
         "get_llm_config",

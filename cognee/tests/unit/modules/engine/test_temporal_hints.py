@@ -117,6 +117,15 @@ FIRST = "On 26 April 1986 the reactor exploded."
 SECOND = "The following night of 27 April, engineers worked."
 
 
+@pytest.mark.parametrize("edge", ["9999-12-31 23:00 EST", "0001-01-01T00:00:00+01:00"])
+def test_document_hints_survive_a_date_beyond_the_calendar_in_utc(edge):
+    # Converting these to UTC leaves datetime's range; the chunk gets no hints
+    # and the base from earlier chunks carries on.
+    hints = document_temporal_hints([FIRST, f"The sentinel is {edge}.", SECOND])
+    assert hints[1] == []
+    assert len(hints[2]) == 1 and "1986-04-27" in hints[2][0]
+
+
 def test_document_hints_roll_the_base_in_order_and_are_a_pure_function():
     hints = document_temporal_hints([FIRST, SECOND])
     assert hints[0] == []
