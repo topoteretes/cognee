@@ -5,6 +5,7 @@ import json
 import os
 import tempfile
 import threading
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, nullcontext
 from datetime import datetime, timezone
@@ -3413,6 +3414,7 @@ class LadybugAdapter(GraphDBInterface):
 
         try:
             num_nodes, num_edges = await self.get_graph_counts()
+            component_sizes = await self._get_connected_component_sizes()
 
             # Calculate mandatory metrics
             mandatory_metrics = {
@@ -3420,8 +3422,8 @@ class LadybugAdapter(GraphDBInterface):
                 "num_edges": num_edges,
                 "mean_degree": (2 * num_edges) / num_nodes if num_nodes != 0 else None,
                 "edge_density": num_edges / (num_nodes * (num_nodes - 1)) if num_nodes > 1 else 0,
-                "num_connected_components": await self._get_num_connected_components(),
-                "sizes_of_connected_components": await self._get_size_of_connected_components(),
+                "num_connected_components": len(component_sizes),
+                "sizes_of_connected_components": component_sizes,
             }
 
             if include_optional:
@@ -3463,30 +3465,48 @@ class LadybugAdapter(GraphDBInterface):
 
     async def _get_num_connected_components(self) -> int:
         """Get the number of connected components in the graph."""
-        query = """
-        MATCH (n:Node)
-        WITH n, n.id AS node_id
-        MATCH path = (n)-[:EDGE*1..3]-(m)
-        WITH node_id, COLLECT(DISTINCT m.id) AS connected_nodes
-        WITH COLLECT(DISTINCT connected_nodes + [node_id]) AS components
-        RETURN SIZE(components) AS num_components
-        """
-        result = await self.query(query)
-        return result[0][0] if result else 0
+        return len(await self._get_connected_component_sizes())
 
     async def _get_size_of_connected_components(self) -> list[int]:
-        """Get the sizes of all connected components in the graph."""
-        query = """
-        MATCH (n:Node)
-        WITH n, n.id AS node_id
-        MATCH path = (n)-[:EDGE*1..3]-(m)
-        WITH node_id, COLLECT(DISTINCT m.id) AS connected_nodes
-        WITH COLLECT(DISTINCT connected_nodes + [node_id]) AS components
-        UNWIND components AS component
-        RETURN SIZE(component) AS component_size
+        """Get the sizes of all connected components in the graph, largest first."""
+        return await self._get_connected_component_sizes()
+
+    async def _get_connected_component_sizes(self) -> list[int]:
+        """Return the size of every connected component, largest first.
+
+        The previous implementation expanded ``(n)-[:EDGE*1..3]-(m)`` and grouped
+        by start node, which split components whose members sit more than 3 hops
+        apart, reported roughly one "component" per node's local neighborhood,
+        and never counted isolated (degree-0) nodes (the smallest expansion is
+        1 hop). Ladybug Cypher has no transitive-closure or WCC primitive to
+        lean on, so components are computed here: two plain queries pull all
+        node ids and edge endpoints, and union-find assembles the components in
+        O(V + E).
         """
-        result = await self.query(query)
-        return [row[0] for row in result] if result else []
+        node_rows = await self.query("MATCH (n:Node) RETURN n.id")
+        parent: dict[str, str] = {row[0]: row[0] for row in node_rows if row[0] is not None}
+
+        def find(node_id: str) -> str:
+            root = node_id
+            while parent[root] != root:
+                root = parent[root]
+            # Path compression: re-point every node along the way at the root.
+            while parent[node_id] != root:
+                parent[node_id], node_id = root, parent[node_id]
+            return root
+
+        edge_rows = await self.query("MATCH (a:Node)-[:EDGE]->(b:Node) RETURN a.id, b.id")
+        for source_id, target_id in edge_rows:
+            if source_id not in parent or target_id not in parent:
+                # Defensive: an edge whose endpoints carry no id cannot be placed.
+                continue
+            source_root = find(source_id)
+            target_root = find(target_id)
+            if source_root != target_root:
+                parent[source_root] = target_root
+
+        component_sizes = Counter(find(node_id) for node_id in parent)
+        return sorted(component_sizes.values(), reverse=True)
 
     async def _get_shortest_path_lengths(self) -> list[int]:
         """Get the lengths of shortest paths between all pairs of nodes."""
