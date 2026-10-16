@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -128,6 +129,10 @@ class EmbeddingConfig(BaseSettings):
     # so it has no effect on providers that don't recognize it. Configure via
     # the EMBEDDING_INPUT_TYPE env var.
     embedding_input_type: str | None = None
+    # Wire format of embedding responses. Unset: base64 on OpenAI's own API (much
+    # cheaper to parse), float everywhere else. "base64" opts an OpenAI-compatible
+    # server or proxy in; "float" opts out everywhere. See embeddings/encoding.py.
+    embedding_encoding_format: Literal["base64", "float"] | None = None
     # Rate-limiting for embedding requests. Lives here (not in LLMConfig) so the
     # knobs sit with the embedding settings they govern.
     embedding_rate_limit_enabled: bool = False
@@ -179,6 +184,7 @@ class EmbeddingConfig(BaseSettings):
             "embedding_max_completion_tokens": self.embedding_max_completion_tokens,
             "huggingface_tokenizer": self.huggingface_tokenizer,
             "embedding_input_type": self.embedding_input_type,
+            "embedding_encoding_format": self.embedding_encoding_format,
             "embedding_batch_size": self.embedding_batch_size,
             "embedding_max_concurrent_data_points": self.embedding_max_concurrent_data_points,
             "embedding_rate_limit_enabled": self.embedding_rate_limit_enabled,

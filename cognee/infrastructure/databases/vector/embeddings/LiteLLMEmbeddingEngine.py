@@ -3,6 +3,7 @@ import logging
 import math
 import os
 import re
+import warnings
 from urllib.parse import urlparse
 
 import httpx
@@ -17,11 +18,19 @@ from tenacity import (
 
 from cognee.infrastructure.databases.exceptions import (
     EmbeddingContextWindowTooSmallError,
+    EmbeddingEncodingError,
     EmbeddingException,
 )
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
     EmbeddingEngine,
     EmbeddingResult,
+)
+from cognee.infrastructure.databases.vector.embeddings.encoding import (
+    ENCODING_FORMAT_HINT,
+    EncodingFormat,
+    decode_embedding,
+    rejects_encoding_format,
+    resolve_encoding_format,
 )
 from cognee.infrastructure.databases.vector.embeddings.input_limit import (
     init_input_limit,
@@ -43,6 +52,16 @@ from cognee.shared.logging_utils import get_logger
 from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 
 litellm.set_verbose = False
+
+# litellm dumps the openai SDK response model, whose embedding field is typed
+# list[float], so a base64 payload trips a harmless pydantic serializer warning.
+# Matches the wording of every supported pydantic: 2.10 says "but got `str`",
+# 2.11+ "input_type=str" (2.12+ also names the field, which 2.11 does not).
+_BASE64_SERIALIZER_WARNING = (
+    r"Pydantic serializer warnings:[\s\S]*Expected `list\[float\]`"
+    r"[\s\S]*(but got `str`|input_type=str)"
+)
+warnings.filterwarnings("ignore", message=_BASE64_SERIALIZER_WARNING, category=UserWarning)
 logger = get_logger("LiteLLMEmbeddingEngine")
 
 observe = get_observe()
@@ -122,6 +141,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         max_completion_tokens: int | None = None,
         batch_size: int = 100,
         input_type: str | None = None,
+        encoding_format: EncodingFormat | None = None,
     ):
         self.api_key = api_key
         self.endpoint = endpoint
@@ -138,6 +158,9 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         # providers that don't recognize the field (e.g. plain OpenAI).
         self.input_type = input_type
         self._uses_nvidia_nim = _uses_nvidia_nim(self.provider, self.model)
+        self.encoding_format = resolve_encoding_format(model, endpoint, encoding_format)
+        # The hint names a setting, so it only applies when the user set it.
+        self._base64_configured = encoding_format == "base64"
 
         enable_mocking = os.getenv("MOCK_EMBEDDING", "false")
         if isinstance(enable_mocking, bool):
@@ -180,6 +203,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         # wrapping hides the class: see embeddings/retry_config.py.
         retry=embedding_retry_condition(
             EmbeddingContextWindowTooSmallError,
+            EmbeddingEncodingError,
             litellm.exceptions.BadRequestError,
             litellm.exceptions.NotFoundError,
             litellm.exceptions.UnprocessableEntityError,
@@ -231,9 +255,9 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                         "api_version": self.api_version,
                     }
                     # Older LiteLLM releases serialize an omitted encoding format as null,
-                    # which OpenRouter rejects (it only accepts "float"/"base64"). Cognee
-                    # always consumes float vectors, so make the valid format explicit for
-                    # every OpenRouter route: the "openrouter/" model prefix, an explicit
+                    # which OpenRouter rejects (it only accepts "float"/"base64"). Unless
+                    # this engine requests base64 (see embeddings/encoding.py), make
+                    # "float" explicit for every OpenRouter route: the "openrouter/" model prefix, an explicit
                     # provider, or a custom endpoint aimed at openrouter.ai. The last case
                     # (an unprefixed model + endpoint) is driven through litellm's OpenAI
                     # handler -- the branch that historically injected the null -- so it is
@@ -245,7 +269,9 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                         or (self.model or "").lower().startswith("openrouter/")
                         or "openrouter.ai" in (self.endpoint or "").lower()
                     )
-                    if routed_to_openrouter:
+                    if self.encoding_format == "base64":
+                        embedding_kwargs["encoding_format"] = "base64"
+                    elif routed_to_openrouter:
                         embedding_kwargs["encoding_format"] = "float"
 
                     # Pass through target embedding dimensions when supported.
@@ -273,7 +299,10 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                         timeout=300.0,
                     )
 
-                embedding_response = [data["embedding"] for data in response.data]
+                embedding_response = [
+                    decode_embedding(data["embedding"], self.encoding_format)
+                    for data in response.data
+                ]
                 return EmbeddingResult(
                     vectors=handle_embedding_response(text, embedding_response, self.dimensions),
                     tokens=count_input_tokens(response, sanitized_text_input, self.tokenizer),
@@ -302,6 +331,8 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 isinstance(error, litellm.exceptions.ContextWindowExceededError)
                 or _EMBED_LENGTH_ERROR_RE.search(str(error))
             ):
+                if self._base64_configured and rejects_encoding_format(error):
+                    logger.error(ENCODING_FORMAT_HINT)
                 raise
             if isinstance(text, list) and len(text) > 1:
                 mid = math.ceil(len(text) / 2)
@@ -392,6 +423,13 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 str(self.model),
                 str(error),
             )
+            if self._base64_configured and rejects_encoding_format(error):
+                logger.error(ENCODING_FORMAT_HINT)
+            raise
+
+        except EmbeddingEncodingError:
+            # Terminal like the branches above: the route answered in another
+            # format, so a retry gets the same answer. Reaches tenacity unwrapped.
             raise
 
         except Exception as error:
