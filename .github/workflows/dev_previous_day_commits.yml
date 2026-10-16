@@ -31,6 +31,7 @@ jobs:
       has_merges: ${{ steps.prepare.outputs.has_merges }}
       merge_summary: ${{ steps.prepare.outputs.merge_summary }}
       matrix: ${{ steps.prepare.outputs.matrix }}
+      docs_daily_date: ${{ steps.daily_date.outputs.date }}
 
     steps:
       - name: Check out repository
@@ -44,6 +45,14 @@ jobs:
 
       - name: Fetch latest dev branch
         run: git fetch origin dev:refs/remotes/origin/dev --no-tags
+
+      # The docs PRs stack onto a daily automation PR in cognee-docs (RES-91).
+      # The scheduled run starts at 23:59 UTC, after that day's other docs
+      # automations, so it opens the next day's: the UTC date one hour from
+      # now, which also absorbs a late start. A manual daytime run gets today's.
+      - name: Pick the daily docs branch date
+        id: daily_date
+        run: echo "date=$(date -u -d '+1 hour' +%F)" >> "$GITHUB_OUTPUT"
 
       - name: Prepare merged PRs
         id: prepare
@@ -439,13 +448,15 @@ jobs:
           PR_TITLE: ${{ steps.pr_content.outputs.pr_title }}
           PR_BODY: ${{ steps.pr_content.outputs.pr_body }}
           CHANGES_MADE: ${{ steps.commit_docs.outputs.changes_made }}
+          DAILY_DATE: ${{ needs.prepare-merged-branches.outputs.docs_daily_date }}
         run: |
           python3 -I tools/manage_docs_pr.py \
             --target-repo topoteretes/cognee-docs \
             --head-branch "${HEAD_BRANCH}" \
             --pr-title "${PR_TITLE}" \
             --pr-body "${PR_BODY}" \
-            --changes-made "${CHANGES_MADE}"
+            --changes-made "${CHANGES_MADE}" \
+            --daily-date "${DAILY_DATE}"
 
       - name: Summarize docs PR result
         if: ${{ steps.assessment.outputs.needs_update == 'true' && steps.scope_plan.outputs.docs_needed == 'true' }}
