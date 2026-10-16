@@ -480,12 +480,13 @@ async def _remember_entry(
 
 async def _resolve_entry_dataset(
     *, session_id: str, dataset_name: str, dataset_id: UUID | None, user
-) -> tuple[Any, "Dataset"]:
+) -> tuple[Any, "Dataset", bool]:
     """Pick the writable dataset a typed entry in ``session_id`` targets.
 
     The session's binding decides the target dataset; only an unbound session
     addressed by name may create one. A bound or explicit id is checked only,
-    so a refused entry leaves no dataset behind.
+    so a refused entry leaves no dataset behind. The flag is True when the
+    session was already bound, which is then always to the returned dataset.
     """
     from cognee.modules.session_lifecycle.metrics import get_session_row
 
@@ -500,7 +501,7 @@ async def _resolve_entry_dataset(
     target_dataset_id = dataset_id or bound_dataset_id
     if target_dataset_id is None:
         user, datasets = await resolve_authorized_user_datasets(dataset_name, user)
-        return user, datasets[0]
+        return user, datasets[0], False
 
     from cognee.modules.data.methods import get_authorized_dataset
     from cognee.modules.users.exceptions import PermissionDeniedError
@@ -517,7 +518,7 @@ async def _resolve_entry_dataset(
         raise ValueError(
             f"Session {session_id!r} is bound to dataset {dataset.name!r}, not {dataset_name!r}"
         )
-    return user, dataset
+    return user, dataset, bound_dataset_id is not None
 
 
 async def _dispatch_session_entry(
@@ -565,7 +566,7 @@ async def _dispatch_session_entry(
 
         if session_id:
             # A run recorded in a session follows the session's dataset binding.
-            user, dataset = await _resolve_entry_dataset(
+            user, dataset, _ = await _resolve_entry_dataset(
                 session_id=session_id, dataset_name=dataset_name, dataset_id=dataset_id, user=user
             )
             dataset_id = dataset.id
@@ -630,7 +631,7 @@ async def _dispatch_session_entry(
         raise RuntimeError("Session cache unavailable — set CACHING=true to enable session memory")
 
     # Resolve write access before caching any content.
-    user, dataset = await _resolve_entry_dataset(
+    user, dataset, was_bound = await _resolve_entry_dataset(
         session_id=session_id, dataset_name=dataset_name, dataset_id=dataset_id, user=user
     )
 
@@ -640,12 +641,13 @@ async def _dispatch_session_entry(
     )
 
     # Every entry bumps the session's activity; the atomic upsert binds an unbound
-    # session and preserves an existing binding. Re-read it before caching: a
-    # concurrent writer may have bound a fresh session to another dataset first.
+    # session and preserves an existing binding. For a session that was unbound,
+    # re-read it before caching: a concurrent writer may have bound it first.
     await ensure_and_touch_session(session_id=session_id, user_id=user.id, dataset_id=dataset.id)
-    row = await get_session_row(session_id=session_id, user_id=user.id)
-    if row is None or row.dataset_id != dataset.id:
-        raise ValueError("Session is already bound to another dataset or cannot be bound")
+    if not was_bound:
+        row = await get_session_row(session_id=session_id, user_id=user.id)
+        if row is None or row.dataset_id != dataset.id:
+            raise ValueError("Session is already bound to another dataset or cannot be bound")
 
     if isinstance(entry, (QAEntry, TraceEntry)) and entry.node_set:
         from cognee.infrastructure.session.session_node_set import pin_session_node_set

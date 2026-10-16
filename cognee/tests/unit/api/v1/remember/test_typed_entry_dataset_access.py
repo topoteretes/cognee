@@ -311,6 +311,27 @@ async def test_dataset_id_that_is_not_a_uuid_is_rejected(env):
 
 
 @pytest.mark.asyncio
+async def test_bound_session_skips_the_binding_reread(env, monkeypatch):
+    metrics = importlib.import_module("cognee.modules.session_lifecycle.metrics")
+    read_row = AsyncMock(wraps=metrics.get_session_row)
+    monkeypatch.setattr(metrics, "get_session_row", read_row)
+
+    for question in ("q1", "q2"):
+        await cognee.remember(
+            QAEntry(question=question, answer="a"),
+            dataset_name="shared",
+            session_id="owner-session",
+            user=env.owner,
+        )
+        if question == "q1":
+            # Binding a fresh session re-reads the row to catch a concurrent binder.
+            assert read_row.await_count == 2
+
+    assert read_row.await_count == 3
+    assert await _cached_questions(env.owner, "owner-session") == ["q1", "q2"]
+
+
+@pytest.mark.asyncio
 async def test_remote_client_receives_dataset_id(monkeypatch):
     remember_module = importlib.import_module("cognee.api.v1.remember.remember")
     state = importlib.import_module("cognee.api.v1.serve.state")
