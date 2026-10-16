@@ -35,6 +35,14 @@ _REMOVED_TASK_NAMES = frozenset({"get_triplet_datapoints"})
 
 def _task_factories() -> dict[str, Callable[[], Task]]:
     """Name -> zero-argument factory, for the names the memify API accepted."""
+    from cognee.memify_pipelines.cognify_code_docs import (
+        cognify_chunks_per_batch,
+        select_code_doc_chunks,
+    )
+    from cognee.shared.data_models import KnowledgeGraph
+    from cognee.tasks.code_docs.add_code_doc_edges import add_code_doc_edges
+    from cognee.tasks.code_docs.extract_code_docs import extract_code_docs
+    from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
     from cognee.tasks.memify.apply_feedback_weights import apply_feedback_weights
     from cognee.tasks.memify.cognify_agent_trace_feedback import cognify_agent_trace_feedback
     from cognee.tasks.memify.cognify_session import cognify_session
@@ -46,6 +54,7 @@ def _task_factories() -> dict[str, Callable[[], Task]]:
     from cognee.tasks.memify.extract_subgraph import extract_subgraph
     from cognee.tasks.memify.extract_subgraph_chunks import extract_subgraph_chunks
     from cognee.tasks.memify.extract_user_sessions import extract_user_sessions
+    from cognee.tasks.storage.add_data_points import add_data_points
     from cognee.tasks.storage.index_data_points import index_data_points
 
     return {
@@ -61,6 +70,24 @@ def _task_factories() -> dict[str, Callable[[], Task]]:
         "detect_entity_duplicates": lambda: Task(detect_entity_duplicates),
         "merge_entity_duplicates": lambda: Task(merge_entity_duplicates),
         "index_data_points": lambda: Task(index_data_points, task_config={"batch_size": 100}),
+        # The code docs pipeline (cognee/memify_pipelines/cognify_code_docs.py) by
+        # name: extraction ["extract_code_docs"]; enrichment ["add_data_points",
+        # "add_code_doc_edges"] (embed-only) or ["select_code_doc_chunks",
+        # "extract_graph_and_summarize", "add_data_points", "add_code_doc_edges"]
+        # (with cognify's entity extraction, at cognify's defaults).
+        "extract_code_docs": lambda: Task(extract_code_docs, needs_llm=False),
+        "select_code_doc_chunks": lambda: Task(select_code_doc_chunks, needs_llm=False),
+        "extract_graph_and_summarize": lambda: Task(
+            extract_graph_and_summarize,
+            graph_model=KnowledgeGraph,
+            task_config={"batch_size": cognify_chunks_per_batch()},
+        ),
+        "add_data_points": lambda: Task(
+            add_data_points,
+            task_config={"batch_size": cognify_chunks_per_batch()},
+            needs_llm=False,
+        ),
+        "add_code_doc_edges": lambda: Task(add_code_doc_edges, needs_llm=False),
     }
 
 
