@@ -117,7 +117,9 @@ def _use(monkeypatch, cognee_fake, **settings) -> ImproveConfig:
             importlib.import_module("cognee"), name, getattr(cognee_fake, name), raising=False
         )
 
-    async def pipeline(*, user, session_ids, raw_trace_content, last_n_steps, **kwargs):
+    async def pipeline(
+        *, user, session_ids, raw_trace_content, last_n_steps, persist_up_to=None, **kwargs
+    ):
         """The memify pipeline's two real tasks, without the dataset and pipeline plumbing."""
         extract_module = importlib.import_module(
             "cognee.tasks.memify.extract_agent_trace_feedbacks"
@@ -128,6 +130,7 @@ def _use(monkeypatch, cognee_fake, **settings) -> ImproveConfig:
             session_ids=session_ids,
             raw_trace_content=raw_trace_content,
             last_n_steps=last_n_steps,
+            persist_up_to=persist_up_to,
         ):
             await cognify_agent_trace_feedback(window, dataset_id=uuid4(), user=user)
         return {}
@@ -206,6 +209,30 @@ async def test_steps_written_during_the_run_wait_for_the_next_run(store, monkeyp
 
     assert second.status == "completed"
     assert await _watermark(store, inputs) == 120
+
+
+@pytest.mark.asyncio
+async def test_last_window_stops_at_the_starting_count_while_the_agent_writes(store, monkeypatch):
+    """A backlog that is not a whole number of windows: the last window is cut at
+    the count the run started with, not at the live count, so the run neither
+    takes the agent's new steps nor mistakes the session for a stuck one."""
+    store.add_steps("s1", 45)
+    cognee_fake = FakeCognee(on_cognify=lambda: store.add_steps("s1", 30))
+    inputs = _inputs(_use(monkeypatch, cognee_fake, trace_window_steps=30))
+
+    result = await PersistAgentTracesStage().run(inputs)
+
+    assert result.status == "completed"
+    assert result.counts["windows"] == 2
+    assert "sessions_stuck" not in result.counts
+    assert cognee_fake.steps_per_document() == [30, 15]
+    assert await _watermark(store, inputs) == 45
+
+    cognee_fake.on_cognify = None
+    second = await PersistAgentTracesStage().run(inputs)
+
+    assert second.status == "completed"
+    assert await _watermark(store, inputs) == 105
 
 
 @pytest.mark.asyncio

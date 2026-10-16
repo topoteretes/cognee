@@ -203,7 +203,8 @@ class PersistAgentTracesStage(BaseStage):
         # of each pending session and advances their watermarks, so a failure
         # repeats one bounded window, not the whole backlog. The loop drains the
         # backlog the run started with, unless trace_windows_per_run caps the
-        # run; steps an agent writes meanwhile wait for the next run, so a live
+        # run; steps an agent writes meanwhile wait for the next run (the window
+        # is cut at the starting count, persist_up_to), so a live
         # session cannot keep the run (and the dataset's improve lock) going. A
         # session whose window did not advance is left out of the later passes
         # of this run, so one stuck session never stalls the others.
@@ -229,6 +230,7 @@ class PersistAgentTracesStage(BaseStage):
                 raw_trace_content=False,
                 last_n_steps=config.trace_window_steps,
                 run_in_background=False,
+                persist_up_to=backlog,
             )
             windows += len(batch)
             stage_result = StageResult.from_pipeline_run(
