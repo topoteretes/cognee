@@ -478,15 +478,6 @@ async def _remember_entry(
     )
 
 
-async def _dataset_exists(dataset_id: UUID) -> bool:
-    """Whether a dataset with this id exists, regardless of who may access it."""
-    from cognee.infrastructure.databases.relational import get_relational_engine
-    from cognee.modules.data.models import Dataset
-
-    async with get_relational_engine().get_async_session() as session:
-        return await session.get(Dataset, dataset_id) is not None
-
-
 async def _resolve_entry_dataset(
     *, session_id: str, dataset_name: str, dataset_id: UUID | None, user
 ) -> tuple[Any, "Dataset", bool]:
@@ -512,7 +503,7 @@ async def _resolve_entry_dataset(
         user, datasets = await resolve_authorized_user_datasets(dataset_name, user)
         return user, datasets[0], False
 
-    from cognee.modules.data.methods import get_authorized_dataset
+    from cognee.modules.data.methods import dataset_exists, get_authorized_dataset
     from cognee.modules.users.exceptions import PermissionDeniedError
 
     try:
@@ -520,7 +511,7 @@ async def _resolve_entry_dataset(
     except PermissionDeniedError:
         # A missing dataset is refused like a forbidden one. Only a binding the
         # caller's own write created may say it is gone: that reveals nothing.
-        if bound_dataset_id is None or await _dataset_exists(bound_dataset_id):
+        if bound_dataset_id is None or await dataset_exists(bound_dataset_id):
             raise
         from cognee.modules.data.exceptions import DatasetNotFoundError
 

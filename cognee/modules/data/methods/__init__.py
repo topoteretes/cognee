@@ -3,6 +3,7 @@ from .create_dataset import create_dataset
 
 # Get
 from .get_dataset import get_dataset
+from .dataset_exists import dataset_exists
 from .get_datasets import get_datasets
 from .get_datasets_by_name import get_datasets_by_name
 from .get_dataset_data import get_dataset_data, count_dataset_data
