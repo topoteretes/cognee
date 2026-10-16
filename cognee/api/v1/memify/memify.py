@@ -48,13 +48,14 @@ def _reads_the_graph_itself(extraction_tasks: list[Task]) -> bool:
 
 def _task_factories() -> dict[str, Callable[[], Task]]:
     """Name -> zero-argument factory, for the names the memify API accepted."""
-    from cognee.memify_pipelines.cognify_code_docs import (
+    from cognee.shared.data_models import KnowledgeGraph
+    from cognee.tasks.code_docs.add_code_doc_edges import add_code_doc_edges
+    from cognee.tasks.code_docs.cognify_code_doc_chunks import (
         cognify_chunks_per_batch,
         cognify_code_doc_chunks,
     )
-    from cognee.shared.data_models import KnowledgeGraph
-    from cognee.tasks.code_docs.add_code_doc_edges import add_code_doc_edges
     from cognee.tasks.code_docs.extract_code_docs import extract_code_docs
+    from cognee.tasks.code_docs.store_code_docs import store_code_docs
     from cognee.tasks.memify.apply_feedback_weights import apply_feedback_weights
     from cognee.tasks.memify.cognify_agent_trace_feedback import cognify_agent_trace_feedback
     from cognee.tasks.memify.cognify_session import cognify_session
@@ -83,16 +84,22 @@ def _task_factories() -> dict[str, Callable[[], Task]]:
         "merge_entity_duplicates": lambda: Task(merge_entity_duplicates),
         "index_data_points": lambda: Task(index_data_points, task_config={"batch_size": 100}),
         # The code docs pipeline (cognee/memify_pipelines/cognify_code_docs.py) by
-        # name: extraction ["extract_code_docs"]; enrichment ["add_data_points",
+        # name: extraction ["extract_code_docs"]; enrichment ["store_code_docs",
         # "add_code_doc_edges"] (embed-only) or ["cognify_code_doc_chunks",
-        # "add_data_points", "add_code_doc_edges"] (cognify's entity extraction
-        # and summaries over the chunks, at cognify's defaults, one cognify
-        # batch at a time).
+        # "store_code_docs", "add_code_doc_edges"] (cognify's entity extraction
+        # and summaries over the not yet summarized chunks, at cognify's
+        # defaults, one cognify batch at a time). store_code_docs writes only
+        # what the graph lacks; add_data_points stays for generic chains.
         "extract_code_docs": lambda: Task(extract_code_docs, needs_llm=False),
         "cognify_code_doc_chunks": lambda: Task(
             cognify_code_doc_chunks,
             graph_model=KnowledgeGraph,
             chunks_per_batch=cognify_chunks_per_batch(),
+        ),
+        "store_code_docs": lambda: Task(
+            store_code_docs,
+            task_config={"batch_size": cognify_chunks_per_batch()},
+            needs_llm=False,
         ),
         "add_data_points": lambda: Task(
             add_data_points,

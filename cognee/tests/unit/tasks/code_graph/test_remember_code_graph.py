@@ -73,7 +73,8 @@ async def test_single_repo_runs_code_graph_pipeline(code_remember_env):
     assert call.kwargs["dataset"] == code_remember_env["dataset"].id
     assert call.kwargs["pipeline_name"] == "code_graph_pipeline"
     assert call.kwargs["data"] == [code_remember_env["data_row"]]
-    assert len(call.kwargs["tasks"]) == 3
+    # extract -> load nodes -> load edges -> store docstrings (the docs tail).
+    assert len(call.kwargs["tasks"]) == 4
 
     assert result.status == "completed"
     assert result.items_processed == 1
@@ -156,6 +157,33 @@ async def test_code_defaults_to_graph_only(code_remember_env):
 
     tasks = code_remember_env["pipeline"].await_args.kwargs["tasks"]
     assert tasks[1].default_params["kwargs"]["graph_only"] is True
+
+
+@pytest.mark.asyncio
+async def test_code_follows_the_docstring_setting(code_remember_env, monkeypatch):
+    """remember(content_type="code") takes CODE_GRAPH_DOCS as it is: the docs tail is
+    the list's last task by default and absent when the setting is off."""
+    from cognee.tasks.code_graph.extract_code_graph import add_code_graph_docs
+
+    monkeypatch.delenv("CODE_GRAPH_DOCS", raising=False)
+    cognify_config_module.get_cognify_config.cache_clear()
+    try:
+        await remember("/some/repo", content_type="code")
+        tasks = code_remember_env["pipeline"].await_args.kwargs["tasks"]
+        assert tasks[-1].executable is add_code_graph_docs
+        assert tasks[-1].needs_llm is False
+
+        monkeypatch.setenv("CODE_GRAPH_DOCS", "false")
+        cognify_config_module.get_cognify_config.cache_clear()
+        await remember("/some/repo", content_type="code")
+    finally:
+        cognify_config_module.get_cognify_config.cache_clear()
+    tasks = code_remember_env["pipeline"].await_args.kwargs["tasks"]
+    assert [task.executable.__name__ for task in tasks] == [
+        "extract_code_graph",
+        "add_code_graph_data_points",
+        "add_code_graph_edges",
+    ]
 
 
 @pytest.mark.asyncio

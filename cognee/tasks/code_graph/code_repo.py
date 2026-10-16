@@ -29,6 +29,10 @@ add; its cognify stamps are kept and nothing is rebuilt. The
 repository itself is read from its original location at cognify time — like
 ``remember(content_type="code")``, the enola run happens in place.
 
+The route also stores the repository's docstrings as DocumentChunks linked to
+the code nodes (``add_code_graph_docs``), by default; ``CODE_GRAPH_DOCS=false``
+or ``cognify(code_docs=False)`` builds the code graph alone.
+
 A GitHub/GitLab repository URL passed to ``add()`` takes the same path after a
 shallow clone (``resolve_code_repository_url``): the clone directory is the
 "original location" the manifest points at.
@@ -417,13 +421,26 @@ async def add_code_repository(
 async def extract_code_repo_graph(
     data_documents: list,
     ctx: Optional["PipelineContext"] = None,
+    code_docs: bool | None = None,
 ) -> list:
     """Cognify CODE_REPO-route adapter: one enola run over the whole project.
 
     Reads the stored manifest for the repo path and runs the standard code
     graph tasks on the ORIGINAL directory (enola writes its .enola snapshot
     there, exactly like remember(content_type="code")). One repository node,
-    cross-file edges, one graph read per repo. No LLM, no embeddings.
+    cross-file edges, one graph read per repo. No LLM call. The code nodes are
+    stored graph-only; the only embedding call is the docs tail that follows
+    (``code_docs``, the CODE_GRAPH_DOCS setting when None, on by default):
+    the repository's docstrings become DocumentChunks linked to its code nodes
+    by ``describes`` edges, embedded with the configured provider -- the local
+    fastembed model when no key is configured, except while a
+    COGNEE_SKIP_PREFLIGHT / COGNEE_SKIP_CONNECTION_TEST / MOCK_EMBEDDING switch
+    keeps the configured provider (a keyless install that sets one names
+    EMBEDDING_PROVIDER=fastembed or switches the tail off). The tail reads the
+    docstrings from this directory, runs with this route's ``ctx``, so the
+    chunks belong to the manifest's data item and forget(data_id) removes them
+    with the code graph, and is best effort: when it fails, add_code_graph_docs
+    logs the error and the item completes with its code graph.
 
     A call-level node_set (add()/remember()'s ``node_set`` argument) reaches
     every document this manifest's repo carries, but not the code nodes
@@ -434,11 +451,15 @@ async def extract_code_repo_graph(
     down so every code node -- CodeRepository included -- carries it too.
     """
     from cognee.infrastructure.files.utils.open_data_file import open_data_file
+    from cognee.modules.cognify.config import get_cognify_config, resolve_code_docs
     from cognee.tasks.code_graph.extract_code_graph import (
         add_code_graph_data_points,
+        add_code_graph_docs,
         add_code_graph_edges,
         extract_code_graph,
     )
+
+    code_docs = resolve_code_docs(code_docs, get_cognify_config())
 
     for data_item in data_documents:
         if not is_code_repo_sourced(data_item):
@@ -464,14 +485,28 @@ async def extract_code_repo_graph(
         data_points = await extract_code_graph(repo_path=repo_path, node_set=node_set)
         state = await add_code_graph_data_points(data_points, ctx=ctx, graph_only=True)
         await add_code_graph_edges(state, repo_path=repo_path, ctx=ctx, node_set=node_set)
+        if code_docs:
+            await add_code_graph_docs(state, ctx=ctx, repo_path=repo_path)
 
         logger.info("Code repo graph extracted for %s (%s).", repo_path, data_item.id)
 
     return data_documents
 
 
-def get_code_repo_tasks() -> list:
-    """The cognify CODE_REPO-route task list: one adapter task, no LLM stages."""
+def get_code_repo_tasks(code_docs: bool | None = None) -> list:
+    """The cognify CODE_REPO-route task list: one adapter task, no LLM stages.
+
+    ``code_docs`` is resolved here against the CODE_GRAPH_DOCS setting (the
+    explicit argument wins) and bound on the task, the way cognify binds
+    summary_method on the standard list.
+    """
+    from cognee.modules.cognify.config import get_cognify_config, resolve_code_docs
     from cognee.modules.pipelines.tasks.task import Task
 
-    return [Task(extract_code_repo_graph, needs_llm=False)]
+    return [
+        Task(
+            extract_code_repo_graph,
+            code_docs=resolve_code_docs(code_docs, get_cognify_config()),
+            needs_llm=False,
+        )
+    ]

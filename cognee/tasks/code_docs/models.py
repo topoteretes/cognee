@@ -19,6 +19,11 @@ from cognee.modules.data.processing.document_types import Document
 # The edge from a docstring chunk to the CodeSymbol (or CodeModule) it documents.
 DESCRIBES_RELATIONSHIP = "describes"
 
+# Where a docstring came from: the source file, read by a language reader, or
+# the ``doc`` prop enola extracted (the first paragraph, cut at 300 bytes).
+DOC_SOURCE_SOURCE = "source"
+DOC_SOURCE_ENOLA = "enola"
+
 
 def code_document_id(repo: str, file_path: str) -> UUID:
     """The id of the CodeDocument for ``file_path`` of ``repo``: stable across runs."""
@@ -43,3 +48,9 @@ class CodeDocument(Document):
     language: str | None = None
     # Documented symbols this document holds (the module docstring not counted).
     symbol_count: int = 0
+    # DOC_SOURCE_SOURCE when the file was read and at least one docstring came
+    # from it; DOC_SOURCE_ENOLA when every chunk carries enola's ``doc`` prop
+    # (no reader for the language, or the source could not be read). A run
+    # that cannot read a repository's source keeps the documents read from it
+    # rather than replace them with enola's shorter docs (see extract_code_docs).
+    doc_source: str = DOC_SOURCE_SOURCE
