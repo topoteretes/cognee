@@ -535,7 +535,12 @@ async def _resolve_entry_dataset(
 
     from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
-    if bound_dataset_id is not None and dataset_name not in (DEFAULT_DATASET_NAME, dataset.name):
+    # An explicit id takes precedence over the name and already matched the binding.
+    if (
+        dataset_id is None
+        and bound_dataset_id is not None
+        and dataset_name not in (DEFAULT_DATASET_NAME, dataset.name)
+    ):
         raise ValueError(
             f"Session {session_id!r} is bound to dataset {dataset.name!r}, not {dataset_name!r}"
         )
@@ -561,10 +566,11 @@ async def _dispatch_session_entry(
     A session is bound to one dataset by its first write (``remember`` or a
     ``recall`` that records activity). Later entries target that dataset:
     ``dataset_name`` only creates-or-resolves a dataset for a session that is
-    not bound yet. On a bound session an explicit ``dataset_id`` or a
-    ``dataset_name`` other than the default that disagrees with the binding is
-    rejected; the ``"main_dataset"`` default is accepted because it cannot be
-    told apart from no name at all.
+    not bound yet. On a bound session an explicit ``dataset_id`` that disagrees
+    with the binding is rejected, and so is a ``dataset_name`` other than the
+    default when no ``dataset_id`` is given (an id takes precedence over the
+    name); the ``"main_dataset"`` default is accepted because it cannot be told
+    apart from no name at all.
     """
     # RememberResult.dataset_id is a str; accept it back as the UUID it names.
     if dataset_id is not None and not isinstance(dataset_id, UUID):

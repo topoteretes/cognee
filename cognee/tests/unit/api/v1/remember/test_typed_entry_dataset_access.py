@@ -362,6 +362,29 @@ async def test_unknown_explicit_dataset_id_is_refused_like_a_forbidden_one(env):
 
 
 @pytest.mark.asyncio
+async def test_bound_session_lets_an_explicit_id_override_the_name(env):
+    # dataset_id takes precedence over dataset_name, bound session or not.
+    await cognee.remember(
+        QAEntry(question="q1", answer="a1"),
+        dataset_name="shared",
+        session_id="owner-session",
+        user=env.owner,
+    )
+    names_before = await _owned_dataset_names(env.owner)
+
+    result = await cognee.remember(
+        QAEntry(question="q2", answer="a2"),
+        dataset_name="other",
+        dataset_id=env.shared.id,
+        session_id="owner-session",
+        user=env.owner,
+    )
+
+    assert result.dataset_id == str(env.shared.id)
+    assert await _owned_dataset_names(env.owner) == names_before
+
+
+@pytest.mark.asyncio
 async def test_remote_client_receives_dataset_id(monkeypatch):
     remember_module = importlib.import_module("cognee.api.v1.remember.remember")
     state = importlib.import_module("cognee.api.v1.serve.state")
