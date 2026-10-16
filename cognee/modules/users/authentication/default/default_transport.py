@@ -14,7 +14,11 @@ if cookie_domain == "":
 
 default_transport = CookieTransport(
     cookie_name=os.getenv("AUTH_TOKEN_COOKIE_NAME", "auth_token"),
-    cookie_secure=False,
+    # Secure: the browser then sends the cookie over https only. Off by default
+    # because a browser will not store a Secure cookie from http://localhost;
+    # set AUTH_TOKEN_COOKIE_SECURE=true behind TLS (cognee itself sees plain
+    # http behind a terminating proxy, so it cannot infer this).
+    cookie_secure=os.getenv("AUTH_TOKEN_COOKIE_SECURE", "false").lower() in ("true", "1", "yes"),
     cookie_httponly=True,
     cookie_samesite="Lax",
     cookie_domain=cookie_domain,  # None allows cookie to work on any domain
