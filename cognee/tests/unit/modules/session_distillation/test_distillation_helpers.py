@@ -174,20 +174,33 @@ class TestIsEntryDistillable:
 
 
 class TestSelectSessionTurns:
-    def test_keeps_turns_from_the_earliest_new_entry_onward(self):
+    def test_keeps_turns_from_the_one_before_the_earliest_new_entry_onward(self):
+        # An entry is written after the turn it judges, so the newest turn before
+        # the earliest new entry is the one that produced it and must be kept.
         entries = [
             _context_entry(created_at="2026-06-11T12:00:00+00:00"),
-            _context_entry(created_at="2026-06-11T10:00:00+00:00"),
+            _context_entry(created_at="2026-06-11T10:00:00.500000+00:00"),
         ]
         rows = [
-            _qa_row("before", time="2026-06-11T09:59:59+00:00"),
-            _qa_row("at", time="2026-06-11T10:00:00+00:00"),
+            _qa_row("long before", time="2026-06-11T08:00:00+00:00"),
+            _qa_row("producing", time="2026-06-11T10:00:00+00:00"),
             _qa_row("after", time="2026-06-11T15:00:00+00:00"),
         ]
 
         kept = distill_module.select_session_turns(rows, entries)
 
-        assert [row["question"] for row in kept] == ["at", "after"]
+        assert [row["question"] for row in kept] == ["producing", "after"]
+
+    def test_no_turn_before_the_entry_keeps_the_rest(self):
+        entries = [_context_entry(created_at="2026-06-11T10:00:00+00:00")]
+        rows = [_qa_row("after", time="2026-06-11T11:00:00+00:00")]
+
+        assert distill_module.select_session_turns(rows, entries) == rows
+
+    def test_no_new_entries_keeps_every_turn(self):
+        rows = [_qa_row("any", time="2026-06-11T09:00:00+00:00")]
+
+        assert distill_module.select_session_turns(rows, []) == rows
 
     def test_entry_without_timestamp_keeps_every_turn(self):
         entries = [_context_entry(created_at="")]
@@ -235,14 +248,14 @@ class TestBuildCuratorBatches:
         )
 
         assert len(batches) == 1
-        assert "User: How do I update firmware?" in batches[0]
-        assert f"Candidate {context_entries[0].id}" in batches[0]
-        assert "Flashing wipes calibration." in batches[0]
+        assert "User: How do I update firmware?" in batches[0].text
+        assert f"Candidate {context_entries[0].id}" in batches[0].text
+        assert "Flashing wipes calibration." in batches[0].text
 
     def test_feedback_text_is_appended_to_the_turn_block(self):
         batch = distill_module.build_curator_batches(
             [_qa_row("Which port?", "8080.", feedback_text="Wrong, it is 9000.")], []
-        )[0]
+        )[0].text
 
         assert (
             batch
@@ -250,7 +263,7 @@ class TestBuildCuratorBatches:
         )
 
     def test_turn_without_feedback_has_no_feedback_line(self):
-        batch = distill_module.build_curator_batches([_qa_row("Q?", "A.")], [])[0]
+        batch = distill_module.build_curator_batches([_qa_row("Q?", "A.")], [])[0].text
 
         assert "User feedback on this answer" not in batch
 
@@ -258,7 +271,7 @@ class TestBuildCuratorBatches:
         batch = distill_module.build_curator_batches(
             [_qa_row("Q?", "A.", feedback_text="  too   " + "w" * (MAX_QA_FEEDBACK_CHARS * 2))],
             [],
-        )[0]
+        )[0].text
 
         feedback_line = batch.split("User feedback on this answer: ", 1)[1]
         assert feedback_line.startswith("too w")
@@ -270,7 +283,7 @@ class TestBuildCuratorBatches:
             section="failure_lessons", context_profile="agent", content="Sync before tests."
         )
 
-        batch = distill_module.build_curator_batches([], [qa_entry, agent_entry])[0]
+        batch = distill_module.build_curator_batches([], [qa_entry, agent_entry])[0].text
 
         assert f"Candidate {qa_entry.id} [qa/rules]:" in batch
         assert f"Candidate {agent_entry.id} [agent/failure_lessons]:" in batch
@@ -281,7 +294,7 @@ class TestBuildCuratorBatches:
         ]
         qa = [_qa_row("Later question?", time="2026-06-11T10:00:05")]
 
-        batch = distill_module.build_curator_batches(qa, context_entries)[0]
+        batch = distill_module.build_curator_batches(qa, context_entries)[0].text
 
         assert batch.index("Earlier candidate.") < batch.index("Later question?")
 
@@ -294,11 +307,11 @@ class TestBuildCuratorBatches:
         batches = distill_module.build_curator_batches(qa, [])
 
         assert len(batches) == 2
-        assert all(len(batch) <= BATCH_CHAR_BUDGET for batch in batches)
+        assert all(len(batch.text) <= BATCH_CHAR_BUDGET for batch in batches)
 
     def test_oversized_question_is_truncated_before_batching(self):
         huge_question = "y" * (BATCH_CHAR_BUDGET * 2)
-        batch = distill_module.build_curator_batches([_qa_row(question=huge_question)], [])[0]
+        batch = distill_module.build_curator_batches([_qa_row(question=huge_question)], [])[0].text
 
         assert len(batch) <= BATCH_CHAR_BUDGET
         assert huge_question not in batch
@@ -308,7 +321,7 @@ class TestBuildCuratorBatches:
         huge_content = "z" * (BATCH_CHAR_BUDGET * 2)
         context_entries = [_context_entry(content=huge_content)]
 
-        batch = distill_module.build_curator_batches([], context_entries)[0]
+        batch = distill_module.build_curator_batches([], context_entries)[0].text
 
         assert len(batch) <= BATCH_CHAR_BUDGET
         assert huge_content not in batch
