@@ -46,7 +46,7 @@ async def cognify_agent_trace_feedback(
     advances that session's trace persist watermark to the step count captured
     at extraction time. On failure the watermark stays put, so the same window
     is re-extracted and retried on the next improve() (add-level content-hash
-    dedup makes the retry safe), and the remaining windows still run.
+    dedup makes the retry safe).
 
     Plain strings are still accepted for callers that feed their own trace text
     through the public ``memify`` task registry; they carry no watermark.
@@ -60,9 +60,7 @@ async def cognify_agent_trace_feedback(
 
     Raises:
         CogneeValidationError: If no non-empty window or text was provided.
-        LLMPaymentRequiredError: If a window's build hit an exhausted LLM budget.
-        CogneeSystemError: If cognee operations fail for plain-text content. A
-            failing window is logged instead, so other sessions still persist.
+        CogneeSystemError: If cognee operations fail.
     """
     items = _coerce_trace_items(data)
     if not items:
@@ -74,77 +72,58 @@ async def cognify_agent_trace_feedback(
             log=False,
         )
 
-    for item in items:
-        window = item if isinstance(item, TracePersistWindow) else None
-        try:
-            await _cognify_trace_item(item, window, dataset_id, node_set_name, user)
-        except CogneeValidationError:
-            # Includes LLMPaymentRequiredError: every later window would fail the
-            # same way, so the run stops here.
-            raise
-        except Exception as error:
-            if window is None:
-                logger.exception("Error cognifying agent trace content")
-                raise CogneeSystemError(
-                    message=f"Failed to cognify agent trace content: {error}",
-                    log=False,
+    try:
+        for item in items:
+            window = item if isinstance(item, TracePersistWindow) else None
+            text = window.text if window is not None else item
+
+            logger.info("Processing agent trace content for cognification")
+            # Plain-text callers carry no session, so no pinned node set.
+            node_set = bridge_node_set([node_set_name], window.node_set if window else ())
+            await cognee.add(text, dataset_id=dataset_id, node_set=node_set, user=user)
+            logger.debug("Agent trace content added to cognee with node_set: %s", node_set)
+            # raise_on_error=False: one trace session's failed build must not kill
+            # the whole memify run — log the cause, keep this window's watermark
+            # put (so it is re-extracted and retried on the next improve()), and
+            # let the remaining sessions proceed.
+            cognify_result = await cognee.cognify(
+                datasets=[dataset_id], user=user, raise_on_error=False
+            )
+            errored_run = get_errored_run_info(cognify_result)
+            if errored_run is not None:
+                # A recorded budget rejection is raised as LLMPaymentRequiredError:
+                # every later window would fail the same way, so improve stops the
+                # run instead of trying each one. The watermark stays put, so this
+                # window is retried once there is budget.
+                raise_if_budget_exhausted_record(errored_run.error_class, errored_run.error_message)
+                logger.error(
+                    "Cognify failed for agent trace content (%s: %s); watermark not advanced, "
+                    "continuing with the run",
+                    errored_run.error_class,
+                    errored_run.error_message,
                 )
-            # One session's failing window must not kill the memify run and with
-            # it every other session's window, run after run. Its watermark stays
-            # put, so improve() reports the session as stuck and retries it later.
-            logger.exception(
-                "Error cognifying agent trace window of session %s; watermark not "
-                "advanced, continuing with the run",
+                continue
+            logger.info("Agent trace content successfully cognified")
+
+            if window is None:
+                continue
+            await TRACE_PERSIST_WATERMARK.write_count(
+                get_session_manager(),
+                user_id=window.user_id,
+                session_id=window.session_id,
+                count=window.persisted_trace_count,
+            )
+            logger.info(
+                "Session %s trace persist watermark advanced to %d",
                 window.session_id,
+                window.persisted_trace_count,
             )
 
-
-async def _cognify_trace_item(
-    item: TraceContent,
-    window: TracePersistWindow | None,
-    dataset_id: UUID | str | None,
-    node_set_name: str,
-    user: User | None,
-) -> None:
-    """Add and cognify one trace item; advance its window's watermark on success."""
-    text = window.text if window is not None else item
-
-    logger.info("Processing agent trace content for cognification")
-    # Plain-text callers carry no session, so no pinned node set.
-    node_set = bridge_node_set([node_set_name], window.node_set if window else ())
-    await cognee.add(text, dataset_id=dataset_id, node_set=node_set, user=user)
-    logger.debug("Agent trace content added to cognee with node_set: %s", node_set)
-    # raise_on_error=False: one trace session's failed build must not kill
-    # the whole memify run — log the cause, keep this window's watermark
-    # put (so it is re-extracted and retried on the next improve()), and
-    # let the remaining sessions proceed.
-    cognify_result = await cognee.cognify(datasets=[dataset_id], user=user, raise_on_error=False)
-    errored_run = get_errored_run_info(cognify_result)
-    if errored_run is not None:
-        # A recorded budget rejection is raised as LLMPaymentRequiredError:
-        # every later window would fail the same way, so improve stops the
-        # run instead of trying each one. The watermark stays put, so this
-        # window is retried once there is budget.
-        raise_if_budget_exhausted_record(errored_run.error_class, errored_run.error_message)
-        logger.error(
-            "Cognify failed for agent trace content (%s: %s); watermark not advanced, "
-            "continuing with the run",
-            errored_run.error_class,
-            errored_run.error_message,
+    except CogneeValidationError:
+        raise
+    except Exception as error:
+        logger.exception("Error cognifying agent trace content")
+        raise CogneeSystemError(
+            message=f"Failed to cognify agent trace content: {error}",
+            log=False,
         )
-        return
-    logger.info("Agent trace content successfully cognified")
-
-    if window is None:
-        return
-    await TRACE_PERSIST_WATERMARK.write_count(
-        get_session_manager(),
-        user_id=window.user_id,
-        session_id=window.session_id,
-        count=window.persisted_trace_count,
-    )
-    logger.info(
-        "Session %s trace persist watermark advanced to %d",
-        window.session_id,
-        window.persisted_trace_count,
-    )

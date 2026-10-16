@@ -244,8 +244,6 @@ async def test_errored_run_info_keeps_watermark_put():
 
 @pytest.mark.asyncio
 async def test_cognify_exception_keeps_watermark_put():
-    """A window whose build raises is logged, not raised, so the memify run (and
-    every other session's window in it) survives; its watermark stays put."""
     manager = _FakeSessionManager()
 
     with (
@@ -256,36 +254,10 @@ async def test_cognify_exception_keeps_watermark_put():
         ),
     ):
         mock_cognify.side_effect = Exception("Cognify operation failed")
-        await cognify_agent_trace_feedback(_window(persisted_trace_count=5), dataset_id="123")
+        with pytest.raises(CogneeSystemError, match="Failed to cognify agent trace content"):
+            await cognify_agent_trace_feedback(_window(persisted_trace_count=5), dataset_id="123")
 
     assert await TRACE_PERSIST_WATERMARK.read_count(manager, "u", "s") == 0
-
-
-@pytest.mark.asyncio
-async def test_raising_window_does_not_stop_the_rest_of_the_batch():
-    manager = _FakeSessionManager()
-
-    async def add(text, **kwargs):
-        if text.startswith("Session ID: a\n"):
-            raise RuntimeError("Add operation failed")
-
-    with (
-        patch("cognee.add", new_callable=AsyncMock, side_effect=add),
-        patch("cognee.cognify", new_callable=AsyncMock, return_value={}),
-        patch.object(
-            cognify_agent_trace_feedback_module, "get_session_manager", return_value=manager
-        ),
-    ):
-        await cognify_agent_trace_feedback(
-            [
-                _window(text="Session ID: a\n\nstep", persisted_trace_count=4, session_id="a"),
-                _window(text="Session ID: b\n\nstep", persisted_trace_count=7, session_id="b"),
-            ],
-            dataset_id="123",
-        )
-
-    assert await TRACE_PERSIST_WATERMARK.read_count(manager, "u", "a") == 0
-    assert await TRACE_PERSIST_WATERMARK.read_count(manager, "u", "b") == 7
 
 
 @pytest.mark.asyncio

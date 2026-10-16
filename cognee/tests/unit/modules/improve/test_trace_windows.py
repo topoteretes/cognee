@@ -307,31 +307,6 @@ async def test_stuck_session_does_not_stall_the_others(store, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_session_whose_window_raises_does_not_stall_the_others(store, monkeypatch):
-    """Session a's add() raises on every try; b still drains to the end in the
-    same run, and the stage reports a as stuck instead of failing the pass."""
-
-    class RaisingAdd(FakeCognee):
-        async def add(self, text, **kwargs):
-            if text.startswith("Session ID: a\n"):
-                raise RuntimeError("add failed for a")
-            self.documents.append(text)
-
-    store.add_steps("a", 95)
-    store.add_steps("b", 95)
-    cognee_fake = RaisingAdd()
-    inputs = _inputs(_use(monkeypatch, cognee_fake, trace_window_steps=30), ("a", "b"))
-
-    result = await PersistAgentTracesStage().run(inputs)
-
-    assert result.status == "errored"
-    assert "a" in (result.error or "")
-    assert result.counts["sessions_stuck"] == 1
-    assert await _watermark(store, inputs, "a") == 0
-    assert await _watermark(store, inputs, "b") == 95
-
-
-@pytest.mark.asyncio
 async def test_exhausted_budget_stops_the_stage_and_is_classified(store, monkeypatch):
     from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
     from cognee.modules.improve.stage import execute_stage
