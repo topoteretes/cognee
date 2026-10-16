@@ -52,7 +52,7 @@ class ImproveConfig(BaseSettings):
     # Agent trace persistence cognifies a session's pending steps in windows of
     # at most this many steps, so no single LLM call grows with the backlog.
     trace_window_steps: int = 30
-    # Windows one persist_agent_traces pass may cognify. 0 (the default) drains
+    # Windows one persist_agent_traces run may cognify. 0 (the default) drains
     # the backlog in one run; with a cap, the rest waits for the next improve().
     trace_windows_per_run: int = 0
 
