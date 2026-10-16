@@ -87,6 +87,7 @@ async def test_non_nvidia_provider_keeps_dimensions_and_skips_input_type(monkeyp
     # OpenAI's own API is the one route that defaults to base64 vectors.
     monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
     monkeypatch.delenv("OPENAI_API_BASE", raising=False)
+    monkeypatch.delenv("USE_LITELLM_PROXY", raising=False)
 
     import cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine as mod
     from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
@@ -94,6 +95,7 @@ async def test_non_nvidia_provider_keeps_dimensions_and_skips_input_type(monkeyp
     )
 
     monkeypatch.setattr(mod.litellm, "api_base", None)
+    monkeypatch.setattr(mod.litellm, "use_litellm_proxy", False)
 
     engine = LiteLLMEmbeddingEngine(
         model="openai/text-embedding-3-large",

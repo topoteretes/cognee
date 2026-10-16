@@ -21,6 +21,7 @@ from urllib.parse import urlparse
 
 import litellm
 import numpy as np
+import openai
 
 from cognee.exceptions import CogneeConfigurationError
 from cognee.infrastructure.databases.exceptions import EmbeddingEncodingError
@@ -74,12 +75,29 @@ def _litellm_openai_endpoint(endpoint: str | None) -> str | None:
     )
 
 
+def _hostname(url: str) -> str | None:
+    """The URL's host, or None when the URL does not parse (an unclosed IPv6 bracket)."""
+    try:
+        return urlparse(url).hostname
+    except ValueError:
+        return None
+
+
 def _routes_to_openai_api(model: str | None, endpoint: str | None) -> bool:
     """Whether litellm sends this model to OpenAI's own embeddings API."""
     endpoint = _litellm_openai_endpoint(endpoint)
-    if endpoint and urlparse(endpoint).hostname != _OPENAI_API_HOST:
+    if endpoint and _hostname(endpoint) != _OPENAI_API_HOST:
         return False
-    return _routes_through_openai_handler(model)
+    if model is None or not _routes_through_openai_handler(model):
+        return False
+    # litellm has the last word: USE_LITELLM_PROXY (or litellm.use_litellm_proxy) sends
+    # even an openai/ model to a LiteLLM proxy, whose backend may refuse base64. Asked
+    # only about models that are OpenAI's by name, so it never meets one it does not know.
+    # It reports every failure as BadRequestError.
+    try:
+        return litellm.get_llm_provider(model=model, api_base=endpoint)[1] == "openai"
+    except litellm.exceptions.BadRequestError:
+        return False
 
 
 def base64_supported(provider: str) -> bool:
@@ -110,28 +128,79 @@ def decode_embedding(embedding: list[float] | str, encoding_format: EncodingForm
     format (a LiteLLM proxy in front of Bedrock returns 1-bit vectors as a list of 0/1),
     so it raises EmbeddingEncodingError instead of storing garbage. With float, the list
     passes through unchanged.
+
+    The length is not checked against the configured dimensions: with EMBEDDING_DIMENSIONS
+    unset, the connection test adopts the length of the first vector it gets.
     """
     if encoding_format == "float":
         return embedding
     if not isinstance(embedding, str):
         raise EmbeddingEncodingError(f"got {type(embedding).__name__}")
     try:
-        vector = np.frombuffer(base64.b64decode(embedding, validate=True), dtype="<f4").tolist()
+        vector = np.frombuffer(base64.b64decode(embedding, validate=True), dtype="<f4")
     except (binascii.Error, ValueError) as error:
         raise EmbeddingEncodingError(f"payload does not decode as float32: {error}") from error
-    if not vector:
+    if not vector.size:
         raise EmbeddingEncodingError("payload is empty")
-    return vector
+    # Bytes of another type (int8, float16, big-endian float32) decode too, as other
+    # numbers. An embedding never holds NaN or infinity, so those give the misread away.
+    if not np.isfinite(vector).all():
+        raise EmbeddingEncodingError("payload decodes to NaN or infinity, so it is not float32")
+    return vector.tolist()
 
 
 _ENCODING_REJECTION_RE = re.compile(r"encoding_format|base64", re.IGNORECASE)
+# The fields where an error body says what went wrong. Echoes of the request ("input",
+# "ctx") are never read: they carry encoding_format=base64 on every refused call.
+_ERROR_MESSAGE_KEYS = ("message", "msg", "error", "errors", "detail")
+
+
+def _server_error_body(error: BaseException) -> object | None:
+    """The parsed body of the HTTP error behind ``error``, or None.
+
+    The openai SDK keeps it on the error it raises. litellm raises its own error and keeps
+    the SDK's in the exception chain.
+    """
+    current: BaseException | None = error
+    for _ in range(5):
+        if current is None:
+            return None
+        # Not every subclass sets it: litellm's UnsupportedParamsError has no body.
+        body = getattr(current, "body", None)
+        if isinstance(current, openai.APIStatusError) and body is not None:
+            return body
+        current = current.__cause__ or current.__context__
+    return None
+
+
+def _names_encoding(body: object) -> bool:
+    """Whether an error body, read from its message fields only, is about the encoding."""
+    if isinstance(body, str):
+        return bool(_ENCODING_REJECTION_RE.search(body))
+    if isinstance(body, list):
+        return any(_names_encoding(item) for item in body)
+    if not isinstance(body, dict):
+        return False
+    # OpenAI-style errors name the parameter; pydantic (FastAPI) errors locate it.
+    if body.get("param") == "encoding_format":
+        return True
+    loc = body.get("loc")
+    if isinstance(loc, (list, tuple)) and "encoding_format" in loc:
+        return True
+    return any(_names_encoding(body[key]) for key in _ERROR_MESSAGE_KEYS if key in body)
 
 
 def rejects_encoding_format(error: BaseException) -> bool:
     """Whether a 400/422 is about the encoding, so ENCODING_FORMAT_HINT fits it.
 
-    A server that rejects base64 says so ("unsupported encoding_format", "Input should
-    be 'float' or 'base64'"); a bad model name or dimensions does not, and the hint
-    would send the user after the wrong fix.
+    A server that rejects base64 says so ("unsupported encoding_format", a validation
+    error located at encoding_format); a bad model name or dimensions does not, and the
+    hint would send the user after the wrong fix. The server's error body is read field by
+    field, because an error about something else may echo the request, which names
+    encoding_format and base64 on every call, or the input texts. An error with no body,
+    such as litellm refusing the parameter before sending, is matched on its message.
     """
+    body = _server_error_body(error)
+    if body is not None:
+        return _names_encoding(body)
     return bool(_ENCODING_REJECTION_RE.search(str(error)))
