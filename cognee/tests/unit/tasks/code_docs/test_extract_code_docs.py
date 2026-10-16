@@ -543,6 +543,26 @@ async def test_stale_line_resolves_by_name_and_overloads_by_their_docstring(tmp_
 
 
 @pytest.mark.asyncio
+async def test_stale_line_of_a_symbol_gone_from_the_source_yields_no_chunk(tmp_path, monkeypatch):
+    root = _write_repo(tmp_path / "shop", {"mod.py": 'def moved():\n    """Moved here."""\n'})
+    nodes = [
+        _repository(root),
+        # The snapshot's line now holds ``moved`` and neither name is in the file.
+        _symbol("mod.gone", "mod.py", 1),
+        _symbol("mod.also_gone", "mod.py", 1, doc="What enola had."),
+    ]
+    _mock_engine(monkeypatch, nodes)
+
+    _, chunks = _split(await extract_code_docs())
+
+    # Not ``moved``'s docstring under another symbol's header; enola's doc when there is one.
+    assert [(_metadata(chunk)["symbol"], _metadata(chunk)["doc_source"]) for chunk in chunks] == [
+        ("mod.also_gone", "enola")
+    ]
+    assert chunks[0].text == "mod.py:1\nmod.also_gone (function)\n\nWhat enola had."
+
+
+@pytest.mark.asyncio
 async def test_graph_is_read_through_the_filtered_query(shop, monkeypatch):
     engine = _mock_engine(monkeypatch, _shop_nodes(shop))
 

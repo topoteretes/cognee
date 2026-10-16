@@ -209,6 +209,24 @@ async def test_memify_without_data_passes_the_graph(legacy_env, run_memify):
 
 
 @pytest.mark.asyncio
+async def test_memify_seeds_a_graph_reading_extraction_instead_of_projecting(
+    legacy_env, run_memify
+):
+    """extract_code_docs reads the code graph itself: no memory fragment is built for it."""
+    with pytest.warns(FutureWarning):
+        await cognee.memify(
+            extraction_tasks=["extract_code_docs"],
+            enrichment_tasks=["add_data_points", "add_code_doc_edges"],
+        )
+
+    legacy_env.get_fragment.assert_not_awaited()
+    assert legacy_env.order == ["setup", "migrations", "resolve"]
+    kwargs = run_memify.await_args.kwargs
+    assert kwargs["data"] == [{}]
+    assert kwargs["dataset"] == legacy_env.dataset.id
+
+
+@pytest.mark.asyncio
 async def test_old_module_path_is_the_same_deprecated_memify(legacy_env, run_memify):
     """Before SDK-1115 cognee.memify *was* cognee.modules.memify.memify."""
     from cognee.modules.memify import memify as old_path_memify

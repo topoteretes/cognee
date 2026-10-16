@@ -13,18 +13,24 @@ retriever (recall, GRAPH_COMPLETION, HYBRID, CHUNKS) already searches
 text with no retrieval change. ``add_code_doc_edges`` then links each chunk to
 its ``CodeSymbol`` with a ``describes`` edge, so a hit reaches the symbol's
 file, line, callers and flows in one hop, and sweeps the chunks a re-run no
-longer yields.
+longer yields, from the graph and from their vector collections.
 
 Ids are deterministic (document: ``code_document_id(repo, file)``; chunk: the
-content hash of its text), so re-runs are idempotent: unchanged sources write
-nothing new and a changed docstring replaces exactly its chunk.
+content hash of its text), so a re-run over unchanged sources yields the same
+ids: no node or edge is added, a changed docstring replaces exactly its chunk
+and the sweep removes nothing else. The nodes themselves are stored again on
+every run (add_data_points merges and re-embeds what it is handed), so an
+unchanged run still costs the writes.
 
 Embed-only by default (no LLM call: ``needs_llm=False`` on every task).
 ``extract_entities=True`` adds the standard cognify extraction and summaries
-over the chunks before they are stored.
+over the chunks before they are stored, one cognify batch at a time.
 """
 
+from typing import TYPE_CHECKING, Optional
 from uuid import UUID
+
+from pydantic import BaseModel
 
 from cognee.infrastructure.engine.models.DataPoint import DataPoint
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
@@ -40,6 +46,9 @@ from cognee.tasks.code_docs.extract_code_docs import extract_code_docs
 from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
 from cognee.tasks.storage import add_data_points
 
+if TYPE_CHECKING:
+    from cognee.modules.pipelines.models import PipelineContext
+
 
 def cognify_chunks_per_batch() -> int:
     """The batch size cognify stores chunks with: its config, 2000 when unset."""
@@ -47,18 +56,41 @@ def cognify_chunks_per_batch() -> int:
     return chunks_per_batch if chunks_per_batch is not None else 2000
 
 
-async def select_code_doc_chunks(data_points: list[DataPoint]):
-    """Keep the chunks of an extract_code_docs batch, dropping its documents.
+async def cognify_code_doc_chunks(
+    data_points: list[DataPoint],
+    ctx: Optional["PipelineContext"] = None,
+    graph_model: type[BaseModel] = KnowledgeGraph,
+    chunks_per_batch: int | None = None,
+):
+    """Run cognify's extract_graph_and_summarize over the batch's chunks, a cognify batch at a time.
 
-    extract_graph_and_summarize accepts chunks only (it reads ``.text``), so
-    the entity-extraction chain starts here. The documents are not lost: each
-    chunk references its document through ``is_part_of`` and add_data_points
-    writes the whole object graph, exactly how the cognify chain stores
-    documents. A batch without chunks is dropped, since extraction rejects an
-    empty list.
+    The whole run arrives in one call (every task of the chain is a coroutine,
+    see get_code_docs_memify_tasks), and extract_graph_and_summarize fires one
+    LLM extraction and one summary request per chunk it is handed, all at
+    once. So the chunks are cut into ``chunks_per_batch`` pieces (cognify's
+    chunks_per_batch when None) and each piece is awaited before the next:
+    the LLM sees at most one cognify batch of concurrent requests, as under
+    cognify's own streaming chunker, while the next task still receives the
+    whole run. Only the chunks go in (extraction reads ``.text``); the
+    documents are not lost, since each chunk references its document through
+    ``is_part_of`` and add_data_points writes the whole object graph, exactly
+    how the cognify chain stores documents. A batch without chunks is dropped,
+    since extraction rejects an empty list. Returns what extraction returned
+    for each piece -- summaries, or chunks as themselves -- in chunk order.
     """
     chunks = [point for point in data_points if isinstance(point, DocumentChunk)]
-    return chunks if chunks else Drop
+    if not chunks:
+        return Drop
+    if not chunks_per_batch or chunks_per_batch <= 0:
+        chunks_per_batch = cognify_chunks_per_batch()
+    results: list[DataPoint] = []
+    for start in range(0, len(chunks), chunks_per_batch):
+        results.extend(
+            await extract_graph_and_summarize(
+                chunks[start : start + chunks_per_batch], graph_model=graph_model, ctx=ctx
+            )
+        )
+    return results
 
 
 def get_code_docs_memify_tasks(
@@ -72,13 +104,15 @@ def get_code_docs_memify_tasks(
     CodeRepository in the dataset); ``include_modules`` adds a chunk per
     file-level docstring. The enrichment chain is cognify's storage chain --
     add_data_points at cognify's batch size, then add_code_doc_edges -- with,
-    for ``extract_entities``, extract_graph_and_summarize (the generic
-    KnowledgeGraph, cognify's defaults) in front of it over the chunks only.
+    for ``extract_entities``, cognify_code_doc_chunks in front of it: cognify's
+    extract_graph_and_summarize (the generic KnowledgeGraph, cognify's
+    defaults) over the chunks only, one cognify batch at a time.
 
     Every task is a coroutine, so the pipeline hands each one the whole run's
     output in one call (only a generator's output is cut into ``batch_size``
     pieces): add_code_doc_edges sees the complete run and its sweep compares
-    the stored docs against all of it.
+    the stored docs against all of it. The ``batch_size`` on add_data_points
+    is cognify's; it would take effect only if a task before it streamed.
     """
     batch_size = cognify_chunks_per_batch()
     extraction_tasks = [
@@ -86,14 +120,9 @@ def get_code_docs_memify_tasks(
     ]
     enrichment_tasks = []
     if extract_entities:
-        enrichment_tasks += [
-            Task(select_code_doc_chunks, needs_llm=False),
-            Task(
-                extract_graph_and_summarize,
-                graph_model=KnowledgeGraph,
-                task_config={"batch_size": batch_size},
-            ),
-        ]
+        enrichment_tasks.append(
+            Task(cognify_code_doc_chunks, graph_model=KnowledgeGraph, chunks_per_batch=batch_size)
+        )
     enrichment_tasks += [
         Task(add_data_points, task_config={"batch_size": batch_size}, needs_llm=False),
         Task(add_code_doc_edges, needs_llm=False),

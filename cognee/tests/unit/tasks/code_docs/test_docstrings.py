@@ -203,6 +203,29 @@ def test_signatures_are_one_line_without_decorators(parsed):
     assert by_name["one_liner"].docstring == "On the header line."
 
 
+def test_line_breaks_follow_the_parser_not_splitlines():
+    # A form feed (a GNU-style page break) and the Unicode line separator are
+    # not line breaks to the parser; cutting the source at them would shift
+    # every line below and yield another line's text as the signature.
+    source = (
+        'TEXT = "para break"\n'
+        "\n"
+        "\n"
+        "def a():\n"
+        '    """A."""\n'
+        "    return 1\n"
+        "\x0c\n"
+        "def b(x, y):\n"
+        '    """B."""\n'
+        "    return x\n"
+    )
+    _, symbols = parse_python_docs(source)
+    assert [(symbol.name, symbol.line, symbol.signature) for symbol in symbols] == [
+        ("a", 4, "def a():"),
+        ("b", 8, "def b(x, y):"),
+    ]
+
+
 def test_signature_is_capped_at_300_characters():
     params = ", ".join(f"parameter_{index}: int = {index}" for index in range(40))
     _, symbols = parse_python_docs(f"def wide({params}):\n    '''Doc.'''\n")
@@ -231,6 +254,11 @@ def test_find_falls_back_to_the_name(file_docs):
     # extractor's naming), and when it agrees with the name.
     assert file_docs.find(_line_of("def helper"), "nested.helper").name == "helper"
     assert file_docs.find(_line_of("def helper"), "helper").name == "helper"
+    # The line holds some other def and the name is nowhere in the file: a
+    # stale line, not this symbol, so another symbol's docstring is not
+    # attached under its header.
+    assert file_docs.find(_line_of("def helper"), "Order.gone") is None
+    assert file_docs.find(_line_of("def helper"), "gone") is None
 
 
 def test_find_prefers_the_documented_overload(file_docs):

@@ -7,6 +7,15 @@ documented symbol's docstring from the repository source on the server
 emits one ``CodeDocument`` per source file plus one ``DocumentChunk`` per
 documented symbol, its text starting with ``file:line``.
 
+Coverage is what the Python reader finds in the source, plus the Enola
+fallback for symbols whose facts carry a ``doc`` prop: the first paragraph of
+the doc comment, cut at 300 bytes, which enola 0.4.30 (the pinned release)
+emits for Python, Go and TypeScript/JavaScript symbols; snapshots written by
+older releases carry none. On this repository the fallback supplied the
+frontend's TS/JS docstrings and the few Python symbols the source matcher did
+not place. A full docstring for another language needs a reader in
+``docstrings.READERS``.
+
 The chunks are plain ``DocumentChunk`` objects on purpose: every existing
 retriever (recall, GRAPH_COMPLETION, HYBRID, CHUNKS) already searches the
 ``DocumentChunk_text`` collection, so a docstring becomes searchable memory
@@ -44,9 +53,7 @@ from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.code_docs.docstrings import (
     STATUS_MISSING,
-    STATUS_OK,
     STATUS_PARSE_ERROR,
-    STATUS_UNSUPPORTED,
     FileDocs,
     language_of,
     module_name_of,
@@ -277,14 +284,17 @@ def _file_docstrings(
     counts: Counter,
 ) -> tuple[FileDocs, str | None, list[_Docstring]]:
     """The docstrings of one source file, module docstring first, symbols in source order."""
+    has_reader = language_of(file_path) is not None
     if repo_path is None:
         file_docs = FileDocs(status=STATUS_MISSING, language=language_of(file_path))
     else:
         file_docs = read_file_docs(repo_path, file_path)
-        if file_docs.status == STATUS_PARSE_ERROR:
-            counts["parse_errors"] += 1
-        elif file_docs.status not in (STATUS_OK, STATUS_UNSUPPORTED):
-            counts["files_unreadable"] += 1
+    if not has_reader:
+        counts["files_unsupported"] += 1
+    elif file_docs.status == STATUS_PARSE_ERROR:
+        counts["parse_errors"] += 1
+    elif not file_docs.readable:
+        counts["files_unreadable"] += 1
 
     language = file_docs.language
     file_set_names: list[str] = []
@@ -339,7 +349,17 @@ def _file_docstrings(
         else:
             text = _enola_doc(properties)
             if text is None:
-                counts["undocumented"] += 1
+                # Why there is nothing to store, so the summary line does not
+                # report a TypeScript interface or a variable as a def that
+                # lacks a docstring.
+                if not has_reader:
+                    counts["symbols_unsupported_language"] += 1
+                elif not file_docs.readable:
+                    counts["symbols_in_unreadable_files"] += 1
+                elif found is None:
+                    counts["symbols_not_defs"] += 1
+                else:
+                    counts["undocumented"] += 1
                 continue
             if line is None:
                 counts["symbols_without_line"] += 1
@@ -556,9 +576,11 @@ async def extract_code_docs(
         documents.extend(repo_documents)
         chunks.extend(repo_chunks)
         logger.info(
-            "Code docs of repository %r%s: %d file(s), %d symbol(s) seen, %d documented from "
-            "source, %d from enola, %d undocumented, %d file(s) unreadable, %d parse error(s), "
-            "%d document(s) and %d chunk(s) emitted.",
+            "Code docs of repository %r%s: %d file(s), %d symbol(s) seen; %d documented from "
+            "source, %d from enola; without a docstring: %d def/class, %d not a def/class in "
+            "the source (variables, stale lines), %d in %d file(s) with no reader for the "
+            "language, %d in %d unreadable file(s) (%d parse error(s)); %d document(s) and "
+            "%d chunk(s) emitted.",
             name,
             f" (dataset {dataset!r})" if dataset else "",
             counts["files"],
@@ -566,7 +588,11 @@ async def extract_code_docs(
             counts["documented_from_source"],
             counts["documented_from_enola"],
             counts["undocumented"],
-            counts["files_unreadable"],
+            counts["symbols_not_defs"],
+            counts["symbols_unsupported_language"],
+            counts["files_unsupported"],
+            counts["symbols_in_unreadable_files"],
+            counts["files_unreadable"] + counts["parse_errors"],
             counts["parse_errors"],
             len(repo_documents),
             counts["chunks"],

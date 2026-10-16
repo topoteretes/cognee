@@ -32,6 +32,7 @@ extract_module = importlib.import_module("cognee.tasks.code_docs.extract_code_do
 graph_engine_module = importlib.import_module(
     "cognee.infrastructure.databases.graph.get_graph_engine"
 )
+vector_module = importlib.import_module("cognee.infrastructure.databases.vector")
 code_retriever_module = importlib.import_module("cognee.modules.retrieval.code_retriever")
 
 SHOP = "shop"
@@ -141,7 +142,27 @@ def _write_snapshot(directory, facts, snapshot_id):
 
 
 @pytest.fixture
-def engine(tmp_path, monkeypatch):
+def vectors(monkeypatch):
+    """Where the sweep drops embeddings.
+
+    The chain here stores graph only (no embedding provider in unit tests), so
+    the fake reports every collection present to make the deletes observable.
+    """
+    fake = SimpleNamespace(deleted=[])
+
+    async def has_collection(name):
+        return True
+
+    async def delete_data_points(collection, ids):
+        fake.deleted.append((collection, list(ids)))
+
+    fake.has_collection, fake.delete_data_points = has_collection, delete_data_points
+    monkeypatch.setattr(vector_module, "get_vector_engine_async", AsyncMock(return_value=fake))
+    return fake
+
+
+@pytest.fixture
+def engine(tmp_path, monkeypatch, vectors):
     """A real Ladybug graph that every task of both chains reads and writes."""
     from cognee.infrastructure.databases.graph.ladybug.adapter import LadybugAdapter
 
@@ -315,10 +336,13 @@ async def test_resolve_edges_to_text_renders_the_chunk_from_its_file_line_header
 
 
 @pytest.mark.asyncio
-async def test_rerun_change_and_removal_touch_exactly_their_chunks(engine, repos, monkeypatch):
+async def test_rerun_change_and_removal_touch_exactly_their_chunks(
+    engine, repos, vectors, monkeypatch
+):
     await _sync_both_code_graphs(repos)
     first = await _sync_code_docs()
     nodes_1, edges_1 = await _graph(engine)
+    assert vectors.deleted == []
 
     written, deleted = [], []
     real_add_edges, real_delete_nodes = engine.add_edges, engine.delete_nodes
@@ -337,7 +361,7 @@ async def test_rerun_change_and_removal_touch_exactly_their_chunks(engine, repos
     # Unchanged sources: the same ids, no new edge, nothing swept.
     second = await _sync_code_docs()
     assert [point.id for point in second] == [point.id for point in first]
-    assert (written, deleted) == ([], [])
+    assert (written, deleted, vectors.deleted) == ([], [], [])
     nodes_2, edges_2 = await _graph(engine)
     assert set(nodes_2) == set(nodes_1)
     assert _edge_keys(edges_2) == _edge_keys(edges_1)
@@ -357,6 +381,8 @@ async def test_rerun_change_and_removal_touch_exactly_their_chunks(engine, repos
     assert new_main.chunk_index == old_main.chunk_index == 1
     assert written == [(str(new_main.id), main_id, "describes")]
     assert deleted == [str(old_main.id)]
+    # The old chunk leaves DocumentChunk_text too, so CHUNKS stops returning it.
+    assert vectors.deleted == [("DocumentChunk_text", [str(old_main.id)])]
     nodes_3, edges_3 = await _graph(engine)
     assert set(nodes_3) == (set(nodes_2) - {str(old_main.id)}) | {str(new_main.id)}
     assert nodes_3[str(new_main.id)]["text"] == new_main.text
@@ -368,6 +394,7 @@ async def test_rerun_change_and_removal_touch_exactly_their_chunks(engine, repos
     # CodeSymbol (and with it the describes edge), the docs run sweeps its chunk.
     written.clear()
     deleted.clear()
+    vectors.deleted.clear()
     (repos.shop / "orders/checkout.py").write_text(
         CHECKOUT_PY_WITHOUT_PLACE_ORDER, encoding="utf-8"
     )
@@ -381,6 +408,7 @@ async def test_rerun_change_and_removal_touch_exactly_their_chunks(engine, repos
     fourth = await _sync_code_docs()
 
     assert (written, deleted) == ([], [str(old_place_order.id)])
+    assert vectors.deleted == [("DocumentChunk_text", [str(old_place_order.id)])]
     assert {point.id for point in fourth} == (
         {point.id for point in second} - {old_main.id, old_place_order.id}
     ) | {new_main.id}

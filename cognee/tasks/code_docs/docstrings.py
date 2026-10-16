@@ -37,6 +37,9 @@ STATUS_PARSE_ERROR = "parse_error"
 
 _SPACE_AFTER_OPEN = re.compile(r"([(\[{])\s+")
 _SPACE_BEFORE_CLOSE = re.compile(r"\s+([)\]},])")
+# The line breaks the parser counts. str.splitlines() also cuts at form feeds
+# and the Unicode separators, which would shift every ``lineno`` below one.
+_LINE_BREAK = re.compile(r"\r\n|\r|\n")
 
 
 @dataclass(frozen=True)
@@ -88,12 +91,22 @@ class FileDocs:
         same name, so an ``@overload`` stub reported by the extractor resolves
         to the implementation that carries the docstring. When the line now
         holds a differently named symbol and ``name`` is found elsewhere, the
-        source has moved on since the snapshot and the name is trusted.
-        Returns an undocumented symbol when that is all there is, and None
-        when the file holds no such symbol.
+        source has moved on since the snapshot and the name is trusted. When
+        ``name`` is nowhere in the file, the symbol on the line stands in for
+        it only if it is at least called the same (an extractor may qualify a
+        nested def differently): a stale line that now holds some other def is
+        not this symbol. Returns an undocumented symbol when that is all there
+        is, and None when the file holds no such symbol.
         """
         line_match = self._by_line.get(line) if line is not None else None
         name_matches = list(self._by_name.get(name, ())) if name else []
+        if (
+            line_match is not None
+            and name
+            and not name_matches
+            and _last_component(line_match.name) != _last_component(name)
+        ):
+            line_match = None
         if line_match is not None and name_matches and line_match.name != name:
             candidates = name_matches
         else:
@@ -103,6 +116,10 @@ class FileDocs:
             if symbol.docstring:
                 return symbol
         return candidates[0] if candidates else None
+
+
+def _last_component(dotted_name: str) -> str:
+    return dotted_name.rsplit(".", 1)[-1]
 
 
 def language_of(file_path: str) -> str | None:
@@ -250,7 +267,7 @@ def parse_python_docs(source: str) -> tuple[str | None, list[SymbolDoc]]:
     does not parse; ``read_file_docs`` turns that into a status.
     """
     tree = ast.parse(source)
-    lines = source.splitlines()
+    lines = _LINE_BREAK.split(source)
     symbols: list[SymbolDoc] = []
     _walk(tree.body, "", False, lines, symbols)
     return ast.get_docstring(tree, clean=True) or None, symbols

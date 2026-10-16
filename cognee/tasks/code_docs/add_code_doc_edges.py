@@ -16,7 +16,8 @@ Ids are deterministic (``code_document_id`` for a document, the content hash of
 the text for a chunk), so a re-run over unchanged sources yields the same ids:
 the edge diff adds nothing and the sweep finds nothing. A changed docstring
 yields a chunk with a new id; its predecessor, and every document the run no
-longer produced, is swept here.
+longer produced, is swept here, from the graph and from the vector collections
+it was embedded into.
 """
 
 import posixpath
@@ -35,6 +36,7 @@ from cognee.tasks.code_graph.extract_code_graph import (
     _invalidate_code_graph_snapshot,
     fact_node_id,
 )
+from cognee.tasks.summarization.models import TextSummary
 
 if TYPE_CHECKING:
     from cognee.modules.pipelines.models import PipelineContext
@@ -44,10 +46,16 @@ logger = get_logger("code_docs")
 # Stored type names (DataPoint.type is the class name).
 _CODE_DOCUMENT_TYPE = CodeDocument.__name__
 _CHUNK_TYPE = DocumentChunk.__name__
-_SUMMARY_TYPE = "TextSummary"
+_SUMMARY_TYPE = TextSummary.__name__
 # The one graph read covers these stored types. A filtered read returns an
 # edge only when both of its endpoints match, so the code node types are in
-# for the describes edges and the summaries for their made_from edges.
+# for the describes edges and the summaries for their made_from edges. The
+# read is the dataset's every DocumentChunk, text included, not just the code
+# docs: there is no property filter below the type on every backend. Walking
+# instead from the repositories' CodeDocuments (get_neighborhood, two hops)
+# measured 2-4x faster on Ladybug for a 20k-chunk corpus next to a 300-chunk
+# repository, and 4-5x slower for a 5k-chunk repository on its own, so the
+# single read stays until a dataset shows the corpus cost.
 _READ_TYPES = [_CODE_DOCUMENT_TYPE, _CHUNK_TYPE, _SUMMARY_TYPE, "CodeSymbol", "CodeModule"]
 
 
@@ -66,12 +74,13 @@ async def add_code_doc_edges(
     so a re-run adds nothing. ``sweep`` deletes, per repository seen in the
     batch, the CodeDocuments the batch did not produce with their chunks, the
     chunks of kept documents whose ids the batch lacks (their docstring
-    changed), and the TextSummaries made from deleted chunks only; other
-    repositories and non-code documents are never considered. The batch is
-    the whole run: every task of the chain is a coroutine, and the pipeline
-    hands a coroutine's result to the next task in one call (a generator's
-    output would arrive in ``batch_size`` pieces, and a sweep per piece would
-    delete the run's other pieces). Passthrough: returns data_points unchanged.
+    changed), and the TextSummaries made from deleted chunks only, from the
+    graph and from their vector collections; other repositories and non-code
+    documents are never considered. The batch is the whole run: every task of
+    the chain is a coroutine, and the pipeline hands a coroutine's result to
+    the next task in one call (a generator's output would arrive in
+    ``batch_size`` pieces, and a sweep per piece would delete the run's other
+    pieces). Passthrough: returns data_points unchanged.
     """
     from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 
@@ -277,6 +286,13 @@ async def _sweep_stale_code_docs(
     stale = sorted(stale_documents) + sorted(stale_chunks) + sorted(stale_summaries)
     for start in range(0, len(stale), _SWEEP_CHUNK_SIZE):
         await graph_engine.delete_nodes(stale[start : start + _SWEEP_CHUNK_SIZE])
+    await _delete_vectors(
+        {
+            CodeDocument.vector_collection("name"): sorted(stale_documents),
+            DocumentChunk.vector_collection("text"): sorted(stale_chunks),
+            TextSummary.vector_collection("text"): sorted(stale_summaries),
+        }
+    )
     if stale:
         logger.info(
             "Swept %d stale code document(s), %d chunk(s) and %d summary(ies).",
@@ -285,3 +301,30 @@ async def _sweep_stale_code_docs(
             len(stale_summaries),
         )
     return len(stale_documents), len(stale_chunks), len(stale_summaries)
+
+
+async def _delete_vectors(stale_by_collection: dict[str, list[str]]) -> None:
+    """Drop the swept nodes' embeddings from the collections add_data_points indexed them into.
+
+    Deleting the graph node alone would leave its vector behind, and the chunk
+    retrievers (CHUNKS, RAG_COMPLETION) read ``DocumentChunk_text`` payloads
+    without consulting the graph, so a replaced docstring would keep being
+    returned next to its replacement. Graph first, then vectors, the order
+    cognee's own deletion uses (delete_from_graph_and_vector): a node left
+    without its vector is still found through the graph, a vector left without
+    its node is served forever. A collection that was never written (a
+    graph_only run) is skipped.
+    """
+    from cognee.infrastructure.databases.vector import get_vector_engine_async
+
+    stale_by_collection = {name: ids for name, ids in stale_by_collection.items() if ids}
+    if not stale_by_collection:
+        return
+    vector_engine = await get_vector_engine_async()
+    for collection, ids in stale_by_collection.items():
+        if not await vector_engine.has_collection(collection):
+            continue
+        for start in range(0, len(ids), _SWEEP_CHUNK_SIZE):
+            await vector_engine.delete_data_points(
+                collection, ids[start : start + _SWEEP_CHUNK_SIZE]
+            )

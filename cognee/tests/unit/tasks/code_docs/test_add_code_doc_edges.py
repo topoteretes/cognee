@@ -24,6 +24,7 @@ add_code_doc_edges_module = importlib.import_module("cognee.tasks.code_docs.add_
 graph_engine_module = importlib.import_module(
     "cognee.infrastructure.databases.graph.get_graph_engine"
 )
+vector_module = importlib.import_module("cognee.infrastructure.databases.vector")
 code_retriever_module = importlib.import_module("cognee.modules.retrieval.code_retriever")
 
 REPO = "demo_repo"
@@ -121,6 +122,28 @@ def _deleted(engine):
     )
 
 
+class _FakeVectorEngine:
+    """Records the sweep's vector deletes; every collection exists unless ``collections`` says."""
+
+    def __init__(self):
+        self.collections = None
+        self.deleted = []
+
+    async def has_collection(self, name):
+        return self.collections is None or name in self.collections
+
+    async def delete_data_points(self, collection, ids):
+        self.deleted.append((collection, list(ids)))
+
+
+@pytest.fixture(autouse=True)
+def vectors(monkeypatch):
+    """The vector engine the sweep drops embeddings through (no LanceDB in unit tests)."""
+    fake = _FakeVectorEngine()
+    monkeypatch.setattr(vector_module, "get_vector_engine_async", AsyncMock(return_value=fake))
+    return fake
+
+
 @pytest.fixture
 def invalidations(monkeypatch):
     """Record every code-retriever snapshot cache invalidation (its kwargs)."""
@@ -163,7 +186,7 @@ async def test_writes_describes_edges_in_the_code_graph_shape(monkeypatch, inval
 
 
 @pytest.mark.asyncio
-async def test_rerun_adds_no_duplicate_edges(monkeypatch, invalidations):
+async def test_rerun_adds_no_duplicate_edges(monkeypatch, invalidations, vectors):
     document = _document()
     chunk = _symbol_chunk(document)
     nodes = CODE_NODES + [
@@ -180,11 +203,12 @@ async def test_rerun_adds_no_duplicate_edges(monkeypatch, invalidations):
 
     engine.add_edges.assert_not_awaited()
     engine.delete_nodes.assert_not_awaited()
+    assert vectors.deleted == []
 
 
 @pytest.mark.asyncio
 async def test_sweep_deletes_only_the_stale_docs_and_chunks_of_the_batch_repo(
-    monkeypatch, invalidations
+    monkeypatch, invalidations, vectors
 ):
     document = _document()
     kept_chunk = _symbol_chunk(document)
@@ -235,10 +259,17 @@ async def test_sweep_deletes_only_the_stale_docs_and_chunks_of_the_batch_repo(
     assert _deleted(engine) == sorted(
         [stale_document_id, stale_chunk_id, stale_summary_id, changed_chunk_id]
     )
+    # The same ids leave the collections add_data_points embedded them into,
+    # so CHUNKS and RAG_COMPLETION stop returning the replaced text.
+    assert vectors.deleted == [
+        ("CodeDocument_name", [stale_document_id]),
+        ("DocumentChunk_text", sorted([stale_chunk_id, changed_chunk_id])),
+        ("TextSummary_text", [stale_summary_id]),
+    ]
 
 
 @pytest.mark.asyncio
-async def test_sweep_deletes_in_chunks(monkeypatch, invalidations):
+async def test_sweep_deletes_in_chunks(monkeypatch, invalidations, vectors):
     monkeypatch.setattr(add_code_doc_edges_module, "_SWEEP_CHUNK_SIZE", 2)
     document = _document()
     chunk = _symbol_chunk(document)
@@ -252,10 +283,33 @@ async def test_sweep_deletes_in_chunks(monkeypatch, invalidations):
 
     assert [len(call.args[0]) for call in engine.delete_nodes.await_args_list] == [2, 1]
     assert _deleted(engine) == sorted(stale_ids)
+    assert [(collection, len(ids)) for collection, ids in vectors.deleted] == [
+        ("CodeDocument_name", 2),
+        ("CodeDocument_name", 1),
+    ]
 
 
 @pytest.mark.asyncio
-async def test_sweep_can_be_disabled(monkeypatch, invalidations):
+async def test_sweep_skips_vector_collections_that_were_never_written(
+    monkeypatch, invalidations, vectors
+):
+    # A graph_only run (add_data_points without a vector engine) has no
+    # collections: the graph nodes go, the vector engine is left alone.
+    vectors.collections = set()
+    document = _document()
+    chunk = _symbol_chunk(document)
+    stale_document_id = str(code_document_id(REPO, "app/legacy.py"))
+    nodes = CODE_NODES + [(stale_document_id, {"type": "CodeDocument", "repo": REPO})]
+    engine = _mock_engine(monkeypatch, nodes)
+
+    await add_code_doc_edges([document, chunk])
+
+    assert _deleted(engine) == [stale_document_id]
+    assert vectors.deleted == []
+
+
+@pytest.mark.asyncio
+async def test_sweep_can_be_disabled(monkeypatch, invalidations, vectors):
     document = _document()
     chunk = _symbol_chunk(document)
     stale_document_id = str(code_document_id(REPO, "app/legacy.py"))
@@ -266,6 +320,7 @@ async def test_sweep_can_be_disabled(monkeypatch, invalidations):
 
     engine.add_edges.assert_awaited_once()
     engine.delete_nodes.assert_not_awaited()
+    assert vectors.deleted == []
 
 
 @pytest.mark.asyncio
