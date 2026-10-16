@@ -15,6 +15,7 @@ from typing_extensions import TypedDict
 
 if TYPE_CHECKING:
     from cognee.modules.cognify.estimator import DryRunEstimate
+    from cognee.modules.data.models import Dataset
     from cognee.modules.improve import ImproveResult
     from cognee.tasks.presort.models import PresortReport
 
@@ -477,6 +478,48 @@ async def _remember_entry(
     )
 
 
+async def _resolve_entry_dataset(
+    *, session_id: str, dataset_name: str, dataset_id: UUID | None, user
+) -> tuple[Any, "Dataset"]:
+    """Pick the writable dataset a typed entry in ``session_id`` targets.
+
+    The session's binding decides the target dataset; only an unbound session
+    addressed by name may create one. A bound or explicit id is checked only,
+    so a refused entry leaves no dataset behind.
+    """
+    from cognee.modules.session_lifecycle.metrics import get_session_row
+
+    row = await get_session_row(session_id=session_id, user_id=user.id)
+    bound_dataset_id = row.dataset_id if row is not None else None
+
+    if dataset_id is not None and bound_dataset_id not in (None, dataset_id):
+        raise ValueError(
+            f"Session {session_id!r} is bound to dataset {bound_dataset_id}, not {dataset_id}"
+        )
+
+    target_dataset_id = dataset_id or bound_dataset_id
+    if target_dataset_id is None:
+        user, datasets = await resolve_authorized_user_datasets(dataset_name, user)
+        return user, datasets[0]
+
+    from cognee.modules.data.methods import get_authorized_dataset
+    from cognee.modules.users.exceptions import PermissionDeniedError
+
+    dataset = await get_authorized_dataset(user, target_dataset_id, "write")
+    if dataset is None:
+        raise PermissionDeniedError(
+            f"Request owner does not have necessary permission: [write] for dataset {target_dataset_id}."
+        )
+
+    from cognee.modules.data.constants import DEFAULT_DATASET_NAME
+
+    if bound_dataset_id is not None and dataset_name not in (DEFAULT_DATASET_NAME, dataset.name):
+        raise ValueError(
+            f"Session {session_id!r} is bound to dataset {dataset.name!r}, not {dataset_name!r}"
+        )
+    return user, dataset
+
+
 async def _dispatch_session_entry(
     entry: "MemoryEntry",
     *,
@@ -501,8 +544,24 @@ async def _dispatch_session_entry(
     rejected; the ``"main_dataset"`` default is accepted because it cannot be
     told apart from no name at all.
     """
+    from cognee.modules.engine.operations.setup import setup
+
+    await setup()
+
+    if user is None:
+        from cognee.modules.users.methods import get_default_user
+
+        user = await get_default_user()
+
     if isinstance(entry, SkillRunEntry):
         from cognee.modules.tools.skill_runs import remember_skill_run_entry
+
+        if session_id:
+            # A run recorded in a session follows the session's dataset binding.
+            user, dataset = await _resolve_entry_dataset(
+                session_id=session_id, dataset_name=dataset_name, dataset_id=dataset_id, user=user
+            )
+            dataset_id = dataset.id
 
         run, dataset = await remember_skill_run_entry(
             entry,
@@ -549,19 +608,11 @@ async def _dispatch_session_entry(
         return result
 
     from cognee.infrastructure.session.get_session_manager import get_session_manager
-    from cognee.modules.engine.operations.setup import setup
 
     if not session_id:
         raise ValueError(
             f"session_id is required for typed memory entries (got {type(entry).__name__})"
         )
-
-    await setup()
-
-    if user is None:
-        from cognee.modules.users.methods import get_default_user
-
-        user = await get_default_user()
 
     user_id = str(user.id) if user and hasattr(user, "id") else None
     if not user_id:
@@ -571,43 +622,15 @@ async def _dispatch_session_entry(
     if not sm.is_available:
         raise RuntimeError("Session cache unavailable — set CACHING=true to enable session memory")
 
-    # Resolve write access before caching any content. The session's binding
-    # decides the target dataset; only an unbound session addressed by name may
-    # create one. A bound or explicit id is checked only, so a refused entry
-    # leaves no dataset behind.
-    from cognee.modules.data.constants import DEFAULT_DATASET_NAME
-    from cognee.modules.data.methods import get_authorized_dataset
+    # Resolve write access before caching any content.
+    user, dataset = await _resolve_entry_dataset(
+        session_id=session_id, dataset_name=dataset_name, dataset_id=dataset_id, user=user
+    )
+
     from cognee.modules.session_lifecycle.metrics import (
         ensure_and_touch_session,
         get_session_row,
     )
-    from cognee.modules.users.exceptions import PermissionDeniedError
-
-    row = await get_session_row(session_id=session_id, user_id=user.id)
-    bound_dataset_id = row.dataset_id if row is not None else None
-
-    if dataset_id is not None and bound_dataset_id not in (None, dataset_id):
-        raise ValueError(
-            f"Session {session_id!r} is bound to dataset {bound_dataset_id}, not {dataset_id}"
-        )
-
-    target_dataset_id = dataset_id or bound_dataset_id
-    if target_dataset_id is not None:
-        dataset = await get_authorized_dataset(user, target_dataset_id, "write")
-        if dataset is None:
-            raise PermissionDeniedError(
-                f"Request owner does not have necessary permission: [write] for dataset {target_dataset_id}."
-            )
-        if bound_dataset_id is not None and dataset_name not in (
-            DEFAULT_DATASET_NAME,
-            dataset.name,
-        ):
-            raise ValueError(
-                f"Session {session_id!r} is bound to dataset {dataset.name!r}, not {dataset_name!r}"
-            )
-    else:
-        user, datasets = await resolve_authorized_user_datasets(dataset_name, user)
-        dataset = datasets[0]
 
     # Every entry bumps the session's activity; the atomic upsert binds an unbound
     # session and preserves an existing binding. Re-read it before caching: a

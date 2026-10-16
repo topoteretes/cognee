@@ -15,7 +15,7 @@ import pytest
 import pytest_asyncio
 
 import cognee
-from cognee.memory import FeedbackEntry, QAEntry
+from cognee.memory import FeedbackEntry, QAEntry, SkillRunEntry
 from cognee.modules.users.exceptions import PermissionDeniedError
 
 
@@ -249,6 +249,31 @@ async def test_bound_session_without_grant_is_refused(env):
         )
 
     assert await _cached_questions(env.outsider, "outsider-session") == []
+
+
+@pytest.mark.asyncio
+async def test_skill_run_in_bound_session_targets_its_dataset(env, monkeypatch):
+    from cognee.modules.session_lifecycle.metrics import ensure_and_touch_session
+
+    skill_runs = importlib.import_module("cognee.modules.tools.skill_runs")
+    run = SimpleNamespace(
+        run_id="run-1", selected_skill_id="s", selected_skill_name="s", success_score=1.0
+    )
+    record_run = AsyncMock(return_value=(run, env.shared))
+    monkeypatch.setattr(skill_runs, "remember_skill_run_entry", record_run)
+    await ensure_and_touch_session(
+        session_id="skill-session", user_id=env.owner.id, dataset_id=env.shared.id
+    )
+
+    result = await cognee.remember(
+        SkillRunEntry(run_id="run-1", selected_skill_id="s", task_text="t"),
+        session_id="skill-session",
+        user=env.owner,
+    )
+
+    assert record_run.await_args.kwargs["dataset_id"] == env.shared.id
+    assert result.dataset_id == str(env.shared.id)
+    assert "main_dataset" not in await _owned_dataset_names(env.owner)
 
 
 @pytest.mark.asyncio
