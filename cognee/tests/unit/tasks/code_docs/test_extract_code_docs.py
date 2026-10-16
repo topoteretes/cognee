@@ -1,7 +1,9 @@
 """The code docs extraction task over a mocked code graph (cognee/tasks/code_docs)."""
 
+import asyncio
 import importlib
 import json
+import threading
 from unittest.mock import AsyncMock
 
 import pytest
@@ -352,12 +354,98 @@ async def test_enola_doc_fallback_when_the_source_is_missing(tmp_path, monkeypat
     documents, chunks = _split(await extract_code_docs())
 
     assert [document.raw_data_location for document in documents] == ["app.py"]
+    assert documents[0].doc_source == "enola"
     assert len(chunks) == 1
     assert chunks[0].text == "app.py:4\napp.main (function)\n\nStart the shop's HTTP server."
     metadata = _metadata(chunks[0])
     assert metadata["doc_source"] == "enola"
     assert metadata["line"] == 4 and metadata["end_line"] is None
     assert metadata["symbol_id"] == str(fact_node_id(REPO, "symbol", "app.main"))
+
+
+def _stored_code_document(file_path, doc_source="source", repo=REPO):
+    """A CodeDocument node an earlier run stored; ``doc_source`` None: stored before the field."""
+    properties = {"type": "CodeDocument", "name": file_path, "repo": repo, "file_path": file_path}
+    if doc_source is not None:
+        properties["doc_source"] = doc_source
+    return str(code_document_id(repo, file_path)), properties
+
+
+@pytest.mark.asyncio
+async def test_unreadable_source_keeps_the_docs_read_from_it(tmp_path, monkeypatch):
+    """A clone lost on a restart, an earlier per-file run's staging directory, a
+    directory on another host: the stored path is not readable here. Enola's docs
+    would replace the full docstrings with their first 300 bytes and drop the
+    module docstrings, so a repository whose stored documents were read from
+    source is left out of the run (and, by the same rule, of the link task's
+    sweep). One whose stored docs are Enola's already is derived again."""
+    shop = [
+        _repository(tmp_path / "gone"),
+        _symbol("app.main", "app.py", 4, doc="Start the shop's HTTP server."),
+    ]
+    other = [
+        _repository(tmp_path / "also-gone", "other"),
+        _symbol("lib.f", "lib.py", 1, doc="Other f.", repo="other"),
+        _stored_code_document("lib.py", "enola", repo="other"),
+    ]
+
+    # Read from source earlier, or stored before doc_source existed: kept.
+    for stored in (_stored_code_document("app.py"), _stored_code_document("app.py", None)):
+        _mock_engine(monkeypatch, shop + [stored] + other)
+        documents, chunks = _split(await extract_code_docs())
+        assert [(document.repo, document.name) for document in documents] == [("other", "lib.py")]
+        assert [_metadata(chunk)["repo"] for chunk in chunks] == ["other"]
+
+    # The filtered run too, with or without a directory of the caller's that
+    # is not there either.
+    _mock_engine(monkeypatch, shop + [_stored_code_document("app.py")] + other)
+    assert await extract_code_docs(repo=REPO) == []
+    assert await extract_code_docs(repo=REPO, repo_path=tmp_path / "nor-this") == []
+
+    # Enola's docs stored: nothing better is lost, so they are derived again.
+    _mock_engine(monkeypatch, shop + [_stored_code_document("app.py", "enola")] + other)
+    documents, chunks = _split(await extract_code_docs())
+    assert [(document.repo, document.name) for document in documents] == [
+        ("other", "lib.py"),
+        (REPO, "app.py"),
+    ]
+    assert {document.doc_source for document in documents} == {"enola"}
+    assert len(chunks) == 2
+
+    # No stored docs at all: the first run of a repository is derived from
+    # whatever is at hand.
+    _mock_engine(monkeypatch, shop + other)
+    documents, _ = _split(await extract_code_docs(repo=REPO))
+    assert [document.name for document in documents] == ["app.py"]
+
+
+@pytest.mark.asyncio
+async def test_repo_path_argument_is_read_in_place_of_the_stored_path(shop, tmp_path, monkeypatch):
+    """The routes hand over the directory they just indexed. The stored
+    CodeRepository.path may be an earlier run's staging directory, gone from disk
+    (the per-file route stages every run afresh and a skipped snapshot does not
+    rewrite the node), so it must not decide where the source is read from."""
+    nodes = [_repository(tmp_path / "gone")] + _shop_nodes(shop)[1:]
+    _mock_engine(monkeypatch, nodes)
+
+    documents, chunks = _split(await extract_code_docs(repo=REPO, repo_path=shop))
+
+    assert [document.raw_data_location for document in documents] == [
+        str(shop / "app.py"),
+        str(shop / "orders" / "checkout.py"),
+    ]
+    assert len(chunks) == 5
+    assert {_metadata(chunk)["doc_source"] for chunk in chunks} == {"source"}
+    assert {document.doc_source for document in documents} == {"source"}
+
+    # A directory that is not there falls back to Enola's docs like a stored one.
+    _mock_engine(monkeypatch, nodes[:1] + [_symbol("app.main", "app.py", 4, doc="Enola's.")])
+    (chunk,) = _split(await extract_code_docs(repo=REPO, repo_path=tmp_path / "also-gone"))[1]
+    assert _metadata(chunk)["doc_source"] == "enola"
+
+    # One directory names one repository.
+    with pytest.raises(ValueError, match="pass repo"):
+        await extract_code_docs(repo_path=shop)
 
 
 @pytest.mark.asyncio
@@ -385,6 +473,7 @@ async def test_enola_doc_fallback_for_unreadable_or_foreign_files(tmp_path, monk
         "missing.py": "python",
     }
     assert [_metadata(chunk)["doc_source"] for chunk in chunks] == ["enola"] * 3
+    assert [document.doc_source for document in documents] == ["enola"] * 3
     assert (
         _chunk_for(chunks, "main.main").text == "main.go:3\nmain.main (function)\n\nGo entry point."
     )
@@ -568,8 +657,75 @@ async def test_graph_is_read_through_the_filtered_query(shop, monkeypatch):
 
     await extract_code_docs()
 
+    # The stored CodeDocuments are in the one read: they say whether a
+    # repository the run cannot read has docs read from source to keep.
     engine.get_filtered_graph_data.assert_awaited_once_with(
-        [{"type": ["CodeRepository", "CodeSymbol", "CodeModule"]}]
+        [{"type": ["CodeRepository", "CodeSymbol", "CodeModule", "CodeDocument"]}]
     )
     engine.add_nodes.assert_not_awaited()
     engine.add_edges.assert_not_awaited()
+
+
+def _other_repo(tmp_path, node_set=None):
+    other = _write_repo(tmp_path / "other", {"lib.py": 'def f():\n    """Other f."""\n'})
+    return [
+        _repository(other, "other"),
+        _symbol("lib.f", "lib.py", 1, repo="other", node_set=node_set),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_repositories_are_extracted_in_a_worker_thread_one_at_a_time(
+    shop, tmp_path, monkeypatch
+):
+    _mock_engine(monkeypatch, _shop_nodes(shop) + _other_repo(tmp_path))
+    entered, release = threading.Event(), threading.Event()
+    threads = []
+    real_extract = extract_module._extract_repository
+
+    def blocking_extract(*args, **kwargs):
+        # Holds the extraction until the test lets it go; on the event loop's
+        # thread this would freeze the loop and time out below.
+        threads.append(threading.current_thread())
+        entered.set()
+        assert release.wait(5), "the extraction was never released"
+        return real_extract(*args, **kwargs)
+
+    monkeypatch.setattr(extract_module, "_extract_repository", blocking_extract)
+    real_to_thread = asyncio.to_thread
+    to_thread = AsyncMock(side_effect=real_to_thread)
+    monkeypatch.setattr(asyncio, "to_thread", to_thread)
+
+    task = asyncio.create_task(extract_code_docs())
+    loop = asyncio.get_running_loop()
+    assert await loop.run_in_executor(None, entered.wait, 5)
+    # The extraction thread is parked; the loop still runs other coroutines.
+    ticks = 0
+    for _ in range(3):
+        await asyncio.sleep(0)
+        ticks += 1
+    assert ticks == 3 and not task.done()
+    release.set()
+    data_points = await task
+
+    assert threads and all(thread is not threading.main_thread() for thread in threads)
+    # One hand-off per repository, sequentially: other, then shop.
+    assert [call.args[:2] for call in to_thread.await_args_list] == [
+        (blocking_extract, "other"),
+        (blocking_extract, REPO),
+    ]
+    assert [document.repo for document in _split(data_points)[0]] == ["other", REPO, REPO]
+
+
+@pytest.mark.asyncio
+async def test_node_sets_are_shared_across_repositories(shop, tmp_path, monkeypatch):
+    _mock_engine(monkeypatch, _shop_nodes(shop) + _other_repo(tmp_path, node_set=("code",)))
+
+    documents, chunks = _split(await extract_code_docs())
+
+    assert {document.repo for document in documents} == {"other", REPO}
+    # The NodeSet built for the first repository is the one the second reuses.
+    assert (
+        len({id(node_set) for point in documents + chunks for node_set in point.belongs_to_set})
+        == 1
+    )

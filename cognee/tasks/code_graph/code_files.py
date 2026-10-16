@@ -7,7 +7,13 @@ Classification maps that tag to CodeFileDocument, and cognify routing sends
 such items down the CODE route (modules/cognify/routing.py). The route's task
 list is built here: it stages each stored code file into a temporary per-file
 directory (enola only accepts directories) and runs the deterministic enola
-code graph pipeline on it — no LLM or embedding calls.
+code graph pipeline on it — no LLM call. The file's docstrings are then stored
+as DocumentChunks linked to its code nodes (``add_code_graph_docs``), the
+route's only embedding call (the local fastembed model when no key is
+configured, unless a COGNEE_SKIP_* / MOCK_EMBEDDING switch keeps the configured
+provider) and best effort: a tail that fails is logged and the file's code
+graph stays. ``CODE_GRAPH_DOCS=false`` or ``cognify(code_docs=False)`` keeps
+the route graph-only.
 """
 
 import os
@@ -94,6 +100,7 @@ def _stage_code_file(data_item, staging_root, content: str) -> Path:
 async def extract_code_files_graph(
     data_documents: list,
     ctx: Optional["PipelineContext"] = None,
+    code_docs: bool | None = None,
 ) -> list:
     """Cognify CODE-route adapter: run the enola pipeline on stored code files.
 
@@ -101,15 +108,29 @@ async def extract_code_files_graph(
     its original file name (enola detects languages by extension and only
     accepts directories), then the standard code graph tasks run on it:
     extract_code_graph -> add_code_graph_data_points -> add_code_graph_edges.
-    graph_only always: SearchType.CODE uses graph indexes, and the CODE route
-    must stay free of embedding calls like the rest of the enola pipeline.
+    The code nodes are stored graph_only: SearchType.CODE uses graph indexes.
+    With ``code_docs`` (the CODE_GRAPH_DOCS setting when None, on by default)
+    the file's docstrings follow as DocumentChunks linked to its code nodes
+    (add_code_graph_docs) -- the route's only embedding call, the local
+    fastembed model when no key is configured -- still inside the staging
+    directory, since the docstrings are read from the staged source: the tail
+    is handed this run's staging directory, because the stored
+    CodeRepository.path is the previous run's, gone from disk, once an
+    unchanged snapshot is skipped. The tail runs with this route's ``ctx``, so
+    the chunks belong to the file's data item and forget(data_id) removes them
+    with the code graph; a tail that fails is logged and the file's code graph
+    kept (see add_code_graph_docs).
     """
     from cognee.infrastructure.files.utils.open_data_file import open_data_file
+    from cognee.modules.cognify.config import get_cognify_config, resolve_code_docs
     from cognee.tasks.code_graph.extract_code_graph import (
         add_code_graph_data_points,
+        add_code_graph_docs,
         add_code_graph_edges,
         extract_code_graph,
     )
+
+    code_docs = resolve_code_docs(code_docs, get_cognify_config())
 
     for data_item in data_documents:
         if not is_code_sourced(data_item):
@@ -127,6 +148,10 @@ async def extract_code_files_graph(
             data_points = await extract_code_graph(repo_path=repo_dir)
             state = await add_code_graph_data_points(data_points, ctx=ctx, graph_only=True)
             await add_code_graph_edges(state, repo_path=repo_dir, ctx=ctx)
+            if code_docs:
+                # Inside the staging block: the docstrings are read from the
+                # staged source, which is gone once it exits.
+                await add_code_graph_docs(state, ctx=ctx, repo_path=repo_dir)
 
         logger.info(
             "Code graph extracted for %s (%s).", _original_file_name(data_item), data_item.id
@@ -135,6 +160,19 @@ async def extract_code_files_graph(
     return data_documents
 
 
-def get_code_file_tasks() -> list[Task]:
-    """The cognify CODE-route task list: one adapter task, no LLM stages."""
-    return [Task(extract_code_files_graph, needs_llm=False)]
+def get_code_file_tasks(code_docs: bool | None = None) -> list[Task]:
+    """The cognify CODE-route task list: one adapter task, no LLM stages.
+
+    ``code_docs`` is resolved here against the CODE_GRAPH_DOCS setting (the
+    explicit argument wins) and bound on the task, the way cognify binds
+    summary_method on the standard list.
+    """
+    from cognee.modules.cognify.config import get_cognify_config, resolve_code_docs
+
+    return [
+        Task(
+            extract_code_files_graph,
+            code_docs=resolve_code_docs(code_docs, get_cognify_config()),
+            needs_llm=False,
+        )
+    ]

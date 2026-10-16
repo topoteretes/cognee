@@ -29,7 +29,8 @@ The dlt route adds
 |---|---|---|
 | `chunks/` | Split text into chunks and manage chunk relations | `chunk_by_paragraph`, `chunk_by_sentence`, `chunk_by_word`, `chunk_by_row`, `create_chunk_associations` |
 | `cleanup/` | Remove data that no dataset references any more | `cleanup_unused_data` |
-| `code_graph/` | Build the deterministic code graph with the bundled enola CLI (no LLM): `CodeSymbol`/`CodeModule` nodes, `calls`/`imports` edges | `extract_code_graph`, `extract_code_files_graph` |
+| `code_docs/` | Store a code graph's docstrings as plain `DocumentChunk`s linked to their `CodeSymbol`/`CodeModule` by `describes` edges (the docs tail every code route ends with; embed-only, no LLM) | `code_docs_tail`, `extract_code_docs`, `store_code_docs`, `add_code_doc_edges`, `cognify_code_doc_chunks` |
+| `code_graph/` | Build the deterministic code graph with the bundled enola CLI (no LLM): `CodeSymbol`/`CodeModule` nodes, `calls`/`imports` edges, then the docstring tail (`add_code_graph_docs`) | `extract_code_graph`, `extract_code_files_graph`, `get_code_graph_tasks` |
 | `codingagents/` | Distil coding-agent traces into reusable coding rules (`CODING_RULES` search) | see its `README.md` |
 | `completion/` | Exceptions shared by completion-style tasks | — |
 | `documents/` | Classify `Data` rows into `Document` types and chunk them | `classify_documents`, `extract_chunks_from_documents` |

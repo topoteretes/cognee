@@ -2,16 +2,26 @@
 
 Runs the REAL enola binary (the enola-cli wheel included with cognee) over
 a small pinned repository that ships with the test suite, against the default
-embedded databases (Ladybug graph + SQLite), with NO LLM or embedding
-configuration. It covers what the unit tests in tests/unit/tasks/code_graph
-mock away: the enola output contract, writing typed code nodes and dynamic
-relation edges into a real graph store, reading them back through the CODE
-retriever with dataset scoping, idempotent re-ingestion, and teardown.
+embedded databases (Ladybug graph + SQLite), with NO LLM key. The code graph
+itself calls neither the LLM nor an embedding model; the docstring chunks the
+code routes store next to it (CODE_GRAPH_DOCS, on by default) are embedded,
+on the local fastembed model when no provider is configured -- see
+_code_docs_enabled for the two ways to run this test. It covers what the unit
+tests in tests/unit/tasks/code_graph mock away: the enola output contract,
+writing typed code nodes and dynamic relation edges into a real graph store,
+reading them back through the CODE retriever with dataset scoping, idempotent
+re-ingestion, and teardown.
 
 Verifies:
 - remember(content_type="code") ingests the repo and reports a completed run
-- the graph holds ONLY the typed enola models (CodeRepository, CodeModule,
-  CodeSymbol, ...) — no generic Node / Entity / DocumentChunk / TextSummary
+- the code graph holds ONLY the typed enola models (CodeRepository, CodeModule,
+  CodeSymbol, ...) — no generic Node / Entity / TextSummary, and no chunks
+  other than the docstring layer below
+- with CODE_GRAPH_DOCS on, every ingestion also stores one CodeDocument per
+  documented fixture file and one DocumentChunk per docstring (the fixture has
+  module docstrings only), each linked to its CodeModule by a `describes`
+  edge; an unchanged re-ingestion adds none, and forget(data_id=...) removes
+  them along with the repository's code graph
 - known files, symbols, modules, dependencies and typed relations
   (calls / imports / declares / part_of) are present, with resolved endpoints
 - SearchType.CODE known-answer queries (query_facts, find_path,
@@ -42,6 +52,7 @@ from cognee import SearchType
 from cognee.api.v1.datasets.datasets import datasets
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.data.methods.get_dataset_processing_status import (
     get_dataset_processing_status,
 )
@@ -106,8 +117,11 @@ PATH_TARGET = "inventory/pricing.line_total"
 PATH_HOPS = 4
 
 # Anything ingested by the standard (LLM) cognify pipeline or the DLT route
-# would show up as one of these. Their presence means the code did NOT take the
-# enola route, or the route emitted generic models.
+# would show up as one of these. Their presence in the code graph means the
+# code did NOT take the enola route, or the route emitted generic models. The
+# docstring layer the code routes store themselves (CodeDocument nodes and the
+# DocumentChunks cut as code docstrings) is split off before this check and
+# asserted on its own (_assert_code_docs).
 FORBIDDEN_NODE_TYPES = {
     "Node",
     "Entity",
@@ -124,6 +138,70 @@ FORBIDDEN_NODE_TYPES = {
 }
 
 ALLOWED_NODE_TYPES = set(CODE_NODE_TYPES) | {"CodeRepository"}
+
+# The docstring layer: cognee/tasks/code_docs, run by the code routes' docs tail.
+CODE_DOCSTRING_CUT_TYPE = "code_docstring"
+
+# The fixture's docstrings are module docstrings only (no function or class has
+# one), so each documented file yields exactly one chunk, headed "<file>:1" and
+# linked to the CodeModule of its directory (the repo root is ".").
+EXPECTED_DOCSTRING_CHUNKS = {
+    "main.py:1": ".",
+    "inventory/pricing.py:1": "inventory",
+    "inventory/store.py:1": "inventory",
+}
+
+
+def _code_docs_enabled() -> bool:
+    """Whether this run stores, and so asserts, the docstring layer: the routes' own setting.
+
+    Two ways to run this test, picked by the environment:
+
+    - Docstrings ON (CODE_GRAPH_DOCS unset or true, the default): the chunks are
+      embedded on the local fastembed model, still without any key. Keyless, the
+      remember() steps would reach that model through the keyless fallback on
+      their own, but the cognify() step sets COGNEE_SKIP_CONNECTION_TEST (see
+      step 4), which also switches the fallback off (keyless_local_defaults_apply)
+      and would leave the CODE_REPO route's tail with the OpenAI default and no
+      key. An explicit setting is honoured on every path, so main() pins the same
+      local model (EMBEDDING_PROVIDER=fastembed, BAAI/bge-small-en-v1.5, 384
+      dimensions, downloaded on first use) unless the environment already
+      configures an embedding setting (provider, model, key or endpoint), which
+      then embeds the docstrings itself. _assert_code_docs then runs after every
+      ingestion.
+    - Docstrings OFF (CODE_GRAPH_DOCS=false in the environment before this module
+      runs): the graph holds the code graph alone, which this test asserts, and the
+      docstring round trip stays covered by
+      cognee/tests/unit/tasks/code_docs/test_code_docs_round_trip.py.
+    """
+    return get_cognify_config().code_graph_docs
+
+
+# The settings embedding_settings_configured() reads: any of them set means the
+# environment chose its embedder, and the pin below stays out of its way.
+_EMBEDDING_SETTINGS = (
+    "EMBEDDING_PROVIDER",
+    "EMBEDDING_MODEL",
+    "EMBEDDING_API_KEY",
+    "EMBEDDING_ENDPOINT",
+)
+
+
+def _pin_local_embeddings() -> None:
+    """Embed the docstring layer on the local fastembed model for the whole run.
+
+    See _code_docs_enabled: the keyless fallback would pick this model for the
+    remember() steps, and step 4's COGNEE_SKIP_CONNECTION_TEST switches the
+    fallback off, so the same model is named explicitly -- provider, model and
+    dimensions together, and only when the environment configures none of the
+    embedding settings (a model or key named without a provider must not be
+    paired with fastembed). No key is involved.
+    """
+    if any(os.environ.get(name) for name in _EMBEDDING_SETTINGS):
+        return
+    os.environ["EMBEDDING_PROVIDER"] = "fastembed"
+    os.environ["EMBEDDING_MODEL"] = "BAAI/bge-small-en-v1.5"
+    os.environ["EMBEDDING_DIMENSIONS"] = "384"
 
 
 # --- Helpers -----------------------------------------------------------------
@@ -157,9 +235,85 @@ def _named(nodes: dict) -> dict:
     return {p.get("name"): p for p in nodes.values()}
 
 
+def _split_code_docs(nodes: dict, edges: list) -> tuple[dict, list, dict, list]:
+    """(code nodes, code edges, docstring nodes, docstring edges) of a stored graph."""
+    docs_nodes = {
+        node_id: p
+        for node_id, p in nodes.items()
+        if p.get("type") == "CodeDocument"
+        or (p.get("type") == "DocumentChunk" and p.get("cut_type") == CODE_DOCSTRING_CUT_TYPE)
+    }
+    code_nodes = {node_id: p for node_id, p in nodes.items() if node_id not in docs_nodes}
+    docs_edges = [e for e in edges if e[0] in docs_nodes or e[1] in docs_nodes]
+    code_edges = [e for e in edges if e[0] not in docs_nodes and e[1] not in docs_nodes]
+    return code_nodes, code_edges, docs_nodes, docs_edges
+
+
+def _assert_code_docs(code_nodes: dict, docs_nodes: dict, docs_edges: list, repo_name: str) -> None:
+    """The docstring layer of a single-repository graph (CODE_GRAPH_DOCS on)."""
+    documents = _by_type(docs_nodes, "CodeDocument")
+    chunks = _by_type(docs_nodes, "DocumentChunk")
+    assert documents and chunks, (
+        "CODE_GRAPH_DOCS is on but the code route stored no docstrings: "
+        f"{len(documents)} CodeDocument(s), {len(chunks)} DocumentChunk(s)"
+    )
+    # Only this repository's: after forget(data_id=...) of another repository,
+    # its documents and chunks are gone along with its code graph.
+    foreign = sorted({p.get("repo") for p in documents.values()} - {repo_name})
+    assert not foreign, f"CodeDocuments of other repositories remain: {foreign}"
+    documented = {p.get("name") for p in documents.values()}
+    assert EXPECTED_FILES <= documented, (
+        f"Documented files without a CodeDocument: {EXPECTED_FILES - documented}"
+    )
+
+    headers = {node_id: (p.get("text") or "").split("\n", 1)[0] for node_id, p in chunks.items()}
+    missing = set(EXPECTED_DOCSTRING_CHUNKS) - set(headers.values())
+    assert not missing, (
+        f"Docstring chunks missing (chunk text starts with file:line): {sorted(missing)}"
+    )
+
+    module_names = {
+        node_id: p.get("name") for node_id, p in _by_type(code_nodes, "CodeModule").items()
+    }
+    describes = {s: t for s, t, rel, _ in docs_edges if rel == "describes"}
+    is_part_of = {s: t for s, t, rel, _ in docs_edges if rel == "is_part_of"}
+    for chunk_id, header in headers.items():
+        assert is_part_of.get(chunk_id) in documents, (
+            f"Docstring chunk {header!r} is not linked to its CodeDocument (is_part_of)"
+        )
+        expected_module = EXPECTED_DOCSTRING_CHUNKS.get(header)
+        if expected_module is None:
+            continue
+        target = describes.get(chunk_id)
+        assert target is not None, f"Docstring chunk {header!r} has no 'describes' edge"
+        assert module_names.get(target) == expected_module, (
+            f"Docstring chunk {header!r} describes {module_names.get(target, target)!r}, "
+            f"expected CodeModule {expected_module!r}"
+        )
+
+
 def _assert_typed_code_graph(nodes: dict, edges: list, repo_name: str) -> None:
     """Structural + known-entity assertions shared by both ingestion routes."""
     assert nodes, "Graph is empty — the code graph pipeline stored nothing"
+
+    # 0. Every edge endpoint exists -- docstring edges included, so a swept or
+    #    forgotten repository leaves no `describes` edge behind.
+    dangling = [e for e in edges if e[0] not in nodes or e[1] not in nodes]
+    assert not dangling, (
+        f"{len(dangling)} edge(s) reference nodes that do not exist: {dangling[:3]}"
+    )
+
+    # The docstring layer is asserted on its own; the typed-graph checks below
+    # see the code graph alone.
+    code_nodes, code_edges, docs_nodes, docs_edges = _split_code_docs(nodes, edges)
+    if _code_docs_enabled():
+        _assert_code_docs(code_nodes, docs_nodes, docs_edges, repo_name)
+    else:
+        assert not docs_nodes, (
+            "CODE_GRAPH_DOCS=false must leave the code graph alone, found "
+            f"{len(docs_nodes)} docstring node(s)"
+        )
+    nodes, edges = code_nodes, code_edges
 
     # 1. Only the typed enola models, never generic/document nodes.
     types_present = {p.get("type") for p in nodes.values()}
@@ -218,12 +372,7 @@ def _assert_typed_code_graph(nodes: dict, edges: list, repo_name: str) -> None:
         f"Missing ExternalDependency nodes: {EXPECTED_DEPENDENCY_NAMES - dependencies}"
     )
 
-    # 4. Relations: every endpoint resolves to a node; known calls/declares/part_of exist.
-    dangling = [e for e in edges if e[0] not in nodes or e[1] not in nodes]
-    assert not dangling, (
-        f"{len(dangling)} edge(s) reference nodes that do not exist: {dangling[:3]}"
-    )
-
+    # 4. Relations: known calls/declares/part_of exist (endpoints were checked in 0).
     name_of = {node_id: p.get("name") for node_id, p in nodes.items()}
     calls = {(name_of[s], name_of[t]) for s, t, rel, _ in edges if rel == "calls"}
     assert EXPECTED_CALLS <= calls, f"Missing 'calls' edges: {sorted(EXPECTED_CALLS - calls)}"
@@ -358,6 +507,8 @@ async def main():
     cognee_directory_path = str((TESTS_DIR / ".cognee_system" / "test_code_graph_e2e").resolve())
     cognee.config.data_root_directory(data_directory_path)
     cognee.config.system_root_directory(cognee_directory_path)
+    if _code_docs_enabled():
+        _pin_local_embeddings()
 
     # Enola output must not depend on a previous run's snapshot.
     scratch_root = tempfile.mkdtemp(prefix="cognee_code_graph_e2e_")
@@ -507,6 +658,9 @@ async def main():
         # even when every item routes to an LLM-free task list. Skip it via
         # the documented switch — set only NOW so the remember() steps above
         # still prove that remember(content_type="code") is keyless on its own.
+        # The switch also disables the keyless fastembed fallback, which is why
+        # main() pinned the local embedding model explicitly (see
+        # _code_docs_enabled) rather than relying on the fallback here.
         os.environ["COGNEE_SKIP_CONNECTION_TEST"] = "true"
         cognify_repo_path = _copy_fixture(os.path.join(scratch_root, "cognify"))
         await cognee.add(str(cognify_repo_path), dataset_name=COGNIFY_DATASET)
