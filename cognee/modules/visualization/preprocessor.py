@@ -389,6 +389,7 @@ def extract_schema_graph_data(nodes_list, links_list):
                 "id": node["id"],
                 "name": node.get("name") or node["id"],
                 "type": node.get("type"),
+                "rank": node.get("topological_rank") or node_type_rank(node.get("type")),
                 "description": node.get("description"),
                 "fields": extract_schema_fields(node),
                 "source_table": node.get("source_table"),
