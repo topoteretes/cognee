@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+from email import parser
 import json
 
 import cognee.cli.echo as fmt
@@ -83,6 +84,11 @@ With --query-type CODE, --code-query selects the code-graph operation and
             default="pretty",
             help="Output format (default: pretty)",
         )
+        parser.add_argument(
+            "--include-references",
+            action="store_true",
+            help="Include source references in recall results",
+        )
         add_code_arguments(parser)
 
     def execute(self, args: argparse.Namespace) -> None:
@@ -128,6 +134,7 @@ With --query-type CODE, --code-query selects the code-graph operation and
                         "datasets": args.datasets,
                         "top_k": args.top_k,
                         "system_prompt_path": (args.system_prompt or "answer_simple_question.txt"),
+                        "include_references": args.include_references,
                         **session_kwargs,
                     }
                     if args.query_type is not None:
