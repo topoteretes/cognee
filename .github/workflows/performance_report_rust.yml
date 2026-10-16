@@ -115,7 +115,7 @@ jobs:
           toolchain: stable
 
       - name: Install mold linker
-        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621  # v1
+        uses: rui314/setup-mold@da13e0b42e392e3a45d1215033a2270b849d7d36  # v1
         with:
           make-default: true
 
