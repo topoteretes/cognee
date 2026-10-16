@@ -19,12 +19,13 @@ import re
 from typing import Literal
 from urllib.parse import urlparse
 
+import httpx
 import litellm
 import numpy as np
 import openai
 
 from cognee.exceptions import CogneeConfigurationError
-from cognee.infrastructure.databases.exceptions import EmbeddingEncodingError
+from cognee.infrastructure.databases.exceptions import EmbeddingEncodingError, EmbeddingException
 
 EncodingFormat = Literal["base64", "float"]
 ENCODING_FORMATS = ("base64", "float")
@@ -58,7 +59,8 @@ def _routes_through_openai_handler(model: str | None) -> bool:
     if not model:
         return False
     if "/" in model:
-        return model.split("/", 1)[0].lower() == "openai"
+        # litellm's provider prefixes are case-sensitive: it cannot route "OpenAI/...".
+        return model.split("/", 1)[0] == "openai"
     # An unprefixed model resolves by litellm's model registry.
     return litellm.model_cost.get(model, {}).get("litellm_provider") == "openai"
 
@@ -142,52 +144,66 @@ def decode_embedding(embedding: list[float] | str, encoding_format: EncodingForm
         raise EmbeddingEncodingError(f"payload does not decode as float32: {error}") from error
     if not vector.size:
         raise EmbeddingEncodingError("payload is empty")
-    # Bytes of another type (int8, float16, big-endian float32) decode too, as other
-    # numbers. An embedding never holds NaN or infinity, so those give the misread away.
+    # NaN or infinity cannot be stored. A base64 reply can carry them as a transient glitch,
+    # which a retry clears, or as bytes of another type read as float32: int8, uint8 and
+    # byte-swapped float32 usually decode to them, float16 and float64 never do. So this is
+    # a retried EmbeddingException, not the terminal error that blames base64 support.
     if not np.isfinite(vector).all():
-        raise EmbeddingEncodingError("payload decodes to NaN or infinity, so it is not float32")
+        raise EmbeddingException(
+            "The embedding server returned NaN or infinity in a base64 vector. If this "
+            "persists, the server may not send float32: set EMBEDDING_ENCODING_FORMAT=float."
+        )
     return vector.tolist()
 
 
 _ENCODING_REJECTION_RE = re.compile(r"encoding_format|base64", re.IGNORECASE)
-# The fields where an error body says what went wrong. Echoes of the request ("input",
-# "ctx") are never read: they carry encoding_format=base64 on every refused call.
-_ERROR_MESSAGE_KEYS = ("message", "msg", "error", "errors", "detail")
+# Where an error body repeats the request back: pydantic's "input" holds the rejected
+# value or the whole request, and "ctx" the constraint. On a base64 call those name
+# encoding_format and base64 whatever the error is about, so they are not read.
+_ECHO_KEYS = frozenset({"input", "ctx", "request"})
 
 
 def _server_error_body(error: BaseException) -> object | None:
-    """The parsed body of the HTTP error behind ``error``, or None.
+    """The JSON body of the HTTP reply behind ``error``, or None.
 
-    The openai SDK keeps it on the error it raises. litellm raises its own error and keeps
-    the SDK's in the exception chain.
+    Read from the reply itself, which the openai SDK's errors and httpx's carry. litellm
+    raises its own error with a placeholder reply and keeps one of those in the chain,
+    linked through the implicit context. The SDK's ``body`` is a last resort: it keeps
+    only the reply's "error" member.
     """
     current: BaseException | None = error
-    for _ in range(5):
+    for _ in range(6):
         if current is None:
             return None
-        # Not every subclass sets it: litellm's UnsupportedParamsError has no body.
-        body = getattr(current, "body", None)
-        if isinstance(current, openai.APIStatusError) and body is not None:
-            return body
+        if isinstance(current, (openai.APIStatusError, httpx.HTTPStatusError)):
+            response = getattr(current, "response", None)
+            if isinstance(response, httpx.Response):
+                try:
+                    return response.json()
+                except (ValueError, httpx.StreamError):
+                    pass
+            # Not every subclass sets it: litellm's UnsupportedParamsError has no body.
+            body = getattr(current, "body", None)
+            if body is not None:
+                return body
         current = current.__cause__ or current.__context__
     return None
 
 
 def _names_encoding(body: object) -> bool:
-    """Whether an error body, read from its message fields only, is about the encoding."""
+    """Whether an error body is about the encoding, read everywhere but its echoes."""
     if isinstance(body, str):
         return bool(_ENCODING_REJECTION_RE.search(body))
     if isinstance(body, list):
         return any(_names_encoding(item) for item in body)
-    if not isinstance(body, dict):
-        return False
-    # OpenAI-style errors name the parameter; pydantic (FastAPI) errors locate it.
-    if body.get("param") == "encoding_format":
-        return True
-    loc = body.get("loc")
-    if isinstance(loc, (list, tuple)) and "encoding_format" in loc:
-        return True
-    return any(_names_encoding(body[key]) for key in _ERROR_MESSAGE_KEYS if key in body)
+    if isinstance(body, dict):
+        # A key can be the field itself, in errors keyed by field name.
+        return any(
+            key == "encoding_format" or _names_encoding(value)
+            for key, value in body.items()
+            if key not in _ECHO_KEYS
+        )
+    return False
 
 
 def rejects_encoding_format(error: BaseException) -> bool:
@@ -195,10 +211,11 @@ def rejects_encoding_format(error: BaseException) -> bool:
 
     A server that rejects base64 says so ("unsupported encoding_format", a validation
     error located at encoding_format); a bad model name or dimensions does not, and the
-    hint would send the user after the wrong fix. The server's error body is read field by
-    field, because an error about something else may echo the request, which names
-    encoding_format and base64 on every call, or the input texts. An error with no body,
-    such as litellm refusing the parameter before sending, is matched on its message.
+    hint would send the user after the wrong fix. The server's JSON reply is read whole,
+    except where it echoes the request, which names encoding_format and base64 on every
+    call, or the input texts. An error with no reply, such as litellm refusing the
+    parameter before sending, is matched on its message. So is a relay that copies the
+    backend's error into its own message, as a LiteLLM proxy does, echo included.
     """
     body = _server_error_body(error)
     if body is not None:

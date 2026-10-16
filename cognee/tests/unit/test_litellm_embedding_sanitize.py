@@ -1,6 +1,9 @@
 import base64
 import re
 import struct
+import subprocess
+import sys
+import textwrap
 import warnings
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
@@ -8,7 +11,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import httpx
 import litellm
 import pytest
-from tenacity import stop_after_attempt
+from tenacity import stop_after_attempt, wait_none
 
 from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
     LiteLLMEmbeddingEngine,
@@ -197,6 +200,36 @@ async def test_embed_text_decodes_base64_vectors(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_a_base64_vector_with_nan_is_requested_again(monkeypatch):
+    """A base64 reply can carry NaN as a transient glitch, which a retry clears."""
+    monkeypatch.setenv("MOCK_EMBEDDING", "false")
+
+    with patch.object(LiteLLMEmbeddingEngine, "get_tokenizer", return_value=Mock()):
+        engine = LiteLLMEmbeddingEngine(
+            provider="openai", model="openai/text-embedding-3-large", dimensions=2, api_key="k"
+        )
+    assert engine.encoding_format == "base64"
+    retry = engine.embed_text.retry_with(stop=stop_after_attempt(2), wait=wait_none())
+    engine.embed_text = retry.__get__(engine)
+
+    good = [0.5, 0.25]
+    replies = [struct.pack("<2f", float("nan"), 0.25), struct.pack("<2f", *good)]
+    aembedding = AsyncMock(
+        side_effect=[
+            SimpleNamespace(data=[{"embedding": base64.b64encode(reply).decode()}])
+            for reply in replies
+        ]
+    )
+
+    import cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine as mod
+
+    monkeypatch.setattr(mod.litellm, "aembedding", aembedding)
+
+    assert await engine.embed_text(["hello"]) == [good]
+    assert aembedding.await_count == 2
+
+
+@pytest.mark.asyncio
 async def test_float_list_on_a_base64_route_fails_without_retry(monkeypatch):
     """A proxy that translates base64 for Bedrock answers with a list of 0/1: raise, once."""
     monkeypatch.setenv("MOCK_EMBEDDING", "false")
@@ -285,6 +318,7 @@ def _dump_base64_reply(**usage):
 
 
 def test_the_real_base64_warning_is_ignored_and_other_problems_are_not():
+    from pydantic import VERSION as PYDANTIC_VERSION
     from pydantic import BaseModel
 
     import cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine as mod
@@ -311,7 +345,64 @@ def test_the_real_base64_warning_is_ignored_and_other_problems_are_not():
         _dump_base64_reply(prompt_tokens="7")
         Scores.model_construct(values="0.1,0.2,0.3").model_dump()
         Record.model_construct(vector={"x": 1}, count="three").model_dump()
-        assert len(caught) == 3
+        expected = 3
+        if tuple(int(part) for part in PYDANTIC_VERSION.split(".")[:2]) >= (2, 12):
+            # A base64-looking string in another field. Before 2.12 no field is named.
+            Scores.model_construct(values="AAAA").model_dump()
+            expected += 1
+        assert len(caught) == expected
+
+
+@pytest.mark.skipif(sys.version_info < (3, 14), reason="context-aware warnings came in 3.14")
+def test_the_filter_is_put_first_in_the_filters_in_effect():
+    """With context-aware warnings, catch_warnings() keeps its filters in a context
+    variable while warnings.filters stays the outer list. The filter already being first
+    in the outer list must not stop it being put first inside the block."""
+    import inspect
+
+    import cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine as mod
+
+    # The flag is fixed at startup, so this runs in a child process: the function's own
+    # source with its pattern, and the dump litellm does, without importing cognee.
+    script = "\n".join(
+        [
+            "import warnings",
+            f"_BASE64_SERIALIZER_WARNING = {mod._BASE64_SERIALIZER_WARNING!r}",
+            inspect.getsource(mod._ignore_base64_serializer_warning),
+            textwrap.dedent(
+                """
+                import base64, struct
+                from openai.types import CreateEmbeddingResponse, Embedding
+                from openai.types.create_embedding_response import Usage
+
+                encoded = base64.b64encode(struct.pack("<2f", 0.5, 0.25)).decode()
+                data = [Embedding.model_construct(embedding=encoded, index=0, object="embedding")]
+                reply = CreateEmbeddingResponse.model_construct(
+                    data=data,
+                    model="m",
+                    object="list",
+                    usage=Usage.model_construct(prompt_tokens=1, total_tokens=1),
+                )
+                _ignore_base64_serializer_warning()
+                with warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        "error", message="Pydantic serializer warnings", category=UserWarning
+                    )
+                    _ignore_base64_serializer_warning()
+                    reply.model_dump()
+                print("dumped without error")
+                """
+            ),
+        ]
+    )
+    result = subprocess.run(
+        [sys.executable, "-X", "context_aware_warnings=1", "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert "dumped without error" in result.stdout.splitlines(), result.stderr[-3000:]
 
 
 @pytest.mark.asyncio

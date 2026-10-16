@@ -174,7 +174,18 @@ class TestOpenAICompatibleEmbeddingEngine:
                 },
                 True,
             ),
-            # ...and echoes the whole request when the error is about something else.
+            # A framework 400 whose "error" member is a bare string keeps the reason in
+            # "message"; the openai SDK's body holds only "Bad Request".
+            (
+                400,
+                {
+                    "statusCode": 400,
+                    "error": "Bad Request",
+                    "message": "body/encoding_format must be equal to one of the allowed values",
+                },
+                True,
+            ),
+            # FastAPI echoes the whole request when the error is about something else.
             (
                 422,
                 {
