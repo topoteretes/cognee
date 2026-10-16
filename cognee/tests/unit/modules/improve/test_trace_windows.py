@@ -1,8 +1,9 @@
-"""improve() persists agent traces in bounded windows, never as one unbounded document.
+"""improve() persists a session's pending agent traces as one document.
 
-By default one run drains a session's whole backlog, window by window; a stuck
-session is left out of the run's later passes so the others keep draining; the
-cap on windows per run is opt-in.
+By default one run drains a session's whole backlog in one cognify run; the
+step cap that splits it into windows is opt-in, and so is the cap on windows
+per run. A stuck session is left out of the run's later passes so the others
+keep draining.
 """
 
 import importlib
@@ -205,6 +206,21 @@ async def test_backlog_is_persisted_in_documents_of_at_most_the_window_size(stor
 
     assert result.status == "completed"
     assert cognee_fake.steps_per_document() == [30, 30, 30, 5]
+    assert await _watermark(store, inputs) == 95
+
+
+@pytest.mark.asyncio
+async def test_default_persists_a_sessions_whole_backlog_as_one_document(store, monkeypatch):
+    """No step cap by default: one session, one document, one pass, whatever the backlog."""
+    store.add_steps("s1", 95)
+    cognee_fake = FakeCognee()
+    inputs = _inputs(_use(monkeypatch, cognee_fake))
+
+    result = await PersistAgentTracesStage().run(inputs)
+
+    assert result.status == "completed"
+    assert result.counts["windows"] == 1
+    assert cognee_fake.steps_per_document() == [95]
     assert await _watermark(store, inputs) == 95
 
 
@@ -488,9 +504,10 @@ async def test_window_cap_defers_the_rest_of_the_backlog_to_the_next_run(store, 
     assert max(cognee_fake.steps_per_document()) == 30
 
 
-def test_window_steps_must_be_positive():
+def test_window_steps_defaults_to_no_cap_and_rejects_negative():
+    assert ImproveConfig(_env_file=None).trace_window_steps == 0
     with pytest.raises(ValueError):
-        ImproveConfig(trace_window_steps=0)
+        ImproveConfig(trace_window_steps=-1)
 
 
 def test_windows_per_run_defaults_to_drain_and_rejects_negative():

@@ -208,18 +208,19 @@ class PersistAgentTracesStage(BaseStage):
         if await _watermarks_show_nothing_new(inputs, kind="traces"):
             return _already_completed(self.name, REASON_NO_NEW_TRACE_STEPS)
 
-        # Each pipeline call cognifies the OLDEST trace_window_steps pending steps
-        # of each pending session and advances their watermarks, so a failure
-        # repeats one bounded window, not the whole backlog. The loop drains the
-        # backlog the run started with, unless trace_windows_per_run caps the
-        # run; steps an agent writes meanwhile wait for the next run (the window
-        # is cut at the starting count, persist_up_to), so a live
-        # session cannot keep the run (and the dataset's improve lock) going. A
-        # pass's windows build in one cognify run; a failed build raises with its
-        # cause and ends the run, nothing built, every watermark in place. A pass
-        # takes at most TRACE_SESSIONS_PER_PASS sessions, those with the fewest
-        # windows so far, so the dataset lock is released between passes and
-        # sessions late in the list get their turn before earlier ones drain.
+        # Each pipeline call cognifies every pending step of each pending session
+        # as one document (the OLDEST trace_window_steps of them when that cap is
+        # set) and advances their watermarks, so a long session costs one cognify
+        # run, not one per window. The loop drains the backlog the run started
+        # with, unless trace_windows_per_run caps the run; steps an agent writes
+        # meanwhile wait for the next run (the window is cut at the starting
+        # count, persist_up_to), so a live session cannot keep the run (and the
+        # dataset's improve lock) going. A pass's windows build in one cognify
+        # run; a failed build raises with its cause and ends the run, nothing
+        # built, every watermark in place. A pass takes at most
+        # TRACE_SESSIONS_PER_PASS sessions, those with the fewest windows so far,
+        # so the dataset lock is released between passes and sessions late in
+        # the list get their turn before earlier ones drain.
         config = inputs.config
         max_windows = config.trace_windows_per_run
         sessions = len(inputs.session_ids)
@@ -245,7 +246,7 @@ class PersistAgentTracesStage(BaseStage):
                 dataset=inputs.dataset_id,
                 node_set_name=AGENT_TRACE_FEEDBACKS_NODE_SET,
                 raw_trace_content=False,
-                last_n_steps=config.trace_window_steps,
+                last_n_steps=config.trace_window_steps or None,
                 run_in_background=False,
                 persist_up_to=backlog,
             )
