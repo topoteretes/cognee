@@ -18,7 +18,7 @@ answer was reached, and the full result when it has more than one row.
 import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from itertools import groupby, pairwise
+from itertools import groupby, pairwise, zip_longest
 from typing import Any, Literal
 from uuid import UUID
 
@@ -182,13 +182,11 @@ def _documents_of(units: list[Unit]) -> list[tuple[str, list[Unit]]]:
 
 def _merged(ranked: list[list]) -> list:
     """Several ranked lists as one: the first of each, then the second of each, ..."""
-    return (
-        [r for tier in zip(*ranked) for r in tier]
-        if len(ranked) > 1
-        else ranked[0]
-        if ranked
-        else []
-    )
+    if not ranked:
+        return []
+    if len(ranked) == 1:
+        return ranked[0]
+    return [r for tier in zip_longest(*ranked) for r in tier if r is not None]
 
 
 def _reads_text(sql: str | None) -> bool:
