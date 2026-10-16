@@ -21,6 +21,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 # are explicit here.
 import cognee.modules.integrations.github
 import cognee.modules.integrations.gmail
+import cognee.modules.integrations.google_calendar
 import cognee.modules.integrations.google_drive
 import cognee.modules.integrations.linear
 from cognee.api.exception_telemetry import send_api_exception_telemetry
