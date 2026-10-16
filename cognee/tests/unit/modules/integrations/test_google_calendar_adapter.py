@@ -12,7 +12,8 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
-from cognee.modules.integrations.google_calendar import adapter as adapter_module
+from cognee.modules.integrations.google import client as google_client
+from cognee.modules.integrations.google import oauth_integration
 from cognee.modules.integrations.google_calendar import client as calendar_client
 from cognee.modules.integrations.google_calendar.adapter import (
     GoogleCalendarIntegration,
@@ -42,7 +43,7 @@ USERINFO = {
 @pytest.fixture(autouse=True)
 def active_credential():
     with patch.object(
-        adapter_module, "require_active_credential", AsyncMock(side_effect=lambda c: c)
+        oauth_integration, "require_active_credential", AsyncMock(side_effect=lambda c: c)
     ):
         yield
 
@@ -91,7 +92,7 @@ def test_state_secret_and_frontend_url_come_from_their_own_settings():
 @pytest.mark.asyncio
 async def test_exchange_code_sends_the_registered_redirect_uri():
     with patch.object(
-        adapter_module.client, "exchange_code", AsyncMock(return_value=TOKEN_RESPONSE)
+        google_client, "exchange_code", AsyncMock(return_value=TOKEN_RESPONSE)
     ) as exchange:
         await GoogleCalendarIntegration().exchange_code("auth-code")
 
@@ -103,11 +104,9 @@ async def test_exchange_code_sends_the_registered_redirect_uri():
 @pytest.mark.asyncio
 async def test_exchange_callback_attaches_the_identity_of_who_authorized():
     with (
+        patch.object(google_client, "exchange_code", AsyncMock(return_value=TOKEN_RESPONSE)),
         patch.object(
-            adapter_module.client, "exchange_code", AsyncMock(return_value=TOKEN_RESPONSE)
-        ),
-        patch.object(
-            adapter_module.client, "fetch_userinfo", AsyncMock(return_value=USERINFO)
+            google_client, "fetch_userinfo", AsyncMock(return_value=USERINFO)
         ) as fetch_userinfo,
     ):
         response = await GoogleCalendarIntegration().exchange_callback("auth-code", {})
@@ -163,7 +162,7 @@ def test_parse_installation_refuses_a_response_without_a_subject():
 
 def test_missing_refresh_token_is_logged_and_the_install_still_works(caplog):
     response = {k: v for k, v in TOKEN_RESPONSE.items() if k != "refresh_token"}
-    with caplog.at_level("WARNING", logger=adapter_module.logger.name):
+    with caplog.at_level("WARNING", logger=oauth_integration.logger.name):
         installation = GoogleCalendarIntegration().parse_installation(
             {**response, "userinfo": USERINFO}
         )
@@ -187,7 +186,9 @@ async def test_calendar_picker_uses_the_client_with_the_current_access_token():
         {"summary": "missing id"},
     ]
     with (
-        patch.object(adapter_module, "decrypt_token_payload", return_value={"access_token": "t"}),
+        patch.object(
+            oauth_integration, "decrypt_token_payload", return_value={"access_token": "t"}
+        ),
         patch.object(calendar_client, "list_calendars", AsyncMock(return_value=calendars)) as lst,
     ):
         resources = await GoogleCalendarIntegration().list_resources(credential)
@@ -218,12 +219,12 @@ async def test_token_inside_the_refresh_margin_is_refreshed_before_listing_calen
     with (
         patch.object(GoogleCalendarIntegration, "refresh", AsyncMock()) as refresh,
         patch.object(
-            adapter_module,
+            oauth_integration,
             "require_active_credential",
             AsyncMock(side_effect=[credential, refreshed] if stale else [credential]),
         ),
         patch.object(
-            adapter_module, "decrypt_token_payload", return_value={"access_token": "fresh"}
+            oauth_integration, "decrypt_token_payload", return_value={"access_token": "fresh"}
         ) as decrypt,
         patch.object(calendar_client, "list_calendars", AsyncMock(return_value=[])) as lst,
     ):
@@ -246,7 +247,9 @@ async def test_access_token_for_treats_a_naive_expiry_as_utc():
     credential = SimpleNamespace(token_expires_at=naive_expiry, provider_account_id="subject")
     with (
         patch.object(GoogleCalendarIntegration, "refresh", AsyncMock()) as refresh,
-        patch.object(adapter_module, "decrypt_token_payload", return_value={"access_token": "t"}),
+        patch.object(
+            oauth_integration, "decrypt_token_payload", return_value={"access_token": "t"}
+        ),
     ):
         assert await access_token_for(credential) == "t"
 
@@ -257,7 +260,7 @@ async def test_access_token_for_treats_a_naive_expiry_as_utc():
 async def test_a_credential_without_an_access_token_fails_loudly():
     credential = SimpleNamespace(token_expires_at=None, provider_account_id="subject")
     with (
-        patch.object(adapter_module, "decrypt_token_payload", return_value={}),
+        patch.object(oauth_integration, "decrypt_token_payload", return_value={}),
         pytest.raises(RuntimeError, match="no access token"),
     ):
         await access_token_for(credential)
@@ -268,14 +271,14 @@ async def test_refresh_keeps_the_stored_refresh_token():
     credential = SimpleNamespace(provider_account_id="subject", scopes="calendar")
     with (
         patch.object(
-            adapter_module, "decrypt_token_payload", return_value={"refresh_token": "1//refresh"}
+            oauth_integration, "decrypt_token_payload", return_value={"refresh_token": "1//refresh"}
         ),
         patch.object(
-            adapter_module.client,
+            google_client,
             "refresh_access_token",
             AsyncMock(return_value={"access_token": "ya29.new", "expires_in": 3599}),
         ),
-        patch.object(adapter_module, "update_refreshed_credential", AsyncMock()) as update,
+        patch.object(oauth_integration, "update_refreshed_credential", AsyncMock()) as update,
     ):
         await GoogleCalendarIntegration().refresh(credential)
 
@@ -291,13 +294,15 @@ async def test_refresh_keeps_the_stored_refresh_token():
 async def test_refresh_stores_the_scope_google_returns():
     credential = SimpleNamespace(provider_account_id="subject", scopes="calendar")
     with (
-        patch.object(adapter_module, "decrypt_token_payload", return_value={"refresh_token": "r"}),
         patch.object(
-            adapter_module.client,
+            oauth_integration, "decrypt_token_payload", return_value={"refresh_token": "r"}
+        ),
+        patch.object(
+            google_client,
             "refresh_access_token",
             AsyncMock(return_value={"access_token": "a", "expires_in": 10, "scope": "narrower"}),
         ),
-        patch.object(adapter_module, "update_refreshed_credential", AsyncMock()) as update,
+        patch.object(oauth_integration, "update_refreshed_credential", AsyncMock()) as update,
     ):
         await GoogleCalendarIntegration().refresh(credential)
 
@@ -308,7 +313,9 @@ async def test_refresh_stores_the_scope_google_returns():
 async def test_refresh_without_a_refresh_token_asks_to_reconnect():
     credential = SimpleNamespace(provider_account_id="subject")
     with (
-        patch.object(adapter_module, "decrypt_token_payload", return_value={"access_token": "a"}),
+        patch.object(
+            oauth_integration, "decrypt_token_payload", return_value={"access_token": "a"}
+        ),
         pytest.raises(RuntimeError, match="reconnect"),
     ):
         await GoogleCalendarIntegration().refresh(credential)
@@ -318,14 +325,14 @@ async def test_refresh_without_a_refresh_token_asks_to_reconnect():
 @pytest.mark.parametrize(("code", "revoked"), [("invalid_grant", True), ("http_503", False)])
 async def test_refresh_revokes_only_when_google_says_the_grant_is_gone(code, revoked):
     credential = SimpleNamespace(provider_account_id="subject")
-    error = adapter_module.client.GoogleAuthError("token refresh", code)
+    error = google_client.GoogleAuthError("token refresh", code)
     with (
         patch.object(
-            adapter_module, "decrypt_token_payload", return_value={"refresh_token": "1//refresh"}
+            oauth_integration, "decrypt_token_payload", return_value={"refresh_token": "1//refresh"}
         ),
-        patch.object(adapter_module.client, "refresh_access_token", AsyncMock(side_effect=error)),
-        patch.object(adapter_module, "revoke_credential_if_current", AsyncMock()) as revoke,
-        pytest.raises(adapter_module.client.GoogleAuthError),
+        patch.object(google_client, "refresh_access_token", AsyncMock(side_effect=error)),
+        patch.object(oauth_integration, "revoke_credential_if_current", AsyncMock()) as revoke,
+        pytest.raises(google_client.GoogleAuthError),
     ):
         await GoogleCalendarIntegration().refresh(credential)
 
@@ -338,7 +345,7 @@ async def test_refresh_revokes_only_when_google_says_the_grant_is_gone(code, rev
 async def test_revoke_remote_never_raises():
     credential = SimpleNamespace(provider_account_id="subject")
     # A disconnect must complete even when the remote revoke cannot.
-    with patch.object(adapter_module, "decrypt_token_payload", side_effect=RuntimeError("boom")):
+    with patch.object(oauth_integration, "decrypt_token_payload", side_effect=RuntimeError("boom")):
         await GoogleCalendarIntegration().revoke_remote(credential)
 
 
@@ -347,11 +354,11 @@ async def test_revoke_remote_prefers_the_refresh_token():
     credential = SimpleNamespace(provider_account_id="subject")
     with (
         patch.object(
-            adapter_module,
+            oauth_integration,
             "decrypt_token_payload",
             return_value={"access_token": "a", "refresh_token": "r"},
         ),
-        patch.object(adapter_module.client, "revoke_token", AsyncMock()) as revoke,
+        patch.object(google_client, "revoke_token", AsyncMock()) as revoke,
     ):
         await GoogleCalendarIntegration().revoke_remote(credential)
 

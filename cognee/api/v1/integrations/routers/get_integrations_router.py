@@ -901,9 +901,13 @@ def get_integrations_router():
             )
         resource_ids = None
         if payload.resource_ids is not None:
-            resource_ids = list(
-                dict.fromkeys(str(resource_id) for resource_id in payload.resource_ids)
-            )
+            # A stored blank id fails every later sync of the providers that check the
+            # shape, and the account stays degraded until the user saves again.
+            if any(not resource_id.strip() for resource_id in payload.resource_ids):
+                raise HTTPException(
+                    status_code=422, detail="Resource ids must not be blank or whitespace only"
+                )
+            resource_ids = list(dict.fromkeys(payload.resource_ids))
         updated = await update_provider_metadata(
             provider,
             credential.provider_account_id,

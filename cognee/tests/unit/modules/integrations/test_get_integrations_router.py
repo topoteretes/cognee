@@ -411,6 +411,35 @@ def test_a_list_selection_is_stored_for_a_provider_that_cannot_select_all(client
     update.assert_awaited_once_with("fake", "ACC1", {"picked": ["a", "b"]})
 
 
+# A blank id is never a real resource. Stored, it makes the sync of every provider
+# that checks the selection shape fail until the user saves again.
+@pytest.mark.parametrize("allows_all", [True, False])
+@pytest.mark.parametrize("body", [[""], [" "], ["a", "\t"], ["a", "  \n"]])
+def test_a_blank_resource_id_is_refused_and_nothing_is_stored(
+    client, monkeypatch, allows_all, body
+):
+    response, update = put_resources(
+        client, supported_integrations["fake"], body, allows_all=allows_all, monkeypatch=monkeypatch
+    )
+
+    assert response.status_code == 422
+    assert "blank" in response.json()["detail"]
+    update.assert_not_awaited()
+
+
+def test_ids_are_stored_as_given_and_deduplicated(client, monkeypatch):
+    response, update = put_resources(
+        client,
+        supported_integrations["fake"],
+        ["b", " a ", "b"],
+        allows_all=True,
+        monkeypatch=monkeypatch,
+    )
+
+    assert response.status_code == 200
+    update.assert_awaited_once_with("fake", "ACC1", {"picked": ["b", " a "]})
+
+
 def test_a_manual_sync_is_not_accepted_while_one_is_running(client):
     from cognee.modules.integrations import ingestion
 

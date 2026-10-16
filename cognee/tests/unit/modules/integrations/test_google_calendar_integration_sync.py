@@ -56,6 +56,12 @@ def credential(**metadata):
     )
 
 
+def _dataset_name(email, account_id):
+    return sync_module.ingestion.dataset_name_for_account(
+        sync_module.GOOGLE_CALENDAR_DATASET_PREFIX, email, account_id
+    )
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("calendars", [["primary"], ["primary", "team@group.calendar.google.com"]])
 async def test_selected_calendars_reach_the_source_factory(calendars, sync_mocks):
@@ -69,7 +75,7 @@ async def test_selected_calendars_reach_the_source_factory(calendars, sync_mocks
     )
     sync_mocks.remember.assert_awaited_once_with(
         "dlt-source",
-        dataset_name=sync_module.dataset_name_for_account("person@example.com", "subject"),
+        dataset_name=sync_module._dataset_name(credential()),
         user="owner",
         write_disposition="merge",
         primary_key="id",
@@ -109,7 +115,7 @@ async def test_calendar_is_opt_in_even_without_connector_dependencies(metadata, 
     sync_mocks.retire.assert_awaited_once_with(
         "google_calendar",
         ANY,
-        sync_module.dataset_name_for_account("person@example.com", "subject"),
+        sync_module._dataset_name(credential()),
         set(),
     )
     sync_mocks.token.assert_not_awaited()
@@ -147,7 +153,7 @@ async def test_stale_tables_are_retired_after_a_clean_run_keeping_the_account_re
     sync_mocks.retire.assert_awaited_once_with(
         "google_calendar",
         ANY,
-        sync_module.dataset_name_for_account("person@example.com", "subject"),
+        sync_module._dataset_name(credential()),
         {sync_module.ingestion.resource_name("google_calendar", credential())},
     )
 
@@ -206,7 +212,7 @@ async def test_duplicate_sync_does_not_race_the_account_cursor(sync_mocks):
     ],
 )
 def test_dataset_name_is_a_slug_of_the_email(email, account_id, expected):
-    assert sync_module.dataset_name_for_account(email, account_id) == expected
+    assert _dataset_name(email, account_id) == expected
 
 
 # The dataset name is a stored identifier: changing the slug rule or the length of the
@@ -219,11 +225,11 @@ def test_dataset_name_is_a_slug_of_the_email(email, account_id, expected):
     ],
 )
 def test_dataset_name_stays_stable(email, account_id, expected):
-    assert sync_module.dataset_name_for_account(email, account_id) == expected
+    assert _dataset_name(email, account_id) == expected
 
 
 def test_dataset_name_tells_apart_accounts_whose_slugs_collide():
-    first = sync_module.dataset_name_for_account("a.b@example.com", "one")
-    second = sync_module.dataset_name_for_account("a_b@example.com", "two")
+    first = _dataset_name("a.b@example.com", "one")
+    second = _dataset_name("a_b@example.com", "two")
     assert first != second
     assert first.startswith("google_calendar_a_b_example_com_")
