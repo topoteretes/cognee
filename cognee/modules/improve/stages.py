@@ -324,7 +324,10 @@ class DistillSessionsStage(BaseStage):
         for session_id in inputs.session_ids:
             try:
                 result = await distill_session(
-                    session_id, dataset=inputs.dataset_id, user=inputs.user
+                    session_id,
+                    dataset=inputs.dataset_id,
+                    user=inputs.user,
+                    max_batches=inputs.config.distill_max_batches_per_run,
                 )
                 distilled += len(result.documents)
                 uncurated += result.uncurated_entries
