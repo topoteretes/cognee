@@ -50,14 +50,30 @@ def _context_row(content="A lesson.", **overrides):
 
 
 class FakeSessionManager:
-    def __init__(self, rows=None):
+    def __init__(self, rows=None, qa_rows=None):
         self.store: list[dict] = [dict(row) for row in (rows or [])]
+        self.qa_rows: list[dict] = [dict(row) for row in (qa_rows or [])]
+        self.qa_reads: list[dict] = []
 
     async def get_session_context_entries(self, *, user_id, session_id=None):
         return list(self.store)
 
-    async def get_session(self, **kwargs):
-        return []
+    async def get_session(self, *, since=None, lead_in=0, **kwargs):
+        """Same contract as the cache interface's get_qa_entries_since."""
+        from datetime import datetime, timezone
+
+        self.qa_reads.append({"since": since, "lead_in": lead_in})
+        if since is None:
+            return list(self.qa_rows)
+        first = len(self.qa_rows)
+        for index, row in enumerate(self.qa_rows):
+            stored = datetime.fromisoformat(row["time"])
+            if stored.tzinfo is None:
+                stored = stored.replace(tzinfo=timezone.utc)
+            if stored >= since:
+                first = index
+                break
+        return list(self.qa_rows[max(first - lead_in, 0) :])
 
     async def update_session_context_entry(self, *, user_id, entry_id, merge, session_id=None):
         for row in self.store:
@@ -643,19 +659,18 @@ async def test_turns_before_the_one_that_produced_the_earliest_new_entry_stay_ho
     """Turns carry no watermark. The entry is written while the next turn is answered,
     before that turn's QA row, and it judges the turn before; so the newest turn
     before the earliest new entry is sent, older ones are not."""
-    old_rows = [_context_row("Old lesson.", created_at="2026-06-11T09:00:00.2+00:00")]
-    new_rows = [_context_row("New lesson.", created_at="2026-06-11T12:05:00.2+00:00")]
+    from datetime import datetime, timezone
 
-    class TalkativeManager(FakeSessionManager):
-        async def get_session(self, **kwargs):
-            return [
-                {"time": "2026-06-11T08:00:00.1+00:00", "question": "Early turn?", "answer": "A."},
-                {"time": "2026-06-11T09:00:00.9+00:00", "question": "Old turn?", "answer": "B."},
-                {"time": "2026-06-11T12:05:00.9+00:00", "question": "No, metric?", "answer": "C."},
-                {"time": "2026-06-11T13:00:00.9+00:00", "question": "Later turn?", "answer": "D."},
-            ]
+    old_rows = [_context_row("Old lesson.", created_at="2026-06-11T09:00:00.200000+00:00")]
+    new_rows = [_context_row("New lesson.", created_at="2026-06-11T12:05:00.200000+00:00")]
+    turns = [
+        {"time": "2026-06-11T08:00:00.100000+00:00", "question": "Early turn?", "answer": "A."},
+        {"time": "2026-06-11T09:00:00.900000+00:00", "question": "Old turn?", "answer": "B."},
+        {"time": "2026-06-11T12:05:00.900000+00:00", "question": "No, metric?", "answer": "C."},
+        {"time": "2026-06-11T13:00:00.900000+00:00", "question": "Later turn?", "answer": "D."},
+    ]
 
-    manager = TalkativeManager(old_rows + new_rows)
+    manager = FakeSessionManager(old_rows + new_rows, qa_rows=turns)
     _install_manager(monkeypatch, manager)
     await save_distilled_entry_ids(
         manager, str(USER.id), "s-1", str(DATASET_A.id), [old_rows[0]["id"]]
@@ -673,6 +688,10 @@ async def test_turns_before_the_one_that_produced_the_earliest_new_entry_stay_ho
     assert "No, metric?" in curated
     assert "Later turn?" in curated
     assert "New lesson." in curated
+    # The bound is pushed down to the cache: one read, from the new entry, one turn of lead-in.
+    assert manager.qa_reads == [
+        {"since": datetime(2026, 6, 11, 12, 5, 0, 200000, tzinfo=timezone.utc), "lead_in": 1}
+    ]
 
 
 def _record_curator_calls(monkeypatch, lessons_per_call=0):
