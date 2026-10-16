@@ -15,6 +15,7 @@ import pytest
 from cognee.infrastructure.databases.cache.models import SessionAgentTraceEntry
 from cognee.infrastructure.session.session_persist_watermark import TRACE_PERSIST_WATERMARK
 from cognee.modules.improve import GraphCapabilities, ImproveConfig, ImproveRunInputs
+from cognee.modules.improve.result import StageResult
 from cognee.modules.improve.stages import PersistAgentTracesStage
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunErrored
 from cognee.tasks.memify.cognify_agent_trace_feedback import cognify_agent_trace_feedback
@@ -326,6 +327,60 @@ async def test_a_pass_takes_a_bounded_number_of_sessions_in_turn(store, monkeypa
     assert result.counts["windows"] == 24
     for session_id in session_ids:
         assert await _watermark(store, inputs, session_id) == 60
+
+
+@pytest.mark.asyncio
+async def test_exhausted_budget_survives_the_real_pipeline_runner(store, monkeypatch):
+    """Through the real run_tasks (storage faked), the task's 402 reaches the stage
+    as a PipelineRunErrored that still names LLMPaymentRequiredError, so the
+    errored stage classifies as budget exhaustion."""
+    from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
+    from cognee.modules.pipelines.tasks.task import Task
+    from cognee.tests.unit.modules.pipelines.test_run_tasks_rollback import (
+        _FakeEngine,
+        _no_op_context,
+    )
+
+    runner = importlib.import_module("cognee.modules.pipelines.operations.run_tasks")
+    store.add_steps("s1", 40)
+    broke = FakeCognee(fail_builds={1})
+    broke.error_class = "LLMPaymentRequiredError"
+    broke.error_message = "insufficient credits"
+    _use(monkeypatch, broke)
+    dataset = types.SimpleNamespace(id=uuid4(), name="docs", owner_id=uuid4())
+    user = types.SimpleNamespace(id=uuid4(), tenant_id=None)
+    monkeypatch.setattr(
+        importlib.import_module("cognee.tasks.memify.extract_agent_trace_feedbacks"),
+        "session_user",
+        types.SimpleNamespace(get=lambda: user),
+    )
+    monkeypatch.setattr(runner, "get_relational_engine", lambda: _FakeEngine(dataset))
+    monkeypatch.setattr(runner, "set_database_global_context_variables", _no_op_context)
+    monkeypatch.setattr(
+        runner,
+        "log_pipeline_run_start",
+        AsyncMock(return_value=types.SimpleNamespace(pipeline_run_id=uuid4())),
+    )
+    monkeypatch.setattr(runner, "log_pipeline_run_error", AsyncMock())
+    monkeypatch.setattr(runner, "log_pipeline_run_progress", AsyncMock())
+    monkeypatch.setattr(runner, "pipeline_run_telemetry_properties", lambda *a, **k: {})
+    tasks = [
+        Task(extract_agent_trace_feedbacks, session_ids=["s1"], last_n_steps=30),
+        Task(cognify_agent_trace_feedback, dataset_id=dataset.id, user=user),
+    ]
+
+    runs = []
+    with pytest.raises(LLMPaymentRequiredError):
+        async for run_info in runner.run_tasks(tasks, dataset.id, [{}], user, "memify_pipeline"):
+            runs.append(run_info)
+
+    assert isinstance(runs[-1], PipelineRunErrored)
+    assert runs[-1].error_class == "LLMPaymentRequiredError"
+    stage_result = StageResult.from_pipeline_run("persist_agent_traces", {dataset.id: runs[-1]})
+    assert stage_result.status == "errored"
+    assert stage_result.budget_exhausted
+    assert await TRACE_PERSIST_WATERMARK.read_count(store, str(user.id), "s1") == 0
+    assert len(broke.documents) == 1
 
 
 @pytest.mark.asyncio
