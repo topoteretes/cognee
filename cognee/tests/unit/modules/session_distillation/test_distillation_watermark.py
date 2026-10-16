@@ -415,6 +415,38 @@ async def test_idle_run_never_reads_the_qa_history(monkeypatch, datasets):
     assert CountingManager.qa_reads == 0
 
 
+@pytest.mark.asyncio
+async def test_turns_before_the_earliest_new_entry_are_not_sent_again(monkeypatch, datasets):
+    """Turns carry no watermark. The ones before the earliest new entry were curated
+    with the entries they produced, so only the turns from that entry on are sent."""
+    old_rows = [_context_row("Old lesson.", created_at="2026-06-11T09:00:00+00:00")]
+    new_rows = [_context_row("New lesson.", created_at="2026-06-11T12:00:00+00:00")]
+
+    class TalkativeManager(FakeSessionManager):
+        async def get_session(self, **kwargs):
+            return [
+                {"time": "2026-06-11T08:00:00+00:00", "question": "Early turn?", "answer": "A."},
+                {"time": "2026-06-11T12:00:00+00:00", "question": "Same minute?", "answer": "B."},
+                {"time": "2026-06-11T13:00:00+00:00", "question": "Later turn?", "answer": "C."},
+            ]
+
+    manager = TalkativeManager(old_rows + new_rows)
+    _install_manager(monkeypatch, manager)
+    await save_distilled_entry_ids(
+        manager, str(USER.id), "s-1", str(DATASET_A.id), [old_rows[0]["id"]]
+    )
+    curator_inputs = _record_curator_calls(monkeypatch)
+
+    result = await distill_module.distill_session("s-1", dataset=DATASET_A.name, user=USER)
+
+    assert result.status == "no_proposed_lessons"
+    curated = "\n".join(curator_inputs)
+    assert "Early turn?" not in curated
+    assert "Same minute?" in curated
+    assert "Later turn?" in curated
+    assert "New lesson." in curated
+
+
 def _record_curator_calls(monkeypatch, lessons_per_call=0):
     curator_inputs: list[str] = []
 
@@ -452,11 +484,42 @@ async def test_curator_sees_only_entries_not_yet_distilled(monkeypatch, datasets
     assert all(row["content"] in curated for row in new_rows)
 
 
+def _set_distill_cap(monkeypatch, max_batches: int) -> None:
+    from cognee.modules.improve.config import ImproveConfig
+
+    config = ImproveConfig(_env_file=None, distill_max_batches_per_run=max_batches)
+    monkeypatch.setattr(distill_module, "get_improve_config", lambda: config)
+
+
 @pytest.mark.asyncio
-async def test_heavy_fan_out_session_is_bounded_per_run(monkeypatch, datasets):
-    """A session that gates thousands of entries must not fan out into thousands of
-    curator calls in one run. The overflow is sealed so it never becomes a backlog."""
-    cap = distill_models.MAX_CURATOR_BATCHES_PER_RUN
+async def test_uncapped_run_curates_every_new_entry(monkeypatch, datasets):
+    """Default: no cap. Every new gated entry reaches the curator, so sealing them all
+    afterwards loses nothing."""
+    _set_distill_cap(monkeypatch, 0)
+    rows = [_context_row(f"Note {index}.", confidence=0.8) for index in range(400)]
+    manager = FakeSessionManager(rows)
+    _install_manager(monkeypatch, manager)
+    curator_inputs = _record_curator_calls(monkeypatch)
+
+    result = await distill_module.distill_session("s-1", dataset=DATASET_A.name, user=USER)
+
+    assert result.status == "no_proposed_lessons"
+    assert result.uncurated_entries == 0
+    assert len(curator_inputs) == -(-len(rows) // distill_models.CURATOR_BLOCKS_PER_BATCH)
+    curated = "\n".join(curator_inputs)
+    assert all(row["content"] in curated for row in rows)
+    assert await get_distilled_entry_ids(manager, str(USER.id), "s-1", str(DATASET_A.id)) == {
+        row["id"] for row in rows
+    }
+
+
+@pytest.mark.asyncio
+async def test_capped_run_curates_the_most_relevant_and_seals_the_rest(monkeypatch, datasets):
+    """With IMPROVE_DISTILL_MAX_BATCHES_PER_RUN set, a session that gates thousands of
+    entries fans out into at most that many curator calls. The overflow is sealed,
+    reported on the result, and never becomes a backlog."""
+    cap = 20
+    _set_distill_cap(monkeypatch, cap)
     blocks_per_run = cap * distill_models.CURATOR_BLOCKS_PER_BATCH
     sure_rows = [_context_row(f"High-confidence {index}.", confidence=0.99) for index in range(5)]
     bulk_rows = [
@@ -481,6 +544,7 @@ async def test_heavy_fan_out_session_is_bounded_per_run(monkeypatch, datasets):
     first = await distill_module.distill_session("s-1", dataset=DATASET_A.name, user=USER)
 
     assert first.status == "completed"
+    assert first.uncurated_entries == len(bulk_rows) + len(sure_rows) - blocks_per_run
     assert 0 < len(curator_inputs) <= cap
     assert sum(published) <= cap * 2
     curated = "\n".join(curator_inputs)

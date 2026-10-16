@@ -2,8 +2,11 @@
 
 Flow (curator calls parallel by batch; accept/write calls parallel by lesson):
 
-1. LOAD    distillable session-context entries the watermark does not cover + QA turns.
-2. CURATE  pack a bounded slice of them into batches; one curator LLM call per batch.
+1. LOAD    distillable session-context entries the watermark does not cover, plus the
+           QA turns from the earliest such entry onward (older turns were already curated
+           with the entries they produced).
+2. CURATE  pack them into batches; one curator LLM call per batch. Every new entry is
+           curated unless ``IMPROVE_DISTILL_MAX_BATCHES_PER_RUN`` caps the run.
 3. ACCEPT  per proposed lesson: search prior lessons/entities, then writer/rejecter LLM.
 4. PERSIST render accepted lessons as documents; add + cognify them in one pass.
 
@@ -41,6 +44,7 @@ from cognee.infrastructure.session.session_persist_watermark import (
 )
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.data.models import Dataset
+from cognee.modules.improve.config import get_improve_config
 from cognee.modules.improve.constants import SESSION_LEARNINGS_NODE_SET
 from cognee.modules.truth_subspace.constants import truth_session_node_set
 from cognee.modules.users.methods import get_default_user
@@ -53,7 +57,6 @@ from .models import (
     CURATOR_CONCURRENCY,
     GLOSSARY_ENTITIES_PER_LESSON,
     MAX_CANDIDATE_CHARS,
-    MAX_CURATOR_BATCHES_PER_RUN,
     MAX_QA_ANSWER_CHARS,
     MAX_QA_FEEDBACK_CHARS,
     MAX_QA_QUESTION_CHARS,
@@ -96,12 +99,18 @@ class SessionDistillationScope:
     def dataset_id(self) -> str:
         return str(self.dataset.id)
 
-    def result(self, status: str, documents: list[str] | None = None) -> DistillationResult:
+    def result(
+        self,
+        status: str,
+        documents: list[str] | None = None,
+        uncurated_entries: int = 0,
+    ) -> DistillationResult:
         return DistillationResult(
             session_id=self.session_id,
             dataset_id=self.dataset_id,
             status=status,
             documents=documents or [],
+            uncurated_entries=uncurated_entries,
         )
 
 
@@ -184,17 +193,37 @@ async def load_session_qa_rows(scope: SessionDistillationScope) -> list[dict]:
     ]
 
 
+def select_session_turns(
+    qa_rows: list[dict],
+    new_entries: list[SessionContextEntry],
+) -> list[dict]:
+    """Keep the QA turns from the earliest new entry onward.
+
+    Turns carry no watermark; the entries do. An entry is written during the turn
+    it came from, so the turns before the earliest new entry were already sent
+    with the entries they produced, and sending them again only costs tokens.
+    Timestamps are UTC ISO strings on both sides, so they compare as text.
+    """
+    since = min(entry.created_at or "" for entry in new_entries)
+    return [row for row in qa_rows if (row.get("time") or "") >= since]
+
+
 def select_curator_inputs(
     qa_rows: list[dict],
     new_entries: list[SessionContextEntry],
+    max_batches: int,
 ) -> tuple[list[dict], list[SessionContextEntry]]:
-    """Pick what one run curates, so it packs into at most MAX_CURATOR_BATCHES_PER_RUN batches.
+    """Pick what one run curates.
 
-    New entries come first, highest confidence then most recent; QA turns fill the
-    remaining blocks, most recent first. Entries left out are still sealed by the
-    watermark when the run completes, so a heavy session never builds a backlog.
+    With ``max_batches`` 0 everything goes: every new entry and every turn given.
+    With a cap, the run packs into at most that many batches: new entries first,
+    highest confidence then most recent; QA turns fill the remaining blocks, most
+    recent first. Entries left out are still sealed by the watermark when the run
+    completes, so a capped run trades the overflow for a bounded run.
     """
-    budget = MAX_CURATOR_BATCHES_PER_RUN * CURATOR_BLOCKS_PER_BATCH
+    if max_batches == 0:
+        return qa_rows, list(new_entries)
+    budget = max_batches * CURATOR_BLOCKS_PER_BATCH
     entries = sorted(
         new_entries, key=lambda entry: (entry.confidence, entry.created_at or ""), reverse=True
     )[:budget]
@@ -526,21 +555,24 @@ async def distill_session(
         )
         return scope.result("no_new_entries")
 
-    qa_rows, curated_entries = select_curator_inputs(await load_session_qa_rows(scope), new_entries)
-    if len(curated_entries) < len(new_entries):
+    max_batches = get_improve_config().distill_max_batches_per_run
+    qa_rows = select_session_turns(await load_session_qa_rows(scope), new_entries)
+    qa_rows, curated_entries = select_curator_inputs(qa_rows, new_entries, max_batches)
+    uncurated = len(new_entries) - len(curated_entries)
+    if uncurated:
         logger.warning(
             "Session %s: curating %d of %d new gated entries (cap %d batches per run); "
             "the other %d are sealed without curation",
             scope.session_id,
             len(curated_entries),
             len(new_entries),
-            MAX_CURATOR_BATCHES_PER_RUN,
-            len(new_entries) - len(curated_entries),
+            max_batches,
+            uncurated,
         )
     proposed, curator_failures = await propose_lessons(qa_rows, curated_entries)
     if not proposed and not curator_failures:
         await advance_distillation_watermark(scope, context_entries)
-        return scope.result("no_proposed_lessons")
+        return scope.result("no_proposed_lessons", uncurated_entries=uncurated)
 
     accepted: list[WrittenLesson] = []
     writer_failures = 0
@@ -566,7 +598,7 @@ async def distill_session(
 
     if not accepted:
         await advance_distillation_watermark(scope, context_entries)
-        return scope.result("no_accepted_lessons")
+        return scope.result("no_accepted_lessons", uncurated_entries=uncurated)
 
     await advance_distillation_watermark(scope, context_entries)
-    return scope.result("completed", documents=documents)
+    return scope.result("completed", documents=documents, uncurated_entries=uncurated)
