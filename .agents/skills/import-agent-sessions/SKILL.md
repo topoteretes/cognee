@@ -6,10 +6,10 @@ description: Import the user's own Claude Code and/or Codex session history (the
 # Import coding-agent sessions
 
 Runs the cookbook in `examples/cookbooks/import_agent_sessions/`. It first finds the coding
-agents installed on this machine and the sessions each has kept. The keys then pick which to import:
-`ANTHROPIC_API_KEY` imports Claude Code history, `OPENAI_API_KEY` imports Codex history, and
-with both, both go into the dataset `imported_agent_sessions` and each question is answered
-over both. Setup, the scripts and what each one does are in the cookbook's
+agents installed on this machine and the sessions each has kept. One LLM key
+(`LLM_API_KEY`, `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`) runs cognee and imports every agent's
+history. The chosen agents go into the dataset `imported_agent_sessions`, and each question is
+answered over all of them. Setup, the scripts and what each one does are in the cookbook's
 [`README.md`](../../../examples/cookbooks/import_agent_sessions/README.md).
 
 Run every command from the repo root.
@@ -17,7 +17,7 @@ Run every command from the repo root.
 ## Demo
 
 When the user has no Claude Code or Codex history, or wants to see it work first, run the
-demo instead of the steps below. It needs any one key and imports sample sessions of both
+demo instead of the steps below. It needs one key and imports sample sessions of both
 agents (a made-up web shop), never the user's own:
 `uv run python examples/cookbooks/import_agent_sessions/import_agent_sessions.py --demo`
 (`--check` first to check the key; exit 2 with a `MISSING:` line means no key is set). Give
@@ -33,7 +33,7 @@ their own question.
 2. Tell the user what was found, from the `[find_agents]` lines: each agent, how it is
    installed, and how many sessions it has and where they were started. Name each
    `Not imported:` app (Claude desktop chats, Cursor's own agent) and why its chats can't be
-   read, and for each `[setup] Skipped:` line the key that would add that agent.
+   read.
 3. Ask the user which agent sessions to ingest into cognee, with your question tool when you
    have one: one choice per `[setup] Can import:` line, several allowed. Skip asking only
    when the user already named the agents. Don't choose for them: without `--agents` the
@@ -56,7 +56,7 @@ their own question.
 
 - Session history is the user's private data. Don't quote it beyond what answers the
   question, and don't print `.env`.
-- Every imported session costs LLM calls, so run the import only when the user asked for it,
+- Every imported session is sent to the provider of the key cognee runs on and costs LLM calls, so run the import only when the user asked for it,
   and raise `--limit` only when they want more history.
 - Pass `--clear` only when the user asked to start over: it forgets everything the dataset
   holds. It never touches `~/.claude` or `~/.codex`.

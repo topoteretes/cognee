@@ -32,7 +32,8 @@ MAX_ANSWER_CHARS = 3_000
 MAX_SESSION_CHARS = 30_000
 RUNNING_SECONDS = 120  # a file written to this recently is a session still running
 
-# Blocks the harness puts into a user turn; they are not what the user typed.
+# Blocks the harness puts into a user turn; they are not what the user typed. The bash-*
+# tags hold a `! command` run in Claude Code and its output, which can print secrets.
 NOISE_TAGS = (
     "system-reminder",
     "ide_opened_file",
@@ -44,12 +45,18 @@ NOISE_TAGS = (
     "local-command-stderr",
     "local-command-caveat",
     "task-notification",
+    "bash-input",
+    "bash-stdout",
+    "bash-stderr",
     "environment_context",
     "user_instructions",
     "permissions instructions",
+    "turn_aborted",
 )
 NOISE = re.compile(
-    "|".join(rf"<{tag}[^>]*>.*?</{tag.split()[0]}>" for tag in NOISE_TAGS), re.DOTALL
+    "|".join(rf"<{tag}[^>]*>.*?</{tag.split()[0]}>" for tag in NOISE_TAGS)
+    + r"|\[Request interrupted by user[^\]]*\]",  # Claude Code's marker when you press Esc
+    re.DOTALL,
 )
 
 SECRET = re.compile(
@@ -106,7 +113,7 @@ def read_claude_session(path: Path) -> Session | None:
     for record in json_lines(path):
         kind = record.get("type")
         if kind == "ai-title" and session:
-            session.title = record.get("aiTitle") or ""
+            session.title = clean(record.get("aiTitle") or "", 200)
         if kind not in ("user", "assistant") or record.get("isSidechain"):
             continue
         if session is None:
@@ -128,7 +135,10 @@ def read_claude_session(path: Path) -> Session | None:
         texts = [b.get("text", "") for b in blocks if b.get("type") == "text"]
 
         if kind == "user":
-            if record.get("isMeta") or any(b.get("type") == "tool_result" for b in blocks):
+            # isCompactSummary: the summary /compact writes in place of the earlier turns
+            if record.get("isMeta") or record.get("isCompactSummary"):
+                continue
+            if any(b.get("type") == "tool_result" for b in blocks):
                 continue
             text = clean("\n".join(texts), MAX_PROMPT_CHARS)
             if not text:
@@ -141,6 +151,17 @@ def read_claude_session(path: Path) -> Session | None:
     if session and prompt is not None:
         add_turn(session, prompt, answer)
     return session if session and session.turns else None
+
+
+def codex_prompt(text: str) -> str:
+    """What the user typed in one Codex input part. The injected AGENTS.md is dropped, and so
+    are the open tabs the IDE extension puts before the request; the environment and abort
+    blocks are NOISE tags."""
+    if text.lstrip().startswith("# AGENTS.md"):
+        return ""
+    if text.lstrip().startswith("# Context from my IDE setup"):
+        return text.partition("## My request for Codex:")[2]
+    return text
 
 
 def read_codex_session(path: Path) -> Session | None:
@@ -165,10 +186,7 @@ def read_codex_session(path: Path) -> Session | None:
         role, parts = payload.get("role"), payload.get("content") or []
         if role == "user":
             texts = [
-                p.get("text", "")
-                for p in parts
-                if p.get("type") == "input_text"
-                and not p.get("text", "").lstrip().startswith(("# AGENTS.md", "<"))
+                codex_prompt(p.get("text", "")) for p in parts if p.get("type") == "input_text"
             ]
             text = clean("\n".join(texts), MAX_PROMPT_CHARS)
             if not text:

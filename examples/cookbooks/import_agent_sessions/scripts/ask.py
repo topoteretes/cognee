@@ -3,7 +3,8 @@
 The question is answered once over every imported session, then once per agent from that
 agent's node set alone, so you see what each agent's history says and what they say together.
 Each answer runs in a new cognee session: without one, recall shares the default session, and
-the answers from earlier runs would end up in this one's context.
+the answers from earlier runs would end up in this one's context. Automatic feedback analysis is
+off here, since nothing ever improves those sessions.
 
 Run alone: uv run python examples/cookbooks/import_agent_sessions/scripts/ask.py \
     "What is the topic of my data?" [--agents claude,codex]
@@ -18,6 +19,10 @@ os.environ.setdefault("LOG_LEVEL", "ERROR")  # quiet cognee's logs; set before i
 
 import cognee
 from cognee.modules.search.types import SearchType
+
+# Nothing improves these one-answer sessions, so skip the per-answer feedback analysis (one more
+# LLM call each). Set after importing cognee, which loads .env, so it wins over a .env value.
+os.environ["AUTO_FEEDBACK"] = "false"
 
 try:
     from scripts.ingest_sessions import node_set
