@@ -1,7 +1,7 @@
 """Aggregate LoCoMo LLM-judge accuracy across conversations and repeated runs.
 
-Reads every ``qa/locomo_metrics_conv<i>_<retriever>_run<r>.json`` under a run directory and
-produces, per retriever (pooled over all conversations):
+Reads every ``qa/locomo_metrics_conv<i>_<retriever>_run<r>.json`` of a run directory (at its
+top or under ``conv_NN/``) and produces, per retriever (pooled over all conversations):
 
 - the total, which leaves out open-domain questions (they are not the focus of the evaluation and
   appear only per category),
@@ -36,8 +36,12 @@ _FILE_RE = re.compile(r"locomo_metrics_conv(?P<conv>\d+)_(?P<retriever>.+)_run(?
 
 
 def find_metric_files(run_dir: Path) -> list[dict[str, Any]]:
+    """The per-question files of one run: in ``qa/`` at the top (an artifacts folder) or under
+    ``conv_NN/qa/`` (a driver run directory). Deeper folders hold other runs and are left alone."""
     found = []
-    for path in sorted(run_dir.rglob("locomo_metrics_conv*_run*.json")):
+    paths = list(run_dir.glob("qa/locomo_metrics_conv*_run*.json"))
+    paths += run_dir.glob("conv_*/qa/locomo_metrics_conv*_run*.json")
+    for path in sorted(paths):
         match = _FILE_RE.search(path.name)
         if not match:
             continue

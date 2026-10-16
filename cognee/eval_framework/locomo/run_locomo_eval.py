@@ -32,6 +32,16 @@ Re-answer an existing ingestion (ingestion is skipped when its report says compl
 
     uv run python -m cognee.eval_framework.locomo.run_locomo_eval --run-dir temp/locomo_runs/<run> \
         --conversations 0-9 --stage answer
+
+Top-k 5 configuration (the four ingestion changes of ``ingest.py`` plus retrieval 5/5/5 with the
+global context index; see the README)::
+
+    uv run python -m cognee.eval_framework.locomo.run_locomo_eval --conversations 0-9 \
+        --resolve-dates \
+        --extraction-prompt cognee/eval_framework/locomo/prompts/graph_extraction_conversations.txt \
+        --summary-prompt cognee/eval_framework/locomo/prompts/summarize_content_questions.txt \
+        --global-context-index \
+        --config-json-path cognee/eval_framework/locomo/configs/locomo_hybrid_5_5_5_gci.json
 """
 
 from __future__ import annotations
@@ -144,6 +154,14 @@ def ingest_args(args: argparse.Namespace, index: int, conv_dir: Path) -> list[st
     ]
     if args.max_sessions:
         cli += ["--max-sessions", str(args.max_sessions)]
+    if args.resolve_dates:
+        cli.append("--resolve-dates")
+    if args.extraction_prompt:
+        cli += ["--extraction-prompt", str(args.extraction_prompt)]
+    if args.summary_prompt:
+        cli += ["--summary-prompt", str(args.summary_prompt)]
+    if args.global_context_index:
+        cli.append("--global-context-index")
     return cli
 
 
@@ -191,6 +209,10 @@ def write_run_manifest(args: argparse.Namespace, conversations: list[int]) -> No
         "window_turns": args.window_turns,
         "chunk_size": args.chunk_size,
         "max_sessions": args.max_sessions,
+        "resolve_dates": args.resolve_dates,
+        "extraction_prompt": str(args.extraction_prompt) if args.extraction_prompt else None,
+        "summary_prompt": str(args.summary_prompt) if args.summary_prompt else None,
+        "global_context_index": args.global_context_index,
         "max_questions": args.max_questions,
         "question_types": args.question_types,
         "num_runs": args.num_runs,
@@ -294,6 +316,29 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--force-ingest", action="store_true", help="re-ingest even if a report exists"
     )
+    # optional changes to how the memory is built (see ingest.py); together: the top-k 5 config
+    parser.add_argument(
+        "--resolve-dates",
+        action="store_true",
+        help="annotate relative time expressions with absolute dates before ingestion",
+    )
+    parser.add_argument(
+        "--extraction-prompt",
+        type=Path,
+        default=None,
+        help="graph extraction prompt file, passed to remember(custom_prompt=...)",
+    )
+    parser.add_argument(
+        "--summary-prompt",
+        type=Path,
+        default=None,
+        help="chunk summary prompt file, used instead of cognee's summarize_content.txt",
+    )
+    parser.add_argument(
+        "--global-context-index",
+        action="store_true",
+        help="build cognee's global context index over each memory after remember()",
+    )
     # QA knobs
     parser.add_argument("--max-questions", type=int, default=None)
     parser.add_argument("--question-types", type=_parse_csv, default=None)
@@ -309,6 +354,12 @@ def _parse_args() -> argparse.Namespace:
     args.config_json_path = args.config_json_path.resolve()
     if not args.config_json_path.is_file():
         parser.error(f"missing sweep config: {args.config_json_path}")
+    for option in ("extraction_prompt", "summary_prompt"):
+        path = getattr(args, option)
+        if path is not None:
+            if not path.is_file():
+                parser.error(f"--{option.replace('_', '-')}: no such file: {path}")
+            setattr(args, option, path.resolve())
     if args.gold_exclusions is not None and not args.gold_exclusions.is_file():
         parser.error(f"missing gold exclusions file: {args.gold_exclusions}")
     return args
