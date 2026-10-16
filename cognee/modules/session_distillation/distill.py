@@ -20,6 +20,7 @@ curator or the writer phase, seals nothing and re-raises, so improve can stop.
 
 import asyncio
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from uuid import UUID
 
 from cognee.context_global_variables import session_user, set_database_global_context_variables
@@ -204,13 +205,26 @@ async def load_distillable_context_entries(
     ]
 
 
-async def load_session_qa_rows(scope: SessionDistillationScope) -> list[dict]:
-    """Load the session's QA turns for curator batching — only after the exits."""
+async def load_session_qa_rows(
+    scope: SessionDistillationScope, since: datetime | None
+) -> list[dict]:
+    """Load the session's QA turns for curator batching — only after the exits.
+
+    With ``since``, only the turns from the one that produced the earliest new
+    entry onward are read: the ones stored at or after it plus the one just
+    before it. The analysis that writes an entry runs while a turn is answered,
+    before that turn's QA row is stored, and it judges the turn before, so the
+    entry's time falls after the turn it is about. Older turns were already sent
+    with the entries they produced; the cache filters them out instead of this
+    process reading the whole session every run.
+    """
     session_manager = get_session_manager()
     raw_qa = await session_manager.get_session(
         user_id=scope.user_id,
         session_id=scope.session_id,
         formatted=False,
+        since=since,
+        lead_in=1 if since is not None else 0,
     )
     return [
         entry.model_dump() if hasattr(entry, "model_dump") else dict(entry)
@@ -218,25 +232,15 @@ async def load_session_qa_rows(scope: SessionDistillationScope) -> list[dict]:
     ]
 
 
-def select_session_turns(
-    qa_rows: list[dict],
-    new_entries: list[SessionContextEntry],
-) -> list[dict]:
-    """Keep the QA turns from the one that produced the earliest new entry onward.
-
-    Turns carry no watermark; the entries do. The analysis that writes an entry runs
-    while a turn is answered, before that turn's QA row is stored, and it judges the
-    turn before. So the entry's timestamp falls after the turn it is about: start at
-    the newest turn at or before the earliest new entry. Older turns were already sent
-    with the entries they produced. Timestamps are UTC ISO strings on both sides, so
-    they compare as text.
-    """
-    since = min((entry.created_at for entry in new_entries if entry.created_at), default="")
-    if not since:
-        return list(qa_rows)
-    earlier = [row.get("time") or "" for row in qa_rows if (row.get("time") or "") < since]
-    start = max(earlier) if earlier else since
-    return [row for row in qa_rows if (row.get("time") or "") >= start]
+def earliest_entry_time(entries: list[SessionContextEntry]) -> datetime | None:
+    """The earliest ``created_at`` among the entries, aware (naive is UTC); None if unset."""
+    times = []
+    for entry in entries:
+        if not entry.created_at:
+            continue
+        parsed = datetime.fromisoformat(entry.created_at)
+        times.append(parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc))
+    return min(times, default=None)
 
 
 def select_curator_inputs(
@@ -641,7 +645,7 @@ async def distill_session(
 
     if max_batches is None:
         max_batches = get_improve_config().distill_max_batches_per_run
-    qa_rows = select_session_turns(await load_session_qa_rows(scope), new_entries)
+    qa_rows = await load_session_qa_rows(scope, earliest_entry_time(new_entries))
     qa_rows, curated_entries = select_curator_inputs(qa_rows, new_entries, max_batches)
     uncurated = len(new_entries) - len(curated_entries)
     if uncurated:
