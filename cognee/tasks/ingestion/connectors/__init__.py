@@ -23,3 +23,6 @@ __all__ = [
     "linear_source",
     "notion_source",
 ]
+from .calendly import calendly_source
+
+__all__.append("calendly_source")
