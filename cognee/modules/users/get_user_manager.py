@@ -50,10 +50,10 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
     async def on_after_forgot_password(
         self, user: User, token: str, request: Request | None = None
     ):
-        logger.info("User %s has forgot their password. Reset token: %s", user.id, token)
+        logger.info("User %s has forgot their password.", user.id)
 
     async def on_after_request_verify(self, user: User, token: str, request: Request | None = None):
-        logger.info("Verification requested for user %s. Verification token: %s", user.id, token)
+        logger.info("Verification requested for user %s.", user.id)
 
     async def authenticate(self, credentials: OAuth2PasswordRequestForm) -> User | None:
         try:
