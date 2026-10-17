@@ -1,0 +1,35 @@
+[project]
+name = "cognee-community-connector-greenhouse"
+version = "0.1.0"
+description = "Greenhouse data-source connector for cognee — sync jobs, job posts and (opt-in) interview scorecards into memory, with forget-on-delete"
+readme = "README.md"
+requires-python = ">=3.11,<=3.13"
+dependencies = [
+    # Requires cognee "document-mode" (DOCUMENT_SOURCE_ATTR + resolve_dlt_sources
+    # routing rows through cognify instead of the dlt-schema path), first shipped
+    # in cognee 1.4.0.
+    "cognee==1.4.0",
+    "dlt[sqlalchemy]>=1.9.0,<2",
+    "httpx>=0.27,<1",
+]
+
+[project.urls]
+Homepage = "https://github.com/topoteretes/cognee"
+Repository = "https://github.com/topoteretes/cognee-community"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["cognee_community_connector_greenhouse"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "N", "B", "UP", "C4", "PGH", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
