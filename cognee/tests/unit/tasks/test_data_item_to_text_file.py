@@ -87,3 +87,36 @@ async def test_s3_temp_file_reopened_by_name_and_cleaned_up():
 
     # And it must still be cleaned up afterwards (no temp-file leak).
     assert not os.path.exists(captured["name"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("as_uri", [False, True], ids=["absolute-path", "file-uri"])
+@pytest.mark.parametrize("is_internal_storage", [False, True], ids=["caller-path", "stored-upload"])
+async def test_local_path_gate_distinguishes_stored_uploads(
+    monkeypatch, tmp_path, as_uri, is_internal_storage
+):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from cognee.modules.ingestion.exceptions import IngestionError
+
+    source = tmp_path / "upload.txt"
+    source.write_text("uploaded bytes", encoding="utf-8")
+    path = source.as_uri() if as_uri else str(source)
+    loader = _FakeLoader()
+    load_file = AsyncMock(return_value="STORAGE_PATH")
+    engine = SimpleNamespace(load_file=load_file, get_loader=lambda *_args: loader)
+    monkeypatch.setattr(ditf, "get_loader_engine", lambda: engine)
+    monkeypatch.setattr(ditf.settings, "accept_local_file_path", False)
+
+    if is_internal_storage:
+        storage_path, selected_loader = await data_item_to_text_file(
+            path, is_internal_storage=True, original_file_name="upload.txt"
+        )
+        assert storage_path == "STORAGE_PATH"
+        assert selected_loader is loader
+        load_file.assert_awaited_once_with(path, None, original_file_name="upload.txt")
+    else:
+        with pytest.raises(IngestionError, match="Local files are not accepted"):
+            await data_item_to_text_file(path)
+        load_file.assert_not_awaited()
