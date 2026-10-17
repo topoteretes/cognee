@@ -102,6 +102,58 @@ async def _invalidate_sessions_for_deleted_data_nonfatal(
         )
 
 
+async def _dry_run_delete_data(
+    dataset_id: UUID,
+    data_id: UUID,
+    user: User | None,
+    delete_dataset_if_empty: bool,
+) -> dict:
+    """Build the delete_data preview: the scope a real run would remove.
+
+    Mirrors the permission check and data resolution of the real path but is
+    strictly read-only: no delete lock, no graph/vector/relational writes, no
+    operation record, no session invalidation.
+    """
+    from cognee.modules.data.methods import resolve_data_id
+
+    if not user:
+        user = await get_default_user()
+
+    try:
+        dataset = await get_authorized_dataset(user, dataset_id, "delete")
+    except PermissionDeniedError:
+        raise UnauthorizedDataAccessError(f"Dataset {dataset_id} not accessible.")
+
+    if not dataset:
+        raise UnauthorizedDataAccessError(f"Dataset {dataset_id} not accessible.")
+
+    # Same resolution order as the real path: exact id first, then the
+    # recorded original of a backfill-split row (legacy_id).
+    resolved_id = await resolve_data_id(dataset.id, data_id)
+    if resolved_id is not None:
+        data_id = resolved_id
+
+    dataset_data = await get_dataset_data(dataset.id) or []
+    data = next((item for item in dataset_data if item.id == data_id), None)
+
+    # A data id not tracked in the dataset goes through the custom-graph-model
+    # deletion path: the graph nodes/edges it sourced would still be removed.
+    remaining_after_delete = len(dataset_data) - (1 if data else 0)
+
+    return {
+        "status": "dry_run",
+        "dry_run": True,
+        "operation": "delete_data",
+        "dataset": {"id": str(dataset.id), "name": dataset.name},
+        "data": {"id": str(data.id), "name": data.name} if data else None,
+        "tracked_data_row": data is not None,
+        "dataset_empty_after_delete": data is not None and remaining_after_delete == 0,
+        "would_delete_dataset": bool(
+            delete_dataset_if_empty and data is not None and remaining_after_delete == 0
+        ),
+    }
+
+
 class datasets:
     """
     Dataset management namespace for Cognee.
@@ -118,6 +170,11 @@ class datasets:
 
         # Check cognify processing status for datasets
         status = await cognee.datasets.get_status([dataset_id])
+
+        # Preview what a deletion would remove, changing nothing
+        report = await cognee.datasets.delete_data(
+            dataset_id=dataset_id, data_id=data_id, dry_run=True
+        )
 
         # Delete a specific data item from a dataset
         await cognee.datasets.delete_data(dataset_id=dataset_id, data_id=data_id)
@@ -181,7 +238,7 @@ class datasets:
         return await _fan_out_by_pipeline(dataset_ids, pipeline_names, get_pipeline_progress)
 
     @staticmethod
-    async def empty_dataset(dataset_id: UUID, user: User | None = None):
+    async def empty_dataset(dataset_id: UUID, user: User | None = None, dry_run: bool = False):
         from cognee.modules.data.methods import delete_data, delete_dataset
 
         if not user:
@@ -191,6 +248,21 @@ class datasets:
 
         if not dataset:
             raise UnauthorizedDataAccessError(f"Dataset {dataset_id} not accessible.")
+
+        if dry_run:
+            # Read-only preview: same permission check as a real delete, then
+            # report the scope without taking the delete lock, touching any
+            # store, or invalidating sessions.
+            dataset_data = await get_dataset_data(dataset.id) or []
+
+            return {
+                "status": "dry_run",
+                "dry_run": True,
+                "operation": "empty_dataset",
+                "dataset": {"id": str(dataset.id), "name": dataset.name},
+                "data_items": [{"id": str(item.id), "name": item.name} for item in dataset_data],
+                "data_count": len(dataset_data),
+            }
 
         # Same per-dataset lock as pipeline runs: wait for any in-flight pipeline
         # on this dataset and exclude concurrent deletes.
@@ -221,7 +293,11 @@ class datasets:
         user: User | None = None,
         mode: str = "soft",  # mode is there for backwards compatibility. Don't use "hard", it is dangerous.
         delete_dataset_if_empty: bool = False,  # if this flag is True, delete the whole dataset if it is left empty after data deletion
+        dry_run: bool = False,  # preview only: report what would be deleted, change nothing
     ):
+        if dry_run:
+            return await _dry_run_delete_data(dataset_id, data_id, user, delete_dataset_if_empty)
+
         async with record_operation(
             "delete", user=user, dataset_id=dataset_id
         ) as operation_context:
@@ -313,11 +389,28 @@ class datasets:
             return {"status": "success"}
 
     @staticmethod
-    async def delete_all(user: User | None = None):
+    async def delete_all(user: User | None = None, dry_run: bool = False):
         if not user:
             user = await get_default_user()
 
         user_datasets = await get_authorized_existing_datasets([], "delete", user)
+
+        if dry_run:
+            # Same dataset enumeration and per-dataset permission checks as the
+            # real run; every report below was produced without any writes.
+            dataset_reports = [
+                await datasets.empty_dataset(dataset.id, user, dry_run=True)
+                for dataset in user_datasets
+            ]
+
+            return {
+                "status": "dry_run",
+                "dry_run": True,
+                "operation": "delete_all",
+                "dataset_count": len(dataset_reports),
+                "data_count": sum(report["data_count"] for report in dataset_reports),
+                "datasets": dataset_reports,
+            }
 
         for dataset in user_datasets:
             await datasets.empty_dataset(dataset.id, user)
