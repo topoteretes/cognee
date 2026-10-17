@@ -11,6 +11,7 @@ from .google_calendar import build_calendar_service_from_access_token, google_ca
 from .google_drive import build_drive_service_from_access_token, google_drive_source
 from .linear import build_linear_service, linear_source
 from .notion import notion_source
+from .openalex import openalex_source
 
 __all__ = [
     "build_calendar_service_from_access_token",
@@ -22,4 +23,5 @@ __all__ = [
     "google_drive_source",
     "linear_source",
     "notion_source",
+    "openalex_source",
 ]
