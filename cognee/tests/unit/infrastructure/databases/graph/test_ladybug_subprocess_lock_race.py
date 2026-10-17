@@ -101,9 +101,9 @@ async def test_handle_reresolves_after_eviction(tmp_path):
     handle = _GraphEngineHandle(cfg)
     await handle.query("MATCH (n) RETURN 1 LIMIT 1")
 
-    # Simulate teardown: evict the cached engine. The handle pins the proxy, so
-    # its next access detects the stale pin, drops it (deferred close releases
-    # the lock off-loop), and re-resolves a fresh engine for the same path.
+    # Simulate teardown: evict the cached engine. The handle pins the proxy
+    # weakly, so eviction closes the old worker (releasing the lock off-loop)
+    # and the handle's next access re-resolves a fresh engine for the same path.
     graph_engine_cache.evict(**cfg)
     gc.collect()
 
