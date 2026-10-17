@@ -185,6 +185,16 @@ def extraction_checkpoint(credential: Any) -> Callable[[], None]:
     return check_active
 
 
+def _bare_table_name(table_name: str) -> str:
+    """Reduce a possibly schema-qualified table ref to its dlt resource name.
+
+    Postgres stores schema-qualified names ("dataset.table"); dlt resources
+    are named by the last path component, so comparisons against the bare
+    names the syncs retain must use that too.
+    """
+    return table_name.split(".")[-1]
+
+
 async def retire_resources(
     provider: str, credential: Any, dataset_name: str, retained: set[str]
 ) -> None:
@@ -206,7 +216,7 @@ async def retire_resources(
             .where(Dataset.name == dataset_name, Dataset.owner_id == credential.user_id)
         )
         retired = {
-            metadata["table_name"]
+            _bare_table_name(metadata["table_name"])
             for metadata in result.scalars()
             if isinstance(metadata, dict)
             and metadata.get("source") == provider
