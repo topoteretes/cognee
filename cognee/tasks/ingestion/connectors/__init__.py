@@ -23,3 +23,5 @@ __all__ = [
     "linear_source",
     "notion_source",
 ]
+from .readwise import readwise_source
+__all__.append("readwise_source")
