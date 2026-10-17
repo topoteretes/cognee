@@ -1,0 +1,25 @@
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from cognee.tasks.ingestion.connectors.intercom import _get_headers, intercom_source
+
+
+def test_intercom_source_requires_token(monkeypatch):
+    monkeypatch.delenv("INTERCOM_ACCESS_TOKEN", raising=False)
+    with pytest.raises(ValueError, match="Intercom access token must be provided"):
+        intercom_source(token=None)
+
+
+def test_intercom_get_headers():
+    headers = _get_headers("my_token")
+    assert headers["Authorization"] == "Bearer my_token"
+    assert headers["Accept"] == "application/json"
+    assert headers["Intercom-Version"] == "2.11"
+
+
+def test_intercom_source_tags():
+    from cognee.tasks.ingestion.dlt_utils import document_source_tag
+
+    source = intercom_source(token="my_test_token")
+    assert document_source_tag(source) == "intercom"
