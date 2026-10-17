@@ -178,7 +178,7 @@ async def test_get_retriever_output_skips_retrieval_for_no_answer_turn():
 
     assert result.result_object is None
     assert result.context is None
-    assert result.completion == ["Thanks, I noted that."]
+    assert result.completion == ["Got it."]
 
 
 @pytest.mark.asyncio
