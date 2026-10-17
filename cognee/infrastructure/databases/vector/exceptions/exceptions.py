@@ -52,6 +52,46 @@ class EmbeddingDimensionMismatchError(CogneeValidationError):
         )
 
 
+class VectorDimensionMismatchError(CogneeValidationError):
+    """A write targets a collection whose vectors have a different fixed width.
+
+    LanceDB stores the vector column as a fixed-size list, so an upsert whose
+    incoming vectors differ in width from the ones that built the collection
+    fails deep in the Arrow/Lance writer with a message that names neither the
+    collection nor the real cause ("Spill has sent an error", "Vector column
+    'vector' has variable length vectors", ...). This error replaces that with
+    the two widths and how to reconcile them.
+    """
+
+    def __init__(
+        self,
+        collection_name: str,
+        stored_dimensions: int,
+        incoming_dimensions: int,
+        name: str = "VectorDimensionMismatchError",
+        status_code: int = status.HTTP_409_CONFLICT,
+    ):
+        self.collection_name = collection_name
+        self.stored_dimensions = stored_dimensions
+        self.incoming_dimensions = incoming_dimensions
+
+        super().__init__(
+            message=(
+                f"Collection '{collection_name}' stores {stored_dimensions}-dimensional "
+                f"vectors, but the embedding engine produced {incoming_dimensions}-dimensional "
+                "vectors for this write. All vectors in a collection must have one width."
+            ),
+            name=name,
+            status_code=status_code,
+            remediation=(
+                "Set EMBEDDING_MODEL/EMBEDDING_DIMENSIONS back to the model that built "
+                f"this dataset ({stored_dimensions} dimensions), or delete the dataset "
+                "(forget(dataset=...) / cognee-cli forget) and ingest it again with the "
+                "current model."
+            ),
+        )
+
+
 class CollectionNotFoundError(CogneeValidationError):
     """
     Represents an error that occurs when a requested collection cannot be found.
