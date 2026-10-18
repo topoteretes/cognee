@@ -3,10 +3,15 @@
 What it shows:
     - Running the enola-backed code graph pipeline (extract -> load nodes -> load edges)
     - Querying the resulting graph deterministically with SearchType.CODE
+    - Optionally (CODE_GRAPH_DOCS=1), storing the repository's docstrings as
+      knowledge-graph chunks linked to the code graph and finding one with
+      SearchType.CHUNKS
 
 Requirements:
     - The enola binary included with cognee, or an explicit binary set through
       ENOLA_PATH
+    - For the optional docstring step only: an embedding provider (the chunks
+      are embedded; no LLM key is needed)
 
 SearchType.CODE does not require an LLM API key or embedding model.
 
@@ -29,6 +34,8 @@ import os
 
 import cognee
 from cognee import SearchType
+from cognee.memify_pipelines.cognify_code_docs import cognify_code_docs_pipeline
+from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import ERROR, setup_logging
 from cognee.tasks.code_graph import get_code_graph_tasks
 
@@ -109,6 +116,29 @@ async def main():
     # code_query={"operation": "query_facts", "kind": "dependency", "prop": "type",
     #             "prop_value": "package"}   # declared packages from manifests (purl names)
     # code_query={"operation": "delta"}    # last ingestion's changes + the snapshot receipt
+    # code_query={"operation": "ask", "question": "How is an order placed?"}
+    #     # seeds, flows, one-hop neighbourhood and file:line citations to read
+
+    # Docstrings as memory. The code docs memify pipeline reads the code graph
+    # above, stores each documented symbol's docstring as a DocumentChunk whose
+    # text starts with "file:line" and the signature, and links it to its
+    # CodeSymbol with a `describes` edge, so recall / CHUNKS / GRAPH_COMPLETION
+    # answer "what does X do" from the docstring and reach the code in one hop.
+    # Opt-in because storing the chunks embeds them, which needs an embedding
+    # provider. Embed-only: no LLM call; extract_entities=True would add
+    # cognify's LLM entity extraction and summaries over the chunks.
+    if os.getenv("CODE_GRAPH_DOCS"):
+        print("Storing the repository's docstrings in the knowledge graph")
+        await cognify_code_docs_pipeline(user=await get_default_user(), dataset="code_graph_demo")
+
+        print("Docstring chunks answering a question (SearchType.CHUNKS, embeddings only)")
+        docstring_hits = await cognee.search(
+            query_type=SearchType.CHUNKS,
+            query_text="what does the main function do",
+            datasets=["code_graph_demo"],
+            top_k=3,
+        )
+        print(json.dumps(docstring_hits, indent=2, default=str))
 
 
 if __name__ == "__main__":

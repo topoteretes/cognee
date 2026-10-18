@@ -21,6 +21,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 # are explicit here.
 import cognee.modules.integrations.github
 import cognee.modules.integrations.gmail
+import cognee.modules.integrations.google_calendar
 import cognee.modules.integrations.google_drive
 import cognee.modules.integrations.linear
 from cognee.api.exception_telemetry import send_api_exception_telemetry
@@ -348,6 +349,14 @@ async def exception_handler(request: Request, exc: CogneeApiError) -> JSONRespon
         improperly_defined=improperly_defined,
     )
     content = {"detail": detail["message"]}
+    # A stable, machine-readable reason and the argument it concerns, for errors
+    # that carry them (SearchType.CODE's CodeSearchValidationError family), so a
+    # client can branch on `code` instead of parsing `detail`. Strings only: other
+    # exceptions may use an `error_code` attribute for something else.
+    for key, attribute in (("code", "error_code"), ("param", "error_param")):
+        value = getattr(exc, attribute, None)
+        if isinstance(value, str) and value:
+            content[key] = value
     # A hint the caller can act on: the exception's own remediation first, else the
     # shared first-run table. Only present when a fix is known, so existing clients
     # that read only `detail` are unaffected.
@@ -383,6 +392,7 @@ app.include_router(get_add_router(), prefix="/api/v1/add", tags=["add"])
 
 app.include_router(get_cognify_router(), prefix="/api/v1/cognify", tags=["cognify"])
 
+# Deprecated (SDK-1115); removed in the next release.
 app.include_router(get_memify_router(), prefix="/api/v1/memify", tags=["memify"])
 
 app.include_router(get_search_router(), prefix="/api/v1/search", tags=["search"])

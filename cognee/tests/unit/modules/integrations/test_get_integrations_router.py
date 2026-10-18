@@ -358,6 +358,88 @@ def test_disconnect_with_delete_data_is_refused_without_a_dataset(client):
     assert response.status_code == 400
 
 
+# --- a provider that cannot read null as "all resources" ---
+#
+# The picker stores a null selection as "everything", and listing shows every
+# resource selected for it. A provider whose sync has no such meaning (Google
+# Calendar) must refuse the null at the boundary instead of storing it.
+
+
+def put_resources(client, integration, body, *, allows_all, monkeypatch):
+    update = AsyncMock(return_value=type("Cred", (), {"provider_metadata": {"picked": body}})())
+    monkeypatch.setattr(integration, "resource_selection_key", "picked")
+    monkeypatch.setattr(integration, "resource_selection_allows_all", allows_all)
+    monkeypatch.setattr(
+        _router_module,
+        "get_active_credential_for_user",
+        AsyncMock(return_value=type("Cred", (), {"provider_account_id": "ACC1"})()),
+    )
+    monkeypatch.setattr(_router_module, "update_provider_metadata", update)
+    response = client.put("/api/v1/integrations/fake/resources", json={"resourceIds": body})
+    return response, update
+
+
+def test_a_null_selection_is_refused_for_a_provider_that_cannot_select_all(client, monkeypatch):
+    response, update = put_resources(
+        client, supported_integrations["fake"], None, allows_all=False, monkeypatch=monkeypatch
+    )
+
+    assert response.status_code == 422
+    assert "explicit list" in response.json()["detail"]
+    update.assert_not_awaited()
+
+
+def test_a_null_selection_is_still_stored_for_a_provider_that_allows_all(client, monkeypatch):
+    response, update = put_resources(
+        client, supported_integrations["fake"], None, allows_all=True, monkeypatch=monkeypatch
+    )
+
+    assert response.status_code == 200
+    update.assert_awaited_once_with("fake", "ACC1", {"picked": None})
+
+
+def test_a_list_selection_is_stored_for_a_provider_that_cannot_select_all(client, monkeypatch):
+    response, update = put_resources(
+        client,
+        supported_integrations["fake"],
+        ["a", "a", "b"],
+        allows_all=False,
+        monkeypatch=monkeypatch,
+    )
+
+    assert response.status_code == 200
+    update.assert_awaited_once_with("fake", "ACC1", {"picked": ["a", "b"]})
+
+
+# A blank id is never a real resource. Stored, it makes the sync of every provider
+# that checks the selection shape fail until the user saves again.
+@pytest.mark.parametrize("allows_all", [True, False])
+@pytest.mark.parametrize("body", [[""], [" "], ["a", "\t"], ["a", "  \n"]])
+def test_a_blank_resource_id_is_refused_and_nothing_is_stored(
+    client, monkeypatch, allows_all, body
+):
+    response, update = put_resources(
+        client, supported_integrations["fake"], body, allows_all=allows_all, monkeypatch=monkeypatch
+    )
+
+    assert response.status_code == 422
+    assert "blank" in response.json()["detail"]
+    update.assert_not_awaited()
+
+
+def test_ids_are_stored_as_given_and_deduplicated(client, monkeypatch):
+    response, update = put_resources(
+        client,
+        supported_integrations["fake"],
+        ["b", " a ", "b"],
+        allows_all=True,
+        monkeypatch=monkeypatch,
+    )
+
+    assert response.status_code == 200
+    update.assert_awaited_once_with("fake", "ACC1", {"picked": ["b", " a "]})
+
+
 def test_a_manual_sync_is_not_accepted_while_one_is_running(client):
     from cognee.modules.integrations import ingestion
 

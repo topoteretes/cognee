@@ -286,3 +286,34 @@ async def test_a_claim_won_right_after_the_release_is_not_dropped(harness):
     # The contender still holds every key: the holder's run released only once.
     assert not await session_lock.try_acquire_improve_lock_many(keys)
     await session_lock.release_improve_lock_many(keys)
+
+
+@pytest.mark.asyncio
+async def test_deprecated_custom_tasks_run_on_the_first_pass_only(harness, monkeypatch):
+    """Custom tasks have no watermark, so a rerun pass must not repeat them."""
+    from unittest.mock import AsyncMock
+
+    session_key = f"session:{harness.user.id}:chat_1"
+    calls = []
+
+    async def nag_once(_inputs):
+        calls.append("nag")
+        if len(calls) == 1:
+            await session_lock.request_improve_rerun_many([session_key])
+        return StageResult.completed("nag", items=1)
+
+    harness.use_stages([FakeStage("nag", run=nag_once)])
+    run_legacy = AsyncMock(return_value={"pass": 1})
+    shim = importlib.import_module("cognee.api.v1.memify.memify")
+    monkeypatch.setattr(shim, "run_legacy_memify", run_legacy)
+
+    with pytest.warns(FutureWarning):
+        result = await harness.improve(
+            session_ids=["chat_1"], extraction_tasks=["extract_subgraph"]
+        )
+
+    assert calls == ["nag", "nag"]
+    run_legacy.assert_awaited_once()
+    assert [s.stage for s in result.stages] == ["nag", "custom_tasks"]
+    assert [s.stage for s in result.rerun_passes[0]] == ["nag"]
+    assert result.model_dump(mode="json")["memify_run"] == {"pass": 1}
