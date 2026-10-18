@@ -27,6 +27,7 @@ from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion import ingest_data, resolve_data_directories
 from cognee.tasks.ingestion.data_item import DataItem
+from cognee.tasks.ingestion.dlt_config import resolve_dlt_options, with_csv_loader_options
 from cognee.tasks.ingestion.refuse_changed_existing_documents import (
     refuse_changed_existing_documents,
 )
@@ -45,6 +46,7 @@ async def add(
     graph_db_config: dict | None = None,
     dataset_id: UUID | None = None,
     preferred_loaders: list[str | dict[str, dict[str, Any]]] | None = None,
+    dlt_config: dict | None = None,
     incremental_loading: bool = True,
     data_per_batch: int | None = 20,
     importance_weight: float | None = 0.5,
@@ -53,6 +55,7 @@ async def add(
     embedding_config: EmbeddingConfig | None = None,
     data_cache: bool = True,
     skip_connection_test: bool = False,
+    branch: str | None = None,
     **kwargs,
 ):
     """
@@ -85,7 +88,8 @@ async def add(
           project, or any URL ending in .git) is shallow-cloned and ingested as ONE
           code-repo item that cognify runs through the enola code graph pipeline
           (cross-file edges), plus the repo's documents; same as adding a local code
-          project directory. Requires ALLOW_HTTP_REQUESTS and git on PATH.
+          project directory. Requires ALLOW_HTTP_REQUESTS and git on PATH. Pass
+          ``branch`` to clone a branch other than the remote's default.
         - **Lists**: Multiple files or text strings in a single call
 
     Supported File Formats:
@@ -118,11 +122,19 @@ async def add(
         user: User object for authentication and permissions. Uses default user if None.
               Default user: "default_user@example.com" (created automatically on first use).
               Users can only access datasets they have permissions for.
-        node_set: Optional list of node identifiers for graph organization and access control.
-                 Used for grouping related data points in the knowledge graph.
+        node_set: Optional list of node identifiers used to organize and filter data points
+                 in the knowledge graph. Not an access-control mechanism.
         vector_db_config: Optional configuration for vector database (for custom setups).
         graph_db_config: Optional configuration for graph database (for custom setups).
         dataset_id: Optional specific dataset UUID to use instead of dataset_name.
+        preferred_loaders: Loader names to try first, each optionally with that loader's
+                           options: ``["csv_loader"]`` or ``[{"dlt_csv_loader": {...}}]``.
+        dlt_config: Options that apply only to dlt sources (connection strings, dlt
+                    resources, CSV files): ``primary_key``, ``write_disposition``,
+                    ``query``, ``max_rows_per_table``, ``column_value_columns``,
+                    ``temporal_columns``. See ``cognee.tasks.ingestion.dlt_config``.
+                    The same options are still accepted as bare keyword arguments;
+                    giving one both ways raises.
         run_in_background: If True, starts ingestion asynchronously and returns immediately.
                            DLT orphan cleanup is skipped; propagating upstream deletions
                            requires a successful foreground sync.
@@ -130,6 +142,12 @@ async def add(
         extraction_rules: Optional dictionary of rules (e.g., CSS selectors, XPath) for extracting specific content from web pages using BeautifulSoup
         tavily_config: Optional configuration for Tavily API, including API key and extraction settings
         soup_crawler_config: Optional configuration for BeautifulSoup crawler, specifying concurrency, crawl delay, and extraction rules.
+        branch: Branch to clone for the GitHub/GitLab repository URL(s) in ``data``, instead of
+                the remote's default. Each branch is cloned into its own directory, so adds on
+                different branches never touch each other's clone. A dataset holds one branch of
+                a URL at a time: adding it on another branch re-indexes the code graph, but the
+                documents ingested from the previous branch stay. A missing branch raises
+                ``CodeRepositoryError``; not supported while connected to a remote instance.
 
     Returns:
         PipelineRunInfo: Information about the ingestion pipeline execution including:
@@ -220,11 +238,24 @@ async def add(
 
     client = get_remote_client()
     if client is not None:
+        if branch is not None:
+            # client.add() sends only the data and the dataset name, so the remote would
+            # clone the default branch instead.
+            raise ValueError(
+                "branch is not supported while connected to a remote Cognee instance. "
+                "Call cognee.disconnect() to clone the branch locally."
+            )
         result = await client.add(data, dataset_name)
         # Wrap in a simple namespace so callers expecting .model_dump() still work
         from types import SimpleNamespace
 
         return SimpleNamespace(**result)
+
+    if branch is not None:
+        from cognee.tasks.code_graph.resolve_repo import check_branch_name
+
+        # Before anything is written, and before the name can reach git.
+        check_branch_name(branch)
 
     if preferred_loaders is not None:
         transformed = {}
@@ -234,6 +265,12 @@ async def add(
             else:
                 transformed[item] = {}
         preferred_loaders = transformed
+
+    # DLT options, from dlt_config and the bare keyword arguments. The CSV
+    # route reads them from the loader's preferred_loaders entry; the
+    # DB-source route from resolve_dlt_sources below.
+    dlt_options = resolve_dlt_options(dlt_config, kwargs)
+    preferred_loaders = with_csv_loader_options(preferred_loaders, dlt_options)
 
     # add() stages data and makes no LLM call of its own, so it validates the
     # embedding side of the provider config only. Whether the run needs an LLM
@@ -275,7 +312,12 @@ async def add(
     # every item (the pipeline also passes the dataset via ctx — this keeps the
     # non-pipeline fallback on the cheap branch too).
     tasks = [
-        Task(resolve_data_directories, include_subdirectories=True, needs_llm=False),
+        Task(
+            resolve_data_directories,
+            include_subdirectories=True,
+            branch=branch,
+            needs_llm=False,
+        ),
         Task(
             ingest_data,
             dataset_name,
@@ -302,7 +344,7 @@ async def add(
         dataset_name=authorized_dataset.name,
         user=user,
         dataset_id=authorized_dataset.id,
-        **kwargs,
+        **dlt_options,
     )
 
     # A file the dataset already holds with other content is an update in
@@ -340,6 +382,8 @@ async def add(
         embedding_config=embedding_config,
         data_cache=data_cache,
         skip_connection_test=skip_connection_test,
+        # run_tasks resolves repository URLs itself, before this task list runs.
+        extras={"repo_branch": branch},
     )
 
     # run_pipeline_blocking returns {dataset_id: PipelineRunInfo} but callers
