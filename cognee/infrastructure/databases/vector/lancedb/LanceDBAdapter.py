@@ -46,7 +46,7 @@ from cognee_db_workers.lancedb_compaction import (
     prune_superseded_versions,
 )
 
-from ..embeddings.EmbeddingEngine import EmbeddingEngine
+from ..embeddings.EmbeddingGateway import EmbeddingGateway
 from ..models.ScoredResult import ScoredResult
 from ..stored_vector_size import choose_stored_vector_size
 from ..vector_db_interface import VectorDBInterface
@@ -140,7 +140,7 @@ class LanceDBAdapter(VectorDBInterface):
         cls,
         url: str | None,
         api_key: str | None,
-        embedding_engine: "EmbeddingEngine",
+        embedding_engine: "EmbeddingGateway",
     ) -> "LanceDBAdapter":
         """Create a LanceDBAdapter running in subprocess-proxy mode."""
         from .subprocess.proxy import (
@@ -167,7 +167,7 @@ class LanceDBAdapter(VectorDBInterface):
         self,
         url: str | None,
         api_key: str | None,
-        embedding_engine: EmbeddingEngine,
+        embedding_engine: EmbeddingGateway,
         *,
         connection: object | None = None,
         session: object | None = None,
@@ -1047,7 +1047,7 @@ class LanceDBAdapter(VectorDBInterface):
         try:
             target_schema = to_arrow_schema()
         except TypeError:
-            # Models with complex Union types (e.g. List[Union[Entity, Event,
+            # Models with complex Union types (e.g. List[Union[Entity, Timestamp,
             # tuple[Edge, Entity]]]) can't be converted to Arrow. Fall back to
             # field-name comparison in _is_payload_schema_compatible.
             return None

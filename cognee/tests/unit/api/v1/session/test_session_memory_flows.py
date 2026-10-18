@@ -1031,7 +1031,7 @@ async def test_self_improvement_controls_session_bridge_without_skipping_cache(f
         )
         if result._task is not None:
             await result._task
-    store.assert_awaited_once_with("s1", "memory", user)
+    store.assert_awaited_once_with("s1", "memory", user, node_set=None)
     assert improve.await_count == (0 if flag is False else 1)
     assert result.status == "session_stored"
 
@@ -1060,6 +1060,9 @@ async def test_typed_api_session_entry_never_runs_automatic_improvement(flag):
         patch(
             "cognee.modules.session_lifecycle.metrics.get_session_row",
             AsyncMock(return_value=MagicMock(dataset_id=dataset.id)),
+        ),
+        patch(
+            "cognee.modules.data.methods.get_authorized_dataset", AsyncMock(return_value=dataset)
         ),
     ):
         kwargs = {} if flag is None else {"self_improvement": flag}

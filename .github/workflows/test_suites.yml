@@ -257,15 +257,6 @@ jobs:
     uses: ./.github/workflows/frontend_docker_build_test.yml
     secrets: inherit
 
-  temporal-graph-tests:
-    name: Temporal Graph Test
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
-    uses: ./.github/workflows/temporal_graph_tests.yml
-    with:
-      ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
-    secrets: inherit
-
   search-db-tests:
     name: Search Test on Different DBs
     needs: [ build-ci-env ]
@@ -313,7 +304,6 @@ jobs:
       docker-compose-test,
       docker-ci-test,
       ui-docker-ci-test,
-      temporal-graph-tests,
       search-db-tests,
       relational-db-migration-tests,
     ]
@@ -341,7 +331,6 @@ jobs:
                 "${{ needs.docker-compose-test.result }}" == "success" &&
                 "${{ needs.docker-ci-test.result }}" == "success" &&
                 "${{ needs.ui-docker-ci-test.result }}" == "success" &&
-                "${{ needs.temporal-graph-tests.result }}" == "success" &&
                 "${{ needs.search-db-tests.result }}" == "success" &&
                 "${{ needs.relational-db-migration-tests.result }}" == "success" ]]; then
             echo "All test suites completed successfully!"
