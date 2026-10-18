@@ -2,17 +2,41 @@ from uuid import UUID
 
 import cognee
 from cognee.exceptions import CogneeSystemError, CogneeValidationError
+from cognee.infrastructure.llm.exceptions import (
+    LLMPaymentRequiredError,
+    raise_if_budget_exhausted,
+    raise_if_budget_exhausted_record,
+)
 from cognee.infrastructure.session.get_session_manager import get_session_manager
+from cognee.infrastructure.session.session_node_set import bridge_node_set
 from cognee.infrastructure.session.session_persist_watermark import (
     SessionPersistWindow,
     save_persisted_qa_count,
 )
+from cognee.modules.improve.config import get_improve_config
 from cognee.modules.improve.constants import USER_SESSIONS_NODE_SET
 from cognee.modules.pipelines.models.PipelineRunInfo import get_errored_run_info
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.ingestion.data_item import DataItem
 
 logger = get_logger("cognify_session")
+
+
+def _dated_content(window: SessionPersistWindow) -> str | DataItem:
+    """The window's text, carrying its last entry time as the document's source date.
+
+    Conflict review orders competing facts by that date, so a window that has one
+    is added as a DataItem under IMPROVE_EFFECTIVE_DATE_KEY. literal_text keeps
+    session text that happens to look like a URL or a path from being fetched.
+    """
+    if not window.last_entry_time:
+        return window.text
+    return DataItem(
+        data=window.text,
+        external_metadata={get_improve_config().effective_date_key: window.last_entry_time},
+        literal_text=True,
+    )
 
 
 async def cognify_session(
@@ -32,6 +56,12 @@ async def cognify_session(
     the same window is re-extracted and retried on the next improve()
     (add-level content-hash dedup makes the retry safe).
 
+    One failure ends the whole call instead of one window: an exhausted LLM
+    budget. The windows after it would fail the same way, so none of them is
+    attempted and the error leaves as ``LLMPaymentRequiredError`` — the type
+    improve() classifies to stop its run. Windows persisted before it keep
+    their advanced watermark; the failed one and the rest keep theirs put.
+
     Args:
         data: Window(s) yielded by ``extract_user_sessions``.
         dataset_id: Dataset to cognify into.
@@ -39,7 +69,8 @@ async def cognify_session(
 
     Raises:
         CogneeValidationError: If no valid, non-empty window was provided.
-        CogneeSystemError: If cognee operations fail.
+        LLMPaymentRequiredError: If the LLM budget is exhausted.
+        CogneeSystemError: If cognee operations fail for any other reason.
     """
     windows = data if isinstance(data, list) else [data]
     valid_windows = [
@@ -59,13 +90,14 @@ async def cognify_session(
                 window.persisted_qa_count,
             )
 
+            node_set = bridge_node_set([USER_SESSIONS_NODE_SET], window.node_set)
             await cognee.add(
-                window.text,
+                _dated_content(window),
                 dataset_id=dataset_id,
-                node_set=[USER_SESSIONS_NODE_SET],
+                node_set=node_set,
                 user=user,
             )
-            logger.debug("Session data added to cognee with node_set: %s", USER_SESSIONS_NODE_SET)
+            logger.debug("Session data added to cognee with node_set: %s", node_set)
             # raise_on_error=False: one window's failed build must not kill the
             # whole memify run — inspect the run info instead, keep this
             # window's watermark put (so it is re-extracted and retried on the
@@ -82,6 +114,9 @@ async def cognify_session(
                     errored_run.error_class,
                     errored_run.error_message,
                 )
+                # Not a per-window failure when the budget is what ran out: the
+                # remaining windows would each spend one more failing build.
+                raise_if_budget_exhausted_record(errored_run.error_class, errored_run.error_message)
                 continue
             logger.info("Session data successfully cognified")
 
@@ -97,6 +132,18 @@ async def cognify_session(
                 window.persisted_qa_count,
             )
 
+    except LLMPaymentRequiredError:
+        # Left typed on purpose. Wrapped in CogneeSystemError it would reach
+        # improve() as a generic failure: the wrapper is a 500 with no
+        # __cause__, so nothing above could tell the budget ran out.
+        logger.error(
+            "LLM budget exhausted while cognifying session data; stopping, the unpersisted "
+            "windows keep their watermarks for the next improve()"
+        )
+        raise
     except Exception as e:
+        # add()/cognify() can also raise the provider's own budget error, or a
+        # wrapper around it; that leaves as LLMPaymentRequiredError as well.
+        raise_if_budget_exhausted(e)
         logger.exception("Error cognifying session data")
         raise CogneeSystemError(message=f"Failed to cognify session data: {e!s}", log=False)

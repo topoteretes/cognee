@@ -33,7 +33,7 @@ from cognee.modules.search.types import (
 )
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
-from cognee.shared.utils import send_telemetry
+from cognee.shared.utils import send_telemetry, telemetry_on_error
 
 logger = get_logger()
 
@@ -52,6 +52,7 @@ def _single_dataset_id(dataset_ids: list[UUID] | UUID | None) -> UUID | None:
     return dataset_ids[0] if len(dataset_ids) == 1 else None
 
 
+@telemetry_on_error("cognee.search EXECUTION ERRORED")
 async def search(
     query_text: str,
     query_type: SearchType,
@@ -147,7 +148,9 @@ async def search(
 
     Notes:
         Scoping to specific datasets requires ``ENABLE_BACKEND_ACCESS_CONTROL``
-        (the default). Permission failures yield an empty list, not an error.
+        (the default). With ``dataset_ids=None``, datasets the user cannot read
+        are skipped (no grants -> ``[]``); an explicit id the user cannot read
+        raises ``PermissionDeniedError``.
     """
     send_telemetry(
         "cognee.search EXECUTION STARTED",
@@ -399,11 +402,15 @@ async def search_in_datasets_context(
         except CodeSeedNotFoundError as error:
             # ``error`` is the one place a caller reads a dataset's failure; the
             # completion marker is the shape this case shipped with and stays
-            # for callers that already parse it.
+            # for callers that already parse it, plus the error's stable code
+            # (not_found, ambiguous, no_code_graph, feature_unavailable).
+            completion = {"seed_not_found": True, "error": str(error), "code": error.error_code}
+            if error.error_param:
+                completion["param"] = error.error_param
             return SearchResultPayload(
                 result_object=None,
                 context=None,
-                completion={"seed_not_found": True, "error": str(error)},
+                completion=completion,
                 error=str(error),
                 search_type=query_type,
                 only_context=False,

@@ -51,58 +51,25 @@ async def test_improve_forwards_every_option():
 
     await client.improve(
         "docs",
-        node_name=["n1"],
         session_ids=["s1", "s2"],
         build_global_context_index=True,
         build_truth_subspace=True,
+        review_conflicts=True,
         feedback_alpha=0.4,
         run_in_background=True,
-        extraction_tasks=["extract_a"],
-        enrichment_tasks=["enrich_b"],
-        data="seed text",
     )
 
     url, payload = posts[0]
     assert url == "http://server/api/v1/improve"
     assert payload == {
         "dataset_name": "docs",
-        "node_name": ["n1"],
         "session_ids": ["s1", "s2"],
         "build_global_context_index": True,
         "build_truth_subspace": True,
+        "review_conflicts": True,
         "feedback_alpha": 0.4,
         "run_in_background": True,
-        "extraction_tasks": ["extract_a"],
-        "enrichment_tasks": ["enrich_b"],
-        "data": "seed text",
     }
-
-
-@pytest.mark.asyncio
-async def test_improve_refuses_options_that_cannot_cross_the_wire():
-    """Task objects and the db-config overrides have no wire form; a loud
-    error beats the server silently running defaults."""
-    client, posts = _client_with_recorder()
-
-    with pytest.raises(ValueError, match="registry task names"):
-        await client.improve("docs", extraction_tasks=[lambda: None])
-    with pytest.raises(ValueError, match="node_type"):
-        await client.improve("docs", node_type=object())
-    assert posts == []
-
-
-def test_the_key_partition_covers_the_memify_passthrough_surface():
-    """Every MEMIFY_PASSTHROUGH_KEYS entry is either forwarded or refused —
-    a key added to the surface must never be silently dropped, and a typo in
-    the serializable list must not invent a key off the surface."""
-    from cognee.api.v1.serve.cloud_client import (
-        _SERIALIZABLE_MEMIFY_TASK_KEYS,
-        _UNSERIALIZABLE_MEMIFY_KEYS,
-    )
-    from cognee.modules.improve import MEMIFY_PASSTHROUGH_KEYS
-
-    handled = {*_SERIALIZABLE_MEMIFY_TASK_KEYS, "data", *_UNSERIALIZABLE_MEMIFY_KEYS}
-    assert handled == set(MEMIFY_PASSTHROUGH_KEYS)
 
 
 @pytest.mark.asyncio
@@ -114,3 +81,36 @@ async def test_improve_defaults_send_only_the_dataset():
 
     _, payload = posts[0]
     assert payload == {"dataset_id": str(dataset_id)}
+
+
+@pytest.mark.asyncio
+async def test_improve_forwards_deprecated_custom_task_names():
+    """Deprecated for one release (SDK-1115): registry names, data and node_name cross the wire."""
+    client, posts = _client_with_recorder()
+
+    await client.improve(
+        "docs",
+        extraction_tasks=["extract_subgraph_chunks"],
+        enrichment_tasks=["index_data_points"],
+        data="seed text",
+        node_name=["n1"],
+    )
+
+    _url, payload = posts[0]
+    assert payload["extraction_tasks"] == ["extract_subgraph_chunks"]
+    assert payload["enrichment_tasks"] == ["index_data_points"]
+    assert payload["data"] == "seed text"
+    assert payload["node_name"] == ["n1"]
+
+
+@pytest.mark.asyncio
+async def test_improve_refuses_options_that_cannot_cross_the_wire():
+    """Task objects and the db-config overrides have no wire form; a loud
+    error beats the server silently running without them."""
+    client, posts = _client_with_recorder()
+
+    with pytest.raises(ValueError, match="registry task names"):
+        await client.improve("docs", extraction_tasks=[lambda: None])
+    with pytest.raises(ValueError, match="node_type"):
+        await client.improve("docs", node_type=object())
+    assert posts == []

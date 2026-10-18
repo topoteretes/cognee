@@ -1,3 +1,5 @@
+# Registers the SQLite compile hook for exact-name UUID columns (see sqlite_uuid.py).
+from . import sqlite_uuid as _sqlite_uuid
 from .ModelBase import Base
 from .config import get_relational_config
 from .config import get_migration_config

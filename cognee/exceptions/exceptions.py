@@ -41,13 +41,21 @@ class CogneeApiError(Exception):
 
         # Automatically log the exception details
         if log and (log_level == "ERROR"):
-            logger.error("%s raised (Status code: %s)", self.name, self.status_code)
+            logger.error(
+                "%s raised (Status code: %s): %s", self.name, self.status_code, self.message
+            )
         elif log and (log_level == "WARNING"):
-            logger.warning("%s raised (Status code: %s)", self.name, self.status_code)
+            logger.warning(
+                "%s raised (Status code: %s): %s", self.name, self.status_code, self.message
+            )
         elif log and (log_level == "INFO"):
-            logger.info("%s raised (Status code: %s)", self.name, self.status_code)
+            logger.info(
+                "%s raised (Status code: %s): %s", self.name, self.status_code, self.message
+            )
         elif log and (log_level == "DEBUG"):
-            logger.debug("%s raised (Status code: %s)", self.name, self.status_code)
+            logger.debug(
+                "%s raised (Status code: %s): %s", self.name, self.status_code, self.message
+            )
 
         super().__init__(self.message, self.name)
 

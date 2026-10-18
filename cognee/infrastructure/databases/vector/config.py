@@ -37,7 +37,7 @@ class VectorConfig(BaseSettings):
     vector_db_subprocess_enabled: bool = True
     vector_pool_args: str | None = None
 
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    model_config = SettingsConfigDict(extra="allow")
 
     @pydantic.model_validator(mode="after")
     def fill_derived(self):
