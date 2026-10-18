@@ -7,7 +7,7 @@ description: Use when the user wants to drive cognee from the terminal with cogn
 
 `cognee-cli` ships with the package (entry point in `cognee/cli/_cognee.py`;
 each command lives in `cognee/cli/commands/`). Every command has
-`--help` for its flags, but only a few (`demo`, `memify`, `eval`, `serve`,
+`--help` for its flags, but only a few (`demo`, `eval`, `serve`,
 `push`, `upgrade`, `downgrade`, `stamp`, and `search` with one CODE example)
 include usage examples — for the memory commands use the examples
 in this file. Needs `LLM_API_KEY` configured, same as the SDK.
@@ -42,7 +42,7 @@ vectors but keeps the raw files, so the data can be rebuilt.
 `--query-type` accepts 10 of the SDK's 20 `SearchType` values — the list in
 `cognee/cli/config.py:SEARCH_TYPE_CHOICES`: HYBRID_COMPLETION, GRAPH_COMPLETION,
 RAG_COMPLETION, CHUNKS, CHUNKS_LEXICAL, SUMMARIES, CODE, CYPHER, GRAPH_REPORT,
-SKILLS. The rest (TEMPORAL, TRIPLET_COMPLETION, GRAPH_COMPLETION_COT,
+SKILLS. The rest (TEMPORAL, GRAPH_COMPLETION_COT,
 AGENTIC_COMPLETION, NATURAL_LANGUAGE, …) are SDK-only, e.g.
 `cognee.recall(q, query_type=SearchType.TEMPORAL)`.
 
@@ -65,25 +65,25 @@ cognee-cli improve -d my_project             # enrich/index the graph (no sessio
 cognee-cli feedback ...                      # attach feedback to results
 ```
 
-`improve` also takes `--node-name`, `--feedback-alpha` (learning rate in
+`improve` also takes `--feedback-alpha` (learning rate in
 (0, 1]; default `IMPROVE_FEEDBACK_ALPHA`, 0.1), `--build-global-context-index`,
 `--build-truth-subspace` (both opt-in stages; the truth subspace needs
-`-s`), and `--background`/`-b`. It prints one line per stage — name, status
+`-s`), and `--background`/`-b` (`--node-name` is deprecated: it warns and is
+ignored). It prints one line per stage — name, status
 (`completed` / `already_completed` / `skipped` / `errored`) and the skip
-reason (e.g. `no_session_ids`, `lock_held`, `triplet_embedding_disabled`).
+reason (e.g. `no_session_ids`, `lock_held`, `opt_in_disabled`).
 `remember`/`improve` build their graphs through `cognify()`, so cognify-level
-settings (e.g. `CONTRADICTION_DETECTION=true`) apply to them too.
+settings (e.g. `PROVENANCE_TRACKING=true`) apply to them too.
 
 ## Legacy / lower-level commands
 
-`add`, `cognify`, `search`, `memify`, and `delete` still ship and are what the
+`add`, `cognify`, `search`, and `delete` still ship and are what the
 memory commands call underneath. Use them only to drive a single stage in
 isolation; prefer `remember`/`recall`/`forget`/`improve` otherwise.
 
 ```bash
 cognee-cli add "text" && cognee-cli cognify  # what `remember` does in one step
 cognee-cli search "question"                 # `recall` minus routing/scope/session sources
-cognee-cli memify -d my_project              # custom extraction/enrichment tasks
 cognee-cli delete --all                      # superseded by `forget --all`
 ```
 
@@ -144,7 +144,6 @@ points at a custom Alembic scripts directory.
   session memory, `cognee-cli config set AUTO_FEEDBACK false` — by default
   cognee makes one structured-output LLM call per answered query to self-tune
   its memory.
-- `memify` requires one of the arguments -d/--dataset-name --dataset-id
 - `config set`/`config unset` write to the `.env` file in whatever directory
   you run the command from (creating it if missing). `config reset` (reset
   *all* keys) is still not implemented.

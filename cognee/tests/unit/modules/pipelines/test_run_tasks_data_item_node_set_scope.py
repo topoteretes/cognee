@@ -1,10 +1,10 @@
-"""The incremental pre-check resolves content under the run's node set.
+"""The incremental pre-check resolves content under the item's node set.
 
 ``add(node_set=...)`` puts the node set on ``ctx.extras``; the per-item wrapper
-hands it to the content-hash lookup so that the same content stored for another
-scope does not make this scope's item "already completed" (which is how a
-second user's identical memory used to be silently dropped). A run that does
-not say keeps the content-only match.
+joins it with a ``DataItem``'s own and hands that to the content-hash lookup so
+that the same content stored for another scope does not make this scope's item
+"already completed" (which is how a second user's identical memory used to be
+silently dropped). A run that does not say keeps the content-only match.
 """
 
 from types import SimpleNamespace
@@ -22,6 +22,7 @@ from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunAlreadyCompleted,
     PipelineRunCompleted,
 )
+from cognee.tasks.ingestion.data_item import DataItem
 
 
 def _wire(monkeypatch, *, rows_by_scope: dict):
@@ -80,10 +81,10 @@ def _wire(monkeypatch, *, rows_by_scope: dict):
 
     monkeypatch.setattr(item_module, "run_tasks_with_telemetry", _empty_pipeline)
 
-    async def _run(ctx):
+    async def _run(ctx, data_item="some text"):
         infos = []
         async for event in item_module.run_tasks_data_item_incremental(
-            data_item="some text",
+            data_item=data_item,
             dataset=dataset,
             tasks=[],
             pipeline_name="add_pipeline",
@@ -133,6 +134,23 @@ async def test_same_content_under_the_same_node_set_is_skipped(monkeypatch):
 
     assert [type(i) for i in infos] == [PipelineRunAlreadyCompleted]
     assert asked == [["user:alice"]]
+
+
+@pytest.mark.asyncio
+async def test_an_items_own_node_set_joins_the_runs_scope(monkeypatch):
+    """ingest_data stores the row under call ∪ item node set; the lookup must
+    ask for that same scope, or the item would never be found as completed."""
+    rows: dict = {}
+    run, dataset, asked = _wire(monkeypatch, rows_by_scope=rows)
+    rows[frozenset({"user:bob", "project:x"})] = _completed_row(dataset)
+
+    infos = await run(
+        PipelineContext(extras={"node_set": ["user:bob"]}),
+        data_item=DataItem(data="some text", node_set=["project:x"]),
+    )
+
+    assert [type(i) for i in infos] == [PipelineRunAlreadyCompleted]
+    assert asked == [["user:bob", "project:x"]]
 
 
 @pytest.mark.asyncio

@@ -27,9 +27,9 @@ from cognee.modules.ingestion.identify import identify_data_by_hash
 from cognee.modules.ingestion.identify_many import identify_many
 from cognee.modules.ingestion.node_set_identity import (
     UNSCOPED,
-    encode_node_set,
+    decode_node_set,
+    node_set_key,
     node_set_matches,
-    normalize_node_set,
 )
 
 _identify_many_module = importlib.import_module("cognee.modules.ingestion.identify_many")
@@ -39,33 +39,32 @@ _identify_module = importlib.import_module("cognee.modules.ingestion.identify")
 # --- pure helpers -----------------------------------------------------------
 
 
-def test_normalize_sorts_dedupes_and_drops_empties():
-    assert normalize_node_set(["bob", "alice", "bob", "", None]) == ["alice", "bob"]
-    assert normalize_node_set(("x",)) == ["x"]
-    assert normalize_node_set({"b", "a"}) == ["a", "b"]
+def test_decode_reads_a_list_or_the_stored_json_encoding_in_order():
+    assert decode_node_set(["bob", "alice", "bob"]) == ["bob", "alice", "bob"]
+    assert decode_node_set(json.dumps(["b", "a"])) == ["b", "a"]
+    assert decode_node_set(("x",)) == ["x"]
 
 
-def test_normalize_treats_absent_and_empty_as_no_node_set():
-    assert normalize_node_set(None) is None
-    assert normalize_node_set([]) is None
-    assert normalize_node_set([""]) is None
-    assert normalize_node_set(UNSCOPED) is None
+def test_decode_treats_absent_empty_and_unreadable_as_no_node_set():
+    assert decode_node_set(None) is None
+    assert decode_node_set([]) is None
+    assert decode_node_set(["", "  "]) is None
+    assert decode_node_set(UNSCOPED) is None
+    assert decode_node_set("null") is None
+    assert decode_node_set("not json") is None
+    assert decode_node_set(json.dumps({"not": "a list"})) is None
 
 
-def test_normalize_reads_the_stored_json_encoding():
-    assert normalize_node_set(json.dumps(["b", "a"])) == ["a", "b"]
-    assert normalize_node_set("null") is None
-    assert normalize_node_set("not json") is None
-    assert normalize_node_set(json.dumps({"not": "a list"})) is None
+def test_key_is_the_set_of_node_set_ids():
+    assert node_set_key(["b", "a"]) == node_set_key('["a", "b", "a"]')
+    # Two spellings that NodeSet.id_for maps to one node set are one tag.
+    assert node_set_key(["Notion:A B"]) == node_set_key(["notion:a_b"])
+    assert node_set_key(["a"]) != node_set_key(["a", "b"])
+    assert node_set_key(None) is None
+    assert node_set_key([]) is None
 
 
-def test_encode_is_canonical_json_or_none():
-    assert encode_node_set(["b", "a", "a"]) == '["a", "b"]'
-    assert encode_node_set(None) is None
-    assert encode_node_set([]) is None
-
-
-def test_matches_compares_as_sets_and_unscoped_matches_everything():
+def test_matches_compares_scopes_and_unscoped_matches_everything():
     assert node_set_matches('["a", "b"]', ["b", "a"])
     assert node_set_matches(None, [])
     assert not node_set_matches('["a"]', ["a", "b"])
@@ -101,7 +100,8 @@ def _row(*, dataset_id, owner_id, content_hash, node_set):
         "raw_data_location": "file:///tmp/doc.txt",
         "pipeline_status": {},
         "token_count": -1,
-        "node_set": encode_node_set(node_set),
+        # The form ingest_data writes.
+        "node_set": json.dumps(node_set) if node_set else None,
     }
 
 
@@ -143,6 +143,10 @@ async def test_identify_by_hash_returns_the_row_of_the_requested_scope(scoped_ro
     ).id == s.bob
     assert (await identify_data_by_hash("h", s.user, s.dataset_id, node_set=None)).id == s.untagged
     assert (await identify_data_by_hash("h", s.user, s.dataset_id, node_set=[])).id == s.untagged
+    # Another spelling of the same node set is the same scope.
+    assert (
+        await identify_data_by_hash("h", s.user, s.dataset_id, node_set=["User:Alice"])
+    ).id == s.alice
 
 
 @pytest.mark.asyncio

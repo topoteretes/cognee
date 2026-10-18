@@ -21,6 +21,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 # are explicit here.
 import cognee.modules.integrations.github
 import cognee.modules.integrations.gmail
+import cognee.modules.integrations.google_calendar
 import cognee.modules.integrations.google_drive
 import cognee.modules.integrations.linear
 from cognee.api.exception_telemetry import send_api_exception_telemetry
@@ -133,10 +134,7 @@ async def lifespan(app: FastAPI):
         await get_default_user()
         await set_default_user_password_if_unset()
     report_default_user_login_posture()
-    from cognee.modules.cognify.recovery import recover_stale_pipeline_runs_on_startup
-
-    await recover_stale_pipeline_runs_on_startup()
-
+    from cognee.modules.cognify.recovery import pipeline_recovery_service
     from cognee.modules.users.authentication.get_auth_secret import resolve_auth_secrets
 
     # Warns at startup, not on the first login, when a token secret was generated.
@@ -151,7 +149,8 @@ async def lifespan(app: FastAPI):
     # Emit a clear startup message for docker logs
     logger.info("Backend server has started")
 
-    yield
+    async with pipeline_recovery_service():
+        yield
 
     # Let in-flight background work (background remember runs, the session
     # improve bridge) finish before the engines below are torn down under it.
@@ -209,10 +208,10 @@ async def _report_unhandled_exceptions(request, call_next):
 async def _stamp_operation_origin(request, call_next):
     # Operations executed for this request record origin="api" in
     # pipeline_runs. ContextVars set here propagate into the handler task.
-    from cognee.modules.operations import ORIGIN_API, set_operation_origin
+    from cognee.modules.operations import ORIGIN_API, operation_origin_scope
 
-    set_operation_origin(ORIGIN_API)
-    return await call_next(request)
+    with operation_origin_scope(ORIGIN_API):
+        return await call_next(request)
 
 
 # Read allowed origins from environment variable (comma-separated)
@@ -350,6 +349,14 @@ async def exception_handler(request: Request, exc: CogneeApiError) -> JSONRespon
         improperly_defined=improperly_defined,
     )
     content = {"detail": detail["message"]}
+    # A stable, machine-readable reason and the argument it concerns, for errors
+    # that carry them (SearchType.CODE's CodeSearchValidationError family), so a
+    # client can branch on `code` instead of parsing `detail`. Strings only: other
+    # exceptions may use an `error_code` attribute for something else.
+    for key, attribute in (("code", "error_code"), ("param", "error_param")):
+        value = getattr(exc, attribute, None)
+        if isinstance(value, str) and value:
+            content[key] = value
     # A hint the caller can act on: the exception's own remediation first, else the
     # shared first-run table. Only present when a fix is known, so existing clients
     # that read only `detail` are unaffected.
@@ -385,6 +392,7 @@ app.include_router(get_add_router(), prefix="/api/v1/add", tags=["add"])
 
 app.include_router(get_cognify_router(), prefix="/api/v1/cognify", tags=["cognify"])
 
+# Deprecated (SDK-1115); removed in the next release.
 app.include_router(get_memify_router(), prefix="/api/v1/memify", tags=["memify"])
 
 app.include_router(get_search_router(), prefix="/api/v1/search", tags=["search"])

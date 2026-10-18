@@ -2,6 +2,7 @@ import string
 from collections import Counter
 
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
+from cognee.modules.graph.utils.fact_conflicts import fact_status, status_label
 from cognee.modules.retrieval.utils.stop_words import DEFAULT_STOP_WORDS
 from cognee.shared.logging_utils import get_logger
 
@@ -57,6 +58,14 @@ def _extract_nodes_from_edges(retrieved_edges: list[Edge]) -> dict:
     return nodes
 
 
+def _superseded_last(edge: Edge) -> bool:
+    """A superseded fact still belongs in the context, but after the one that replaced it.
+
+    sorted() is stable, so every other edge keeps the retriever's ranking.
+    """
+    return fact_status(edge.attributes) == "superseded"
+
+
 async def resolve_edges_to_text(retrieved_edges: list[Edge]) -> str:
     """Converts retrieved graph edges into a human-readable string format."""
     if not retrieved_edges:
@@ -76,7 +85,7 @@ async def resolve_edges_to_text(retrieved_edges: list[Edge]) -> str:
         extra={"edge_count": len(retrieved_edges)},
     )
 
-    for edge in retrieved_edges:
+    for edge in sorted(retrieved_edges, key=_superseded_last):
         source_name = nodes[edge.node1.id]["name"]
         target_name = nodes[edge.node2.id]["name"]
         edge_label = (
@@ -90,6 +99,10 @@ async def resolve_edges_to_text(retrieved_edges: list[Edge]) -> str:
         description = edge.attributes.get("edge_text")
         if description and description != edge_label:
             line += f"  ({description})"
+
+        status = status_label(edge.attributes)
+        if status:
+            line += f" {status}"
 
         connections.append(line)
 

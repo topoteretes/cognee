@@ -343,3 +343,50 @@ def test_openapi_schema_lists_the_memory_and_low_level_routes(api):
         "POST /api/v1/forget",
     ):
         assert required in routes, f"{required} missing from OpenAPI schema"
+
+
+@pytest.mark.journey
+def test_http_session_entries_pin_a_node_set(api):
+    """The wire contract the integrations plugins rely on (SDK-336).
+
+    A typed entry with ``node_set`` pins the session; repeating or omitting it is
+    fine; a different set is a 409 that names the error, so a client can tell a
+    pinned-session conflict from the endpoint's other failures.
+    """
+    unique = uuid.uuid4().hex[:8]
+    carol = Session(api, f"carol-{unique}@cognee-journeys.org").register_and_login()
+    session_id = f"http-project-session-{unique}"
+
+    def entry(body: dict) -> dict:
+        return {"entry": body, "dataset_name": DATASET, "session_id": session_id}
+
+    pinned = carol.post(
+        "/api/v1/remember/entry",
+        json=entry({"type": "qa", "question": "q", "answer": "a", "node_set": ["project-http"]}),
+    )
+    assert pinned.status_code == 200, f"pin: {pinned.status_code} {pinned.text}"
+    assert pinned.json()["status"] == "session_stored", pinned.text
+
+    repeated = carol.post(
+        "/api/v1/remember/entry",
+        json=entry({"type": "trace", "origin_function": "f", "node_set": ["project-http"]}),
+    )
+    assert repeated.status_code == 200, f"repeat: {repeated.status_code} {repeated.text}"
+
+    omitted = carol.post(
+        "/api/v1/remember/entry", json=entry({"type": "qa", "question": "q2", "answer": "a2"})
+    )
+    assert omitted.status_code == 200, f"omit: {omitted.status_code} {omitted.text}"
+
+    conflict = carol.post(
+        "/api/v1/remember/entry",
+        json=entry({"type": "qa", "question": "q3", "answer": "a3", "node_set": ["project-other"]}),
+    )
+    assert conflict.status_code == 409, f"conflict: {conflict.status_code} {conflict.text}"
+    assert "SessionNodeSetConflictError" in conflict.text, conflict.text
+    assert "project-http" in conflict.text and "project-other" in conflict.text, conflict.text
+
+    # The schema the plugins probe before tagging capture.
+    schemas = api.get("/openapi.json").json()["components"]["schemas"]
+    assert "node_set" in schemas["QAEntry"]["properties"]
+    assert "node_set" in schemas["TraceEntry"]["properties"]

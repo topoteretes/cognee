@@ -7,6 +7,7 @@ within pipeline operations, supporting both incremental and regular processing m
 
 import os
 from collections.abc import AsyncGenerator
+from contextlib import aclosing
 from typing import Any
 
 from sqlalchemy import select
@@ -15,7 +16,7 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.modules import ingestion
 from cognee.modules.data.models import Data, Dataset
-from cognee.modules.ingestion.node_set_identity import UNSCOPED
+from cognee.modules.ingestion.node_set_identity import UNSCOPED, union_node_sets
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.models.DataItemStatus import (
     DataItemStatus,
@@ -98,29 +99,41 @@ async def _drain_item_events(
     Every intermediate ``PipelineRunYield`` is forwarded to stage-progress
     tracking; the one non-yield item — a ``{"run_info": ..., "data_id": ...}``
     dict — is the item's final result, returned once the generator is exhausted.
+
+    If progress tracking raises mid-item, ``aclosing`` closes the generator
+    right away, so the item's telemetry reports a terminal event now rather than
+    whenever the abandoned generator is garbage-collected.
     """
     result = None
-    async for item in events:
-        if isinstance(item, PipelineRunYield):
-            _push_stage_progress(item, ctx, tasks, pipeline_run_id, progress_state)
-        else:
-            result = item
+    async with aclosing(events) as stream:
+        async for item in stream:
+            if isinstance(item, PipelineRunYield):
+                _push_stage_progress(item, ctx, tasks, pipeline_run_id, progress_state)
+            else:
+                result = item
     return result
 
 
-def _node_set_scope(ctx: PipelineContext | None) -> Any:
-    """The node set the run ingests under, for the content-hash lookups below.
+def _node_set_scope(ctx: PipelineContext | None, data_item: Any) -> Any:
+    """The node set the item is ingested under, for the content-hash lookups below.
 
-    ``add()`` puts it on ``ctx.extras``; the same content under another node
+    ``add()`` puts the call's node set on ``ctx.extras``; a ``DataItem`` may
+    carry its own, and ingestion stores the row under their union, so that is
+    the scope to look the content up in. The same content under another node
     set is a different data item (see ``ingestion.node_set_identity``), so a
     lookup that ignored it would skip the second scope's item as "already
     completed". A run that does not say (custom pipelines) keeps the
     content-only match.
     """
     extras = getattr(ctx, "extras", None) if ctx is not None else None
-    if isinstance(extras, dict) and "node_set" in extras:
-        return extras["node_set"]
-    return UNSCOPED
+    if not (isinstance(extras, dict) and "node_set" in extras):
+        return UNSCOPED
+
+    # Import cycle: the tasks package imports pipelines.
+    from cognee.tasks.ingestion.data_item import DataItem
+
+    item_node_set = data_item.node_set if isinstance(data_item, DataItem) else None
+    return union_node_sets(extras["node_set"], item_node_set)
 
 
 async def run_tasks_data_item_incremental(
@@ -165,6 +178,7 @@ async def run_tasks_data_item_incremental(
     # identify()-then-select-by-id, and the post-run status write below
     # re-resolves fresh content inside the session that records the status.
     content_hash = None
+    node_set_scope = UNSCOPED
     data_point = None
     if not isinstance(data_item, Data):
         # If the DataItem carries a stable data_id (e.g. from DLT), prefer it
@@ -192,12 +206,13 @@ async def run_tasks_data_item_incremental(
                     stored.metadata = await ingestion.classify(file).aget_metadata()
 
             content_hash = stored.metadata["content_hash"]
+            node_set_scope = _node_set_scope(ctx, data_item)
 
             # Dataset-scoped content lookup: the existing row (its id and
             # pipeline_status) or None for content this dataset has not
             # seen (ingestion mints the id).
             data_point = await ingestion.identify_data_by_hash(
-                content_hash, user, dataset.id, node_set=_node_set_scope(ctx)
+                content_hash, user, dataset.id, node_set=node_set_scope
             )
             data_id = data_point.id if data_point is not None else None
 
@@ -227,20 +242,24 @@ async def run_tasks_data_item_incremental(
             return
 
     try:
-        # Process data based on data_item and list of tasks
-        async for result in run_tasks_with_telemetry(
-            tasks=tasks,
-            data=[data_item],
-            user=user,
-            pipeline_name=pipeline_id,
-            ctx=ctx,
-        ):
-            yield PipelineRunYield(
-                pipeline_run_id=pipeline_run_id,
-                dataset_id=dataset.id,
-                dataset_name=dataset.name,
-                payload=result,
+        # Process data based on data_item and list of tasks. aclosing closes
+        # the telemetry generator as soon as this one is closed early.
+        async with aclosing(
+            run_tasks_with_telemetry(
+                tasks=tasks,
+                data=[data_item],
+                user=user,
+                pipeline_name=pipeline_id,
+                ctx=ctx,
             )
+        ) as results:
+            async for result in results:
+                yield PipelineRunYield(
+                    pipeline_run_id=pipeline_run_id,
+                    dataset_id=dataset.id,
+                    dataset_name=dataset.name,
+                    payload=result,
+                )
 
         # Update pipeline status for Data element. Fresh content had no row at
         # the pre-check (data_id None); ingestion has created it since — resolve
@@ -252,7 +271,7 @@ async def run_tasks_data_item_incremental(
                 ).scalar_one_or_none()
             elif content_hash is not None:
                 data_point = await ingestion.identify_data_by_hash(
-                    content_hash, user, dataset.id, session=session, node_set=_node_set_scope(ctx)
+                    content_hash, user, dataset.id, session=session, node_set=node_set_scope
                 )
                 data_id = data_point.id if data_point is not None else None
             else:
@@ -327,20 +346,24 @@ async def run_tasks_data_item_regular(
     Yields:
         Dict containing run_info for each processing step
     """
-    # Process data based on data_item and list of tasks
-    async for result in run_tasks_with_telemetry(
-        tasks=tasks,
-        data=[data_item],
-        user=user,
-        pipeline_name=pipeline_id,
-        ctx=ctx,
-    ):
-        yield PipelineRunYield(
-            pipeline_run_id=pipeline_run_id,
-            dataset_id=dataset.id,
-            dataset_name=dataset.name,
-            payload=result,
+    # Process data based on data_item and list of tasks. aclosing closes the
+    # telemetry generator as soon as this one is closed early.
+    async with aclosing(
+        run_tasks_with_telemetry(
+            tasks=tasks,
+            data=[data_item],
+            user=user,
+            pipeline_name=pipeline_id,
+            ctx=ctx,
         )
+    ) as results:
+        async for result in results:
+            yield PipelineRunYield(
+                pipeline_run_id=pipeline_run_id,
+                dataset_id=dataset.id,
+                dataset_name=dataset.name,
+                payload=result,
+            )
 
     yield {
         "run_info": PipelineRunCompleted(

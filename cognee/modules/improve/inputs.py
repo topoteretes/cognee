@@ -8,7 +8,7 @@ because ``improve()`` owns background mode and a stage never asks.
 """
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Any
 from uuid import UUID
@@ -16,16 +16,6 @@ from uuid import UUID
 from .capabilities import GraphCapabilities
 from .config import ImproveConfig
 from .constants import DEFAULT_FEEDBACK_ALPHA
-
-# memify() knobs that improve() forwards untouched to the enrichment stage.
-MEMIFY_PASSTHROUGH_KEYS = (
-    "extraction_tasks",
-    "enrichment_tasks",
-    "data",
-    "node_type",
-    "vector_db_config",
-    "graph_db_config",
-)
 
 
 @dataclass(frozen=True)
@@ -36,20 +26,21 @@ class ImproveRunInputs:
     session_ids: tuple[str, ...]
     config: ImproveConfig
     capabilities: GraphCapabilities
-    node_name: list[str] | None = None
-    # The run's own operation-record id (``pipeline_runs.pipeline_run_id``),
-    # which stage 8's change check must never read as its own watermark.
+    # The run's own operation-record id (``pipeline_runs.pipeline_run_id``).
     improve_operation_id: UUID | None = None
     feedback_alpha: float = DEFAULT_FEEDBACK_ALPHA
     build_global_context_index: bool = False
     build_truth_subspace: bool = False
-    # Caller-supplied memify overrides (extraction_tasks, enrichment_tasks,
-    # data, node_type, vector_db_config, graph_db_config). Read-only.
-    memify_kwargs: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
+    review_conflicts: bool = False
+    # Deprecated (SDK-1115): the caller's improve(extraction_tasks=...,
+    # enrichment_tasks=...) and the options that scope them (data, node_type,
+    # node_name, vector_db_config, graph_db_config). None unless custom tasks
+    # were given; then the custom_tasks stage runs them. Read-only.
+    legacy_memify: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.memify_kwargs, MappingProxyType):
-            object.__setattr__(self, "memify_kwargs", MappingProxyType(dict(self.memify_kwargs)))
+        if self.legacy_memify is not None and not isinstance(self.legacy_memify, MappingProxyType):
+            object.__setattr__(self, "legacy_memify", MappingProxyType(dict(self.legacy_memify)))
         if not isinstance(self.session_ids, tuple):
             object.__setattr__(self, "session_ids", tuple(self.session_ids or ()))
 
@@ -75,10 +66,3 @@ class ImproveRunInputs:
     @property
     def session_id_list(self) -> list[str]:
         return list(self.session_ids)
-
-    @property
-    def has_custom_memify_tasks(self) -> bool:
-        """True when the caller supplied its own memify tasks or data."""
-        return any(
-            self.memify_kwargs.get(key) for key in ("extraction_tasks", "enrichment_tasks", "data")
-        )
