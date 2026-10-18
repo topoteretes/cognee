@@ -18,33 +18,30 @@ task's output, `enriches`, `ctx` injection, `Drop`) are documented in
 | 4 | `summarization.summarize_text` | chunks → `TextSummary` nodes (LLM) |
 | 5 | `storage.add_data_points` | data points → written to graph + vector DB (+ edge evidence) |
 | 6 | `provenance.record_provenance` | audit-ledger rows, when `PROVENANCE_TRACKING=true` |
-| 7 | `graph.detect_contradictions` | `contradicts` edges, when `CONTRADICTION_DETECTION=true` |
 
-`cognify(temporal_cognify=True)` swaps steps 3–4 for `temporal_graph.extract_events_and_timestamps`
-→ `temporal_graph.extract_knowledge_graph_from_events`. The dlt route adds
+The dlt route adds
 `ingestion.purge_stale_dlt_source_artifacts` and `ingestion.extract_dlt_source_edges`.
-`improve()` / `memify()` run the pre-assembled lists in `cognee/memify_pipelines/`.
+`improve()` stages run the pre-assembled lists in `cognee/memify_pipelines/`.
 
 ## Subpackages
 
 | Package | What its tasks do | Key exports |
 |---|---|---|
-| `chunks/` | Split text into chunks and manage chunk relations | `chunk_by_paragraph`, `chunk_by_sentence`, `chunk_by_word`, `chunk_by_row`, `remove_disconnected_chunks`, `create_chunk_associations` |
+| `chunks/` | Split text into chunks and manage chunk relations | `chunk_by_paragraph`, `chunk_by_sentence`, `chunk_by_word`, `chunk_by_row`, `create_chunk_associations` |
 | `cleanup/` | Remove data that no dataset references any more | `cleanup_unused_data` |
 | `code_graph/` | Build the deterministic code graph with the bundled enola CLI (no LLM): `CodeSymbol`/`CodeModule` nodes, `calls`/`imports` edges | `extract_code_graph`, `extract_code_files_graph` |
 | `codingagents/` | Distil coding-agent traces into reusable coding rules (`CODING_RULES` search) | see its `README.md` |
 | `completion/` | Exceptions shared by completion-style tasks | — |
 | `documents/` | Classify `Data` rows into `Document` types and chunk them | `classify_documents`, `extract_chunks_from_documents` |
 | `entity_completion/` | Pluggable entity extractors (`entity_extractors/`: LLM-based and regex-based) | `LLMEntityExtractor`, `RegexEntityExtractor` |
-| `graph/` | Extract entities/relations into the graph; contradiction detection; the GLiNER (`graph/gliner_demo/`) and code (`extract_graph_from_code`) variants | `extract_graph_from_data`, `extract_graph_from_code`, `detect_contradictions`, `resolve_temporal_contradictions` |
+| `graph/` | Extract entities/relations into the graph; the GLiNER (`graph/gliner_demo/`) and code (`extract_graph_from_code`) variants | `extract_graph_from_data`, `extract_graph_from_code` |
 | `ingestion/` | Ingest and normalise inputs for `add()`: resolve paths/directories, save to storage, dedup, dlt sources, relational-DB migration | `ingest_data`, `resolve_data_directories`, `save_data_item_to_storage`, `resolve_dlt_sources`, `migrate_relational_database` |
-| `memify/` | Enrichment tasks: session and agent-trace persistence, feedback weights, entity dedup/consolidation, triplet embeddings, global context index | `extract_subgraph`, `cognify_session`, `apply_feedback_weights`, `extract_feedback_qas`, `detect_entity_duplicates`, … |
+| `memify/` | Tasks behind the `improve()` stages: session and agent-trace persistence, feedback weights, entity dedup/consolidation, fact-conflict review, global context index | `cognify_session`, `apply_feedback_weights`, `extract_feedback_qas`, `detect_entity_duplicates`, `review_conflicts`, … |
 | `presort/` | Pre-organise a folder before ingestion (`remember(dry_run="presort")`): classify, hash, dedup, version and PII detection, proposed groupings | `build_report`, `classify_files`, `detect_duplicates`, `detect_pii`, `group_files`, `apply_presort_graph` |
 | `provenance/` | Write audit-ledger provenance entries for a pipeline run | `record_provenance` |
 | `schema/` | Ingest a relational database schema as graph nodes | `ingest_database_schema` |
-| `storage/` | Persist data points: graph + vector writes, index rebuilds, fact validity (`close_node`) | `add_data_points`, `index_data_points`, `index_graph_edges` |
-| `summarization/` | LLM summaries of chunks and code | `summarize_text`, `summarize_code` |
-| `temporal_graph/` | Event/timestamp extraction and the temporal knowledge graph | `extract_events_and_timestamps`, `extract_knowledge_graph_from_events` |
+| `storage/` | Persist data points: graph + vector writes, index rebuilds | `add_data_points`, `index_data_points`, `index_graph_edges` |
+| `summarization/` | Chunk summaries (LLM, or relations plus entity types) and code summaries | `summarize_text`, `build_summary_from_extraction`, `summarize_code` |
 | `translation/` | Translate chunk content before extraction (provider-pluggable) | `TranslationConfig`, `TranslatedContent` |
 | `web_scraper/` | Fetch and crawl web pages for URL ingestion | `fetch_page_content`, `DefaultUrlCrawler` |
 

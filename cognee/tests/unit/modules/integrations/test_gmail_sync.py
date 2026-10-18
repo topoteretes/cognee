@@ -59,7 +59,7 @@ async def test_sdk_source_receives_the_exact_scope(labels, sync_mocks):
     )
     sync_mocks.remember.assert_awaited_once_with(
         "dlt-source",
-        dataset_name=sync_module.dataset_name_for_account("person@example.com", "subject"),
+        dataset_name=sync_module._dataset_name(credential()),
         user="owner",
         write_disposition="merge",
         primary_key="id",
@@ -149,3 +149,29 @@ async def test_duplicate_sync_does_not_race_the_account_cursor(sync_mocks):
         release.set()
         await task
     assert not sync_module.ingestion.sync_is_running("gmail", "subject")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("labels", "status", "retained"),
+    [
+        ([], "completed", set()),
+        (["INBOX"], "completed", {"account"}),
+        (["INBOX"], "errored", None),
+    ],
+)
+async def test_stale_tables_are_retired_only_after_a_clean_run(
+    labels, status, retained, sync_mocks
+):
+    """A failed run keeps the old tables, so an outage never empties the mailbox."""
+    sync_mocks.remember.return_value = SimpleNamespace(status=status)
+    account = credential(selected_label_ids=labels)
+    await sync_module.sync_gmail(account)
+
+    retire = sync_module.ingestion.retire_resources
+    if retained is None:
+        retire.assert_not_awaited()
+        return
+    if retained:
+        retained = {sync_module.ingestion.resource_name("gmail", account)}
+    retire.assert_awaited_once_with("gmail", account, sync_module._dataset_name(account), retained)

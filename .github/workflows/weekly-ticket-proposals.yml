@@ -29,8 +29,8 @@ jobs:
   digest:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - run: pip install duckdb
@@ -41,7 +41,7 @@ jobs:
           MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
           LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
         run: python scripts/weekly_tickets/fetch_context.py
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: digest
           path: digest.md
@@ -51,8 +51,8 @@ jobs:
     needs: digest
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           name: digest
       - name: Install Claude Code
@@ -74,7 +74,7 @@ jobs:
           else
             echo "_No proposals this week; see the run report._" > issue-baseline.md
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: proposals-baseline
           path: |
@@ -86,11 +86,11 @@ jobs:
     needs: digest
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           name: digest
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Install Claude Code and cognee
@@ -136,7 +136,7 @@ jobs:
           else
             echo "_No proposals this week; see the run report._" > issue-cognee.md
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: proposals-cognee
           path: |
@@ -147,7 +147,7 @@ jobs:
     needs: [baseline, cognee-assisted]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           merge-multiple: true
       - name: Open comparison issue (only step that writes to GitHub)

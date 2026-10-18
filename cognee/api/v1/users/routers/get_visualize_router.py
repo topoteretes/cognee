@@ -140,11 +140,9 @@ def get_visualize_router() -> APIRouter:
         from cognee.api.v1.visualize import visualize_graph
 
         try:
-            # Verify user has permission to read dataset
-            dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
-
+            # visualize_graph checks read permission on the dataset itself.
             html_visualization = await visualize_graph(
-                dataset=dataset[0].id,
+                dataset=dataset_id,
                 user=user,
                 full=full,
                 query=query,
@@ -214,6 +212,14 @@ def get_visualize_router() -> APIRouter:
                 "negotiation on `Accept`; true or false decides outright."
             ),
         ),
+        include_session_events: bool = Query(
+            True,
+            description=(
+                "Include the dataset's search/improve history as `search_events`. "
+                "Defaults to true; a client that reads that history elsewhere "
+                "(e.g. `/visualize/live-events`) can pass false to skip collecting it."
+            ),
+        ),
         user: User = Depends(get_authenticated_user),
     ):
         """
@@ -229,13 +235,13 @@ def get_visualize_router() -> APIRouter:
         ## Query Parameters
         Same as `GET /visualize` (dataset_id, full, query, seed_node_ids,
         neighborhood_depth, neighborhood_seed_top_k, max_nodes), plus
-        `stream`.
+        `stream` and `include_session_events`.
 
         ## Response
         A JSON object with `nodes`, `links`, `color_maps`, `schema_graph`,
         `schema_data`, `pipeline_stages`, `edge_classes`, `bundles`,
         `provenance_index`, `has_meaningful_topological_rank`, `memory_map`
-        and `search_events`.
+        and `search_events` (empty when `include_session_events=false`).
 
         ## Streaming
         Sent when the request has `Accept: text/event-stream` or
@@ -248,7 +254,9 @@ def get_visualize_router() -> APIRouter:
         most one chunk's size, the first also carrying `color_maps.node_set`);
         `done` (totals). A failure after the response started is one
         `error` event with `message` and `status`. The heavy side payloads
-        are not streamed, and `full=true` cannot be streamed.
+        are not streamed, and `full=true` cannot be streamed. A stream never
+        carries `search_events` regardless of `include_session_events`; the
+        Memory tab gets that history from `/visualize/live-events` instead.
 
         ## Error Codes
         - **409 Conflict**: Dataset not found, permission denied, or the
@@ -305,9 +313,12 @@ def get_visualize_router() -> APIRouter:
             )
 
         try:
-            dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
-
             if streaming:
+                # The stream reads the Dataset row directly, so this branch
+                # checks read permission itself; the JSON branch below leaves
+                # that to visualize_graph_json.
+                dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
+
                 # Starts the read and waits for its first chunk, so a failure
                 # before any output keeps the status code the JSON path gives.
                 graph_stream = await begin_graph_stream(
@@ -330,7 +341,7 @@ def get_visualize_router() -> APIRouter:
                 )
 
             payload = await visualize_graph_json(
-                dataset=dataset[0].id,
+                dataset=dataset_id,
                 user=user,
                 full=full,
                 query=query,
@@ -338,6 +349,7 @@ def get_visualize_router() -> APIRouter:
                 neighborhood_depth=neighborhood_depth,
                 neighborhood_seed_top_k=neighborhood_seed_top_k,
                 max_nodes=max_nodes,
+                include_session_events=include_session_events,
             )
             return JSONResponse(status_code=200, content=payload)
 
@@ -439,10 +451,9 @@ def get_visualize_router() -> APIRouter:
         from cognee.api.v1.visualize import visualize_semantic_json
 
         try:
-            dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
-
+            # visualize_semantic_json checks read permission on the dataset itself.
             payload = await visualize_semantic_json(
-                dataset=dataset[0].id,
+                dataset=dataset_id,
                 user=user,
                 full=full,
                 query=query,
@@ -539,7 +550,10 @@ def get_visualize_router() -> APIRouter:
           empty when the data was ingested without node sets
         - **node_count** (int): nodes in the dataset's graph as of its latest
           cognify run — the whole graph, not only entity nodes, and 0 for a
-          dataset that has never been cognified
+          dataset that has never been cognified. A 0 also stands in for a graph
+          that could not be read; this payload cannot distinguish the two, so
+          use `GET /datasets/graph-summary` and its `computedAt` when that
+          matters
         - **node_set_colors** (dict[str, str]): node set colors from the same
           rule `/brains` uses. Same rule and same node sets give the same
           colors, but the two endpoints can be looking at different node

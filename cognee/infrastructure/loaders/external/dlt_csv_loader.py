@@ -10,7 +10,7 @@ The loader returns a ``LoaderResult`` instead of a plain path: the manifest
 text is the derived file, and the result carries the manifest's stable
 ``data_id`` plus the ``system_metadata`` route stamp that cognify's per-item
 routing keys on. Per-call dlt options (``primary_key``, ``write_disposition``,
-``max_rows_per_table``, ``column_value_columns``) ride the standard
+``max_rows_per_table``, ``column_value_columns``, ``temporal_columns``) ride the standard
 ``preferred_loaders`` config channel:
 ``preferred_loaders={"dlt_csv_loader": {"primary_key": "id"}}``.
 """
@@ -54,6 +54,7 @@ class DltCsvLoader(LoaderInterface):
         write_disposition: str = "replace",
         max_rows_per_table: int | None = None,
         column_value_columns: dict | None = None,
+        temporal_columns: dict | None = None,
         **kwargs: Any,
     ) -> LoaderResult:
         # Task-layer imports are lazy: the loaders package must not depend on
@@ -92,6 +93,7 @@ class DltCsvLoader(LoaderInterface):
             dataset_name,
             user,
             column_value_columns=column_value_columns,
+            temporal_columns=temporal_columns,
         )
         if manifest_item is None:
             raise IngestionError(

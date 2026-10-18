@@ -1,4 +1,4 @@
-"""The add pipeline is LLM-free by construction; the default memify pipeline too.
+"""The add pipeline is LLM-free by construction.
 
 add() stages data and never calls the LLM itself (the media loaders guard the
 one exception at the point of use -- see test_media_loaders_require_llm.py),
@@ -8,14 +8,8 @@ cognify() from their real task lists.
 """
 
 import inspect
-from types import SimpleNamespace
 
 from cognee.api.v1.add import add as add_module
-from cognee.memify_pipelines.memify_default_tasks import (
-    get_default_memify_enrichment_tasks,
-    get_default_memify_extraction_tasks,
-)
-from cognee.modules.pipelines.tasks.task import pipeline_needs_llm
 
 
 def test_add_never_asks_for_the_llm():
@@ -25,17 +19,3 @@ def test_add_never_asks_for_the_llm():
     assert "validate_provider_config(needs_llm=False)" in source
     assert "needs_llm=True" not in source
     assert "resolve_extractor" not in source
-
-
-def test_default_memify_tasks_are_llm_free(monkeypatch):
-    monkeypatch.setattr(
-        "cognee.modules.cognify.config.get_cognify_config",
-        lambda: SimpleNamespace(triplet_embedding=True),
-    )
-
-    tasks = [
-        *get_default_memify_extraction_tasks(),
-        *get_default_memify_enrichment_tasks(),
-    ]
-
-    assert pipeline_needs_llm(tasks) is False

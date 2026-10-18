@@ -1,7 +1,8 @@
-"""Session-independent, operation-scoped LLM token accumulation.
+"""Session-independent, operation-scoped LLM and embedding token accumulation.
 
-A ContextVar-scoped accumulator fed from ``record_llm_call`` (the single
-choke point for counted LLM calls) regardless of whether a session-usage
+A ContextVar-scoped accumulator fed from ``record_llm_call`` and
+``record_embedding_call`` (the choke points for counted LLM and embedding
+calls) regardless of whether a session-usage
 scope is active. Accumulators chain to their parent scope, so a top-level
 operation (e.g. ``remember``) sees the total including its nested
 operations' tokens — do NOT sum token columns across nesting levels.
@@ -24,6 +25,7 @@ class OperationUsage:
 
     tokens_in: int = 0
     tokens_out: int = 0
+    embedding_tokens: int = 0
     parent: Optional["OperationUsage"] = None
 
     def add(self, tokens_in: int, tokens_out: int) -> None:
@@ -32,6 +34,13 @@ class OperationUsage:
         self.tokens_out += tokens_out
         if self.parent is not None:
             self.parent.add(tokens_in, tokens_out)
+
+    def add_embedding(self, tokens: int) -> None:
+        """Add an embedding call's input tokens, kept apart from the LLM counters,
+        then propagate up the parent chain."""
+        self.embedding_tokens += tokens
+        if self.parent is not None:
+            self.parent.add_embedding(tokens)
 
 
 _active_operation_usage: ContextVar[OperationUsage | None] = ContextVar(

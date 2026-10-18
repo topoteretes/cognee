@@ -114,7 +114,9 @@ class DatasetGraphSummaryDTO(OutDTO):
     num_nodes: int
     num_edges: int
     # None while pipeline_run_id is set means the last count attempt degraded
-    # (graph store unavailable) and wasn't cached — retried on the next poll.
+    # (graph store unavailable) and wasn't cached. The degraded result is held
+    # in process briefly (GRAPH_COUNTS_FAILED_TTL_SECONDS, default 15s), so a
+    # poll inside that window repeats it rather than recounting.
     computed_at: datetime | None = None
 
 
@@ -188,10 +190,12 @@ def get_datasets_router() -> APIRouter:
 
             return datasets
         except Exception as error:
-            logger.error(f"Error retrieving datasets: {error!s}")
+            # The exception text can carry database hosts, names or SQL; it
+            # belongs in the server log, never in a response.
+            logger.exception("Error retrieving datasets")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Error retrieving datasets: {error!s}",
+                detail="Error retrieving datasets.",
             ) from error
 
     @router.post("", response_model=DatasetDTO)
@@ -241,10 +245,11 @@ def get_datasets_router() -> APIRouter:
 
             return dataset
         except Exception as error:
-            logger.error(f"Error creating dataset: {error!s}")
+            # Same as get_datasets: diagnostics stay server-side.
+            logger.exception("Error creating dataset")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Error creating dataset: {error!s}",
+                detail="Error creating dataset.",
             ) from error
 
     @router.delete("")
@@ -740,10 +745,14 @@ def get_datasets_router() -> APIRouter:
         - **pipelineRunId**: The dataset's latest cognify run, or null if it
           has never been cognified
         - **numNodes** / **numEdges**: Graph size for that run
-        - **computedAt**: When the count was cached, or null when it wasn't —
-          either the last attempt degraded (graph store unavailable, counts
-          are 0 and retried on the next poll) or a concurrent caller cached
-          the same run first (counts are exact)
+        - **computedAt**: When the count was cached, or null when it wasn't,
+          which happens three ways: the last attempt degraded (graph store
+          unavailable, counts are 0 and held for
+          GRAPH_COUNTS_FAILED_TTL_SECONDS, default 15s, before another
+          attempt); a concurrent caller cached the same run first (counts are
+          exact, and the next poll reports a non-null computedAt from that
+          row); or caching failed for another reason (counts are exact and
+          held for GRAPH_COUNTS_UNCACHED_TTL_SECONDS, default 60s)
 
         ## Error Codes
         - **409 Conflict**: The summary could not be built (generic message;

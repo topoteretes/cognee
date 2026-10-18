@@ -55,6 +55,7 @@ def _run(**overrides) -> PipelineRun:
         "error_class": None,
         "tokens_in": None,
         "tokens_out": None,
+        "embedding_tokens": None,
         "origin": None,
         "session_id": None,
         "parent_operation_id": None,
@@ -251,7 +252,9 @@ def test_zero_tokens_serialize_as_zero_not_null(monkeypatch):
     """NULL means "not measured" and 0 means "measured zero" (see
     PipelineRun.py). A truthiness check would collapse the two."""
     user_id = uuid4()
-    run = _run(user_id=user_id, operation_name="search", tokens_in=0, tokens_out=0)
+    run = _run(
+        user_id=user_id, operation_name="search", tokens_in=0, tokens_out=0, embedding_tokens=0
+    )
     _stub_engine(monkeypatch, [_joined(run)])
     _stub_visibility(monkeypatch, visible_user_ids=[user_id], permitted_dataset_ids=[])
 
@@ -259,6 +262,7 @@ def test_zero_tokens_serialize_as_zero_not_null(monkeypatch):
 
     assert body[0]["tokens_in"] == 0
     assert body[0]["tokens_out"] == 0
+    assert body[0]["embedding_tokens"] == 0
 
 
 def test_legacy_row_returns_every_new_column_as_null(monkeypatch):
@@ -290,6 +294,7 @@ def test_legacy_row_returns_every_new_column_as_null(monkeypatch):
         "error_class",
         "tokens_in",
         "tokens_out",
+        "embedding_tokens",
         "started_at",
         "ended_at",
         "user_id",

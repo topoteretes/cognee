@@ -53,6 +53,14 @@ def _relational_db_for_unit_tests():
 
 
 @pytest.fixture(autouse=True)
+def _operation_origin_starts_as_the_sdk():
+    from cognee.modules.operations.origin import ORIGIN_SDK, operation_origin_scope
+
+    with operation_origin_scope(ORIGIN_SDK):
+        yield
+
+
+@pytest.fixture(autouse=True)
 def _keyless_gates_see_a_usable_llm():
     """Unit tests mock the LLM call itself; the keyless gates must not skip it.
 
