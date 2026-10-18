@@ -160,9 +160,10 @@ def test_render_cluster_config_lists_absolute_paths_and_disables_history(tmp_pat
 
     config = enola_module.render_cluster_config([tmp_path / "golf", odd])
 
-    assert config == (
-        f'repos:\n  - "{tmp_path / "golf"}"\n  - {json.dumps(str(odd))}\nhistory:\n  enabled: false\n'
-    )
+    # Paths are JSON-quoted (so Windows backslashes are escaped, and a path
+    # with YAML punctuation stays one scalar), absolute, in cluster order.
+    golf = json.dumps(str(tmp_path / "golf"))
+    assert config == f"repos:\n  - {golf}\n  - {json.dumps(str(odd))}\nhistory:\n  enabled: false\n"
 
 
 def _cluster_repos(tmp_path):
