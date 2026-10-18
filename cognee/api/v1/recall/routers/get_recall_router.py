@@ -138,11 +138,14 @@ class RecallPayloadDTO(InDTO):
         examples=[None],
         description=(
             "'code' scope only: structured operation and arguments for the "
-            "deterministic code-graph query (same format as /v1/search code_query, "
-            'e.g. {"operation": "impact_analysis", "seeds": ["UserService"]}). '
+            "deterministic code-graph query (same format and operations as /v1/search "
+            'code_query, e.g. {"operation": "impact_analysis", "seeds": ["UserService"]} '
+            'or {"operation": "ask", "question": "where are tokens validated?"}). '
             "Omit to run the default 'explore' operation with the query text as seed. "
-            "A seed the code graph cannot resolve contributes no results rather than "
-            "failing the recall."
+            "A seed the code graph cannot resolve, a dataset without a code graph, or "
+            "flows on a graph without them contribute no results rather than failing "
+            "the recall; an unknown operation or invalid argument answers 422 with a "
+            "stable 'code' and 'param'."
         ),
     )
     context_profile: str = Field(

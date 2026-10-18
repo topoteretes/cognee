@@ -52,6 +52,43 @@ def test_response_search_tool_advertises_all_code_operations():
         "insights",
         "architecture",
         "delta",
+        "capabilities",
+        "search",
+        "neighbors",
+        "subgraph",
+        "flows",
+        "hubs",
+        "ask",
     ]
     code_query_properties = search_tool["parameters"]["properties"]["code_query"]["properties"]
     assert code_query_properties["diagram"]["enum"] == ["mermaid", "dot"]
+    assert code_query_properties["mode"]["enum"] == ["list", "show", "through"]
+    assert {
+        "text",
+        "question",
+        "seeds",
+        "seed_ids",
+        "depth",
+        "max_edges",
+        "mode",
+        "symbol",
+        "include_tests",
+        "include_side",
+        "max_seeds",
+        "max_citations",
+    } <= set(code_query_properties)
+
+
+def test_both_tool_lists_advertise_the_retriever_operations():
+    from cognee.api.v1.responses.default_tools import DEFAULT_TOOLS
+    from cognee.api.v1.responses.routers.default_tools import DEFAULT_TOOLS as ROUTER_TOOLS
+    from cognee.modules.retrieval.code_retriever import _OPERATIONS
+
+    for tools in (DEFAULT_TOOLS, ROUTER_TOOLS):
+        search_tool = next(tool for tool in tools if tool["name"] == "search")
+        code_query = search_tool["parameters"]["properties"]["code_query"]["properties"]
+        assert set(code_query["operation"]["enum"]) == _OPERATIONS
+    assert (
+        next(tool for tool in DEFAULT_TOOLS if tool["name"] == "search")["parameters"]
+        == next(tool for tool in ROUTER_TOOLS if tool["name"] == "search")["parameters"]
+    )

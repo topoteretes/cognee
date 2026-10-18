@@ -559,6 +559,9 @@ class SqlCacheAdapter(CacheDBInterface):
                         session_id=session_id,
                         qa_id=qa_entry["qa_id"],
                         payload=qa_entry,
+                        # The same instant as the payload's ``time``, so a time filter
+                        # on the column agrees with one on the payload.
+                        created_at=datetime.fromisoformat(qa_entry["time"]),
                         expires_at=self._session_expiry(),
                     )
                 )
@@ -606,6 +609,36 @@ class SqlCacheAdapter(CacheDBInterface):
                     .order_by(cache_qa_entries.c.seq.asc())
                 )
                 rows = result.scalars().all()
+            return [SessionQAEntry.model_validate(payload) for payload in rows]
+        except Exception as error:
+            error_msg = f"Unexpected error while reading Q&A from SQL cache: {error}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from error
+
+    async def get_qa_entries_since(
+        self, user_id: str, session_id: str, since: datetime, lead_in: int = 0
+    ) -> list[SessionQAEntry]:
+        """Filter on the ``created_at`` column, so only the wanted rows are read."""
+        await self._ensure_initialized()
+        try:
+            async with self.sessionmaker() as session:
+                scoped = select(cache_qa_entries.c.payload).where(
+                    self._session_filter(cache_qa_entries, user_id, session_id),
+                    self._not_expired(cache_qa_entries),
+                )
+                result = await session.execute(
+                    scoped.where(cache_qa_entries.c.created_at >= since).order_by(
+                        cache_qa_entries.c.seq.asc()
+                    )
+                )
+                rows = list(result.scalars().all())
+                if lead_in:
+                    result = await session.execute(
+                        scoped.where(cache_qa_entries.c.created_at < since)
+                        .order_by(cache_qa_entries.c.seq.desc())
+                        .limit(lead_in)
+                    )
+                    rows = list(reversed(result.scalars().all())) + rows
             return [SessionQAEntry.model_validate(payload) for payload in rows]
         except Exception as error:
             error_msg = f"Unexpected error while reading Q&A from SQL cache: {error}"
