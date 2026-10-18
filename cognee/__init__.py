@@ -40,7 +40,7 @@ logger.info(describe_resolution(_env_file))
 from .api.v1.add import add
 from .api.v1.delete import delete
 from .api.v1.cognify import cognify
-from .modules.memify import memify
+from .api.v1.memify import memify  # deprecated (SDK-1115), removed in the next release
 from .modules.run_custom_pipeline import run_custom_pipeline
 from .api.v1.update import update
 from .api.v1.config.config import config
@@ -88,6 +88,7 @@ from .api.v1 import (
     ExportResult,
 )
 from .memory import MemoryEntry, QAEntry, TraceEntry, FeedbackEntry
+from .infrastructure.session.session_node_set import SessionNodeSetConflictError
 
 # Background work: wait for fire-and-forget tasks (background remember, the
 # session-to-graph improve bridge) before the process exits.

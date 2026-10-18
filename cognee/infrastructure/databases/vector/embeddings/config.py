@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -128,6 +129,11 @@ class EmbeddingConfig(BaseSettings):
     # so it has no effect on providers that don't recognize it. Configure via
     # the EMBEDDING_INPUT_TYPE env var.
     embedding_input_type: str | None = None
+    # Wire format of embedding responses. Unset: base64 on OpenAI's own API (much
+    # cheaper to parse), float everywhere else. "base64" opts any provider in except
+    # fastembed and ollama, which have no wire format; the first reply shows whether the
+    # route honours it. "float" opts out everywhere. See embeddings/encoding.py.
+    embedding_encoding_format: Literal["base64", "float"] | None = None
     # Rate-limiting for embedding requests. Lives here (not in LLMConfig) so the
     # knobs sit with the embedding settings they govern.
     embedding_rate_limit_enabled: bool = False
@@ -154,8 +160,11 @@ class EmbeddingConfig(BaseSettings):
                 )
                 self.embedding_dimensions = _FALLBACK_DIMENSIONS
 
+        # 32 is the most inputs one request may carry on common self-hosted
+        # servers (Text Embeddings Inference answers 422 above it), and the
+        # difference from the old 36 is not measurable on hosted providers.
         if not self.embedding_batch_size:
-            self.embedding_batch_size = 36
+            self.embedding_batch_size = 32
 
     def to_dict(self) -> dict:
         """
@@ -176,6 +185,7 @@ class EmbeddingConfig(BaseSettings):
             "embedding_max_completion_tokens": self.embedding_max_completion_tokens,
             "huggingface_tokenizer": self.huggingface_tokenizer,
             "embedding_input_type": self.embedding_input_type,
+            "embedding_encoding_format": self.embedding_encoding_format,
             "embedding_batch_size": self.embedding_batch_size,
             "embedding_max_concurrent_data_points": self.embedding_max_concurrent_data_points,
             "embedding_rate_limit_enabled": self.embedding_rate_limit_enabled,
@@ -200,8 +210,8 @@ def embedding_settings_configured(config) -> bool:
     )
 
 
-def resolve_embedding_defaults(config, llm_config) -> tuple[str | None, str | None, int | None]:
-    """Return the ``(provider, model, dimensions)`` the embedding engine runs with.
+def keyless_embedding_defaults_apply(config, llm_config) -> bool:
+    """True when embeddings run on the local fastembed default instead of the config.
 
     The OpenAI default embedder only works because ``LLM_API_KEY`` is reused
     for it. With no embedding setting configured and no usable LLM key, that
@@ -213,15 +223,36 @@ def resolve_embedding_defaults(config, llm_config) -> tuple[str | None, str | No
     """
     from cognee.modules.preflight import keyless_local_defaults_apply
 
-    if not embedding_settings_configured(config) and keyless_local_defaults_apply(llm_config):
-        dimensions = _resolve_embedding_dimensions(
-            DEFAULT_LOCAL_EMBEDDING_PROVIDER, DEFAULT_LOCAL_EMBEDDING_MODEL
-        )
+    return not embedding_settings_configured(config) and keyless_local_defaults_apply(llm_config)
+
+
+def resolve_embedding_names(config, llm_config) -> tuple[str | None, str | None]:
+    """The ``(provider, model)`` embeddings run with, without touching any registry.
+
+    Pure: the telemetry settings payload reports the embedder through this, so
+    it cannot raise ``KeylessEmbedderNotInstalledError`` — that stays with the
+    engine, in ``resolve_embedding_defaults``.
+    """
+    if keyless_embedding_defaults_apply(config, llm_config):
+        return DEFAULT_LOCAL_EMBEDDING_PROVIDER, DEFAULT_LOCAL_EMBEDDING_MODEL
+    return config.embedding_provider, config.embedding_model
+
+
+def resolve_embedding_defaults(config, llm_config) -> tuple[str | None, str | None, int | None]:
+    """Return the ``(provider, model, dimensions)`` the embedding engine runs with.
+
+    See ``keyless_embedding_defaults_apply`` for when the local default applies;
+    its vector size is read from fastembed's registry, so a missing ``fastembed``
+    surfaces here as ``KeylessEmbedderNotInstalledError``.
+    """
+    provider, model = resolve_embedding_names(config, llm_config)
+    if keyless_embedding_defaults_apply(config, llm_config):
+        dimensions = _resolve_embedding_dimensions(provider, model)
         if dimensions is None:
             # The registry lookup only fails when fastembed itself is absent.
             raise KeylessEmbedderNotInstalledError()
-        return DEFAULT_LOCAL_EMBEDDING_PROVIDER, DEFAULT_LOCAL_EMBEDDING_MODEL, dimensions
-    return config.embedding_provider, config.embedding_model, config.embedding_dimensions
+        return provider, model, dimensions
+    return provider, model, config.embedding_dimensions
 
 
 @lru_cache

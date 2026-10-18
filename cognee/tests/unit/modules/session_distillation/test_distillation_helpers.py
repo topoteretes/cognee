@@ -81,7 +81,7 @@ class TestLoadDistillableSessionInputs:
             SimpleNamespace(user_id="u-1", session_id="s-1")
         )
         qa_rows = await distill_module.load_session_qa_rows(
-            SimpleNamespace(user_id="u-1", session_id="s-1")
+            SimpleNamespace(user_id="u-1", session_id="s-1"), since=None
         )
 
         assert len(qa_rows) == 1
@@ -97,6 +97,8 @@ class TestLoadDistillableSessionInputs:
             user_id="u-1",
             session_id="s-1",
             formatted=False,
+            since=None,
+            lead_in=0,
         )
 
     @pytest.mark.asyncio
@@ -173,6 +175,64 @@ class TestIsEntryDistillable:
         assert [entry.content for entry in context_entries] == ["Survives."]
 
 
+class TestEarliestEntryTime:
+    def test_returns_the_earliest_created_at_as_an_aware_datetime(self):
+        from datetime import datetime, timezone
+
+        entries = [
+            _context_entry(created_at="2026-06-11T12:00:00+00:00"),
+            _context_entry(created_at="2026-06-11T10:00:00.500000+00:00"),
+        ]
+
+        assert distill_module.earliest_entry_time(entries) == datetime(
+            2026, 6, 11, 10, 0, 0, 500000, tzinfo=timezone.utc
+        )
+
+    def test_naive_created_at_is_read_as_utc(self):
+        from datetime import datetime, timezone
+
+        entries = [_context_entry(created_at="2026-06-11T10:00:00")]
+
+        assert distill_module.earliest_entry_time(entries) == datetime(
+            2026, 6, 11, 10, 0, tzinfo=timezone.utc
+        )
+
+    def test_no_timestamps_means_no_bound(self):
+        assert distill_module.earliest_entry_time([_context_entry(created_at="")]) is None
+        assert distill_module.earliest_entry_time([]) is None
+
+
+class TestSelectCuratorInputs:
+    def test_uncapped_returns_everything(self):
+        entries = [_context_entry(confidence=0.8) for _ in range(50)]
+        rows = [_qa_row(f"q{i}") for i in range(50)]
+
+        kept_rows, kept_entries = distill_module.select_curator_inputs(rows, entries, 0)
+
+        assert kept_rows == rows
+        assert kept_entries == entries
+
+    def test_cap_keeps_the_most_confident_entries_then_recent_turns(self):
+        sure = [_context_entry(confidence=0.99, content="sure")]
+        bulk = [_context_entry(confidence=0.8, content=f"bulk {i}") for i in range(20)]
+        rows = [_qa_row(f"q{i}", time=f"2026-06-11T10:{i:02d}:00+00:00") for i in range(10)]
+
+        kept_rows, kept_entries = distill_module.select_curator_inputs(rows, bulk + sure, 1)
+
+        assert len(kept_entries) == CURATOR_BLOCKS_PER_BATCH
+        assert kept_entries[0].content == "sure"
+        assert kept_rows == []
+
+    def test_cap_fills_leftover_blocks_with_the_most_recent_turns(self):
+        entries = [_context_entry(confidence=0.9, content="one")]
+        rows = [_qa_row(f"q{i}", time=f"2026-06-11T10:{i:02d}:00+00:00") for i in range(10)]
+
+        kept_rows, kept_entries = distill_module.select_curator_inputs(rows, entries, 1)
+
+        assert kept_entries == entries
+        assert [row["question"] for row in kept_rows] == ["q5", "q6", "q7", "q8", "q9"]
+
+
 class TestBuildCuratorBatches:
     def test_small_session_is_one_batch_with_turns_and_candidates(self):
         context_entries = [_context_entry(content="Flashing wipes calibration.")]
@@ -181,14 +241,14 @@ class TestBuildCuratorBatches:
         )
 
         assert len(batches) == 1
-        assert "User: How do I update firmware?" in batches[0]
-        assert f"Candidate {context_entries[0].id}" in batches[0]
-        assert "Flashing wipes calibration." in batches[0]
+        assert "User: How do I update firmware?" in batches[0].text
+        assert f"Candidate {context_entries[0].id}" in batches[0].text
+        assert "Flashing wipes calibration." in batches[0].text
 
     def test_feedback_text_is_appended_to_the_turn_block(self):
         batch = distill_module.build_curator_batches(
             [_qa_row("Which port?", "8080.", feedback_text="Wrong, it is 9000.")], []
-        )[0]
+        )[0].text
 
         assert (
             batch
@@ -196,7 +256,7 @@ class TestBuildCuratorBatches:
         )
 
     def test_turn_without_feedback_has_no_feedback_line(self):
-        batch = distill_module.build_curator_batches([_qa_row("Q?", "A.")], [])[0]
+        batch = distill_module.build_curator_batches([_qa_row("Q?", "A.")], [])[0].text
 
         assert "User feedback on this answer" not in batch
 
@@ -204,7 +264,7 @@ class TestBuildCuratorBatches:
         batch = distill_module.build_curator_batches(
             [_qa_row("Q?", "A.", feedback_text="  too   " + "w" * (MAX_QA_FEEDBACK_CHARS * 2))],
             [],
-        )[0]
+        )[0].text
 
         feedback_line = batch.split("User feedback on this answer: ", 1)[1]
         assert feedback_line.startswith("too w")
@@ -216,7 +276,7 @@ class TestBuildCuratorBatches:
             section="failure_lessons", context_profile="agent", content="Sync before tests."
         )
 
-        batch = distill_module.build_curator_batches([], [qa_entry, agent_entry])[0]
+        batch = distill_module.build_curator_batches([], [qa_entry, agent_entry])[0].text
 
         assert f"Candidate {qa_entry.id} [qa/rules]:" in batch
         assert f"Candidate {agent_entry.id} [agent/failure_lessons]:" in batch
@@ -227,7 +287,7 @@ class TestBuildCuratorBatches:
         ]
         qa = [_qa_row("Later question?", time="2026-06-11T10:00:05")]
 
-        batch = distill_module.build_curator_batches(qa, context_entries)[0]
+        batch = distill_module.build_curator_batches(qa, context_entries)[0].text
 
         assert batch.index("Earlier candidate.") < batch.index("Later question?")
 
@@ -240,11 +300,11 @@ class TestBuildCuratorBatches:
         batches = distill_module.build_curator_batches(qa, [])
 
         assert len(batches) == 2
-        assert all(len(batch) <= BATCH_CHAR_BUDGET for batch in batches)
+        assert all(len(batch.text) <= BATCH_CHAR_BUDGET for batch in batches)
 
     def test_oversized_question_is_truncated_before_batching(self):
         huge_question = "y" * (BATCH_CHAR_BUDGET * 2)
-        batch = distill_module.build_curator_batches([_qa_row(question=huge_question)], [])[0]
+        batch = distill_module.build_curator_batches([_qa_row(question=huge_question)], [])[0].text
 
         assert len(batch) <= BATCH_CHAR_BUDGET
         assert huge_question not in batch
@@ -254,7 +314,7 @@ class TestBuildCuratorBatches:
         huge_content = "z" * (BATCH_CHAR_BUDGET * 2)
         context_entries = [_context_entry(content=huge_content)]
 
-        batch = distill_module.build_curator_batches([], context_entries)[0]
+        batch = distill_module.build_curator_batches([], context_entries)[0].text
 
         assert len(batch) <= BATCH_CHAR_BUDGET
         assert huge_content not in batch
@@ -361,10 +421,35 @@ class TestRenderLessonDocument:
         assert "Plain statement.\n" in document
         assert "()" not in document
 
+    @staticmethod
+    def _session_manager(context_rows):
+        """Publish reads the session's pinned node_set through the context-entry API."""
+        return SimpleNamespace(get_session_context_entries=AsyncMock(return_value=context_rows))
+
     @pytest.mark.asyncio
-    async def test_publish_tags_lessons_with_global_and_session_node_sets(self):
+    @pytest.mark.parametrize(
+        ("context_rows", "expected_node_set"),
+        [
+            ([], ["session_learnings", "session_learnings:s-1"]),
+            (
+                [
+                    {
+                        "id": "session_node_set",
+                        "kind": "session_node_set_state",
+                        "node_set": ["project-a"],
+                    }
+                ],
+                ["session_learnings", "session_learnings:s-1", "project-a"],
+            ),
+        ],
+        ids=["session-without-node-set", "session-with-node-set"],
+    )
+    async def test_publish_adds_global_session_and_pinned_node_sets_to_lessons(
+        self, context_rows, expected_node_set
+    ):
         scope = SimpleNamespace(
             session_id="s-1",
+            user_id="u-1",
             dataset=SimpleNamespace(id=uuid4()),
             user=SimpleNamespace(id=uuid4()),
         )
@@ -374,13 +459,18 @@ class TestRenderLessonDocument:
         with (
             patch("cognee.api.v1.add.add", add),
             patch("cognee.api.v1.cognify.cognify", cognify),
+            patch.object(
+                distill_module,
+                "get_session_manager",
+                return_value=self._session_manager(context_rows),
+            ),
         ):
             await distill_module.publish_distilled_lessons(
                 scope,
                 [WrittenLesson(accept=True, statement="Keep reports concise.")],
             )
 
-        assert add.await_args.kwargs["node_set"] == ["session_learnings", "session_learnings:s-1"]
+        assert add.await_args.kwargs["node_set"] == expected_node_set
         cognify.assert_awaited_once_with(datasets=[scope.dataset.id], user=scope.user)
 
 

@@ -1,3 +1,4 @@
+import importlib.util
 from typing import Any
 
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
@@ -6,12 +7,14 @@ from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface, Loade
 from cognee.infrastructure.loaders.store_derived_text import store_derived_text
 from cognee.shared.logging_utils import get_logger
 
-try:
-    from unstructured.partition.auto import partition  # ty:ignore[unresolved-import]
-except ImportError as e:
+# Only check that unstructured is installed here; the actual import happens in
+# load(). Importing unstructured probes libmagic through python-magic, which can
+# hang on Windows when a broken libmagic DLL is on PATH, and that must never be
+# part of `import cognee`.
+if importlib.util.find_spec("unstructured") is None:
     raise ImportError(
         "unstructured is required for document processing. Install with: pip install unstructured"
-    ) from e
+    )
 
 logger = get_logger(__name__)
 
@@ -89,6 +92,8 @@ class UnstructuredLoader(LoaderInterface):
             ImportError: If unstructured is not installed
             Exception: If document processing fails
         """
+        from unstructured.partition.auto import partition  # ty:ignore[unresolved-import]
+
         try:
             logger.info(f"Processing document: {file_path}")
 

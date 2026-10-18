@@ -4,10 +4,12 @@ import pathlib
 import cognee
 from cognee import update
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
+from cognee.modules.pipelines.models import PipelineRunStatus
 from cognee.modules.search.operations import get_history
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
+from cognee.tests.utils.get_latest_pipeline_run import get_latest_pipeline_run
 
 logger = get_logger()
 
@@ -51,6 +53,11 @@ async def main():
     await cognee.add([text], dataset_name)
 
     cognify_run_info = await cognee.cognify([dataset_name])
+
+    cognify_run = await get_latest_pipeline_run(
+        pipeline_name="cognify_pipeline", status=PipelineRunStatus.DATASET_PROCESSING_COMPLETED
+    )
+    assert cognify_run.embedding_tokens > 0, "Cognify recorded no embedding tokens."
 
     from cognee.infrastructure.databases.vector import get_vector_engine_async
 
@@ -108,6 +115,11 @@ async def main():
     recall_text = "\n".join(result.text for result in recall_results).lower()
     assert "grace hopper" in recall_text, "Recall did not return remembered content."
     assert "compiler" in recall_text, "Recall result is missing the remembered compiler detail."
+
+    # A CHUNKS recall only embeds the query: its tokens are embedding tokens, not LLM ones.
+    recall_run = await get_latest_pipeline_run(operation_name="recall")
+    assert recall_run.embedding_tokens > 0, "Recall recorded no embedding tokens."
+    assert recall_run.tokens_in == 0, "Recall's embedding tokens were counted as LLM tokens."
 
     # Test updating of documents
     # Get Pipeline Run object
