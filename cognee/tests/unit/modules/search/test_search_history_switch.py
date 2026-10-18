@@ -32,6 +32,11 @@ delete_history_mod = importlib.import_module(
 )
 get_history_mod = importlib.import_module("cognee.modules.search.operations.get_history")
 forget_mod = importlib.import_module("cognee.api.v1.forget.forget")
+# The package re-exports the ``datasets`` class under the submodule's name, so a
+# dotted ``patch("cognee.api.v1.datasets.datasets.datasets")`` resolves to the
+# class on Python 3.10 (``mock._importer`` walks attributes, not modules).
+# Patch the module object instead, which works on every version.
+datasets_mod = importlib.import_module("cognee.api.v1.datasets.datasets")
 
 
 @pytest_asyncio.fixture
@@ -174,7 +179,7 @@ async def test_forget_everything_purges_user_history():
     delete_history = AsyncMock(return_value=3)
 
     with (
-        patch("cognee.api.v1.datasets.datasets.datasets", fake_datasets),
+        patch.object(datasets_mod, "datasets", fake_datasets),
         patch(
             "cognee.modules.search.operations.delete_search_history",
             delete_history,
@@ -198,7 +203,7 @@ async def test_forget_dataset_purges_that_dataset_history():
     delete_history = AsyncMock(return_value=1)
 
     with (
-        patch("cognee.api.v1.datasets.datasets.datasets", fake_datasets),
+        patch.object(datasets_mod, "datasets", fake_datasets),
         patch.object(forget_mod, "_resolve_dataset_id", AsyncMock(return_value=dataset_id)),
         patch(
             "cognee.modules.search.operations.delete_search_history",
@@ -220,7 +225,7 @@ async def test_history_cleanup_failure_does_not_fail_forget():
     fake_datasets = SimpleNamespace(empty_dataset=AsyncMock())
 
     with (
-        patch("cognee.api.v1.datasets.datasets.datasets", fake_datasets),
+        patch.object(datasets_mod, "datasets", fake_datasets),
         patch.object(forget_mod, "_resolve_dataset_id", AsyncMock(return_value=dataset_id)),
         patch(
             "cognee.modules.search.operations.delete_search_history",
