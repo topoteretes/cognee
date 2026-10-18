@@ -11,7 +11,7 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("cognee.tools.resolve_skills")
 
 
-def _skill_in_dataset_scope(skill: Skill, dataset_id: UUID) -> bool:
+def _skill_in_dataset_scope(skill: Skill, dataset_id: UUID | str) -> bool:
     return skill.is_active and str(dataset_id) in (skill.dataset_scope or [])
 
 
