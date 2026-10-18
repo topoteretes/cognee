@@ -381,6 +381,7 @@ async def load_dataset_cluster(ctx: Optional["PipelineContext"]) -> bool:
     this route in the same pipeline run, which have nothing left to do.
     Without a pipeline run id nothing is remembered between calls.
     """
+    from cognee.tasks.code_graph.code_repo import code_repo_node_set
     from cognee.tasks.code_graph.extract_code_graph import (
         add_code_graph_data_points,
         add_code_graph_edges,
@@ -410,10 +411,14 @@ async def load_dataset_cluster(ctx: Optional["PipelineContext"]) -> bool:
 
         for member in run.snapshot.members:
             member_ctx = replace(ctx, data_item=member.data)
+            # Each row's own add()/remember() tag, exactly as the per-repo
+            # route reads it, so a member's code nodes carry its node_set.
+            node_set = code_repo_node_set(member.data)
             data_points = await extract_code_graph(
                 repo_path=member.repo_path,
                 snapshot_dir=run.snapshot.snapshot_dir,
                 repo_scope=member.label,
+                node_set=node_set,
             )
             state = await add_code_graph_data_points(data_points, ctx=member_ctx, graph_only=True)
             await add_code_graph_edges(
@@ -422,6 +427,7 @@ async def load_dataset_cluster(ctx: Optional["PipelineContext"]) -> bool:
                 snapshot_dir=run.snapshot.snapshot_dir,
                 ctx=member_ctx,
                 repo_scope=member.label,
+                node_set=node_set,
             )
             logger.info("Code repo graph extracted for %s (%s).", member.repo_path, member.label)
         # A failed member load leaves ``done`` unset: the next row of the run

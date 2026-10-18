@@ -20,6 +20,7 @@ from cognee.tasks.code_graph.cluster import (
     snapshot_dataset_code_repos,
 )
 from cognee.tasks.code_graph.extract_code_graph import (
+    CODE_GRAPH_MAPPING_VERSION,
     add_code_graph_data_points,
     add_code_graph_edges,
     extract_code_graph,
@@ -251,7 +252,10 @@ def test_scoped_mapping_keeps_one_repository_with_its_real_path(tmp_path):
 async def test_member_skip_check_reads_its_own_repository_node(monkeypatch, tmp_path):
     snapshot_dir = _write_snapshot(tmp_path)
     engine = _mock_engine(monkeypatch)
-    engine.get_node.return_value = {"last_snapshot_id": SNAPSHOT_ID}
+    engine.get_node.return_value = {
+        "last_snapshot_id": SNAPSHOT_ID,
+        "last_mapping_version": CODE_GRAPH_MAPPING_VERSION,
+    }
 
     assert await extract_code_graph(snapshot_dir=snapshot_dir, repo_scope="ui") == []
     engine.get_node.assert_awaited_once_with(str(fact_node_id("ui", "repository", "ui")))

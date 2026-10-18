@@ -189,7 +189,7 @@ def _capture_subprocess(monkeypatch, on_run):
 async def test_run_enola_cluster_pipes_the_config_and_writes_no_file(monkeypatch, tmp_path):
     fake_binary = _make_fake_binary(tmp_path)
     monkeypatch.setenv("ENOLA_PATH", str(fake_binary))
-    monkeypatch.setattr(enola_module.os, "name", "posix")
+    monkeypatch.setattr(enola_module, "_config_via_stdin", lambda: True)
     golf, ui = _cluster_repos(tmp_path)
 
     def write_snapshot():
@@ -214,7 +214,9 @@ async def test_run_enola_cluster_pipes_the_config_and_writes_no_file(monkeypatch
 async def test_run_enola_cluster_on_windows_uses_a_temporary_file_it_removes(monkeypatch, tmp_path):
     fake_binary = _make_fake_binary(tmp_path)
     monkeypatch.setenv("ENOLA_PATH", str(fake_binary))
-    monkeypatch.setattr(enola_module.os, "name", "nt")
+    # Patch the seam, not os.name: a patched os.name makes pathlib refuse to
+    # build paths on this interpreter, and pytest's reporter with it.
+    monkeypatch.setattr(enola_module, "_config_via_stdin", lambda: False)
     monkeypatch.setattr(enola_module.tempfile, "gettempdir", lambda: str(tmp_path))
     golf, ui = _cluster_repos(tmp_path)
     seen_configs = []

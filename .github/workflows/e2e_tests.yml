@@ -143,8 +143,9 @@ jobs:
       # The workflow-level skip disables the keyless rerouting as well
       # (keyless_local_defaults_apply), so it must be off here.
       COGNEE_SKIP_CONNECTION_TEST: 'false'
+      # Holds both the GLiNER and the fastembed model. FASTEMBED_CACHE_PATH is
+      # left unset so the default (Hugging Face hub cache) location is exercised.
       HF_HOME: ${{ github.workspace }}/.model-cache/huggingface
-      FASTEMBED_CACHE_PATH: ${{ github.workspace }}/.model-cache/fastembed
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -294,6 +295,11 @@ jobs:
       # stress run mutates a book through every edit shape and audits ownership.
       - name: Run incremental update suite
         run: uv run pytest cognee/tests/e2e/incremental_update/
+
+      # Same backend matrix, no LLM: the Timestamp range lookup and the anchors
+      # SearchType.TEMPORAL reranks by.
+      - name: Run temporal range lookup suite
+        run: uv run pytest cognee/tests/e2e/temporal/
 
       - name: Run incremental update stress test
         run: uv run python ./cognee/tests/test_incremental_update_stress.py

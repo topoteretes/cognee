@@ -14,7 +14,8 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
-from cognee.modules.integrations.google_drive import adapter as adapter_module
+from cognee.modules.integrations.google import client as google_client
+from cognee.modules.integrations.google import oauth_integration
 from cognee.modules.integrations.google_drive.adapter import (
     GoogleDriveIntegration,
     access_token_for,
@@ -40,7 +41,7 @@ _PERSONAL_USERINFO = {"sub": "110000000000000000002", "email": "someone@gmail.co
 @pytest.fixture(autouse=True)
 def active_credential():
     with patch.object(
-        adapter_module, "require_active_credential", AsyncMock(side_effect=lambda c: c)
+        oauth_integration, "require_active_credential", AsyncMock(side_effect=lambda c: c)
     ):
         yield
 
@@ -95,11 +96,9 @@ def test_authorize_url_asks_for_a_refresh_token_and_a_separate_grant():
 async def test_exchange_callback_attaches_the_identity_of_who_authorized():
     integration = GoogleDriveIntegration()
     with (
+        patch.object(google_client, "exchange_code", AsyncMock(return_value=_TOKEN_RESPONSE)),
         patch.object(
-            adapter_module.client, "exchange_code", AsyncMock(return_value=_TOKEN_RESPONSE)
-        ),
-        patch.object(
-            adapter_module.client,
+            google_client,
             "fetch_userinfo",
             AsyncMock(return_value=_WORKSPACE_USERINFO),
         ) as fetch_userinfo,
@@ -159,16 +158,16 @@ async def test_refresh_updates_only_tokens_and_scopes():
     )
     with (
         patch.object(
-            adapter_module,
+            oauth_integration,
             "decrypt_token_payload",
             return_value={"access_token": "old", "refresh_token": "1//refresh"},
         ),
         patch.object(
-            adapter_module.client,
+            google_client,
             "refresh_access_token",
             AsyncMock(return_value={"access_token": "ya29.new", "expires_in": 3599}),
         ),
-        patch.object(adapter_module, "update_refreshed_credential", AsyncMock()) as upsert,
+        patch.object(oauth_integration, "update_refreshed_credential", AsyncMock()) as upsert,
     ):
         await GoogleDriveIntegration().refresh(credential)
 
@@ -188,16 +187,16 @@ async def test_refresh_revokes_the_credential_when_the_account_pulled_access():
     credential = make_credential()
     with (
         patch.object(
-            adapter_module,
+            oauth_integration,
             "decrypt_token_payload",
             return_value={"refresh_token": "1//refresh"},
         ),
         patch.object(
-            adapter_module.client,
+            google_client,
             "refresh_access_token",
             AsyncMock(side_effect=GoogleAuthError("token refresh", "invalid_grant")),
         ),
-        patch.object(adapter_module, "revoke_credential_if_current", AsyncMock()) as revoke,
+        patch.object(oauth_integration, "revoke_credential_if_current", AsyncMock()) as revoke,
         pytest.raises(GoogleAuthError),
     ):
         await GoogleDriveIntegration().refresh(credential)
@@ -213,16 +212,16 @@ async def test_refresh_does_not_revoke_on_a_transient_failure():
     credential = make_credential()
     with (
         patch.object(
-            adapter_module,
+            oauth_integration,
             "decrypt_token_payload",
             return_value={"refresh_token": "1//refresh"},
         ),
         patch.object(
-            adapter_module.client,
+            google_client,
             "refresh_access_token",
             AsyncMock(side_effect=GoogleAuthError("token refresh", "http_503")),
         ),
-        patch.object(adapter_module, "revoke_credential_if_current", AsyncMock()) as revoke,
+        patch.object(oauth_integration, "revoke_credential_if_current", AsyncMock()) as revoke,
         pytest.raises(GoogleAuthError),
     ):
         await GoogleDriveIntegration().refresh(credential)
@@ -233,7 +232,9 @@ async def test_refresh_does_not_revoke_on_a_transient_failure():
 @pytest.mark.asyncio
 async def test_refresh_without_a_stored_refresh_token_fails_loudly():
     with (
-        patch.object(adapter_module, "decrypt_token_payload", return_value={"access_token": "a"}),
+        patch.object(
+            oauth_integration, "decrypt_token_payload", return_value={"access_token": "a"}
+        ),
         pytest.raises(RuntimeError, match="reconnect"),
     ):
         await GoogleDriveIntegration().refresh(make_credential())
@@ -243,7 +244,7 @@ async def test_refresh_without_a_stored_refresh_token_fails_loudly():
 async def test_revoke_remote_never_raises():
     credential = make_credential()
     # A disconnect must complete even when the remote revoke cannot.
-    with patch.object(adapter_module, "decrypt_token_payload", side_effect=RuntimeError("boom")):
+    with patch.object(oauth_integration, "decrypt_token_payload", side_effect=RuntimeError("boom")):
         await GoogleDriveIntegration().revoke_remote(credential)
 
 
@@ -255,10 +256,10 @@ async def test_access_token_for_rotates_an_expiring_token_and_rereads_the_row():
     with (
         patch.object(GoogleDriveIntegration, "refresh", AsyncMock()) as refresh,
         patch.object(
-            adapter_module, "require_active_credential", AsyncMock(side_effect=[stale, fresh])
+            oauth_integration, "require_active_credential", AsyncMock(side_effect=[stale, fresh])
         ) as reread,
         patch.object(
-            adapter_module, "decrypt_token_payload", return_value={"access_token": "ya29.new"}
+            oauth_integration, "decrypt_token_payload", return_value={"access_token": "ya29.new"}
         ) as decrypt,
     ):
         token = await access_token_for(stale)
@@ -278,7 +279,7 @@ async def test_access_token_for_leaves_a_healthy_token_alone():
     with (
         patch.object(GoogleDriveIntegration, "refresh", AsyncMock()) as refresh,
         patch.object(
-            adapter_module, "decrypt_token_payload", return_value={"access_token": "ya29.ok"}
+            oauth_integration, "decrypt_token_payload", return_value={"access_token": "ya29.ok"}
         ),
     ):
         token = await access_token_for(credential)
@@ -298,7 +299,7 @@ async def test_access_token_for_treats_a_naive_expiry_as_utc():
     with (
         patch.object(GoogleDriveIntegration, "refresh", AsyncMock()) as refresh,
         patch.object(
-            adapter_module, "decrypt_token_payload", return_value={"access_token": "ya29.ok"}
+            oauth_integration, "decrypt_token_payload", return_value={"access_token": "ya29.ok"}
         ),
     ):
         token = await access_token_for(credential)

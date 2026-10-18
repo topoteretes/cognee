@@ -13,6 +13,7 @@ from uuid import NAMESPACE_OID, UUID, uuid5
 from pydantic import ValidationError
 
 from cognee.infrastructure.engine.models.DataPoint import DataPoint
+from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.code_graph.enola import (
@@ -28,6 +29,7 @@ from cognee.tasks.code_graph.models import (
     CodeAssociation,
     CodeExtractionAccount,
     CodeFileReference,
+    CodeFlow,
     CodeInsight,
     CodeIntent,
     CodeLintFinding,
@@ -55,11 +57,16 @@ KIND_TO_MODEL = {
     "test_ref": CodeTestReference,
     "file_ref": CodeFileReference,
     "insight": CodeInsight,
+    "flow": CodeFlow,
     "intent": CodeIntent,
     "extraction": CodeExtractionAccount,
     "association": CodeAssociation,
     "lint": CodeLintFinding,
 }
+
+# The prop holding the prose a synthesized kind is described by: an insight's
+# explainer text, a flow's summary.
+_PROSE_PROPS = {"insight": "description", "flow": "summary"}
 
 # receipt.json fields worth keeping on the repository node. repo_path,
 # duration and generated_at-style run specifics that describe the machine
@@ -81,6 +88,12 @@ _RECEIPT_PROJECTION_KEYS = (
 # write-side _WRITE_CHUNK_SIZE convention so no single statement can run past
 # the subprocess engine's per-call deadline.
 _SWEEP_CHUNK_SIZE = 2000
+
+# Version of how cognee maps an enola snapshot onto graph nodes and edges.
+# Bump it whenever that mapping changes, so a repository whose snapshot did not
+# change is still loaded again by the new mapping instead of being skipped.
+# 1: doc fields, CodeFlow nodes and declaration-view resolution (SDK-1119).
+CODE_GRAPH_MAPPING_VERSION = 1
 
 
 def _is_mappable_fact(kind: Any, name: Any) -> bool:
@@ -134,14 +147,29 @@ def map_facts_to_data_points(
     facts: list[dict],
     repo_path: str | Path | None = None,
     repo_scope: str | None = None,
+    node_set: list[str] | None = None,
 ) -> list[DataPoint]:
     """Map parsed enola facts to DataPoints, prepending one CodeRepository per repo.
 
     repo_scope narrows a multi-repo snapshot to one member: only that
     repository's facts are mapped, and repo_path is that member's directory.
+
+    ``node_set`` (the caller's add()/remember() tag, read off the repo
+    manifest's external_metadata by extract_code_repo_graph) tags every
+    returned node -- CodeRepository included -- with the same
+    belongs_to_set/source_node_set a document gets from classify_documents.
+    An untagged call (node_set=None, the per-file CODE route and the legacy
+    remember(content_type="code") path) produces byte-identical fact_hash
+    values to before this parameter existed.
     """
     fallback_repo = _resolve_fallback_repo(facts, repo_path)
     primary_repo = repo_scope or fallback_repo
+
+    node_sets = [NodeSet(name=name) for name in node_set] if node_set else None
+    source_node_set = ", ".join(node_set) if node_set else None
+    # Sorted so re-tagging with the same names in a different order does not
+    # spuriously flip every fact's hash.
+    node_set_hash_value = sorted(node_set) if node_set else None
 
     repositories: dict[str, CodeRepository] = {}
 
@@ -151,6 +179,8 @@ def map_facts_to_data_points(
                 id=fact_node_id(repo, "repository", repo),
                 name=repo,
                 path=str(repo_path) if repo_path and repo == primary_repo else repo,
+                belongs_to_set=node_sets,
+                source_node_set=source_node_set,
             )
         return repositories[repo]
 
@@ -200,6 +230,10 @@ def map_facts_to_data_points(
         line = fact.get("line")
         end_line = fact.get("end_line")
         enola_id = fact.get("id")
+        doc = props.get("doc")
+        if kind == "insight" or not isinstance(doc, str) or not doc.strip():
+            doc = None
+        prose = props.get(_PROSE_PROPS[kind]) if kind in _PROSE_PROPS else doc
 
         fields: dict[str, Any] = {
             "id": node_id,
@@ -213,17 +247,28 @@ def map_facts_to_data_points(
             "repo": repo,
             "enola_id": enola_id if is_enola_id(enola_id) else None,
             # Insights carry prose from the explainer; use it verbatim instead
-            # of the generic "kind: k=v, ..." property summary.
-            "description": props.get("description")
-            if kind == "insight" and isinstance(props.get("description"), str)
-            else _describe_fact(kind, props),
+            # of the generic "kind: k=v, ..." property summary. So do flows
+            # (their summary) and documented facts (the author's doc comment).
+            "description": prose if isinstance(prose, str) else _describe_fact(kind, props),
             "fact_properties": props,
             "part_of": _get_repository(repo),
         }
         if model is CodeSymbol:
             fields["symbol_kind"] = props.get("symbol_kind")
+        if doc is not None:
+            # Only a documented fact gains the key, so an undocumented fact's
+            # fact_hash stays byte-identical to before docs were read.
+            fields["doc"] = doc
 
-        fields["fact_hash"] = _fact_content_hash(fields)
+        # node_set only enters the hash input when the call is tagged, so an
+        # untagged repo's fact_hash stays byte-identical to before node_set
+        # existed; a tagged repo's hash changes when its tag changes.
+        hash_fields = {**fields, "node_set": node_set_hash_value} if node_set_hash_value else fields
+        fields["fact_hash"] = _fact_content_hash(hash_fields)
+
+        if node_sets is not None:
+            fields["belongs_to_set"] = node_sets
+            fields["source_node_set"] = source_node_set
 
         try:
             entities.append(model(**fields))
@@ -337,6 +382,40 @@ def _add_client_route_edges(
     return skipped
 
 
+# Fact kinds a framework extractor derives from a declaration and names after
+# it: an ORM model's storage (Eloquent, JPA, ActiveRecord) and a relation
+# method's association. code_retriever resolves names the same way.
+_DECLARATION_VIEW_KINDS = frozenset({"storage", "association"})
+
+
+def _without_declaration_views(
+    candidates: set[tuple[str, str, str]],
+    fact_index: dict[tuple[str, str, str], dict],
+) -> set[tuple[str, str, str]]:
+    """Name candidates minus the views of a symbol that is itself a candidate.
+
+    A view is a storage or association fact carrying the symbol's own name,
+    repo and file. Anything else sharing the name (a fact from another file or
+    repo, a second same-named symbol) stays a rival candidate. When one repo
+    declares the symbol name in several files, the file compared is that of the
+    first such fact, the one its node keeps.
+    """
+
+    def _is_view(candidate: tuple[str, str, str]) -> bool:
+        repo, kind, name = candidate
+        symbol = (repo, "symbol", name)
+        if kind not in _DECLARATION_VIEW_KINDS or symbol not in candidates:
+            return False
+        symbol_file = fact_index[symbol].get("file")
+        return (
+            isinstance(symbol_file, str)
+            and symbol_file != ""
+            and fact_index[candidate].get("file") == symbol_file
+        )
+
+    return {candidate for candidate in candidates if not _is_view(candidate)}
+
+
 def build_code_graph_edges(
     facts: list[dict],
     repo_path: str | Path | None = None,
@@ -347,7 +426,9 @@ def build_code_graph_edges(
     to that fact directly — it is enola's own unambiguous answer. Otherwise
     the target is matched by fact name within the same snapshot; on ambiguity
     same-repo targets are preferred, then the relation is skipped rather than
-    bound to an arbitrary fact. repo_path must be the same value given to
+    bound to an arbitrary fact. A storage or association fact sharing a
+    symbol's name, repo and file is a view of that symbol, not a rival: the
+    name means the symbol. repo_path must be the same value given to
     map_facts_to_data_points so that edge endpoint ids match the node ids.
     Returns (edges, skipped_count).
     """
@@ -367,9 +448,13 @@ def build_code_graph_edges(
             continue
         repo = _fact_repo(fact, fallback_repo)
         valid_facts.append((fact, repo))
-        name_index.setdefault(name, set()).add((repo, kind))
-        for short_form in _short_target_names(name):
-            short_name_index.setdefault(short_form, set()).add((repo, kind, name))
+        if kind != "flow":
+            # No relation targets a flow, and a flow is named after its entry
+            # symbol or route: indexing its name would make those names
+            # ambiguous for every relation that resolves by name.
+            name_index.setdefault(name, set()).add((repo, kind))
+            for short_form in _short_target_names(name):
+                short_name_index.setdefault(short_form, set()).add((repo, kind, name))
         fact_id = fact.get("id")
         if is_enola_id(fact_id):
             # Records sharing an id share (repo, kind, name, file), hence the node.
@@ -399,6 +484,12 @@ def build_code_graph_edges(
             candidates = set(short_name_index.get(target_name, ()))
         if allowed_repos is not None:
             candidates = {candidate for candidate in candidates if candidate[0] in allowed_repos}
+        # A framework extractor may describe one declaration twice under one
+        # name: the class or method as a ``symbol`` and what it stands for (an
+        # ORM model as ``storage``, a relation method as ``association``). The
+        # writer then withholds ``target_id`` (two identities), but the two are
+        # not rival targets: a reference to the name means the declaration.
+        candidates = _without_declaration_views(candidates, fact_index)
         same_repo = {candidate for candidate in candidates if candidate[0] == source_repo}
         if len(same_repo) == 1:
             return next(iter(same_repo))
@@ -590,12 +681,16 @@ async def extract_code_graph(
     snapshot_dir: str | Path | None = None,
     timeout: float = 600.0,
     repo_scope: str | None = None,
+    node_set: list[str] | None = None,
 ) -> list[DataPoint]:
     """Run enola on repo_path (or reuse an existing snapshot) and return DataPoints.
 
     The returned list composes with the add_data_points task downstream. Typed
     relations are persisted separately by add_code_graph_edges, which re-reads
-    the same snapshot after the nodes exist in the graph.
+    the same snapshot after the nodes exist in the graph. ``node_set`` tags
+    every returned node (see ``map_facts_to_data_points``). An unchanged
+    snapshot is skipped only for an untagged repo: a tagged one always reloads,
+    so a tag change (or a run that crashed mid-retag) is never skipped.
 
     repo_scope loads one member of a multi-repo snapshot (snapshot_dir is then
     the cluster's snapshot and repo_path the member's directory): the skip
@@ -626,14 +721,19 @@ async def extract_code_graph(
     if snapshot_id is not None:
         fallback_repo = repo_scope or _resolve_fallback_repo(facts, repo_path)
         try:
-            stored_id = await _stored_snapshot_identity(fallback_repo)
+            stored_id, stored_version, stored_tagged = await _stored_repository_state(fallback_repo)
         except Exception as error:
             # The skip check is an optimization; never let it break ingestion.
             logger.warning(
                 "Could not read the stored snapshot id (%s); loading fully.", error, exc_info=True
             )
-            stored_id = None
-        if stored_id == snapshot_id:
+            stored_id, stored_version, stored_tagged = None, None, False
+        if (
+            stored_id == snapshot_id
+            and stored_version == CODE_GRAPH_MAPPING_VERSION
+            and not node_set
+            and not stored_tagged
+        ):
             logger.info(
                 "Code graph for '%s' already matches snapshot %s; skipping load.",
                 fallback_repo,
@@ -641,30 +741,26 @@ async def extract_code_graph(
             )
             return []
 
-    data_points = map_facts_to_data_points(facts, repo_path=repo_path, repo_scope=repo_scope)
+    data_points = map_facts_to_data_points(
+        facts, repo_path=repo_path, repo_scope=repo_scope, node_set=node_set
+    )
     logger.info("Mapped %d enola fact(s) to %d data point(s).", len(facts), len(data_points))
     return data_points
 
 
-async def _stored_snapshot_identity(repo: str) -> str | None:
-    """The snapshot id recorded on the repository node by the last full load.
+def _read_repo_node_property(node: Any, key: str) -> Any:
+    """One property off a ``get_node()`` result.
 
-    The marker lives on the CodeRepository node in the graph itself — not in
-    the relational metastore — because this pipeline persists no Data row to
-    key relational state on (the payload is a repo path), and because a marker
-    stored with the graph can never outlive it: forget(memory_only=True),
-    prune, and even manual deletion of the graph database files all take the
-    marker down with the data it describes.
+    ``get_node`` returns either the properties flattened at the top level, or
+    nested inside a ``properties`` key that may itself be JSON text (adapter
+    dependent) -- both shapes are covered so a caller reads a property without
+    caring which adapter answered.
     """
-    from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
-
-    graph_engine = await get_graph_engine()
-    node = await graph_engine.get_node(str(fact_node_id(repo, "repository", repo)))
     if not isinstance(node, dict):
         return None
-    stored = node.get("last_snapshot_id")
-    if isinstance(stored, str) and stored:
-        return stored
+    value = node.get(key)
+    if value is not None:
+        return value
     properties = node.get("properties")
     if isinstance(properties, str):
         try:
@@ -672,9 +768,46 @@ async def _stored_snapshot_identity(repo: str) -> str | None:
         except json.JSONDecodeError:
             return None
     if isinstance(properties, dict):
-        stored = properties.get("last_snapshot_id")
-        if isinstance(stored, str) and stored:
-            return stored
+        return properties.get(key)
+    return None
+
+
+async def _stored_repository_state(repo: str) -> tuple[str | None, int | None, bool]:
+    """(last_snapshot_id, last_mapping_version, whether it carries a node_set).
+
+    Read off the repository node. A node stamped before the mapping version
+    existed has none, so its unchanged snapshot is loaded once more.
+
+    The snapshot id lives on the CodeRepository node in the graph itself, not
+    in the relational metastore: this pipeline persists no Data row to key it
+    on, and a marker stored with the graph can never outlive it.
+    """
+    from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
+
+    graph_engine = await get_graph_engine()
+    node = await graph_engine.get_node(str(fact_node_id(repo, "repository", repo)))
+    stored_id = _read_repo_node_property(node, "last_snapshot_id")
+    stored_version = _read_repo_node_property(node, "last_mapping_version")
+    tags = _read_repo_node_property(node, "belongs_to_set")
+    if isinstance(tags, str):
+        tags = json.loads(tags)
+    return (
+        stored_id if isinstance(stored_id, str) and stored_id else None,
+        _as_mapping_version(stored_version),
+        bool(tags),
+    )
+
+
+def _as_mapping_version(value: Any) -> int | None:
+    """The stored mapping version as an int, whatever scalar type the adapter returned."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
     return None
 
 
@@ -831,13 +964,15 @@ async def add_code_graph_edges(
     snapshot_dir: str | Path | None = None,
     ctx: Optional["PipelineContext"] = None,
     repo_scope: str | None = None,
+    node_set: list[str] | None = None,
 ) -> list[DataPoint]:
     """Insert typed relation edges (calls/imports/...) after add_data_points ran.
 
     Relation names are dynamic, so they cannot be expressed as DataPoint field
     references; instead they are written directly through the graph engine,
     following the extract_dlt_fk_edges precedent. Afterwards, stale nodes and
-    edges from earlier ingestions of the same repos are swept, and the
+    edges from earlier ingestions of the same repos are swept, a node_set
+    re-tag (if any) is detagged off the nodes that no longer carry it, and the
     snapshot identity is stamped on the repository node so the next unchanged
     ingestion can skip entirely. Passthrough: returns data_points unchanged.
 
@@ -938,6 +1073,15 @@ async def add_code_graph_edges(
             graph_engine, facts, edges, repo_path, existing_nodes, existing_edge_keys
         )
 
+        # Retag: strip node_set names this repo carried before but not anymore.
+        # A no-op (zero graph calls) when node_set is unchanged, including the
+        # untagged case, so the per-file CODE route and the legacy
+        # remember(content_type="code") path (both always pass node_set=None)
+        # never pay for this.
+        detagged = await _detag_stale_code_graph(
+            graph_engine, facts, repo_path, existing_nodes, existing_edge_keys, node_set
+        )
+
         snapshot_id = snapshot_identity(snapshot_dir, receipt)
         node_delta = getattr(data_points, "node_delta", None) or {}
         delta = {
@@ -946,12 +1090,13 @@ async def add_code_graph_edges(
             "edges_removed": edges_removed,
             "nodes_removed": nodes_removed,
             "samples_removed": samples_removed,
+            "node_set_detagged": detagged,
             "snapshot_id": snapshot_id,
             "loaded_at": datetime.now(timezone.utc).isoformat(),
         }
 
-        # Stamp last: only a load that added, swept, and got here may record
-        # its snapshot id, so a crashed run can never be skipped-past later.
+        # Stamp last: only a load that added, swept, detagged, and got here may
+        # record its snapshot id, so a crashed run can never be skipped-past later.
         await _stamp_snapshot_identity(
             graph_engine,
             facts,
@@ -960,11 +1105,33 @@ async def add_code_graph_edges(
             delta,
             receipt=receipt,
             repo_scope=repo_scope,
+            node_set=node_set,
         )
     finally:
         # Direct edge writes, sweeps, and ledger writes may partially succeed.
         _invalidate_code_graph_snapshot(ctx)
     return data_points
+
+
+def _code_graph_node_types() -> set:
+    """Every graph node type this pipeline produces, CodeRepository included."""
+    return {model.__name__ for model in KIND_TO_MODEL.values()} | {CodeRepository.__name__}
+
+
+def _is_repo_code_node(properties: Any, snapshot_repos: set, code_types: set) -> bool:
+    """Whether a stored node's properties are a code-graph node of one of these repos.
+
+    Shared by the stale-node sweep and the stale node_set detag, so both agree
+    on exactly which nodes belong to a snapshot's repos.
+    """
+    if not isinstance(properties, dict):
+        return False
+    node_type = properties.get("type")
+    if node_type not in code_types:
+        return False
+    # Repository nodes carry their repo in name; entities in the repo field.
+    repo = properties.get("name") if node_type == "CodeRepository" else properties.get("repo")
+    return repo in snapshot_repos
 
 
 async def _sweep_stale_code_graph(
@@ -991,19 +1158,14 @@ async def _sweep_stale_code_graph(
     snapshot_repos = _snapshot_repos(facts, fallback_repo)
     current_ids = _current_code_node_ids(facts, fallback_repo)
 
-    code_types = {model.__name__ for model in KIND_TO_MODEL.values()} | {CodeRepository.__name__}
+    code_types = _code_graph_node_types()
     stale_node_ids = []
     stale_node_names = []
     for node_id, properties in existing_nodes:
         node_id = str(node_id)
-        if node_id in current_ids or not isinstance(properties, dict):
+        if node_id in current_ids:
             continue
-        node_type = properties.get("type")
-        if node_type not in code_types:
-            continue
-        # Repository nodes carry their repo in name; entities in the repo field.
-        repo = properties.get("name") if node_type == "CodeRepository" else properties.get("repo")
-        if repo not in snapshot_repos:
+        if not _is_repo_code_node(properties, snapshot_repos, code_types):
             continue
         stale_node_ids.append(node_id)
         stale_node_names.append(str(properties.get("name") or node_id))
@@ -1048,6 +1210,97 @@ async def _sweep_stale_code_graph(
     return len(stale_node_ids), len(stale_edges), _delta_samples(stale_node_names)
 
 
+async def _detag_stale_code_graph(
+    graph_engine,
+    facts: list[dict],
+    repo_path: str | Path | None,
+    existing_nodes: list[tuple],
+    existing_edge_keys: set,
+    node_set: list[str] | None,
+) -> list[str]:
+    """Strip node_set tags this repo's surviving code nodes carry but should not.
+
+    Stale tags are read off the nodes themselves (their ``belongs_to_set``
+    edges and property), so a tag left behind by a crashed run is found too.
+    A node rewrite never removes edges, so stale edges are deleted on every
+    backend; the property is only stale on Neo4j, whose rewrite unions it.
+
+    Edges are stale by NodeSet id, the property by exact name: a respelling
+    ("Team-A" -> "team-a") keeps the shared edge but drops the old spelling.
+    """
+    from cognee.infrastructure.databases.provenance.delete_data import EdgeIdentity
+
+    fallback_repo = _resolve_fallback_repo(facts, repo_path)
+    snapshot_repos = _snapshot_repos(facts, fallback_repo)
+    current_ids = _current_code_node_ids(facts, fallback_repo)
+    code_types = _code_graph_node_types()
+
+    code_node_ids = [
+        str(node_id)
+        for node_id, properties in existing_nodes
+        if str(node_id) in current_ids
+        and _is_repo_code_node(properties, snapshot_repos, code_types)
+    ]
+    if not code_node_ids:
+        return []
+    code_node_id_set = set(code_node_ids)
+
+    nodeset_names = {
+        str(node_id): properties.get("name")
+        for node_id, properties in existing_nodes
+        if isinstance(properties, dict) and properties.get("type") == "NodeSet"
+    }
+    property_names: set = set()
+    for node_id, properties in existing_nodes:
+        if str(node_id) in code_node_id_set and isinstance(properties, dict):
+            tags = properties.get("belongs_to_set")
+            if isinstance(tags, list):
+                property_names.update(tag for tag in tags if isinstance(tag, str))
+    edge_names = {
+        nodeset_names[target]
+        for source, target, relationship in existing_edge_keys or ()
+        if relationship == "belongs_to_set"
+        and source in code_node_id_set
+        and isinstance(nodeset_names.get(target), str)
+    }
+
+    current = set(node_set or [])
+    current_ids_by_name = {NodeSet.id_for(name) for name in current}
+    stale_edge_names = sorted(
+        name
+        for name in edge_names | property_names
+        if NodeSet.id_for(name) not in current_ids_by_name
+    )
+    stale_property_names = sorted(property_names - current)
+    if not stale_edge_names and not stale_property_names:
+        return []
+
+    stale_edges = [
+        EdgeIdentity(
+            source_id=node_id,
+            target_id=str(NodeSet.id_for(name)),
+            relationship_name="belongs_to_set",
+        )
+        for node_id in code_node_ids
+        for name in stale_edge_names
+    ]
+    for start in range(0, len(stale_edges), _SWEEP_CHUNK_SIZE):
+        await graph_engine.delete_edge_triples(stale_edges[start : start + _SWEEP_CHUNK_SIZE])
+    if stale_property_names:
+        for start in range(0, len(code_node_ids), _SWEEP_CHUNK_SIZE):
+            await graph_engine.remove_belongs_to_set_tags(
+                stale_property_names, node_ids=code_node_ids[start : start + _SWEEP_CHUNK_SIZE]
+            )
+
+    removed = sorted(set(stale_edge_names) | set(stale_property_names))
+    logger.info(
+        "Removed stale node_set tag(s) %s from %d code graph node(s).",
+        removed,
+        len(code_node_ids),
+    )
+    return removed
+
+
 def receipt_projection(receipt: dict | None) -> dict | None:
     """The receipt.json fields kept on the repository node (see _RECEIPT_PROJECTION_KEYS)."""
     if not isinstance(receipt, dict):
@@ -1064,25 +1317,34 @@ async def _stamp_snapshot_identity(
     delta: dict | None = None,
     receipt: dict | None = None,
     repo_scope: str | None = None,
+    node_set: list[str] | None = None,
 ) -> None:
-    """Record the loaded snapshot's identity, delta and receipt on the repository nodes.
+    """Record the loaded snapshot's identity, delta, receipt and tag on the repository nodes.
 
     With repo_scope only that member is stamped: the other members of the
     snapshot have not loaded yet, and a stamp would make their load skip.
+
+    This rewrites the CodeRepository node through ``add_nodes``, so it carries
+    the tag itself, as names (the stored shape): omitting it would erase the
+    tag on adapters that overwrite node properties wholesale.
     """
     if snapshot_id is None:
         return
     fallback_repo = repo_scope or _resolve_fallback_repo(facts, repo_path)
     repos = {repo_scope} if repo_scope else _snapshot_repos(facts, fallback_repo)
     last_receipt = receipt_projection(receipt)
+    source_node_set = ", ".join(node_set) if node_set else None
     repositories = [
         CodeRepository(
             id=fact_node_id(repo, "repository", repo),
             name=repo,
             path=str(repo_path) if repo_path and repo == fallback_repo else repo,
             last_snapshot_id=snapshot_id,
+            last_mapping_version=CODE_GRAPH_MAPPING_VERSION,
             last_delta=delta,
             last_receipt=last_receipt,
+            belongs_to_set=list(node_set) if node_set else None,
+            source_node_set=source_node_set,
         )
         for repo in sorted(repos)
     ]

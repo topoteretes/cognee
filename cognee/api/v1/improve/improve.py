@@ -22,6 +22,7 @@ it and the remaining stages are ``skipped: budget_exhausted``.
 """
 
 import asyncio
+import warnings
 from collections.abc import Callable, Coroutine, Iterator, Sequence
 from contextlib import contextmanager
 from typing import Any
@@ -41,7 +42,6 @@ from cognee.infrastructure.locks.session_lock import (
 )
 from cognee.modules.improve import (
     DEFAULT_STAGES,
-    MEMIFY_PASSTHROUGH_KEYS,
     REASON_ABORTED_BY_FATAL_STAGE,
     REASON_BUDGET_EXHAUSTED,
     REASON_LOCK_HELD,
@@ -56,6 +56,8 @@ from cognee.modules.improve import (
     stage_names,
     validate_stages_disabled,
 )
+from cognee.modules.improve.result import LEGACY_CUSTOM_TASKS_STAGE_NAME
+from cognee.modules.improve.stages import LegacyCustomTasksStage
 from cognee.modules.migrations.startup import run_migrations_and_block
 from cognee.modules.observability import (
     COGNEE_DATASET_NAME,
@@ -90,17 +92,66 @@ def _session_lock_keys(lock_keys: tuple[str, ...]) -> list[str]:
     return [key for key in lock_keys if key.startswith("session:")]
 
 
+# Options of the removed triplet-enrichment stage (SDK-1115), deprecated for
+# one release. Custom tasks still run, as the custom_tasks stage; the scoping
+# options apply to them. Without custom tasks the scoping options only scoped
+# the removed stage and are ignored. Replacement: run_custom_pipeline().
+LEGACY_TASK_OPTIONS = ("extraction_tasks", "enrichment_tasks")
+LEGACY_SCOPE_OPTIONS = ("data", "node_type", "vector_db_config", "graph_db_config")
+
+
 class ImproveKwargs(TypedDict, total=False):
     """Power-user overrides for improve(). Most users never need these."""
 
+    user: object
+    feedback_alpha: float
+    # Deprecated, see LEGACY_TASK_OPTIONS / LEGACY_SCOPE_OPTIONS.
     extraction_tasks: list
     enrichment_tasks: list
     data: Any
     node_type: type
-    user: object
     vector_db_config: dict
     graph_db_config: dict
-    feedback_alpha: float
+
+
+def _split_legacy_options(node_name: list[str] | None, kwargs: dict) -> tuple[dict, dict | None]:
+    """Split the deprecated memify options off improve()'s overrides, warning once.
+
+    Returns ``(overrides, legacy_memify)``. ``legacy_memify`` is ``None`` unless
+    custom tasks were given; then it holds them and the options scoping them,
+    for the deprecated ``custom_tasks`` stage. ``None`` and an empty task list
+    count as not given, as they did before.
+    """
+    legacy = {key: kwargs[key] for key in LEGACY_SCOPE_OPTIONS if kwargs.get(key) is not None}
+    if node_name is not None:
+        legacy = {"node_name": node_name, **legacy}
+    overrides = {
+        key: value
+        for key, value in kwargs.items()
+        if key not in (*LEGACY_TASK_OPTIONS, *LEGACY_SCOPE_OPTIONS)
+    }
+
+    if any(kwargs.get(key) for key in LEGACY_TASK_OPTIONS):
+        warnings.warn(
+            "improve(extraction_tasks=..., enrichment_tasks=...) is deprecated and will be "
+            "removed in the next release. Run custom tasks with cognee.run_custom_pipeline().",
+            FutureWarning,
+            stacklevel=3,
+        )
+        for key in LEGACY_TASK_OPTIONS:
+            if kwargs.get(key):
+                legacy[key] = kwargs[key]
+        return overrides, legacy
+
+    if legacy:
+        warnings.warn(
+            f"improve() ignores {', '.join(legacy)}: without custom tasks these options only "
+            "scoped the removed triplet-enrichment stage, and they will be removed in the "
+            "next release.",
+            FutureWarning,
+            stacklevel=3,
+        )
+    return overrides, None
 
 
 async def improve(
@@ -111,6 +162,7 @@ async def improve(
     session_ids: list[str] | None = None,
     build_global_context_index: bool = False,
     build_truth_subspace: bool = False,
+    review_conflicts: bool = False,
     **kwargs: Unpack[ImproveKwargs],
 ) -> ImproveResult:
     """Run the self-improvement loop over a dataset and report what each stage did.
@@ -118,16 +170,16 @@ async def improve(
     The stages are ``cognee.modules.improve.DEFAULT_STAGES``, in order:
     ``feedback_weights``, ``persist_session_qa``, ``persist_agent_traces``,
     ``extract_agent_context``, ``distill_sessions``, ``update_user_preferences``,
-    ``build_truth_subspace``, ``triplet_enrichment``, ``global_context_index``.
+    ``build_truth_subspace``, ``review_conflicts``, ``global_context_index``.
     Each stage first *gates* — declines work it cannot do under the current
     settings, with zero LLM calls — and only then runs. That registry is the
     authoritative description of what runs.
 
-    Every stage but the last two is session-fed and is skipped with
+    The first seven stages are session-fed and are skipped with
     ``no_session_ids`` when no ``session_ids`` were given. Stages named in
     ``IMPROVE_STAGES_DISABLED`` are skipped with ``disabled_by_config``. The
     stages that draft text with an LLM (``extract_agent_context``,
-    ``distill_sessions``, ``global_context_index``) are skipped with
+    ``distill_sessions``, ``review_conflicts``, ``global_context_index``) are skipped with
     ``no_llm_configured`` when no usable LLM is configured, so a keyless
     install still bridges sessions and traces into the graph. A run
     that loses the improve lock — another run is already touching the same
@@ -153,7 +205,9 @@ async def improve(
         run_in_background: Run all stages as one background task that holds
             the improve lock for its lifetime. The returned result has
             ``status == "running"``; ``await result.wait()`` blocks on it.
-        node_name: Filter graph to specific named entities (enrichment stage).
+        node_name: Deprecated. Scopes the graph passed to the deprecated
+            custom tasks (``extraction_tasks`` / ``enrichment_tasks``); ignored
+            without them. Removed in the next release.
         session_ids: Session IDs whose feedback and content should be
             bridged into the permanent graph. The Q&A and trace persist
             watermarks are per (user, session), NOT per dataset: content a
@@ -164,11 +218,12 @@ async def improve(
             per-dataset and unaffected.)
         build_global_context_index: Opt in to ``global_context_index``.
         build_truth_subspace: Opt in to ``build_truth_subspace``.
+        review_conflicts: Review dated source facts and update conflict descriptions.
+            Also enabled by ``IMPROVE_REVIEW_CONFLICTS=true``.
         **kwargs: Additional options — see ``ImproveKwargs``.
 
     Returns:
-        ``ImproveResult`` with one ``StageResult`` per stage, in order. The
-        legacy memify run info stays reachable as ``result.memify_run``.
+        ``ImproveResult`` with one ``StageResult`` per stage, in order.
 
     Example::
 
@@ -190,9 +245,13 @@ async def improve(
         release itself checks for that request and, when one is pending,
         consumes it and keeps the lock, so the stages run again over whatever
         landed above the watermarks meanwhile — cheap, since every stage is
-        watermark-gated. Bounded by ``IMPROVE_MAX_RERUN_PASSES``.
+        watermark-gated; the deprecated ``custom_tasks`` stage, which is not,
+        runs on the first pass only. Bounded by ``IMPROVE_MAX_RERUN_PASSES``.
         """
         stages = list(DEFAULT_STAGES)
+        if inputs.legacy_memify is not None:
+            # Deprecated custom tasks run last, under the same lock and result.
+            stages.append(LegacyCustomTasksStage())
         session_keys = _session_lock_keys(lock_keys)
         # The claim is released exactly once: either by the combined
         # check-and-release below (set ``released``) or by the finally. A second
@@ -206,7 +265,14 @@ async def improve(
                 if passes > 1:
                     result.start_rerun_pass()
                 budget_exhausted = False
-                for index, stage in enumerate(stages):
+                # Custom tasks run on the first pass only: unlike the registry
+                # stages they have no watermark, so a rerun would repeat them.
+                pass_stages = (
+                    stages
+                    if passes == 1
+                    else [stage for stage in stages if stage.name != LEGACY_CUSTOM_TASKS_STAGE_NAME]
+                )
+                for index, stage in enumerate(pass_stages):
                     stage_result = await execute_stage(stage, inputs)
                     result.record(stage_result)
                     if stage_result.run_info_stamp:
@@ -216,7 +282,7 @@ async def improve(
                         operation.merge_run_info(
                             stage_result.run_info_stamp, allow_overwrite=passes > 1
                         )
-                    remaining_stages = stages[index + 1 :]
+                    remaining_stages = pass_stages[index + 1 :]
                     # An exhausted LLM budget is not this stage's problem alone:
                     # every later stage would spend one more failing call on it.
                     # The stage stays recorded as it ended; the rest is skipped
@@ -295,11 +361,12 @@ async def improve(
                 operation.set_outcome(OperationOutcome.FAILED)
             elif result.status == "skipped":
                 # Nothing ran: record that truthfully, and keep the stamp-less
-                # row out of the bounded scan stamp readers do.
+                # row out of the stage watermark queries.
                 operation.set_outcome(OperationOutcome.NOOP)
             if not released:
                 await release_improve_lock_many(lock_keys)
 
+    kwargs, legacy_memify = _split_legacy_options(node_name, kwargs)
     session_ids = [session_id for session_id in (session_ids or []) if session_id]
     _send_improve_telemetry(
         dataset,
@@ -308,6 +375,7 @@ async def improve(
         run_in_background=run_in_background,
         build_global_context_index=build_global_context_index,
         build_truth_subspace=build_truth_subspace,
+        review_conflicts=review_conflicts,
     )
 
     with _improve_span(dataset, session_ids) as report:
@@ -316,12 +384,12 @@ async def improve(
             remote_result = await _improve_remotely(
                 remote_client,
                 dataset,
-                node_name=node_name,
                 session_ids=session_ids,
                 build_global_context_index=build_global_context_index,
                 build_truth_subspace=build_truth_subspace,
+                review_conflicts=review_conflicts,
                 run_in_background=run_in_background,
-                overrides=kwargs,
+                overrides={**kwargs, **(legacy_memify or {})},
             )
             return report(remote_result)
 
@@ -334,10 +402,11 @@ async def improve(
                 dataset=dataset,
                 session_ids=session_ids,
                 run_in_background=run_in_background,
-                node_name=node_name,
                 build_global_context_index=build_global_context_index,
                 build_truth_subspace=build_truth_subspace,
+                review_conflicts=review_conflicts,
                 overrides=kwargs,
+                legacy_memify=legacy_memify,
             )
             # One claim per session id plus one for the dataset, so bridge
             # runs and dataset runs exclude each other; held until the last
@@ -377,7 +446,6 @@ async def improve(
                     dataset_id=inputs.dataset_id,
                     dataset_name=inputs.dataset_name,
                     session_ids=inputs.session_id_list,
-                    memify_run={},
                     background=run_in_background,
                     finished=False,
                 )
@@ -446,10 +514,11 @@ async def _resolve_inputs(
     dataset: str | UUID,
     session_ids: list[str],
     run_in_background: bool,
-    node_name: list[str] | None,
     build_global_context_index: bool,
     build_truth_subspace: bool,
+    review_conflicts: bool,
     overrides: dict,
+    legacy_memify: dict | None = None,
 ) -> ImproveRunInputs:
     """Resolve everything a stage may read into the frozen ``ImproveRunInputs``.
 
@@ -489,6 +558,14 @@ async def _resolve_inputs(
     feedback_alpha = overrides.get("feedback_alpha")
     if feedback_alpha is None:
         feedback_alpha = config.feedback_alpha
+    # Argument and IMPROVE_REVIEW_CONFLICTS are both opt-ins: either turns the stage on.
+    review_conflicts = review_conflicts or config.review_conflicts
+    if legacy_memify is not None:
+        from cognee.api.v1.memify.memify import resolve_memify_tasks
+
+        # Unknown or removed task names fail here, before the lock or any stage.
+        for key in LEGACY_TASK_OPTIONS:
+            resolve_memify_tasks(legacy_memify.get(key))
 
     return ImproveRunInputs(
         user=user,
@@ -501,11 +578,11 @@ async def _resolve_inputs(
         # graph engine (and a dataset-queue slot), which a lock loser must not
         # pay for. improve() swaps in the probed answer via with_capabilities.
         capabilities=GraphCapabilities.assume_supported(),
-        node_name=node_name,
         feedback_alpha=feedback_alpha,
         build_global_context_index=build_global_context_index,
         build_truth_subspace=build_truth_subspace,
-        memify_kwargs={key: overrides[key] for key in MEMIFY_PASSTHROUGH_KEYS if key in overrides},
+        review_conflicts=review_conflicts,
+        legacy_memify=legacy_memify,
     )
 
 
@@ -531,8 +608,12 @@ def _skip_lock_held_run(
         " (rerun requested from the holder)" if rerun_requested else "",
     )
     operation.set_outcome(OperationOutcome.NOOP)
+    skipped_stages = stage_names(DEFAULT_STAGES)
+    if inputs.legacy_memify is not None:
+        # The deprecated custom tasks were dropped too; say so.
+        skipped_stages.append(LEGACY_CUSTOM_TASKS_STAGE_NAME)
     result = ImproveResult.all_skipped(
-        stage_names(DEFAULT_STAGES),
+        skipped_stages,
         REASON_LOCK_HELD,
         dataset_id=inputs.dataset_id,
         dataset_name=inputs.dataset_name,
@@ -630,10 +711,10 @@ async def _improve_remotely(
     remote_client: Any,
     dataset: str | UUID,
     *,
-    node_name: list[str] | None,
     session_ids: list[str],
     build_global_context_index: bool,
     build_truth_subspace: bool,
+    review_conflicts: bool,
     run_in_background: bool,
     overrides: dict,
 ) -> ImproveResult:
@@ -647,10 +728,10 @@ async def _improve_remotely(
     """
     payload = await remote_client.improve(
         dataset,
-        node_name=node_name,
         session_ids=session_ids or None,
         build_global_context_index=build_global_context_index,
         build_truth_subspace=build_truth_subspace,
+        review_conflicts=review_conflicts,
         run_in_background=run_in_background,
         **overrides,
     )
@@ -665,6 +746,7 @@ def _send_improve_telemetry(
     run_in_background: bool,
     build_global_context_index: bool,
     build_truth_subspace: bool,
+    review_conflicts: bool,
 ) -> None:
     # cognee/__init__.py imports this module, so the version has to be read at
     # call time; its own NOTE explains why __version__ sits at the top there.
@@ -682,6 +764,7 @@ def _send_improve_telemetry(
             "run_in_background": run_in_background,
             "build_global_context_index": build_global_context_index,
             "build_truth_subspace": build_truth_subspace,
+            "review_conflicts": review_conflicts,
             "cognee_version": cognee_version,
         },
     )

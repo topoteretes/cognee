@@ -22,9 +22,6 @@ _mod_sm = importlib.import_module("cognee.infrastructure.session.get_session_man
 _pkg_improve = importlib.import_module("cognee.api.v1.improve")
 _mod_query_router = importlib.import_module("cognee.api.v1.recall.query_router")
 _mod_search_methods = importlib.import_module("cognee.modules.search.methods.search")
-_mod_authorized_dataset = importlib.import_module(
-    "cognee.modules.data.methods.get_authorized_dataset"
-)
 
 
 @contextmanager
@@ -1034,7 +1031,7 @@ async def test_self_improvement_controls_session_bridge_without_skipping_cache(f
         )
         if result._task is not None:
             await result._task
-    store.assert_awaited_once_with("s1", "memory", user)
+    store.assert_awaited_once_with("s1", "memory", user, node_set=None)
     assert improve.await_count == (0 if flag is False else 1)
     assert result.status == "session_stored"
 
@@ -1045,6 +1042,8 @@ async def test_typed_api_session_entry_never_runs_automatic_improvement(flag):
     from cognee.memory import QAEntry
 
     user = MagicMock(id=uuid4())
+    dataset = MagicMock(id=uuid4())
+    dataset.name = "main_dataset"
     manager = MagicMock(is_available=True)
     manager.add_qa = AsyncMock(return_value="qa1")
     improve = AsyncMock()
@@ -1053,9 +1052,18 @@ async def test_typed_api_session_entry_never_runs_automatic_improvement(flag):
         patch.object(_mod_sm, "get_session_manager", return_value=manager),
         patch.object(_pkg_improve, "improve", improve),
         patch.object(
-            _mod_authorized_dataset, "get_authorized_dataset", AsyncMock(return_value=None)
+            _get_remember_module(),
+            "resolve_authorized_user_datasets",
+            AsyncMock(return_value=(user, [dataset])),
         ),
         patch("cognee.modules.session_lifecycle.metrics.ensure_and_touch_session", AsyncMock()),
+        patch(
+            "cognee.modules.session_lifecycle.metrics.get_session_row",
+            AsyncMock(return_value=MagicMock(dataset_id=dataset.id)),
+        ),
+        patch(
+            "cognee.modules.data.methods.get_authorized_dataset", AsyncMock(return_value=dataset)
+        ),
     ):
         kwargs = {} if flag is None else {"self_improvement": flag}
         result = await _get_remember_module().remember(

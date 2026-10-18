@@ -15,6 +15,7 @@ from neo4j.exceptions import Neo4jError
 from cognee.infrastructure.databases.exceptions import DatabaseCredentialsError
 from cognee.infrastructure.databases.graph.graph_db_interface import (
     GraphDBInterface,
+    temporal_anchors_from_rows,
 )
 from cognee.infrastructure.databases.provenance import (
     EdgeDeleteData,
@@ -30,7 +31,6 @@ from cognee.infrastructure.databases.provenance.source_ref_state import (
     provenance_attach_inputs,
 )
 from cognee.infrastructure.engine import DataPoint
-from cognee.modules.engine.utils.generate_timestamp_datapoint import date_to_int
 from cognee.modules.observability import OtelStatusCode as StatusCode
 from cognee.modules.observability import new_span
 from cognee.modules.observability.tracing import (
@@ -41,13 +41,11 @@ from cognee.modules.observability.tracing import (
 )
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.shared.logging_utils import ERROR, get_logger
-from cognee.tasks.temporal_graph.models import Timestamp
 
 from .deadlock_retry import deadlock_retry
 from .neo4j_metrics_utils import (
     count_self_loops,
     get_avg_clustering,
-    get_edge_density,
     get_num_connected_components,
     get_shortest_path_lengths,
     get_size_of_connected_components,
@@ -1808,27 +1806,6 @@ class Neo4jAdapter(GraphDBInterface):
 
         return serialized_properties
 
-    async def get_model_independent_graph_data(self):
-        """
-        Retrieve the basic graph data without considering the model specifics, returning nodes
-        and edges.
-
-        Returns:
-        --------
-
-            A tuple of nodes and edges data.
-        """
-        query_nodes = f"MATCH (n:`{BASE_LABEL}`) RETURN collect(n) AS nodes"
-        nodes = await self.query(query_nodes)
-
-        query_edges = (
-            f"MATCH (n:`{BASE_LABEL}`)-[r]->(m:`{BASE_LABEL}`) "
-            "RETURN collect([n, r, m]) AS elements"
-        )
-        edges = await self.query(query_edges)
-
-        return (nodes, edges)
-
     async def get_entity_type_names(self, entity_ids: list[str]) -> dict[str, str]:
         """One-hop ``is_a`` lookup: entity id to its EntityType name."""
         if not entity_ids:
@@ -2324,6 +2301,27 @@ class Neo4jAdapter(GraphDBInterface):
             drop_query = f"CALL gds.graph.drop('{graph_name}');"
             await self.query(drop_query)
 
+    async def get_graph_counts(self) -> tuple[int, int]:
+        """
+        Count nodes and edges with aggregation queries.
+
+        Counting in Cypher keeps memory constant; collecting the nodes or edges to take
+        len() of them builds the whole graph inside one transaction and exhausts the
+        transaction memory pool on large graphs (#4832).
+
+        Returns:
+        --------
+
+            A ``(num_nodes, num_edges)`` tuple.
+        """
+        node_count = await self.query(f"MATCH (n:`{BASE_LABEL}`) RETURN count(n) AS count")
+        edge_count = await self.query(
+            f"MATCH (n:`{BASE_LABEL}`)-[r]->(m:`{BASE_LABEL}`) RETURN count(r) AS count"
+        )
+        num_nodes = node_count[0]["count"] if node_count else 0
+        num_edges = edge_count[0]["count"] if edge_count else 0
+        return num_nodes, num_edges
+
     async def get_graph_metrics(self, include_optional=False):
         """
         Retrieve metrics related to the graph such as number of nodes, edges, and connected
@@ -2342,19 +2340,16 @@ class Neo4jAdapter(GraphDBInterface):
             input flag.
         """
 
-        nodes, edges = await self.get_model_independent_graph_data()
+        num_nodes, num_edges = await self.get_graph_counts()
         graph_name = "myGraph"
         await self.drop_graph(graph_name)
         await self.project_entire_graph(graph_name)
-
-        num_nodes = len(nodes[0]["nodes"])
-        num_edges = len(edges[0]["elements"])
 
         mandatory_metrics = {
             "num_nodes": num_nodes,
             "num_edges": num_edges,
             "mean_degree": (2 * num_edges) / num_nodes if num_nodes != 0 else None,
-            "edge_density": await get_edge_density(self),
+            "edge_density": num_edges / (num_nodes * (num_nodes - 1)) if num_nodes > 1 else 0,
             "num_connected_components": await get_num_connected_components(self, graph_name),
             "sizes_of_connected_components": await get_size_of_connected_components(
                 self, graph_name
@@ -2452,92 +2447,82 @@ class Neo4jAdapter(GraphDBInterface):
         result = await self.query(query)
         return [record["n"] for record in result] if result else []
 
-    async def collect_events(self, ids: list[str]) -> Any:
+    async def get_timestamps_in_range(
+        self, start: int | None, end: int | None
+    ) -> list[dict[str, Any]]:
+        """Timestamp nodes whose ``[time_at, time_until)`` overlaps ``[start, end)``."""
+        conditions = ["n.type = 'Timestamp'"]
+        params: dict[str, Any] = {}
+        if end is not None:
+            conditions.append("n.time_at < $window_end")
+            params["window_end"] = int(end)
+        if start is not None:
+            conditions.append("coalesce(n.time_until, n.time_at + 1000) > $window_start")
+            params["window_start"] = int(start)
+        cypher = f"""
+        MATCH (n:`{BASE_LABEL}`)
+        WHERE {" AND ".join(conditions)}
+        RETURN n.id AS id, n.timestamp_str AS timestamp_str, n.time_at AS time_at,
+               coalesce(n.time_until, n.time_at + 1000) AS time_until
+        ORDER BY time_at, id
         """
-        Collect all Event-type nodes reachable within 1..2 hops
-        from the given node IDs.
+        rows = await self.query(cypher, params)
+        return [
+            {
+                "id": row["id"],
+                "type": "Timestamp",
+                "timestamp_str": row["timestamp_str"],
+                "time_at": row["time_at"],
+                "time_until": row["time_until"],
+            }
+            for row in rows
+        ]
 
-        Args:
-            graph_engine: Object exposing an async .query(str) -> Any
-            ids: List of node IDs (strings)
-
-        Returns:
-            List of events
-        """
-
-        event_collection_cypher = """UNWIND [{quoted}] AS uid
-            MATCH (start {{id: uid}})
-            MATCH (start)-[*1..2]-(event)
-            WHERE event.type = 'Event'
-            WITH DISTINCT event
-            RETURN collect(event) AS events;
-        """
-
-        query = event_collection_cypher.format(quoted=ids)
-        return await self.query(query)
-
-    async def collect_time_ids(
+    async def get_temporal_anchors(
         self,
-        time_from: Timestamp | None = None,
-        time_to: Timestamp | None = None,
-    ) -> str:
-        """
-        Collect IDs of Timestamp nodes between time_from and time_to.
-
-        Args:
-            graph_engine: Object exposing an async .query(query, params) -> list[dict]
-            time_from: Lower bound int (inclusive), optional
-            time_to: Upper bound int (inclusive), optional
-
-        Returns:
-            A string of quoted IDs:  "'id1', 'id2', 'id3'"
-            (ready for use in a Cypher UNWIND clause).
-        """
-
-        ids: list[str] = []
-
-        if time_from and time_to:
-            time_from = date_to_int(time_from)
-            time_to = date_to_int(time_to)
-
-            cypher = """
-            MATCH (n)
-            WHERE n.type = 'Timestamp'
-              AND n.time_at >= $time_from
-              AND n.time_at <= $time_to
-            RETURN n.id AS id
-            """
-            params = {"time_from": time_from, "time_to": time_to}
-
-        elif time_from:
-            time_from = date_to_int(time_from)
-
-            cypher = """
-            MATCH (n)
-            WHERE n.type = 'Timestamp'
-              AND n.time_at >= $time_from
-            RETURN n.id AS id
-            """
-            params = {"time_from": time_from}
-
-        elif time_to:
-            time_to = date_to_int(time_to)
-
-            cypher = """
-            MATCH (n)
-            WHERE n.type = 'Timestamp'
-              AND n.time_at <= $time_to
-            RETURN n.id AS id
-            """
-            params = {"time_to": time_to}
-
-        else:
-            return ids
-
-        time_nodes = await self.query(cypher, params)
-        time_ids_list = [item["id"] for item in time_nodes if "id" in item]
-
-        return ", ".join(f"'{uid}'" for uid in time_ids_list)
+        chunk_ids,
+        entity_ids,
+        start: int | None,
+        end: int | None,
+    ) -> dict[str, set[str]]:
+        """Candidates attached to a Timestamp overlapping ``[start, end)``: directly,
+        or (for chunks) through an entity they ``contains``. See the interface."""
+        chunk_list = sorted({str(node_id) for node_id in chunk_ids})
+        entity_list = sorted({str(node_id) for node_id in entity_ids})
+        if not chunk_list and not entity_list:
+            return temporal_anchors_from_rows([], [], [])
+        conditions = ["t.type = 'Timestamp'"]
+        params: dict[str, Any] = {}
+        if end is not None:
+            conditions.append("t.time_at < $window_end")
+            params["window_end"] = int(end)
+        if start is not None:
+            conditions.append("coalesce(t.time_until, t.time_at + 1000) > $window_start")
+            params["window_start"] = int(start)
+        where = " AND ".join(conditions)
+        direct_rows = await self.query(
+            f"""
+            MATCH (c:`{BASE_LABEL}`)-[]->(t:`{BASE_LABEL}`)
+            WHERE c.id IN $candidate_ids AND {where}
+            RETURN DISTINCT c.id AS candidate_id, t.id AS timestamp_id
+            """,
+            {**params, "candidate_ids": chunk_list + entity_list},
+        )
+        via_rows = []
+        if chunk_list:
+            via_rows = await self.query(
+                f"""
+                MATCH (c:`{BASE_LABEL}`)-[:contains]->(e:`{BASE_LABEL}`)-[]->(t:`{BASE_LABEL}`)
+                WHERE c.id IN $chunk_ids AND e.type = 'Entity' AND {where}
+                RETURN DISTINCT c.id AS chunk_id, e.id AS entity_id, t.id AS timestamp_id
+                """,
+                {**params, "chunk_ids": chunk_list},
+            )
+        return temporal_anchors_from_rows(
+            [(row["candidate_id"], row["timestamp_id"]) for row in direct_rows],
+            [(row["chunk_id"], row["entity_id"], row["timestamp_id"]) for row in via_rows],
+            chunk_list,
+        )
 
     async def get_triplets_batch(self, offset: int, limit: int) -> list[dict[str, Any]]:
         """

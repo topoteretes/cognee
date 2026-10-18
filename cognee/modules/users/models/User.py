@@ -63,7 +63,16 @@ class UserRead(schemas.BaseUser[uuid_UUID]):
 
 
 class UserCreate(schemas.BaseUserCreate):
+    """What the public sign-up route accepts. It has no ``parent_user_id``: a
+    parent can see its child's agents and sessions and is granted every dataset
+    the child creates, so a parent is set only by ``create_agent``."""
+
     is_verified: bool = True
+
+
+class InternalUserCreate(UserCreate):
+    """``UserCreate`` plus the parent, for ``create_user`` only."""
+
     parent_user_id: uuid_UUID | None = None
 
 

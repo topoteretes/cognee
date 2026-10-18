@@ -61,7 +61,7 @@ Use `code_search` for deterministic queries against an indexed code dataset. Sel
 }
 ```
 
-Supported operations are `query_facts`, `explore`, `traverse`, `find_path`, `impact_analysis`, `insights`, `architecture`, and `delta`.
+Supported operations are `query_facts`, `explore`, `traverse`, `find_path`, `impact_analysis`, `insights`, `architecture` and `delta`, plus the navigation operations `capabilities`, `search`, `neighbors`, `subgraph`, `flows`, `hubs` and `ask`. `search` and `ask` take a question in plain words as `query`.
 
 ## 🚀 Quick Start
 

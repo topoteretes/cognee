@@ -4,6 +4,7 @@ import os
 import litellm
 
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
@@ -31,30 +32,14 @@ async def get_max_chunk_tokens() -> int:
     from cognee.infrastructure.databases.vector.embeddings.input_limit import (
         resolve_input_limit,
     )
-    from cognee.infrastructure.llm.config import get_llm_context_config
 
     # Calculate max chunk size based on the following formula
     embedding_engine = (await get_vector_engine_async()).embedding_engine
     await resolve_input_limit(embedding_engine)
 
-    # Resolve the LLM token ceiling from configuration alone — building an LLM
-    # client here would eagerly instantiate the legacy framework's adapter
-    # even when the litellm_native framework is active. Mirrors the resolution
-    # in get_llm_client()/get_native_client(): the lower of the model's hard
-    # limit and the user's configured ceiling, with the Ollama context-size
-    # special case.
-    llm_config = get_llm_context_config()
-    model_max = get_model_max_completion_tokens(llm_config.llm_model)
-    if model_max is not None:
-        llm_max_completion_tokens = min(model_max, llm_config.llm_max_completion_tokens)
-    elif llm_config.llm_provider == "ollama":
-        llm_max_completion_tokens = llm_config.ollama_num_ctx
-    else:
-        llm_max_completion_tokens = llm_config.llm_max_completion_tokens
-
     # We need to make sure chunk size won't take more than half of LLM max context token size
     # but it also can't be bigger than the embedding engine max token size
-    llm_cutoff_point = llm_max_completion_tokens // 2  # Round down the division
+    llm_cutoff_point = get_llm_token_ceiling() // 2
     max_chunk_tokens = min(embedding_engine.max_completion_tokens, llm_cutoff_point)
 
     return max_chunk_tokens
@@ -149,6 +134,40 @@ def get_model_max_completion_tokens(model_name: str) -> int | None:
         logger.debug("Model not found in LiteLLM's model_cost.")
 
     return max_completion_tokens
+
+
+def get_llm_token_ceiling() -> int:
+    """The LLM token ceiling, resolved from configuration alone.
+
+    Building an LLM client here would eagerly instantiate the legacy framework's
+    adapter even when the litellm_native framework is active. Mirrors the
+    resolution in get_llm_client()/get_native_client(): the lower of the model's
+    hard limit and the user's configured ceiling, with the Ollama context-size
+    special case.
+    """
+    # NOTE: Import must be done in function to avoid circular import issue
+    from cognee.infrastructure.llm.config import get_llm_context_config
+
+    config = get_llm_context_config()
+    model_max = get_model_max_completion_tokens(config.llm_model)
+    if model_max is not None:
+        return min(model_max, config.llm_max_completion_tokens)
+    if config.llm_provider == "ollama":
+        return config.ollama_num_ctx
+    return config.llm_max_completion_tokens
+
+
+def get_llm_tokenizer() -> TikTokenTokenizer:
+    """Use the model's encoding, or the default for models unknown to tiktoken."""
+    # NOTE: Import must be done in function to avoid circular import issue
+    from cognee.infrastructure.llm.config import get_llm_config
+
+    model = get_llm_config().llm_model.split("/", 1)[-1]
+    try:
+        return TikTokenTokenizer(model=model)
+    except Exception:
+        logger.debug("Falling back to the default LLM tokenizer", exc_info=True)
+        return TikTokenTokenizer(model=None)
 
 
 async def test_llm_connection() -> None:
