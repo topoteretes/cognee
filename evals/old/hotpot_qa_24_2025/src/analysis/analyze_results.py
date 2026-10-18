@@ -1,9 +1,10 @@
 import os
+
 import pandas as pd
 
 
 def create_aggregate_metrics_df(
-    metrics_dfs: dict, metrics: list, save_folder: str = None, save_prefix: str = None
+    metrics_dfs: dict, metrics: list, save_folder: str | None = None, save_prefix: str | None = None
 ) -> pd.DataFrame:
     """Create aggregate dataframe with mean and std for each metric across files."""
     # Check that all requested metrics exist
@@ -37,7 +38,10 @@ def create_aggregate_metrics_df(
 
 
 def cumulative_single_metric_analysis(
-    metric: str, aggregate_df: pd.DataFrame, save_folder: str = None, save_prefix: str = None
+    metric: str,
+    aggregate_df: pd.DataFrame,
+    save_folder: str | None = None,
+    save_prefix: str | None = None,
 ) -> pd.DataFrame:
     """Create cumulative analysis for a single metric, ordered by best results first."""
     # Get the mean column for the specified metric
@@ -72,9 +76,9 @@ def cumulative_single_metric_analysis(
 
 def cumulative_all_metrics_analysis(
     aggregate_df: pd.DataFrame,
-    metrics: list = None,
-    save_folder: str = None,
-    save_prefix: str = None,
+    metrics: list | None = None,
+    save_folder: str | None = None,
+    save_prefix: str | None = None,
 ) -> dict:
     """Create cumulative analysis for all metrics, ordered by best results first."""
     if metrics is None:

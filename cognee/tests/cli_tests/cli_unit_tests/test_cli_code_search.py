@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import json
 import sys
+from pathlib import Path
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
@@ -47,17 +48,17 @@ def _search_response(result=None):
 
 
 def _args(**overrides):
-    base = dict(
-        query_text="",
-        query_type="CODE",
-        datasets=["shop"],
-        top_k=10,
-        system_prompt=None,
-        output_format="pretty",
-        code_query=None,
-        diagram=None,
-        diagram_out=None,
-    )
+    base = {
+        "query_text": "",
+        "query_type": "CODE",
+        "datasets": ["shop"],
+        "top_k": 10,
+        "system_prompt": None,
+        "output_format": "pretty",
+        "code_query": None,
+        "diagram": None,
+        "diagram_out": None,
+    }
     base.update(overrides)
     return argparse.Namespace(**base)
 
@@ -153,10 +154,10 @@ def test_print_code_results_shows_payload_and_fenced_diagram(capsys):
 
 def test_write_diagram_raw_and_html(tmp_path):
     raw_path = write_diagram(_search_response(), str(tmp_path / "out" / "arch.mmd"))
-    assert open(raw_path, encoding="utf-8").read() == MERMAID
+    assert Path(raw_path).read_text(encoding="utf-8") == MERMAID
 
     html_path = write_diagram(_search_response(), str(tmp_path / "arch.html"))
-    page = open(html_path, encoding="utf-8").read()
+    page = Path(html_path).read_text(encoding="utf-8")
     assert page.startswith("<!doctype html>")
     assert "<title>architecture: shop</title>" in page
     assert 'class="mermaid"' in page
@@ -179,7 +180,7 @@ def test_write_diagram_renders_dot_with_graphviz(tmp_path, monkeypatch):
     dot_response = _search_response(_code_result("dot", DOT))
 
     raw = write_diagram(dot_response, str(tmp_path / "arch.dot"))
-    assert open(raw, encoding="utf-8").read() == DOT
+    assert Path(raw).read_text(encoding="utf-8") == DOT
 
     with pytest.raises(CliCommandInnerException, match="DOT format"):
         write_diagram(_search_response(), str(tmp_path / "arch.svg"))
@@ -192,7 +193,7 @@ def test_write_diagram_renders_dot_with_graphviz(tmp_path, monkeypatch):
     if shutil.which("dot") is None:
         pytest.skip("Graphviz dot is not installed")
     svg = write_diagram(dot_response, str(tmp_path / "arch.svg"))
-    assert open(svg, encoding="utf-8").read().lstrip().startswith("<?xml")
+    assert Path(svg).read_text(encoding="utf-8").lstrip().startswith("<?xml")
 
 
 # --- commands ------------------------------------------------------------------------
@@ -314,3 +315,32 @@ def test_json_output_keeps_the_diagram_inline(capsys):
     # The status line precedes the JSON document, which starts on its own line.
     payload = json.loads(out[out.index("\n[") + 1 :])
     assert payload[0]["search_result"][0]["diagram"]["format"] == "mermaid"
+
+
+def test_code_query_help_lists_every_retriever_operation():
+    from cognee.cli.code_search import CODE_OPERATIONS
+    from cognee.modules.retrieval.code_retriever import _OPERATIONS
+
+    assert set(CODE_OPERATIONS) == _OPERATIONS
+    parser = argparse.ArgumentParser()
+    SearchCommand().configure_parser(parser)
+    help_text = next(action.help for action in parser._actions if action.dest == "code_query")
+    for operation in ("ask", "search", "neighbors", "subgraph", "flows", "hubs", "capabilities"):
+        assert operation in help_text
+
+
+def test_print_code_results_reports_navigation_truncation(capsys):
+    subgraph = {
+        "operation": "subgraph",
+        "nodes": [],
+        "edges": [],
+        "truncated": True,
+        "truncation_reason": "max_nodes",
+        "stats": {"nodes_visited": 140, "edges_considered": 300, "depth_reached": 2},
+    }
+    asked = {"operation": "ask", "question": "how?", "truncated": False}
+
+    assert print_code_results([subgraph, asked]) is True
+    out = capsys.readouterr().out
+    assert "subgraph (nodes_visited=140, truncated=True (max_nodes))" in out
+    assert "ask (truncated=False)" in out

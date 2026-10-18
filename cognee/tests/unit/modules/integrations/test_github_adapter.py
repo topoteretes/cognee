@@ -85,9 +85,9 @@ async def test_exchange_callback_refuses_an_installation_the_user_cannot_access(
         ),
         patch.object(app_auth, "user_can_access_installation", new=AsyncMock(return_value=False)),
         patch.object(app_auth, "get_installation", new=AsyncMock()) as lookup,
+        pytest.raises(PermissionError),
     ):
-        with pytest.raises(PermissionError):
-            await integration.exchange_callback("code", {"installation_id": "12345"})
+        await integration.exchange_callback("code", {"installation_id": "12345"})
 
     lookup.assert_not_awaited()
 

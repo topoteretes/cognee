@@ -12,23 +12,25 @@
 
 import os
 import typing
-import typing_extensions
 
 import baml_py
+import typing_extensions
 
-from . import types, stream_types, type_builder
+from . import stream_types, type_builder, types
+from .globals import (
+    DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_CTX as __ctx__manager__,
+)
 from .globals import (
     DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIME as __runtime__,
-    DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_CTX as __ctx__manager__,
 )
 
 
 class BamlCallOptions(typing.TypedDict, total=False):
     tb: typing_extensions.NotRequired[type_builder.TypeBuilder]
     client_registry: typing_extensions.NotRequired[baml_py.baml_py.ClientRegistry]
-    env: typing_extensions.NotRequired[typing.Dict[str, typing.Optional[str]]]
+    env: typing_extensions.NotRequired[dict[str, str | None]]
     collector: typing_extensions.NotRequired[
-        typing.Union[baml_py.baml_py.Collector, typing.List[baml_py.baml_py.Collector]]
+        baml_py.baml_py.Collector | list[baml_py.baml_py.Collector]
     ]
     abort_controller: typing_extensions.NotRequired[baml_py.baml_py.AbortController]
     on_tick: typing_extensions.NotRequired[
@@ -37,21 +39,21 @@ class BamlCallOptions(typing.TypedDict, total=False):
 
 
 class _ResolvedBamlOptions:
-    tb: typing.Optional[baml_py.baml_py.TypeBuilder]
-    client_registry: typing.Optional[baml_py.baml_py.ClientRegistry]
-    collectors: typing.List[baml_py.baml_py.Collector]
-    env_vars: typing.Dict[str, str]
-    abort_controller: typing.Optional[baml_py.baml_py.AbortController]
-    on_tick: typing.Optional[typing.Callable[[], None]]
+    tb: baml_py.baml_py.TypeBuilder | None
+    client_registry: baml_py.baml_py.ClientRegistry | None
+    collectors: list[baml_py.baml_py.Collector]
+    env_vars: dict[str, str]
+    abort_controller: baml_py.baml_py.AbortController | None
+    on_tick: typing.Callable[[], None] | None
 
     def __init__(
         self,
-        tb: typing.Optional[baml_py.baml_py.TypeBuilder],
-        client_registry: typing.Optional[baml_py.baml_py.ClientRegistry],
-        collectors: typing.List[baml_py.baml_py.Collector],
-        env_vars: typing.Dict[str, str],
-        abort_controller: typing.Optional[baml_py.baml_py.AbortController],
-        on_tick: typing.Optional[typing.Callable[[], None]],
+        tb: baml_py.baml_py.TypeBuilder | None,
+        client_registry: baml_py.baml_py.ClientRegistry | None,
+        collectors: list[baml_py.baml_py.Collector],
+        env_vars: dict[str, str],
+        abort_controller: baml_py.baml_py.AbortController | None,
+        on_tick: typing.Callable[[], None] | None,
     ):
         self.tb = tb
         self.client_registry = client_registry
@@ -122,7 +124,7 @@ class DoNotUseDirectlyCallManager:
         return DoNotUseDirectlyCallManager({**self.__baml_options, **options})
 
     async def call_function_async(
-        self, *, function_name: str, args: typing.Dict[str, typing.Any]
+        self, *, function_name: str, args: dict[str, typing.Any]
     ) -> baml_py.baml_py.FunctionResult:
         resolved_options = self.__resolve()
 
@@ -131,7 +133,7 @@ class DoNotUseDirectlyCallManager:
             resolved_options.abort_controller is not None
             and resolved_options.abort_controller.aborted
         ):
-            raise Exception("BamlAbortError: Operation was aborted")
+            raise RuntimeError("BamlAbortError: Operation was aborted")
 
         return await __runtime__.call_function(
             function_name,
@@ -151,7 +153,7 @@ class DoNotUseDirectlyCallManager:
         )
 
     def call_function_sync(
-        self, *, function_name: str, args: typing.Dict[str, typing.Any]
+        self, *, function_name: str, args: dict[str, typing.Any]
     ) -> baml_py.baml_py.FunctionResult:
         resolved_options = self.__resolve()
 
@@ -160,7 +162,7 @@ class DoNotUseDirectlyCallManager:
             resolved_options.abort_controller is not None
             and resolved_options.abort_controller.aborted
         ):
-            raise Exception("BamlAbortError: Operation was aborted")
+            raise RuntimeError("BamlAbortError: Operation was aborted")
 
         ctx = __ctx__manager__.get()
         return __runtime__.call_function_sync(
@@ -184,8 +186,8 @@ class DoNotUseDirectlyCallManager:
         self,
         *,
         function_name: str,
-        args: typing.Dict[str, typing.Any],
-    ) -> typing.Tuple[baml_py.baml_py.RuntimeContextManager, baml_py.baml_py.FunctionResultStream]:
+        args: dict[str, typing.Any],
+    ) -> tuple[baml_py.baml_py.RuntimeContextManager, baml_py.baml_py.FunctionResultStream]:
         resolved_options = self.__resolve()
         ctx = __ctx__manager__.clone_context()
         result = __runtime__.stream_function(
@@ -213,10 +215,8 @@ class DoNotUseDirectlyCallManager:
         self,
         *,
         function_name: str,
-        args: typing.Dict[str, typing.Any],
-    ) -> typing.Tuple[
-        baml_py.baml_py.RuntimeContextManager, baml_py.baml_py.SyncFunctionResultStream
-    ]:
+        args: dict[str, typing.Any],
+    ) -> tuple[baml_py.baml_py.RuntimeContextManager, baml_py.baml_py.SyncFunctionResultStream]:
         resolved_options = self.__resolve()
         if resolved_options.on_tick is not None:
             raise ValueError(
@@ -249,7 +249,7 @@ class DoNotUseDirectlyCallManager:
         self,
         *,
         function_name: str,
-        args: typing.Dict[str, typing.Any],
+        args: dict[str, typing.Any],
         mode: typing_extensions.Literal["stream", "request"],
     ) -> baml_py.baml_py.HTTPRequest:
         resolved_options = self.__resolve()
@@ -272,7 +272,7 @@ class DoNotUseDirectlyCallManager:
         self,
         *,
         function_name: str,
-        args: typing.Dict[str, typing.Any],
+        args: dict[str, typing.Any],
         mode: typing_extensions.Literal["stream", "request"],
     ) -> baml_py.baml_py.HTTPRequest:
         resolved_options = self.__resolve()
@@ -323,6 +323,7 @@ class DoNotUseDirectlyCallManager:
 
 def disassemble(function: typing.Callable) -> None:
     import inspect
+
     from . import b
 
     if not callable(function):

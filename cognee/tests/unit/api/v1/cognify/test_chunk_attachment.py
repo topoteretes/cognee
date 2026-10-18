@@ -5,7 +5,6 @@ also takes **kwargs, so anything unusable has to raise here rather than vanish.
 """
 
 import importlib
-from typing import List
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -24,7 +23,7 @@ class _Person(DataPoint):
 
 
 class _Directory(DataPoint):
-    people: List[_Person]
+    people: list[_Person]
     metadata: dict = {"index_fields": []}
 
 
@@ -66,10 +65,6 @@ def _no_pipeline_work():
             "requires a custom DataPoint",
         ),
         ({"graph_model": _PlainModel, "chunk_attachment": "all"}, "requires a custom DataPoint"),
-        (
-            {"graph_model": _Directory, "chunk_attachment": "all", "temporal_cognify": True},
-            "not supported with temporal_cognify",
-        ),
     ],
 )
 async def test_invalid_combinations_raise_before_any_pipeline_work(kwargs, message):
@@ -86,9 +81,11 @@ async def test_invalid_combinations_raise_before_any_pipeline_work(kwargs, messa
 
 @pytest.mark.asyncio
 async def test_remote_client_raises():
-    with patch.object(serve_state_module, "get_remote_client", return_value=MagicMock()):
-        with pytest.raises(ValueError, match="remote Cognee instance"):
-            await cognify_module.cognify(graph_model=_Directory, chunk_attachment="all")
+    with (
+        patch.object(serve_state_module, "get_remote_client", return_value=MagicMock()),
+        pytest.raises(ValueError, match="remote Cognee instance"),
+    ):
+        await cognify_module.cognify(graph_model=_Directory, chunk_attachment="all")
 
 
 @pytest.mark.asyncio

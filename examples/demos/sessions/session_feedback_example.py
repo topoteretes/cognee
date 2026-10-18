@@ -1,6 +1,16 @@
-# ruff: noqa: E402
-import os
+"""Tour the session feedback API: get_session (full and last_n), add_feedback and delete_feedback.
+
+Questions are recalled in a named session and in default_session, feedback is attached to the
+latest answers, and one entry's feedback is retracted; each step prints the API's return value
+so the before/after state is visible.
+
+Requires: LLM_API_KEY; the script defaults CACHING=true and CACHE_BACKEND=redis, so a running
+Redis is needed unless CACHE_BACKEND is set to another backend first.
+Run: uv run python examples/demos/sessions/session_feedback_example.py
+"""
+
 import asyncio
+import os
 
 # Set os.environ before importing Cognee: Cognee reads env-backed settings at import time, so values
 # assigned later may not override defaults or `.env`. See https://docs.cognee.ai/setup-configuration/overview#using-os-environ
@@ -19,12 +29,18 @@ async def main():
     print("Done.\n")
 
     texts = [
-        "Cognee builds knowledge graphs from text and provides session-based feedback APIs. "
-        "You can attach feedback (rating and comment) to each Q&A and later retract it.",
-        "Sessions group Q&A by conversation. Use a session_id in recall() to keep turns in one thread; "
-        "omit it to use the default_session.",
-        "Feedback helps improve answers: add_feedback stores a score and optional text, "
-        "delete_feedback clears it.",
+        (
+            "Cognee builds knowledge graphs from text and provides session-based feedback APIs. "
+            "You can attach feedback (rating and comment) to each Q&A and later retract it."
+        ),
+        (
+            "Sessions group Q&A by conversation. Use a session_id in recall() to keep turns in one thread; "
+            "omit it to use the default_session."
+        ),
+        (
+            "Feedback helps improve answers: add_feedback stores a score and optional text, "
+            "delete_feedback clears it."
+        ),
     ]
     await cognee.remember(texts, self_improvement=False)
 

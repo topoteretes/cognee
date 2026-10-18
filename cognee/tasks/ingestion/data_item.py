@@ -1,6 +1,6 @@
 import json
 from dataclasses import dataclass, field
-from typing import Any, List, Optional
+from typing import Any
 from uuid import UUID
 
 from cognee.tasks.ingestion.exceptions import (
@@ -14,15 +14,26 @@ from cognee.tasks.ingestion.exceptions import (
 @dataclass
 class DataItem:
     data: Any
-    label: Optional[str] = None
-    external_metadata: Optional[dict] = field(default=None)
+    label: str | None = None
+    external_metadata: dict | None = field(default=None)
     # System-derived metadata (e.g. DLT source stamps) persisted to
     # Data.system_metadata — never merged with user external_metadata.
-    system_metadata: Optional[dict] = field(default=None)
-    data_id: Optional[UUID] = None
+    system_metadata: dict | None = field(default=None)
+    data_id: UUID | None = None
+    # Item-level node_set (e.g. a document-mode dlt row's own labels). Unioned
+    # with the call-level node_set in ingest_data, not merged here — this
+    # field only carries the item's own contribution.
+    node_set: list[str] | None = None
+    # When True, ``data`` (a str) is stored verbatim as a text document and
+    # never interpreted as an http(s) URL, an s3:// path, or a local file
+    # path. Set this on any DataItem whose text came from a field the caller
+    # does not control (e.g. a synced document's body), since such text can
+    # legitimately be just a URL or an existing path, and reading it as one
+    # would fetch or read something the caller never asked to ingest.
+    literal_text: bool = False
 
 
-def parse_labels(labels: Optional[str]) -> Optional[List[Optional[str]]]:
+def parse_labels(labels: str | None) -> list[str | None] | None:
     """Parse the ``labels`` form field into per-file label entries.
 
     The canonical format is a JSON array of strings ('["finance", "people", ""]'),
@@ -52,8 +63,8 @@ def parse_labels(labels: Optional[str]) -> Optional[List[Optional[str]]]:
 
 
 def parse_external_metadata(
-    external_metadata: Optional[str],
-) -> Optional[List[Optional[dict]]]:
+    external_metadata: str | None,
+) -> list[dict | None] | None:
     """Parse the ``external_metadata`` form field: a JSON array of objects.
 
     Same wire convention as ``labels``: one JSON-encoded string, paired
@@ -88,10 +99,10 @@ def parse_external_metadata(
 
 
 def pair_labels_with_data(
-    data: Optional[list],
-    labels: Optional[List[Optional[str]]],
-    external_metadata: Optional[List[Optional[dict]]] = None,
-) -> Optional[list]:
+    data: list | None,
+    labels: list[str | None] | None,
+    external_metadata: list[dict | None] | None = None,
+) -> list | None:
     """Pair per-item labels and external metadata with data items as DataItems.
 
     Both attribute lists pair positionally: the Nth entry applies to the Nth

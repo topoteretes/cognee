@@ -11,8 +11,8 @@ from uuid import uuid4
 
 import pytest
 
-from cognee.modules.session_lifecycle import agent_usage
 from cognee.modules.agents.models import AgentConnection, AgentsListResponse
+from cognee.modules.session_lifecycle import agent_usage
 from cognee.modules.session_lifecycle.metrics import SessionListPage, SessionRowWithStatus
 from cognee.modules.session_lifecycle.models import SessionRecord
 from cognee.modules.users.exceptions import PermissionDeniedError
@@ -194,7 +194,7 @@ async def test_single_user_mode_falls_back_to_caller_only(monkeypatch):
         return []
 
     monkeypatch.setattr(agent_usage, "list_persisted_agent_connections", fake_persisted)
-    monkeypatch.setattr(agent_usage, "list_registered_agent_connections", lambda: [])
+    monkeypatch.setattr(agent_usage, "list_registered_agent_connections", list)
 
     result = await agent_usage.compute_cost_by_user_agent(
         user=user, visible_user_ids=[user_id], permitted_dataset_ids=[], since=None
@@ -222,7 +222,7 @@ async def test_solo_mode_includes_child_agent_sessions(monkeypatch):
         return []
 
     monkeypatch.setattr(agent_usage, "list_persisted_agent_connections", fake_persisted)
-    monkeypatch.setattr(agent_usage, "list_registered_agent_connections", lambda: [])
+    monkeypatch.setattr(agent_usage, "list_registered_agent_connections", list)
 
     result = await agent_usage.compute_cost_by_user_agent(
         user=user, visible_user_ids=[user_id, child_id], permitted_dataset_ids=[], since=None
@@ -266,7 +266,7 @@ async def test_tenant_mode_aggregates_across_users_and_sorts_by_cost(monkeypatch
     monkeypatch.setattr(agent_usage, "get_users_in_tenant", fake_get_users_in_tenant)
     monkeypatch.setattr(agent_usage, "get_relational_engine", lambda: _FakeEngine(rows))
     monkeypatch.setattr(agent_usage, "list_persisted_agent_connections", fake_persisted)
-    monkeypatch.setattr(agent_usage, "list_registered_agent_connections", lambda: [])
+    monkeypatch.setattr(agent_usage, "list_registered_agent_connections", list)
 
     result = await agent_usage.compute_cost_by_user_agent(
         user=user, visible_user_ids=[caller_id], permitted_dataset_ids=[], since=None
@@ -300,7 +300,7 @@ async def test_tenant_mode_member_falls_back_to_own_sessions(monkeypatch):
     monkeypatch.setattr(agent_usage, "get_users_in_tenant", fake_get_users_in_tenant)
     monkeypatch.setattr(agent_usage, "get_relational_engine", lambda: _FakeEngine(rows))
     monkeypatch.setattr(agent_usage, "list_persisted_agent_connections", fake_persisted)
-    monkeypatch.setattr(agent_usage, "list_registered_agent_connections", lambda: [])
+    monkeypatch.setattr(agent_usage, "list_registered_agent_connections", list)
 
     result = await agent_usage.compute_cost_by_user_agent(
         user=user, visible_user_ids=[caller_id], permitted_dataset_ids=[], since=None
@@ -336,7 +336,7 @@ async def test_tenant_mode_member_keeps_child_agents_when_denied_tenant_view(mon
     monkeypatch.setattr(agent_usage, "get_users_in_tenant", fake_get_users_in_tenant)
     monkeypatch.setattr(agent_usage, "get_relational_engine", lambda: _FakeEngine(rows))
     monkeypatch.setattr(agent_usage, "list_persisted_agent_connections", fake_persisted)
-    monkeypatch.setattr(agent_usage, "list_registered_agent_connections", lambda: [])
+    monkeypatch.setattr(agent_usage, "list_registered_agent_connections", list)
 
     result = await agent_usage.compute_cost_by_user_agent(
         user=user, visible_user_ids=[caller_id, child_id], permitted_dataset_ids=[], since=None

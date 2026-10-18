@@ -92,9 +92,8 @@ async def test_session_id_is_persisted(ops_engine):
 @pytest.mark.asyncio
 async def test_nested_operations_form_a_tree(ops_engine):
     """Child rows reference the parent's pipeline_run_id, allocated at entry."""
-    async with record_operation("remember") as outer:
-        async with record_operation("improve") as inner:
-            assert inner.parent_operation_id == outer.operation_id
+    async with record_operation("remember") as outer, record_operation("improve") as inner:
+        assert inner.parent_operation_id == outer.operation_id
 
     rows = await _fetch_rows(ops_engine)
     by_name = {row.operation_name: row for row in rows}

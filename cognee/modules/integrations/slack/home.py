@@ -92,13 +92,15 @@ async def publish_home_view(access_token: str, slack_user_id: str) -> None:
     isn't turned on in the app's config (App Home -> Home Tab), not a scope
     problem — ``views.publish`` needs no OAuth scope beyond a bot token.
     """
-    async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
-        async with session.post(
+    async with (
+        aiohttp.ClientSession(timeout=_TIMEOUT) as session,
+        session.post(
             _VIEWS_PUBLISH_URL,
             headers={"Authorization": f"Bearer {access_token}"},
             json={"user_id": slack_user_id, "view": _build_home_view()},
-        ) as response:
-            payload = await response.json()
+        ) as response,
+    ):
+        payload = await response.json()
 
     if not payload.get("ok"):
         raise RuntimeError(f"Slack views.publish failed: {payload.get('error', 'unknown')}")

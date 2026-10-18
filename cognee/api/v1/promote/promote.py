@@ -21,6 +21,8 @@ from cognee.modules.users.permissions.methods.get_principal import get_principal
 from cognee.modules.users.permissions.methods.get_principal_datasets import get_principal_datasets
 from cognee.shared.logging_utils import get_logger
 
+logger = get_logger("promotion")
+
 
 @dataclass(frozen=True)
 class PromotionResult:
@@ -85,9 +87,7 @@ async def _persist_copy(row, content, provenance, actor, target, target_id) -> b
         try:
             winner = await _get_data(target_id, target.id)
         except Exception as lookup_error:
-            get_logger("promotion").warning(
-                "Promotion commit could not be verified; retaining its storage object"
-            )
+            logger.warning("Promotion commit could not be verified; retaining its storage object")
             raise error from lookup_error
         referenced = winner is not None and location in (
             winner.raw_data_location,
@@ -96,8 +96,8 @@ async def _persist_copy(row, content, provenance, actor, target, target_id) -> b
         if not referenced:
             try:
                 await storage.remove(relative)
-            except Exception:  # noqa: BLE001 - preserve the original persistence error
-                get_logger("promotion").exception("Could not clean an uncommitted promotion object")
+            except Exception:  # cleanup only; the persistence error is what propagates
+                logger.exception("Could not clean an uncommitted promotion object")
         if (
             winner is not None
             and (winner.system_metadata or {}).get("promotion", {}).get("source_revision")

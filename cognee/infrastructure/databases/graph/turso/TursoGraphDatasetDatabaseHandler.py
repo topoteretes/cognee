@@ -1,6 +1,5 @@
 import os
 from uuid import UUID
-from typing import Optional
 
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.graph.config import get_graph_config
@@ -8,18 +7,20 @@ from cognee.infrastructure.databases.graph.get_graph_engine import (
     create_graph_engine,
     graph_engine_cache,
 )
-from cognee.modules.users.models import User, DatasetDatabase
+from cognee.infrastructure.databases.turso.files import remove_database_files
+from cognee.modules.users.models import DatasetDatabase, User
 
 
 class TursoGraphDatasetDatabaseHandler:
-    """Handler for per-dataset Turso/libSQL graph databases.
+    """Handler for per-dataset Turso graph databases.
 
-    Each dataset gets its own libSQL file under the system databases directory, so
-    the existing multi-user permission system isolates datasets by file.
+    Each dataset gets its own Turso database file under the system databases
+    directory, so the existing multi-user permission system isolates datasets by
+    file.
     """
 
     @classmethod
-    async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
+    async def create_dataset(cls, dataset_id: UUID | None, user: User | None) -> dict:
         graph_config = get_graph_config()
 
         if graph_config.graph_database_provider != "turso":
@@ -37,7 +38,7 @@ class TursoGraphDatasetDatabaseHandler:
         # nothing can remove. Runs before makedirs so a non-local root such as
         # an s3:// one creates no local directory on the way out.
         if not os.path.isabs(databases_dir):
-            raise EnvironmentError(
+            raise OSError(
                 "Turso per-dataset graph databases need an absolute local path; set "
                 f"SYSTEM_ROOT_DIRECTORY to one (got {base_config.system_root_directory!r})."
             )
@@ -67,7 +68,7 @@ class TursoGraphDatasetDatabaseHandler:
     async def resolve_dataset_connection_info(
         cls, dataset_database: DatasetDatabase
     ) -> DatasetDatabase:
-        # A local libSQL file has no connection credentials to resolve.
+        # A local Turso database file has no connection credentials to resolve.
         return dataset_database
 
     @classmethod
@@ -88,14 +89,8 @@ class TursoGraphDatasetDatabaseHandler:
         if graph_db_name:
             await graph_engine_cache.aevict_for_database(graph_db_name)
 
-        # Remove the dataset's libSQL file and its WAL-mode companions. This
-        # adapter runs PRAGMA journal_mode=WAL, so SQLite keeps write-ahead-log
-        # state in "<file>-wal"/"<file>-shm" until a clean close checkpoints
-        # them into the main file -- leaving them behind risks stale data
-        # surviving under a same-name recreate.
-        if dataset_url and os.path.isabs(dataset_url) and os.path.exists(dataset_url):
-            os.remove(dataset_url)
-            for suffix in ("-wal", "-shm"):
-                companion_path = dataset_url + suffix
-                if os.path.exists(companion_path):
-                    os.remove(companion_path)
+        # Remove the dataset's database file and the engine's companions
+        # (-wal/-shm in WAL mode, -log in MVCC mode). Leaving them behind risks
+        # stale data surviving under a same-name recreate.
+        if dataset_url and os.path.isabs(dataset_url):
+            remove_database_files(dataset_url)

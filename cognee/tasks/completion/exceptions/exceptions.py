@@ -1,5 +1,6 @@
-from cognee.exceptions import CogneeValidationError
 from fastapi import status
+
+from cognee.exceptions import CogneeValidationError
 
 
 class NoRelevantDataError(CogneeValidationError):

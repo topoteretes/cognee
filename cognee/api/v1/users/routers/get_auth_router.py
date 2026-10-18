@@ -1,11 +1,11 @@
-from fastapi import Depends, HTTPException, Response, APIRouter
+from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.security import OAuth2PasswordRequestForm
 
-from cognee.modules.users.models import User
-from cognee.modules.users.methods import get_authenticated_user
+from cognee.modules.users.authentication.default.default_transport import default_transport
 from cognee.modules.users.authentication.get_client_auth_backend import get_client_auth_backend
 from cognee.modules.users.authentication.methods.authenticate_user import authenticate_user
-from cognee.modules.users.authentication.default.default_transport import default_transport
+from cognee.modules.users.methods import get_authenticated_user
+from cognee.modules.users.models import User
 
 
 def get_auth_router():

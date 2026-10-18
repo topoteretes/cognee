@@ -1,6 +1,5 @@
-from typing import Optional, Type, List
-
 from cognee.base_config import get_base_config
+from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.utils.completion import summarize_text
 
@@ -14,7 +13,7 @@ class GraphSummaryCompletionRetriever(GraphCompletionRetriever):
     information efficiently. Public methods include:
 
     - __init__()
-    - resolve_edges_to_text()
+    - render_edges()
     """
 
     def __init__(
@@ -22,15 +21,15 @@ class GraphSummaryCompletionRetriever(GraphCompletionRetriever):
         user_prompt_path: str = "graph_context_for_question.txt",
         system_prompt_path: str = "answer_simple_question.txt",
         summarize_prompt_path: str = "summarize_search_results.txt",
-        system_prompt: Optional[str] = None,
-        top_k: Optional[int] = 5,
-        node_type: Optional[Type] = None,
-        node_name: Optional[List[str]] = None,
+        system_prompt: str | None = None,
+        top_k: int | None = 5,
+        node_type: type | None = None,
+        node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
-        wide_search_top_k: Optional[int] = 100,
-        triplet_distance_penalty: Optional[float] = 6.5,
+        wide_search_top_k: int | None = 100,
+        triplet_distance_penalty: float | None = 6.5,
         feedback_influence: float = get_base_config().default_feedback_influence,
-        session_id: Optional[str] = None,
+        session_id: str | None = None,
         include_references: bool = False,
     ):
         """Initialize retriever with default prompt paths and search parameters."""
@@ -50,14 +49,14 @@ class GraphSummaryCompletionRetriever(GraphCompletionRetriever):
         )
         self.summarize_prompt_path = summarize_prompt_path
 
-    async def resolve_edges_to_text(self, retrieved_edges: list) -> str:
+    async def render_edges(self, retrieved_edges: list) -> str:
         """
         Convert retrieved graph edges into a summary without redundancies.
 
         This asynchronous method processes a list of retrieved edges and summarizes their
-        content using a specified prompt path. It relies on the parent's implementation to
-        convert the edges to text before summarizing. Raises an error if the summarization fails
-        due to an invalid prompt path.
+        content using a specified prompt path. The base class appends the stored conflict
+        explanations after this returns, so they never enter the summarization call.
+        Raises an error if the summarization fails due to an invalid prompt path.
 
         Parameters:
         -----------
@@ -69,5 +68,5 @@ class GraphSummaryCompletionRetriever(GraphCompletionRetriever):
 
             - str: A summary string representing the content of the retrieved edges.
         """
-        direct_text = await super().resolve_edges_to_text(retrieved_edges)
+        direct_text = await resolve_edges_to_text(retrieved_edges)
         return await summarize_text(direct_text, self.summarize_prompt_path, self.system_prompt)

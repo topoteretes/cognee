@@ -1,10 +1,9 @@
 """Adapter for Generic API LLM provider API"""
 
-import asyncio
 import base64
 import logging
 import mimetypes
-from typing import Any
+from typing import Any, cast
 
 import instructor
 import litellm
@@ -15,25 +14,23 @@ from pydantic import BaseModel
 from tenacity import (
     before_sleep_log,
     retry,
-    retry_if_not_exception_type,
     stop_after_attempt,
     wait_exponential_jitter,
 )
 
-from cognee.infrastructure.llm.streaming.stream_completion import stream_text_completion
-from cognee.infrastructure.llm.streaming.token_sink import TokenSink, get_active_token_sink
+from cognee.infrastructure.files.utils.open_data_file import open_data_file
+from cognee.infrastructure.llm.exceptions import (
+    ContentPolicyFilterError,
+    raise_if_budget_exhausted,
+)
 from cognee.infrastructure.llm.retry_config import (
     llm_retry_condition,
     llm_retry_stop_condition,
 )
-
-from cognee.infrastructure.files.utils.open_data_file import open_data_file
+from cognee.infrastructure.llm.streaming.stream_completion import stream_text_completion
+from cognee.infrastructure.llm.streaming.token_sink import TokenSink, get_active_token_sink
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
     get_instructor_mode,
-)
-from cognee.infrastructure.llm.exceptions import (
-    ContentPolicyFilterError,
-    raise_if_budget_exhausted,
 )
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
     LLMInterface,
@@ -74,7 +71,7 @@ def _enrich_llm_span(model: str, name: str) -> None:
             if stage:
                 current_span.set_attribute(COGNEE_PIPELINE_STAGE, stage)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in _enrich_llm_span", exc_info=True)
 
 
 class GenericAPIAdapter(LLMInterface):
@@ -174,6 +171,9 @@ class GenericAPIAdapter(LLMInterface):
                 api_version=self.api_version,
                 **merged_kwargs,
             )
+            # litellm types acompletion() as ModelResponse | CustomStreamWrapper whatever
+            # `stream` is; a call without stream=True returns a ModelResponse.
+            response = cast(litellm.ModelResponse, response)
         # Guarded for the same reason the streaming loop is: content-filter
         # refusals and some proxy error envelopes come back with choices == [],
         # and a bare IndexError is not retryable and says nothing useful.
@@ -279,7 +279,7 @@ class GenericAPIAdapter(LLMInterface):
                 isinstance(error, InstructorRetryException)
                 and "content management policy" not in str(error).lower()
             ):
-                raise error
+                raise
 
             if not (self.fallback_model and self.fallback_api_key and self.fallback_endpoint):
                 raise ContentPolicyFilterError(
@@ -320,7 +320,7 @@ class GenericAPIAdapter(LLMInterface):
                     isinstance(error, InstructorRetryException)
                     and "content management policy" not in str(error).lower()
                 ):
-                    raise error
+                    raise
                 else:
                     raise ContentPolicyFilterError(
                         f"The provided input contains content that is not aligned with our content policy: {text_input}"
@@ -334,13 +334,7 @@ class GenericAPIAdapter(LLMInterface):
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(2, 128),
-        retry=retry_if_not_exception_type(
-            (
-                litellm.exceptions.NotFoundError,
-                litellm.exceptions.AuthenticationError,
-                asyncio.CancelledError,
-            )
-        ),
+        retry=llm_retry_condition,
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
@@ -387,22 +381,17 @@ class GenericAPIAdapter(LLMInterface):
             api_base=self.endpoint,
             max_retries=self.MAX_RETRIES,
         )
+        response = cast(litellm.ModelResponse, response)
 
         if not response.choices or response.choices[0].message is None:
             raise ValueError("Transcription failed. No response received.")
-        return TranscriptionReturnType(response.choices[0].message.content, response)
+        return TranscriptionReturnType(response.choices[0].message.content or "", response)
 
     @observe(as_type="transcribe_image")
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(2, 128),
-        retry=retry_if_not_exception_type(
-            (
-                litellm.exceptions.NotFoundError,
-                litellm.exceptions.AuthenticationError,
-                asyncio.CancelledError,
-            )
-        ),
+        retry=llm_retry_condition,
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
@@ -438,7 +427,7 @@ class GenericAPIAdapter(LLMInterface):
             raise ValueError(
                 f"Could not determine MIME type for image file: {input}. Is the extension correct?"
             )
-        response: litellm.ModelResponse = await litellm.acompletion(
+        response = await litellm.acompletion(
             model=self.image_transcribe_model,
             messages=[
                 {
@@ -466,4 +455,4 @@ class GenericAPIAdapter(LLMInterface):
             reasoning_effort=reasoning_effort,
             drop_params=True,
         )
-        return response
+        return cast(litellm.ModelResponse, response)

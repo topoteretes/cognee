@@ -10,7 +10,7 @@ import pytest
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.data.processing.document_types import TextDocument
 from cognee.tasks.translation import translate_content
-from cognee.tasks.translation.models import TranslatedContent, LanguageMetadata
+from cognee.tasks.translation.models import LanguageMetadata, TranslatedContent
 
 
 def has_llm_api_key():

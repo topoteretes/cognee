@@ -1,7 +1,11 @@
 import warnings
 
+from cognee.shared.logging_utils import get_logger
+
 from .config import get_vectordb_context_config
 from .create_vector_engine import create_vector_engine
+
+logger = get_logger()
 
 
 class _VectorEngineHandle:
@@ -54,10 +58,12 @@ class _VectorEngineHandle:
                 if not active():
                     return False
             except Exception:
+                logger.debug(
+                    "Falling back to False after error in _VectorEngineHandle._pin_is_live",
+                    exc_info=True,
+                )
                 return False
-        if getattr(engine, "_permanently_closed", False):
-            return False
-        return True
+        return not getattr(engine, "_permanently_closed", False)
 
     def _engine(self):
         pinned = self._pinned

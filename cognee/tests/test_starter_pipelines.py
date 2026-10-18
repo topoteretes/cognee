@@ -1,7 +1,7 @@
-import unittest
-import subprocess
 import os
+import subprocess
 import sys
+import unittest
 
 
 class TestPipelines(unittest.TestCase):

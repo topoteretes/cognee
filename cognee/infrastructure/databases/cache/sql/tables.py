@@ -8,12 +8,12 @@ on SQLite so unit tests can run on aiosqlite without a server.
 """
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Column,
     DateTime,
     Index,
     Integer,
-    JSON,
     MetaData,
     Table,
     Text,

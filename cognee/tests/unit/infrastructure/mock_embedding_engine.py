@@ -1,5 +1,4 @@
 import asyncio
-from typing import List
 
 from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
     LiteLLMEmbeddingEngine,
@@ -31,7 +30,7 @@ class MockEmbeddingEngine(LiteLLMEmbeddingEngine):
         self.fail_every_n_requests = fail_every_n_requests
         self.add_delay = add_delay
 
-    async def embed_text(self, text: List[str]) -> List[List[float]]:
+    async def embed_text(self, text: list[str]) -> list[list[float]]:
         """
         Mock implementation that returns fixed embeddings and can
         simulate failures and delays based on configuration.
@@ -44,7 +43,7 @@ class MockEmbeddingEngine(LiteLLMEmbeddingEngine):
 
         # Simulate failures if configured
         if self.fail_every_n_requests > 0 and self.request_count % self.fail_every_n_requests == 0:
-            raise Exception(f"Mock failure on request #{self.request_count}")
+            raise RuntimeError(f"Mock failure on request #{self.request_count}")
 
         # Return mock embeddings of the correct dimension
         async with embedding_rate_limiter_context_manager():

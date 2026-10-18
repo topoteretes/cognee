@@ -2,7 +2,7 @@
 
 Implements ``NativeLiteLLMAdapter`` — a single adapter that works with every
 provider LiteLLM supports, using LiteLLM's own ``response_format`` to obtain
-validated Pydantic objects **without** the ``instructor`` library.
+validated Pydantic objects without any third-party structured-output library.
 
 Two paths, chosen per model via ``litellm.supports_response_schema``:
 
@@ -12,16 +12,24 @@ Two paths, chosen per model via ``litellm.supports_response_schema``:
   object, injects the schema into the prompt, validates, and on failure feeds
   the validation error back so the model can self-correct.
 
-Retry/error handling mirrors the instructor adapters: transient errors (incl.
+Retry/error handling mirrors the legacy per-provider adapters: transient errors (incl.
 rate limits) retry with backoff, while auth and quota/budget exhaustion (mapped
 to ``LLMPaymentRequiredError``) are terminal; content-policy violations fall back
-to the configured fallback model. This file never imports ``instructor``.
+to the configured fallback model.
+
+Audio and image transcription are plain litellm calls (``litellm.atranscription``
+and a multimodal ``litellm.acompletion``), so the default framework covers every
+``LLMGateway`` entry point on its own. This file never imports the legacy
+framework's library.
 """
 
 import asyncio
+import base64
 import json
 import logging
+import mimetypes
 import re
+from collections.abc import Callable
 from typing import Any, cast
 
 import litellm
@@ -31,19 +39,22 @@ from tenacity import (
     before_sleep_log,
     retry,
     retry_if_not_exception_type,
+    stop_after_attempt,
     wait_exponential_jitter,
 )
 
+from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.exceptions import (
     ContentPolicyFilterError,
     LLMPaymentRequiredError,
     is_budget_exhausted_error,
 )
 from cognee.infrastructure.llm.retry_config import llm_retry_stop_condition
-from cognee.modules.observability.get_observe import get_observe
-from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.llm.streaming.stream_completion import stream_text_completion
 from cognee.infrastructure.llm.streaming.token_sink import get_active_token_sink
+from cognee.infrastructure.llm.types import TranscriptionReturnType
+from cognee.modules.observability.get_observe import get_observe
+from cognee.shared.logging_utils import get_logger
 from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
 
 logger = get_logger()
@@ -99,7 +110,7 @@ def _nonstrict_response_format(response_model: type[BaseModel]) -> dict:
 
 
 def _attach_raw_response(instance: BaseModel, response) -> BaseModel:
-    """Attach the raw litellm response as ``_raw_response``, like instructor does.
+    """Attach the raw litellm response as ``_raw_response``, like the legacy framework does.
 
     The LLMGateway usage recorder reads ``result._raw_response.usage`` for the
     provider-billed token counts (which include hidden reasoning tokens no
@@ -120,6 +131,7 @@ def _supports_native_schema(model_name: str) -> bool:
     try:
         return bool(litellm.supports_response_schema(model=model_name))
     except Exception:
+        logger.debug("Falling back to False after error in _supports_native_schema", exc_info=True)
         return False
 
 
@@ -151,11 +163,11 @@ def _enrich_llm_span(model: str, name: str) -> None:
             if stage:
                 current_span.set_attribute(COGNEE_PIPELINE_STAGE, stage)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in _enrich_llm_span", exc_info=True)
 
 
 class NativeLiteLLMAdapter:
-    """Structured output via LiteLLM's native ``response_format`` (no instructor).
+    """Structured output via LiteLLM's native ``response_format``.
 
     One class handles every provider. The connection params for a given call are
     passed through the private helpers rather than stored per call, so a single
@@ -164,16 +176,25 @@ class NativeLiteLLMAdapter:
 
     Instance variables:
         - model, api_key, endpoint, api_version, max_completion_tokens,
-          fallback_model, fallback_api_key, fallback_endpoint, llm_args, name
+          fallback_model, fallback_api_key, fallback_endpoint, llm_args, name,
+          transcription_model, image_transcribe_model, azure_ad_token_provider
+
+    ``azure_ad_token_provider`` authenticates the primary model to Azure OpenAI
+    with an Entra ID token instead of an API key (managed identity). It applies to
+    every call on the primary model; the content-policy fallback keeps its own key.
     """
 
     # The default framework's answer path, so this is the one that decides
     # whether an out-of-the-box install can stream at all.
     supports_answer_streaming = True
 
+    # Client-side retries litellm performs inside a single transcription call,
+    # on top of the tenacity retry around the whole method.
+    MAX_RETRIES = 2
+
     def __init__(
         self,
-        api_key: str,
+        api_key: str | None,
         model: str,
         max_completion_tokens: int,
         name: str = "LiteLLM-Native",
@@ -183,6 +204,9 @@ class NativeLiteLLMAdapter:
         fallback_api_key: str | None = None,
         fallback_endpoint: str | None = None,
         llm_args: dict[str, Any] | None = None,
+        transcription_model: str | None = None,
+        image_transcribe_model: str | None = None,
+        azure_ad_token_provider: Callable[[], str] | None = None,
     ) -> None:
         self.name = name
         self.model = model
@@ -194,6 +218,18 @@ class NativeLiteLLMAdapter:
         self.fallback_api_key = fallback_api_key
         self.fallback_endpoint = fallback_endpoint
         self.llm_args: dict[str, Any] = llm_args or {}
+        # Audio goes to a dedicated speech-to-text model. Images default to the
+        # chat model, which then has to be multimodal; IMAGE_TRANSCRIBE_MODEL
+        # points them at a vision model when it is not.
+        self.transcription_model = transcription_model or model
+        self.image_transcribe_model = image_transcribe_model or model
+        self.azure_ad_token_provider = azure_ad_token_provider
+
+    def _primary_auth_kwargs(self) -> dict[str, Any]:
+        """Credentials the primary model needs besides ``api_key``, as litellm kwargs."""
+        if self.azure_ad_token_provider is None:
+            return {}
+        return {"azure_ad_token_provider": self.azure_ad_token_provider}
 
     async def _acreate_str_output(
         self,
@@ -238,6 +274,9 @@ class NativeLiteLLMAdapter:
                 api_version=api_version,
                 **merged_kwargs,
             )
+            # litellm types acompletion() as ModelResponse | CustomStreamWrapper whatever
+            # `stream` is; a call without stream=True returns a ModelResponse.
+            response = cast(litellm.ModelResponse, response)
         if not response.choices:
             raise ValueError("litellm_native returned no choices for a plain-text completion")
         return response.choices[0].message.content or ""
@@ -271,6 +310,7 @@ class NativeLiteLLMAdapter:
                 api_version=api_version,
                 **merged_kwargs,
             )
+            response = cast(litellm.ModelResponse, response)
         raw_content = response.choices[0].message.content or "{}"
         return _attach_raw_response(response_model.model_validate_json(raw_content), response)
 
@@ -323,6 +363,7 @@ class NativeLiteLLMAdapter:
                     api_version=api_version,
                     **merged_kwargs,
                 )
+                response = cast(litellm.ModelResponse, response)
 
             raw_content = _strip_json_fence(response.choices[0].message.content or "{}")
             try:
@@ -434,7 +475,7 @@ class NativeLiteLLMAdapter:
                 litellm.exceptions.NotFoundError,
                 litellm.exceptions.AuthenticationError,
                 # Quota/billing exhaustion is terminal (#3643); transient rate
-                # limits still retry with backoff, matching the instructor adapters.
+                # limits still retry with backoff, matching the legacy adapters.
                 LLMPaymentRequiredError,
                 # A cancelled task must propagate, not be retried.
                 asyncio.CancelledError,
@@ -458,6 +499,7 @@ class NativeLiteLLMAdapter:
         fallback model before raising ``ContentPolicyFilterError``.
         """
         merged_kwargs = {**self.llm_args, **kwargs}
+        primary_kwargs = {**merged_kwargs, **self._primary_auth_kwargs()}
 
         # A plain string needs no schema — skip structured output entirely.
         if response_model is str:
@@ -468,7 +510,7 @@ class NativeLiteLLMAdapter:
                 api_key=self.api_key,
                 endpoint=self.endpoint,
                 api_version=self.api_version,
-                **merged_kwargs,
+                **primary_kwargs,
             )
 
         structured_model = cast(type[BaseModel], response_model)
@@ -481,7 +523,7 @@ class NativeLiteLLMAdapter:
                 api_key=self.api_key,
                 endpoint=self.endpoint,
                 api_version=self.api_version,
-                **merged_kwargs,
+                **primary_kwargs,
             )
             _enrich_llm_span(self.model, self.name)
             return result
@@ -518,7 +560,106 @@ class NativeLiteLLMAdapter:
 
         except Exception as error:
             # Surface quota/budget exhaustion as an actionable, non-retryable
-            # error, matching the instructor adapters.
+            # error, matching the legacy adapters.
             if is_budget_exhausted_error(error):
                 raise LLMPaymentRequiredError() from error
             raise
+
+    @observe(as_type="transcription")
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential_jitter(2, 128),
+        retry=retry_if_not_exception_type(
+            (
+                litellm.exceptions.NotFoundError,
+                litellm.exceptions.AuthenticationError,
+                asyncio.CancelledError,
+            )
+        ),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+        reraise=True,
+    )
+    async def create_transcript(self, input: str, **kwargs: Any) -> TranscriptionReturnType:
+        """Transcribe the audio file at ``input`` with ``litellm.atranscription``.
+
+        ``kwargs`` are passed straight to litellm, so callers can request
+        ``response_format="verbose_json"`` and ``timestamp_granularities`` and read
+        the segments back from ``TranscriptionReturnType.payload``.
+        """
+        async with open_data_file(input, mode="rb") as audio_file:
+            transcription = await litellm.atranscription(
+                model=self.transcription_model,
+                file=audio_file,
+                api_key=self.api_key,
+                api_base=self.endpoint,
+                api_version=self.api_version,
+                max_retries=self.MAX_RETRIES,
+                **self._primary_auth_kwargs(),
+                **kwargs,
+            )
+
+        text = getattr(transcription, "text", None)
+        if text is None:
+            raise ValueError("Transcription failed. No text returned.")
+        return TranscriptionReturnType(text, transcription)
+
+    @observe(as_type="transcribe_image")
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential_jitter(2, 128),
+        retry=retry_if_not_exception_type(
+            (
+                litellm.exceptions.NotFoundError,
+                litellm.exceptions.AuthenticationError,
+                asyncio.CancelledError,
+            )
+        ),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+        reraise=True,
+    )
+    async def transcribe_image(
+        self,
+        input: str,
+        prompt: str | None = None,
+        max_completion_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> litellm.ModelResponse:
+        """Describe the image at ``input`` with a multimodal chat completion.
+
+        Returns the raw ``ModelResponse``; callers read
+        ``response.choices[0].message.content``. ``prompt`` defaults to a plain
+        caption request and ``max_completion_tokens`` to 300, matching the
+        legacy adapters so existing loaders see no behaviour change.
+        """
+        async with open_data_file(input, mode="rb") as image_file:
+            encoded_image = base64.b64encode(image_file.read()).decode("utf-8")
+        mime_type, _ = mimetypes.guess_type(input)
+        if not mime_type or not mime_type.startswith("image/"):
+            raise ValueError(
+                f"Could not determine MIME type for image file: {input}. Is the extension correct?"
+            )
+        response = await litellm.acompletion(
+            model=self.image_transcribe_model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt or "What's in this image?"},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{mime_type};base64,{encoded_image}"},
+                        },
+                    ],
+                }
+            ],
+            api_key=self.api_key,
+            api_base=self.endpoint,
+            api_version=self.api_version,
+            max_completion_tokens=max_completion_tokens or 300,
+            max_retries=self.MAX_RETRIES,
+            # drop_params ignores reasoning_effort on models that don't support it.
+            reasoning_effort=reasoning_effort,
+            drop_params=True,
+            **self._primary_auth_kwargs(),
+        )
+        return cast(litellm.ModelResponse, response)

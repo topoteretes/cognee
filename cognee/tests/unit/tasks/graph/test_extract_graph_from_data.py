@@ -3,12 +3,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from cognee.shared.data_models import KnowledgeGraph, Node, Edge as KGEdge
+from cognee.shared.data_models import Edge as KGEdge
+from cognee.shared.data_models import KnowledgeGraph, Node
+from cognee.tasks.graph.exceptions import InvalidOntologyAdapterError
 from cognee.tasks.graph.extract_graph_from_data import (
     extract_graph_from_data,
     integrate_chunk_graphs,
 )
-from cognee.tasks.graph.exceptions import InvalidOntologyAdapterError
 
 egd_module = importlib.import_module("cognee.tasks.graph.extract_graph_from_data")
 
@@ -377,7 +378,7 @@ async def test_stub_resolver_reaches_graph_construction_via_task(mock_find_exist
 
 # --- chunk_attachment (SDK-163) -------------------------------------------------
 
-from typing import Any, List, Optional  # noqa: E402
+from typing import Any  # noqa: E402
 
 from cognee.infrastructure.engine import DataPoint  # noqa: E402
 from cognee.modules.graph.utils import (  # noqa: E402
@@ -393,17 +394,17 @@ class _Activity(DataPoint):
 
 class _Person(DataPoint):
     name: str
-    likes: Optional[List[_Activity]] = None
+    likes: list[_Activity] | None = None
     metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
 
 
 class _Directory(DataPoint):
-    people: List[_Person]
+    people: list[_Person]
     metadata: dict = {"index_fields": []}
 
 
 class _TransparentDirectory(DataPoint):
-    people: List[_Person]
+    people: list[_Person]
     metadata: dict = {"index_fields": [], "transparent": True}
 
 
@@ -563,3 +564,81 @@ async def test_chunk_attachment_reaches_integration_by_keyword_only(
     assert mock_integrate.await_args.kwargs["chunk_attachment"] == "all"
     # It must never reach the LLM call, which swallows unknown kwargs silently.
     assert "chunk_attachment" not in mock_extract.await_args.kwargs
+
+
+# --- temporal hints (SDK-827) ---------------------------------------------
+
+
+def _document_chunk(document, text):
+    from uuid import uuid4
+
+    from cognee.modules.chunking.models import DocumentChunk
+
+    return DocumentChunk(
+        id=uuid4(),
+        text=text,
+        chunk_size=len(text.split()),
+        chunk_index=0,
+        cut_type="paragraph_end",
+        is_part_of=document,
+    )
+
+
+@pytest.mark.asyncio
+@patch.object(egd_module, "integrate_chunk_graphs", new_callable=AsyncMock)
+@patch.object(egd_module, "extract_content_graph", new_callable=AsyncMock)
+async def test_temporal_hints_reach_extraction_in_document_order(mock_extract, mock_integrate):
+    from uuid import uuid4
+
+    from cognee.modules.data.processing.document_types import TextDocument
+
+    mock_extract.return_value = KnowledgeGraph(nodes=[], edges=[])
+    mock_integrate.side_effect = lambda chunks, *args, **kwargs: chunks
+    document = TextDocument(
+        id=uuid4(), name="d", raw_data_location="d", external_metadata=None, mime_type="text/plain"
+    )
+    first = _document_chunk(document, "On 26 April 1986 the reactor exploded.")
+    second = _document_chunk(document, "The following night of 27 April, engineers worked.")
+
+    await extract_graph_from_data([first, second], KnowledgeGraph)
+
+    hints_by_text = {
+        call.args[0]: call.kwargs["temporal_hints"] for call in mock_extract.call_args_list
+    }
+    assert hints_by_text[first.text] == []
+    assert len(hints_by_text[second.text]) == 1
+    assert "1986-04-27" in hints_by_text[second.text][0]
+    assert all(call.kwargs["custom_prompt"] is None for call in mock_extract.call_args_list)
+
+
+@pytest.mark.asyncio
+async def test_default_prompt_renders_hints_and_custom_prompt_is_verbatim():
+    ecg = importlib.import_module(
+        "cognee.infrastructure.llm.extraction.knowledge_graph.extract_content_graph"
+    )
+
+    captured = []
+
+    async def fake_llm(content, system_prompt, response_model, **kwargs):
+        captured.append(system_prompt)
+        return KnowledgeGraph(nodes=[], edges=[])
+
+    with patch.object(ecg.LLMGateway, "acreate_structured_output", side_effect=fake_llm):
+        await ecg.extract_content_graph("text", KnowledgeGraph)
+        await ecg.extract_content_graph(
+            "text",
+            KnowledgeGraph,
+            temporal_hints=['- "27 April" -> 1986-04-27 (inferred from context)'],
+        )
+        await ecg.extract_content_graph(
+            "text", KnowledgeGraph, custom_prompt="MINE", temporal_hints=["- ignored"]
+        )
+
+    plain, hinted, custom = captured
+    # The rule about hints is always in the prompt; the block itself only when there are hints.
+    assert "TEMPORAL_NORMALIZATION_HINTS:" not in plain
+    assert '"Timestamp"' in plain
+    assert hinted.startswith(plain.rstrip())
+    assert "TEMPORAL_NORMALIZATION_HINTS:" in hinted
+    assert '- "27 April" -> 1986-04-27 (inferred from context)' in hinted
+    assert custom == "MINE"

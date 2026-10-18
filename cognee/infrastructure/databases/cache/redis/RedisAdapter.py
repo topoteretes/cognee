@@ -73,11 +73,11 @@ class RedisAdapter(CacheDBInterface):
             logger.info(f"Successfully connected to Redis at {host}:{port}")
 
         except (redis.ConnectionError, redis.TimeoutError) as e:
-            error_msg = f"Failed to connect to Redis at {host}:{port}: {str(e)}"
+            error_msg = f"Failed to connect to Redis at {host}:{port}: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
         except Exception as e:
-            error_msg = f"Unexpected error initializing Redis adapter: {str(e)}"
+            error_msg = f"Unexpected error initializing Redis adapter: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
@@ -87,7 +87,7 @@ class RedisAdapter(CacheDBInterface):
             self.sync_redis.ping()
         except (redis.ConnectionError, redis.TimeoutError) as e:
             raise CacheConnectionError(
-                f"Cannot connect to Redis at {self.host}:{self.port}: {str(e)}"
+                f"Cannot connect to Redis at {self.host}:{self.port}: {e!s}"
             ) from e
 
     @staticmethod
@@ -314,11 +314,11 @@ class RedisAdapter(CacheDBInterface):
             await self.async_redis.rpush(session_key, json.dumps(qa_entry))
             await self._apply_session_ttl(session_key)
         except (redis.ConnectionError, redis.TimeoutError) as e:
-            error_msg = f"Redis connection error while adding Q&A: {str(e)}"
+            error_msg = f"Redis connection error while adding Q&A: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
         except Exception as e:
-            error_msg = f"Unexpected error while adding Q&A to Redis: {str(e)}"
+            error_msg = f"Unexpected error while adding Q&A to Redis: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
@@ -405,13 +405,13 @@ class RedisAdapter(CacheDBInterface):
             await self._apply_session_ttl(session_key)
             return True
         except (redis.ConnectionError, redis.TimeoutError) as e:
-            error_msg = f"Redis connection error while updating Q&A: {str(e)}"
+            error_msg = f"Redis connection error while updating Q&A: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
         except SessionQAEntryValidationError:
             raise
         except Exception as e:
-            error_msg = f"Unexpected error while updating Q&A in Redis: {str(e)}"
+            error_msg = f"Unexpected error while updating Q&A in Redis: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
@@ -431,13 +431,13 @@ class RedisAdapter(CacheDBInterface):
             await self._apply_session_ttl(session_key)
             return True
         except (redis.ConnectionError, redis.TimeoutError) as e:
-            error_msg = f"Redis connection error while clearing feedback: {str(e)}"
+            error_msg = f"Redis connection error while clearing feedback: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
         except SessionQAEntryValidationError:
             raise
         except Exception as e:
-            error_msg = f"Unexpected error while clearing feedback: {str(e)}"
+            error_msg = f"Unexpected error while clearing feedback: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
@@ -458,11 +458,11 @@ class RedisAdapter(CacheDBInterface):
                 await self._apply_session_ttl(session_key)
             return True
         except (redis.ConnectionError, redis.TimeoutError) as e:
-            error_msg = f"Redis connection error while deleting Q&A: {str(e)}"
+            error_msg = f"Redis connection error while deleting Q&A: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
         except Exception as e:
-            error_msg = f"Unexpected error while deleting Q&A from Redis: {str(e)}"
+            error_msg = f"Unexpected error while deleting Q&A from Redis: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
@@ -481,11 +481,11 @@ class RedisAdapter(CacheDBInterface):
             return (deleted_sessions + deleted_traces + deleted_context) > 0
 
         except (redis.ConnectionError, redis.TimeoutError) as e:
-            error_msg = f"Redis connection error while deleting session: {str(e)}"
+            error_msg = f"Redis connection error while deleting session: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
         except Exception as e:
-            error_msg = f"Unexpected error while deleting session from Redis: {str(e)}"
+            error_msg = f"Unexpected error while deleting session from Redis: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
@@ -497,11 +497,11 @@ class RedisAdapter(CacheDBInterface):
                 return value.decode("utf-8")
             return value
         except (redis.ConnectionError, redis.TimeoutError) as e:
-            error_msg = f"Redis connection error while getting value: {str(e)}"
+            error_msg = f"Redis connection error while getting value: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
         except Exception as e:
-            error_msg = f"Unexpected error while getting value from Redis: {str(e)}"
+            error_msg = f"Unexpected error while getting value from Redis: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
@@ -512,11 +512,11 @@ class RedisAdapter(CacheDBInterface):
             if ttl:
                 await self.async_redis.expire(key, ttl)
         except (redis.ConnectionError, redis.TimeoutError) as e:
-            error_msg = f"Redis connection error while setting value: {str(e)}"
+            error_msg = f"Redis connection error while setting value: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
         except Exception as e:
-            error_msg = f"Unexpected error while setting value in Redis: {str(e)}"
+            error_msg = f"Unexpected error while setting value in Redis: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
@@ -525,11 +525,11 @@ class RedisAdapter(CacheDBInterface):
         try:
             await self.async_redis.delete(key)
         except (redis.ConnectionError, redis.TimeoutError) as e:
-            error_msg = f"Redis connection error while deleting value: {str(e)}"
+            error_msg = f"Redis connection error while deleting value: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
         except Exception as e:
-            error_msg = f"Unexpected error while deleting value from Redis: {str(e)}"
+            error_msg = f"Unexpected error while deleting value from Redis: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
@@ -564,11 +564,11 @@ class RedisAdapter(CacheDBInterface):
             await self.async_redis.rpush(trace_key, json.dumps(trace_entry))
             await self._apply_session_ttl(trace_key)
         except (redis.ConnectionError, redis.TimeoutError) as e:
-            error_msg = f"Redis connection error while appending agent trace step: {str(e)}"
+            error_msg = f"Redis connection error while appending agent trace step: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
         except Exception as e:
-            error_msg = f"Unexpected error while appending agent trace step to Redis: {str(e)}"
+            error_msg = f"Unexpected error while appending agent trace step to Redis: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
@@ -605,11 +605,11 @@ class RedisAdapter(CacheDBInterface):
             await self.async_redis.rpush(context_key, json.dumps(entry_dump))
             await self._apply_session_ttl(context_key)
         except (redis.ConnectionError, redis.TimeoutError) as e:
-            error_msg = f"Redis connection error while adding session context: {str(e)}"
+            error_msg = f"Redis connection error while adding session context: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
         except Exception as e:
-            error_msg = f"Unexpected error while adding session context to Redis: {str(e)}"
+            error_msg = f"Unexpected error while adding session context to Redis: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
@@ -633,11 +633,11 @@ class RedisAdapter(CacheDBInterface):
                     return True
             return False
         except (redis.ConnectionError, redis.TimeoutError) as e:
-            error_msg = f"Redis connection error while updating session context: {str(e)}"
+            error_msg = f"Redis connection error while updating session context: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
         except Exception as e:
-            error_msg = f"Unexpected error while updating session context in Redis: {str(e)}"
+            error_msg = f"Unexpected error while updating session context in Redis: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
@@ -656,13 +656,11 @@ class RedisAdapter(CacheDBInterface):
                 await self._apply_session_ttl(context_key)
             return True
         except (redis.ConnectionError, redis.TimeoutError) as e:
-            error_msg = f"Redis connection error while deleting session context entry: {str(e)}"
+            error_msg = f"Redis connection error while deleting session context entry: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
         except Exception as e:
-            error_msg = (
-                f"Unexpected error while deleting session context entry from Redis: {str(e)}"
-            )
+            error_msg = f"Unexpected error while deleting session context entry from Redis: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
@@ -672,11 +670,11 @@ class RedisAdapter(CacheDBInterface):
             context_key = self._session_context_key(user_id, session_id)
             return (await self.async_redis.delete(context_key)) > 0
         except (redis.ConnectionError, redis.TimeoutError) as e:
-            error_msg = f"Redis connection error while deleting session context: {str(e)}"
+            error_msg = f"Redis connection error while deleting session context: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
         except Exception as e:
-            error_msg = f"Unexpected error while deleting session context from Redis: {str(e)}"
+            error_msg = f"Unexpected error while deleting session context from Redis: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
@@ -688,11 +686,11 @@ class RedisAdapter(CacheDBInterface):
             await self.async_redis.flushdb()
 
         except (redis.ConnectionError, redis.TimeoutError) as e:
-            error_msg = f"Redis connection error while pruning: {str(e)}"
+            error_msg = f"Redis connection error while pruning: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
         except Exception as e:
-            error_msg = f"Unexpected error while pruning Redis: {str(e)}"
+            error_msg = f"Unexpected error while pruning Redis: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
@@ -722,11 +720,11 @@ class RedisAdapter(CacheDBInterface):
                 await self.async_redis.expire(usage_logs_key, ttl)
 
         except (redis.ConnectionError, redis.TimeoutError) as e:
-            error_msg = f"Redis connection error while logging usage: {str(e)}"
+            error_msg = f"Redis connection error while logging usage: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
         except Exception as e:
-            error_msg = f"Unexpected error while logging usage to Redis: {str(e)}"
+            error_msg = f"Unexpected error while logging usage to Redis: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
@@ -746,11 +744,11 @@ class RedisAdapter(CacheDBInterface):
             entries = await self.async_redis.lrange(usage_logs_key, -limit, -1)
             return [json.loads(e) for e in reversed(entries)] if entries else []
         except (redis.ConnectionError, redis.TimeoutError) as e:
-            error_msg = f"Redis connection error while retrieving usage logs: {str(e)}"
+            error_msg = f"Redis connection error while retrieving usage logs: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
         except Exception as e:
-            error_msg = f"Unexpected error while retrieving usage logs from Redis: {str(e)}"
+            error_msg = f"Unexpected error while retrieving usage logs from Redis: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
@@ -759,4 +757,4 @@ class RedisAdapter(CacheDBInterface):
         try:
             await self.async_redis.aclose()
         except Exception as e:
-            logger.debug("Error closing Redis async connection: %s", e)
+            logger.debug("Error closing Redis async connection: %s", e, exc_info=True)

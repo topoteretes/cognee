@@ -1,16 +1,17 @@
 from uuid import UUID
-from typing import Dict, List, Tuple
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cognee.infrastructure.databases.relational import with_async_session
 from cognee.infrastructure.engine.models.DataPoint import DataPoint
+
 from .GraphRelationshipLedger import GraphRelationshipLedger
 
 
 @with_async_session
 async def record_data_in_legacy_ledger(
-    nodes: List[DataPoint],
-    edges: List[Tuple[UUID, UUID, str, Dict]],
+    nodes: list[DataPoint],
+    edges: list[tuple[UUID, UUID, str, dict]],
     session: AsyncSession,
 ) -> None:
     relationships = [

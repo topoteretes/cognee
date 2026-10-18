@@ -1,10 +1,10 @@
 import argparse
 import asyncio
 
-from cognee.cli.reference import SupportsCliCommand
-from cognee.cli import DEFAULT_DOCS_URL
 import cognee.cli.echo as fmt
+from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.cli.reference import SupportsCliCommand
 
 
 class EvalCommand(SupportsCliCommand):
@@ -57,7 +57,7 @@ Once a LongMemEval adapter is registered in the benchmark registry, run it with:
                 try:
                     return await run_eval(config)
                 except Exception as e:
-                    raise CliCommandInnerException(f"Failed to run eval: {str(e)}") from e
+                    raise CliCommandInnerException(f"Failed to run eval: {e!s}") from e
 
             result = asyncio.run(_run())
 
@@ -68,4 +68,4 @@ Once a LongMemEval adapter is registered in the benchmark registry, run it with:
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
                 raise CliCommandException(str(e), error_code=1) from e
-            raise CliCommandException(f"Error during evaluation: {str(e)}", error_code=1) from e
+            raise CliCommandException(f"Error during evaluation: {e!s}", error_code=1) from e

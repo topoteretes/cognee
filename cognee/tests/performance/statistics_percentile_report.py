@@ -20,9 +20,8 @@ import subprocess
 import sys
 import tempfile
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-
 
 BENCH_SCRIPT = (Path(__file__).parent / "statistics_percentile" / "bench_cognee.py").resolve()
 RESULTS_DIR = Path(__file__).parent / "results"
@@ -88,7 +87,7 @@ def run_single(run_num: int, total: int, extra_args: list[str]) -> dict:
     print(f"{'=' * 60}\n")
 
     t0 = time.time()
-    result = subprocess.run(cmd, text=True, cwd=str(COGNEE_DIR))
+    result = subprocess.run(cmd, text=True, cwd=str(COGNEE_DIR), check=False)
     wall = time.time() - t0
 
     # A non-zero exit with results present is a FAILED RUN (the bench exits 1
@@ -175,7 +174,7 @@ def print_report(stats: dict, num_runs: int, config: dict, runs: list[dict]):
 
 
 def generate_html(stats: dict, num_runs: int, config: dict, runs: list[dict], path: Path):
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     pct_keys = ["min", "p50", "p75", "p90", "p95", "p99", "max", "mean"]
 
     # Build table rows

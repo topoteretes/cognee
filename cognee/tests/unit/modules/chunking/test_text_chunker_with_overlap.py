@@ -1,9 +1,10 @@
 """Unit tests for TextChunkerWithOverlap overlap behavior."""
 
 import sys
-import pytest
-from uuid import uuid4
 from unittest.mock import patch
+from uuid import uuid4
+
+import pytest
 
 from cognee.modules.chunking.text_chunker_with_overlap import TextChunkerWithOverlap
 from cognee.modules.data.processing.document_types import Document

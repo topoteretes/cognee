@@ -1,18 +1,23 @@
 import asyncio
-from typing import Any, AsyncIterable, AsyncGenerator, Callable, Dict, Union, Awaitable
-from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted, PipelineRunErrored
-from cognee.modules.pipelines.queues.pipeline_run_info_queues import push_to_queue
-from cognee.modules.users.methods.get_default_user import get_default_user
+from collections.abc import AsyncGenerator, AsyncIterable, Awaitable, Callable
+from typing import Any
+
 from cognee.modules.data.methods.get_authorized_existing_datasets import (
     get_authorized_existing_datasets,
 )
+from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted, PipelineRunErrored
+from cognee.modules.pipelines.queues.pipeline_run_info_queues import push_to_queue
+from cognee.modules.users.methods.get_default_user import get_default_user
+from cognee.shared.logging_utils import get_logger
 
-AsyncGenLike = Union[
-    AsyncIterable[Any],
-    AsyncGenerator[Any, None],
-    Callable[..., AsyncIterable[Any]],
-    Callable[..., AsyncGenerator[Any, None]],
-]
+logger = get_logger("pipeline_execution_mode")
+
+AsyncGenLike = (
+    AsyncIterable[Any]
+    | AsyncGenerator[Any, None]
+    | Callable[..., AsyncIterable[Any]]
+    | Callable[..., AsyncGenerator[Any, None]]
+)
 
 # Strong refs for fire-and-forget background pipeline tasks. The event loop only
 # keeps weak references to tasks, so without anchoring here Python's gc can collect
@@ -21,7 +26,7 @@ AsyncGenLike = Union[
 _BACKGROUND_PIPELINE_TASKS: set[asyncio.Task] = set()
 
 
-async def run_pipeline_blocking(pipeline: AsyncGenLike, **params) -> Dict[str, Any]:
+async def run_pipeline_blocking(pipeline: AsyncGenLike, **params) -> dict[str, Any]:
     """
     Execute a pipeline synchronously (blocking until all results are consumed).
 
@@ -39,7 +44,7 @@ async def run_pipeline_blocking(pipeline: AsyncGenLike, **params) -> Dict[str, A
     """
     agen = pipeline(**params) if callable(pipeline) else pipeline
 
-    total_run_info: Dict[str, Any] = {}
+    total_run_info: dict[str, Any] = {}
 
     async for run_info in agen:
         dataset_id = getattr(run_info, "dataset_id", None)
@@ -54,7 +59,7 @@ async def run_pipeline_blocking(pipeline: AsyncGenLike, **params) -> Dict[str, A
 async def run_pipeline_as_background_process(
     pipeline: AsyncGenLike,
     **params,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Execute one or more pipelines as background tasks.
 
@@ -88,36 +93,39 @@ async def run_pipeline_as_background_process(
 
     pipeline_run_started_info = {}
 
-    async def handle_rest_of_the_run(pipeline_list):
-        # Execute all provided pipelines one by one to avoid database write conflicts
-        # TODO: Convert to async gather task instead of for loop when Queue mechanism for database is created
-        for pipeline in pipeline_list:
-            while True:
+    async def close_runs(pipeline_list):
+        for pipeline_run in pipeline_list:
+            close = getattr(pipeline_run, "aclose", None)
+            if close is not None:
                 try:
-                    pipeline_run_info = await anext(pipeline)
+                    await close()
+                except Exception:
+                    logger.exception("Failed to close a background pipeline")
+
+    async def handle_rest_of_the_run(pipeline_list):
+        try:
+            for pipeline_run in pipeline_list:
+                async for pipeline_run_info in pipeline_run:
                     push_to_queue(pipeline_run_info.pipeline_run_id, pipeline_run_info)
-                except StopAsyncIteration:
-                    break
+        finally:
+            await close_runs(pipeline_list)
 
-    # Start all pipelines to get started status
+    # Every primed generator owns a run and must be closed if a later setup fails.
     pipeline_list = []
-    for dataset in datasets:
-        call_params = dict(params)
-        if "datasets" in call_params:
-            call_params["datasets"] = dataset
-
-        pipeline_run = pipeline(**call_params) if callable(pipeline) else pipeline
-
-        # Save dataset Pipeline run started info
-        run_info = await anext(pipeline_run)
-        pipeline_run_started_info[run_info.dataset_id] = run_info
-
-        if pipeline_run_started_info[run_info.dataset_id].payload:
-            # Remove payload info to avoid serialization
-            # TODO: Handle payload serialization
-            pipeline_run_started_info[run_info.dataset_id].payload = []
-
-        pipeline_list.append(pipeline_run)
+    try:
+        for dataset in datasets:
+            call_params = dict(params)
+            if "datasets" in call_params:
+                call_params["datasets"] = dataset
+            pipeline_run = pipeline(**call_params) if callable(pipeline) else pipeline
+            pipeline_list.append(pipeline_run)
+            run_info = await anext(pipeline_run)
+            pipeline_run_started_info[run_info.dataset_id] = run_info
+            if run_info.payload:
+                run_info.payload = []
+    except BaseException:
+        await close_runs(pipeline_list)
+        raise
 
     # Send all started pipelines to execute one by one in background
     task = asyncio.create_task(handle_rest_of_the_run(pipeline_list=pipeline_list))
@@ -129,7 +137,7 @@ async def run_pipeline_as_background_process(
 
 def get_pipeline_executor(
     run_in_background: bool = False,
-) -> Callable[..., Awaitable[Dict[str, Any]]]:
+) -> Callable[..., Awaitable[dict[str, Any]]]:
     """
     Return the appropriate pipeline runner.
 

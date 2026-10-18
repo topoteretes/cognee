@@ -7,8 +7,8 @@ are monkeypatched so each test asserts exactly which of them fire per mode.
 
 import asyncio
 import importlib
+from collections.abc import AsyncIterator
 from types import SimpleNamespace
-from typing import AsyncIterator
 from uuid import uuid4
 
 import pytest

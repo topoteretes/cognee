@@ -60,6 +60,47 @@ def test_sqlite_backend_returns_sql_adapter_with_aiosqlite_url(tmp_path):
     assert engine.db_uri == f"sqlite+aiosqlite:///{tmp_path}/cache.db"
 
 
+def test_turso_backend_returns_sql_adapter_with_turso_url(tmp_path):
+    pytest.importorskip("turso", reason="pyturso not installed")
+    fake_relational = types.SimpleNamespace(db_path=str(tmp_path), db_provider="turso")
+
+    with patch(f"{RELATIONAL_CONFIG_MOD}.get_relational_config", return_value=fake_relational):
+        engine = _create_engine("turso")
+
+    from cognee.infrastructure.databases.cache.sql.SqlCacheAdapter import SqlCacheAdapter
+
+    assert isinstance(engine, SqlCacheAdapter)
+    assert engine.db_uri == f"sqlite+cognee_turso:///{tmp_path}/cache.db"
+    assert engine.engine.dialect.driver == "cognee_turso"
+
+
+def test_turso_backend_on_s3_raises():
+    """Same rule as sqlite: a file-backed cache cannot live on an S3 system root."""
+    fake_relational = types.SimpleNamespace(
+        db_path="s3://bucket/cognee/system/databases", db_provider="turso"
+    )
+
+    with (
+        patch(f"{RELATIONAL_CONFIG_MOD}.get_relational_config", return_value=fake_relational),
+        pytest.raises(CacheConnectionError, match="CACHE_BACKEND=turso cannot store cache.db"),
+    ):
+        _create_engine("turso", explicit=True)
+
+
+def test_turso_backend_without_driver_raises_actionable_error(tmp_path):
+    """Without the turso extra the backend fails loudly, naming the extra to install."""
+    import sys
+
+    fake_relational = types.SimpleNamespace(db_path=str(tmp_path), db_provider="turso")
+
+    with (
+        patch(f"{RELATIONAL_CONFIG_MOD}.get_relational_config", return_value=fake_relational),
+        patch.dict(sys.modules, {"turso": None}),
+        pytest.raises(CacheConnectionError, match="requires the turso extra"),
+    ):
+        _create_engine("turso", explicit=True)
+
+
 def test_sqlite_backend_prefers_explicit_cache_db_url(tmp_path):
     explicit_url = f"sqlite+aiosqlite:///{tmp_path}/custom_cache.db"
 
@@ -103,17 +144,21 @@ def test_explicitly_chosen_sqlite_backend_on_s3_still_raises():
         db_path="s3://bucket/cognee/system/databases", db_provider="sqlite"
     )
 
-    with patch(f"{RELATIONAL_CONFIG_MOD}.get_relational_config", return_value=fake_relational):
-        with pytest.raises(CacheConnectionError, match="cannot store cache.db on S3"):
-            _create_engine("sqlite", explicit=True)
+    with (
+        patch(f"{RELATIONAL_CONFIG_MOD}.get_relational_config", return_value=fake_relational),
+        pytest.raises(CacheConnectionError, match="cannot store cache.db on S3"),
+    ):
+        _create_engine("sqlite", explicit=True)
 
 
 def test_postgres_backend_without_url_or_postgres_relational_raises():
     fake_relational = types.SimpleNamespace(db_provider="sqlite")
 
-    with patch(f"{RELATIONAL_CONFIG_MOD}.get_relational_config", return_value=fake_relational):
-        with pytest.raises(CacheConnectionError, match="CACHE_DB_URL or DB_PROVIDER=postgres"):
-            _create_engine("postgres")
+    with (
+        patch(f"{RELATIONAL_CONFIG_MOD}.get_relational_config", return_value=fake_relational),
+        pytest.raises(CacheConnectionError, match="CACHE_DB_URL or DB_PROVIDER=postgres"),
+    ):
+        _create_engine("postgres")
 
 
 def test_postgres_backend_falls_back_to_relational_postgres_settings():

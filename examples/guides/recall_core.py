@@ -1,4 +1,14 @@
+"""Show the simplest recall call: an auto-routed query with no query_type over remembered facts.
+
+Three facts are remembered, then recall() picks the search strategy itself and the answer entries
+are printed one per line.
+
+Requires: LLM_API_KEY.
+Run: uv run python examples/guides/recall_core.py
+"""
+
 import asyncio
+
 import cognee
 
 

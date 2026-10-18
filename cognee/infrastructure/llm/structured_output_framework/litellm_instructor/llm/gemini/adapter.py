@@ -15,13 +15,9 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
-from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
-    get_instructor_mode,
-)
 from cognee.infrastructure.llm.exceptions import (
     ContentPolicyFilterError,
-    LLMPaymentRequiredError,
-    is_budget_exhausted_error,
+    raise_if_budget_exhausted,
 )
 from cognee.infrastructure.llm.retry_config import (
     llm_retry_condition,
@@ -29,6 +25,9 @@ from cognee.infrastructure.llm.retry_config import (
 )
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
     GenericAPIAdapter,
+)
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
+    get_instructor_mode,
 )
 from cognee.modules.observability.get_observe import get_observe
 from cognee.shared.logging_utils import get_logger
@@ -69,6 +68,7 @@ class GeminiAdapter(GenericAPIAdapter):
         endpoint: str | None = None,
         api_version: str | None = None,
         transcription_model: str | None = None,
+        image_transcribe_model: str | None = None,
         instructor_mode: str | None = None,
         fallback_model: str | None = None,
         fallback_api_key: str | None = None,
@@ -83,6 +83,7 @@ class GeminiAdapter(GenericAPIAdapter):
             endpoint=endpoint,
             api_version=api_version,
             transcription_model=transcription_model,
+            image_transcribe_model=image_transcribe_model,
             fallback_model=fallback_model,
             fallback_api_key=fallback_api_key,
             fallback_endpoint=fallback_endpoint,
@@ -160,9 +161,19 @@ class GeminiAdapter(GenericAPIAdapter):
                 isinstance(error, InstructorRetryException)
                 and "content management policy" not in str(error).lower()
             ):
-                raise error
+                # No failover exists for this shape: classify here, since the
+                # handler further down is unreachable once this clause matches.
+                raise_if_budget_exhausted(error)
+                raise
 
             if not (self.fallback_model and self.fallback_api_key and self.fallback_endpoint):
+                # Nothing left to try, so classify here rather than at the top of
+                # the clause: a policy-worded InstructorRetryException that also
+                # carries budget wording (the model's partial completion is
+                # rendered into str(error)) would otherwise be classified before
+                # ever reaching the fallback attempt below, silently dropping a
+                # failover a differently-keyed fallback could still satisfy.
+                raise_if_budget_exhausted(error)
                 raise ContentPolicyFilterError(
                     f"The provided input contains content that is not aligned with our content policy: {text_input}"
                 )
@@ -192,16 +203,20 @@ class GeminiAdapter(GenericAPIAdapter):
                 ContentPolicyViolationError,
                 InstructorRetryException,
             ) as error:
+                # The fallback capped out too, and there is nothing left to try,
+                # so classify unconditionally here rather than only in one branch.
+                raise_if_budget_exhausted(error)
+
                 if (
                     isinstance(error, InstructorRetryException)
                     and "content management policy" not in str(error).lower()
                 ):
-                    raise error
+                    raise
                 else:
                     raise ContentPolicyFilterError(
                         f"The provided input contains content that is not aligned with our content policy: {text_input}"
                     )
         except Exception as e:
-            if is_budget_exhausted_error(e):
-                raise LLMPaymentRequiredError() from e
+            # Same detail-carrying message as the wrapped-error paths above.
+            raise_if_budget_exhausted(e)
             raise

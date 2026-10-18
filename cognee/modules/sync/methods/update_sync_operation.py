@@ -1,12 +1,13 @@
 import asyncio
-from typing import Optional, List
 from datetime import datetime, timezone
+
 from sqlalchemy import select
-from sqlalchemy.exc import SQLAlchemyError, DisconnectionError, OperationalError, TimeoutError
-from cognee.modules.sync.models import SyncOperation, SyncStatus
+from sqlalchemy.exc import DisconnectionError, OperationalError, SQLAlchemyError, TimeoutError
+
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.utils.calculate_backoff import calculate_backoff
+from cognee.modules.sync.models import SyncOperation, SyncStatus
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("sync.db_operations")
 
@@ -38,19 +39,19 @@ async def _retry_db_operation(operation_func, run_id: str, max_retries: int = 3)
 
             if attempt >= max_retries:
                 logger.error(
-                    f"Database operation failed after {max_retries} attempts for run_id {run_id}: {str(e)}"
+                    f"Database operation failed after {max_retries} attempts for run_id {run_id}: {e!s}"
                 )
                 break
 
             backoff_time = calculate_backoff(attempt - 1)  # calculate_backoff is 0-indexed
             logger.warning(
-                f"Database operation failed for run_id {run_id}, retrying in {backoff_time:.2f}s (attempt {attempt}/{max_retries}): {str(e)}"
+                f"Database operation failed for run_id {run_id}, retrying in {backoff_time:.2f}s (attempt {attempt}/{max_retries}): {e!s}"
             )
             await asyncio.sleep(backoff_time)
 
         except Exception as e:
             # Non-transient errors should not be retried
-            logger.error(f"Non-retryable database error for run_id {run_id}: {str(e)}")
+            logger.error(f"Non-retryable database error for run_id {run_id}: {e!s}")
             raise
 
     # If we get here, all retries failed
@@ -59,21 +60,21 @@ async def _retry_db_operation(operation_func, run_id: str, max_retries: int = 3)
 
 async def update_sync_operation(
     run_id: str,
-    status: Optional[SyncStatus] = None,
-    progress_percentage: Optional[int] = None,
-    records_downloaded: Optional[int] = None,
-    total_records_to_sync: Optional[int] = None,
-    total_records_to_download: Optional[int] = None,
-    total_records_to_upload: Optional[int] = None,
-    records_uploaded: Optional[int] = None,
-    bytes_downloaded: Optional[int] = None,
-    bytes_uploaded: Optional[int] = None,
-    dataset_sync_hashes: Optional[dict] = None,
-    error_message: Optional[str] = None,
-    retry_count: Optional[int] = None,
-    started_at: Optional[datetime] = None,
-    completed_at: Optional[datetime] = None,
-) -> Optional[SyncOperation]:
+    status: SyncStatus | None = None,
+    progress_percentage: int | None = None,
+    records_downloaded: int | None = None,
+    total_records_to_sync: int | None = None,
+    total_records_to_download: int | None = None,
+    total_records_to_upload: int | None = None,
+    records_uploaded: int | None = None,
+    bytes_downloaded: int | None = None,
+    bytes_uploaded: int | None = None,
+    dataset_sync_hashes: dict | None = None,
+    error_message: str | None = None,
+    retry_count: int | None = None,
+    started_at: datetime | None = None,
+    completed_at: datetime | None = None,
+) -> SyncOperation | None:
     """
     Update a sync operation record with new status/progress information.
 
@@ -192,16 +193,12 @@ async def update_sync_operation(
                 logger.debug(f"Successfully updated sync operation {run_id}")
                 return sync_operation
 
-            except SQLAlchemyError as e:
-                logger.error(
-                    f"Database error updating sync operation {run_id}: {str(e)}", exc_info=True
-                )
+            except SQLAlchemyError:
+                logger.exception(f"Database error updating sync operation {run_id}")
                 await session.rollback()
                 raise
-            except Exception as e:
-                logger.error(
-                    f"Unexpected error updating sync operation {run_id}: {str(e)}", exc_info=True
-                )
+            except Exception:
+                logger.exception(f"Unexpected error updating sync operation {run_id}")
                 await session.rollback()
                 raise
 
@@ -209,7 +206,7 @@ async def update_sync_operation(
     return await _retry_db_operation(_perform_update, run_id)
 
 
-async def mark_sync_started(run_id: str) -> Optional[SyncOperation]:
+async def mark_sync_started(run_id: str) -> SyncOperation | None:
     """Convenience method to mark a sync operation as started."""
     return await update_sync_operation(
         run_id=run_id, status=SyncStatus.IN_PROGRESS, started_at=datetime.now(timezone.utc)
@@ -222,8 +219,8 @@ async def mark_sync_completed(
     records_uploaded: int = 0,
     bytes_downloaded: int = 0,
     bytes_uploaded: int = 0,
-    dataset_sync_hashes: Optional[dict] = None,
-) -> Optional[SyncOperation]:
+    dataset_sync_hashes: dict | None = None,
+) -> SyncOperation | None:
     """Convenience method to mark a sync operation as completed successfully."""
     return await update_sync_operation(
         run_id=run_id,
@@ -238,7 +235,7 @@ async def mark_sync_completed(
     )
 
 
-async def mark_sync_failed(run_id: str, error_message: str) -> Optional[SyncOperation]:
+async def mark_sync_failed(run_id: str, error_message: str) -> SyncOperation | None:
     """Convenience method to mark a sync operation as failed."""
     return await update_sync_operation(
         run_id=run_id,

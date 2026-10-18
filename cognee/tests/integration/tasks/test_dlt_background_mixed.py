@@ -9,6 +9,7 @@ pins it end-to-end. Offline: LLM and embeddings are mocked.
 """
 
 import asyncio
+import logging
 import pathlib
 from unittest.mock import patch
 
@@ -17,6 +18,7 @@ import pytest_asyncio
 
 import cognee
 from cognee.context_global_variables import graph_db_config, vector_db_config
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingResult
 from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
     LiteLLMEmbeddingEngine,
 )
@@ -26,12 +28,15 @@ from cognee.modules.engine.operations.setup import setup as engine_setup
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunStarted
 from cognee.modules.users.methods import get_default_user
 
+logger = logging.getLogger(__name__)
+
 DATASET = "background_mixed_ds"
 COMPLETION_TIMEOUT_SECONDS = 120
 
 
 async def _mock_embed_text(self, texts):
-    return [[float(len(t) % 7) / 10.0] * self.dimensions for t in texts]
+    vectors = [[float(len(t) % 7) / 10.0] * self.dimensions for t in texts]
+    return EmbeddingResult(vectors=vectors, tokens=0)
 
 
 async def _mock_acreate(text_input, system_prompt, response_model, **kwargs):
@@ -97,7 +102,7 @@ async def clean_env(tmp_path, monkeypatch):
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in clean_env", exc_info=True)
 
 
 def _dlt_source():

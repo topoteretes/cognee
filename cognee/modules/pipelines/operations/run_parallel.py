@@ -1,9 +1,11 @@
-from typing import Any, Callable, Generator, List
 import asyncio
+from collections.abc import Callable, Generator
+from typing import Any
+
 from ..tasks.task import Task
 
 
-def run_tasks_parallel(tasks: List[Task]) -> Callable[[Any], Generator[Any, Any, Any]]:
+def run_tasks_parallel(tasks: list[Task]) -> Callable[[Any], Generator[Any, Any, Any]]:
     async def parallel_run(*args, **kwargs):
         parallel_tasks = [asyncio.create_task(task.run(*args, **kwargs)) for task in tasks]
 

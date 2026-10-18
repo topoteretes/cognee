@@ -14,6 +14,8 @@ from raw graph adapter output. These tests pin the contract:
     already reads.
 """
 
+import json
+
 import pytest
 
 from cognee.modules.visualization.preprocessor import (
@@ -134,6 +136,46 @@ def test_stage_falls_through_to_other_for_unknown_types():
     edges_data = []
     result = preprocess((nodes_data, edges_data))
     assert result.nodes[0]["stage"] == "other"
+
+
+_IDENTITY = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+
+@pytest.mark.parametrize("metadata", [_IDENTITY, json.dumps(_IDENTITY)])
+def test_custom_graph_model_node_with_identity_is_an_entity(metadata):
+    # A custom graph_model node keeps its class name as its type; metadata arrives
+    # as a dict from Ladybug and as a JSON string from Neo4j.
+    nodes_data = [("dana", {"type": "Person", "name": "Dana Kim", "metadata": metadata})]
+    result = preprocess((nodes_data, []))
+    assert result.nodes[0]["stage"] == "entity"
+    assert result.nodes[0]["entity_type"] == "Person"
+
+
+def test_custom_graph_model_node_without_identity_stays_other():
+    # A container root such as CompanyGraph declares no identity.
+    nodes_data = [("root", {"type": "CompanyGraph", "metadata": {"index_fields": []}})]
+    result = preprocess((nodes_data, []))
+    assert result.nodes[0]["stage"] == "other"
+
+
+@pytest.mark.parametrize(
+    "node_type", ["EdgeType", "NodeSet", "Skill", "SkillRun", "SkillImprovementProposal"]
+)
+def test_builtin_types_with_identity_keep_their_stage(node_type):
+    nodes_data = [("n", {"type": node_type, "name": "n", "metadata": _IDENTITY})]
+    result = preprocess((nodes_data, []))
+    assert result.nodes[0]["stage"] == "other"
+
+
+def test_mapped_types_keep_their_mapped_stage_even_with_identity():
+    nodes_data = [
+        ("e", {"type": "Entity", "name": "Alice", "metadata": _IDENTITY}),
+        ("t", {"type": "EntityType", "name": "Person", "metadata": _IDENTITY}),
+        ("s", {"type": "NodeSet", "name": "hr_database", "metadata": {"index_fields": []}}),
+    ]
+    result = preprocess((nodes_data, []))
+    stages = {n["id"]: n["stage"] for n in result.nodes}
+    assert stages == {"e": "entity", "t": "type", "s": "other"}
 
 
 def test_visual_rank_uses_stamped_topological_rank():
@@ -573,7 +615,7 @@ def test_operation_layer_maps_operations_to_present_types():
     feedback_targets = {
         (link["target"], link["effect"])
         for link in schema["operation_links"]
-        if link["source"] == "op:apply_feedback_weights"
+        if link["source"] == "op:feedback_weights"
     }
     assert ("type:Person", "modifies") in feedback_targets
 

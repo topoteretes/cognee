@@ -2,9 +2,9 @@ from collections import OrderedDict
 from threading import Lock
 
 from pydantic_core import PydanticUndefined
+
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.storage.utils import copy_model
-
 
 # Memoize extended-model classes across calls. ``copy_model`` returns a
 # brand-new pydantic subclass on every invocation, and each one attaches

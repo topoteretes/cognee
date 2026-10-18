@@ -26,13 +26,14 @@ from sqlalchemy import select
 import cognee
 from cognee.api.v1.datasets import datasets
 from cognee.context_global_variables import set_database_global_context_variables
-from cognee.infrastructure.locks import dataset_lock
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingResult
 from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
     LiteLLMEmbeddingEngine,
 )
 from cognee.infrastructure.llm import LLMGateway
+from cognee.infrastructure.locks import dataset_lock
 from cognee.modules.data.methods import create_authorized_dataset
 from cognee.modules.engine.operations.setup import setup as setup_cognee
 from cognee.modules.engine.utils import generate_edge_object_id
@@ -71,7 +72,7 @@ def _mock_llm_output(text_input, system_prompt, response_model):
 
 
 async def _fake_embed(self, text):
-    return [[0.0] * (self.dimensions or 8) for _ in text]
+    return EmbeddingResult(vectors=[[0.0] * (self.dimensions or 8) for _ in text], tokens=0)
 
 
 async def _setup(tmp_path):
@@ -89,7 +90,7 @@ async def _ingest():
     d1 = UUID(str(r1.data_ingestion_info[0]["data_id"]))
     d2 = UUID(str(r2.data_ingestion_info[0]["data_id"]))
     cognify_result = await cognee.cognify()
-    dataset_id = UUID(str(list(cognify_result.keys())[0]))
+    dataset_id = UUID(str(next(iter(cognify_result.keys()))))
     return dataset_id, d1, d2
 
 

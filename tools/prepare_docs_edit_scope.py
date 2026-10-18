@@ -10,7 +10,6 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-
 MAX_SOURCE_FILES_TO_INSPECT = 8
 MAX_DOC_FILES_TO_CONSIDER = 5
 

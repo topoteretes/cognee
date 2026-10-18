@@ -95,7 +95,7 @@ class StorageAwareCache:
                 cached_version = (await asyncio.to_thread(f.read)).strip()
                 return cached_version == version_or_hash
         except Exception as e:
-            logger.debug(f"Error checking cache validity: {e}")
+            logger.debug(f"Error checking cache validity: {e}", exc_info=True)
             return False
 
     async def _clear_cache(self, cache_dir: str) -> None:
@@ -103,7 +103,7 @@ class StorageAwareCache:
         try:
             await self.storage_manager.remove_all(cache_dir)
         except Exception as e:
-            logger.debug(f"Error clearing cache directory {cache_dir}: {e}")
+            logger.debug(f"Error clearing cache directory {cache_dir}: {e}", exc_info=True)
 
     async def _check_remote_content_freshness(
         self, url: str, cache_dir: str
@@ -118,13 +118,15 @@ class StorageAwareCache:
             # Make a HEAD request to check headers without downloading
             ssl_context = create_secure_ssl_context()
             connector = aiohttp.TCPConnector(ssl=ssl_context)
-            async with aiohttp.ClientSession(connector=connector) as session:
-                async with session.head(url, timeout=aiohttp.ClientTimeout(total=30)) as response:
-                    response.raise_for_status()
+            async with (
+                aiohttp.ClientSession(connector=connector) as session,
+                session.head(url, timeout=aiohttp.ClientTimeout(total=30)) as response,
+            ):
+                response.raise_for_status()
 
-                    # Try ETag first (most reliable)
-                    etag = response.headers.get("ETag", "").strip('"')
-                    last_modified = response.headers.get("Last-Modified", "")
+                # Try ETag first (most reliable)
+                etag = response.headers.get("ETag", "").strip('"')
+                last_modified = response.headers.get("Last-Modified", "")
 
             # Use ETag if available, otherwise Last-Modified
             remote_identifier = etag if etag else last_modified
@@ -151,7 +153,7 @@ class StorageAwareCache:
                 return False, remote_identifier
 
         except Exception as e:
-            logger.debug(f"Could not check remote freshness: {e}")
+            logger.debug(f"Could not check remote freshness: {e}", exc_info=True)
             return True, None  # Assume fresh if we can't check
 
     async def download_and_extract_zip(
@@ -174,7 +176,7 @@ class StorageAwareCache:
         # Check if already cached and valid
         if not force and await self._is_cache_valid(cache_dir, version_or_hash):
             # Also check if remote content has changed
-            is_fresh, new_identifier = await self._check_remote_content_freshness(url, cache_dir)
+            is_fresh, _new_identifier = await self._check_remote_content_freshness(url, cache_dir)
             if is_fresh:
                 logger.debug(f"Content already cached and fresh for version {version_or_hash}")
                 return cache_dir
@@ -192,17 +194,19 @@ class StorageAwareCache:
         last_modified = ""
         ssl_context = create_secure_ssl_context()
         connector = aiohttp.TCPConnector(ssl=ssl_context)
-        async with aiohttp.ClientSession(connector=connector) as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=60)) as response:
-                response.raise_for_status()
+        async with (
+            aiohttp.ClientSession(connector=connector) as session,
+            session.get(url, timeout=aiohttp.ClientTimeout(total=60)) as response,
+        ):
+            response.raise_for_status()
 
-                # Extract headers before consuming response
-                etag = response.headers.get("ETag", "").strip('"')
-                last_modified = response.headers.get("Last-Modified", "")
+            # Extract headers before consuming response
+            etag = response.headers.get("ETag", "").strip('"')
+            last_modified = response.headers.get("Last-Modified", "")
 
-                # Read the response content
-                async for chunk in response.content.iter_chunked(8192):
-                    zip_content.write(chunk)
+            # Read the response content
+            async for chunk in response.content.iter_chunked(8192):
+                zip_content.write(chunk)
         zip_content.seek(0)
 
         # Extract the archive
@@ -273,7 +277,7 @@ class StorageAwareCache:
                 return full_paths
 
         except Exception as e:
-            logger.debug(f"Error listing files in {directory_path}: {e}")
+            logger.debug(f"Error listing files in {directory_path}: {e}", exc_info=True)
             return []
 
 

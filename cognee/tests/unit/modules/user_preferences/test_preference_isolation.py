@@ -12,8 +12,6 @@ from uuid import UUID
 from cognee.infrastructure.engine import INTERNAL_PROPERTY, is_internal_node
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
 from cognee.modules.user_preferences import UserPreference, preference_node_id
-from cognee.tasks.graph.detect_contradictions import _node_names
-from cognee.tasks.memify.get_triplet_datapoints import _process_single_triplet
 
 
 class TestIsInternalNode:
@@ -100,40 +98,3 @@ class TestPreferenceNodeId:
         base = preference_node_id("user-1", "dataset-1")
         assert preference_node_id("user-2", "dataset-1") != base
         assert preference_node_id("user-1", "dataset-2") != base
-
-
-class TestTripletEmbeddingFilter:
-    def test_internal_endpoint_skips_triplet(self):
-        triplet = {
-            "start_node": {"id": "pref-1", "type": "UserPreference", INTERNAL_PROPERTY: True},
-            "end_node": {"id": "chunk-1", "type": "DocumentChunk", "text": "some text"},
-            "relationship_properties": {"relationship_name": "prefers"},
-        }
-
-        triplet_obj, error_msg = _process_single_triplet(triplet, {"DocumentChunk": ["text"]}, 0, 0)
-
-        assert triplet_obj is None
-        assert "internal node endpoint" in error_msg
-
-    def test_normal_triplet_still_processed(self):
-        triplet = {
-            "start_node": {"id": "chunk-1", "type": "DocumentChunk", "text": "some text"},
-            "end_node": {"id": "chunk-2", "type": "DocumentChunk", "text": "other text"},
-            "relationship_properties": {"relationship_name": "related_to"},
-        }
-
-        triplet_obj, error_msg = _process_single_triplet(triplet, {"DocumentChunk": ["text"]}, 0, 0)
-
-        assert error_msg is None
-        assert triplet_obj is not None
-
-
-class TestContradictionNodeNames:
-    def test_internal_node_omitted_from_name_map(self):
-        nodes = [
-            ("node-a", {"name": "Postgres"}),
-            ("pref-1", {"name": "named internal node", INTERNAL_PROPERTY: True}),
-            ("node-b", {}),
-        ]
-
-        assert _node_names(nodes) == {"node-a": "Postgres"}

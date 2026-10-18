@@ -10,16 +10,16 @@ uses the real storage stack over a real temp file.
 """
 
 import hashlib
-from uuid import uuid4
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 
 import cognee.modules.pipelines.operations.run_tasks_data_item as item_module
 from cognee.modules.ingestion import StoredFile
-from cognee.tasks.ingestion.carried_source import CARRIED_SOURCE_KEY
 from cognee.modules.pipelines.models.DataItemStatus import DataItemStatus
+from cognee.tasks.ingestion.carried_source import CARRIED_SOURCE_KEY
 
 CONTENT = b"pass-through payload, hashed while open"
 
@@ -40,7 +40,6 @@ async def test_passthrough_item_is_hashed_while_its_file_is_open(tmp_path, monke
 
     async def capture_identify(content_hash, user, dataset_id):
         seen["content_hash"] = content_hash
-        return None
 
     monkeypatch.setattr(item_module.ingestion, "identify_data_by_hash", capture_identify)
     # local_path_safety allowlists cognee's own roots; tmp_path is not one.

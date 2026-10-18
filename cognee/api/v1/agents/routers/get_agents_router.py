@@ -1,22 +1,23 @@
-from typing import Literal, Optional
+from typing import Literal
 from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.encoders import jsonable_encoder
+from fastapi_users.exceptions import UserAlreadyExists
 
 from cognee.api.DTO import OutDTO
 from cognee.modules.agents.agent_mode import register_agent, unregister_agent
-from cognee.modules.agents.models import RegisterAgentRequest, UnregisterAgentRequest
 from cognee.modules.agents.create_agent import create_agent
+from cognee.modules.agents.delete_agent import delete_agent
 from cognee.modules.agents.get_agent import get_agent
 from cognee.modules.agents.list_agents import list_agents
-from cognee.modules.agents.delete_agent import delete_agent
+from cognee.modules.agents.models import RegisterAgentRequest, UnregisterAgentRequest
 from cognee.modules.agents.operations import (
     get_agent_connection_detail,
     list_agent_connections,
 )
 from cognee.modules.users.methods.get_authenticated_user import get_authenticated_user
 from cognee.modules.users.models.User import User
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.encoders import jsonable_encoder
-from fastapi_users.exceptions import UserAlreadyExists
 
 RangeLiteral = Literal["24h", "7d", "30d", "all"]
 
@@ -27,7 +28,7 @@ MANAGEMENT_TAG = "agent management"
 class AgentDTO(OutDTO):
     agent_id: UUID
     agent_email: str
-    api_key_label: Optional[str] = None
+    api_key_label: str | None = None
 
 
 class AgentWithApiKeyDTO(OutDTO):
@@ -99,13 +100,13 @@ def get_agents_router() -> APIRouter:
 
     @router.get("/connections", tags=[CONNECTIONS_TAG])
     async def list_agents_connections(
-        agent_id: Optional[UUID] = Query(
+        agent_id: UUID | None = Query(
             None,
             description="Filter connections by agent user ID. "
             "Only returns connections belonging to this specific agent.",
         ),
         range: RangeLiteral = Query("30d"),
-        status_filter: Optional[Literal["active", "inactive", "unknown"]] = Query(
+        status_filter: Literal["active", "inactive", "unknown"] | None = Query(
             None,
             alias="status",
         ),
@@ -145,9 +146,10 @@ def get_agents_router() -> APIRouter:
 
     @router.get("/connections/me", tags=[CONNECTIONS_TAG])
     async def get_my_connection_detail(
-        agent_session_name: Optional[str] = Query(
+        agent_session_name: str | None = Query(
             None,
-            description="Filter by connection name. "
+            description="Filter by connection name. A named lookup also returns inactive "
+            "(unregistered) connections; check agent.status. "
             "Uses the authenticated user's ID as the agent ID.",
         ),
         user: User = Depends(get_authenticated_user),
@@ -155,7 +157,8 @@ def get_agents_router() -> APIRouter:
         """Get my connection detail — GET /api/v1/agents/connections/me.
 
         ## Query Parameters
-        - **agent_session_name** (Optional[str]): Filter by connection name. Uses the authenticated
+        - **agent_session_name** (Optional[str]): Filter by connection name. A named lookup also
+          returns inactive (unregistered) connections; check agent.status. Uses the authenticated
           user's ID as the agent ID.
         """
         response = await get_agent_connection_detail(
@@ -170,9 +173,11 @@ def get_agents_router() -> APIRouter:
     @router.get("/connections/{agent_id}", tags=[CONNECTIONS_TAG])
     async def get_connection_detail(
         agent_id: UUID,
-        agent_session_name: Optional[str] = Query(
+        agent_session_name: str | None = Query(
             None,
-            description="Filter by connection name within the agent's connections.",
+            description="Filter by connection name within the agent's connections. "
+            "A named lookup also returns inactive (unregistered) connections; "
+            "check agent.status.",
         ),
         user: User = Depends(get_authenticated_user),
     ):
@@ -183,7 +188,8 @@ def get_agents_router() -> APIRouter:
 
         ## Query Parameters
         - **agent_session_name** (Optional[str]): Filter by connection name within the agent's
-          connections.
+          connections. A named lookup also returns inactive (unregistered) connections; check
+          agent.status.
         """
         response = await get_agent_connection_detail(
             user=user,

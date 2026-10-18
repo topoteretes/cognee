@@ -52,7 +52,6 @@ the upgrade), so this is cheap: one indexed relational query in the common
 case, per-document work only where forks exist.
 """
 
-from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import select
@@ -80,7 +79,7 @@ logger = get_logger(__name__)
 _IS_PART_OF = "is_part_of"
 
 
-async def _fork_rows(dataset_id: Optional[UUID]) -> list:
+async def _fork_rows(dataset_id: UUID | None) -> list:
     """(legacy_id, canonical_id, dataset_id) triples for this scope's fork rows."""
     engine = get_relational_engine()
     async with engine.get_async_session() as session:
@@ -100,7 +99,7 @@ def _document_chunk_ids(edges: list, document_ids: set) -> dict:
     return chunk_owners
 
 
-async def _update_ledger_references(id_map: dict, dataset_id: Optional[UUID]) -> None:
+async def _update_ledger_references(id_map: dict, dataset_id: UUID | None) -> None:
     """Point ledger slug / edge-endpoint references at the canonical doc id.
 
     Plain column updates — deletion reads rows by (data_id, dataset_id) and
@@ -110,7 +109,8 @@ async def _update_ledger_references(id_map: dict, dataset_id: Optional[UUID]) ->
     """
     from sqlalchemy import update as sql_update
 
-    from cognee.modules.graph.models import Edge as LedgerEdge, Node as LedgerNode
+    from cognee.modules.graph.models import Edge as LedgerEdge
+    from cognee.modules.graph.models import Node as LedgerNode
 
     engine = get_relational_engine()
     async with engine.get_async_session() as session:
@@ -128,7 +128,7 @@ async def _update_ledger_references(id_map: dict, dataset_id: Optional[UUID]) ->
         await session.commit()
 
 
-def _run_id_for_key(snapshot, source_ref_key: str) -> Optional[str]:
+def _run_id_for_key(snapshot, source_ref_key: str) -> str | None:
     """The pipeline run id recorded for this key, so rollback linkage survives."""
     for run_ref in getattr(snapshot, "source_run_refs", None) or []:
         if get_source_ref_key_from_source_run_ref(run_ref) == source_ref_key:
@@ -189,6 +189,7 @@ async def _fast_move_provenance_ladybug(graph_engine, old_key: str, new_key: str
             "rekey_fork_document_ids: fast provenance move unavailable (%s), "
             "using the generic path",
             error,
+            exc_info=True,
         )
         return False
     return True
@@ -295,7 +296,7 @@ async def _rekey_chunk_scoped_provenance(graph_engine, fork_rows: list) -> None:
         except UnsupportedProvenanceCapability:
             return
 
-        def _forked_v2_refs(ref_map: dict) -> dict:
+        def _forked_v2_refs(ref_map: dict, *, dataset_id=dataset_id, id_map=id_map) -> dict:
             """old v2 ref key -> (new v2 ref key, holder ids)."""
             moves: dict = {}
             for holder, refs in ref_map.items():
@@ -351,10 +352,10 @@ class ForkChunkIndexPoint(DataPoint):
     """
 
     text: str
-    document_id: Optional[str] = None
-    document_name: Optional[str] = None
-    chunk_index: Optional[int] = None
-    source_chunk_id: Optional[str] = None
+    document_id: str | None = None
+    document_name: str | None = None
+    chunk_index: int | None = None
+    source_chunk_id: str | None = None
     metadata: dict = {"index_fields": ["text"]}
 
 
@@ -412,7 +413,7 @@ async def _sync_chunk_vector_payloads(
     )
 
 
-async def _keeper_blocked_pairs(fork_rows: list, dataset_id: Optional[UUID]) -> set:
+async def _keeper_blocked_pairs(fork_rows: list, dataset_id: UUID | None) -> set:
     """Old-position ids whose node identity is owned by an UNRELATED live row.
 
     On shared stores (access control off — one graph for every dataset) the
@@ -541,9 +542,9 @@ async def _rekey_graph_nodes(
 
     # Graph last: re-key the document nodes themselves (also updates each
     # node's own document_id property when it mirrors the node id).
-    for old_id in id_map:
+    for old_id, new_id in id_map.items():
         if str(properties_by_id[old_id].get("document_id")) == old_id:
-            properties_by_id[old_id]["document_id"] = id_map[old_id]
+            properties_by_id[old_id]["document_id"] = new_id
     remapped_edges = await _migrate_graph(graph_engine, id_map, properties_by_id, normalized_edges)
     logger.info(
         "rekey_fork_document_ids: re-keyed %d fork document node(s), %d edge(s)",

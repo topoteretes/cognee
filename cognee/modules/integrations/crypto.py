@@ -29,7 +29,7 @@ Configuration (env):
 import base64
 import json
 import os
-from typing import Any, Optional
+from typing import Any
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
@@ -101,7 +101,7 @@ def encrypt_credentials(payload: dict[str, Any]) -> tuple[bytes, bytes, int, str
 
 
 def decrypt_credentials(
-    ciphertext: bytes, nonce: bytes, encryption_version: int, key_id: Optional[str]
+    ciphertext: bytes, nonce: bytes, encryption_version: int, key_id: str | None
 ) -> dict[str, Any]:
     """Decrypt a stored payload, dispatching on its ``encryption_version`` and ``key_id``.
 

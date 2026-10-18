@@ -1,15 +1,18 @@
 import logging
 import os
+from unittest.mock import AsyncMock, patch
+
 import pytest
-from unittest.mock import patch, AsyncMock
-from cognee.infrastructure.llm.ollama_support import (
-    normalize_model_name,
-    classify_model,
-    emit_warning,
-    _warned_models,
-)
+
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingResult
 from cognee.infrastructure.llm.config import LLMConfig
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.llm.ollama_support import (
+    _warned_models,
+    classify_model,
+    emit_warning,
+    normalize_model_name,
+)
 
 
 @pytest.mark.parametrize(
@@ -107,12 +110,11 @@ async def test_local_ollama_example_executes_offline(monkeypatch):
     # over the network. Patch embed_text at the class so every engine, cached or
     # fresh, stays offline.
     async def _mock_embed_text(self, texts):
-        return [[0.1] * self.dimensions for _ in texts]
+        return EmbeddingResult(vectors=[[0.1] * self.dimensions for _ in texts], tokens=0)
 
     @staticmethod
     async def _mock_acreate(text_input, system_prompt, response_model, **kwargs):
-        from cognee.shared.data_models import KnowledgeGraph, SummarizedContent
-        from cognee.shared.data_models import Node, Edge
+        from cognee.shared.data_models import Edge, KnowledgeGraph, Node, SummarizedContent
 
         if response_model is KnowledgeGraph or (
             isinstance(response_model, type) and issubclass(response_model, KnowledgeGraph)
@@ -131,14 +133,26 @@ async def test_local_ollama_example_executes_offline(monkeypatch):
             return "Mocked answer"
         return response_model()
 
+    from cognee.infrastructure.databases.cache.config import get_cache_config
+    from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_config
     from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
         LiteLLMEmbeddingEngine,
     )
+    from cognee.infrastructure.llm.config import get_llm_config
 
-    with (
-        patch.object(LLMGateway, "acreate_structured_output", new=_mock_acreate),
-        patch.object(LiteLLMEmbeddingEngine, "embed_text", new=_mock_embed_text),
-    ):
-        from examples.guides.local_ollama_example import main
+    # The example configures itself by writing os.environ at import (CACHING=false, an Ollama
+    # LLM and embedder, ...). patch.dict restores the environment afterwards, and the configs it
+    # may have cached from those values are dropped, so later tests do not inherit
+    # CACHING=false or the Ollama provider.
+    try:
+        with (
+            patch.dict(os.environ),
+            patch.object(LLMGateway, "acreate_structured_output", new=_mock_acreate),
+            patch.object(LiteLLMEmbeddingEngine, "embed_text", new=_mock_embed_text),
+        ):
+            from examples.guides.local_ollama_example import main
 
-        await main()
+            await main()
+    finally:
+        for cached_config in (get_cache_config, get_llm_config, get_embedding_config):
+            cached_config.cache_clear()

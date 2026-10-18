@@ -1,13 +1,14 @@
-import time
 import asyncio
-from cognee.shared.logging_utils import get_logger
+import logging
+import time
+
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.rate_limiter import (
-    sleep_and_retry_sync,
-    sleep_and_retry_async,
     is_rate_limit_error,
+    sleep_and_retry_async,
+    sleep_and_retry_sync,
 )
 
-logger = get_logger()
+logger = logging.getLogger(__name__)
 
 
 # Test function to be decorated
@@ -22,7 +23,7 @@ def test_function_sync():
     if test_function_sync.counter <= 2:
         error_msg = "429 Too Many Requests: Rate limit exceeded"
         logger.info(f"Attempt {test_function_sync.counter}: Raising rate limit error")
-        raise Exception(error_msg)
+        raise RuntimeError(error_msg)
 
     logger.info(f"Attempt {test_function_sync.counter}: Success!")
     return f"Success on attempt {test_function_sync.counter}"
@@ -40,7 +41,7 @@ async def test_function_async():
     if test_function_async.counter <= 2:
         error_msg = "429 Too Many Requests: Rate limit exceeded"
         logger.info(f"Attempt {test_function_async.counter}: Raising rate limit error")
-        raise Exception(error_msg)
+        raise RuntimeError(error_msg)
 
     logger.info(f"Attempt {test_function_async.counter}: Success!")
     return f"Success on attempt {test_function_async.counter}"
@@ -117,7 +118,7 @@ def test_sync_retry():
 
         print("✅ PASS: Synchronous retry mechanism is working correctly")
     except Exception as e:
-        print(f"❌ FAIL: Test encountered an unexpected error: {str(e)}")
+        print(f"❌ FAIL: Test encountered an unexpected error: {e!s}")
         raise
 
 
@@ -150,7 +151,7 @@ async def test_async_retry():
 
         print("✅ PASS: Asynchronous retry mechanism is working correctly")
     except Exception as e:
-        print(f"❌ FAIL: Test encountered an unexpected error: {str(e)}")
+        print(f"❌ FAIL: Test encountered an unexpected error: {e!s}")
         raise
 
 
@@ -163,14 +164,15 @@ async def test_retry_max_exceeded():
         """A function that always raises a rate limit error."""
         error_msg = "429 Too Many Requests: Rate limit always exceeded"
         logger.info(f"Always fails with: {error_msg}")
-        raise Exception(error_msg)
+        raise RuntimeError(error_msg)
 
     try:
         # This should fail after 2 retries (3 attempts total)
         await always_fails()
         print("❌ FAIL: Function should have failed but succeeded")
     except Exception as e:
-        print(f"Expected error after max retries: {str(e)}")
+        logger.debug("Ignoring exception in test_retry_max_exceeded", exc_info=True)
+        print(f"Expected error after max retries: {e!s}")
         print("✅ PASS: Function correctly failed after max retries exceeded")
 
 

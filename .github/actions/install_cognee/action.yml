@@ -46,7 +46,10 @@ runs:
         uv pip uninstall cognee
         if [ "${{ inputs.cognee_version }}" = "local" ]; then
           echo "Installing Cognee from local source ..."
-          uv pip install --force-reinstall -e ../
+          # --no-deps: the dependencies are already installed from uv.lock; a
+          # fresh resolution would upgrade them one package at a time past
+          # their locked, exactly-pinned partners (opentelemetry-api vs -sdk).
+          uv pip install --no-deps --force-reinstall -e ../
         else
           echo "Installing Cognee version ${{ inputs.cognee_version }} from PyPI..."
           uv pip install --force-reinstall "cognee==${{ inputs.cognee_version }}"

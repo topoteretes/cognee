@@ -1,6 +1,6 @@
-from cognee.shared.data_models import KnowledgeGraph
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.engine.models import Entity, EntityType
+from cognee.shared.data_models import KnowledgeGraph
 
 
 def extract_relationships(
@@ -28,7 +28,7 @@ def extract_relationships(
     for node in graph.nodes:
         node_id = Entity.id_for(node.id)
         type_node_id = EntityType.id_for(node.type)
-        type_edge_id = f"{str(node_id)}_is_a_{str(type_node_id)}"
+        type_edge_id = f"{node_id!s}_is_a_{type_node_id!s}"
 
         if type_edge_id not in cache:
             relationship = (
@@ -42,7 +42,7 @@ def extract_relationships(
 
         relationships.append(relationship)
 
-        chunk_edge_id = f"{str(document_chunk.id)}_contains_{str(node_id)}"
+        chunk_edge_id = f"{document_chunk.id!s}_contains_{node_id!s}"
 
         if chunk_edge_id not in cache:
             relationship = (

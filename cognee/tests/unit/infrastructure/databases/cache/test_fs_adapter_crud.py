@@ -1,11 +1,12 @@
 """Unit tests for FsCacheAdapter CRUD operations."""
 
-from datetime import datetime
-from uuid import uuid4
 import tempfile
 from contextlib import contextmanager
-import pytest
+from datetime import datetime, timezone
 from unittest.mock import patch
+from uuid import uuid4
+
+import pytest
 
 from cognee.infrastructure.databases.exceptions import (
     CacheConnectionError,
@@ -18,18 +19,20 @@ from cognee.tasks.memify.feedback_weights_constants import (
 
 @pytest.fixture
 def adapter():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        with patch(
+    with (
+        tempfile.TemporaryDirectory() as tmpdir,
+        patch(
             "cognee.infrastructure.databases.cache.fscache.FsCacheAdapter.get_storage_config",
             return_value={"data_root_directory": tmpdir},
-        ):
-            from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import (
-                FSCacheAdapter,
-            )
+        ),
+    ):
+        from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import (
+            FSCacheAdapter,
+        )
 
-            inst = FSCacheAdapter()
-            yield inst
-            inst.cache.close()
+        inst = FSCacheAdapter()
+        yield inst
+        inst.cache.close()
 
 
 @pytest.mark.asyncio
@@ -38,6 +41,31 @@ async def test_create_and_get(adapter):
     await adapter.create_qa_entry("u1", "s1", "Q", "C", "A", qa_id="id1")
     entries = await adapter.get_all_qa_entries("u1", "s1")
     assert len(entries) == 1 and entries[0].qa_id == "id1"
+
+
+@pytest.mark.asyncio
+async def test_get_qa_entries_since_filters_on_entry_time(adapter):
+    """The interface default: read the session, keep the entries from the bound on."""
+    from datetime import datetime, timedelta, timezone
+
+    for index in range(4):
+        await adapter.create_qa_entry("u1", "s1", f"Q{index}", "C", "A", qa_id=f"id{index}")
+    stored = await adapter.get_all_qa_entries("u1", "s1")
+    since = datetime.fromisoformat(stored[2].time)
+
+    assert [e.qa_id for e in await adapter.get_qa_entries_since("u1", "s1", since)] == [
+        "id2",
+        "id3",
+    ]
+    assert [e.qa_id for e in await adapter.get_qa_entries_since("u1", "s1", since, lead_in=1)] == [
+        "id1",
+        "id2",
+        "id3",
+    ]
+    far_future = datetime.now(timezone.utc) + timedelta(days=1)
+    assert [
+        e.qa_id for e in await adapter.get_qa_entries_since("u1", "s1", far_future, lead_in=1)
+    ] == ["id3"]
 
 
 @pytest.mark.asyncio
@@ -199,7 +227,7 @@ async def test_append_agent_trace_step_sanitizes_non_json_safe_values(adapter):
         status="success",
         method_params={
             "trip_id": uuid4(),
-            "created_at": datetime(2026, 4, 14, 12, 0, 0),
+            "created_at": datetime(2026, 4, 14, 12, 0, 0, tzinfo=timezone.utc),
             "obj": _Obj(),
         },
         method_return_value={"result_id": uuid4(), "owner": _Obj()},

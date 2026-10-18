@@ -1,9 +1,10 @@
-import pytest
 from unittest.mock import patch
 
+import pytest
+
+from cognee.modules.observability.exceptions import UnsupportedObserverError
 from cognee.modules.observability.get_observe import get_observe
 from cognee.modules.observability.observers import Observer
-from cognee.modules.observability.exceptions import UnsupportedObserverError
 
 
 def test_get_observe_raises_for_unsupported_observer():

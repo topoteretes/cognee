@@ -15,4 +15,4 @@ from .get_loader_engine import get_loader_engine
 from .LoaderInterface import LoaderInterface
 from .use_loader import use_loader
 
-__all__ = ["get_loader_engine", "use_loader", "LoaderInterface"]
+__all__ = ["LoaderInterface", "get_loader_engine", "use_loader"]

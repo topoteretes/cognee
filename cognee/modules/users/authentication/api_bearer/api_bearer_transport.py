@@ -1,8 +1,6 @@
-from typing import Optional
-
 from fastapi.security import OAuth2PasswordBearer
-from starlette.requests import HTTPConnection
 from fastapi_users.authentication import BearerTransport
+from starlette.requests import HTTPConnection
 
 from cognee.modules.users.authentication.websocket_query_param import (
     resolve_websocket_query_param_fallback,
@@ -28,7 +26,7 @@ class _OAuth2PasswordBearerOrWebSocketQueryParam(OAuth2PasswordBearer):
     # FastAPI read it as an ordinary query parameter named `request` and every
     # unauthenticated HTTP call answered 422 (missing query param) instead of
     # 401. Guarded by tests/unit/modules/users/test_transport_scheme_signature.py.
-    async def __call__(self, request: HTTPConnection) -> Optional[str]:
+    async def __call__(self, request: HTTPConnection) -> str | None:
         token = await super().__call__(request)
         return await resolve_websocket_query_param_fallback(request, token)
 

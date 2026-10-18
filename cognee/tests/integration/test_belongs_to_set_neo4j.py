@@ -12,7 +12,6 @@ them at whatever local Neo4j instance you're running.
 from __future__ import annotations
 
 import os
-from typing import List, Optional
 from uuid import UUID, uuid4
 
 import pytest
@@ -44,7 +43,7 @@ class _TaggedPoint(DataPoint):
     metadata: dict = {"index_fields": ["text"]}
 
 
-async def _fresh_adapter() -> "Neo4jAdapter":
+async def _fresh_adapter() -> Neo4jAdapter:
     """Build and initialize a Neo4jAdapter against the live test instance."""
     adapter = Neo4jAdapter(
         graph_database_url=NEO4J_URL,
@@ -56,7 +55,7 @@ async def _fresh_adapter() -> "Neo4jAdapter":
     return adapter
 
 
-async def _read_tag_property(adapter: "Neo4jAdapter", node_id: UUID) -> Optional[List[str]]:
+async def _read_tag_property(adapter: Neo4jAdapter, node_id: UUID) -> list[str] | None:
     """Read a node's stored `belongs_to_set` property, returning `None` if the node is gone."""
     rows = await adapter.query(
         "MATCH (n {id: $id}) RETURN n.belongs_to_set AS tags",

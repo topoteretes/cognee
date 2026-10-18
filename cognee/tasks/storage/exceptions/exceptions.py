@@ -1,7 +1,8 @@
+from fastapi import status
+
 from cognee.exceptions import (
     CogneeValidationError,
 )
-from fastapi import status
 
 
 class InvalidDataPointsInAddDataPointsError(CogneeValidationError):

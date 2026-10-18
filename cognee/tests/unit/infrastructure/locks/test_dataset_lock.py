@@ -7,8 +7,8 @@ different datasets proceed in parallel.
 """
 
 import asyncio
-from uuid import uuid4
 from unittest.mock import patch
+from uuid import uuid4
 
 import pytest
 

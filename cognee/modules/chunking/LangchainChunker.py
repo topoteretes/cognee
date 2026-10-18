@@ -1,11 +1,13 @@
-from cognee.shared.logging_utils import get_logger
 from os.path import basename
 from uuid import NAMESPACE_OID, uuid5
 
-from cognee.modules.chunking.Chunker import Chunker
-from .models.DocumentChunk import DocumentChunk
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+
 from cognee.infrastructure.databases.vector import get_vector_engine_async
+from cognee.modules.chunking.Chunker import Chunker
+from cognee.shared.logging_utils import get_logger
+
+from .models.DocumentChunk import DocumentChunk
 
 logger = get_logger()
 

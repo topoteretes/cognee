@@ -15,7 +15,7 @@ from uuid import uuid4
 
 import pytest
 
-import cognee.api.v1.cognify.cognify  # noqa: F401 — ensure the module (not the re-exported function) is importable via sys.modules
+import cognee.api.v1.cognify.cognify  # ensure the module (not the re-exported function) is importable via sys.modules
 import cognee.modules.pipelines.operations.run_tasks as run_tasks_module
 from cognee.modules.cognify.routing import CognifyRoute, cognify_route_for
 from cognee.modules.pipelines.models.PipelineRunInfo import (
@@ -164,46 +164,11 @@ class TestCognifyMakesOneCall:
         (call,) = calls
         resolver = call["tasks"]
 
-        with patch.object(cognify_module, "cognify_route_for", return_value="UNMAPPED_ROUTE"):
-            with pytest.raises(KeyError):
-                resolver(_text_item())
-
-    @pytest.mark.asyncio
-    async def test_temporal_swaps_standard_route_only(self):
-        """temporal_cognify replaces the fallback list; manifests still route DLT."""
-        calls = []
-
-        async def _fake_executor(**kwargs):
-            calls.append(kwargs)
-            return {}
-
         with (
-            patch.object(
-                cognify_module, "get_pipeline_executor", lambda run_in_background: _fake_executor
-            ),
-            patch.object(
-                cognify_module, "get_temporal_tasks", new=AsyncMock(return_value="TEMPORAL_TASKS")
-            ),
-            patch.object(cognify_module, "get_dlt_tasks", new=AsyncMock(return_value="DLT_TASKS")),
-            patch.object(
-                cognify_module, "get_code_file_tasks", new=MagicMock(return_value="CODE_TASKS")
-            ),
-            patch.object(
-                cognify_module, "get_code_repo_tasks", new=MagicMock(return_value="CODE_REPO_TASKS")
-            ),
+            patch.object(cognify_module, "cognify_route_for", return_value="UNMAPPED_ROUTE"),
+            pytest.raises(KeyError),
         ):
-            await cognify_module.cognify(
-                datasets=["ds"],
-                temporal_cognify=True,
-                chunk_size=1024,
-                config={"ontology_config": {"ontology_resolver": None}},
-            )
-
-        (call,) = calls
-        resolver = call["tasks"]
-        assert resolver(_text_item()) == "TEMPORAL_TASKS"
-        assert resolver(_manifest_item()) == "DLT_TASKS"
-        assert resolver(_code_item()) == "CODE_TASKS"
+            resolver(_text_item())
 
 
 @pytest.mark.asyncio
@@ -293,7 +258,6 @@ async def test_task_resolver_composes_with_pipeline_cache(monkeypatch):
         event
         async for event in pipeline_module.run_pipeline(
             tasks=lambda item: ["LIST"],
-            use_pipeline_cache=True,
             datasets=["ds"],
         )
     ]

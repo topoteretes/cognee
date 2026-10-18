@@ -1,13 +1,14 @@
 import json
-from typing import Any, Optional
-from cognee.shared.logging_utils import get_logger
+from typing import Any
+
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 from cognee.infrastructure.engine import INTERNAL_PROPERTY, is_internal_node
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions import SearchTypeNotSupported
-from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("NaturalLanguageRetriever")
 
@@ -69,11 +70,17 @@ class NaturalLanguageRetriever(BaseRetriever):
     - get_completion: Returns a completion based on the query and context.
     """
 
+    # The caller gets the rows the generated Cypher returned, never an LLM answer, so
+    # the pre-retrieval turn analysis has nothing to feed: it could only rewrite the
+    # question or answer it with an acknowledgement in place of the rows (the same
+    # reason the Cypher and chunk retrievers opt out).
+    supports_session_turn_preparation = False
+
     def __init__(
         self,
         system_prompt_path: str = "natural_language_retriever_system.txt",
         max_attempts: int = 3,
-        session_id: Optional[str] = None,
+        session_id: str | None = None,
     ):
         """Initialize retriever with optional custom prompt paths."""
         self.system_prompt_path = system_prompt_path
@@ -153,7 +160,7 @@ class NaturalLanguageRetriever(BaseRetriever):
 
             except Exception as e:
                 previous_attempts += f"Query: {cypher_query if 'cypher_query' in locals() else 'Not generated'} -> Executed with error: {e}\n"
-                logger.error(f"Error executing query: {str(e)}")
+                logger.exception("Error executing query")
 
         logger.warning(
             f"Failed to get results after {self.max_attempts} attempts for query: '{query[:50]}...'"
@@ -183,7 +190,7 @@ class NaturalLanguageRetriever(BaseRetriever):
 
         return await self._execute_cypher_query(query, graph_engine)
 
-    async def get_context_from_objects(self, query: str, retrieved_objects: Any) -> Optional[Any]:
+    async def get_context_from_objects(self, query: str, retrieved_objects: Any) -> Any | None:
         """
         Retrieves relevant context using a natural language query converted to Cypher.
 
@@ -199,14 +206,16 @@ class NaturalLanguageRetriever(BaseRetriever):
         Returns:
         --------
 
-            - Optional[Any]: Returns the context retrieved from the graph database based on the
-              query.
+            - Optional[Any]: Always None. The rows travel as the retrieved objects
+              (``SearchResultPayload.result_object``); ``context`` is typed as text and
+              rejects raw graph rows, which failed every search that found something.
         """
-        # TODO: Do we want to process retrieved_objects into a context string?
-        return retrieved_objects
+        # Same shape as CypherSearchRetriever: the rows are the result, there is no
+        # text context to render them into.
+        return None
 
     async def get_completion_from_context(
-        self, query: str, retrieved_objects: Any, context: Optional[Any] = None
+        self, query: str, retrieved_objects: Any, context: Any | None = None
     ) -> Any:
         """
         Returns a completion based on the query and context.
@@ -227,7 +236,8 @@ class NaturalLanguageRetriever(BaseRetriever):
         Returns:
         --------
 
-            - Any: Returns the completion derived from the given query and context.
+            - Any: Always None. This retriever does not generate a completion; the
+              caller reads the rows from the retrieved objects.
         """
         # TODO: Do we want to generate a completion using LLM here?
-        return context
+        return None

@@ -31,10 +31,14 @@ Exit codes mirror ``check_router_docstrings.py``:
 from __future__ import annotations
 
 import argparse
+import logging
 import os
+import re
 import sys
 from pathlib import Path
 from urllib.parse import urlparse
+
+logger = logging.getLogger(__name__)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -83,6 +87,19 @@ def check_servers(servers: list) -> list[str]:
             problems.append(f"servers entry has no absolute http(s) url: {url!r}")
         if not entry.get("description"):
             problems.append(f"servers entry {url!r} has no description")
+
+        # A templated url like https://{tenant}.aws.cognee.ai only renders as an
+        # editable field if every placeholder has a matching `variables` entry with
+        # a default. Without one the playground sends the literal braces.
+        placeholders = set(re.findall(r"\{([^{}]+)\}", url))
+        variables = entry.get("variables") or {}
+        for name in sorted(placeholders - variables.keys()):
+            problems.append(f"servers entry {url!r} has no variables entry for {{{name}}}")
+        for name in sorted(placeholders & variables.keys()):
+            if not (variables[name] or {}).get("default"):
+                problems.append(f"servers entry {url!r} variable {{{name}}} has no default")
+        for name in sorted(variables.keys() - placeholders):
+            problems.append(f"servers entry {url!r} declares unused variable {{{name}}}")
     return problems
 
 
@@ -109,6 +126,7 @@ def main() -> int:
     try:
         spec = load_app_schema()
     except Exception as exc:
+        logger.debug("Exiting with status 2 after error in main", exc_info=True)
         print(f"Failed to import cognee API app: {exc}", file=sys.stderr)
         return 2
 

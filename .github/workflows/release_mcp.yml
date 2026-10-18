@@ -1,0 +1,178 @@
+name: release_mcp.yml
+# Publish cognee-mcp to PyPI.
+#
+# cognee-mcp versions independently of the cognee library (0.5.x vs 1.5.x), so
+# it gets its own workflow and its own tag namespace (cognee-mcp-v*) instead of
+# riding release.yml — which builds from the repo root and therefore only ever
+# publishes `cognee`. Until this file existed every MCP release was done by
+# hand, which is how the package sat at 0.5.5 for seven weeks while ~40 commits
+# (the whole FastMCP 3 migration) went unpublished.
+#
+# Auth: unlike release.yml, this uploads with the PYPI_TOKEN secret. The
+# `cognee-mcp` project has no trusted publisher on PyPI — the one registered for
+# `cognee` does not cover it, and only the project owner can add one — so the
+# first OIDC run (2026-10-01) died at the upload with `invalid-publisher` and
+# 0.5.6 went out by hand with this same token. The token costs the PEP 740
+# attestations on PyPI, which only Trusted Publishing produces; the SLSA build
+# provenance attestation hosted by GitHub is unaffected.
+#
+# The way back is built in: with no PYPI_TOKEN secret the publish step uses
+# Trusted Publishing on its own. Register the publisher, delete the secret, and
+# nothing in this file has to change — docs/supply_chain_provenance.md has the
+# fields.
+on:
+  workflow_dispatch:
+
+# Minimal default permissions (OSSF Scorecard: Token-Permissions). The one job
+# opts in to exactly what it needs.
+permissions:
+  contents: read
+
+jobs:
+  release-mcp-pypi:
+    name: Release cognee-mcp to PyPI from ${{ github.ref_name }}
+    permissions:
+      contents: write       # push the cognee-mcp-v* tag
+      id-token: write       # OIDC: signing attestations (+ Trusted Publishing once the token is gone)
+      attestations: write   # Persist the SLSA build provenance attestation
+    runs-on: ubuntu-latest
+    env:
+      UV_PYTHON: "3.12"
+    defaults:
+      run:
+        working-directory: cognee-mcp
+
+    steps:
+      - name: Check out ${{ github.ref_name }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+
+      - name: Install Python
+        # UV_PYTHON selects 3.12 for all uv commands: it satisfies
+        # requires-python <3.14 and matches cognee-mcp/Dockerfile.
+        run: uv python install 3.12
+
+      - name: Resolve version and tag
+        id: meta
+        run: |
+          VERSION="$(uv version --short)"
+          TAG="cognee-mcp-v${VERSION}"
+          echo "Releasing cognee-mcp ${VERSION} as ${TAG}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Refuse to republish an existing version
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "::error::release_mcp.yml publishes and tags permanently; run it from main (got ${GITHUB_REF})."
+            exit 1
+          fi
+          # PyPI versions are immutable: a second upload of the same version is
+          # rejected, and a yanked version can never be reused. Fail here, with
+          # a message that says what to do, rather than at the upload step.
+          if curl -fsS "https://pypi.org/pypi/cognee-mcp/${VERSION}/json" >/dev/null 2>&1; then
+            echo "::error::cognee-mcp ${VERSION} is already on PyPI. Bump the version in cognee-mcp/pyproject.toml (and re-lock) before releasing."
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "::error::Tag ${TAG} already exists on origin."
+            exit 1
+          fi
+          echo "${VERSION} is unpublished and ${TAG} is free."
+
+      - name: Verify the lockfile matches pyproject.toml
+        # Cheap consistency gate before building: a stale lock here means the
+        # pin someone meant to ship is not the one that would be resolved.
+        run: uv lock --check
+
+      - name: Validate locked cognee version matches declared range
+        run: |
+          uv run --no-project --with packaging==25.0 python - <<'PY'
+          import tomllib
+          from pathlib import Path
+
+          from packaging.requirements import Requirement
+          from packaging.version import Version
+
+          project = tomllib.loads(Path("pyproject.toml").read_text())
+          lock = tomllib.loads(Path("uv.lock").read_text())
+          requirement = next(
+              req for dep in project["project"]["dependencies"]
+              if (req := Requirement(dep)).name == "cognee"
+          )
+          locked = [pkg["version"] for pkg in lock["package"] if pkg["name"] == "cognee"]
+          if not locked:
+              raise SystemExit("::error::uv.lock has no cognee package. Run 'uv lock' to sync.")
+          for version in locked:
+              if Version(version) not in requirement.specifier:
+                  raise SystemExit(
+                      f"::error::uv.lock pins cognee {version}, but pyproject.toml requires "
+                      f"{requirement}. Run 'uv lock' to sync."
+                  )
+              print(f"Locked cognee {version} satisfies {requirement}.")
+          PY
+
+      - name: Build distributions
+        run: uv build
+
+      - name: Verify distributions were built
+        run: |
+          shopt -s nullglob
+          wheels=(dist/*.whl)
+          sdists=(dist/*.tar.gz)
+          if [ "${#wheels[@]}" -ne 1 ] || [ "${#sdists[@]}" -ne 1 ] || \
+             [ ! -s "${wheels[0]}" ] || [ ! -s "${sdists[0]}" ]; then
+            echo "::error::Build must produce exactly one nonempty wheel and sdist."
+            ls -lh dist/ || true
+            exit 1
+          fi
+          ls -lh "${wheels[@]}" "${sdists[@]}"
+
+      # `with:` paths on actions are workspace-relative — the job-level
+      # working-directory only applies to `run:` steps.
+      - name: Attest build provenance for distributions
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-path: "cognee-mcp/dist/*"
+
+      - name: Report how the upload will authenticate
+        # Says which path the next step takes before it takes it. The two fail
+        # differently (a rejected token is a 403, a missing publisher is
+        # `invalid-publisher`) and neither message names the cause.
+        env:
+          HAS_PYPI_TOKEN: ${{ secrets.PYPI_TOKEN != '' }}
+        run: |
+          if [ "${HAS_PYPI_TOKEN}" = "true" ]; then
+            echo "::notice::Uploading with the PYPI_TOKEN secret (no PEP 740 attestations)."
+          else
+            echo "::notice::No PYPI_TOKEN secret: uploading via Trusted Publishing, which needs the cognee-mcp publisher registered on PyPI."
+          fi
+
+      - name: Publish cognee-mcp ${{ steps.meta.outputs.version }} to PyPI
+        # The action picks its path from `password`. Non-empty: token auth, and
+        # it warns and skips attestations, which need OIDC. Empty: Trusted
+        # Publishing, with PEP 740 attestations uploaded by default.
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # v1.14.2 (twine 7.0.0: accepts Metadata-Version 2.5)
+        with:
+          packages-dir: cognee-mcp/dist/
+          password: ${{ secrets.PYPI_TOKEN }}
+
+      - name: Tag the released commit
+        # After the upload, not before: a tag that points at an unpublished
+        # version is a lie, whereas a published version with no tag is a
+        # one-line fix by hand.
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          git config user.name "Cognee Team"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "${TAG}"
+          git push origin "${TAG}"
+          echo "Tagged ${TAG} at $(git rev-parse --short HEAD)"

@@ -19,8 +19,10 @@ Endpoints under test:
 
 import os
 import uuid
-import pytest
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 with patch("dotenv.load_dotenv"):
     os.environ["REQUIRE_AUTHENTICATION"] = "true"
@@ -262,6 +264,19 @@ class TestAgentsE2E:
         assert connection["datasets"][0]["id"] == dataset_id
         assert connection["datasets"][0]["role"] == "read_write"
 
+    def test_register_connection_rejects_a_dataset_the_caller_cannot_read(self, client, headers):
+        """Not patched: the owner has no dataset by that id or name, so both are refused."""
+        for fields in (
+            {"dataset_ids": [str(uuid.uuid4())]},
+            {"dataset_names": ["nobody-has-this"]},
+        ):
+            resp = client.post(
+                "/api/v1/agents/register",
+                headers=headers,
+                json={"agent_session_name": "refused_agent", **fields},
+            )
+            assert resp.status_code == 403, resp.text
+
     def test_register_connection_idempotent_update(self, client, headers, _patch_operations):
         clear_registered_agent_connections()
         payload = {
@@ -456,7 +471,7 @@ class TestAgentsE2E:
         agent_mode._active_connection_ids.clear()
         agent_mode._active_connection_ids.update(saved_ids)
 
-    @pytest.fixture(scope="class")
+    @pytest.fixture
     def _patch_operations(self, owner):
         async def readable_datasets_for(_user):
             return []
@@ -467,7 +482,15 @@ class TestAgentsE2E:
         async def persisted_agent_connections(_user_id, active_only=True):
             return []
 
+        async def readable_dataset(*_args):
+            return SimpleNamespace(id=uuid.uuid4())
+
+        async def datasets_by_name(*_args):
+            return [SimpleNamespace(id=uuid.uuid4())]
+
         with (
+            patch("cognee.modules.agents.operations.get_authorized_dataset", readable_dataset),
+            patch("cognee.modules.agents.operations.get_datasets_by_name", datasets_by_name),
             patch(
                 "cognee.modules.agents.operations.get_readable_datasets",
                 readable_datasets_for,

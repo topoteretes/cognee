@@ -2,6 +2,7 @@ from os.path import basename
 from uuid import UUID
 
 from cognee.modules.chunking.Chunker import Chunker
+
 from .Document import Document
 
 

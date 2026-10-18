@@ -10,7 +10,6 @@ payload / metadata / account id) has moved onto that adapter, which is the
 one place a provider's response-shape knowledge should live.
 """
 
-from typing import Optional
 from uuid import UUID
 
 from cognee.modules.integrations.credentials import (
@@ -28,11 +27,11 @@ from cognee.modules.integrations.slack.handle_slack_link import (
 PROVIDER = "slack"
 
 
-async def get_by_team(team_id: str) -> Optional[IntegrationCredential]:
+async def get_by_team(team_id: str) -> IntegrationCredential | None:
     return await get_credential_by_account(PROVIDER, team_id)
 
 
-async def get_for_user(user_id: UUID) -> Optional[IntegrationCredential]:
+async def get_for_user(user_id: UUID) -> IntegrationCredential | None:
     return await get_active_credential_for_user(user_id, PROVIDER)
 
 
@@ -40,13 +39,13 @@ async def revoke_by_team(team_id: str) -> bool:
     return await revoke_credential_by_account(PROVIDER, team_id)
 
 
-def is_active(credential: Optional[IntegrationCredential]) -> bool:
+def is_active(credential: IntegrationCredential | None) -> bool:
     return credential is not None and credential.status == STATUS_ACTIVE
 
 
 async def resolve_owner_user_id(
     credential: IntegrationCredential, team_id: str, invoking_slack_user_id: str
-) -> Optional[UUID]:
+) -> UUID | None:
     """Resolve which cognee user's memory ``invoking_slack_user_id`` should use.
 
     Shared by every Slack entry point that touches memory (``/cognee-ask``,

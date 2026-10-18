@@ -24,7 +24,7 @@ this integration: only the invoking member should ever see their own link.
 """
 
 import time
-from typing import Any, Optional, Tuple
+from typing import Any
 from urllib.parse import parse_qs
 
 from cognee.modules.integrations.credentials import upsert_credential
@@ -68,7 +68,7 @@ def make_link_code(team_id: str, slack_user_id: str) -> str:
     return f"{payload}:{signature}"
 
 
-def validate_link_code(code: str) -> Optional[Tuple[str, str]]:
+def validate_link_code(code: str) -> tuple[str, str] | None:
     """Return ``(team_id, slack_user_id)`` for a valid, unexpired code; ``None`` otherwise.
 
     Verifies the HMAC before reading any field, so a forged or tampered

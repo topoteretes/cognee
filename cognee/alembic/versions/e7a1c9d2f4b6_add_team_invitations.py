@@ -1,14 +1,14 @@
 """Add expiring team invitations.
 
 Revision ID: e7a1c9d2f4b6
-Revises: a7c2e9f4b8d1
+Revises: d4a8e2f6b1c9
 """
 
 import sqlalchemy as sa
 from alembic import op
 
 revision = "e7a1c9d2f4b6"
-down_revision = "a7c2e9f4b8d1"
+down_revision = "d4a8e2f6b1c9"
 branch_labels = None
 depends_on = None
 

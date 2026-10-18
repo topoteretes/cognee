@@ -1,5 +1,3 @@
-from typing import Optional
-
 import jwt
 from fastapi import HTTPException, WebSocket
 from fastapi_users import exceptions as fastapi_users_exceptions
@@ -30,7 +28,7 @@ BAD_CREDENTIAL_ERRORS = (
 )
 
 
-async def _read_handshake_user(websocket: WebSocket) -> Optional[User]:
+async def _read_handshake_user(websocket: WebSocket) -> User | None:
     """Resolve a user from the credentials carried by the WebSocket handshake.
 
     Walks the configured authentication backends in registration order and
@@ -56,47 +54,47 @@ async def _read_handshake_user(websocket: WebSocket) -> Optional[User]:
     """
     db_engine = get_relational_engine()
 
-    async with db_engine.get_async_session() as session:
-        async with get_user_db_context(session) as user_db:
-            async with get_user_manager_context(user_db) as user_manager:
-                for backend in get_fastapi_users().authenticator.backends:
-                    try:
-                        # auto_error=False on every scheme here means "no
-                        # credential" is a None return; a custom transport that
-                        # sets auto_error raises instead, which is the same
-                        # answer.
-                        token = await backend.transport.scheme(websocket)
-                    except HTTPException:
-                        continue
+    async with (
+        db_engine.get_async_session() as session,
+        get_user_db_context(session) as user_db,
+        get_user_manager_context(user_db) as user_manager,
+    ):
+        for backend in get_fastapi_users().authenticator.backends:
+            try:
+                # auto_error=False on every scheme here means "no
+                # credential" is a None return; a custom transport that
+                # sets auto_error raises instead, which is the same
+                # answer.
+                token = await backend.transport.scheme(websocket)
+            except HTTPException:
+                continue
 
-                    if not token:
-                        continue
+            if not token:
+                continue
 
-                    try:
-                        user = await backend.get_strategy().read_token(token, user_manager)
-                    except BAD_CREDENTIAL_ERRORS as error:
-                        # A failed authentication attempt: try the next backend
-                        # and let the caller reject the connection if none
-                        # match.
-                        logger.debug(
-                            "WebSocket authentication via %s failed: %s", backend.name, error
-                        )
-                        continue
-                    except Exception:
-                        logger.warning(
-                            "WebSocket authentication backend %s failed to read a token",
-                            backend.name,
-                            exc_info=True,
-                        )
-                        raise
+            try:
+                user = await backend.get_strategy().read_token(token, user_manager)
+            except BAD_CREDENTIAL_ERRORS as error:
+                # A failed authentication attempt: try the next backend
+                # and let the caller reject the connection if none
+                # match.
+                logger.debug("WebSocket authentication via %s failed: %s", backend.name, error)
+                continue
+            except Exception:
+                logger.warning(
+                    "WebSocket authentication backend %s failed to read a token",
+                    backend.name,
+                    exc_info=True,
+                )
+                raise
 
-                    if user is not None and user.is_active:
-                        return user
+            if user is not None and user.is_active:
+                return user
 
     return None
 
 
-async def get_authenticated_websocket_user(websocket: WebSocket) -> Optional[User]:
+async def get_authenticated_websocket_user(websocket: WebSocket) -> User | None:
     """Authenticate a WebSocket connection. The counterpart of ``get_authenticated_user``.
 
     A WebSocket route cannot depend on ``get_authenticated_user``: every

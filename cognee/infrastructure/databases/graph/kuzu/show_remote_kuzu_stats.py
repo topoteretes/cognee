@@ -1,8 +1,9 @@
 import asyncio
+
+from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.databases.graph.ladybug.remote_ladybug_adapter import (
     RemoteLadybugAdapter,
 )
-from cognee.infrastructure.databases.graph.config import get_graph_config
 
 
 async def main():

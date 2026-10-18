@@ -22,7 +22,8 @@ import json
 import os
 import shutil
 import subprocess
-from typing import Any, Iterator, Optional
+from collections.abc import Iterator
+from typing import Any
 
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandInnerException
@@ -37,6 +38,13 @@ CODE_OPERATIONS = (
     "insights",
     "architecture",
     "delta",
+    "capabilities",
+    "search",
+    "neighbors",
+    "subgraph",
+    "flows",
+    "hubs",
+    "ask",
 )
 _DOT_EXTENSIONS = {".dot", ".gv"}
 _GRAPHVIZ_RENDER_EXTENSIONS = {".svg", ".png", ".pdf"}
@@ -78,7 +86,9 @@ def add_code_arguments(parser: argparse.ArgumentParser) -> None:
         help=(
             "Structured code-graph query for --query-type CODE, as JSON: "
             '\'{"operation": "architecture"}\', \'{"operation": "impact_analysis", '
-            '"name": "pkg.Symbol", "max_depth": 3}\'. Operations: ' + ", ".join(CODE_OPERATIONS)
+            '"name": "pkg.Symbol", "max_depth": 3}\', \'{"operation": "ask", '
+            '"question": "where are auth tokens validated?"}\'. Operations: '
+            + ", ".join(CODE_OPERATIONS)
         ),
     )
     parser.add_argument(
@@ -102,7 +112,7 @@ def add_code_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def build_code_query(args: argparse.Namespace, query_type: Optional[str]) -> Optional[dict]:
+def build_code_query(args: argparse.Namespace, query_type: str | None) -> dict | None:
     """Assemble ``code_query`` from --code-query/--diagram/--diagram-out, or None."""
     raw = getattr(args, "code_query", None)
     diagram = getattr(args, "diagram", None)
@@ -159,7 +169,7 @@ def iter_code_results(results: Any) -> Iterator[dict]:
             yield from iter_code_results(item)
 
 
-def first_diagram(results: Any) -> Optional[dict]:
+def first_diagram(results: Any) -> dict | None:
     for result in iter_code_results(results):
         diagram = result.get("diagram")
         if isinstance(diagram, dict) and diagram.get("source"):
@@ -181,6 +191,11 @@ def _summary_line(result: dict) -> str:
         parts.append("path found" if result["found"] else "no path")
     if "summary" in result:
         parts.append(str(result["summary"]))
+    # The navigation operations (neighbors, subgraph, flows, ask) report cuts
+    # at the top level.
+    if isinstance(result.get("truncated"), bool):
+        reason = result.get("truncation_reason")
+        parts.append(f"truncated={result['truncated']}" + (f" ({reason})" if reason else ""))
     return f"{operation}" + (f" ({', '.join(parts)})" if parts else "")
 
 
@@ -266,6 +281,7 @@ def write_diagram(results: Any, path: str) -> str:
             input=source.encode("utf-8"),
             capture_output=True,
             timeout=120,
+            check=False,
         )
         if completed.returncode != 0:
             raise CliCommandInnerException(
@@ -279,7 +295,7 @@ def write_diagram(results: Any, path: str) -> str:
     return path
 
 
-def _mermaid_title(source: str) -> Optional[str]:
+def _mermaid_title(source: str) -> str | None:
     lines = source.splitlines()
     if len(lines) >= 3 and lines[0] == "---":
         for line in lines[1:]:

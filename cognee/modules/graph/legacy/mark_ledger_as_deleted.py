@@ -1,18 +1,18 @@
-from uuid import UUID
 from datetime import datetime, timezone
-from typing import List
+from uuid import UUID
 
 from sqlalchemy import and_, or_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cognee.infrastructure.databases.relational import with_async_session
+
 from .GraphRelationshipLedger import GraphRelationshipLedger
 
 BATCH_SIZE = 1000
 
 
 @with_async_session
-async def mark_ledger_nodes_as_deleted(node_slugs: List[UUID], session: AsyncSession) -> None:
+async def mark_ledger_nodes_as_deleted(node_slugs: list[UUID], session: AsyncSession) -> None:
     """Mark legacy ledger entries as deleted for the given node IDs.
 
     When non-legacy nodes are deleted from graph/vector DBs, their corresponding
@@ -43,7 +43,7 @@ async def mark_ledger_nodes_as_deleted(node_slugs: List[UUID], session: AsyncSes
 
 @with_async_session
 async def mark_ledger_edges_as_deleted(
-    edge_relationship_names: List[str], session: AsyncSession
+    edge_relationship_names: list[str], session: AsyncSession
 ) -> None:
     """Mark legacy ledger edge entries as deleted for the given relationship names.
 

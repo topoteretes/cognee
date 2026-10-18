@@ -8,10 +8,10 @@ from .sync import (
 )
 
 __all__ = [
-    "sync",
-    "SyncResponse",
-    "LocalFileInfo",
-    "CheckMissingHashesRequest",
     "CheckHashesDiffResponse",
+    "CheckMissingHashesRequest",
+    "LocalFileInfo",
     "PruneDatasetRequest",
+    "SyncResponse",
+    "sync",
 ]
