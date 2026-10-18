@@ -294,7 +294,6 @@ async def get_gliner_demo_tasks(
     chunks_per_batch: int | None = None,
     config: Config | None = None,
     chunk_attachment: Literal["direct", "all"] | None = None,
-    embed_triplets: bool = False,
     track_provenance: bool = False,
     stats: GlinerRunStats | None = None,
 ) -> list[Task]:
@@ -358,7 +357,6 @@ async def get_gliner_demo_tasks(
         extraction_task,
         Task(
             add_data_points,
-            embed_triplets=embed_triplets,
             task_config={"batch_size": chunks_per_batch},
             needs_llm=False,
         ),
