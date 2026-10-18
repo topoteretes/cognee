@@ -1,0 +1,26 @@
+{
+  "snapshot_id": "sha256:5e1f0c0ffee0d0c5",
+  "format_version": 1,
+  "enola_version": "dev",
+  "generated_at": "2026-10-14T09:30:00Z",
+  "duration": "41ms",
+  "repo_path": "/tmp/shop",
+  "git": {
+    "ref": "main",
+    "commit": "9c1d2e3f",
+    "dirty": false
+  },
+  "extractors": [
+    "python"
+  ],
+  "renderers": [
+    "flows"
+  ],
+  "fact_count": 13,
+  "insight_count": 0,
+  "quality": {
+    "files_seen": 7,
+    "files_parsed": 7,
+    "parse_errors": 0
+  }
+}

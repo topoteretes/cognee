@@ -36,7 +36,10 @@ async def _effective_search_type(
         reject_hybrid_graph_only_knobs(kwargs)
         reason = await hybrid_deferral_reason(kwargs, graph_is_empty=graph_is_empty)
         if reason:
-            logger.info("Deferring HYBRID_COMPLETION to GRAPH_COMPLETION: %s", reason)
+            logger.warning(
+                "HYBRID_COMPLETION is not available for this search; answering with "
+                "GRAPH_COMPLETION instead."
+            )
             # Payload.search_type records this. search() strips it; only_context
             # and verbose callers that parse shape must pin query_type.
             return SearchType.GRAPH_COMPLETION

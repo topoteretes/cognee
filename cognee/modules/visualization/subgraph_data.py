@@ -91,12 +91,7 @@ async def resolve_seeds_from_query(
     seed_top_k: int = DEFAULT_SEED_TOP_K,
     wide_search_top_k: int = DEFAULT_WIDE_SEARCH_TOP_K,
 ) -> list[str]:
-    """Seed node ids for a query, ranked by vector distance (nearest first).
-
-    ``NodeEdgeVectorSearch.extract_relevant_node_ids()`` returns an unordered
-    set, so a plain slice of it is neither top-k nor deterministic. We rank the
-    scored hits by distance here to get a genuinely most-relevant, stable top-k.
-    """
+    """Seed node ids for a query, ranked by vector distance (nearest first)."""
     vector_search = NodeEdgeVectorSearch()
     await vector_search.embed_and_retrieve_distances(
         query=query,
@@ -106,15 +101,7 @@ async def resolve_seeds_from_query(
     if not vector_search.has_results():
         return []
 
-    # Each collection's hits are ScoredResult(id, score); lower score = closer.
-    scored = [
-        (str(hit.id), hit.score)
-        for hits in vector_search.node_distances.values()
-        for hit in hits
-        if getattr(hit, "id", None) is not None
-    ]
-    scored.sort(key=lambda pair: pair[1] if pair[1] is not None else float("inf"))
-    return _unique_preserve_order([node_id for node_id, _ in scored])[:seed_top_k]
+    return vector_search.extract_relevant_node_ids()[:seed_top_k]
 
 
 async def resolve_seeds_by_degree(graph_engine: Any, top_k: int) -> list[str]:

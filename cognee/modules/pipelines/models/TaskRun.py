@@ -1,15 +1,15 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import JSON, Column, DateTime, String
+from sqlalchemy import JSON, Column, DateTime, String, Uuid
 
-from cognee.infrastructure.databases.relational import UUID, Base
+from cognee.infrastructure.databases.relational import Base
 
 
 class TaskRun(Base):
     __tablename__ = "task_runs"
 
-    id = Column(UUID, primary_key=True, default=uuid4)
+    id = Column(Uuid, primary_key=True, default=uuid4)
 
     task_name = Column(String)
 
