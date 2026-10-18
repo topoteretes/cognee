@@ -31,7 +31,7 @@ def _parse(*argv):
 
 
 def _result(*stages, **fields):
-    return ImproveResult(dataset_name="docs", stages=list(stages), memify_run={}, **fields)
+    return ImproveResult(dataset_name="docs", stages=list(stages), **fields)
 
 
 class TestParser:
@@ -39,6 +39,7 @@ class TestParser:
         args = _parse()
         assert args.build_global_context_index is False
         assert args.build_truth_subspace is False
+        assert args.review_conflicts is False
         assert args.feedback_alpha is None
         assert args.background is False
         assert args.dataset_name == "main_dataset"
@@ -56,6 +57,7 @@ class TestParser:
             "0.3",
             "--build-global-context-index",
             "--build-truth-subspace",
+            "--review-conflicts",
             "-b",
         )
         assert args.session_ids == ["s1", "s2"]
@@ -63,6 +65,7 @@ class TestParser:
         assert args.feedback_alpha == 0.3
         assert args.build_global_context_index is True
         assert args.build_truth_subspace is True
+        assert args.review_conflicts is True
         assert args.background is True
 
 
@@ -91,8 +94,9 @@ class TestExecute:
             "0.2",
             "--build-global-context-index",
             "--build-truth-subspace",
+            "--review-conflicts",
         )
-        improve, _ = self._execute(args, _result(StageResult.completed("triplet_enrichment")))
+        improve, _ = self._execute(args, _result(StageResult.completed("global_context_index")))
 
         kwargs = improve.call_args.kwargs
         assert kwargs["dataset"] == dataset_id
@@ -100,16 +104,25 @@ class TestExecute:
         assert kwargs["feedback_alpha"] == 0.2
         assert kwargs["build_global_context_index"] is True
         assert kwargs["build_truth_subspace"] is True
+        assert kwargs["review_conflicts"] is True
         assert kwargs["run_in_background"] is False
 
+    def test_deprecated_node_name_warns_and_is_not_forwarded(self):
+        args = _parse("--node-name", "Alice")
+        improve, echoed = self._execute(
+            args, _result(StageResult.completed("global_context_index"))
+        )
+        assert "node_name" not in improve.call_args.kwargs
+        assert any("--node-name is deprecated" in str(line) for line in echoed)
+
     def test_omitted_alpha_is_not_forwarded(self):
-        improve, _ = self._execute(_parse(), _result(StageResult.completed("triplet_enrichment")))
+        improve, _ = self._execute(_parse(), _result(StageResult.completed("global_context_index")))
         assert "feedback_alpha" not in improve.call_args.kwargs
 
     def test_prints_one_line_per_stage(self):
         result = _result(
             StageResult.skipped("feedback_weights", "no_session_ids"),
-            StageResult.completed("triplet_enrichment", nodes=12),
+            StageResult.completed("review_conflicts", nodes=12),
             StageResult.errored("global_context_index", RuntimeError("boom")),
         )
         _, echoed = self._execute(_parse(), result)
@@ -117,7 +130,7 @@ class TestExecute:
         text = "\n".join(echoed)
         assert "finished with errors" in text
         assert "feedback_weights" in text and "no_session_ids" in text
-        assert "triplet_enrichment" in text and "nodes=12" in text
+        assert "review_conflicts" in text and "nodes=12" in text
         assert "global_context_index" in text and "boom" in text
         stage_lines = [line for line in echoed if line.startswith("  ")]
         assert len(stage_lines) == 3
@@ -137,14 +150,13 @@ class TestExecute:
             dataset_name="docs",
             background=True,
             finished=False,
-            stages=[StageResult.completed("triplet_enrichment")],
-            memify_run={},
+            stages=[StageResult.completed("global_context_index")],
         )
         _, echoed = self._execute(_parse("-b"), result)
 
         assert result.waited is True
         assert "Improvement started in background!" not in echoed
-        assert any("triplet_enrichment" in line for line in echoed)
+        assert any("global_context_index" in line for line in echoed)
 
     def test_remote_background_prints_only_the_headline(self):
         # A remote server owns the task: the result has nothing to wait on and
@@ -158,7 +170,9 @@ class TestExecute:
         assert len(echoed) == 2
 
     def test_lost_lock_is_explained(self):
-        result = ImproveResult.all_skipped(["feedback_weights", "triplet_enrichment"], "lock_held")
+        result = ImproveResult.all_skipped(
+            ["feedback_weights", "global_context_index"], "lock_held"
+        )
         _, echoed = self._execute(_parse(), result)
 
         assert any("lock_held" in line for line in echoed)
@@ -189,7 +203,7 @@ class TestFormatting:
 
     def test_print_accepts_the_serialized_api_payload(self):
         payload = _result(
-            StageResult.completed("triplet_enrichment"),
+            StageResult.completed("global_context_index"),
             StageResult.skipped("global_context_index", "opt_in_disabled"),
         ).model_dump(mode="json")
         echoed = []

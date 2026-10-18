@@ -11,7 +11,7 @@ class S3Config(BaseSettings):
     aws_session_token: str | None = None
     aws_profile_name: str | None = None
     aws_bedrock_runtime_endpoint: str | None = None
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    model_config = SettingsConfigDict(extra="allow")
 
 
 @lru_cache

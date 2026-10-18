@@ -133,6 +133,31 @@ def test_lock_usable_across_sequential_event_loops():
     asyncio.run(operation())
 
 
+@pytest.mark.asyncio
+async def test_cancelled_contended_acquire_does_not_wedge_lock():
+    """A waiter cancelled while parked behind the holder never leaves the lock held.
+
+    The blocking acquire on the executor thread cannot be interrupted; once
+    the holder releases, that thread obtains the lock with no owner left to
+    release it. The lock must give it back by itself, or the dataset (and, at
+    interpreter exit, the executor join) is wedged.
+    """
+    lock = await get_dataset_lock(uuid4())
+    await lock.acquire()
+
+    waiter = asyncio.create_task(lock.acquire())
+    await asyncio.sleep(0.05)  # parked on the executor thread
+    waiter.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await waiter
+
+    lock.release()
+    # Wedged forever before: the cancelled waiter's thread held it.
+    await asyncio.wait_for(lock.acquire(), timeout=2)
+    lock.release()
+    assert not lock.locked()
+
+
 def test_same_dataset_serialized_across_threads_with_own_loops():
     """Operations on one dataset from different threads/loops never overlap."""
     dataset_id = uuid4()

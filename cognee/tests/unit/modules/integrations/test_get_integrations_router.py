@@ -36,6 +36,11 @@ _router_module = importlib.import_module(
 )
 
 
+# The forget package re-exports the function under the submodule's name, so a
+# dotted-string patch target resolves to the function on Python 3.10.
+_forget_module = importlib.import_module("cognee.api.v1.forget.forget")
+
+
 class _FakeUser:
     id = USER_ID
 
@@ -271,6 +276,194 @@ def test_connection_status_reports_connected_with_generic_fields(client):
     assert body["providerAccountId"] == "ACC1"
 
 
+def _connected_credential():
+    return type(
+        "Cred",
+        (),
+        {
+            "account_label": "Acme",
+            "provider_account_id": "ACC1",
+            "created_at": __import__("datetime").datetime(2026, 1, 1),
+            "sync_status": None,
+            "last_synced_at": None,
+        },
+    )()
+
+
+def test_connection_status_reports_the_dataset_of_any_provider_that_names_one(client):
+    integration = supported_integrations["fake"]
+    summary = AsyncMock(return_value=("dataset-1", 7))
+    with (
+        patch.object(
+            _router_module,
+            "get_active_credential_for_user",
+            new=AsyncMock(return_value=_connected_credential()),
+        ),
+        patch.object(integration, "dataset_name", return_value="fake_acme"),
+        patch("cognee.modules.integrations.ingestion.dataset_summary", summary),
+    ):
+        body = client.get("/api/v1/integrations/fake/connection").json()
+
+    assert body["datasetId"] == "dataset-1"
+    assert body["storedItems"] == 7
+    assert summary.await_args.args[1] == "fake_acme"
+
+
+def test_connection_status_has_no_dataset_for_a_provider_that_names_none(client):
+    summary = AsyncMock()
+    with (
+        patch.object(
+            _router_module,
+            "get_active_credential_for_user",
+            new=AsyncMock(return_value=_connected_credential()),
+        ),
+        patch("cognee.modules.integrations.ingestion.dataset_summary", summary),
+    ):
+        body = client.get("/api/v1/integrations/fake/connection").json()
+
+    summary.assert_not_awaited()
+    assert body.get("datasetId") is None
+
+
+def test_disconnect_with_delete_data_forgets_the_providers_dataset(client):
+    integration = supported_integrations["fake"]
+    forget = AsyncMock()
+    with (
+        patch.object(
+            _router_module,
+            "get_active_credential_for_user",
+            new=AsyncMock(return_value=type("Cred", (), {"provider_account_id": "ACC1"})()),
+        ),
+        patch.object(integration, "dataset_name", return_value="fake_acme"),
+        patch.object(integration, "revoke_remote", new=AsyncMock()),
+        patch.object(
+            _router_module, "revoke_credential_by_account", new=AsyncMock(return_value=True)
+        ),
+        patch.object(_forget_module, "forget", forget),
+    ):
+        response = client.delete("/api/v1/integrations/fake/connection?delete_data=true")
+
+    assert response.json() == {"disconnected": True}
+    assert forget.await_args.kwargs["dataset"] == "fake_acme"
+
+
+def test_disconnect_with_delete_data_is_refused_without_a_dataset(client):
+    with patch.object(
+        _router_module,
+        "get_active_credential_for_user",
+        new=AsyncMock(return_value=type("Cred", (), {"provider_account_id": "ACC1"})()),
+    ):
+        response = client.delete("/api/v1/integrations/fake/connection?delete_data=true")
+
+    assert response.status_code == 400
+
+
+# --- a provider that cannot read null as "all resources" ---
+#
+# The picker stores a null selection as "everything", and listing shows every
+# resource selected for it. A provider whose sync has no such meaning (Google
+# Calendar) must refuse the null at the boundary instead of storing it.
+
+
+def put_resources(client, integration, body, *, allows_all, monkeypatch):
+    update = AsyncMock(return_value=type("Cred", (), {"provider_metadata": {"picked": body}})())
+    monkeypatch.setattr(integration, "resource_selection_key", "picked")
+    monkeypatch.setattr(integration, "resource_selection_allows_all", allows_all)
+    monkeypatch.setattr(
+        _router_module,
+        "get_active_credential_for_user",
+        AsyncMock(return_value=type("Cred", (), {"provider_account_id": "ACC1"})()),
+    )
+    monkeypatch.setattr(_router_module, "update_provider_metadata", update)
+    response = client.put("/api/v1/integrations/fake/resources", json={"resourceIds": body})
+    return response, update
+
+
+def test_a_null_selection_is_refused_for_a_provider_that_cannot_select_all(client, monkeypatch):
+    response, update = put_resources(
+        client, supported_integrations["fake"], None, allows_all=False, monkeypatch=monkeypatch
+    )
+
+    assert response.status_code == 422
+    assert "explicit list" in response.json()["detail"]
+    update.assert_not_awaited()
+
+
+def test_a_null_selection_is_still_stored_for_a_provider_that_allows_all(client, monkeypatch):
+    response, update = put_resources(
+        client, supported_integrations["fake"], None, allows_all=True, monkeypatch=monkeypatch
+    )
+
+    assert response.status_code == 200
+    update.assert_awaited_once_with("fake", "ACC1", {"picked": None})
+
+
+def test_a_list_selection_is_stored_for_a_provider_that_cannot_select_all(client, monkeypatch):
+    response, update = put_resources(
+        client,
+        supported_integrations["fake"],
+        ["a", "a", "b"],
+        allows_all=False,
+        monkeypatch=monkeypatch,
+    )
+
+    assert response.status_code == 200
+    update.assert_awaited_once_with("fake", "ACC1", {"picked": ["a", "b"]})
+
+
+# A blank id is never a real resource. Stored, it makes the sync of every provider
+# that checks the selection shape fail until the user saves again.
+@pytest.mark.parametrize("allows_all", [True, False])
+@pytest.mark.parametrize("body", [[""], [" "], ["a", "\t"], ["a", "  \n"]])
+def test_a_blank_resource_id_is_refused_and_nothing_is_stored(
+    client, monkeypatch, allows_all, body
+):
+    response, update = put_resources(
+        client, supported_integrations["fake"], body, allows_all=allows_all, monkeypatch=monkeypatch
+    )
+
+    assert response.status_code == 422
+    assert "blank" in response.json()["detail"]
+    update.assert_not_awaited()
+
+
+def test_ids_are_stored_as_given_and_deduplicated(client, monkeypatch):
+    response, update = put_resources(
+        client,
+        supported_integrations["fake"],
+        ["b", " a ", "b"],
+        allows_all=True,
+        monkeypatch=monkeypatch,
+    )
+
+    assert response.status_code == 200
+    update.assert_awaited_once_with("fake", "ACC1", {"picked": ["b", " a "]})
+
+
+def test_a_manual_sync_is_not_accepted_while_one_is_running(client):
+    from cognee.modules.integrations import ingestion
+
+    credential = type("Cred", (), {"provider_account_id": "ACC1"})()
+    integration = supported_integrations["fake"]
+    sync_now = AsyncMock()
+    with (
+        patch.object(
+            _router_module, "get_active_credential_for_user", new=AsyncMock(return_value=credential)
+        ),
+        patch.object(integration, "sync_now", sync_now),
+    ):
+        ingestion._running_syncs.add(("fake", "ACC1"))
+        try:
+            running = client.post("/api/v1/integrations/fake/sync").json()
+        finally:
+            ingestion._running_syncs.discard(("fake", "ACC1"))
+        idle = client.post("/api/v1/integrations/fake/sync").json()
+
+    assert running == {"accepted": False}
+    assert idle == {"accepted": True}
+    sync_now.assert_called_once_with(credential)
+
+
 def test_disconnect_calls_revoke_remote_and_revokes_locally(client):
     fake_credential = type("Cred", (), {"provider_account_id": "ACC1"})()
     integration = supported_integrations["fake"]
@@ -469,3 +662,26 @@ def test_a_non_ascii_nonce_cookie_is_filtered_out_not_a_crash():
     # itself raise TypeError, before ever reaching the real one.
     assert _install_nonce_matches(_FakeRequest(), "fake", "someone-elses-nonce") is False
     assert _install_nonce_matches(_FakeRequest(), "fake", "realnonce") is True
+
+
+@pytest.mark.asyncio
+async def test_spawned_integration_work_is_registered_for_the_shutdown_drain():
+    import asyncio
+
+    from cognee.infrastructure import background_tasks
+
+    router_module = importlib.import_module(
+        "cognee.api.v1.integrations.routers.get_integrations_router"
+    )
+    gate, finished = asyncio.Event(), []
+
+    async def work():
+        await gate.wait()
+        finished.append(True)
+
+    before = set(background_tasks._BACKGROUND_TASKS)
+    router_module._spawn_background(work(), description="test work")
+    assert len(background_tasks._BACKGROUND_TASKS - before) == 1
+    gate.set()
+    assert await background_tasks.wait_for_background_tasks(timeout=2)
+    assert finished == [True]

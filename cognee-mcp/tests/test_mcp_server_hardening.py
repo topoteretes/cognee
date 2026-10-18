@@ -99,21 +99,21 @@ def test_cognee_client_auth_schemes():
 
 
 # Tools that the MCP server is expected to expose. Kept as named groups so the
-# contract documents intent rather than just enumerating names. The hardening
-# rule is that the LLM-direct memory API stays minimal (V2: remember/recall/
-# forget).
+# contract documents intent rather than just enumerating names. Keep the memory
+# API minimal while exposing code-graph search as a separate tool.
 MEMORY_API_TOOLS = {"remember", "recall", "forget"}
+CODE_SEARCH_TOOLS = {"code_search"}
 STATUS_TOOLS = {
     # Ingestion is queued (remember(background=True)) because it outruns the
     # host's request deadline, so progress and failures are only observable
     # through a status call.
     "cognify_status",
 }
-EXPECTED_TOOLS = MEMORY_API_TOOLS | STATUS_TOOLS
+EXPECTED_TOOLS = MEMORY_API_TOOLS | CODE_SEARCH_TOOLS | STATUS_TOOLS
 
 
 @pytest.mark.asyncio
-async def test_mcp_exposes_only_memory_tools():
+async def test_mcp_exposes_memory_and_code_search_tools():
     from src import server
 
     tools = await server.mcp.list_tools()
@@ -287,6 +287,67 @@ async def test_cognee_client_api_remember_uploads_file_path_under_original_basen
     assert _multipart_filenames(requests[0]) == ["alice_notes.md"]
     assert "alice prefers async updates" in body
     assert str(upload) not in body
+
+
+@pytest.mark.asyncio
+async def test_cognee_client_api_upload_honours_allowed_local_file_roots(monkeypatch, tmp_path):
+    """A file outside COGNEE_ALLOWED_LOCAL_FILE_ROOTS is stored as text, as in direct mode.
+
+    API mode reads the file on the MCP host, so skipping the allowlist here would
+    send a file the operator fenced off to the remote server.
+    """
+    outside = tmp_path / "outside" / "id_rsa"
+    outside.parent.mkdir()
+    outside.write_bytes(b"PRIVATE KEY MATERIAL")
+    allowed_root = tmp_path / "allowed"
+    allowed_root.mkdir()
+    inside = allowed_root / "notes.md"
+    inside.write_text("allowed notes", encoding="utf-8")
+    monkeypatch.setenv("COGNEE_ALLOWED_LOCAL_FILE_ROOTS", str(allowed_root))
+
+    requests: list[httpx.Request] = []
+    client = await _mock_api_client(requests)
+
+    try:
+        await client.add(str(outside), dataset_name="ds")
+        await client.remember(str(outside), dataset_name="ds")
+        await client.add(str(inside), dataset_name="ds")
+    finally:
+        await client.close()
+
+    digest = hashlib.md5(str(outside).encode("utf-8")).hexdigest()
+    for request in requests[:2]:
+        assert b"PRIVATE KEY MATERIAL" not in request.content
+        assert _multipart_filenames(request) == [f"text_{digest}.txt"]
+    # A file inside an allowed root is still uploaded as a file.
+    assert _multipart_filenames(requests[2]) == ["notes.md"]
+    assert b"allowed notes" in requests[2].content
+
+
+@pytest.mark.asyncio
+async def test_cognee_client_api_upload_refuses_local_files_when_disabled(monkeypatch, tmp_path):
+    """ACCEPT_LOCAL_FILE_PATH=false refuses a local file before anything is sent."""
+    save_module = importlib.import_module("cognee.tasks.ingestion.save_data_item_to_storage")
+    ingestion_error = importlib.import_module("cognee.modules.ingestion.exceptions").IngestionError
+    monkeypatch.setattr(save_module.settings, "accept_local_file_path", False)
+    local_file = tmp_path / "id_rsa"
+    local_file.write_bytes(b"PRIVATE KEY MATERIAL")
+
+    requests: list[httpx.Request] = []
+    client = await _mock_api_client(requests)
+
+    try:
+        with pytest.raises(ingestion_error, match="Local files are not accepted"):
+            await client.add(str(local_file), dataset_name="ds")
+        with pytest.raises(ingestion_error, match="Local files are not accepted"):
+            await client.remember(str(local_file), dataset_name="ds")
+        # Plain text is untouched by the setting.
+        await client.remember("just a note", dataset_name="ds")
+    finally:
+        await client.close()
+
+    assert len(requests) == 1
+    assert b"PRIVATE KEY MATERIAL" not in requests[0].content
 
 
 @pytest.mark.asyncio
@@ -629,6 +690,7 @@ async def test_mcp_remember_forwards_file_uploads(monkeypatch):
             "custom_prompt": "extract carefully",
             "ontology_key": None,
             "self_improvement": True,
+            "node_set": None,
         }
     ]
     # The confirmation names the file and its decoded size, not the base64 length.
@@ -748,6 +810,8 @@ async def test_mcp_recall_forwards_system_prompt(monkeypatch):
         "session_id": "session-1",
         "system_prompt": "Answer with provenance.",
         "top_k": 5,
+        "scope": None,
+        "code_query": None,
     }
 
 

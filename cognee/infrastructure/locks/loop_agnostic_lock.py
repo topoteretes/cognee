@@ -41,9 +41,17 @@ def _get_lock_wait_executor() -> ThreadPoolExecutor:
 
 
 def _release_abandoned_acquire(lock: threading.Lock):
-    """Done-callback releasing a lock acquired by a cancelled waiter."""
+    """Done-callback releasing a lock acquired by a cancelled waiter.
+
+    Attached to the *concurrent* future of the blocking acquire, not the
+    asyncio wrapper: once the wrapper is cancelled, asyncio discards the
+    worker thread's result, so only the concurrent future still observes
+    whether the thread ended up holding the lock.
+    """
 
     def _release(future: Future) -> None:
+        if future.cancelled():
+            return
         try:
             if future.result():
                 lock.release()
@@ -64,15 +72,17 @@ class LoopAgnosticLock:
         if self._lock.acquire(blocking=False):
             # Uncontended fast path: no executor round-trip.
             return True
-        future = loop.run_in_executor(_get_lock_wait_executor(), self._lock.acquire)
+        blocking_acquire = _get_lock_wait_executor().submit(self._lock.acquire)
         try:
-            return await future
+            return await asyncio.wrap_future(blocking_acquire, loop=loop)
         except asyncio.CancelledError:
-            # The blocking acquire cannot be interrupted. If it already — or
-            # eventually — succeeds with no owner left to release it, undo
-            # the acquisition immediately so the resource is never wedged by
-            # a cancelled waiter.
-            future.add_done_callback(_release_abandoned_acquire(self._lock))
+            # The blocking acquire cannot be interrupted once it is running.
+            # If it has not started yet, cancel it outright; otherwise release
+            # the lock the moment the worker thread obtains it, so a cancelled
+            # waiter can never wedge the resource (or, at interpreter exit,
+            # the executor join).
+            if not blocking_acquire.cancel():
+                blocking_acquire.add_done_callback(_release_abandoned_acquire(self._lock))
             raise
 
     def release(self) -> None:

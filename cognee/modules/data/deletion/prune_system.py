@@ -21,6 +21,7 @@ from cognee.infrastructure.databases.utils.ensure_embedding_model_matches import
 )
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.databases.vector.create_vector_engine import _create_vector_engine
+from cognee.infrastructure.databases.vector.exceptions import SharedDatabasePruneError
 from cognee.modules.operations import record_operation
 from cognee.modules.users.models import DatasetDatabase
 from cognee.shared.cache import delete_cache
@@ -69,17 +70,27 @@ async def prune_system(graph=True, vector=True, metadata=True, cache=True):
     #       delete all graph and vector databases if called. It should only be used in development or testing environments.
 
     async def _prune():
+        if vector and not backend_access_control_enabled():
+            vector_engine = await get_vector_engine_async()
+            try:
+                await vector_engine.prune()
+            except SharedDatabasePruneError:
+                if not metadata:
+                    raise
+                logger.info(
+                    "Skipping separate PGVector prune because the relational database "
+                    "will be deleted by metadata pruning."
+                )
+        elif vector and backend_access_control_enabled():
+            await prune_vector_databases()
+
+        # Graph runs after vector: a refused vector prune (shared PGVector database)
+        # must raise before anything irreversible has been deleted.
         if graph and not backend_access_control_enabled():
             graph_engine = await get_graph_engine()
             await graph_engine.delete_graph()
         elif graph and backend_access_control_enabled():
             await prune_graph_databases()
-
-        if vector and not backend_access_control_enabled():
-            vector_engine = await get_vector_engine_async()
-            await vector_engine.prune()
-        elif vector and backend_access_control_enabled():
-            await prune_vector_databases()
 
         if graph:
             _create_graph_engine.cache_clear()
