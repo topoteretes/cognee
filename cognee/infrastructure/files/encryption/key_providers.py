@@ -198,7 +198,7 @@ class AwsKmsKeyProvider:
             with self._client_lock:
                 if self._client is None:
                     try:
-                        import boto3  # ty:ignore[unresolved-import]
+                        import boto3
                     except ImportError as error:
                         raise FileEncryptionConfigurationError(
                             "The aws_kms file encryption provider needs boto3.",
