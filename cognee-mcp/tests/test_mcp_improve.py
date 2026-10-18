@@ -30,11 +30,10 @@ def _improve_payload(**overrides):
         "background": False,
         "finished": True,
         "error": None,
-        "memify_run": {},
         "status": "completed",
         "stages": [
             {"stage": "feedback_weights", "status": "skipped", "reason": "no_session_ids"},
-            {"stage": "triplet_enrichment", "status": "completed", "counts": {"nodes": 3}},
+            {"stage": "review_conflicts", "status": "completed", "counts": {"nodes": 3}},
         ],
     }
     payload.update(overrides)
@@ -64,7 +63,6 @@ async def test_mcp_improve_forwards_every_option(monkeypatch):
     await server.improve(
         dataset_name="ds",
         session_ids="s1, s2",
-        node_name="Alice,Bob",
         build_global_context_index=True,
         build_truth_subspace=True,
     )
@@ -73,7 +71,6 @@ async def test_mcp_improve_forwards_every_option(monkeypatch):
         {
             "dataset_name": "ds",
             "session_ids": ["s1", "s2"],
-            "node_name": ["Alice", "Bob"],
             "build_global_context_index": True,
             "build_truth_subspace": True,
         }
@@ -91,7 +88,7 @@ async def test_mcp_improve_summarizes_every_stage(monkeypatch):
     text = result[0].text
     assert text.splitlines()[0] == "Improve completed for dataset 'ds'. Sessions: 1."
     assert "- feedback_weights: skipped (no_session_ids)" in text
-    assert "- triplet_enrichment: completed (nodes=3)" in text
+    assert "- review_conflicts: completed (nodes=3)" in text
 
 
 @pytest.mark.asyncio
@@ -129,7 +126,7 @@ def test_mcp_improve_docstring_no_longer_promises_a_session_sync():
     doc = (server.improve.__doc__ or "").lower()
     assert "sync" not in doc
     assert "build_truth_subspace" in doc
-    assert "node_name" in doc
+    assert "node_name" not in doc
 
 
 def test_format_improve_result_handles_running_and_legacy_payloads():
@@ -164,7 +161,6 @@ async def test_cognee_client_api_improve_sends_every_option():
         result = await client.improve(
             dataset_name="ds",
             session_ids=["s1"],
-            node_name=["Alice"],
             build_global_context_index=True,
             build_truth_subspace=True,
         )
@@ -176,14 +172,13 @@ async def test_cognee_client_api_improve_sends_every_option():
     assert payload == {
         "dataset_name": "ds",
         "session_ids": ["s1"],
-        "node_name": ["Alice"],
         "build_global_context_index": True,
         "build_truth_subspace": True,
     }
     assert result["status"] == "completed"
     assert [stage["stage"] for stage in result["stages"]] == [
         "feedback_weights",
-        "triplet_enrichment",
+        "review_conflicts",
     ]
 
 
@@ -223,7 +218,6 @@ async def test_cognee_client_local_improve_returns_the_result_as_json_dict():
             return ImproveResult(
                 dataset_name="ds",
                 stages=[StageResult.skipped("global_context_index", "opt_in_disabled")],
-                memify_run={},
             )
 
     fake = FakeCognee()
@@ -233,7 +227,6 @@ async def test_cognee_client_local_improve_returns_the_result_as_json_dict():
     result = await client.improve(
         dataset_name="ds",
         session_ids=["s1"],
-        node_name=["Alice"],
         build_global_context_index=True,
         build_truth_subspace=True,
     )
@@ -242,7 +235,6 @@ async def test_cognee_client_local_improve_returns_the_result_as_json_dict():
         {
             "dataset": "ds",
             "session_ids": ["s1"],
-            "node_name": ["Alice"],
             "build_global_context_index": True,
             "build_truth_subspace": True,
         }

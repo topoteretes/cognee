@@ -1,0 +1,1362 @@
+{
+ "description": "Questions whose gold answer is corrupted, by audit; reported results leave out both sets together. Both audits cover categories 1-4 only.",
+ "sets": {
+  "external": {
+   "source": "Penfield Labs, https://github.com/dial481/locomo-audit (errors.json)",
+   "license": "CC BY-NC 4.0",
+   "rule": "score-corrupting errors; WRONG_CITATION entries (gold correct, citation wrong) are not excluded",
+   "questions": [
+    {
+     "conversation_index": 0,
+     "question_idx": 2,
+     "question_id": "locomo_0_qa2",
+     "error_type": "HALLUCINATION"
+    },
+    {
+     "conversation_index": 0,
+     "question_idx": 5,
+     "question_id": "locomo_0_qa5",
+     "error_type": "TEMPORAL_ERROR"
+    },
+    {
+     "conversation_index": 0,
+     "question_idx": 23,
+     "question_id": "locomo_0_qa23",
+     "error_type": "HALLUCINATION"
+    },
+    {
+     "conversation_index": 0,
+     "question_idx": 26,
+     "question_id": "locomo_0_qa26",
+     "error_type": "HALLUCINATION"
+    },
+    {
+     "conversation_index": 0,
+     "question_idx": 32,
+     "question_id": "locomo_0_qa32",
+     "error_type": "INCOMPLETE"
+    },
+    {
+     "conversation_index": 0,
+     "question_idx": 43,
+     "question_id": "locomo_0_qa43",
+     "error_type": "AMBIGUOUS"
+    },
+    {
+     "conversation_index": 0,
+     "question_idx": 56,
+     "question_id": "locomo_0_qa56",
+     "error_type": "HALLUCINATION"
+    },
+    {
+     "conversation_index": 0,
+     "question_idx": 66,
+     "question_id": "locomo_0_qa66",
+     "error_type": "AMBIGUOUS"
+    },
+    {
+     "conversation_index": 0,
+     "question_idx": 77,
+     "question_id": "locomo_0_qa77",
+     "error_type": "AMBIGUOUS"
+    },
+    {
+     "conversation_index": 0,
+     "question_idx": 94,
+     "question_id": "locomo_0_qa94",
+     "error_type": "ATTRIBUTION_ERROR"
+    },
+    {
+     "conversation_index": 0,
+     "question_idx": 135,
+     "question_id": "locomo_0_qa135",
+     "error_type": "TEMPORAL_ERROR"
+    },
+    {
+     "conversation_index": 0,
+     "question_idx": 137,
+     "question_id": "locomo_0_qa137",
+     "error_type": "INCOMPLETE"
+    },
+    {
+     "conversation_index": 0,
+     "question_idx": 138,
+     "question_id": "locomo_0_qa138",
+     "error_type": "ATTRIBUTION_ERROR"
+    },
+    {
+     "conversation_index": 0,
+     "question_idx": 144,
+     "question_id": "locomo_0_qa144",
+     "error_type": "ATTRIBUTION_ERROR"
+    },
+    {
+     "conversation_index": 0,
+     "question_idx": 149,
+     "question_id": "locomo_0_qa149",
+     "error_type": "HALLUCINATION"
+    },
+    {
+     "conversation_index": 1,
+     "question_idx": 31,
+     "question_id": "locomo_1_qa31",
+     "error_type": "TEMPORAL_ERROR"
+    },
+    {
+     "conversation_index": 1,
+     "question_idx": 47,
+     "question_id": "locomo_1_qa47",
+     "error_type": "AMBIGUOUS"
+    },
+    {
+     "conversation_index": 1,
+     "question_idx": 57,
+     "question_id": "locomo_1_qa57",
+     "error_type": "ATTRIBUTION_ERROR"
+    },
+    {
+     "conversation_index": 1,
+     "question_idx": 63,
+     "question_id": "locomo_1_qa63",
+     "error_type": "AMBIGUOUS"
+    },
+    {
+     "conversation_index": 2,
+     "question_idx": 48,
+     "question_id": "locomo_2_qa48",
+     "error_type": "TEMPORAL_ERROR"
+    },
+    {
+     "conversation_index": 2,
+     "question_idx": 63,
+     "question_id": "locomo_2_qa63",
+     "error_type": "AMBIGUOUS"
+    },
+    {
+     "conversation_index": 2,
+     "question_idx": 68,
+     "question_id": "locomo_2_qa68",
+     "error_type": "TEMPORAL_ERROR"
+    },
+    {
+     "conversation_index": 2,
+     "question_idx": 69,
+     "question_id": "locomo_2_qa69",
+     "error_type": "TEMPORAL_ERROR"
+    },
+    {
+     "conversation_index": 2,
+     "question_idx": 129,
+     "question_id": "locomo_2_qa129",
+     "error_type": "ATTRIBUTION_ERROR"
+    },
+    {
+     "conversation_index": 3,
+     "question_idx": 4,
+     "question_id": "locomo_3_qa4",
+     "error_type": "HALLUCINATION"
+    },
+    {
+     "conversation_index": 3,
+     "question_idx": 5,
+     "question_id": "locomo_3_qa5",
+     "error_type": "INCOMPLETE"
+    },
+    {
+     "conversation_index": 3,
+     "question_idx": 24,
+     "question_id": "locomo_3_qa24",
+     "error_type": "TEMPORAL_ERROR"
+    },
+    {
+     "conversation_index": 3,
+     "question_idx": 34,
+     "question_id": "locomo_3_qa34",
+     "error_type": "HALLUCINATION"
+    },
+    {
+     "conversation_index": 3,
+     "question_idx": 43,
+     "question_id": "locomo_3_qa43",
+     "error_type": "TEMPORAL_ERROR"
+    },
+    {
+     "conversation_index": 3,
+     "question_idx": 52,
+     "question_id": "locomo_3_qa52",
+     "error_type": "HALLUCINATION"
+    },
+    {
+     "conversation_index": 3,
+     "question_idx": 58,
+     "question_id": "locomo_3_qa58",
+     "error_type": "HALLUCINATION"
+    },
+    {
+     "conversation_index": 3,
+     "question_idx": 61,
+     "question_id": "locomo_3_qa61",
+     "error_type": "HALLUCINATION"
+    },
+    {
+     "conversation_index": 3,
+     "question_idx": 66,
+     "question_id": "locomo_3_qa66",
+     "error_type": "HALLUCINATION"
+    },
+    {
+     "conversation_index": 3,
+     "question_idx": 68,
+     "question_id": "locomo_3_qa68",
+     "error_type": "AMBIGUOUS"
+    },
+    {
+     "conversation_index": 3,
+     "question_idx": 73,
+     "question_id": "locomo_3_qa73",
+     "error_type": "TEMPORAL_ERROR"
+    },
+    {
+     "conversation_index": 3,
+     "question_idx": 81,
+     "question_id": "locomo_3_qa81",
+     "error_type": "HALLUCINATION"
+    },
+    {
+     "conversation_index": 3,
+     "question_idx": 91,
+     "question_id": "locomo_3_qa91",
+     "error_type": "HALLUCINATION"
+    },
+    {
+     "conversation_index": 3,
+     "question_idx": 119,
+     "question_id": "locomo_3_qa119",
+     "error_type": "ATTRIBUTION_ERROR"
+    },
+    {
+     "conversation_index": 4,
+     "question_idx": 6,
+     "question_id": "locomo_4_qa6",
+     "error_type": "TEMPORAL_ERROR"
+    },
+    {
+     "conversation_index": 4,
+     "question_idx": 9,
+     "question_id": "locomo_4_qa9",
+     "error_type": "HALLUCINATION"
+    },
+    {
+     "conversation_index": 4,
+     "question_idx": 16,
+     "question_id": "locomo_4_qa16",
+     "error_type": "TEMPORAL_ERROR"
+    },
+    {
+     "conversation_index": 4,
+     "question_idx": 56,
+     "question_id": "locomo_4_qa56",
+     "error_type": "TEMPORAL_ERROR"
+    },
+    {
+     "conversation_index": 4,
+     "question_idx": 60,
+     "question_id": "locomo_4_qa60",
+     "error_type": "TEMPORAL_ERROR"
+    },
+    {
+     "conversation_index": 4,
+     "question_idx": 74,
+     "question_id": "locomo_4_qa74",
+     "error_type": "ATTRIBUTION_ERROR"
+    },
+    {
+     "conversation_index": 4,
+     "question_idx": 86,
+     "question_id": "locomo_4_qa86",
+     "error_type": "ATTRIBUTION_ERROR"
+    },
+    {
+     "conversation_index": 4,
+     "question_idx": 128,
+     "question_id": "locomo_4_qa128",
+     "error_type": "HALLUCINATION"
+    },
+    {
+     "conversation_index": 4,
+     "question_idx": 135,
+     "question_id": "locomo_4_qa135",
+     "error_type": "ATTRIBUTION_ERROR"
+    },
+    {
+     "conversation_index": 4,
+     "question_idx": 136,
+     "question_id": "locomo_4_qa136",
+     "error_type": "ATTRIBUTION_ERROR"
+    },
+    {
+     "conversation_index": 4,
+     "question_idx": 164,
+     "question_id": "locomo_4_qa164",
+     "error_type": "ATTRIBUTION_ERROR"
+    },
+    {
+     "conversation_index": 4,
+     "question_idx": 165,
+     "question_id": "locomo_4_qa165",
+     "error_type": "ATTRIBUTION_ERROR"
+    },
+    {
+     "conversation_index": 4,
+     "question_idx": 166,
+     "question_id": "locomo_4_qa166",
+     "error_type": "ATTRIBUTION_ERROR"
+    },
+    {
+     "conversation_index": 5,
+     "question_idx": 2,
+     "question_id": "locomo_5_qa2",
+     "error_type": "HALLUCINATION"
+    },
+    {
+     "conversation_index": 5,
+     "question_idx": 4,
+     "question_id": "locomo_5_qa4",
+     "error_type": "AMBIGUOUS"
+    },
+    {
+     "conversation_index": 5,
+     "question_idx": 5,
+     "question_id": "locomo_5_qa5",
+     "error_type": "TEMPORAL_ERROR"
+    },
+    {
+     "conversation_index": 5,
+     "question_idx": 18,
+     "question_id": "locomo_5_qa18",
+     "error_type": "AMBIGUOUS"
+    },
+    {
+     "conversation_index": 5,
+     "question_idx": 37,
+     "question_id": "locomo_5_qa37",
+     "error_type": "TEMPORAL_ERROR"
+    },
+    {
+     "conversation_index": 5,
+     "question_idx": 41,
+     "question_id": "locomo_5_qa41",
+     "error_type": "AMBIGUOUS"
+    },
+    {
+     "conversation_index": 5,
+     "question_idx": 57,
+     "question_id": "locomo_5_qa57",
+     "error_type": "TEMPORAL_ERROR"
+    },
+    {
+     "conversation_index": 6,
+     "question_idx": 2,
+     "question_id": "locomo_6_qa2",
+     "error_type": "HALLUCINATION"
+    },
+    {
+     "conversation_index": 6,
+     "question_idx": 11,
+     "question_id": "locomo_6_qa11",
+     "error_type": "TEMPORAL_ERROR"
+    },
+    {
+     "conversation_index": 6,
+     "question_idx": 17,
+     "question_id": "locomo_6_qa17",
+     "error_type": "HALLUCINATION"
+    },
+    {
+     "conversation_index": 6,
+     "question_idx": 31,
+     "question_id": "locomo_6_qa31",
+     "error_type": "TEMPORAL_ERROR"
+    },
+    {
+     "conversation_index": 6,
+     "question_idx": 37,
+     "question_id": "locomo_6_qa37",
+     "error_type": "ATTRIBUTION_ERROR"
+    },
+    {
+     "conversation_index": 6,
+     "question_idx": 61,
+     "question_id": "locomo_6_qa61",
+     "error_type": "TEMPORAL_ERROR"
+    },
+    {
+     "conversation_index": 6,
+     "question_idx": 65,
+     "question_id": "locomo_6_qa65",
+     "error_type": "AMBIGUOUS"
+    },
+    {
+     "conversation_index": 6,
+     "question_idx": 88,
+     "question_id": "locomo_6_qa88",
+     "error_type": "TEMPORAL_ERROR"
+    },
+    {
+     "conversation_index": 7,
+     "question_idx": 0,
+     "question_id": "locomo_7_qa0",
+     "error_type": "HALLUCINATION"
+    },
+    {
+     "conversation_index": 7,
+     "question_idx": 75,
+     "question_id": "locomo_7_qa75",
+     "error_type": "HALLUCINATION"
+    },
+    {
+     "conversation_index": 7,
+     "question_idx": 87,
+     "question_id": "locomo_7_qa87",
+     "error_type": "HALLUCINATION"
+    },
+    {
+     "conversation_index": 7,
+     "question_idx": 116,
+     "question_id": "locomo_7_qa116",
+     "error_type": "ATTRIBUTION_ERROR"
+    },
+    {
+     "conversation_index": 7,
+     "question_idx": 123,
+     "question_id": "locomo_7_qa123",
+     "error_type": "ATTRIBUTION_ERROR"
+    },
+    {
+     "conversation_index": 7,
+     "question_idx": 174,
+     "question_id": "locomo_7_qa174",
+     "error_type": "ATTRIBUTION_ERROR"
+    },
+    {
+     "conversation_index": 7,
+     "question_idx": 179,
+     "question_id": "locomo_7_qa179",
+     "error_type": "ATTRIBUTION_ERROR"
+    },
+    {
+     "conversation_index": 8,
+     "question_idx": 4,
+     "question_id": "locomo_8_qa4",
+     "error_type": "HALLUCINATION"
+    },
+    {
+     "conversation_index": 8,
+     "question_idx": 18,
+     "question_id": "locomo_8_qa18",
+     "error_type": "HALLUCINATION"
+    },
+    {
+     "conversation_index": 8,
+     "question_idx": 24,
+     "question_id": "locomo_8_qa24",
+     "error_type": "ATTRIBUTION_ERROR"
+    },
+    {
+     "conversation_index": 8,
+     "question_idx": 33,
+     "question_id": "locomo_8_qa33",
+     "error_type": "HALLUCINATION"
+    },
+    {
+     "conversation_index": 8,
+     "question_idx": 36,
+     "question_id": "locomo_8_qa36",
+     "error_type": "HALLUCINATION"
+    },
+    {
+     "conversation_index": 8,
+     "question_idx": 37,
+     "question_id": "locomo_8_qa37",
+     "error_type": "HALLUCINATION"
+    },
+    {
+     "conversation_index": 8,
+     "question_idx": 43,
+     "question_id": "locomo_8_qa43",
+     "error_type": "HALLUCINATION"
+    },
+    {
+     "conversation_index": 8,
+     "question_idx": 54,
+     "question_id": "locomo_8_qa54",
+     "error_type": "HALLUCINATION"
+    },
+    {
+     "conversation_index": 8,
+     "question_idx": 74,
+     "question_id": "locomo_8_qa74",
+     "error_type": "TEMPORAL_ERROR"
+    },
+    {
+     "conversation_index": 8,
+     "question_idx": 80,
+     "question_id": "locomo_8_qa80",
+     "error_type": "TEMPORAL_ERROR"
+    },
+    {
+     "conversation_index": 8,
+     "question_idx": 102,
+     "question_id": "locomo_8_qa102",
+     "error_type": "TEMPORAL_ERROR"
+    },
+    {
+     "conversation_index": 8,
+     "question_idx": 103,
+     "question_id": "locomo_8_qa103",
+     "error_type": "TEMPORAL_ERROR"
+    },
+    {
+     "conversation_index": 8,
+     "question_idx": 106,
+     "question_id": "locomo_8_qa106",
+     "error_type": "HALLUCINATION"
+    },
+    {
+     "conversation_index": 8,
+     "question_idx": 144,
+     "question_id": "locomo_8_qa144",
+     "error_type": "ATTRIBUTION_ERROR"
+    },
+    {
+     "conversation_index": 9,
+     "question_idx": 1,
+     "question_id": "locomo_9_qa1",
+     "error_type": "HALLUCINATION"
+    },
+    {
+     "conversation_index": 9,
+     "question_idx": 19,
+     "question_id": "locomo_9_qa19",
+     "error_type": "HALLUCINATION"
+    },
+    {
+     "conversation_index": 9,
+     "question_idx": 29,
+     "question_id": "locomo_9_qa29",
+     "error_type": "AMBIGUOUS"
+    },
+    {
+     "conversation_index": 9,
+     "question_idx": 50,
+     "question_id": "locomo_9_qa50",
+     "error_type": "TEMPORAL_ERROR"
+    },
+    {
+     "conversation_index": 9,
+     "question_idx": 60,
+     "question_id": "locomo_9_qa60",
+     "error_type": "HALLUCINATION"
+    },
+    {
+     "conversation_index": 9,
+     "question_idx": 62,
+     "question_id": "locomo_9_qa62",
+     "error_type": "TEMPORAL_ERROR"
+    },
+    {
+     "conversation_index": 9,
+     "question_idx": 63,
+     "question_id": "locomo_9_qa63",
+     "error_type": "HALLUCINATION"
+    },
+    {
+     "conversation_index": 9,
+     "question_idx": 72,
+     "question_id": "locomo_9_qa72",
+     "error_type": "AMBIGUOUS"
+    },
+    {
+     "conversation_index": 9,
+     "question_idx": 88,
+     "question_id": "locomo_9_qa88",
+     "error_type": "ATTRIBUTION_ERROR"
+    },
+    {
+     "conversation_index": 9,
+     "question_idx": 137,
+     "question_id": "locomo_9_qa137",
+     "error_type": "ATTRIBUTION_ERROR"
+    },
+    {
+     "conversation_index": 9,
+     "question_idx": 147,
+     "question_id": "locomo_9_qa147",
+     "error_type": "ATTRIBUTION_ERROR"
+    },
+    {
+     "conversation_index": 9,
+     "question_idx": 151,
+     "question_id": "locomo_9_qa151",
+     "error_type": "ATTRIBUTION_ERROR"
+    }
+   ]
+  },
+  "ours": {
+   "source": "cognee audit: gpt-5.1 (reasoning medium), two stages, criteria in gold_audit_prompt.txt",
+   "rule": "final label WRONG, UNSUPPORTED, MALFORMED or AMBIGUOUS with high or medium confidence",
+   "questions": [
+    {
+     "conversation_index": 0,
+     "question_idx": 5,
+     "sample_id": "conv-26",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "On 25 May 2023 Melanie says she ran a charity race 'last Saturday', which is Saturday 20 May 2023, not Sunday."
+    },
+    {
+     "conversation_index": 0,
+     "question_idx": 23,
+     "sample_id": "conv-26",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "The conversation explicitly states that Melanie loved reading \"Charlotte's Web\" as a kid (D6:10). The other book title in the gold answer, \"Nothing is Impossible\", is never mentioned anywhere in the conversation, so that part of the gold answer is not supported."
+    },
+    {
+     "conversation_index": 0,
+     "question_idx": 40,
+     "sample_id": "conv-26",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "The conversation shows at least one beach trip in 2023 (camping at the beach in D6:16, and a later mention of having gone to the beach in D10:8 that may or may not be the same trip), but it never states a total count of beach visits, so the exact number '2' is not supported."
+    },
+    {
+     "conversation_index": 0,
+     "question_idx": 56,
+     "sample_id": "conv-26",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "Caroline explicitly says the rainbow flag mural is important to her and explains that the eagle symbolizes freedom and pride (D14:15). The conversation never mentions a transgender symbol being important to her, so that part of the gold answer is not supported."
+    },
+    {
+     "conversation_index": 0,
+     "question_idx": 70,
+     "sample_id": "conv-26",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "The conversation explicitly says Caroline attended a transgender poetry reading (D17:17–19). She mentions planning to go to a transgender conference (D5:13), and later attending an LGBTQ conference (D7:1), but it is never stated that she actually attended a specifically transgender conference, so the gold answer overstates what is supported."
+    },
+    {
+     "conversation_index": 0,
+     "question_idx": 94,
+     "sample_id": "conv-26",
+     "label": "MALFORMED",
+     "confidence": "high",
+     "reason": "The conversation states that *Caroline’s* hand-painted bowl reminds her of \"art and self-expression\" (D4:5); it never mentions a hand-painted bowl belonging to Melanie. The gold answer matches the reminder content but not the person, so it does not answer the question as asked."
+    },
+    {
+     "conversation_index": 0,
+     "question_idx": 138,
+     "sample_id": "conv-26",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "On October 13, 2023 (Session 17), the abstract blue painting with blue streaks on a wall was shared by Melanie (D17:14), not Caroline. Caroline only later shared a drawing of a woman in a dress (D17:21), so the gold answer attributes the wrong artwork and artist."
+    },
+    {
+     "conversation_index": 0,
+     "question_idx": 144,
+     "sample_id": "conv-26",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "The conversation says that the other kids (referred to as 'they') were scared but reassured when told their brother would be okay, but it never states how Melanie’s son who was in the accident himself handled it. Thus the gold answer describes the wrong person and is not supported by the text."
+    },
+    {
+     "conversation_index": 1,
+     "question_idx": 21,
+     "sample_id": "conv-30",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "On 27 May 2023 Jon says he is currently reading 'The Lean Startup', but there is no information about when he started reading it, only that he is reading it at that time."
+    },
+    {
+     "conversation_index": 1,
+     "question_idx": 31,
+     "sample_id": "conv-30",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "Jon says he lost his banking job \"yesterday\" on 20 January 2023, making the job loss 19 January 2023 (D1:2). He later says the official studio opening night is \"tomorrow\" on 19 June 2023, making the opening 20 June 2023 (D15:5). This is roughly five months, not six, so the gold answer contradicts the conversation."
+    },
+    {
+     "conversation_index": 1,
+     "question_idx": 42,
+     "sample_id": "conv-30",
+     "label": "MALFORMED",
+     "confidence": "high",
+     "reason": "The conversation states that Gina’s team performed a contemporary piece called \"Finding Freedom\"; the question asks for the kind of dance piece (i.e., the style), but the gold answer gives the title instead."
+    },
+    {
+     "conversation_index": 1,
+     "question_idx": 48,
+     "sample_id": "conv-30",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "The conversation only states that Gina designed the space for her store (D3:4). It mentions that she picked out the furniture and decor (D3:5–D3:6), but not that she designed them, so including furniture and decor in the answer goes beyond what is supported."
+    },
+    {
+     "conversation_index": 1,
+     "question_idx": 57,
+     "sample_id": "conv-30",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "The gold answer quotes advice Jon gives to Gina in D7:5, not advice Gina gives to Jon. When Jon asks Gina for advice about starting out (D14:9–10), she advises him to stay passionate, focused, and resilient, believe in himself and keep going, and stay open to learning and improving."
+    },
+    {
+     "conversation_index": 2,
+     "question_idx": 47,
+     "sample_id": "conv-41",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "Kickboxing, yoga, and weight training are clearly supported, but there is no statement that John has actually done circuit training—only that his studio offers it—so that part of the gold answer is not supported by the conversation."
+    },
+    {
+     "conversation_index": 2,
+     "question_idx": 48,
+     "sample_id": "conv-41",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "In session 26 on 31 July 2023, John says his first firefighter call-out was \"Last Sunday\" (D26:4). The Sunday before 31 July 2023 is 30 July 2023, not the Sunday before 3 July 2023."
+    },
+    {
+     "conversation_index": 2,
+     "question_idx": 62,
+     "sample_id": "conv-41",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "The dialogue states Maria volunteers at a local dog shelter (D17:12) and later that she got a puppy, Coco (D30:1), and adopted another pup, Shadow, from a shelter (D31:2), but it never says either dog was adopted specifically from the dog shelter where she volunteers or how many were. Thus the claim that she has adopted two dogs from that shelter is not supported by the text."
+    },
+    {
+     "conversation_index": 2,
+     "question_idx": 63,
+     "sample_id": "conv-41",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "Maria says she got Coco two weeks before 11 August 2023 (around 28 July), and that she adopted Shadow a week before 13 August 2023 (around 6 August). The time between these dates is about 9 days, i.e., roughly one and a half weeks, not two full weeks."
+    },
+    {
+     "conversation_index": 3,
+     "question_idx": 22,
+     "sample_id": "conv-42",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "The conversation only shows that by 20 May 2022 Joanna had finished her third screenplay (D12:13–14) but never states when she started writing it, so the specific start date of May 2022 is not supported."
+    },
+    {
+     "conversation_index": 3,
+     "question_idx": 23,
+     "sample_id": "conv-42",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "The conversation mentions Joanna receiving a generic rejection from a major company (D14:1) and later \"another rejection from a production company\" (D24:12), but it never specifies which particular screenplays these rejections applied to, nor links them to the first (drama/romance) or third (loss, identity, connection) screenplays. Thus the gold answer’s assignment of rejections to those specific scripts is not stated in the text."
+    },
+    {
+     "conversation_index": 3,
+     "question_idx": 24,
+     "sample_id": "conv-42",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "On 3 June 2022 Nate says he is organizing a gaming party “two weekends later,” not the very next weekend after 3 June. The gold answer shortens this to the weekend immediately after 3 June, which contradicts the conversation."
+    },
+    {
+     "conversation_index": 3,
+     "question_idx": 34,
+     "sample_id": "conv-42",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "Joanna never mentions 'A Court of Thorns and Roses' anywhere in the conversation, and when she talks about 'Little Women' in D3:17 and D22:8–9 it is clearly as a movie recommendation, not as a book. Her only explicit book-related advice is the generic recommendation in D19:14 and approving Nate’s pictured series in D19:16 without naming it."
+    },
+    {
+     "conversation_index": 3,
+     "question_idx": 35,
+     "sample_id": "conv-42",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "On 22 August 2022 Nate says he is taking time off \"this weekend\" to chill with his pets, which refers to the upcoming weekend after 22 August, not the weekend of 22 August itself."
+    },
+    {
+     "conversation_index": 3,
+     "question_idx": 43,
+     "sample_id": "conv-42",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "The dialogue only shows that Joanna had already started her book by 10 July 2022 (D17:14) and that she finished writing it sometime the week before 6 October 2022 (D22:9). It never states how long the writing took in months, so the specific duration of four months is not supported."
+    },
+    {
+     "conversation_index": 3,
+     "question_idx": 52,
+     "sample_id": "conv-42",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "Joanna says at D25:4, after mentioning another script being shown on the big screen, that this is the third time her work has appeared there, so the correct count is three, not two."
+    },
+    {
+     "conversation_index": 3,
+     "question_idx": 53,
+     "sample_id": "conv-42",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "The dialogue explicitly mentions Nate taking his turtles out for a walk once (D25:15) and elsewhere refers generically to walking them (D5:4) without giving any count. Nothing in the conversation states or implies that he has taken them for walks exactly twice."
+    },
+    {
+     "conversation_index": 3,
+     "question_idx": 58,
+     "sample_id": "conv-42",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "The conversation shows Nate recommending pets (D2:14), The Lord of the Rings trilogy (confirmed by Joanna in D10:1), at least two favorite book series (D9:14, D19:17), coconut-based dessert ideas (referenced as his coconut recommendation in D10:11), the game Xenoblade Chronicles (D27:23), and using dairy-free margarine and coconut oil (D20:15). It never mentions a dragon book series or the book Project Hail Mary, so those items in the gold answer are not supported."
+    },
+    {
+     "conversation_index": 3,
+     "question_idx": 61,
+     "sample_id": "conv-42",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "The conversation never mentions Gamecube or PlayStation. It explicitly shows Nate using a PC gaming setup and generic controllers, and also playing board games, but provides no evidence for the specific platforms listed in the gold answer."
+    },
+    {
+     "conversation_index": 3,
+     "question_idx": 74,
+     "sample_id": "conv-42",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "The conversation supports Joanna recommending an unnamed romantic drama, the movie \"Little Women,\" starting a cork board, and giving detailed living‑room setup tips. It never mentions the titles \"Eternal Sunshine of the Spotless Mind\" or \"A Court of Thorns and Roses,\" so those parts of the gold answer are unsupported additions, making the overall gold answer inaccurate."
+    },
+    {
+     "conversation_index": 3,
+     "question_idx": 75,
+     "sample_id": "conv-42",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "The chat clearly calls coconut milk ice cream and dairy-free chocolate mousse Nate's favorites (D21:10), but only says he enjoys chocolate and mixed berry flavors (D3:10) and that he made a dairy-free chocolate cake with berries (D3:12); it never states those latter two desserts are his favorites."
+    },
+    {
+     "conversation_index": 3,
+     "question_idx": 91,
+     "sample_id": "conv-42",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "Nate only describes his favorite book series as having adventures, magic, battles, and great/interesting characters; dragons are never mentioned in the conversation."
+    },
+    {
+     "conversation_index": 3,
+     "question_idx": 92,
+     "sample_id": "conv-42",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "The conversation only mentions a photo of Nate's gaming room with a computer and a gaming chair but never describes any lighting colors, so the specific claim of red and purple lighting is not supported."
+    },
+    {
+     "conversation_index": 4,
+     "question_idx": 6,
+     "sample_id": "conv-43",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "In Session 3 on 16 July 2023, John says, \"Last week I scored 40 points, my highest ever,\" so his career-high points game occurred in the previous week, which still falls within July 2023, not June 2023."
+    },
+    {
+     "conversation_index": 4,
+     "question_idx": 8,
+     "sample_id": "conv-43",
+     "label": "AMBIGUOUS",
+     "confidence": "high",
+     "reason": "The conversation only says John got an endorsement with a \"renowned outdoor gear company\" (D25:2) and never names the brand. Earlier, he mentions liking Under Armour (D3:15), but no link is made between that preference and the later outdoor-gear deal, so multiple companies fit and the text does not single out Under Armour."
+    },
+    {
+     "conversation_index": 4,
+     "question_idx": 9,
+     "sample_id": "conv-43",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "The conversation explicitly mentions a Nike basketball shoe and gear deal (D3:13), being in talks with Gatorade for a potential sponsorship (D3:13), an endorsement with a popular beverage company (unnamed) (D29:4), and an endorsement with a renowned outdoor gear company (D25:2). The gold answer’s specification of the beverage company as 'Moxie' is not stated anywhere, so that part is unsupported rather than contradicted."
+    },
+    {
+     "conversation_index": 4,
+     "question_idx": 17,
+     "sample_id": "conv-43",
+     "label": "UNSUPPORTED",
+     "confidence": "medium",
+     "reason": "The dialogue clearly describes five distinct games that John says his team won (D3:3, D5:2, D22:4, D23:7, D24:2/D24:4 refer to one game), which supports an answer of 5. A sixth possible win in D16:6 is only implied and may be the same comeback game later described in D23:7, so the exact count of 6 is not determinable from the text alone."
+    },
+    {
+     "conversation_index": 4,
+     "question_idx": 18,
+     "sample_id": "conv-43",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "The conversation clearly shows Tim has read books by J.K. Rowling (discussing her works as his long-time reads), George R. R. Martin (he says he has read the GoT series), and Patrick Rothfuss (he is reading and recommends The Name of the Wind). It also shows he has read The Alchemist, but the author Paulo Coelho is never named, and J. R. R. Tolkien is only referenced indirectly via The Hobbit/LOTR with no explicit statement that Tim has read those books, so including Paulo Coelho and Tolkien in the gold goes beyond what the dialogue states."
+    },
+    {
+     "conversation_index": 4,
+     "question_idx": 20,
+     "sample_id": "conv-43",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "The conversation states only that John took a trip to Chicago (D6:1, D6:3). It never specifies which city he was in immediately before traveling there; Seattle is mentioned earlier as a future game destination, not as his location before the Chicago trip."
+    },
+    {
+     "conversation_index": 4,
+     "question_idx": 48,
+     "sample_id": "conv-43",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "The conversation mentions an ankle injury only once (D19:6), referring vaguely to \"last season\" without any date, and mentions a separate, more recent injury around mid‑November 2023 (D18:2) without specifying that it is an ankle injury. There is no explicit link tying the ankle injury to mid‑November 2023, so the date \"around November 16, 2023\" for the ankle injury is not supported by the text."
+    },
+    {
+     "conversation_index": 4,
+     "question_idx": 49,
+     "sample_id": "conv-43",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "The conversation explicitly mentions only one ankle injury (D19:6: John says that last season he hurt his ankle and needed time off and physical therapy). Later injuries are described but not specified as ankle injuries, so the text does not support counting two ankle injuries."
+    },
+    {
+     "conversation_index": 4,
+     "question_idx": 50,
+     "sample_id": "conv-43",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "The conversation states that John previously hurt his ankle and later, in a separate message, that he recently reread 'The Alchemist', but it never links that book to his recovery period from the ankle injury. The association is inferred, not stated."
+    },
+    {
+     "conversation_index": 4,
+     "question_idx": 55,
+     "sample_id": "conv-43",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "On 6 December 2023 (Session 21), John says he has been playing professionally for 'just under a year,' which places his professional start around December 2022, contradicting the gold answer of May 2023."
+    },
+    {
+     "conversation_index": 4,
+     "question_idx": 60,
+     "sample_id": "conv-43",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "On 11 December 2023 (a Monday), John says he had a career-high in assists \"last Friday,\" which refers to Friday 8 December 2023, not December 11, 2023."
+    },
+    {
+     "conversation_index": 4,
+     "question_idx": 113,
+     "sample_id": "conv-43",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "In D12:20 John says, 'The Wolves are my team for sure,' indicating the Wolves are John’s team. Tim never states which basketball team he supports, so the conversation does not specify an answer to this question."
+    },
+    {
+     "conversation_index": 4,
+     "question_idx": 135,
+     "sample_id": "conv-43",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "The cited turn D18:6 states that John, not Tim, stays motivated during difficult study sessions by visualizing his goals and success. When Tim later describes his own method in D18:7, he mentions breaking study into 25-minute blocks with 5-minute breaks, not visualization. The gold answer therefore does not describe Tim’s strategy and is not supported for the question as written."
+    },
+    {
+     "conversation_index": 4,
+     "question_idx": 164,
+     "sample_id": "conv-43",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "In D27:5 Tim says German is easier than when he took French in high school, indicating French is the other language he has studied. In D27:6 it is John, not Tim, who says he knows some Spanish, so Spanish is not the correct answer for Tim."
+    },
+    {
+     "conversation_index": 4,
+     "question_idx": 165,
+     "sample_id": "conv-43",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "The conversation only says John got “this awesome book” in Italy that has been giving him cooking inspiration; it never states that it is specifically a cooking book, so calling it “a cooking book” goes beyond the text."
+    },
+    {
+     "conversation_index": 4,
+     "question_idx": 166,
+     "sample_id": "conv-43",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "The cited turn D27:19 states that Harry Potter is Tim's favorite book, not John's, and nowhere in the conversation does John state a favorite book series. Thus attributing Harry Potter as John's favorite is incorrect."
+    },
+    {
+     "conversation_index": 4,
+     "question_idx": 169,
+     "sample_id": "conv-43",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "John only says he has a painting in his room and the image is described as a painting of a man smoking a cigarette; he never states that it is a painting of Aragorn."
+    },
+    {
+     "conversation_index": 5,
+     "question_idx": 5,
+     "sample_id": "conv-44",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "On 3 May 2023 Audrey says she saw the hummingbird \"last week\" (D4:1), which refers to the preceding week in late April, not the first week of May 2023."
+    },
+    {
+     "conversation_index": 5,
+     "question_idx": 12,
+     "sample_id": "conv-44",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "The conversation clearly states that Andrew has gone rock climbing (D8:1–D8:3) and fishing at a nearby lake (D17:1). Camping is only mentioned as a future plan (“are going camping” in D14:1) and never confirmed as an activity he actually did, so including camping overstates what the text supports."
+    },
+    {
+     "conversation_index": 5,
+     "question_idx": 18,
+     "sample_id": "conv-44",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "The conversation only says they 'adopted another puppy called Pixie' and never specifies that Pixie came from a breeder; the later mention of finding a breeder nearby refers to her dogs in general and is not explicitly tied to Pixie in particular."
+    },
+    {
+     "conversation_index": 5,
+     "question_idx": 37,
+     "sample_id": "conv-44",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "On 24 October 2023 (Session 25), Audrey says she had the accident \"last week,\" which places it in the preceding week (approximately 16–22 October 2023). The gold range of 19–24 October extends into the current week (including the 24th itself), which contradicts the \"last week\" timing."
+    },
+    {
+     "conversation_index": 5,
+     "question_idx": 43,
+     "sample_id": "conv-44",
+     "label": "AMBIGUOUS",
+     "confidence": "high",
+     "reason": "The conversation never specifies a US state or any uniquely identifying geographic clues; many states could fit the described parks, lakes, and city life, so choosing Minnesota over others is arbitrary rather than text-supported."
+    },
+    {
+     "conversation_index": 5,
+     "question_idx": 44,
+     "sample_id": "conv-44",
+     "label": "AMBIGUOUS",
+     "confidence": "high",
+     "reason": "The conversation mentions trips to “a beautiful national park” and “a national park” but never provides a name, so many different parks could fit; nothing specifically supports Voyageurs National Park over any other."
+    },
+    {
+     "conversation_index": 5,
+     "question_idx": 57,
+     "sample_id": "conv-44",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "On 22 November 2023 (Session 28), Andrew says he adopted Scout \"the other day,\" which indicates a few days before 22 November 2023, i.e., in November. The gold answer says \"few days before November 2023,\" which incorrectly places the adoption before the month of November."
+    },
+    {
+     "conversation_index": 6,
+     "question_idx": 2,
+     "sample_id": "conv-47",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "The conversation shows they plan to do VR gaming next Saturday (D1:33–36), to meet at McGee's pub (D21:13–18), to go to a baseball game together (D23:5–6), and for James to take John to the volunteer organization that provides items to those in need (D15:12–13). The specific place name 'VR Club' never appears, so that part of the gold answer is unsupported."
+    },
+    {
+     "conversation_index": 6,
+     "question_idx": 11,
+     "sample_id": "conv-47",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "Turn D6:7 shows John wanted to be alone with nature two days before April 20, 2022 (i.e., on April 18), not on April 10. The conversation never mentions John’s feelings on April 10, 2022."
+    },
+    {
+     "conversation_index": 6,
+     "question_idx": 31,
+     "sample_id": "conv-47",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "On July 9 James says he is leaving for Toronto 'the day after tomorrow evening' (i.e., July 11) and later in the same session says he plans to return on July 20, so the trip length is about 9 days, not 19."
+    },
+    {
+     "conversation_index": 6,
+     "question_idx": 36,
+     "sample_id": "conv-47",
+     "label": "AMBIGUOUS",
+     "confidence": "high",
+     "reason": "The chat only shows James bringing souvenirs \"for both you and your Jill\" and John replying that Jill will be delighted, which implies she is important to John but gives no explicit indication that she is his partner rather than a family member, friend, or someone else. Multiple roles are equally plausible, so calling her specifically John's partner is more specific than the text supports."
+    },
+    {
+     "conversation_index": 6,
+     "question_idx": 37,
+     "sample_id": "conv-47",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "The conversation states that it was James, not John, who spent time with his sister and dogs, and that this happened \"yesterday\" relative to the session on 22 July 2022 (i.e., on July 21, 2022). The gold date fits James’s activity, but the question attributes the event to John, so the fact belongs to the other speaker."
+    },
+    {
+     "conversation_index": 6,
+     "question_idx": 53,
+     "sample_id": "conv-47",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "The conversation never states how long it took James to complete his Witcher-inspired game; no duration such as six months is mentioned or can be derived from the timestamps."
+    },
+    {
+     "conversation_index": 6,
+     "question_idx": 62,
+     "sample_id": "conv-47",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "James says he asked Samantha to become his girlfriend 'yesterday' in Session 23 on 4 September 2022 (so they started dating around 3 September), and in Session 29 on 31 October 2022 he says they have decided to move in together; this is just under two months of dating, not nearly three months."
+    },
+    {
+     "conversation_index": 7,
+     "question_idx": 19,
+     "sample_id": "conv-48",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "The conversation mentions Jolene being in Paris in 2010 and again about a year before January 27, 2023, which shows she has been to France at least twice, but it never states or implies that these were the only visits. Therefore, the exact total number of times she has been to France cannot be determined."
+    },
+    {
+     "conversation_index": 7,
+     "question_idx": 20,
+     "sample_id": "conv-48",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "The conversation explicitly states that Jolene and her partner played Detroit (D2:26), love playing It Takes Two together (D15:10), and often play Overcooked 2 together (D19:10). Walking Dead is only mentioned as a future plan (D2:30), and Battlefield 1 is only said to have been given to them (D20:1) with no evidence they played it, so including those two in the gold answer is not supported by the text."
+    },
+    {
+     "conversation_index": 7,
+     "question_idx": 46,
+     "sample_id": "conv-48",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "The conversation shows Jolene starting a robotics project from her engineering professor (Session 3) and later mentions other unspecified 'big' or 'tough' engineering projects, but it never states how long she worked on that specific robotics project. Any duration like 'four months' would require guessing both that later projects are the same one and the exact timespan, which the text does not provide."
+    },
+    {
+     "conversation_index": 7,
+     "question_idx": 70,
+     "sample_id": "conv-48",
+     "label": "AMBIGUOUS",
+     "confidence": "high",
+     "reason": "The phrasing suggests a permanent loss and could imply death, but it could also mean an irreversible separation or other circumstance; the text never explicitly says the friend died, so both interpretations are possible."
+    },
+    {
+     "conversation_index": 7,
+     "question_idx": 71,
+     "sample_id": "conv-48",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "In Session 24 (timestamped 3 September 2023), Deborah says she went to a community meetup \"last Friday\" (D24:3). The Friday immediately before Sunday 3 September 2023 is 1 September 2023, not the last week of August."
+    },
+    {
+     "conversation_index": 7,
+     "question_idx": 77,
+     "sample_id": "conv-48",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "The conversation mentions Jolene and her partner taking a scuba diving lesson and finding a cool dive spot, but it never states where this occurred; Phuket is only mentioned earlier as the location of a meditation retreat, not of the dive spot."
+    },
+    {
+     "conversation_index": 7,
+     "question_idx": 87,
+     "sample_id": "conv-48",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "Deborah says she traveled to Bali (an island in Indonesia) in D6:10 and mentions having been in Rio de Janeiro (Brazil) three years ago in D23:18. Thailand is only mentioned as a place Jolene visited, not Deborah."
+    },
+    {
+     "conversation_index": 7,
+     "question_idx": 115,
+     "sample_id": "conv-48",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "Deborah says she went for a morning jog in a nearby park and will now incorporate this into her daily routine; spending time with loved ones is described as her usual evening activity, not the new activity she decided to add after the jog."
+    },
+    {
+     "conversation_index": 7,
+     "question_idx": 116,
+     "sample_id": "conv-48",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "The conversation states that Deborah says exercise makes her feel connected to her body (D7:20); Jolene never says this, so attributing it to Jolene is incorrect even though the phrase itself matches Deborah’s statement."
+    },
+    {
+     "conversation_index": 7,
+     "question_idx": 155,
+     "sample_id": "conv-48",
+     "label": "MALFORMED",
+     "confidence": "high",
+     "reason": "Turn D20:12 clearly states that these four habits are practiced by Deborah, not Jolene. The gold answer matches Deborah’s habits, so it is supported by the conversation’s content but does not answer the question as written, which asks about Jolene."
+    },
+    {
+     "conversation_index": 7,
+     "question_idx": 174,
+     "sample_id": "conv-48",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "In D26:15 Deborah says, \"Sorry, I remembered that I already have plans for this day,\" indicating that the meeting had to be rescheduled due to Deborah’s prior plans, not Jolene’s."
+    },
+    {
+     "conversation_index": 8,
+     "question_idx": 18,
+     "sample_id": "conv-49",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "Most of the gold items are supported (flavored seltzer water, dark chocolate with high cocoa, air‑popped popcorn and fruit, veggies/fruit, energy balls, and a chicken–avocado salad as a healthy meal), but there is no mention of any kind of healthy sandwich snacks anywhere in the conversation, so that part of the gold answer is not supported by the text."
+    },
+    {
+     "conversation_index": 8,
+     "question_idx": 24,
+     "sample_id": "conv-49",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "The conversation says that toward late August 2023 Sam went on a diet and began a new diet and exercise routine (Sessions 8 on 19 Aug and 9 on 27 Aug). The claim that he fell in love with a Canadian woman refers to Evan in Session 5, not Sam, so the gold answer attributes the wrong event and person."
+    },
+    {
+     "conversation_index": 8,
+     "question_idx": 36,
+     "sample_id": "conv-49",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "Sam clearly recommends an easy roasted vegetable recipe (D7:8) and a flavorful, healthy grilled chicken and veggie stir-fry (D8:7). The conversation never mentions grilled vegetables specifically, and poutine is only mentioned by Evan as something he plans to try after Sam shares a fries photo (D23:26–27), not as a recipe Sam recommends."
+    },
+    {
+     "conversation_index": 8,
+     "question_idx": 54,
+     "sample_id": "conv-49",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "Evan describes a health scare with sudden heart palpitations (D3:1) and later says he twisted his knee (not ankle) on 27 August (D9:2) and then messed up his knee again playing basketball (D11:2). The gold answer incorrectly says twisted ankle (and repeats it), which contradicts the text that clearly specifies the knee."
+    },
+    {
+     "conversation_index": 8,
+     "question_idx": 57,
+     "sample_id": "conv-49",
+     "label": "AMBIGUOUS",
+     "confidence": "high",
+     "reason": "The conversation only states that Sam is travelling through Lake Tahoe in October 2023, which lies on the California–Nevada border, so either state could be correct and the text does not indicate which side; the gold answer chooses California without textual support over Nevada."
+    },
+    {
+     "conversation_index": 8,
+     "question_idx": 74,
+     "sample_id": "conv-49",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "In Session 20, Evan says the accident happened \"last Tuesday\" (relative to Sunday, December 17, 2023), which corresponds to Tuesday, December 12, 2023; the gold answer incorrectly states Thursday before December 17, 2023."
+    },
+    {
+     "conversation_index": 8,
+     "question_idx": 80,
+     "sample_id": "conv-49",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "In Session 24 on 10 January 2024 at 12:17 am, Evan says that yesterday he went out with his friends and drank too much, so the drunken night occurred on 9 January 2024, not 2023."
+    },
+    {
+     "conversation_index": 8,
+     "question_idx": 106,
+     "sample_id": "conv-49",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "The conversation says Evan started painting after a friend gave him a painting and shows that the gift was a painting of a forest scene, but it never states that Evan specifically started painting forest scenes. The only supported fact is that he started painting in general."
+    },
+    {
+     "conversation_index": 8,
+     "question_idx": 108,
+     "sample_id": "conv-49",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "Evan says he loves painting landscapes and shows a recent work that happens to be a sunset over the ocean, but he never states that sunsets over the ocean are the type of landscapes he loves painting the most."
+    },
+    {
+     "conversation_index": 9,
+     "question_idx": 1,
+     "sample_id": "conv-50",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "On March 23 Calvin shows \"my new mansion\" and later repeatedly refers to it as his Japanese mansion, and on March 26 he says he just got a new car; however, the conversation never names the car as a Ferrari 488 GTB or ties any Ferrari purchase to March. In fact, Calvin says he got a new Ferrari \"last week\" in a message dated 15 September 2023, contradicting the idea that a Ferrari was bought in March."
+    },
+    {
+     "conversation_index": 9,
+     "question_idx": 8,
+     "sample_id": "conv-50",
+     "label": "AMBIGUOUS",
+     "confidence": "high",
+     "reason": "In Session 4 (dated 1 May 2023), Dave says he has finally opened his own car maintenance shop, implying it is already open by that date. However, in Session 6 (dated 16 May 2023), he says he opened his car shop “last week,” which points instead to the week of 8–14 May 2023. These conflicting statements support different opening times, so choosing May 1, 2023 as the exact date is not uniquely supported."
+    },
+    {
+     "conversation_index": 9,
+     "question_idx": 19,
+     "sample_id": "conv-50",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "The conversation clearly states that Calvin went to a music festival in Tokyo and that a concert photo was taken in Tokyo, but it never mentions him visiting a car museum, nor does it clearly state that he has visited Shibuya Crossing or Shinjuku (they are mentioned as spots he is excited to check out/try again). Thus the gold list adds unsupported items."
+    },
+    {
+     "conversation_index": 9,
+     "question_idx": 47,
+     "sample_id": "conv-50",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "Dave says his dad took him to his first car show when he was 10 (D26:6), and he also mentions going to a car show last weekend (D3:12) and to a car show last Friday (D22:1), so the conversation supports that he has attended at least three car shows, contradicting the gold answer of two."
+    },
+    {
+     "conversation_index": 9,
+     "question_idx": 60,
+     "sample_id": "conv-50",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "The conversation explicitly states that Calvin received a gold necklace with a diamond pendant as a gift from another artist (D4:24–D4:26). The guitar with an octopus was custom made by his Japanese artist friend (D16:14), but it is not described as a gift, only as a custom commission, so claiming it as a gift is unsupported."
+    },
+    {
+     "conversation_index": 9,
+     "question_idx": 61,
+     "sample_id": "conv-50",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "The conversation mentions Dave working on a vintage/ Ford Mustang (e.g., in D20:1 and D21:4) but never states how long the work took, nor gives clear start and end dates tied explicitly to that Mustang. Any duration like 'nearly two months' is an unstated inference."
+    },
+    {
+     "conversation_index": 9,
+     "question_idx": 62,
+     "sample_id": "conv-50",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "The conversation mentions Dave going to a car workshop in San Francisco and later returning from San Francisco with car modification insights, but it never states or implies how long the workshop lasted."
+    },
+    {
+     "conversation_index": 9,
+     "question_idx": 136,
+     "sample_id": "conv-50",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "The conversation only states that Dave restored a car last year and later sold it to a collector, but it never says when the sale happened, so answering that he sold it last year is not supported by the text."
+    },
+    {
+     "conversation_index": 9,
+     "question_idx": 137,
+     "sample_id": "conv-50",
+     "label": "UNSUPPORTED",
+     "confidence": "high",
+     "reason": "The conversation never states when Calvin first became interested in cars; the cited turn D26:6 refers to Dave getting into cars at age 10, not Calvin. There is no mention of the timing of Calvin’s initial interest in cars."
+    },
+    {
+     "conversation_index": 9,
+     "question_idx": 147,
+     "sample_id": "conv-50",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "Turn D28:34 shows that writing lyrics and notes boosts Dave’s motivation, not Calvin’s. The gold answer misattributes this tool to Calvin, so it is not supported as an answer to the question about Calvin."
+    },
+    {
+     "conversation_index": 9,
+     "question_idx": 151,
+     "sample_id": "conv-50",
+     "label": "WRONG",
+     "confidence": "high",
+     "reason": "In D30:1 (and earlier in D27:2), Dave says he has taken up photography, not Calvin. The conversation never states that Calvin recently took up photography or any other new hobby."
+    }
+   ]
+  }
+ },
+ "variants": {
+  "without_corrupted_golds": [
+   "external",
+   "ours"
+  ]
+ }
+}

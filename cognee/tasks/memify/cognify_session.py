@@ -8,16 +8,35 @@ from cognee.infrastructure.llm.exceptions import (
     raise_if_budget_exhausted_record,
 )
 from cognee.infrastructure.session.get_session_manager import get_session_manager
+from cognee.infrastructure.session.session_node_set import bridge_node_set
 from cognee.infrastructure.session.session_persist_watermark import (
     SessionPersistWindow,
     save_persisted_qa_count,
 )
+from cognee.modules.improve.config import get_improve_config
 from cognee.modules.improve.constants import USER_SESSIONS_NODE_SET
 from cognee.modules.pipelines.models.PipelineRunInfo import get_errored_run_info
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.ingestion.data_item import DataItem
 
 logger = get_logger("cognify_session")
+
+
+def _dated_content(window: SessionPersistWindow) -> str | DataItem:
+    """The window's text, carrying its last entry time as the document's source date.
+
+    Conflict review orders competing facts by that date, so a window that has one
+    is added as a DataItem under IMPROVE_EFFECTIVE_DATE_KEY. literal_text keeps
+    session text that happens to look like a URL or a path from being fetched.
+    """
+    if not window.last_entry_time:
+        return window.text
+    return DataItem(
+        data=window.text,
+        external_metadata={get_improve_config().effective_date_key: window.last_entry_time},
+        literal_text=True,
+    )
 
 
 async def cognify_session(
@@ -71,13 +90,14 @@ async def cognify_session(
                 window.persisted_qa_count,
             )
 
+            node_set = bridge_node_set([USER_SESSIONS_NODE_SET], window.node_set)
             await cognee.add(
-                window.text,
+                _dated_content(window),
                 dataset_id=dataset_id,
-                node_set=[USER_SESSIONS_NODE_SET],
+                node_set=node_set,
                 user=user,
             )
-            logger.debug("Session data added to cognee with node_set: %s", USER_SESSIONS_NODE_SET)
+            logger.debug("Session data added to cognee with node_set: %s", node_set)
             # raise_on_error=False: one window's failed build must not kill the
             # whole memify run — inspect the run info instead, keep this
             # window's watermark put (so it is re-extracted and retried on the

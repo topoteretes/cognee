@@ -33,6 +33,27 @@ class TestAuthFlow:
         with TestClient(app) as client:
             yield client
 
+    def test_sign_up_cannot_name_a_parent(self, client):
+        """A parent is set only by create_agent; a sign-up body naming one is ignored."""
+        suffix = uuid.uuid4().hex[:8]
+        parent = client.post(
+            "/api/v1/auth/register",
+            json={"email": f"parent_{suffix}@example.com", "password": TEST_USER_PASSWORD},
+        )
+        assert parent.status_code == 201, parent.text
+
+        puppet = client.post(
+            "/api/v1/auth/register",
+            json={
+                "email": f"puppet_{suffix}@example.com",
+                "password": TEST_USER_PASSWORD,
+                "parent_user_id": parent.json()["id"],
+            },
+        )
+
+        assert puppet.status_code == 201, puppet.text
+        assert puppet.json()["parent_user_id"] is None
+
     def test_register_login_create_api_key_and_authenticate(self, client):
         # Register a new user (ignore if already exists)
         register_response = client.post(

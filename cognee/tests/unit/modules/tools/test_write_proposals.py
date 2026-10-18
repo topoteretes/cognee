@@ -12,8 +12,6 @@ from cognee.modules.tools.errors import (
 )
 from cognee.modules.tools.text_to_sql.write_proposals import (
     apply_write_proposal,
-    list_write_proposals,
-    propose_corrections_from_contradictions,
     propose_sql_write,
     reject_write_proposal,
 )
@@ -254,45 +252,3 @@ async def test_guard_rejection_feeds_back_and_retries(
 
     assert proposal["status"] == "proposed"
     assert calls["count"] == 2
-
-
-@pytest.mark.asyncio
-async def test_propose_corrections_from_contradictions(
-    monkeypatch, write_enabled, writable_connection, relational_engine, source_db
-):
-    _mock_llm(monkeypatch, ["UPDATE customers SET country = 'fr' WHERE name = 'acme'"])
-
-    class FakeGraphEngine:
-        async def get_graph_data(self):
-            edges = [
-                ("n1", "n2", "is_part_of", {}),
-                (
-                    "n3",
-                    "n4",
-                    "contradicts",
-                    {
-                        "first_fact": "acme located in de",
-                        "second_fact": "acme located in fr",
-                        "reason": "a company HQ is in one country",
-                        "confidence": 0.9,
-                    },
-                ),
-            ]
-            return [], edges
-
-    async def fake_get_graph_engine():
-        return FakeGraphEngine()
-
-    import cognee.infrastructure.databases.graph as graph_pkg
-
-    monkeypatch.setattr(graph_pkg, "get_graph_engine", fake_get_graph_engine)
-
-    user_id = uuid4()
-    proposals = await propose_corrections_from_contradictions(user_id, "source")
-
-    assert len(proposals) == 1
-    assert proposals[0]["evidence"]["reason"] == "a company HQ is in one country"
-    assert proposals[0]["status"] == "proposed"
-
-    listed = await list_write_proposals(user_id, status="proposed")
-    assert len(listed) == 1

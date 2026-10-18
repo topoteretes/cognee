@@ -1,4 +1,4 @@
-"""The nine improve stages, wrapping the helpers that already exist.
+"""The improve stages, wrapping the helpers that already exist.
 
 Each class is a gate, a call into code that lives elsewhere
 (``memify_pipelines/``, ``infrastructure/session/``, ``modules/user_preferences/``,
@@ -17,7 +17,7 @@ from cognee.shared.logging_utils import get_logger
 
 from .constants import AGENT_TRACE_FEEDBACKS_NODE_SET
 from .inputs import ImproveRunInputs
-from .result import REASON_BACKEND_UNSUPPORTED, StageResult
+from .result import LEGACY_CUSTOM_TASKS_STAGE_NAME, REASON_BACKEND_UNSUPPORTED, StageResult
 from .stage import BaseStage
 
 logger = get_logger("improve")
@@ -27,14 +27,19 @@ REASON_SESSION_MANAGER_UNAVAILABLE = "session_manager_unavailable"
 REASON_AUTO_FEEDBACK_DISABLED = "auto_feedback_disabled"
 REASON_PERSONALIZATION_DISABLED = "personalization_disabled"
 REASON_OPT_IN_DISABLED = "opt_in_disabled"
-REASON_TRIPLET_EMBEDDING_DISABLED = "triplet_embedding_disabled"
-REASON_NO_WRITES_SINCE_LAST_IMPROVE = "no_writes_since_last_improve"
 REASON_NO_NEW_SESSION_ENTRIES = "no_new_entries"
 REASON_NO_NEW_TRACE_STEPS = "no_new_trace_steps"
+REASON_EDGE_EVIDENCE_DISABLED = "edge_evidence_disabled"
+REASON_NO_NEW_FACTS = "no_new_facts"
 # The stage drafts text with an LLM and no usable one is configured (keyless
 # installs run on GLiNER + fastembed); the stages that only cognify or embed
 # are not gated on this — cognify resolves its own extractor.
 REASON_NO_LLM_CONFIGURED = "no_llm_configured"
+
+# Entity ids a failed review carries on its watermark stamp for the next run.
+# Beyond this the stamp is withheld instead, so the next run redoes the whole
+# window rather than carry a large id list in the operation row.
+REVIEW_RETRY_ENTITY_LIMIT = 500
 
 
 def _already_completed(stage_name: str, reason: str) -> StageResult:
@@ -48,9 +53,8 @@ async def _watermarks_show_nothing_new(inputs: ImproveRunInputs, *, kind: str) -
 
     True only when the stage's own persist watermarks cover every given
     session, so the memify pipeline need not run at all — an unconditional run
-    logs a completed ``memify_pipeline`` row even with nothing new, which the
-    enrichment change-check counts as a graph write (a repeat session improve
-    would then re-embed the whole dataset). Fail-open: any error here means
+    would log a completed ``memify_pipeline`` row even with nothing new.
+    Fail-open: any error here means
     "run the pipeline"; the extraction tasks keep their own watermark logic,
     so this check is an optimization, never the correctness gate.
     """
@@ -75,6 +79,54 @@ async def _watermarks_show_nothing_new(inputs: ImproveRunInputs, *, kind: str) -
             exc_info=True,
         )
         return False
+
+
+async def _pending_trace_watermarks(
+    inputs: ImproveRunInputs, backlog: dict[str, int] | None = None
+) -> dict[str, tuple[int, int]] | None:
+    """``(persisted, total)`` step counts of each session with unpersisted steps.
+
+    ``persisted`` is the effective watermark (a stale one, above the LIVE
+    count, reads as 0). With ``backlog``, the step counts a run started with,
+    only sessions still below their starting count are pending: steps written
+    while the run goes on wait for the next run, and a watermark another
+    persister moved past the starting count reads as done, not stale. None
+    when the session store cannot be read.
+    """
+    try:
+        from cognee.infrastructure.session.get_session_manager import get_session_manager
+        from cognee.infrastructure.session.session_persist_watermark import (
+            TRACE_PERSIST_WATERMARK,
+        )
+        from cognee.tasks.memify.extract_agent_trace_feedbacks import resolve_trace_window
+
+        session_manager = get_session_manager()
+        if not session_manager.is_available:
+            return None
+        user_id = str(inputs.user.id)
+        pending = {}
+        for session_id in inputs.session_id_list:
+            total = await session_manager.get_agent_trace_count(
+                user_id=user_id, session_id=session_id
+            )
+            persisted = await TRACE_PERSIST_WATERMARK.read_count(
+                session_manager, user_id, session_id
+            )
+            step_limit = None
+            if backlog is not None:
+                if session_id not in backlog:
+                    continue
+                step_limit = backlog[session_id]
+            # The live total drives the stale check; the limit only bounds the reach.
+            effective, pending_steps = resolve_trace_window(
+                total, persisted, None, session_id=session_id, step_limit=step_limit
+            )
+            if total and pending_steps:
+                pending[session_id] = (effective, total)
+        return pending
+    except Exception as error:
+        logger.debug("improve: trace watermarks unreadable: %s", error, exc_info=True)
+        return None
 
 
 class FeedbackWeightsStage(BaseStage):
@@ -136,6 +188,12 @@ class PersistSessionQAStage(BaseStage):
         return StageResult.from_pipeline_run(self.name, result, sessions=len(inputs.session_ids))
 
 
+# Sessions one persist_agent_traces pass cognifies, one window each. A pass is
+# one memify run, which holds the dataset lock until it ends, so this bounds how
+# long a remember() or cognify() on the dataset waits behind a draining run.
+TRACE_SESSIONS_PER_PASS = 10
+
+
 class PersistAgentTracesStage(BaseStage):
     """Stage 3: cognify per-step agent trace feedback (``agent_trace_feedbacks``)."""
 
@@ -150,19 +208,89 @@ class PersistAgentTracesStage(BaseStage):
         if await _watermarks_show_nothing_new(inputs, kind="traces"):
             return _already_completed(self.name, REASON_NO_NEW_TRACE_STEPS)
 
-        result = await persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
-            user=inputs.user,
-            session_ids=inputs.session_id_list,
-            dataset=inputs.dataset_id,
-            node_set_name=AGENT_TRACE_FEEDBACKS_NODE_SET,
-            raw_trace_content=False,
-            last_n_steps=None,  # persist all stored steps on demand
-            run_in_background=False,
-        )
+        # Each pipeline call cognifies every pending step of each pending session
+        # as one document (the OLDEST trace_window_steps of them when that cap is
+        # set) and advances their watermarks, so a long session costs one cognify
+        # run, not one per window. The loop drains the backlog the run started
+        # with, unless trace_windows_per_run caps the run; steps an agent writes
+        # meanwhile wait for the next run (the window is cut at the starting
+        # count, persist_up_to), so a live session cannot keep the run (and the
+        # dataset's improve lock) going. A pass's windows build in one cognify
+        # run; a failed build raises with its cause and ends the run, nothing
+        # built, every watermark in place. A pass takes at most
+        # TRACE_SESSIONS_PER_PASS sessions, those with the fewest windows so far,
+        # so the dataset lock is released between passes and sessions late in
+        # the list get their turn before earlier ones drain.
+        config = inputs.config
+        max_windows = config.trace_windows_per_run
+        sessions = len(inputs.session_ids)
+        windows = 0
+        stuck: list[str] = []
+        served: dict[str, int] = {}
+        stage_result = None
+        pending = await _pending_trace_watermarks(inputs)
+        backlog = {sid: total for sid, (_mark, total) in (pending or {}).items()}
+        while pending:
+            limit = TRACE_SESSIONS_PER_PASS
+            if max_windows:
+                limit = max(0, min(limit, max_windows - windows))
+            candidates = sorted(
+                (sid for sid in pending if sid not in stuck), key=lambda sid: served.get(sid, 0)
+            )
+            batch = {sid: pending[sid][0] for sid in candidates[:limit]}
+            if not batch:
+                break
+            result = await persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
+                user=inputs.user,
+                session_ids=list(batch),
+                dataset=inputs.dataset_id,
+                node_set_name=AGENT_TRACE_FEEDBACKS_NODE_SET,
+                raw_trace_content=False,
+                last_n_steps=config.trace_window_steps or None,
+                run_in_background=False,
+                persist_up_to=backlog,
+            )
+            windows += len(batch)
+            for sid in batch:
+                served[sid] = served.get(sid, 0) + 1
+            stage_result = StageResult.from_pipeline_run(
+                self.name, result, sessions=sessions, windows=windows
+            )
+            if stage_result.status == "errored":
+                break
+            # A failed build raises and ended the run above. A session can still
+            # come back unmoved when extraction skipped it (its context could not
+            # be read): set it aside for the rest of the run and report it.
+            pending = await _pending_trace_watermarks(inputs, backlog)
+            if pending is None:
+                break
+            stuck.extend(
+                sid for sid, mark in batch.items() if sid in pending and pending[sid][0] == mark
+            )
         logger.info(
-            "improve: agent trace steps persisted from %d session(s)", len(inputs.session_ids)
+            "improve: persisted %d agent trace window(s) from %d session(s)", windows, sessions
         )
-        return StageResult.from_pipeline_run(self.name, result, sessions=len(inputs.session_ids))
+        if stage_result is not None and stage_result.status == "errored":
+            return stage_result
+        if pending is None:
+            return StageResult.errored(
+                self.name,
+                "agent trace watermarks could not be read",
+                sessions=sessions,
+                windows=windows,
+            )
+        if stuck:
+            return StageResult.errored(
+                self.name,
+                f"{len(stuck)} session(s) did not advance their trace persist watermark: "
+                + ", ".join(stuck),
+                sessions=sessions,
+                windows=windows,
+                sessions_stuck=len(stuck),
+            )
+        if stage_result is not None:
+            return stage_result
+        return _already_completed(self.name, REASON_NO_NEW_TRACE_STEPS)
 
 
 class ExtractAgentContextStage(BaseStage):
@@ -243,18 +371,24 @@ class DistillSessionsStage(BaseStage):
         return None
 
     async def run(self, inputs: ImproveRunInputs) -> StageResult:
+        from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
         from cognee.modules.session_distillation import distill_session
 
         distilled = 0
         completed = 0
         failed = 0
+        uncurated = 0
         last_error: BaseException | None = None
         for session_id in inputs.session_ids:
             try:
                 result = await distill_session(
-                    session_id, dataset=inputs.dataset_id, user=inputs.user
+                    session_id,
+                    dataset=inputs.dataset_id,
+                    user=inputs.user,
+                    max_batches=inputs.config.distill_max_batches_per_run,
                 )
                 distilled += len(result.documents)
+                uncurated += result.uncurated_entries
                 if result.status == "completed":
                     completed += 1
                 logger.info(
@@ -263,6 +397,18 @@ class DistillSessionsStage(BaseStage):
                     result.status,
                     len(result.documents),
                 )
+            except LLMPaymentRequiredError as e:
+                # Every later session would fail the same way: stop here, and keep
+                # this error so the stage result reports the exhausted budget.
+                failed += 1
+                last_error = e
+                logger.warning(
+                    "improve: LLM budget exhausted distilling session '%s'; "
+                    "skipping the remaining sessions: %s",
+                    session_id,
+                    e,
+                )
+                break
             except Exception as e:
                 failed += 1
                 last_error = e
@@ -276,6 +422,7 @@ class DistillSessionsStage(BaseStage):
             "documents": distilled,
             "sessions_completed": completed,
             "sessions_failed": failed,
+            "entries_uncurated": uncurated,
         }
         if failed:
             return StageResult.errored(self.name, last_error, **counts)
@@ -375,84 +522,134 @@ class BuildTruthSubspaceStage(BaseStage):
         return StageResult.completed(self.name, **counts)
 
 
-class TripletEnrichmentStage(BaseStage):
-    """Stage 8: default memify enrichment (triplet embeddings).
+class ReviewConflictsStage(BaseStage):
+    """Review changed facts and retry conflicts with missing citations or pending writes."""
 
-    Skipped when ``triplet_embedding`` is off and the caller supplied no tasks
-    of their own (the default task list would be empty). ``already_completed``
-    when no write pipeline has completed for this dataset since its last
-    improve, read from ``pipeline_runs`` — unless the caller scoped the run
-    with ``node_name`` or supplied custom tasks: the watermark's unit is the
-    dataset, and "nothing changed" does not imply that narrower or different
-    work was already done.
-    """
+    name = "review_conflicts"
 
-    name = "triplet_enrichment"
+    @staticmethod
+    def _stamped_retry_ids(watermark) -> list[str]:
+        """Entity ids a previous review stamped for retry; ignore a malformed value."""
+        ids = (watermark.stamp or {}).get("retry_entity_ids") if watermark else None
+        if not isinstance(ids, list):
+            return []
+        return [entity_id for entity_id in ids if isinstance(entity_id, str)]
 
     def gate(self, inputs: ImproveRunInputs) -> str | None:
-        if inputs.has_custom_memify_tasks:
-            return None
-        from cognee.modules.cognify.config import get_cognify_config
+        if not inputs.review_conflicts:
+            return REASON_OPT_IN_DISABLED
+        if not llm_available():
+            return REASON_NO_LLM_CONFIGURED
+        from cognee.modules.provenance.edge_evidence.config import get_provenance_config
 
-        if not get_cognify_config().triplet_embedding:
-            return REASON_TRIPLET_EMBEDDING_DISABLED
+        if not get_provenance_config().edge_evidence_enabled:
+            return REASON_EDGE_EVIDENCE_DISABLED
         return None
 
     async def run(self, inputs: ImproveRunInputs) -> StageResult:
         from datetime import datetime, timezone
 
-        from cognee.modules.memify import memify
+        from .graph_changes import REVIEW_WATERMARK_KEY, last_improve_watermark, watermark_stamp
 
-        from .graph_changes import (
-            enrichment_watermark_stamp,
-            has_graph_changed_since_last_improve,
+        started_at = datetime.now(timezone.utc)
+        watermark = await last_improve_watermark(
+            inputs.dataset_id,
+            REVIEW_WATERMARK_KEY,
+            exclude_operation_id=inputs.improve_operation_id,
+        )
+        # Without a watermark nothing has been reviewed yet, so review every entity.
+        if watermark is None:
+            return await self._review(inputs, entity_ids=None, since=None, started_at=started_at)
+
+        entity_ids = await self._changed_entity_ids(inputs, watermark)
+        if not entity_ids and not await self._has_conflicts_to_repair(inputs):
+            result = _already_completed(self.name, REASON_NO_NEW_FACTS)
+            result._run_info_stamp = watermark_stamp(
+                REVIEW_WATERMARK_KEY, result.status, started_at
+            )
+            return result
+        return await self._review(
+            inputs, entity_ids=entity_ids, since=watermark.started_at, started_at=started_at
         )
 
-        # Only a full, unscoped enrichment stamps the watermark: the stamp
-        # says "the whole dataset was enriched as of started_at", which
-        # narrower or different work cannot claim. started_at is captured
-        # before the change check and the memify run, so a write racing the
-        # row close stays visible to the next run's gate.
-        full_scope = not inputs.has_custom_memify_tasks and not inputs.node_name
-        started_at = datetime.now(timezone.utc)
+    async def _changed_entity_ids(self, inputs: ImproveRunInputs, watermark) -> list[str]:
+        """Entities a completed write touched since the watermark, plus the ones to retry.
 
-        if full_scope and not await has_graph_changed_since_last_improve(
-            inputs.dataset_id, exclude_operation_id=inputs.improve_operation_id
+        Entities a previous run could not review are touched by no later write, so
+        without carrying them forward get_touched_entity_ids would never select
+        them again.
+        """
+        from cognee.modules.provenance.edge_evidence.lookup import get_touched_entity_ids
+
+        touched = await get_touched_entity_ids(inputs.dataset_id, watermark.started_at)
+        return sorted(touched | set(self._stamped_retry_ids(watermark)))
+
+    async def _has_conflicts_to_repair(self, inputs: ImproveRunInputs) -> bool:
+        """Is a stored conflict still waiting on a lost citation or an unfinished write?"""
+        from cognee.context_global_variables import set_database_global_context_variables
+        from cognee.infrastructure.databases.graph import get_graph_engine
+        from cognee.infrastructure.locks.dataset_lock import dataset_lock
+        from cognee.tasks.memify.review_conflicts.read_facts import (
+            find_conflicts_with_lost_citations,
+        )
+
+        # Match memify's lock/context order and release both before its wrapper
+        # runs, so the dataset queue slot is never held waiting.
+        async with (
+            dataset_lock(inputs.dataset_id),
+            set_database_global_context_variables(inputs.dataset_id, inputs.dataset.owner_id),
         ):
-            result = StageResult(
-                stage=self.name,
-                status="already_completed",
-                reason=REASON_NO_WRITES_SINCE_LAST_IMPROVE,
-            )
-            result._raw_run = {}
-            result._run_info_stamp = enrichment_watermark_stamp(result.status, started_at)
-            return result
+            graph = await get_graph_engine()
+            pending, drops = await find_conflicts_with_lost_citations(graph, inputs.dataset_id)
+        return bool(pending or drops)
 
-        kwargs = dict(inputs.memify_kwargs)
-        if kwargs.get("node_type") is None:
-            from cognee.modules.engine.models.node_set import NodeSet
+    async def _review(
+        self, inputs: ImproveRunInputs, *, entity_ids, since, started_at
+    ) -> StageResult:
+        """Run the review pipeline and stamp the watermark the next run reads."""
+        from cognee.memify_pipelines.review_conflicts import review_conflicts_pipeline
 
-            kwargs["node_type"] = NodeSet
+        from .graph_changes import REVIEW_WATERMARK_KEY, watermark_stamp
 
-        # The default memify tasks never read the projected graph: they stream
-        # triplets straight from the graph DB (or no-op). Pass the non-empty
-        # sentinel the other improve stages already use so memify skips the
-        # full-graph projection. Custom tasks/data keep the projection, since a
-        # caller-supplied task may consume it.
-        if not inputs.has_custom_memify_tasks:
-            kwargs["data"] = [{}]
-
-        run_result = await memify(
-            dataset=inputs.dataset_id,
-            node_name=inputs.node_name,
-            user=inputs.user,
-            run_in_background=False,
-            **kwargs,
+        run_result = await review_conflicts_pipeline(
+            dataset=inputs.dataset_id, user=inputs.user, entity_ids=entity_ids, since=since
         )
         result = StageResult.from_pipeline_run(self.name, run_result)
-        if full_scope and result.status in ("completed", "already_completed"):
-            result._run_info_stamp = enrichment_watermark_stamp(result.status, started_at)
+        payload = result.run.payload if result.run is not None else None
+        failed = payload.get("unreviewed_entity_ids", []) if isinstance(payload, dict) else []
+        result.counts = {"entities_failed": len(failed)}
+        if failed:
+            logger.warning("improve: conflict review failed for entities: %s", failed)
+        # review_entities appends failures from three sites and dedups none of them.
+        retry_ids = sorted(set(failed))
+        if result.status == "completed" and len(retry_ids) <= REVIEW_RETRY_ENTITY_LIMIT:
+            result._run_info_stamp = watermark_stamp(
+                REVIEW_WATERMARK_KEY, result.status, started_at, retry_entity_ids=retry_ids
+            )
         return result
+
+
+class LegacyCustomTasksStage(BaseStage):
+    """Deprecated (SDK-1115): ``improve(extraction_tasks=..., enrichment_tasks=...)``.
+
+    Not in ``DEFAULT_STAGES``. ``improve()`` appends it for a run whose caller
+    gave custom tasks, so they keep running for one release, as the removed
+    triplet-enrichment stage ran them. Its raw return fills the deprecated
+    ``ImproveResult.memify_run``. Removed in the next release, with those options.
+    """
+
+    name = LEGACY_CUSTOM_TASKS_STAGE_NAME
+
+    async def run(self, inputs: ImproveRunInputs) -> StageResult:
+        from cognee.api.v1.memify.memify import run_legacy_memify
+
+        run_result = await run_legacy_memify(
+            **dict(inputs.legacy_memify or {}),
+            dataset=inputs.dataset_id,
+            user=inputs.user,
+            run_in_background=False,
+        )
+        return StageResult.from_pipeline_run(self.name, run_result)
 
 
 class GlobalContextIndexStage(BaseStage):

@@ -1,5 +1,6 @@
 from .Entity import Entity
 from .EntityType import EntityType
+from .FactConflict import FactConflict
 from .OntologyProperty import OntologyProperty
 from .OntologyProposal import OntologyProposal
 from .TableRow import TableRow
@@ -8,8 +9,6 @@ from .node_set import NodeSet
 from .ColumnValue import ColumnValue
 from .DltColumn import DltColumn
 from .Timestamp import Timestamp
-from .Interval import Interval
-from .Event import Event
 from .Triplet import Triplet
 from .Skill import Skill
 from .SkillImprovementProposal import SkillImprovementProposal

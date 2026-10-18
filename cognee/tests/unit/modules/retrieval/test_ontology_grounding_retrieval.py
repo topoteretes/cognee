@@ -285,6 +285,15 @@ async def test_hybrid_retrieve_one_carries_grounding_and_pins_entity_lane():
             return_value={},
         ),
         patch(
+            "cognee.modules.retrieval.hybrid_retriever.dlt_rows_indexed",
+            new_callable=AsyncMock,
+            return_value=False,
+        ),
+        patch(
+            "cognee.modules.retrieval.hybrid_retriever.attach_chunk_conflicts",
+            new_callable=AsyncMock,
+        ),
+        patch(
             "cognee.modules.retrieval.hybrid_retriever.retrieve_hybrid_chunks",
             new_callable=AsyncMock,
             return_value={"chunks": [], "chunk_summaries": {}},
@@ -331,6 +340,15 @@ async def test_hybrid_result_has_no_grounding_key_when_nothing_matches():
             "cognee.modules.retrieval.hybrid_retriever.load_preference_weights",
             new_callable=AsyncMock,
             return_value={},
+        ),
+        patch(
+            "cognee.modules.retrieval.hybrid_retriever.dlt_rows_indexed",
+            new_callable=AsyncMock,
+            return_value=False,
+        ),
+        patch(
+            "cognee.modules.retrieval.hybrid_retriever.attach_chunk_conflicts",
+            new_callable=AsyncMock,
         ),
         patch(
             "cognee.modules.retrieval.hybrid_retriever.retrieve_hybrid_chunks",
