@@ -5,7 +5,7 @@ This document summarizes how to work with the cognee repository: how it’s orga
 ## Project Structure & Module Organization
 
 - `cognee/`: Core Python library and API.
-  - `api/`: FastAPI application and versioned routers under `api/v1/` — memory API (`remember`, `recall`, `improve`, `forget`), low-level operations (`add`, `cognify`, `memify`, `search`, `delete`, `update`), and supporting routers (`datasets`, `users`, `permissions`, `settings`, `sync`, `visualize`, `health`, `skills`, `sessions`, …). Each router package has a `routers/` folder; `api/client.py` registers them.
+  - `api/`: FastAPI application and versioned routers under `api/v1/` — memory API (`remember`, `recall`, `improve`, `forget`), low-level operations (`add`, `cognify`, `search`, `delete`, `update`), and supporting routers (`datasets`, `users`, `permissions`, `settings`, `sync`, `visualize`, `health`, `skills`, `sessions`, …). Each router package has a `routers/` folder; `api/client.py` registers them.
   - `cli/`: CLI entry points and subcommands invoked via `cognee` / `cognee-cli`.
   - `infrastructure/`: Databases, LLM providers, embeddings, loaders, and storage adapters.
   - `modules/`: Domain logic (graph, retrieval, ontology, users, processing, observability, etc.).
@@ -128,7 +128,10 @@ graph and vector databases. Backend support (source of truth:
 - Vector — supported: LanceDB (default), PGVector, Turso. Unsupported: Neptune
   Analytics and community adapters (unless they register a handler via
   `use_dataset_database_handler()`).
-- Relational (SQLite/Postgres) is always a single shared DB (users, ACLs, registry).
+- Relational (SQLite/Postgres/Turso) is always a single shared DB (users, ACLs, registry).
+- Turso: the three layers and the session cache (`CACHE_BACKEND=turso`) can run on the Turso
+  rewrite engine (`pyturso`, local files only);
+  setup, journal modes and engine limits are in `docs/turso-local.md`.
 
 Each provider has a default handler derived from it, so no handler setting is needed
 normally. Setting `GRAPH_DATASET_DATABASE_HANDLER` / `VECTOR_DATASET_DATABASE_HANDLER`

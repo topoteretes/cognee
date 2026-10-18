@@ -27,7 +27,16 @@ def pipeline_name_for_source(source, dataset_name: str) -> str:
 
 # Community/cloud hosts can refuse unsafe older cores before ingestion starts.
 # Version 1 scopes cleanup by staging table and handles a confirmed empty table.
-DOCUMENT_SYNC_VERSION = 1
+# Version 2 reads the per-row node_set column (NODE_SET_COLUMN).
+DOCUMENT_SYNC_VERSION = 2
+
+# A document-mode row may carry its own node sets in this column, as a JSON
+# list of names (see resolve_dlt_sources._row_node_set). Every name is
+# namespaced under the source tag, so a row can never name one of cognee's
+# own node sets. The type hint is applied at load time so dlt stores the list
+# on the row as json instead of normalizing it into a child table.
+NODE_SET_COLUMN = "cognee_node_set"
+NODE_SET_COLUMN_HINT = {NODE_SET_COLUMN: {"data_type": "json", "nullable": True}}
 
 
 def guarded_rows(rows, check_active=None):
@@ -99,3 +108,14 @@ async def load_dlt_manifest(raw_data_location: str) -> dict:
 
     async with open_data_file(raw_data_location, mode="r", encoding="utf-8") as file:
         return json.loads(file.read())
+
+
+def column_selected(selection: dict | None, table_name: str, column: str) -> bool:
+    """Whether ``selection`` ({table: [column, ...]}, "*" wildcards on either side)
+    names this cell. A table named in the selection gets exactly its list — an
+    empty list means none for that table — and only an unnamed table takes the
+    wildcard. An empty or missing selection names nothing."""
+    if not selection:
+        return False
+    columns = selection[table_name] if table_name in selection else selection.get("*", [])
+    return "*" in columns or column in columns

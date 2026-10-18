@@ -370,3 +370,135 @@ def test_a_type_with_no_name_creates_no_entity_type(empty_type):
     assert not [dp for dp in data_points if isinstance(dp, EntityType)]
     alice = next(dp for dp in data_points if isinstance(dp, Entity))
     assert alice.is_a is None
+
+
+# --- Timestamp nodes (SDK-827) --------------------------------------------
+
+
+def _timestamp_graph(name="1867-11-07", timestamp_type="Timestamp", extra_edges=()):
+    return _make_graph(
+        [
+            Node(id="n1", name="Marie Curie", type="Person", description="physicist"),
+            Node(id="t1", name=name, type=timestamp_type, description="a time"),
+        ],
+        [
+            KGEdge(source_node_id="n1", target_node_id="t1", relationship_name="born_at"),
+            *extra_edges,
+        ],
+    )
+
+
+def test_a_timestamp_node_becomes_a_timestamp_datapoint_the_at_edge_points_to():
+    from cognee.modules.engine.models import EntityType, Timestamp
+
+    chunk = _make_chunk()
+    data_points = _construct_test_data_points([chunk], [_timestamp_graph()])
+
+    timestamp = next(dp for dp in data_points if isinstance(dp, Timestamp))
+    assert timestamp.timestamp_str == "1867-11-07"
+    assert timestamp.precision == "day"
+    assert timestamp.id == Timestamp.id_for("1867-11-07")
+    assert timestamp.importance_weight == chunk.importance_weight
+    # No EntityType "timestamp" is created for it, only the person's type.
+    assert [dp.name for dp in data_points if isinstance(dp, EntityType)] == ["person"]
+
+    marie = next(dp for dp in data_points if isinstance(dp, Entity))
+    edge, target = marie.relations[0]
+    assert edge.relationship_type == "born_at"
+    assert target is timestamp
+    assert [entity for _, entity in chunk.contains] == [marie, timestamp]
+
+
+def test_the_same_time_in_two_chunks_is_one_timestamp_node():
+    from cognee.modules.engine.models import Timestamp
+
+    chunk_a, chunk_b = _make_chunk(), _make_chunk()
+    graph_a = _timestamp_graph("1867")
+    graph_b = _make_graph(
+        [
+            Node(id="n1", name="Pierre Curie", type="Person", description="physicist"),
+            Node(id="t1", name="1867", type="timestamp", description="a time"),
+        ],
+        [KGEdge(source_node_id="n1", target_node_id="t1", relationship_name="married_at")],
+    )
+    data_points = _construct_test_data_points([chunk_a, chunk_b], [graph_a, graph_b])
+
+    timestamps = [dp for dp in data_points if isinstance(dp, Timestamp)]
+    assert len(timestamps) == 1
+    assert chunk_a.contains[1][1] is timestamps[0]
+    assert chunk_b.contains[1][1] is timestamps[0]
+    assert [dp.relations[0][1] for dp in data_points if isinstance(dp, Entity)] == timestamps * 2
+
+
+@pytest.mark.parametrize("name", ["the 1860s", "that spring", "1867-13"])
+def test_a_timestamp_whose_name_is_not_a_normalized_time_stays_an_entity(name):
+    from cognee.modules.engine.models import EntityType, Timestamp
+
+    chunk = _make_chunk()
+    data_points = _construct_test_data_points([chunk], [_timestamp_graph(name)])
+
+    assert not [dp for dp in data_points if isinstance(dp, Timestamp)]
+    kept = next(dp for dp in data_points if isinstance(dp, Entity) and dp.name != "marie curie")
+    assert kept.is_a.name == "timestamp"
+    assert isinstance(kept.is_a, EntityType)
+
+
+def test_an_edge_drawn_from_a_timestamp_is_reversed_onto_its_target():
+    """The LLM got the direction wrong; the fact survives, the Timestamp survives."""
+    from cognee.modules.engine.models import Timestamp
+
+    chunk = _make_chunk()
+    graph = _make_graph(
+        [
+            Node(id="n1", name="radium", type="Element", description="element"),
+            Node(id="t1", name="1898-12-26", type="Timestamp", description="a time"),
+        ],
+        [KGEdge(source_node_id="t1", target_node_id="n1", relationship_name="discovery_of")],
+    )
+    data_points = _construct_test_data_points([chunk], [graph])
+
+    timestamp = next(dp for dp in data_points if isinstance(dp, Timestamp))
+    assert timestamp.timestamp_str == "1898-12-26"
+    radium = next(dp for dp in data_points if isinstance(dp, Entity))
+    edge, target = radium.relations[0]
+    assert edge.relationship_type == "discovery_of"
+    assert target is timestamp
+    assert [dp.name for dp in data_points if isinstance(dp, Entity) and dp.name != "radium"] == []
+
+
+def test_an_edge_between_two_timestamps_is_dropped_and_both_survive():
+    from cognee.modules.engine.models import Timestamp
+
+    chunk = _make_chunk()
+    graph = _make_graph(
+        [
+            Node(id="t1", name="1803", type="Timestamp", description="start"),
+            Node(id="t2", name="1815", type="Timestamp", description="end"),
+        ],
+        [KGEdge(source_node_id="t1", target_node_id="t2", relationship_name="until")],
+    )
+    data_points = _construct_test_data_points([chunk], [graph])
+
+    assert sorted(dp.timestamp_str for dp in data_points if isinstance(dp, Timestamp)) == [
+        "1803",
+        "1815",
+    ]
+    assert not [dp for dp in data_points if isinstance(dp, Entity)]
+
+
+def test_an_unparseable_timestamp_with_outgoing_edges_keeps_them_as_an_entity():
+    from cognee.modules.engine.models import Timestamp
+
+    chunk = _make_chunk()
+    graph = _timestamp_graph(
+        "that spring",
+        extra_edges=[
+            KGEdge(source_node_id="t1", target_node_id="n1", relationship_name="related_to")
+        ],
+    )
+    data_points = _construct_test_data_points([chunk], [graph])
+
+    assert not [dp for dp in data_points if isinstance(dp, Timestamp)]
+    kept = next(dp for dp in data_points if dp.name == "that spring")
+    assert isinstance(kept, Entity)
+    assert [edge.relationship_type for edge, _ in kept.relations] == ["related_to"]
