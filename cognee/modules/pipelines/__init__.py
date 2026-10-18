@@ -29,7 +29,12 @@ Two functions named ``run_pipeline`` -- pick the right one
   per-item task resolver), ``data``, ``datasets``, ``user``,
   ``pipeline_name``. This is what ``cognify``, ``improve`` and
   ``run_custom_pipeline`` call. Use it when the run must be dataset-aware,
-  permission-checked or resumable.
+  permission-checked or resumable. Without ``data`` it runs over every row of
+  the dataset. ``Data`` rows passed in ``data`` are read again under the
+  dataset lock (``get_selected_dataset_data``): tasks get the current rows,
+  not the caller's instances; deleted rows are dropped, and a selection left
+  empty runs over no data, never the whole dataset; a row of another dataset
+  raises ``CogneeValidationError``. Other items in ``data`` pass through.
 * ``cognee.pipelines.run_pipeline`` (``operations/run_pipeline.py``) -- the
   lightweight deferred-call runner: ``run_pipeline([spec1(), spec2(...)],
   data=...)`` over ``BoundTask`` steps, returns the final step's results as a

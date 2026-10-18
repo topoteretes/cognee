@@ -78,6 +78,8 @@ async def main() -> None:
     )
     from cognee.infrastructure.llm.config import get_llm_config
     from cognee.modules.cognify.config import get_cognify_config, resolve_extractor
+    from cognee.modules.pipelines.models import PipelineRunStatus
+    from cognee.tests.utils.get_latest_pipeline_run import get_latest_pipeline_run
 
     assert not get_llm_config().llm_api_key, "an LLM key leaked into the environment"
     extractor = resolve_extractor(None, get_cognify_config())
@@ -100,6 +102,11 @@ async def main() -> None:
     )
 
     await cognee.cognify(["keyless"])
+
+    cognify_run = await get_latest_pipeline_run(
+        pipeline_name="cognify_pipeline", status=PipelineRunStatus.DATASET_PROCESSING_COMPLETED
+    )
+    assert cognify_run.embedding_tokens > 0, "cognify recorded no embedding tokens"
 
     chunks = await cognee.search(
         "Where was Marie Curie born?", query_type=SearchType.CHUNKS, datasets=["keyless"], top_k=3
@@ -236,6 +243,9 @@ async def main() -> None:
     assert recalled and recalled[0].search_type == "CHUNKS", [
         getattr(r, "search_type", None) for r in recalled
     ]
+    recall_run = await get_latest_pipeline_run(operation_name="recall")
+    assert recall_run.embedding_tokens > 0, "recall recorded no embedding tokens"
+    assert recall_run.tokens_in == 0, "recall's embedding tokens were counted as LLM tokens"
     missing_key_logs = [
         message for message in LOG_CAPTURE.messages if "LLMAPIKeyNotSetError" in message
     ]

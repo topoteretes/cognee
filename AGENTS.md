@@ -5,7 +5,7 @@ This document summarizes how to work with the cognee repository: how it’s orga
 ## Project Structure & Module Organization
 
 - `cognee/`: Core Python library and API.
-  - `api/`: FastAPI application and versioned routers under `api/v1/` — memory API (`remember`, `recall`, `improve`, `forget`), low-level operations (`add`, `cognify`, `memify`, `search`, `delete`, `update`), and supporting routers (`datasets`, `users`, `permissions`, `settings`, `sync`, `visualize`, `health`, `skills`, `sessions`, …). Each router package has a `routers/` folder; `api/client.py` registers them.
+  - `api/`: FastAPI application and versioned routers under `api/v1/` — memory API (`remember`, `recall`, `improve`, `forget`), low-level operations (`add`, `cognify`, `search`, `delete`, `update`), and supporting routers (`datasets`, `users`, `permissions`, `settings`, `sync`, `visualize`, `health`, `skills`, `sessions`, …). Each router package has a `routers/` folder; `api/client.py` registers them.
   - `cli/`: CLI entry points and subcommands invoked via `cognee` / `cognee-cli`.
   - `infrastructure/`: Databases, LLM providers, embeddings, loaders, and storage adapters.
   - `modules/`: Domain logic (graph, retrieval, ontology, users, processing, observability, etc.).
