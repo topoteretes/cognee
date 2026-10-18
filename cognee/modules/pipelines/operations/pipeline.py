@@ -7,6 +7,7 @@ from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingCo
 from cognee.infrastructure.llm.config import LLMConfig
 from cognee.infrastructure.locks import get_dataset_lock, held_datasets
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
+from cognee.modules.data.methods.get_selected_dataset_data import get_selected_dataset_data
 from cognee.modules.data.models import Data, Dataset
 from cognee.modules.pipelines.layers import validate_pipeline_tasks
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
@@ -142,7 +143,12 @@ async def run_pipeline_per_dataset(
     # The actual work of a single run, factored out so it can run either under
     # the per-dataset lock (normal case) or directly (re-entrant case below).
     async def _run_body():
-        body_data = data if data else await get_dataset_data(dataset_id=dataset.id)
+        # Read under the dataset lock, so the run sees each selected row as it is now.
+        body_data = (
+            await get_selected_dataset_data(dataset.id, data)
+            if data
+            else await get_dataset_data(dataset_id=dataset.id)
+        )
 
         # The run always proceeds. Concurrent runs on one dataset are serialized
         # by the per-dataset lock, and already-processed documents are skipped
