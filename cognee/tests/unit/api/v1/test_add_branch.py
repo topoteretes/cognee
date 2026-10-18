@@ -55,9 +55,11 @@ async def test_the_branch_reaches_run_tasks_and_the_add_task(executor):
 
     with_branch, without = executor.await_args_list
     # run_tasks resolves repository URLs before the task list runs, from the extras.
-    assert with_branch.kwargs["extras"] == {"repo_branch": "dev"}
+    # The node set rides along for the incremental pre-check's dedup scope (None
+    # means "the rows stored without one", so it is always present).
+    assert with_branch.kwargs["extras"] == {"repo_branch": "dev", "node_set": None}
     assert with_branch.kwargs["tasks"][0].default_params["kwargs"]["branch"] == "dev"
-    assert without.kwargs["extras"] == {"repo_branch": None}
+    assert without.kwargs["extras"] == {"repo_branch": None, "node_set": None}
 
     with pytest.raises(ValueError, match="Invalid branch name"):  # never reaches git
         await add_module.add(_REPO, branch="-x")
