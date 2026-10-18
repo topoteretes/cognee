@@ -11,7 +11,7 @@ that stamps the same artifact from two concurrent operations can still lose an
 update in the read→write window. See ``phase1_storage_capabilities.md``.
 """
 
-from typing import Any, List, NamedTuple, Optional
+from typing import Any, NamedTuple
 from uuid import UUID
 
 from .source_refs import (
@@ -25,10 +25,10 @@ from .source_refs import (
 class ProvenanceColumns(NamedTuple):
     """The four provenance fields stored on a graph node or edge."""
 
-    source_ref_keys: List[str]
-    source_dataset_ids: List[str]
-    source_run_ids: List[str]
-    source_run_refs: List[str]
+    source_ref_keys: list[str]
+    source_dataset_ids: list[str]
+    source_run_ids: list[str]
+    source_run_refs: list[str]
 
 
 class ProvenanceAttachInputs(NamedTuple):
@@ -46,15 +46,15 @@ class ProvenanceAttachInputs(NamedTuple):
     """
 
     source_ref_key: str
-    add_keys: List[str]
-    add_dataset_ids: List[str]
-    add_run_refs: List[str]
-    add_run_ids: List[str]
+    add_keys: list[str]
+    add_dataset_ids: list[str]
+    add_run_refs: list[str]
+    add_run_ids: list[str]
 
 
 def provenance_attach_inputs(
     source_ref_key: str,
-    pipeline_run_id: Optional[str],
+    pipeline_run_id: str | None,
 ) -> ProvenanceAttachInputs:
     """Build the fixed add-lists for folding one source ref into a graph write.
 
@@ -63,8 +63,8 @@ def provenance_attach_inputs(
     can decide per-artifact whether the run mapping is new.
     """
     add_dataset_ids = [str(get_dataset_id_from_source_ref_key(source_ref_key))]
-    add_run_refs: List[str] = []
-    add_run_ids: List[str] = []
+    add_run_refs: list[str] = []
+    add_run_ids: list[str] = []
     if pipeline_run_id is not None:
         run_uuid = coerce_run_uuid(pipeline_run_id)
         add_run_refs = [make_source_run_ref(run_uuid, source_ref_key)]
@@ -83,21 +83,21 @@ def coerce_run_uuid(pipeline_run_id: Any) -> UUID:
     return pipeline_run_id if isinstance(pipeline_run_id, UUID) else UUID(str(pipeline_run_id))
 
 
-def derive_dataset_ids(source_ref_keys: List[str]) -> List[str]:
+def derive_dataset_ids(source_ref_keys: list[str]) -> list[str]:
     """Materialized dataset filter derived from source_ref_keys (sorted, unique)."""
     return sorted({str(get_dataset_id_from_source_ref_key(key)) for key in source_ref_keys})
 
 
-def derive_run_ids(source_run_refs: List[str]) -> List[str]:
+def derive_run_ids(source_run_refs: list[str]) -> list[str]:
     """Materialized rollback filter derived from source_run_refs (sorted, unique)."""
     return sorted({str(get_pipeline_run_id_from_source_run_ref(ref)) for ref in source_run_refs})
 
 
 def provenance_after_attach(
-    current_keys: List[str],
-    current_run_refs: List[str],
-    add_keys: List[str],
-    pipeline_run_id: Optional[str],
+    current_keys: list[str],
+    current_run_refs: list[str],
+    add_keys: list[str],
+    pipeline_run_id: str | None,
 ) -> ProvenanceColumns:
     """Return the four provenance columns after attaching ``add_keys``.
 
@@ -108,7 +108,7 @@ def provenance_after_attach(
     undoes the ownership the run first established). A write without a
     pipeline_run_id records no run ref (non-rollbackable by run id).
     """
-    newly_added_keys: List[str] = []
+    newly_added_keys: list[str] = []
     for key in add_keys:
         if key not in current_keys and key not in newly_added_keys:
             newly_added_keys.append(key)
@@ -128,9 +128,9 @@ def provenance_after_attach(
 
 
 def provenance_after_remove(
-    current_keys: List[str],
-    current_run_refs: List[str],
-    remove_keys: List[str],
+    current_keys: list[str],
+    current_run_refs: list[str],
+    remove_keys: list[str],
 ) -> ProvenanceColumns:
     """Return the four provenance columns after removing ``remove_keys``.
 

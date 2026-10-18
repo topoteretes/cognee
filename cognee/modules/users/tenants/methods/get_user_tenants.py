@@ -1,7 +1,7 @@
 from sqlalchemy import select
 
-from cognee.modules.users.models import User
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.users.models import User
 from cognee.modules.users.models.Tenant import Tenant
 from cognee.modules.users.models.UserTenant import UserTenant
 

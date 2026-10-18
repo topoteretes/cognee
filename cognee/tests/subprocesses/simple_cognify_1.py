@@ -1,9 +1,10 @@
 import asyncio
 
+from common import configure_cognee_for_subprocess
+
 import cognee
 from cognee.api.v1.search import SearchType
 from cognee.shared.logging_utils import INFO, setup_logging
-from common import configure_cognee_for_subprocess
 
 
 async def main():

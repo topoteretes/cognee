@@ -7,9 +7,9 @@ from .models import (
 )
 
 __all__ = [
-    "distill_session",
     "CuratorBatchOutput",
     "DistillationResult",
     "ProposedLesson",
     "WrittenLesson",
+    "distill_session",
 ]

@@ -1,9 +1,10 @@
 """Unit tests for RedisAdapter CRUD operations."""
 
-from datetime import datetime
-from uuid import uuid4
-import pytest
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
+from uuid import uuid4
+
+import pytest
 
 from cognee.infrastructure.databases.exceptions import (
     CacheConnectionError,
@@ -213,6 +214,31 @@ async def test_create_qa_entry_does_not_set_session_ttl_when_disabled(redis_stor
 
 
 @pytest.mark.asyncio
+async def test_get_qa_entries_since_filters_on_entry_time(adapter):
+    """The interface default: read the session, keep the entries from the bound on."""
+    from datetime import datetime, timedelta, timezone
+
+    for index in range(4):
+        await adapter.create_qa_entry("u1", "s1", f"Q{index}", "C", "A", qa_id=f"id{index}")
+    stored = await adapter.get_all_qa_entries("u1", "s1")
+    since = datetime.fromisoformat(stored[2].time)
+
+    assert [e.qa_id for e in await adapter.get_qa_entries_since("u1", "s1", since)] == [
+        "id2",
+        "id3",
+    ]
+    assert [e.qa_id for e in await adapter.get_qa_entries_since("u1", "s1", since, lead_in=1)] == [
+        "id1",
+        "id2",
+        "id3",
+    ]
+    far_future = datetime.now(timezone.utc) + timedelta(days=1)
+    assert [
+        e.qa_id for e in await adapter.get_qa_entries_since("u1", "s1", far_future, lead_in=1)
+    ] == ["id3"]
+
+
+@pytest.mark.asyncio
 async def test_create_qa_entry_with_used_graph_element_ids_round_trip(adapter):
     """create_qa_entry with used_graph_element_ids stores and returns it."""
     used_ids = {"node_ids": ["n1"], "edge_ids": ["e1"]}
@@ -388,7 +414,7 @@ async def test_append_agent_trace_step_sanitizes_non_json_safe_values(adapter):
         status="success",
         method_params={
             "trip_id": uuid4(),
-            "created_at": datetime(2026, 4, 14, 12, 0, 0),
+            "created_at": datetime(2026, 4, 14, 12, 0, 0, tzinfo=timezone.utc),
             "obj": _Obj(),
         },
         method_return_value={"result_id": uuid4(), "owner": _Obj()},

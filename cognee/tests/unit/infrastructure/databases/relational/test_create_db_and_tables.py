@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-import cognee.modules.migrations.startup as startup
+from cognee.modules.migrations import startup
 
 # The package re-exports the function under the module's name; import the module.
 module = importlib.import_module("cognee.infrastructure.databases.relational.create_db_and_tables")

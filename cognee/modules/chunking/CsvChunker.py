@@ -1,9 +1,9 @@
-from cognee.shared.logging_utils import get_logger
 from os.path import basename
 
-
-from cognee.tasks.chunks import chunk_by_row
 from cognee.modules.chunking.Chunker import Chunker
+from cognee.shared.logging_utils import get_logger
+from cognee.tasks.chunks import chunk_by_row
+
 from .models.DocumentChunk import DocumentChunk
 
 logger = get_logger()
@@ -32,6 +32,7 @@ class CsvChunker(Chunker):
                         contains=[],
                         document_id=document_id,
                         document_name=document_name,
+                        importance_weight=self.document.importance_weight,
                         metadata={
                             "index_fields": ["text"],
                         },

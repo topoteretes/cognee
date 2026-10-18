@@ -8,8 +8,8 @@ rebuild from the same learning statements produces the same slots.
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from datetime import datetime, timezone
-from typing import Sequence
 from uuid import NAMESPACE_OID, UUID, uuid5
 
 from .align import cosine

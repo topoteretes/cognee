@@ -32,6 +32,7 @@ REEXPORTED_CALLABLES = (
     "load_or_create_datasets",
     "get_authorized_existing_datasets",
     "check_dataset_name",
+    "get_dataset_processing_status",
 )
 
 
@@ -41,6 +42,7 @@ def _probe(source: str) -> str:
         capture_output=True,
         text=True,
         timeout=300,
+        check=False,
     )
     assert result.returncode == 0, result.stderr[-3000:]
     return result.stdout.strip()

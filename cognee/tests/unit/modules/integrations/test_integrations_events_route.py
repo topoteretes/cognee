@@ -22,9 +22,9 @@ from cognee.modules.integrations.base import (
     OAuthIntegration,
     WebhookVerifier,
 )
-from cognee.modules.integrations.oauth_flow import make_state
 from cognee.modules.integrations.registry import supported_integrations, use_integration
 from cognee.modules.users.methods import get_authenticated_user
+from cognee.tests.unit.modules.integrations.test_get_integrations_router import start_install
 
 USER_ID = uuid4()
 
@@ -164,7 +164,7 @@ def test_events_verified_delivery_is_acked_and_handled_detached(client, spawned)
 
 def test_callback_passes_the_full_query_string_to_the_adapter(client, spawned):
     integration = supported_integrations["fake"]
-    state = make_state(USER_ID, signing_secret="fake-secret")
+    state = start_install(client)
 
     # complete_installation is real here — the point is the wiring from the
     # route's query string down to exchange_callback. Only the credential
@@ -186,7 +186,7 @@ def test_callback_passes_the_full_query_string_to_the_adapter(client, spawned):
 
 
 def test_callback_success_fires_on_installed_detached(client, spawned):
-    state = make_state(USER_ID, signing_secret="fake-secret")
+    state = start_install(client)
     credential = type("C", (), {"provider_account_id": "ACC1"})()
 
     with patch.object(
@@ -205,7 +205,7 @@ def test_callback_success_fires_on_installed_detached(client, spawned):
 
 
 def test_callback_failure_fires_no_on_installed(client, spawned):
-    state = make_state(USER_ID, signing_secret="fake-secret")
+    state = start_install(client)
 
     with patch.object(
         _router_module,

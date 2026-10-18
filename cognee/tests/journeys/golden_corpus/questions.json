@@ -1,10 +1,10 @@
 {
   "_comment": "Gold questions over golden_corpus/documents.json. `expected_any` lists lowercase tokens; a result passes when any one appears in the returned text. `forbidden` lists tokens from OTHER documents that a correct, concise answer must not contain; it is enforced only in real-LLM mode because the mock echoes the whole retrieved context.",
   "questions": [
-    {"id": "q01", "question": "Who founded the Varenholt Observatory?", "doc": "varenholt_observatory", "expected_any": ["marrow"], "forbidden": ["petch", "quist"]},
+    {"id": "q01", "question": "Who founded the Varenholt Observatory?", "doc": "varenholt_observatory", "expected_any": ["ilse marrow"], "forbidden": ["petch", "quist"]},
     {"id": "q02", "question": "In which year was the Varenholt Observatory founded?", "doc": "varenholt_observatory", "expected_any": ["1987"], "forbidden": ["1911", "1968"]},
     {"id": "q03", "question": "What is the flagship vessel of the Brindlewick Ferry Company?", "doc": "brindlewick_ferry", "expected_any": ["quiet heron", "heron"], "forbidden": ["marigold", "ember queen"]},
-    {"id": "q04", "question": "Which lake does the Brindlewick Ferry Company cross?", "doc": "brindlewick_ferry", "expected_any": ["orrin"], "forbidden": ["tamsin bridge"]},
+    {"id": "q04", "question": "Which lake does the Brindlewick Ferry Company cross?", "doc": "brindlewick_ferry", "expected_any": ["lake orrin"], "forbidden": ["tamsin bridge"]},
     {"id": "q05", "question": "What is the Solenne Bakery famous for?", "doc": "solenne_bakery", "expected_any": ["larkloaf", "cardamom"], "forbidden": ["ferryman", "seaglass"]},
     {"id": "q06", "question": "Who owns the Solenne Bakery?", "doc": "solenne_bakery", "expected_any": ["quist"], "forbidden": ["sato", "renn"]},
     {"id": "q07", "question": "Who is the mayor of Kestrel Hollow?", "doc": "town_council", "expected_any": ["lindqvist"], "forbidden": ["duquesne", "ostrowski"]},
@@ -28,7 +28,7 @@
     {"id": "q25", "question": "Who founded Nightjar Software?", "doc": "nightjar_software", "expected_any": ["ezekiel"], "forbidden": ["ilse", "petch"]},
     {"id": "q26", "question": "What product does Nightjar Software make?", "doc": "nightjar_software", "expected_any": ["ledgerlight"], "forbidden": ["seaglass", "larkloaf"]},
     {"id": "q27", "question": "Who chairs the Pewter Street Market stallholder association?", "doc": "pewter_market", "expected_any": ["ostrowski"], "forbidden": ["duquesne", "lindqvist"]},
-    {"id": "q28", "question": "Who ground the mirror of the Aldous Reflector?", "doc": "aldous_reflector", "expected_any": ["casimir", "aldous"], "forbidden": ["renn", "nkemelu"]},
+    {"id": "q28", "question": "Who ground the mirror of the Aldous Reflector?", "doc": "aldous_reflector", "expected_any": ["casimir"], "forbidden": ["renn", "nkemelu"]},
     {"id": "q29", "question": "What is the whitefish quota of the Orrin Fisheries Cooperative?", "doc": "orrin_fisheries", "expected_any": ["180"], "forbidden": ["400", "310"]},
     {"id": "q30", "question": "Who organizes the Kestrel Hollow Lantern Walk?", "doc": "lantern_walk", "expected_any": ["achebe"], "forbidden": ["ostrowski", "oyelaran"]}
   ]

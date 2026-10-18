@@ -1,4 +1,4 @@
-"""Unit tests for the improve() agent-context extraction stage (_extract_agent_context).
+"""Unit tests for the improve() agent-context extraction stage (stage 4).
 
 The stage iterates sessions, is gated on automatic session context, and is fail-open per
 session. These tests stub the session manager and pending extractor so no LLM/cache is needed.
@@ -10,14 +10,25 @@ from uuid import uuid4
 
 import pytest
 
+from cognee.modules.improve import GraphCapabilities, ImproveConfig, ImproveRunInputs
+from cognee.modules.improve.stages import (
+    REASON_AUTO_FEEDBACK_DISABLED,
+    REASON_SESSION_MANAGER_UNAVAILABLE,
+    ExtractAgentContextStage,
+)
 
-def _make_user():
-    return types.SimpleNamespace(id=uuid4())
 
-
-@pytest.fixture
-def improve_mod():
-    return importlib.import_module("cognee.api.v1.improve.improve")
+def _inputs(session_ids):
+    user = types.SimpleNamespace(id=uuid4())
+    dataset = types.SimpleNamespace(id=uuid4(), name="docs", owner_id=user.id)
+    return ImproveRunInputs(
+        user=user,
+        dataset_id=dataset.id,
+        dataset=dataset,
+        session_ids=tuple(session_ids),
+        config=ImproveConfig(),
+        capabilities=GraphCapabilities.assume_supported(),
+    )
 
 
 def _patch_session_manager(monkeypatch, *, available=True, auto_feedback=True):
@@ -43,29 +54,32 @@ def _patch_extractor(monkeypatch, behavior):
 
 
 @pytest.mark.asyncio
-async def test_runs_extraction_per_session_and_counts_lessons(monkeypatch, improve_mod):
+async def test_runs_extraction_per_session_and_counts_lessons(monkeypatch):
     _patch_session_manager(monkeypatch)
     calls = _patch_extractor(monkeypatch, behavior=lambda _sid: ["lesson"])
+    stage = ExtractAgentContextStage()
+    inputs = _inputs(["s1", "s2"])
 
-    total = await improve_mod._extract_agent_context(session_ids=["s1", "s2"], user=_make_user())
+    assert stage.gate(inputs) is None
+    result = await stage.run(inputs)
 
     assert calls == [("s1", 1), ("s2", 1)]
-    assert total == 2
+    assert result.status == "completed"
+    assert result.counts == {"lessons": 2, "sessions_failed": 0}
 
 
-@pytest.mark.asyncio
-async def test_skipped_when_auto_feedback_disabled(monkeypatch, improve_mod):
+def test_gate_skips_when_auto_feedback_disabled(monkeypatch):
     _patch_session_manager(monkeypatch, auto_feedback=False)
-    calls = _patch_extractor(monkeypatch, behavior=lambda _sid: ["lesson"])
+    assert ExtractAgentContextStage().gate(_inputs(["s1"])) == REASON_AUTO_FEEDBACK_DISABLED
 
-    total = await improve_mod._extract_agent_context(session_ids=["s1"], user=_make_user())
 
-    assert total == 0
-    assert calls == []
+def test_gate_skips_when_session_manager_unavailable(monkeypatch):
+    _patch_session_manager(monkeypatch, available=False)
+    assert ExtractAgentContextStage().gate(_inputs(["s1"])) == REASON_SESSION_MANAGER_UNAVAILABLE
 
 
 @pytest.mark.asyncio
-async def test_one_failing_session_does_not_block_others(monkeypatch, improve_mod):
+async def test_one_failing_session_does_not_block_others(monkeypatch):
     _patch_session_manager(monkeypatch)
 
     def behavior(session_id):
@@ -75,7 +89,9 @@ async def test_one_failing_session_does_not_block_others(monkeypatch, improve_mo
 
     calls = _patch_extractor(monkeypatch, behavior=behavior)
 
-    total = await improve_mod._extract_agent_context(session_ids=["s1", "s2"], user=_make_user())
+    result = await ExtractAgentContextStage().run(_inputs(["s1", "s2"]))
 
     assert calls == [("s1", 1), ("s2", 1)]  # s2 still processed after s1 raised
-    assert total == 1
+    assert result.status == "errored"
+    assert result.counts == {"lessons": 1, "sessions_failed": 1}
+    assert "boom" in result.error

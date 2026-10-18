@@ -39,13 +39,12 @@ from cognee.infrastructure.databases.vector.embeddings.get_embedding_engine impo
 )
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.data.methods import get_authorized_existing_datasets
-from cognee.modules.retrieval.hybrid.results import payload
 from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
+from cognee.modules.retrieval.utils.results import payload
 from cognee.modules.truth_subspace import align
 from cognee.modules.truth_subspace.build import build_truth_subspace
 from cognee.modules.truth_subspace.centroids import load_centroids
 from cognee.modules.users.methods import get_default_user
-
 
 DATASET = "truth_centroid_slots_demo"
 CORPUS_NODE_SET = ["truth_demo_corpus"]

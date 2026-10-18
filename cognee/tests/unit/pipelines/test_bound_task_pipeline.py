@@ -1,7 +1,8 @@
 """Tests for the deferred-call pipeline pattern (BoundTask + run_pipeline)."""
 
 import pytest
-from cognee.modules.pipelines.tasks.task import task, BoundTask, TaskSpec, Task
+
+from cognee.modules.pipelines.tasks.task import BoundTask, Task, TaskSpec, task
 from cognee.pipelines.types import _Drop as Drop
 
 

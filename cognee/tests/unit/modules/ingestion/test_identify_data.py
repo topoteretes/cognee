@@ -36,15 +36,15 @@ def _patch_engine(engine):
 
 
 async def _make_engine(rows: list[dict]) -> tuple[SQLAlchemyAdapter, str]:
-    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-    tmp.close()
-    engine = SQLAlchemyAdapter(f"sqlite+aiosqlite:///{tmp.name}")
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+        db_path = tmp.name
+    engine = SQLAlchemyAdapter(f"sqlite+aiosqlite:///{db_path}")
     await engine.create_database()
     async with engine.get_async_session() as session:
         for row in rows:
             session.add(Data(**row))
         await session.commit()
-    return engine, tmp.name
+    return engine, db_path
 
 
 def _user(tenant_id=None):
@@ -52,17 +52,17 @@ def _user(tenant_id=None):
 
 
 def _row(*, dataset_id, owner_id, content_hash, tenant_id=None, pipeline_status=None):
-    return dict(
-        id=uuid4(),
-        dataset_id=dataset_id,
-        owner_id=owner_id,
-        tenant_id=tenant_id,
-        name="doc.txt",
-        content_hash=content_hash,
-        raw_data_location="file:///tmp/doc.txt",
-        pipeline_status=pipeline_status or {},
-        token_count=-1,
-    )
+    return {
+        "id": uuid4(),
+        "dataset_id": dataset_id,
+        "owner_id": owner_id,
+        "tenant_id": tenant_id,
+        "name": "doc.txt",
+        "content_hash": content_hash,
+        "raw_data_location": "file:///tmp/doc.txt",
+        "pipeline_status": pipeline_status or {},
+        "token_count": -1,
+    }
 
 
 def _classified(content_hash: str):

@@ -16,7 +16,6 @@ import asyncio
 import logging
 import math
 import os
-from typing import List, Optional
 
 import httpx
 import numpy as np
@@ -29,27 +28,44 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
+from cognee.infrastructure.databases.exceptions import (
+    EmbeddingContextWindowTooSmallError,
+    EmbeddingCredentialsError,
+    EmbeddingEncodingError,
+    EmbeddingException,
+)
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
     EmbeddingEngine,
+    EmbeddingResult,
+)
+from cognee.infrastructure.databases.vector.embeddings.encoding import (
+    EncodingFormat,
+    decode_embedding,
+    rejects_encoding_format,
+    validate_encoding_format,
+)
+from cognee.infrastructure.databases.vector.embeddings.input_limit import (
+    init_input_limit,
+    litellm_input_limit,
+    sane_limit,
 )
 from cognee.infrastructure.databases.vector.embeddings.retry_config import (
     embedding_retry_condition,
 )
-from cognee.infrastructure.llm.exceptions import raise_if_budget_exhausted
-from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
 from cognee.infrastructure.databases.vector.embeddings.utils import (
+    count_input_tokens,
     handle_embedding_response,
     sanitize_embedding_text_inputs,
 )
-from cognee.infrastructure.databases.exceptions import (
-    EmbeddingContextWindowTooSmallError,
-    EmbeddingCredentialsError,
-    EmbeddingException,
-)
-from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
+from cognee.infrastructure.llm.exceptions import raise_if_budget_exhausted
+from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
+from cognee.modules.observability.get_observe import get_observe
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 
 logger = get_logger("OpenAICompatibleEmbeddingEngine")
+
+observe = get_observe()
 
 
 class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
@@ -67,7 +83,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
     and response-parsing issues with custom endpoints.
 
     Public methods:
-    - embed_text: Embed a list of strings into vector representations.
+    - embed_text: Embed a list of strings; returns their vectors and the input-token count.
     - get_vector_size: Retrieve the size of the embedding vectors.
     - get_batch_size: Return the configured batch size.
     """
@@ -83,17 +99,17 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
 
     def __init__(
         self,
-        model: Optional[str] = "default",
+        model: str | None = "default",
         dimensions: int = 3072,
-        max_completion_tokens: int = 8191,
-        endpoint: Optional[str] = "http://localhost:8080",
-        api_key: Optional[str] = "no-key-required",
-        batch_size: int = 36,
-        input_type: Optional[str] = None,
+        max_completion_tokens: int | None = None,
+        endpoint: str | None = "http://localhost:8080",
+        api_key: str | None = "no-key-required",
+        batch_size: int = 32,
+        input_type: str | None = None,
+        encoding_format: EncodingFormat | None = None,
     ):
         self.model = model or "default"
         self.dimensions = dimensions
-        self.max_completion_tokens = max_completion_tokens
         self.endpoint = endpoint or "http://localhost:8080"
         self.api_key = api_key or "no-key-required"
         self.batch_size = batch_size
@@ -102,7 +118,10 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         # that isn't part of the OpenAI embeddings spec. Sent via extra_body
         # so it has no effect on servers that ignore unknown fields.
         self.input_type = input_type
+        # The servers behind this engine vary, so base64 is opt-in only.
+        self.encoding_format = validate_encoding_format(encoding_format) or "float"
         self.tokenizer = self.get_tokenizer()
+        init_input_limit(self, max_completion_tokens)
 
         enable_mocking = os.getenv("MOCK_EMBEDDING", "false").lower()
         self.mock = enable_mocking in ("true", "1", "yes")
@@ -116,6 +135,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
             base = base + "/v1"
         self._client = AsyncOpenAI(api_key=self.api_key, base_url=base, timeout=120)
 
+    @observe(as_type="embeddings")
     @retry(
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(2, 128),
@@ -125,15 +145,16 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         retry=embedding_retry_condition(
             EmbeddingContextWindowTooSmallError,
             EmbeddingCredentialsError,
+            EmbeddingEncodingError,
             ValueError,
             asyncio.CancelledError,
         ),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    async def embed_text(self, text: List[str]) -> List[List[float]]:
+    async def embed_text(self, text: list[str]) -> EmbeddingResult:
         """
-        Embed a list of text strings into vector representations.
+        Embed a list of text strings; returns their vectors and the input-token count.
 
         If the input exceeds the model's context window, the method will recursively
         split the input and combine the results.
@@ -146,20 +167,24 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         Returns:
         --------
 
-            - List[List[float]]: A list of vectors representing the embedded texts.
+            - EmbeddingResult: A vector per input text and the input tokens consumed.
         """
         original_texts = text if isinstance(text, list) else [text]
         sanitized_text = sanitize_embedding_text_inputs(original_texts)
 
         if self.mock:
             embeddings = [[0.0] * (self.dimensions or 1) for _ in sanitized_text]
-            return handle_embedding_response(original_texts, embeddings, self.dimensions)
+            # No provider call, so nothing consumed.
+            return EmbeddingResult(
+                vectors=handle_embedding_response(original_texts, embeddings, self.dimensions),
+                tokens=0,
+            )
 
         try:
             create_kwargs = {
                 "model": self.model,
                 "input": sanitized_text,
-                "encoding_format": "float",
+                "encoding_format": self.encoding_format,
             }
             if self.input_type:
                 create_kwargs["extra_body"] = {"input_type": self.input_type}
@@ -169,7 +194,14 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
                     self._client.embeddings.create(**create_kwargs),
                     timeout=300.0,
                 )
-            embeddings = [item.embedding for item in response.data]
+            embeddings = [
+                decode_embedding(item.embedding, self.encoding_format) for item in response.data
+            ]
+
+        except EmbeddingEncodingError:
+            # Terminal: the server answered in another format, so a retry gets the
+            # same answer. Reaches tenacity unwrapped, like EmbeddingCredentialsError.
+            raise
 
         except Exception as error:
             # A proxy spend cap is terminal, and none of the branches below can
@@ -191,12 +223,17 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
             if any(pattern in error_str for pattern in context_error_patterns):
                 if isinstance(original_texts, list) and len(original_texts) > 1:
                     mid = math.ceil(len(original_texts) / 2)
-                    left_vecs, right_vecs = await asyncio.gather(
+                    left_result, right_result = await asyncio.gather(
                         self.embed_text(original_texts[:mid]),
                         self.embed_text(original_texts[mid:]),
                     )
-                    embeddings = left_vecs + right_vecs
-                    return handle_embedding_response(original_texts, embeddings, self.dimensions)
+                    embeddings = left_result + right_result
+                    return EmbeddingResult(
+                        vectors=handle_embedding_response(
+                            original_texts, embeddings, self.dimensions
+                        ),
+                        tokens=left_result.tokens + right_result.tokens,
+                    )
 
                 if isinstance(original_texts, list) and len(original_texts) == 1:
                     s = original_texts[0]
@@ -204,13 +241,19 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
                     if third == 0:
                         raise EmbeddingContextWindowTooSmallError from error
                     left_part, right_part = s[: third * 2], s[third:]
-                    (left_vec,), (right_vec,) = await asyncio.gather(
+                    left_result, right_result = await asyncio.gather(
                         self.embed_text([left_part]),
                         self.embed_text([right_part]),
                     )
+                    (left_vec,), (right_vec,) = left_result, right_result
                     pooled = (np.array(left_vec) + np.array(right_vec)) / 2
                     embeddings = [pooled.tolist()]
-                    return handle_embedding_response(original_texts, embeddings, self.dimensions)
+                    return EmbeddingResult(
+                        vectors=handle_embedding_response(
+                            original_texts, embeddings, self.dimensions
+                        ),
+                        tokens=left_result.tokens + right_result.tokens,
+                    )
 
             if isinstance(error, asyncio.TimeoutError):
                 logger.error(
@@ -260,11 +303,21 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
                 str(error),
                 self.endpoint,
             )
+            if (
+                self.encoding_format == "base64"
+                and isinstance(error, (openai.BadRequestError, openai.UnprocessableEntityError))
+                and rejects_encoding_format(error)
+            ):
+                # Terminal, like a list reply: the server said it will not do base64.
+                raise EmbeddingEncodingError(f"the server rejected the request: {error}") from error
             raise EmbeddingException(
                 "Embedding failed. Verify EMBEDDING_ENDPOINT and server status."
             ) from error
 
-        return handle_embedding_response(original_texts, embeddings, self.dimensions)
+        return EmbeddingResult(
+            vectors=handle_embedding_response(original_texts, embeddings, self.dimensions),
+            tokens=count_input_tokens(response, sanitized_text, self.tokenizer),
+        )
 
     def get_vector_size(self) -> int:
         """
@@ -288,6 +341,13 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         """
         return self.batch_size
 
+    input_limit_source = "litellm model table or the model's tokenizer"
+
+    async def input_limit(self) -> int | None:
+        """A self-hosted server names no limit; the served model id is usually a
+        HuggingFace repo (its tokenizer knows) or a hosted model litellm knows."""
+        return litellm_input_limit(self.model) or sane_limit(self.tokenizer.model_input_limit)
+
     def get_tokenizer(self):
         """Load a tokenizer for chunk sizing against OpenAI-compatible embedding servers.
 
@@ -295,8 +355,4 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         model's own tokenizer and warns/falls back safely on mismatch (issue #3646).
         """
         logger.debug("Loading tokenizer for OpenAICompatibleEmbeddingEngine...")
-        return resolve_embedding_tokenizer(
-            provider="openai_compatible",
-            model=self.model,
-            max_completion_tokens=self.max_completion_tokens,
-        )
+        return resolve_embedding_tokenizer(provider="openai_compatible", model=self.model)

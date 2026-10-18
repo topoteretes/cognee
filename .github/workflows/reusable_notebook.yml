@@ -1,5 +1,13 @@
 name: test-notebook
 
+# Least-privilege GITHUB_TOKEN (OSSF Scorecard: Token-Permissions). A caller can
+# only narrow this further. packages: read is required: the jobs run inside the
+# private ghcr.io CI image (and pull ghcr.io service images), which the runner
+# fetches with this token before the first step. Nothing here writes.
+permissions:
+  contents: read
+  packages: read
+
 on:
   workflow_call:
     inputs:
@@ -43,7 +51,7 @@ jobs:
         shell: bash
     steps:
       - name: Check out
-        uses: actions/checkout@master
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup

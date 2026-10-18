@@ -14,8 +14,9 @@ Test Coverage:
 
 import os
 import pathlib
+from datetime import datetime, timedelta, timezone
+
 import pytest
-from datetime import datetime, timezone, timedelta
 from sqlalchemy import select, update
 
 import cognee
@@ -72,7 +73,7 @@ async def test_last_accessed_updates_on_search():
     await cognee.add([doc_text], dataset_name=dataset_name, user=user)
     cognify_result = await cognee.cognify([dataset_name], user=user)
 
-    dataset_id = list(cognify_result.keys())[0]
+    dataset_id = next(iter(cognify_result.keys()))
 
     # Get the data_id
     db_engine = get_relational_engine()
@@ -187,7 +188,7 @@ async def test_cleanup_unused_data_dry_run():
         data_ids.append(add_result.data_ingestion_info[0]["data_id"])
 
     cognify_result = await cognee.cognify([dataset_name], user=user)
-    list(cognify_result.keys())[0]
+    next(iter(cognify_result.keys()))
 
     # Age the first 3 documents to be "old"
     db_engine = get_relational_engine()
@@ -293,7 +294,7 @@ async def test_cleanup_actual_deletion():
         data_ids.append(add_result.data_ingestion_info[0]["data_id"])
 
     cognify_result = await cognee.cognify([dataset_name], user=user)
-    list(cognify_result.keys())[0]
+    next(iter(cognify_result.keys()))
 
     # Age the first 3 documents to be "old"
     db_engine = get_relational_engine()

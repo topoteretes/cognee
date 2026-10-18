@@ -27,13 +27,13 @@ runs:
 
     - name: Set up Python
       if: steps.detect-env.outputs.in-container != 'true'
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
       with:
         python-version: ${{ inputs.python-version }}
 
     - name: Install uv
       if: steps.detect-env.outputs.in-container != 'true'
-      uses: astral-sh/setup-uv@v4
+      uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a  # v4.2.0
       with:
         enable-cache: true
 
@@ -46,7 +46,10 @@ runs:
         uv pip uninstall cognee
         if [ "${{ inputs.cognee_version }}" = "local" ]; then
           echo "Installing Cognee from local source ..."
-          uv pip install --force-reinstall -e ../
+          # --no-deps: the dependencies are already installed from uv.lock; a
+          # fresh resolution would upgrade them one package at a time past
+          # their locked, exactly-pinned partners (opentelemetry-api vs -sdk).
+          uv pip install --no-deps --force-reinstall -e ../
         else
           echo "Installing Cognee version ${{ inputs.cognee_version }} from PyPI..."
           uv pip install --force-reinstall "cognee==${{ inputs.cognee_version }}"

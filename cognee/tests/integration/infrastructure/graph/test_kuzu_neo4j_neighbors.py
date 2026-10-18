@@ -5,10 +5,9 @@ from pathlib import Path
 import pytest
 
 import cognee
-
-from cognee.shared.data_models import KnowledgeGraph
 from cognee.infrastructure.databases.graph.ladybug.adapter import LadybugAdapter
 from cognee.infrastructure.databases.graph.neo4j_driver.adapter import Neo4jAdapter
+from cognee.shared.data_models import KnowledgeGraph
 
 DEMO_KG_PATH = os.path.join(os.path.dirname(__file__), "test_kg.json")
 

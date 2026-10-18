@@ -1,7 +1,7 @@
 class TranslationError(Exception):
     """Base exception for translation errors."""
 
-    def __init__(self, message: str, original_error: Exception = None):
+    def __init__(self, message: str, original_error: Exception | None = None):
         self.message = message
         self.original_error = original_error
         super().__init__(self.message)
@@ -13,7 +13,7 @@ class LanguageDetectionError(TranslationError):
     """Exception raised when language detection fails."""
 
     def __init__(
-        self, message: str = "Failed to detect language", original_error: Exception = None
+        self, message: str = "Failed to detect language", original_error: Exception | None = None
     ):
         super().__init__(message, original_error)
 
@@ -25,7 +25,7 @@ class TranslationProviderError(TranslationError):
         self,
         provider: str,
         message: str = "Translation provider error",
-        original_error: Exception = None,
+        original_error: Exception | None = None,
     ):
         self.provider = provider
         full_message = f"[{provider}] {message}"
@@ -38,9 +38,9 @@ class UnsupportedLanguageError(TranslationError):
     def __init__(
         self,
         language: str,
-        provider: str = None,
-        message: str = None,
-        original_error: Exception = None,
+        provider: str | None = None,
+        message: str | None = None,
+        original_error: Exception | None = None,
     ):
         self.language = language
         self.provider = provider
@@ -57,6 +57,6 @@ class TranslationConfigError(TranslationError):
     def __init__(
         self,
         message: str = "Invalid translation configuration",
-        original_error: Exception = None,
+        original_error: Exception | None = None,
     ):
         super().__init__(message, original_error)

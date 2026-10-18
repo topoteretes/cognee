@@ -1,9 +1,10 @@
 import os
+import pathlib
 import sys
 import uuid
-import pytest
-import pathlib
 from unittest.mock import patch
+
+import pytest
 
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.data.processing.document_types.UnstructuredDocument import UnstructuredDocument

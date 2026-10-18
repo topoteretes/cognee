@@ -77,7 +77,7 @@ def test_source_ref_from_context_uses_fallback_data_id_only_when_missing():
 
 @pytest.mark.asyncio
 async def test_graph_provenance_write_kwargs_unstamped_on_ledger_graph(monkeypatch):
-    import cognee.infrastructure.databases.provenance.write_context as write_context
+    from cognee.infrastructure.databases.provenance import write_context
 
     async def _false(_graph):
         return False
@@ -93,7 +93,7 @@ async def test_graph_provenance_write_kwargs_unstamped_on_ledger_graph(monkeypat
 
 @pytest.mark.asyncio
 async def test_graph_provenance_write_kwargs_stamps_when_graph_stores_provenance(monkeypatch):
-    import cognee.infrastructure.databases.provenance.write_context as write_context
+    from cognee.infrastructure.databases.provenance import write_context
 
     dataset_id = uuid4()
     data_id = uuid4()

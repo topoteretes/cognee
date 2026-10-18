@@ -3,23 +3,46 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from cognee.exceptions import CogneeValidationError
+from cognee.infrastructure.databases.cache.models import SessionQAEntry
+from cognee.modules.improve.constants import DEFAULT_FEEDBACK_ALPHA
 from cognee.tasks.memify.apply_feedback_weights import (
     apply_feedback_weights,
     normalize_feedback_score,
     stream_update_weight,
+    validate_feedback_alpha,
 )
 from cognee.tasks.memify.feedback_weights_constants import (
+    FEEDBACK_SOURCE_IMPLICIT,
+    FEEDBACK_WEIGHTS_MAX_ATTEMPTS,
+    MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_EDGE_IDS_KEY,
     MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY,
+    MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_NODE_IDS_KEY,
+    MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_SCORE_KEY,
+    MEMIFY_METADATA_FEEDBACK_WEIGHTS_ATTEMPTS_KEY,
+    MEMIFY_METADATA_FEEDBACK_WEIGHTS_PRUNED_IDS_KEY,
 )
 
 apply_feedback_weights_module = sys.modules["cognee.tasks.memify.apply_feedback_weights"]
 
+APPLIED = MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY
+NODE_IDS = MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_NODE_IDS_KEY
+EDGE_IDS = MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_EDGE_IDS_KEY
+SCORE = MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_SCORE_KEY
+ATTEMPTS = MEMIFY_METADATA_FEEDBACK_WEIGHTS_ATTEMPTS_KEY
+PRUNED_IDS = MEMIFY_METADATA_FEEDBACK_WEIGHTS_PRUNED_IDS_KEY
+
 
 class InMemoryGraphWithWeights:
-    def __init__(self, missing_edge: bool = False):
+    """Flat weight maps; ids absent from a map count as deleted from the graph."""
+
+    def __init__(self, missing_edge: bool = False, failing_edge_writes: set | None = None):
         self.node_weights = {"n1": 0.5}
         self.edge_weights = {"e1": 0.5}
         self.missing_edge = missing_edge
+        self.failing_edge_writes = failing_edge_writes or set()
+        self.node_write_log: list[dict] = []
+        self.edge_write_log: list[dict] = []
 
     async def get_node_feedback_weights(self, node_ids):
         return {
@@ -29,6 +52,7 @@ class InMemoryGraphWithWeights:
         }
 
     async def set_node_feedback_weights(self, node_feedback_weights):
+        self.node_write_log.append(dict(node_feedback_weights))
         result = {}
         for node_id, weight in node_feedback_weights.items():
             if node_id in self.node_weights:
@@ -48,9 +72,12 @@ class InMemoryGraphWithWeights:
         }
 
     async def set_edge_feedback_weights(self, edge_feedback_weights):
+        self.edge_write_log.append(dict(edge_feedback_weights))
         result = {}
         for edge_object_id, weight in edge_feedback_weights.items():
-            if edge_object_id in self.edge_weights:
+            if edge_object_id in self.failing_edge_writes:
+                result[edge_object_id] = False
+            elif edge_object_id in self.edge_weights:
                 self.edge_weights[edge_object_id] = float(weight)
                 result[edge_object_id] = True
             else:
@@ -107,8 +134,32 @@ class InMemoryGraphWithNestedEdgeProperties:
         return result
 
 
-def _feedback_item(memify_metadata=None, used_graph_element_ids=None):
-    return {
+class RecordingSessionManager:
+    """Stores memify_metadata the way the cache adapters do: overlay incoming keys,
+    validated through the real ``SessionQAEntry`` — a value the model's whitelist
+    rejects must fail here, not first in the e2e smoke test against a live cache."""
+
+    def __init__(self):
+        self.is_available = True
+        self.metadata: dict[str, dict] = {}
+        self.update_qa = AsyncMock(side_effect=self._update_qa)
+
+    async def _update_qa(self, *, user_id, session_id, qa_id, memify_metadata, **_):
+        merged = {**self.metadata.get(qa_id, {}), **memify_metadata}
+        SessionQAEntry(
+            time="2026-01-01T00:00:00",
+            question="q",
+            context="",
+            answer="a",
+            qa_id=qa_id,
+            memify_metadata=merged,
+        )
+        self.metadata[qa_id] = merged
+        return True
+
+
+def _feedback_item(memify_metadata=None, used_graph_element_ids=None, **overrides):
+    item = {
         "session_id": "s1",
         "qa_id": "q1",
         "feedback_score": 5,
@@ -117,12 +168,37 @@ def _feedback_item(memify_metadata=None, used_graph_element_ids=None):
         else {"node_ids": ["n1"], "edge_ids": ["e1"]},
         "memify_metadata": memify_metadata if memify_metadata is not None else {},
     }
+    item.update(overrides)
+    return item
 
 
 def _mock_user():
     user = MagicMock()
     user.id = "u1"
     return user
+
+
+async def _run(graph, session_manager, items, alpha=0.1):
+    with (
+        patch.object(apply_feedback_weights_module, "session_user") as mock_session_user,
+        patch.object(apply_feedback_weights_module, "get_graph_engine", return_value=graph),
+        patch.object(
+            apply_feedback_weights_module,
+            "get_session_manager",
+            return_value=session_manager,
+        ),
+    ):
+        mock_session_user.get.return_value = _mock_user()
+        return await apply_feedback_weights(items, alpha=alpha)
+
+
+async def _run_from_store(graph, session_manager, item_factory, times: int, alpha=0.1):
+    """Re-run the task ``times`` times, feeding back the metadata the store holds."""
+    results = []
+    for _ in range(times):
+        stored = session_manager.metadata.get("q1", {})
+        results.append(await _run(graph, session_manager, [item_factory(stored)], alpha=alpha))
+    return results
 
 
 def test_normalize_feedback_score_mapping():
@@ -143,129 +219,388 @@ def test_streaming_update_formula_and_bounds():
 @pytest.mark.asyncio
 async def test_apply_feedback_weights_neo4j_success_marks_applied_true():
     graph = InMemoryGraphWithWeights()
-    session_manager = MagicMock()
-    session_manager.is_available = True
-    session_manager.update_qa = AsyncMock(return_value=True)
+    session_manager = RecordingSessionManager()
 
-    with (
-        patch.object(apply_feedback_weights_module, "session_user") as mock_session_user,
-        patch.object(apply_feedback_weights_module, "get_graph_engine", return_value=graph),
-        patch.object(
-            apply_feedback_weights_module,
-            "get_session_manager",
-            return_value=session_manager,
-        ),
-    ):
-        mock_session_user.get.return_value = _mock_user()
-        result = await apply_feedback_weights([_feedback_item()], alpha=0.1)
+    result = await _run(graph, session_manager, [_feedback_item()])
 
     assert result["processed"] == 1
     assert result["applied"] == 1
     assert graph.node_weights["n1"] == pytest.approx(0.55)
     assert graph.edge_weights["e1"] == pytest.approx(0.55)
 
-    call_kwargs = session_manager.update_qa.call_args.kwargs
-    assert call_kwargs["memify_metadata"][MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY] is True
+    written = session_manager.update_qa.call_args.kwargs["memify_metadata"]
+    assert written[APPLIED] is True
+    assert written[NODE_IDS] == ["n1"]
+    assert written[EDGE_IDS] == ["e1"]
+    assert written[SCORE] == 5
+    assert written[ATTEMPTS] == 1
 
 
 @pytest.mark.asyncio
 async def test_apply_feedback_weights_ladybug_success_marks_applied_true():
     graph = InMemoryGraphWithNestedEdgeProperties()
-    session_manager = MagicMock()
-    session_manager.is_available = True
-    session_manager.update_qa = AsyncMock(return_value=True)
+    session_manager = RecordingSessionManager()
 
-    with (
-        patch.object(apply_feedback_weights_module, "session_user") as mock_session_user,
-        patch.object(apply_feedback_weights_module, "get_graph_engine", return_value=graph),
-        patch.object(
-            apply_feedback_weights_module,
-            "get_session_manager",
-            return_value=session_manager,
-        ),
-    ):
-        mock_session_user.get.return_value = _mock_user()
-        result = await apply_feedback_weights([_feedback_item()], alpha=0.1)
+    result = await _run(graph, session_manager, [_feedback_item()])
 
     assert result["processed"] == 1
     assert result["applied"] == 1
     assert graph.nodes["n1"]["feedback_weight"] == pytest.approx(0.55)
     assert graph.edges["e1"]["properties"]["feedback_weight"] == pytest.approx(0.55)
+    assert session_manager.metadata["q1"][APPLIED] is True
 
 
 @pytest.mark.asyncio
 async def test_apply_feedback_weights_skips_already_applied():
     graph = InMemoryGraphWithWeights()
-    session_manager = MagicMock()
-    session_manager.is_available = True
-    session_manager.update_qa = AsyncMock(return_value=True)
+    session_manager = RecordingSessionManager()
 
-    with (
-        patch.object(apply_feedback_weights_module, "session_user") as mock_session_user,
-        patch.object(apply_feedback_weights_module, "get_graph_engine", return_value=graph),
-        patch.object(
-            apply_feedback_weights_module,
-            "get_session_manager",
-            return_value=session_manager,
-        ),
-    ):
-        mock_session_user.get.return_value = _mock_user()
-        result = await apply_feedback_weights(
-            [_feedback_item(memify_metadata={MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY: True})],
-            alpha=0.1,
-        )
+    result = await _run(graph, session_manager, [_feedback_item(memify_metadata={APPLIED: True})])
 
     assert result["processed"] == 0
     assert result["applied"] == 0
+    assert result["skipped"] == 1
     session_manager.update_qa.assert_not_called()
+    assert graph.node_weights["n1"] == 0.5
 
 
 @pytest.mark.asyncio
-async def test_apply_feedback_weights_missing_mapping_sets_false():
+async def test_apply_feedback_weights_no_ids_marks_row_done_and_touches_no_weights():
     graph = InMemoryGraphWithWeights()
-    session_manager = MagicMock()
-    session_manager.is_available = True
-    session_manager.update_qa = AsyncMock(return_value=True)
+    session_manager = RecordingSessionManager()
 
-    with (
-        patch.object(apply_feedback_weights_module, "session_user") as mock_session_user,
-        patch.object(apply_feedback_weights_module, "get_graph_engine", return_value=graph),
-        patch.object(
-            apply_feedback_weights_module,
-            "get_session_manager",
-            return_value=session_manager,
-        ),
-    ):
-        mock_session_user.get.return_value = _mock_user()
-        await apply_feedback_weights(
-            [_feedback_item(used_graph_element_ids={"node_ids": [], "edge_ids": []})],
-            alpha=0.1,
-        )
+    result = await _run(
+        graph,
+        session_manager,
+        [_feedback_item(used_graph_element_ids={"node_ids": [], "edge_ids": []})],
+    )
 
-    call_kwargs = session_manager.update_qa.call_args.kwargs
-    assert call_kwargs["memify_metadata"][MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY] is False
+    assert result == {"processed": 0, "applied": 0, "skipped": 1}
+    assert session_manager.update_qa.call_args.kwargs["memify_metadata"] == {APPLIED: True}
+    assert graph.node_weights["n1"] == 0.5
+    assert graph.edge_weights["e1"] == 0.5
 
 
 @pytest.mark.asyncio
-async def test_apply_feedback_weights_partial_failure_keeps_false():
+async def test_missing_ids_keep_the_row_pending_until_the_attempt_cap():
+    """ "Not found" conflates deleted with owned-by-another-dataset, so a pruned id
+    must not seal the row: it stays pending (bounded by the attempt cap) so an
+    improve on the dataset that HAS the id can consume it."""
     graph = InMemoryGraphWithWeights(missing_edge=True)
-    session_manager = MagicMock()
-    session_manager.is_available = True
-    session_manager.update_qa = AsyncMock(return_value=True)
+    session_manager = RecordingSessionManager()
 
-    with (
-        patch.object(apply_feedback_weights_module, "session_user") as mock_session_user,
-        patch.object(apply_feedback_weights_module, "get_graph_engine", return_value=graph),
-        patch.object(
-            apply_feedback_weights_module,
-            "get_session_manager",
-            return_value=session_manager,
-        ),
-    ):
-        mock_session_user.get.return_value = _mock_user()
-        result = await apply_feedback_weights([_feedback_item()], alpha=0.1)
+    result = await _run(graph, session_manager, [_feedback_item()])
 
     assert result["processed"] == 1
-    assert result["applied"] == 0
-    call_kwargs = session_manager.update_qa.call_args.kwargs
-    assert call_kwargs["memify_metadata"][MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY] is False
+    assert result["applied"] == 0  # e1 was never found: not fully applied
+    assert graph.node_weights["n1"] == pytest.approx(0.55)
+    written = session_manager.metadata["q1"]
+    assert written[APPLIED] is False
+    assert written[NODE_IDS] == ["n1"]
+    assert written[PRUNED_IDS] == ["e1"]
+
+
+@pytest.mark.asyncio
+async def test_pruned_ids_are_consumed_by_the_dataset_that_has_them():
+    """A row rated during a recall over dataset B, first processed by dataset A's
+    improve: A applies its own ids and cannot find B's. B's improve then finds
+    and applies them — before, A's run sealed the row and B's weights never moved."""
+    graph_a = InMemoryGraphWithWeights(missing_edge=True)  # dataset A has no e1
+    graph_b = InMemoryGraphWithWeights()  # dataset B has e1
+    graph_b.node_weights = {}  # ...and no n1
+    session_manager = RecordingSessionManager()
+
+    def item(stored):
+        return _feedback_item(memify_metadata=stored)
+
+    first = (await _run_from_store(graph_a, session_manager, item, times=1))[0]
+    assert first["applied"] == 0
+    assert session_manager.metadata["q1"][APPLIED] is False
+
+    second = (await _run_from_store(graph_b, session_manager, item, times=1))[0]
+    assert second["applied"] == 1
+    stored = session_manager.metadata["q1"]
+    assert stored[APPLIED] is True
+    assert stored[EDGE_IDS] == ["e1"]
+    assert graph_b.edge_weights["e1"] == pytest.approx(0.55)
+    # n1 moved exactly once, in dataset A; B never re-applied it.
+    assert graph_a.node_weights["n1"] == pytest.approx(0.55)
+    assert graph_b.node_write_log == []
+
+
+@pytest.mark.asyncio
+async def test_deleted_node_runs_move_each_surviving_element_exactly_once():
+    """Acceptance: a QA whose ids include one deleted node moves each surviving
+    element exactly once; the never-found id keeps the row pending until the
+    attempt cap, then the row seals."""
+    graph = InMemoryGraphWithWeights()
+    session_manager = RecordingSessionManager()
+
+    def item(stored):
+        return _feedback_item(
+            memify_metadata=stored,
+            used_graph_element_ids={"node_ids": ["n1", "n_deleted"], "edge_ids": ["e1"]},
+        )
+
+    results = await _run_from_store(
+        graph, session_manager, item, times=FEEDBACK_WEIGHTS_MAX_ATTEMPTS + 1
+    )
+
+    assert graph.node_weights["n1"] == pytest.approx(0.55)
+    assert graph.edge_weights["e1"] == pytest.approx(0.55)
+    assert graph.node_write_log == [{"n1": pytest.approx(0.55)}]
+    assert graph.edge_write_log == [{"e1": pytest.approx(0.55)}]
+    assert [r["processed"] for r in results] == [1] * FEEDBACK_WEIGHTS_MAX_ATTEMPTS + [0]
+    assert [r["skipped"] for r in results] == [0] * FEEDBACK_WEIGHTS_MAX_ATTEMPTS + [1]
+    stored = session_manager.metadata["q1"]
+    assert stored[APPLIED] is True
+    assert stored[NODE_IDS] == ["n1"]
+    assert stored[PRUNED_IDS] == ["n_deleted"]
+    assert stored[ATTEMPTS] == FEEDBACK_WEIGHTS_MAX_ATTEMPTS
+
+
+@pytest.mark.asyncio
+async def test_partial_write_failure_retries_only_unapplied_ids():
+    graph = InMemoryGraphWithWeights(failing_edge_writes={"e1"})
+    session_manager = RecordingSessionManager()
+
+    def item(stored):
+        return _feedback_item(memify_metadata=stored)
+
+    first = (await _run_from_store(graph, session_manager, item, times=1))[0]
+    assert first == {"processed": 1, "applied": 0, "skipped": 0}
+    stored = session_manager.metadata["q1"]
+    assert stored[APPLIED] is False
+    assert stored[NODE_IDS] == ["n1"]
+    assert stored[EDGE_IDS] == []
+    assert stored[ATTEMPTS] == 1
+    assert graph.node_weights["n1"] == pytest.approx(0.55)
+    assert graph.edge_weights["e1"] == 0.5
+
+    graph.failing_edge_writes = set()
+    second = (await _run_from_store(graph, session_manager, item, times=1))[0]
+    assert second == {"processed": 1, "applied": 1, "skipped": 0}
+    stored = session_manager.metadata["q1"]
+    assert stored[APPLIED] is True
+    assert stored[NODE_IDS] == ["n1"]
+    assert stored[EDGE_IDS] == ["e1"]
+    assert stored[ATTEMPTS] == 2
+    # n1 moved exactly once across both runs; e1 moved once on the retry.
+    assert graph.node_weights["n1"] == pytest.approx(0.55)
+    assert graph.edge_weights["e1"] == pytest.approx(0.55)
+    assert graph.node_write_log == [{"n1": pytest.approx(0.55)}]
+
+
+@pytest.mark.asyncio
+async def test_attempts_are_capped_then_row_is_marked_done():
+    graph = InMemoryGraphWithWeights(failing_edge_writes={"e1"})
+    session_manager = RecordingSessionManager()
+
+    def item(stored):
+        return _feedback_item(memify_metadata=stored)
+
+    results = await _run_from_store(
+        graph, session_manager, item, times=FEEDBACK_WEIGHTS_MAX_ATTEMPTS + 1
+    )
+
+    assert [r["processed"] for r in results] == [1] * FEEDBACK_WEIGHTS_MAX_ATTEMPTS + [0]
+    assert all(r["applied"] == 0 for r in results)
+    stored = session_manager.metadata["q1"]
+    assert stored[APPLIED] is True
+    assert stored[ATTEMPTS] == FEEDBACK_WEIGHTS_MAX_ATTEMPTS
+    assert stored[EDGE_IDS] == []
+    assert graph.node_weights["n1"] == pytest.approx(0.55)
+    assert len(graph.node_write_log) == 1
+    assert len(graph.edge_write_log) == FEEDBACK_WEIGHTS_MAX_ATTEMPTS
+
+
+@pytest.mark.asyncio
+async def test_rerated_row_starts_over_with_the_new_score():
+    graph = InMemoryGraphWithWeights()
+    session_manager = RecordingSessionManager()
+    # add_feedback resets the done flag but leaves the bookkeeping; a different score
+    # must move every id again, with the new rating.
+    stored = {APPLIED: False, NODE_IDS: ["n1"], EDGE_IDS: ["e1"], SCORE: 5, ATTEMPTS: 1}
+
+    result = await _run(
+        graph, session_manager, [_feedback_item(memify_metadata=stored, feedback_score=1)]
+    )
+
+    assert result["applied"] == 1
+    assert graph.node_weights["n1"] == pytest.approx(0.45)
+    assert graph.edge_weights["e1"] == pytest.approx(0.45)
+    written = session_manager.metadata["q1"]
+    assert written[SCORE] == 1
+    assert written[ATTEMPTS] == 1
+    assert written[APPLIED] is True
+
+
+@pytest.mark.asyncio
+async def test_same_score_with_reset_flag_is_a_no_op_on_weights():
+    graph = InMemoryGraphWithWeights()
+    session_manager = RecordingSessionManager()
+    stored = {APPLIED: False, NODE_IDS: ["n1"], EDGE_IDS: ["e1"], SCORE: 5, ATTEMPTS: 1}
+
+    result = await _run(graph, session_manager, [_feedback_item(memify_metadata=stored)])
+
+    assert result["applied"] == 1
+    assert graph.node_weights["n1"] == 0.5
+    assert graph.edge_weights["e1"] == 0.5
+    assert session_manager.metadata["q1"][APPLIED] is True
+
+
+@pytest.mark.asyncio
+async def test_implicit_feedback_uses_half_alpha():
+    graph = InMemoryGraphWithWeights()
+    session_manager = RecordingSessionManager()
+
+    result = await _run(
+        graph,
+        session_manager,
+        [_feedback_item(feedback_source=FEEDBACK_SOURCE_IMPLICIT, feedback_text="thanks!")],
+        alpha=0.1,
+    )
+
+    assert result["applied"] == 1
+    assert graph.node_weights["n1"] == pytest.approx(0.525)
+    assert graph.edge_weights["e1"] == pytest.approx(0.525)
+
+
+@pytest.mark.asyncio
+async def test_explicit_feedback_uses_full_alpha():
+    graph = InMemoryGraphWithWeights()
+    session_manager = RecordingSessionManager()
+
+    await _run(graph, session_manager, [_feedback_item(feedback_source="explicit")], alpha=0.1)
+
+    assert graph.node_weights["n1"] == pytest.approx(0.55)
+
+
+class TestFeedbackAlpha:
+    """The learning rate has one default and one range check, shared by task and pipeline."""
+
+    def test_default_alpha_is_the_shared_constant(self):
+        import inspect
+
+        from cognee.memify_pipelines.apply_feedback_weights import apply_feedback_weights_pipeline
+
+        assert DEFAULT_FEEDBACK_ALPHA == 0.1
+        task_default = inspect.signature(apply_feedback_weights).parameters["alpha"].default
+        pipeline_default = (
+            inspect.signature(apply_feedback_weights_pipeline).parameters["alpha"].default
+        )
+        assert task_default is DEFAULT_FEEDBACK_ALPHA
+        assert pipeline_default is DEFAULT_FEEDBACK_ALPHA
+
+    @pytest.mark.parametrize("alpha", [0.0001, 0.1, 0.5, 1.0])
+    def test_validate_feedback_alpha_accepts_the_half_open_unit_interval(self, alpha):
+        assert validate_feedback_alpha(alpha) == alpha
+
+    @pytest.mark.parametrize("alpha", [0.0, -0.1, 1.0001, 2.0])
+    def test_validate_feedback_alpha_rejects_values_outside_range(self, alpha):
+        with pytest.raises(CogneeValidationError, match=r"alpha must be in range \(0, 1\]"):
+            validate_feedback_alpha(alpha)
+
+    @pytest.mark.parametrize("alpha", [0.0, 1.5])
+    def test_stream_update_weight_uses_the_shared_check(self, alpha):
+        with pytest.raises(CogneeValidationError):
+            stream_update_weight(0.5, 1.0, alpha)
+
+    @pytest.mark.asyncio
+    async def test_apply_feedback_weights_uses_the_shared_check(self):
+        with pytest.raises(CogneeValidationError):
+            await apply_feedback_weights([], alpha=0.0)
+
+
+@pytest.mark.asyncio
+async def test_raised_graph_call_persists_bookkeeping_and_spares_the_batch():
+    """An edge read raising after the node write succeeded must not lose the
+    applied ids or the attempt count (the same nodes would move again on every
+    run and the cap would never trip), and must not abort the rest of the batch."""
+
+    class EdgeReadRaises(InMemoryGraphWithWeights):
+        async def get_edge_feedback_weights(self, edge_object_ids):
+            raise RuntimeError("edge read failed")
+
+    graph = EdgeReadRaises()
+    graph.node_weights["n2"] = 0.5
+    session_manager = RecordingSessionManager()
+    second_item = _feedback_item(
+        qa_id="q2", used_graph_element_ids={"node_ids": ["n2"], "edge_ids": []}
+    )
+    # q2 has no edge ids, so the raising edge read is never called for it.
+
+    result = await _run(graph, session_manager, [_feedback_item(), second_item])
+
+    # q1: nodes applied and persisted despite the raise; attempt counted; not done.
+    stored = session_manager.metadata["q1"]
+    assert stored[APPLIED] is False
+    assert stored[NODE_IDS] == ["n1"]
+    assert stored[ATTEMPTS] == 1
+    assert graph.node_weights["n1"] == pytest.approx(0.55)
+    # q2 still processed: the batch survived q1's failure.
+    assert session_manager.metadata["q2"][APPLIED] is True
+    assert result["skipped"] == 1
+
+    # A retry of q1 does not re-move n1 (exactly-once across retries).
+    await _run(graph, session_manager, [_feedback_item(memify_metadata=stored)])
+    assert graph.node_weights["n1"] == pytest.approx(0.55)
+    assert [write for write in graph.node_write_log if "n1" in write] == [
+        {"n1": pytest.approx(0.55)}
+    ]
+    assert session_manager.metadata["q1"][ATTEMPTS] == 2
+
+
+@pytest.mark.asyncio
+async def test_repeated_raises_trip_the_attempt_cap():
+    class EdgeReadRaises(InMemoryGraphWithWeights):
+        async def get_edge_feedback_weights(self, edge_object_ids):
+            raise RuntimeError("edge read failed")
+
+    graph = EdgeReadRaises()
+    session_manager = RecordingSessionManager()
+
+    def item(stored):
+        return _feedback_item(memify_metadata=stored)
+
+    await _run_from_store(graph, session_manager, item, times=FEEDBACK_WEIGHTS_MAX_ATTEMPTS + 1)
+
+    stored = session_manager.metadata["q1"]
+    assert stored[APPLIED] is True  # sealed by the cap, not by success
+    assert stored[ATTEMPTS] == FEEDBACK_WEIGHTS_MAX_ATTEMPTS
+
+
+@pytest.mark.asyncio
+async def test_explicit_rerating_of_an_implicit_score_reapplies_at_full_alpha():
+    """An implicit rating moved the weights at half alpha; an explicit rating of
+    the SAME score is new information and must re-apply — comparing only the
+    score would leave the half-alpha update standing."""
+    from cognee.tasks.memify.feedback_weights_constants import (
+        FEEDBACK_SOURCE_EXPLICIT,
+        MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_SOURCE_KEY,
+    )
+
+    graph = InMemoryGraphWithWeights()
+    session_manager = RecordingSessionManager()
+
+    first = await _run(
+        graph, session_manager, [_feedback_item(feedback_source=FEEDBACK_SOURCE_IMPLICIT)]
+    )
+    assert first["applied"] == 1
+    assert graph.node_weights["n1"] == pytest.approx(0.525)  # half alpha
+    stored = session_manager.metadata["q1"]
+    assert stored[MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_SOURCE_KEY] == "implicit"
+
+    # add_feedback resets the done flag; same score, now explicit.
+    stored = {**stored, APPLIED: False}
+    second = await _run(
+        graph,
+        session_manager,
+        [_feedback_item(memify_metadata=stored, feedback_source=FEEDBACK_SOURCE_EXPLICIT)],
+    )
+    assert second["applied"] == 1
+    assert graph.node_weights["n1"] == pytest.approx(0.5725)  # full alpha from 0.525
+    assert (
+        session_manager.metadata["q1"][MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_SOURCE_KEY]
+        == "explicit"
+    )

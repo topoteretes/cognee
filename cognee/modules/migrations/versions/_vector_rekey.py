@@ -141,8 +141,8 @@ async def rekey_lancedb(vector_engine, collection: str, id_map: dict) -> None:
         optimize = getattr(fresh_table, "optimize", None)
         if optimize is not None:
             await optimize()
-    except Exception as exc:  # noqa: BLE001 - compaction is an optimization
-        logger.warning("Post-re-key compaction skipped for %s: %s", collection, exc)
+    except Exception as exc:  # compaction is an optimization
+        logger.warning("Post-re-key compaction skipped for %s: %s", collection, exc, exc_info=True)
 
 
 async def rekey_pgvector(vector_engine, collection: str, id_map: dict) -> None:

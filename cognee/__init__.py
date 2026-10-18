@@ -21,15 +21,18 @@ from cognee.version import get_cognee_version
 #       there will be circular import issues
 __version__ = get_cognee_version()
 
-# Load environment variable settings has to be before setting up logging for LOG_LEVEL value
-import dotenv
+# The .env must be loaded before logging is configured, because LOG_LEVEL comes
+# from it. One resolver for the whole process — see cognee.shared.env_file for
+# the search order (working directory first, then the package's own tree).
+from cognee.shared.env_file import load_env_file, describe_resolution
 
-dotenv.load_dotenv(override=True)
+_env_file = load_env_file()
 
 # NOTE: Log level can be set with the LOG_LEVEL env variable
 from cognee.shared.logging_utils import setup_logging
 
 logger = setup_logging()
+logger.info(describe_resolution(_env_file))
 
 # ---------------------------------------------------------------------------
 # V1 API
@@ -37,7 +40,7 @@ logger = setup_logging()
 from .api.v1.add import add
 from .api.v1.delete import delete
 from .api.v1.cognify import cognify
-from .modules.memify import memify
+from .api.v1.memify import memify  # deprecated (SDK-1115), removed in the next release
 from .modules.run_custom_pipeline import run_custom_pipeline
 from .api.v1.update import update
 from .api.v1.config.config import config
@@ -85,6 +88,11 @@ from .api.v1 import (
     ExportResult,
 )
 from .memory import MemoryEntry, QAEntry, TraceEntry, FeedbackEntry
+from .infrastructure.session.session_node_set import SessionNodeSetConflictError
+
+# Background work: wait for fire-and-forget tasks (background remember, the
+# session-to-graph improve bridge) before the process exits.
+from cognee.infrastructure.background_tasks import wait_for_background_tasks
 
 # Memory migration (cognee.migration has the provider sources:
 # Mem0Source, ZepSource/GraphitiSource, LettaSource, COGXArchiveSource)
@@ -107,6 +115,6 @@ from .api.v1.tools import tools
 
 # Relational DB models
 from cognee.modules.session_lifecycle.models import SessionModelUsage, SessionRecord
-import cognee.modules.migrations.models  # noqa: F401  (registers global_database_version)
-import cognee.modules.tools.models  # noqa: F401  (registers tool_connections)
-import cognee.modules.provenance.edge_evidence.models  # noqa: F401  (registers provenance_edge_evidence)
+import cognee.modules.migrations.models  # registers global_database_version
+import cognee.modules.tools.models  # registers tool_connections
+import cognee.modules.provenance.edge_evidence.models  # registers provenance_edge_evidence

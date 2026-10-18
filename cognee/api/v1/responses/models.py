@@ -1,10 +1,9 @@
 import time
 import uuid
-from typing import Any, Dict, List, Optional, Union
+from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel, Field
-
-from enum import Enum
 
 from cognee.api.DTO import InDTO, OutDTO
 
@@ -19,8 +18,8 @@ class FunctionParameters(BaseModel):
     """JSON Schema for function parameters"""
 
     type: str = "object"
-    properties: Dict[str, Dict[str, Any]]
-    required: Optional[List[str]] = None
+    properties: dict[str, dict[str, Any]]
+    required: list[str] | None = None
 
 
 class Function(BaseModel):
@@ -66,18 +65,18 @@ class ResponseRequest(InDTO):
 
     model: CogneeModel = CogneeModel.COGNEEV1
     input: str
-    tools: Optional[List[ToolFunction]] = None
-    tool_choice: Optional[Union[str, Dict[str, Any]]] = "auto"
-    user: Optional[str] = None
-    temperature: Optional[float] = 1.0
-    max_completion_tokens: Optional[int] = None
+    tools: list[ToolFunction] | None = None
+    tool_choice: str | dict[str, Any] | None = "auto"
+    user: str | None = None
+    temperature: float | None = 1.0
+    max_completion_tokens: int | None = None
 
 
 class ToolCallOutput(BaseModel):
     """Output of a tool call in the responses API"""
 
     status: str = "success"  # success/error
-    data: Optional[Dict[str, Any]] = None
+    data: dict[str, Any] | None = None
 
 
 class ResponseToolCall(BaseModel):
@@ -86,7 +85,7 @@ class ResponseToolCall(BaseModel):
     id: str = Field(default_factory=lambda: f"call_{uuid.uuid4().hex}")
     type: str = "function"
     function: FunctionCall
-    output: Optional[ToolCallOutput] = None
+    output: ToolCallOutput | None = None
 
 
 class ResponseBody(OutDTO):
@@ -97,6 +96,6 @@ class ResponseBody(OutDTO):
     model: str
     object: str = "response"
     status: str = "completed"
-    tool_calls: List[ResponseToolCall]
-    usage: Optional[ChatUsage] = None
-    metadata: Dict[str, Any] = None
+    tool_calls: list[ResponseToolCall]
+    usage: ChatUsage | None = None
+    metadata: dict[str, Any] = None

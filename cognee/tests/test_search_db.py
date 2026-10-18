@@ -1,15 +1,17 @@
-import pathlib
-import os
 import asyncio
+import logging
+import os
+import pathlib
+from collections import Counter
+
 import pytest
 import pytest_asyncio
-from collections import Counter
 
 import cognee
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
-from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
+from cognee.modules.retrieval.completion_retriever import CompletionRetriever
 from cognee.modules.retrieval.graph_completion_context_extension_retriever import (
     GraphCompletionContextExtensionRetriever,
 )
@@ -17,19 +19,15 @@ from cognee.modules.retrieval.graph_completion_cot_retriever import GraphComplet
 from cognee.modules.retrieval.graph_completion_decomposition_retriever import (
     GraphCompletionDecompositionRetriever,
 )
+from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
 )
-from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
 from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
-from cognee.modules.retrieval.completion_retriever import CompletionRetriever
-from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
-from cognee.modules.retrieval.triplet_retriever import TripletRetriever
-from cognee.shared.logging_utils import get_logger
+from cognee.modules.retrieval.temporal_hybrid_retriever import TemporalHybridRetriever
 from cognee.modules.search.types import SearchType
-from cognee.modules.users.methods import get_default_user
 
-logger = get_logger()
+logger = logging.getLogger(__name__)
 
 
 async def _reset_engines_and_prune() -> None:
@@ -48,13 +46,13 @@ async def _reset_engines_and_prune() -> None:
             await vector_engine.engine.dispose(close=True)
     except Exception:
         # Engine might not exist yet
-        pass
+        logger.debug("Ignoring exception in _reset_engines_and_prune", exc_info=True)
 
     from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
-    from cognee.infrastructure.databases.vector.create_vector_engine import _create_vector_engine
     from cognee.infrastructure.databases.relational.create_relational_engine import (
         create_relational_engine,
     )
+    from cognee.infrastructure.databases.vector.create_vector_engine import _create_vector_engine
 
     _create_graph_engine.cache_clear()
     _create_vector_engine.cache_clear()
@@ -124,29 +122,13 @@ def _disable_session_turn_gating():
 
 
 async def setup_test_environment():
-    """Helper function to set up test environment with data, cognify, and triplet embeddings."""
+    """Helper function to set up test environment with data and cognify."""
     # This test runs for multiple db settings, to run this locally set the corresponding db envs
 
     dataset_name = "test_dataset"
     logger.info("Starting test setup: pruning data and system")
     await _reset_engines_and_prune()
     state = await _seed_default_dataset(dataset_name=dataset_name)
-
-    user = await get_default_user()
-    from cognee.memify_pipelines.create_triplet_embeddings import create_triplet_embeddings
-
-    logger.info("Creating triplet embeddings")
-    await create_triplet_embeddings(user=user, dataset=dataset_name, triplets_batch_size=5)
-
-    # Check if Triplet_text collection was created
-    vector_engine = await get_vector_engine_async()
-    has_collection = await vector_engine.has_collection(collection_name="Triplet_text")
-    logger.info(f"Triplet_text collection exists after creation: {has_collection}")
-
-    if has_collection:
-        collection = await vector_engine.get_collection("Triplet_text")
-        count = await collection.count_rows() if hasattr(collection, "count_rows") else "unknown"
-        logger.info(f"Triplet_text collection row count: {count}")
 
     return state
 
@@ -170,13 +152,6 @@ async def e2e_state(_disable_session_turn_gating):
     # --- Graph/vector engine consistency ---
     graph_engine = await get_graph_engine()
     _nodes, edges = await graph_engine.get_graph_data()
-
-    vector_engine = await get_vector_engine_async()
-    collection = await vector_engine.search(
-        collection_name="Triplet_text",
-        query_text="Test",
-        limit=None,
-    )
 
     # --- Retriever contexts ---
     query = "Next to which country is Germany located?"
@@ -202,8 +177,7 @@ async def e2e_state(_disable_session_turn_gating):
         "chunks": await _get_retriever_context(ChunksRetriever(top_k=5), query=query),
         "summaries": await _get_retriever_context(SummariesRetriever(top_k=5), query=query),
         "rag_completion": await _get_retriever_context(CompletionRetriever(top_k=3), query=query),
-        "temporal": await _get_retriever_context(TemporalRetriever(top_k=5), query=query),
-        "triplet": await _get_retriever_context(TripletRetriever(), query=query),
+        "temporal": await _get_retriever_context(TemporalHybridRetriever(top_k=5), query=query),
     }
 
     # --- Retriever triplets + vector distance validation ---
@@ -251,11 +225,6 @@ async def e2e_state(_disable_session_turn_gating):
         query_text="Next to which country is Germany located?",
         verbose=True,
     )
-    completion_triplet = await cognee.search(
-        query_type=SearchType.TRIPLET_COMPLETION,
-        query_text="Next to which country is Germany located?",
-        verbose=True,
-    )
     completion_chunks = await cognee.search(
         query_type=SearchType.CHUNKS,
         query_text="Germany",
@@ -282,9 +251,6 @@ async def e2e_state(_disable_session_turn_gating):
 
     return {
         "graph_edges": edges,
-        "triplet_collection": collection,
-        "vector_collection_edges_count": len(collection),
-        "graph_edges_count": len(edges),
         "contexts": contexts,
         "triplets": triplets,
         "search_results": {
@@ -298,7 +264,6 @@ async def e2e_state(_disable_session_turn_gating):
             "graph_completion_cot": completion_cot,
             "graph_completion_context_extension": completion_ext,
             "graph_summary_completion": completion_sum,
-            "triplet_completion": completion_triplet,
             "chunks": completion_chunks,
             "summaries": completion_summaries,
             "rag_completion": completion_rag,
@@ -306,12 +271,6 @@ async def e2e_state(_disable_session_turn_gating):
         },
         "graph_snapshot": graph_snapshot,
     }
-
-
-@pytest.mark.asyncio
-async def test_e2e_graph_vector_consistency(e2e_state):
-    """Graph and vector stores contain the same triplet edges."""
-    assert e2e_state["graph_edges_count"] == e2e_state["vector_collection_edges_count"]
 
 
 @pytest.mark.asyncio
@@ -332,10 +291,6 @@ async def test_e2e_retriever_contexts(e2e_state):
         assert ctx.strip(), f"{name}: Context should not be empty"
         lower = ctx.lower()
         assert "germany" in lower or "netherlands" in lower
-
-    triplet_ctx = contexts["triplet"]
-    assert isinstance(triplet_ctx, str), "triplet: Context should be a string"
-    assert triplet_ctx.strip(), "triplet: Context should not be empty"
 
     chunks_ctx = contexts["chunks"]
     assert isinstance(chunks_ctx, str), "chunks: Context should be a string"
@@ -418,7 +373,6 @@ async def test_e2e_search_results_and_wrappers(e2e_state):
         "graph_completion_cot",
         "graph_completion_context_extension",
         "graph_summary_completion",
-        "triplet_completion",
         "rag_completion",
         "temporal",
     ]:

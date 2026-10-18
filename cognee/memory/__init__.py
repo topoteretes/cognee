@@ -9,11 +9,11 @@ from .entries import (
 )
 
 __all__ = [
+    "FeedbackEntry",
     "MemoryEntry",
     "QAEntry",
-    "TraceEntry",
-    "FeedbackEntry",
-    "SkillRunEntry",
     "RecallScope",
+    "SkillRunEntry",
+    "TraceEntry",
     "normalize_scope",
 ]

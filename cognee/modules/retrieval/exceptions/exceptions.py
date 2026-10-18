@@ -1,5 +1,6 @@
 from fastapi import status
-from cognee.exceptions import CogneeValidationError, CogneeSystemError
+
+from cognee.exceptions import CogneeSystemError, CogneeValidationError
 
 
 class SearchTypeNotSupported(CogneeValidationError):

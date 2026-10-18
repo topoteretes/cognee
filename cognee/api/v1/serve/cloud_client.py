@@ -1,13 +1,13 @@
 """Remote HTTP client that proxies V2 operations to a Cognee Cloud instance."""
 
 import io
+import json
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 
 import aiohttp
 
-from cognee.modules.search.types import ContextFormat
 from cognee.modules.ingestion.data_types.TextData import create_text_data
 from cognee.shared.logging_utils import get_logger
 
@@ -26,6 +26,19 @@ def _text_upload_filename(text: str) -> str:
     return create_text_data(text).get_metadata()["name"]
 
 
+def _failed_update_result(body: str) -> dict | None:
+    """Parse a 500 body as an update result when it is one with status "failed"."""
+    from cognee.api.v1.update.result import UpdateResult
+
+    try:
+        payload = json.loads(body)
+    except ValueError:
+        return None
+    if isinstance(payload, dict) and payload.get("status") == "failed" and "data_id" in payload:
+        return UpdateResult.model_validate(payload).model_dump()
+    return None
+
+
 class CloudClient:
     """Async HTTP client for a remote Cognee Cloud tenant instance.
 
@@ -36,7 +49,7 @@ class CloudClient:
     def __init__(self, service_url: str, api_key: str):
         self.service_url = service_url.rstrip("/")
         self.api_key = api_key
-        self._session: Optional[aiohttp.ClientSession] = None
+        self._session: aiohttp.ClientSession | None = None
 
     # Default for ordinary API calls: aiohttp's standard 5-minute total,
     # with connect failures surfacing quickly.
@@ -50,9 +63,15 @@ class CloudClient:
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
+            # trust_env: honour HTTP(S)_PROXY / NO_PROXY like every other HTTP
+            # client cognee uses. aiohttp ignores them by default, which in a
+            # proxied environment (corporate egress, Docker Sandboxes' credential
+            # proxy) sends requests around the proxy — a proxy-managed API key
+            # then never gets substituted and the server sees the placeholder.
             self._session = aiohttp.ClientSession(
                 headers={"X-Api-Key": self.api_key},
                 timeout=self.DEFAULT_TIMEOUT,
+                trust_env=True,
             )
         return self._session
 
@@ -68,9 +87,12 @@ class CloudClient:
             async with session.get(f"{self.service_url}/health") as resp:
                 return resp.status == 200
         except Exception:
+            logger.debug(
+                "Falling back to False after error in CloudClient._health_check", exc_info=True
+            )
             return False
 
-    async def _auth_check(self) -> Optional[int]:
+    async def _auth_check(self) -> int | None:
         """Status of an authenticated probe, or None when unreachable.
 
         ``/health`` is unauthenticated, so it cannot tell a working API key
@@ -82,6 +104,9 @@ class CloudClient:
             async with session.get(f"{self.service_url}/api/v1/datasets") as resp:
                 return resp.status
         except Exception:
+            logger.debug(
+                "Falling back to None after error in CloudClient._auth_check", exc_info=True
+            )
             return None
 
     # ----- V2 Operations -----
@@ -99,6 +124,8 @@ class CloudClient:
             form.add_field("session_id", kwargs["session_id"])
         if kwargs.get("run_in_background"):
             form.add_field("run_in_background", "true")
+        if kwargs.get("self_improvement") is not None:
+            form.add_field("self_improvement", "true" if kwargs["self_improvement"] else "false")
         if kwargs.get("custom_prompt"):
             form.add_field("custom_prompt", kwargs["custom_prompt"])
         if kwargs.get("chunk_size") is not None:
@@ -186,8 +213,9 @@ class CloudClient:
         self,
         entry,
         dataset_name: str = "main_dataset",
-        session_id: Optional[str] = None,
-        skill_improvement: Optional[dict] = None,
+        session_id: str | None = None,
+        skill_improvement: dict | None = None,
+        dataset_id: str | None = None,
     ) -> dict:
         """POST /api/v1/remember/entry — store a typed MemoryEntry.
 
@@ -205,6 +233,9 @@ class CloudClient:
             "skill_improvement": skill_improvement,
         }
 
+        if dataset_id is not None:
+            payload["dataset_id"] = str(dataset_id)
+
         async with session.post(
             f"{self.service_url}/api/v1/remember/entry",
             json=payload,
@@ -214,7 +245,7 @@ class CloudClient:
                 raise RuntimeError(f"Remote remember_entry failed ({resp.status}): {body}")
             return await resp.json()
 
-    async def recall(self, query_text: str, query_type: Optional[str] = None, **kwargs) -> list:
+    async def recall(self, query_text: str, query_type: str | None = None, **kwargs) -> list:
         """POST /api/v1/recall — query the knowledge graph and/or session cache."""
         session = await self._get_session()
 
@@ -233,10 +264,6 @@ class CloudClient:
             payload["node_name"] = kwargs["node_name"]
         if kwargs.get("only_context"):
             payload["only_context"] = kwargs["only_context"]
-        # Only the non-default shape is worth sending: an older instance ignores the
-        # field, and omitting it keeps the request identical to what it always was.
-        if ContextFormat.parse(kwargs.get("context_format")) is ContextFormat.PROMPT:
-            payload["context_format"] = ContextFormat.PROMPT.value
         if kwargs.get("verbose"):
             payload["verbose"] = kwargs["verbose"]
         if kwargs.get("session_id"):
@@ -276,8 +303,38 @@ class CloudClient:
             payload["dataset_name"] = str(dataset)
         if kwargs.get("run_in_background"):
             payload["run_in_background"] = True
-        if kwargs.get("node_name"):
+        if kwargs.get("session_ids"):
+            payload["session_ids"] = list(kwargs["session_ids"])
+        if kwargs.get("build_global_context_index"):
+            payload["build_global_context_index"] = True
+        if kwargs.get("build_truth_subspace"):
+            payload["build_truth_subspace"] = True
+        if kwargs.get("review_conflicts"):
+            payload["review_conflicts"] = True
+        if kwargs.get("feedback_alpha") is not None:
+            payload["feedback_alpha"] = kwargs["feedback_alpha"]
+        # Deprecated custom tasks (SDK-1115): the /improve DTO takes registry task
+        # names, a data string and node_name. Task objects and the other scoping
+        # options cannot cross the wire, so they fail loudly instead of the
+        # server silently running without them.
+        for key in ("extraction_tasks", "enrichment_tasks"):
+            tasks = kwargs.get(key)
+            if tasks:
+                if not all(isinstance(task, str) for task in tasks):
+                    raise ValueError(
+                        f"improve({key}=...) on a remote instance takes registry "
+                        "task names (strings); Task objects cannot be serialized."
+                    )
+                payload[key] = list(tasks)
+        if kwargs.get("data") is not None:
+            payload["data"] = kwargs["data"]
+        if kwargs.get("node_name") is not None:
             payload["node_name"] = kwargs["node_name"]
+        for key in ("node_type", "vector_db_config", "graph_db_config"):
+            if kwargs.get(key) is not None:
+                raise ValueError(
+                    f"improve({key}=...) is not supported on a remote instance; run it locally."
+                )
 
         async with session.post(
             f"{self.service_url}/api/v1/improve",
@@ -331,7 +388,7 @@ class CloudClient:
         data_id: UUID,
         data: Any,
         dataset_id: UUID,
-        node_set: Optional[list] = None,
+        node_set: list | None = None,
         chunk_level_diff: bool = True,
     ) -> dict:
         """PATCH /api/v1/update — replace one document in place on the remote.
@@ -376,23 +433,59 @@ class CloudClient:
             "dataset_id": str(dataset_id),
             "chunk_level_diff": "true" if chunk_level_diff else "false",
         }
+        from cognee.api.v1.update.result import UpdateResult
+
         async with session.patch(
             f"{self.service_url}/api/v1/update", params=params, data=form
         ) as resp:
             if resp.status >= 400:
                 body = await resp.text()
+                # A failed rebuild travels with a 500 but is still a result, in
+                # the same shape the local path returns, so the caller can read
+                # the error and retry. Anything else is a remote error.
+                failed = _failed_update_result(body)
+                if failed is not None:
+                    return failed
                 raise RuntimeError(f"Remote update failed ({resp.status}): {body}")
-            return await resp.json()
+            # Through the schema so the dict matches the local result exactly:
+            # UUIDs as UUID objects, the fallback reason as its enum member.
+            return UpdateResult.model_validate(await resp.json()).model_dump()
 
     async def list_data(self, dataset_id: UUID) -> list:
-        """GET /api/v1/datasets/{dataset_id}/data — the documents in a dataset."""
-        session = await self._get_session()
+        """Traverse bounded pages, deduplicating overlaps during concurrent ingest.
 
-        async with session.get(f"{self.service_url}/api/v1/datasets/{dataset_id}/data") as resp:
-            if resp.status >= 400:
-                body = await resp.text()
-                raise RuntimeError(f"Remote list_data failed ({resp.status}): {body}")
-            return await resp.json()
+        This is not a snapshot: inserts/deletes can make rows unreachable during
+        offset traversal. Above offset 1,000,000 the server rejects requests;
+        /data/count still reports the full dataset size.
+        """
+        session = await self._get_session()
+        rows = []
+        seen_ids = set()
+        limit = 1000
+        offset = 0
+        while True:
+            async with session.get(
+                f"{self.service_url}/api/v1/datasets/{dataset_id}/data",
+                params={"limit": limit, "offset": offset},
+            ) as resp:
+                if resp.status >= 400:
+                    body = await resp.text()
+                    raise RuntimeError(f"Remote list_data failed ({resp.status}): {body}")
+                page = await resp.json()
+            if not isinstance(page, list):
+                raise RuntimeError("Remote list_data returned an invalid document list")
+            page_ids = {str(row["id"]) for row in page if isinstance(row, dict) and "id" in row}
+            if len(page) > limit or (page and page_ids and page_ids <= seen_ids):
+                raise RuntimeError("Remote server did not honor dataset pagination")
+            # Advance by consumed server rows, independently of deduplication.
+            offset += len(page)
+            for row in page:
+                row_id = str(row["id"])
+                if row_id not in seen_ids:
+                    seen_ids.add(row_id)
+                    rows.append(row)
+            if len(page) < limit:
+                return rows
 
     async def cognify(self, datasets: Any = None, **kwargs) -> dict:
         """POST /api/v1/cognify — build the knowledge graph."""
@@ -444,8 +537,10 @@ class CloudClient:
             payload["nodeName"] = kwargs["node_name"]
         if kwargs.get("only_context") is not None:
             payload["onlyContext"] = kwargs["only_context"]
-        if ContextFormat.parse(kwargs.get("context_format")) is ContextFormat.PROMPT:
-            payload["contextFormat"] = ContextFormat.PROMPT.value
+        if kwargs.get("session_id"):
+            # Selects the session layer server-side: history and guidance for a real
+            # completion, and the same layer inside an only_context string.
+            payload["sessionId"] = kwargs["session_id"]
         if kwargs.get("verbose") is not None:
             payload["verbose"] = kwargs["verbose"]
         if kwargs.get("skills") is not None:

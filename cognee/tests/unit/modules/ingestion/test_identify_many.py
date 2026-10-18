@@ -28,7 +28,6 @@ from cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter imp
 from cognee.modules.data.models import Data
 from cognee.modules.ingestion.identify_many import _CHUNK_SIZE, identify_many
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -55,9 +54,9 @@ def _patch_identify_engine(engine):
 
 async def _make_engine(rows: list[dict]) -> tuple[SQLAlchemyAdapter, str]:
     """Spin up a throwaway SQLite engine and seed it with the given Data rows."""
-    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-    tmp.close()
-    engine = SQLAlchemyAdapter(f"sqlite+aiosqlite:///{tmp.name}")
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+        db_path = tmp.name
+    engine = SQLAlchemyAdapter(f"sqlite+aiosqlite:///{db_path}")
     await engine.create_database()
 
     async with engine.get_async_session() as session:
@@ -65,7 +64,7 @@ async def _make_engine(rows: list[dict]) -> tuple[SQLAlchemyAdapter, str]:
             session.add(Data(**row))
         await session.commit()
 
-    return engine, tmp.name
+    return engine, db_path
 
 
 def _user(tenant_id=None):
@@ -73,17 +72,17 @@ def _user(tenant_id=None):
 
 
 def _row(*, dataset_id, owner_id, content_hash, tenant_id=None, name="doc.txt"):
-    return dict(
-        id=uuid4(),
-        dataset_id=dataset_id,
-        owner_id=owner_id,
-        tenant_id=tenant_id,
-        name=name,
-        content_hash=content_hash,
-        raw_data_location=f"file:///tmp/{name}",
-        pipeline_status={},
-        token_count=-1,
-    )
+    return {
+        "id": uuid4(),
+        "dataset_id": dataset_id,
+        "owner_id": owner_id,
+        "tenant_id": tenant_id,
+        "name": name,
+        "content_hash": content_hash,
+        "raw_data_location": f"file:///tmp/{name}",
+        "pipeline_status": {},
+        "token_count": -1,
+    }
 
 
 # ---------------------------------------------------------------------------

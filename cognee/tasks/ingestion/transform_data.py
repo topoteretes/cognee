@@ -1,10 +1,10 @@
 from llama_index.core import Document
 from llama_index.core.schema import ImageDocument
+
 from cognee.modules.ingestion import save_data_to_file
-from typing import Union
 
 
-async def get_data_from_llama_index(data_point: Union[Document, ImageDocument]) -> str:
+async def get_data_from_llama_index(data_point: Document | ImageDocument) -> str:
     """
     Retrieve the file path based on the data point type.
 

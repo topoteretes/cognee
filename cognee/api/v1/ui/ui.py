@@ -1,27 +1,30 @@
 import os
 import platform
+import shutil
 import signal
 import socket
 import subprocess
+import tempfile
 import threading
 import time
 import webbrowser
 import zipfile
-import requests
+from collections.abc import Callable
+from contextlib import ExitStack
 from pathlib import Path
-from typing import Callable, Optional, Tuple, List
-import tempfile
-import shutil
+
+import requests
 
 from cognee.shared.logging_utils import get_logger
 from cognee.version import get_cognee_version
+
 from .node_setup import check_node_npm, get_nvm_dir, get_nvm_sh_path
 from .npm_utils import run_npm_command
 
 logger = get_logger()
 
 
-def _check_docker_available() -> Tuple[bool, str]:
+def _check_docker_available() -> tuple[bool, str]:
     """
     Check if the Docker daemon is reachable by running `docker info`.
 
@@ -43,6 +46,7 @@ def _check_docker_available() -> Tuple[bool, str]:
             ["docker", "info"],
             capture_output=True,
             timeout=15,
+            check=False,
         )
         if result.returncode == 0:
             return True, "Docker daemon is running."
@@ -106,7 +110,9 @@ def _stream_process_output(
                     if line_text:
                         print(f"{color_code}{prefix}{reset_code} {line_text}", flush=True)
         except Exception:
-            pass
+            logger.debug(
+                "Ignoring exception in _stream_process_output.stream_reader", exc_info=True
+            )
         finally:
             if stream:
                 stream.close()
@@ -127,10 +133,11 @@ def _is_port_available(port: int) -> bool:
             result = sock.connect_ex(("localhost", port))
             return result != 0  # Port is available if connection fails
     except Exception:
+        logger.debug("Falling back to False after error in _is_port_available", exc_info=True)
         return False
 
 
-def _check_required_ports(ports_to_check: List[Tuple[int, str]]) -> Tuple[bool, List[str]]:
+def _check_required_ports(ports_to_check: list[tuple[int, str]]) -> tuple[bool, list[str]]:
     """
     Check if all required ports are available on localhost.
 
@@ -174,7 +181,7 @@ def get_frontend_cache_dir() -> Path:
     return cache_dir
 
 
-def get_frontend_download_info() -> Tuple[str, str]:
+def get_frontend_download_info() -> tuple[str, str]:
     """
     Get the download URL and version for the actual cognee-frontend source.
     Downloads the real frontend from GitHub releases, matching the installed version.
@@ -228,7 +235,7 @@ def download_frontend_assets(force: bool = False) -> bool:
                 if version_file.exists():
                     version_file.unlink()
         except Exception as e:
-            logger.debug(f"Error checking cached version: {e}")
+            logger.debug(f"Error checking cached version: {e}", exc_info=True)
             # Clear potentially corrupted cache
             if frontend_dir.exists():
                 shutil.rmtree(frontend_dir)
@@ -255,8 +262,7 @@ def download_frontend_assets(force: bool = False) -> bool:
             response.raise_for_status()
 
             with open(archive_path, "wb") as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
+                f.writelines(response.iter_content(chunk_size=8192))
 
             # Extract the archive and find the cognee-frontend directory
             if frontend_dir.exists():
@@ -303,16 +309,16 @@ def download_frontend_assets(force: bool = False) -> bool:
             )
             logger.error("Try using a stable release version of cognee.")
         else:
-            logger.error(f"Failed to download from GitHub: {str(e)}")
+            logger.error(f"Failed to download from GitHub: {e!s}")
         logger.error("You can still use cognee without the UI functionality.")
         return False
     except Exception as e:
-        logger.error(f"Failed to download frontend assets: {str(e)}")
-        logger.error("You can still use cognee without the UI functionality.")
+        logger.error(f"Failed to download frontend assets: {e!s}")
+        logger.exception("You can still use cognee without the UI functionality.")
         return False
 
 
-def find_frontend_path() -> Optional[Path]:
+def find_frontend_path() -> Path | None:
     """
     Find the cognee-frontend directory.
     Checks both development location and cached download location.
@@ -368,8 +374,8 @@ def install_frontend_dependencies(frontend_path: Path) -> bool:
     except subprocess.TimeoutExpired:
         logger.error("Timeout installing frontend dependencies")
         return False
-    except Exception as e:
-        logger.error(f"Error installing frontend dependencies: {str(e)}")
+    except Exception:
+        logger.exception("Error installing frontend dependencies")
         return False
 
 
@@ -393,6 +399,7 @@ def is_development_frontend(frontend_path: Path) -> bool:
 
         return "next" in dependencies or "next" in dev_dependencies
     except Exception:
+        logger.debug("Falling back to False after error in is_development_frontend", exc_info=True)
         return False
 
 
@@ -421,8 +428,91 @@ def prompt_user_for_download() -> bool:
         return False
 
 
+def stop_ui_pid(pid: int, *, running: bool = True) -> None:
+    """Signal a process group created by this launch, by PID.
+
+    The PID-level half of :func:`stop_ui_process`, so callers that only kept a
+    PID (the CLI's signal handler) share one implementation with the callers
+    that kept the Popen. Deliberately uses ``pid`` as the group id rather than
+    resolving ``os.getpgid(pid)`` first: every Unix Popen in start_ui creates
+    its own session, and the original group id stays valid even once npm's
+    parent has exited -- which is exactly the case where getpgid() fails.
+    """
+    try:
+        if platform.system() == "Windows":
+            if running:
+                # npm is launched through a shell on Windows. Stopping only
+                # that shell would leave the Node.js child running.
+                subprocess.run(
+                    ["taskkill", "/PID", str(pid), "/T", "/F"],
+                    capture_output=True,
+                    timeout=5,
+                    check=True,
+                )
+        else:
+            os.killpg(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    except (OSError, subprocess.SubprocessError):
+        logger.warning("UI process %s did not stop gracefully", pid, exc_info=True)
+
+
+def stop_ui_process(process: subprocess.Popen) -> None:
+    """Stop a process created by this launch and its child processes."""
+    stop_ui_pid(process.pid, running=process.poll() is None)
+    try:
+        process.wait(timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        logger.warning("UI process %s did not stop gracefully", process.pid, exc_info=True)
+
+    try:
+        if platform.system() == "Windows":
+            if process.poll() is None:
+                process.kill()
+        else:
+            # The parent may exit before children that ignored SIGTERM.
+            os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    except OSError:
+        logger.warning("Could not kill UI process group %s", process.pid, exc_info=True)
+    try:
+        process.wait(timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        logger.warning("Could not reap UI process %s", process.pid, exc_info=True)
+
+
+def remove_ui_container(container_name: str) -> None:
+    """Stop and remove only the uniquely named container created by this launch."""
+    try:
+        # Ask for a graceful stop first. `docker rm --force` alone is a SIGKILL,
+        # and this is also the shutdown path for a container that has been
+        # serving traffic, not just for cleaning up a failed startup.
+        subprocess.run(
+            ["docker", "stop", container_name], capture_output=True, timeout=10, check=False
+        )
+    except (OSError, subprocess.SubprocessError):
+        # Fall through: the forced removal below is what actually has to happen.
+        logger.debug("docker stop %s failed; forcing removal", container_name, exc_info=True)
+    try:
+        result = subprocess.run(
+            ["docker", "rm", "--force", container_name],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        # --rm or the caller's shutdown handler may already have removed it.
+        if result.returncode and "No such container" not in result.stderr:
+            logger.warning(
+                "Could not remove UI MCP container %s: %s", container_name, result.stderr
+            )
+    except (OSError, subprocess.SubprocessError):
+        logger.warning("Could not remove UI MCP container %s", container_name, exc_info=True)
+
+
 def start_ui(
-    pid_callback: Callable[[int], None],
+    pid_callback: Callable[[int | tuple[int, str]], None],
     port: int = 3000,
     open_browser: bool = True,
     auto_download: bool = False,
@@ -430,7 +520,7 @@ def start_ui(
     backend_port: int = 8000,
     start_mcp: bool = False,
     mcp_port: int = 8001,
-) -> Optional[subprocess.Popen]:
+) -> subprocess.Popen | None:
     """
     Start the cognee frontend UI server, optionally with the backend API server and MCP server.
 
@@ -455,8 +545,9 @@ def start_ui(
 
     Returns:
         subprocess.Popen object representing the running frontend server, or None if failed
-        Note: If backend and/or MCP server are started, they run in separate processes
-        that will be cleaned up when the frontend process is terminated.
+        Failed startup cleans up processes and containers created by this call.
+        After successful startup, the caller owns shutdown of all resources reported
+        through pid_callback (including the MCP PID/container-name tuple).
 
     Example:
         >>> import cognee
@@ -473,21 +564,51 @@ def start_ui(
         >>> server = cognee.start_ui(dummy_callback, start_mcp=True)
         >>> # UI will be available at http://localhost:3000
         >>> # MCP server will be available at http://127.0.0.1:8001/sse
-        >>> # To stop all servers later:
-        >>> server.terminate()
+        >>> # Track the callback's PIDs/container name to stop all servers later.
     """
+    # Keep ownership until the entire startup succeeds. ExitStack also handles
+    # early returns and BaseException (for example Ctrl-C during npm install).
+    with ExitStack() as resources:
+        try:
+            process = _start_ui(
+                resources,
+                pid_callback,
+                port,
+                open_browser,
+                auto_download,
+                start_backend,
+                backend_port,
+                start_mcp,
+                mcp_port,
+            )
+        except Exception:
+            logger.exception("Failed to start cognee UI")
+            return None
+        if process is not None:
+            resources.pop_all()
+        return process
+
+
+def _start_ui(
+    resources: ExitStack,
+    pid_callback: Callable[[int | tuple[int, str]], None],
+    port: int,
+    open_browser: bool,
+    auto_download: bool,
+    start_backend: bool,
+    backend_port: int,
+    start_mcp: bool,
+    mcp_port: int,
+) -> subprocess.Popen | None:
     logger.info("Starting cognee UI...")
 
-    ports_to_check = [(port, "Frontend UI")]
+    required_ports = [(port, "Frontend UI")]
 
     if start_backend:
-        ports_to_check.append((backend_port, "Backend API"))
-
-    if start_mcp:
-        ports_to_check.append((mcp_port, "MCP Server"))
+        required_ports.append((backend_port, "Backend API"))
 
     logger.info("Checking port availability...")
-    all_ports_available, unavailable_services = _check_required_ports(ports_to_check)
+    all_ports_available, unavailable_services = _check_required_ports(required_ports)
 
     if not all_ports_available:
         error_msg = f"Cannot start cognee UI: The following services have ports already in use: {', '.join(unavailable_services)}"
@@ -495,7 +616,14 @@ def start_ui(
         logger.error("Please stop the conflicting services or change the port configuration.")
         return None
 
-    logger.info("✓ All required ports are available")
+    if start_mcp and not _is_port_available(mcp_port):
+        logger.warning(
+            f"Port {mcp_port} is already in use. Skipping the optional MCP server; "
+            "the UI and backend can start without it."
+        )
+        start_mcp = False
+
+    logger.info("✓ All required UI ports are available")
     backend_process = None
 
     if start_mcp:
@@ -513,6 +641,8 @@ def start_ui(
             start_mcp = False
 
     if start_mcp:
+        mcp_resources = ExitStack()
+        resources.callback(mcp_resources.close)
         try:
             image = "cognee/cognee-mcp:main"
             # Bound the pull so a reachable-but-stalled daemon / registry can't hang
@@ -530,7 +660,7 @@ def start_ui(
 
             import uuid
 
-            container_name = f"cognee-mcp-{uuid.uuid4().hex[:8]}"
+            container_name = f"cognee-mcp-{uuid.uuid4().hex}"
 
             docker_cmd = [
                 "docker",
@@ -566,8 +696,13 @@ def start_ui(
                 docker_cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                preexec_fn=os.setsid if hasattr(os, "setsid") else None,
+                start_new_session=True,
             )
+
+            # LIFO: stop the Docker CLI before removing its container, so it
+            # cannot keep creating the container while cleanup is running.
+            mcp_resources.callback(remove_ui_container, container_name)
+            mcp_resources.callback(stop_ui_process, mcp_process)
 
             _stream_process_output(mcp_process, "stdout", "[MCP]", "\033[34m")  # Blue
             _stream_process_output(mcp_process, "stderr", "[MCP]", "\033[34m")  # Blue
@@ -579,14 +714,29 @@ def start_ui(
             logger.info(
                 f"✓ Cognee MCP server starting on http://127.0.0.1:{mcp_port}/sse ({mode_info})"
             )
-        except Exception as e:
-            logger.error(f"Failed to start MCP server with Docker: {str(e)}")
+        except Exception:
+            logger.exception("Failed to start MCP server with Docker")
+            mcp_resources.close()
     # Start backend server if requested
     if start_backend:
         logger.info("Starting cognee backend API server...")
         try:
             import sys
 
+            # This backend binds localhost only, so the well-known dev password
+            # is reachable solely from this machine. Supplying it keeps
+            # `cognee-cli -ui` a one-click login on a fresh install (the login
+            # form prefills it) without weakening the default anywhere else: a
+            # server bound to a network interface has no default-user login
+            # unless the operator sets DEFAULT_USER_PASSWORD. The server sets
+            # this once on a default user that has no password yet (the SDK
+            # and CLI create it that way), and never changes an existing
+            # password. An operator's own value always wins here.
+            backend_env = {
+                **os.environ,
+                "DEFAULT_USER_PASSWORD": os.environ.get("DEFAULT_USER_PASSWORD")
+                or "default_password",
+            }
             backend_process = subprocess.Popen(
                 [
                     sys.executable,
@@ -598,10 +748,13 @@ def start_ui(
                     "--port",
                     str(backend_port),
                 ],
+                env=backend_env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                preexec_fn=os.setsid if hasattr(os, "setsid") else None,
+                start_new_session=True,
             )
+
+            resources.callback(stop_ui_process, backend_process)
 
             # Start threads to stream backend output with prefix
             _stream_process_output(backend_process, "stdout", "[BACKEND]", "\033[32m")  # Green
@@ -618,8 +771,8 @@ def start_ui(
 
             logger.info(f"✓ Backend API started at http://localhost:{backend_port}")
 
-        except Exception as e:
-            logger.error(f"Failed to start backend server: {str(e)}")
+        except Exception:
+            logger.exception("Failed to start backend server")
             return None
 
     # Find frontend directory
@@ -708,7 +861,7 @@ def start_ui(
                     env=env,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    preexec_fn=os.setsid if hasattr(os, "setsid") else None,
+                    start_new_session=True,
                 )
             else:
                 process = subprocess.Popen(
@@ -717,8 +870,10 @@ def start_ui(
                     env=env,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    preexec_fn=os.setsid if hasattr(os, "setsid") else None,
+                    start_new_session=True,
                 )
+
+        resources.callback(stop_ui_process, process)
 
         # Start threads to stream frontend output with prefix
         _stream_process_output(process, "stdout", "[FRONTEND]", "\033[33m")  # Yellow
@@ -742,7 +897,7 @@ def start_ui(
                 try:
                     webbrowser.open(f"http://localhost:{port}")
                 except Exception as e:
-                    logger.warning(f"Could not open browser automatically: {e}")
+                    logger.warning(f"Could not open browser automatically: {e}", exc_info=True)
 
             browser_thread = threading.Thread(target=open_browser_delayed, daemon=True)
             browser_thread.start()
@@ -753,18 +908,6 @@ def start_ui(
 
         return process
 
-    except Exception as e:
-        logger.error(f"Failed to start frontend server: {str(e)}")
-        # Clean up backend process if it was started
-        if backend_process:
-            logger.info("Cleaning up backend process due to frontend failure...")
-            try:
-                backend_process.terminate()
-                backend_process.wait(timeout=5)
-            except (subprocess.TimeoutExpired, OSError, ProcessLookupError):
-                try:
-                    backend_process.kill()
-                    backend_process.wait()
-                except (OSError, ProcessLookupError):
-                    pass
+    except Exception:
+        logger.exception("Failed to start frontend server")
         return None

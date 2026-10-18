@@ -1,15 +1,14 @@
-from typing import Optional
-from uuid import UUID
 from abc import ABC, abstractmethod
+from uuid import UUID
 
-from cognee.modules.users.models.User import User
 from cognee.modules.users.models.DatasetDatabase import DatasetDatabase
+from cognee.modules.users.models.User import User
 
 
 class DatasetDatabaseHandlerInterface(ABC):
     @classmethod
     @abstractmethod
-    async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
+    async def create_dataset(cls, dataset_id: UUID | None, user: User | None) -> dict:
         """
         Return a dictionary with database connection/resolution info for a graph or vector database for the given dataset.
         Function can auto handle deploying of the actual database if needed, but is not necessary.
@@ -31,7 +30,6 @@ class DatasetDatabaseHandlerInterface(ABC):
         Returns:
             dict: Connection info for the created graph or vector database instance.
         """
-        pass
 
     @classmethod
     async def resolve_dataset_connection_info(
@@ -77,4 +75,3 @@ class DatasetDatabaseHandlerInterface(ABC):
         Args:
             dataset_database: DatasetDatabase row containing connection/resolution info for the graph or vector database to delete.
         """
-        pass

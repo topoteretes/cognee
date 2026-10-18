@@ -1,11 +1,11 @@
 import asyncio
 
 import cognee
-from cognee.modules.pipelines.tasks.task import Task
-from cognee.modules.pipelines.models import PipelineContext
-from cognee.modules.users.methods import get_default_user
-from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
 from cognee.infrastructure.databases.relational import create_db_and_tables
+from cognee.modules.pipelines.models import PipelineContext
+from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
+from cognee.modules.pipelines.tasks.task import Task
+from cognee.modules.users.methods import get_default_user
 
 
 async def run_and_check_tasks():

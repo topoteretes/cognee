@@ -10,16 +10,28 @@ credentials came from.
 import json
 import os
 import re
-from typing import Union
 from uuid import UUID
 
 from sqlalchemy import URL, text
-from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.schema import DDLElement
 
-
 _MAINTENANCE_DB_NAME = "postgres"
+
+# Advisory locks that make the create helpers atomic across every process in
+# the cluster: a fixed namespace hash plus the hash of the resource being
+# provisioned. Session-level for CREATE DATABASE, which cannot run inside a
+# transaction; transaction-level for schema DDL, released with the transaction.
+_ACQUIRE_PROVISIONING_LOCK = (
+    "SELECT pg_advisory_lock(hashtext('cognee_provisioning'), hashtext(:key))"
+)
+_RELEASE_PROVISIONING_LOCK = (
+    "SELECT pg_advisory_unlock(hashtext('cognee_provisioning'), hashtext(:key))"
+)
+_ACQUIRE_PROVISIONING_XACT_LOCK = (
+    "SELECT pg_advisory_xact_lock(hashtext('cognee_provisioning'), hashtext(:key))"
+)
 # Dataset databases are named after dataset UUIDs (hyphens, leading digits), so
 # this is looser than an unquoted Postgres identifier; the compiled DDL below
 # always quotes the name via compiler.preparer.quote, which is what actually
@@ -54,7 +66,7 @@ def _compile_drop_database_if_exists(element: DropDatabaseIfExists, compiler, **
     return "DROP DATABASE IF EXISTS " + compiler.preparer.quote(element.db_name)
 
 
-def dataset_schema_name(dataset_id: Union[UUID, str]) -> str:
+def dataset_schema_name(dataset_id: UUID | str) -> str:
     """Postgres schema name used to isolate a dataset in shared-database mode.
 
     Returns ``ds_<dataset_id_hex>`` — a valid, lower-case Postgres identifier
@@ -95,7 +107,7 @@ def _direct_host(host: str) -> str:
     return host.replace("-pooler.", ".") if host and "-pooler." in host else host
 
 
-def _build_maintenance_url(host: str, port: Union[int, str], username: str, password: str) -> URL:
+def _build_maintenance_url(host: str, port: int | str, username: str, password: str) -> URL:
     return URL.create(
         "postgresql+asyncpg",
         username=username,
@@ -106,9 +118,7 @@ def _build_maintenance_url(host: str, port: Union[int, str], username: str, pass
     )
 
 
-def _build_db_url(
-    db_name: str, host: str, port: Union[int, str], username: str, password: str
-) -> URL:
+def _build_db_url(db_name: str, host: str, port: int | str, username: str, password: str) -> URL:
     """Connection URL to a specific (already existing) database.
 
     Unlike ``_build_maintenance_url`` this targets ``db_name`` directly, since
@@ -129,7 +139,7 @@ async def create_pg_schema_if_not_exists(
     db_name: str,
     schema: str,
     host: str,
-    port: Union[int, str],
+    port: int | str,
     username: str,
     password: str,
     with_vector_extension: bool = False,
@@ -142,6 +152,11 @@ async def create_pg_schema_if_not_exists(
     set the pgvector extension is ensured in the database (it installs into the
     database's ``public`` schema and is reachable from any schema via the
     search path).
+
+    Safe to call concurrently: IF NOT EXISTS is not race-free in Postgres (two
+    transactions that both pass the check collide on the catalog's unique
+    index), so creators are serialized on an advisory lock keyed by the shared
+    database, which also covers the extension.
     """
     engine = create_async_engine(
         _build_db_url(db_name, host, port, username, password),
@@ -149,6 +164,7 @@ async def create_pg_schema_if_not_exists(
     )
     try:
         async with engine.begin() as connection:
+            await connection.execute(text(_ACQUIRE_PROVISIONING_XACT_LOCK), {"key": db_name})
             if with_vector_extension:
                 await connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
             await connection.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}";'))
@@ -160,7 +176,7 @@ async def drop_pg_schema_if_exists(
     db_name: str,
     schema: str,
     host: str,
-    port: Union[int, str],
+    port: int | str,
     username: str,
     password: str,
 ) -> None:
@@ -184,14 +200,18 @@ async def drop_pg_schema_if_exists(
 async def create_pg_database_if_not_exists(
     db_name: str,
     host: str,
-    port: Union[int, str],
+    port: int | str,
     username: str,
     password: str,
 ) -> bool:
     """Create a Postgres database if it does not already exist.
 
     Connects to the cluster's 'postgres' maintenance database in AUTOCOMMIT
-    mode and runs ``CREATE DATABASE`` guarded by an existence check.
+    mode and runs ``CREATE DATABASE`` guarded by an existence check. The check
+    and the create are made atomic with a session-level advisory lock on the
+    database name (``CREATE DATABASE`` has no ``IF NOT EXISTS``), so concurrent
+    callers create the database once; Postgres releases the lock if the
+    connection drops.
 
     Returns:
         True if the database was created, False if it already existed.
@@ -204,14 +224,18 @@ async def create_pg_database_if_not_exists(
         connection = await engine.connect()
         try:
             connection = await connection.execution_options(isolation_level="AUTOCOMMIT")
-            result = await connection.execute(
-                text("SELECT 1 FROM pg_database WHERE datname = :db"),
-                {"db": db_name},
-            )
-            if result.scalar():
-                return False
-            await connection.execute(CreateDatabase(db_name))
-            return True
+            await connection.execute(text(_ACQUIRE_PROVISIONING_LOCK), {"key": db_name})
+            try:
+                result = await connection.execute(
+                    text("SELECT 1 FROM pg_database WHERE datname = :db"),
+                    {"db": db_name},
+                )
+                if result.scalar():
+                    return False
+                await connection.execute(CreateDatabase(db_name))
+                return True
+            finally:
+                await connection.execute(text(_RELEASE_PROVISIONING_LOCK), {"key": db_name})
         finally:
             await connection.close()
     finally:
@@ -221,7 +245,7 @@ async def create_pg_database_if_not_exists(
 async def drop_pg_database_if_exists(
     db_name: str,
     host: str,
-    port: Union[int, str],
+    port: int | str,
     username: str,
     password: str,
 ) -> None:

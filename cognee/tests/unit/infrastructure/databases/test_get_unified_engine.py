@@ -4,8 +4,8 @@ import pytest
 
 from cognee.infrastructure.databases.unified.capabilities import EngineCapability
 from cognee.infrastructure.databases.unified.get_unified_engine import (
-    _is_hybrid_provider,
     HYBRID_PROVIDERS,
+    _is_hybrid_provider,
 )
 
 

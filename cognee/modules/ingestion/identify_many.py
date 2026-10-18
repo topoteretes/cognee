@@ -1,4 +1,3 @@
-from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import select
@@ -18,7 +17,7 @@ async def identify_many(
     hashes: list[str],
     user: User,
     dataset_id: UUID,
-    session: Optional[AsyncSession] = None,
+    session: AsyncSession | None = None,
 ) -> dict[str, UUID]:
     """Batch version of :func:`identify`: resolve existing ``Data`` rows for
     multiple content hashes in one dataset.

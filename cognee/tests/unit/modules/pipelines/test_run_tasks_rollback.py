@@ -1,7 +1,8 @@
 import asyncio
-from contextlib import asynccontextmanager
 import importlib
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -37,6 +38,102 @@ class _FakeEngine:
 @asynccontextmanager
 async def _no_op_context(*_args, **_kwargs):
     yield
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "outcome", ["success", "empty", "skipped", "flush_error", "cancelled", "item_error"]
+)
+async def test_telemetry_follows_the_whole_run_lifecycle(monkeypatch, outcome):
+    dataset = SimpleNamespace(id=uuid4(), name="private-dataset", owner_id=uuid4())
+    user = SimpleNamespace(id=uuid4(), tenant_id=None)
+    run_id = uuid4()
+    events = []
+    order = []
+    engine = _FakeEngine(dataset)
+
+    def capture(name, _user, additional_properties):
+        events.append((name, additional_properties))
+        order.append(name)
+
+    async def item(*args):
+        if outcome == "cancelled":
+            raise asyncio.CancelledError()
+        if outcome == "item_error":
+            raise ValueError("private error message")
+        # Completed/skipped items are both successful results for the runner.
+        from cognee.modules.pipelines.models.PipelineRunInfo import (
+            PipelineRunAlreadyCompleted,
+            PipelineRunCompleted,
+        )
+
+        cls = PipelineRunAlreadyCompleted if outcome == "skipped" else PipelineRunCompleted
+        return {
+            "run_info": cls(
+                pipeline_run_id=run_id, dataset_id=dataset.id, dataset_name=dataset.name
+            )
+        }
+
+    async def flush():
+        order.append("flush")
+        if outcome == "flush_error":
+            raise OSError("private storage path")
+
+    monkeypatch.setattr(run_tasks_module, "get_relational_engine", lambda: engine)
+    monkeypatch.setattr(
+        run_tasks_module,
+        "get_graph_engine",
+        AsyncMock(return_value=SimpleNamespace(push_to_s3=flush)),
+    )
+    monkeypatch.setattr(run_tasks_module, "set_database_global_context_variables", _no_op_context)
+    monkeypatch.setattr(
+        run_tasks_module,
+        "log_pipeline_run_start",
+        AsyncMock(return_value=SimpleNamespace(pipeline_run_id=run_id)),
+    )
+    monkeypatch.setattr(run_tasks_module, "log_pipeline_run_complete", AsyncMock())
+    monkeypatch.setattr(run_tasks_module, "log_pipeline_run_error", AsyncMock())
+    monkeypatch.setattr(run_tasks_module, "log_pipeline_run_progress", AsyncMock())
+    monkeypatch.setattr(run_tasks_module, "run_tasks_data_item", item)
+    monkeypatch.setattr(run_tasks_module, "send_telemetry", capture)
+    seen_extractors = []
+
+    def properties(*args, graph_extractor, **kwargs):
+        seen_extractors.append(graph_extractor)
+        return {"pipeline_run_id": str(run_id)}
+
+    monkeypatch.setattr(run_tasks_module, "pipeline_run_telemetry_properties", properties)
+
+    async def drain():
+        async for _ in run_tasks_module.run_tasks(
+            [Task(lambda x: x)],
+            dataset.id,
+            [] if outcome == "empty" else [1, 2],
+            user,
+            extras={"graph_extractor": "gliner_demo"},
+        ):
+            pass
+
+    failures = {
+        "flush_error": OSError,
+        "cancelled": asyncio.CancelledError,
+        "item_error": ValueError,
+    }
+    if outcome in failures:
+        with pytest.raises(failures[outcome]):
+            await drain()
+    else:
+        await drain()
+    terminal = "Errored" if outcome in failures else "Completed"
+    assert [name for name, _ in events] == ["Pipeline Run Started", f"Pipeline Run {terminal}"]
+    assert seen_extractors == ["gliner_demo"]
+    assert all(props["pipeline_event_scope"] == "run" for _, props in events)
+    assert all(props["pipeline_run_id"] == str(run_id) for _, props in events)
+    if outcome in failures:
+        assert events[-1][1]["exception_type"] == failures[outcome].__name__
+    if "flush" in order:
+        assert order.index("flush") < order.index(f"Pipeline Run {terminal}")
+    assert "private" not in repr(events)
 
 
 @pytest.mark.asyncio

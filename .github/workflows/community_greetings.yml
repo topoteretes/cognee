@@ -5,10 +5,12 @@ on:
     types: [opened]
 
 permissions:
-  issues: write
+  contents: read
 
 jobs:
   greeting:
+    permissions:
+      issues: write
     if: github.actor != 'github-actions[bot]' && github.actor != 'dependabot[bot]'
     runs-on: ubuntu-22.04
     steps:
@@ -19,3 +21,5 @@ jobs:
           Hello @${{ github.actor }}, thank you for your interest in our work!
 
           If this is a bug report, please provide screenshots and **minimum viable code to reproduce your issue**, otherwise we can not help you.
+        pr_message: |
+          Hello @${{ github.actor }}, thank you for your contribution!

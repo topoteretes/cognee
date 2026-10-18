@@ -27,7 +27,6 @@ from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-
 ProvenanceMode = Literal["lightweight", "deep", "disabled"]
 
 _VALID_MODES: frozenset[str] = frozenset({"lightweight", "deep", "disabled"})
@@ -45,7 +44,7 @@ class ProvenanceConfig(BaseSettings):
 
     provenance_mode: str = os.getenv("COGNEE_PROVENANCE_MODE", "lightweight").lower()
 
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    model_config = SettingsConfigDict(extra="allow")
 
     def is_lightweight(self) -> bool:
         return self.provenance_mode == "lightweight"

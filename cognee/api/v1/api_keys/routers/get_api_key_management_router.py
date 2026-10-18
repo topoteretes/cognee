@@ -1,22 +1,21 @@
 from uuid import UUID
-from typing import Optional
+
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
 from cognee.api.DTO import InDTO
+from cognee.modules.users.api_key.create_api_key import create_api_key
+from cognee.modules.users.api_key.delete_api_key import delete_api_key
+from cognee.modules.users.api_key.exceptions import ApiKeyCreationError
+from cognee.modules.users.api_key.get_api_keys import get_api_keys
+from cognee.modules.users.api_key.hash_api_key import HASH_API_KEY
+from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 from cognee.shared.utils import send_telemetry
 
-from cognee.modules.users.methods import get_authenticated_user
-from cognee.modules.users.api_key.exceptions import ApiKeyCreationError
-from cognee.modules.users.api_key.create_api_key import create_api_key
-from cognee.modules.users.api_key.delete_api_key import delete_api_key
-from cognee.modules.users.api_key.get_api_keys import get_api_keys
-from cognee.modules.users.api_key.hash_api_key import HASH_API_KEY
-
 
 class ApiKeyCreationPayload(InDTO):
-    name: Optional[str] = None
+    name: str | None = None
 
 
 def get_api_key_management_router():

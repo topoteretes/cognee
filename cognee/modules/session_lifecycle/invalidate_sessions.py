@@ -62,6 +62,7 @@ async def invalidate_sessions_for_dataset(dataset_id: UUID) -> dict:
                 session_id,
                 user_id,
                 error,
+                exc_info=True,
             )
 
     if sessions:
@@ -110,11 +111,11 @@ async def invalidate_sessions_for_deleted_data(
             sessions.append(candidate)
     totals["sessions_considered"] = len(sessions)
 
-    for user_id, session_id in sessions:
+    for session_user_id, session_id in sessions:
         try:
             counts = await _invalidate_session_entries(
                 session_manager,
-                user_id=str(user_id),
+                user_id=str(session_user_id),
                 session_id=session_id,
                 deleted_node_ids=deleted_node_ids,
                 deleted_edge_ids=deleted_edge_ids,
@@ -126,8 +127,9 @@ async def invalidate_sessions_for_deleted_data(
                 "Session invalidation: targeted cleanup failed for session %s, user %s "
                 "(non-fatal): %s",
                 session_id,
-                user_id,
+                session_user_id,
                 error,
+                exc_info=True,
             )
 
     if totals["qa_entries_deleted"] or totals["context_entries_deleted"]:
@@ -159,9 +161,8 @@ async def _invalidate_session_entries(
         used = entry.used_graph_element_ids or {}
         used_nodes = set(used.get("node_ids") or [])
         used_edges = set(used.get("edge_ids") or [])
-        if (used_nodes & deleted_node_ids) or (used_edges & deleted_edge_ids):
-            if entry.qa_id:
-                contaminated_qa_ids.add(entry.qa_id)
+        if ((used_nodes & deleted_node_ids) or (used_edges & deleted_edge_ids)) and entry.qa_id:
+            contaminated_qa_ids.add(entry.qa_id)
 
     if not contaminated_qa_ids:
         return (0, 0)
@@ -187,10 +188,13 @@ async def _invalidate_session_entries(
                 if set(context_entry.get("referenced_qa_ids") or []) & contaminated_qa_ids:
                     contaminated_feedback_ids.add(entry_id)
                     changed = True
-            elif kind == "context" and entry_id not in contaminated_context_ids:
-                if set(context_entry.get("source_feedback_ids") or []) & contaminated_feedback_ids:
-                    contaminated_context_ids.add(entry_id)
-                    changed = True
+            elif (
+                kind == "context"
+                and entry_id not in contaminated_context_ids
+                and set(context_entry.get("source_feedback_ids") or []) & contaminated_feedback_ids
+            ):
+                contaminated_context_ids.add(entry_id)
+                changed = True
         for entry in entries:
             if not entry.qa_id or entry.qa_id in contaminated_qa_ids:
                 continue

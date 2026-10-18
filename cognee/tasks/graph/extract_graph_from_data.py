@@ -1,35 +1,40 @@
 import asyncio
 import inspect
-from typing import Type, List, Literal, Optional
+from typing import Literal
+
 from pydantic import BaseModel
 
-from cognee.modules.pipelines.tasks.task import task_summary
-from cognee.modules.ontology.ontology_config import Config
-from cognee.modules.ontology.get_default_ontology_resolver import (
-    get_configured_ontology_mode,
-    get_configured_ontology_resolver,
-)
-from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
-from cognee.modules.ontology.construct_data_points_and_edges_with_ontology import (
-    construct_data_points_and_edges_with_ontology,
-)
 from cognee.infrastructure.databases.provenance import EdgeIdentity
+from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.llm.extraction import extract_content_graph
+from cognee.infrastructure.llm.pipeline_stage import pipeline_stage
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
+from cognee.modules.engine.utils.temporal_hints import (
+    chunk_temporal_hints,
+    document_temporal_hints,
+)
 from cognee.modules.graph.utils import (
     attach_new_edges_to_data_points,
     collect_stored_data_points,
     construct_data_points_and_edges,
     find_existing_edge_identities,
 )
+from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
+from cognee.modules.ontology.construct_data_points_and_edges_with_ontology import (
+    construct_data_points_and_edges_with_ontology,
+)
+from cognee.modules.ontology.get_default_ontology_resolver import (
+    get_configured_ontology_mode,
+    get_configured_ontology_resolver,
+)
+from cognee.modules.ontology.ontology_config import Config
+from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.shared.data_models import KnowledgeGraph
-from cognee.infrastructure.llm.extraction import extract_content_graph
-from cognee.infrastructure.llm.pipeline_stage import pipeline_stage
-from cognee.infrastructure.engine import DataPoint
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.graph.exceptions import (
-    InvalidGraphModelError,
-    InvalidDataChunksError,
     InvalidChunkGraphInputError,
+    InvalidDataChunksError,
+    InvalidGraphModelError,
     InvalidOntologyAdapterError,
 )
 
@@ -55,6 +60,30 @@ def _remove_duplicate_extracted_nodes_by_id(
 
         if len(nodes_by_id) != len(extracted_graph.nodes):
             extracted_graph.nodes = list(nodes_by_id.values())
+
+
+def _temporal_hints_for(data_chunks: list) -> list[list[str]]:
+    """The date hints extraction renders for each chunk of ``data_chunks``.
+
+    The pipeline's chunker attaches them per document (``attach_temporal_hints``),
+    so normally they are read off the chunks. Chunks that arrive without them —
+    built by a caller that never ran that pass — get the same computation over
+    this batch, per document in batch order; batch-local and side-effect free,
+    so a repeat call yields the same hints.
+    """
+    attached = [chunk_temporal_hints(chunk) for chunk in data_chunks]
+    if all(hints is not None for hints in attached):
+        return attached
+    by_document: dict = {}
+    for index, chunk in enumerate(data_chunks):
+        by_document.setdefault(id(getattr(chunk, "is_part_of", None)), []).append(index)
+    computed: list = list(attached)
+    for indexes in by_document.values():
+        hints = document_temporal_hints([data_chunks[index].text for index in indexes])
+        for index, lines in zip(indexes, hints):
+            if computed[index] is None:
+                computed[index] = lines
+    return computed
 
 
 def _stamp_provenance_deep(data, pipeline_name, task_name, visited=None):
@@ -86,15 +115,15 @@ def _stamp_provenance_deep(data, pipeline_name, task_name, visited=None):
 async def integrate_chunk_graphs(
     data_chunks: list[DocumentChunk],
     chunk_graphs: list,
-    graph_model: Type[BaseModel],
-    ontology_resolver: Optional[BaseOntologyResolver],
-    chunk_attachment: Optional[Literal["direct", "all"]] = None,
-    pipeline_name: str = None,
-    task_name: str = None,
-    ontology_mode: Optional[str] = None,
+    graph_model: type[BaseModel],
+    ontology_resolver: BaseOntologyResolver | None,
+    chunk_attachment: Literal["direct", "all"] | None = None,
+    pipeline_name: str | None = None,
+    task_name: str | None = None,
+    ontology_mode: str | None = None,
     ctx=None,
     **kwargs,
-) -> List[DocumentChunk]:
+) -> list[DocumentChunk]:
     """Convert extracted graphs into linked data points for later storage.
 
     Graphs take the pure construction path when no ontology resolver is provided.
@@ -195,14 +224,14 @@ async def integrate_chunk_graphs(
 
 @task_summary("Extracted graph from {n} chunk(s)")
 async def extract_graph_from_data(
-    data_chunks: List[DocumentChunk],
-    graph_model: Type[BaseModel],
-    config: Optional[Config] = None,
-    custom_prompt: Optional[str] = None,
+    data_chunks: list[DocumentChunk],
+    graph_model: type[BaseModel],
+    config: Config | None = None,
+    custom_prompt: str | None = None,
     ctx=None,
-    chunk_attachment: Optional[Literal["direct", "all"]] = None,
+    chunk_attachment: Literal["direct", "all"] | None = None,
     **kwargs,
-) -> List[DocumentChunk]:
+) -> list[DocumentChunk]:
     """
     Extracts and integrates a knowledge graph from the text content of document chunks using a specified graph model.
     """
@@ -220,13 +249,18 @@ async def extract_graph_from_data(
         extracted = calculate_chunk_graphs(data_chunks, graph_model, custom_prompt, **kwargs)
         chunk_graphs = await extracted if inspect.isawaitable(extracted) else extracted
     else:
+        temporal_hints = _temporal_hints_for(data_chunks)
         with pipeline_stage("extraction"):
             chunk_graphs = await asyncio.gather(
                 *[
                     extract_content_graph(
-                        chunk.text, graph_model, custom_prompt=custom_prompt, **kwargs
+                        chunk.text,
+                        graph_model,
+                        custom_prompt=custom_prompt,
+                        temporal_hints=hints,
+                        **kwargs,
                     )
-                    for chunk in data_chunks
+                    for chunk, hints in zip(data_chunks, temporal_hints)
                 ]
             )
     cache_entity_embeddings = kwargs.get("cache_entity_embeddings")

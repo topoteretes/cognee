@@ -37,7 +37,7 @@ async def _chunk_search_text(query: str) -> str:
     results = await cognee.search(
         query_text=query, query_type=SearchType.CHUNKS, datasets=[DATASET]
     )
-    return _support.result_text(results)
+    return _support.content_text(results)
 
 
 @pytest.mark.journey
@@ -46,10 +46,7 @@ async def test_update_forget_and_reremember_keep_all_stores_consistent(clean_env
     # --- remember three documents ---------------------------------------------
     result = await cognee.remember([DOC_A_V1, DOC_B, DOC_C], dataset_name=DATASET)
     assert result.status == "completed"
-    dataset_id = result.dataset_id
-    from uuid import UUID
-
-    dataset_id = UUID(str(dataset_id))
+    dataset_id = _support.as_uuid(result.dataset_id)
 
     full = await _support.snapshot_dataset(dataset_id, default_user)
     assert full.data_rows == 3, full
@@ -57,8 +54,7 @@ async def test_update_forget_and_reremember_keep_all_stores_consistent(clean_env
     assert "farquhar" in await _chunk_search_text("Who chairs the Meridian Kite Club?")
 
     # --- update document A: the old fact must disappear, the new one appear ----
-    rows = await cognee.datasets.list_data(dataset_id, default_user)
-    doc_a = next(r for r in rows if "kite" in (r.name or "").lower() or _looks_like(r, "Meridian"))
+    doc_a = await _row_containing(dataset_id, default_user, "meridian kite club")
     await cognee.update(data_id=doc_a.id, data=DOC_A_V2, dataset_id=dataset_id, user=default_user)
 
     after_update = await _support.snapshot_dataset(dataset_id, default_user)
@@ -74,8 +70,7 @@ async def test_update_forget_and_reremember_keep_all_stores_consistent(clean_env
     )
 
     # --- forget one document -----------------------------------------------------
-    rows = await cognee.datasets.list_data(dataset_id, default_user)
-    doc_b = next(r for r in rows if _looks_like(r, "Bramblefield"))
+    doc_b = await _row_containing(dataset_id, default_user, "bramblefield")
     await cognee.forget(data_id=doc_b.id, dataset_id=dataset_id, user=default_user)
 
     after_forget = await _support.snapshot_dataset(dataset_id, default_user)
@@ -118,21 +113,11 @@ async def test_update_forget_and_reremember_keep_all_stores_consistent(clean_env
     ), "content from before forget(everything) resurfaced"
 
 
-def _looks_like(row, needle: str) -> bool:
-    """Match a data row to its source text via any of the identifying columns."""
-    needle = needle.lower()
-    for attr in ("name", "label", "raw_data_location", "original_data_location"):
-        value = getattr(row, attr, None)
-        if isinstance(value, str) and needle in value.lower():
-            return True
-    location = getattr(row, "raw_data_location", None)
-    if isinstance(location, str):
-        try:
-            from pathlib import Path
-
-            path = Path(location.replace("file://", ""))
-            if path.exists() and needle in path.read_text(errors="ignore").lower():
-                return True
-        except Exception:
-            pass
-    return False
+async def _row_containing(dataset_id, user, needle: str):
+    """The single ``Data`` row whose stored text contains ``needle`` (lowercase)."""
+    rows = await cognee.datasets.list_data(dataset_id, user)
+    matches = [r for r in rows if needle in _support.stored_text(r)]
+    assert len(matches) == 1, (
+        f"expected exactly one data row containing {needle!r}, found {len(matches)} of {len(rows)}"
+    )
+    return matches[0]

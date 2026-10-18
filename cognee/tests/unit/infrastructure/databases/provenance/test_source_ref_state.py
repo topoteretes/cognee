@@ -6,13 +6,13 @@ backend — so a regression in the derive/merge logic is caught instantly.
 
 from uuid import uuid4
 
-from cognee.infrastructure.databases.provenance.source_refs import (
-    make_source_ref_key,
-    make_source_run_ref,
-)
 from cognee.infrastructure.databases.provenance.source_ref_state import (
     provenance_after_attach,
     provenance_after_remove,
+)
+from cognee.infrastructure.databases.provenance.source_refs import (
+    make_source_ref_key,
+    make_source_run_ref,
 )
 
 

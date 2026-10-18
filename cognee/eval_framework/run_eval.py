@@ -10,9 +10,9 @@ or the CLI:  ``cognee eval ...`` / ``python -m cognee.eval_framework``.
 
 import asyncio
 
-from cognee.shared.logging_utils import get_logger
 from cognee.eval_framework.eval_config import EvalConfig
 from cognee.eval_framework.runner import run_eval, summarize_result
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 

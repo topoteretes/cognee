@@ -69,7 +69,7 @@ async def test_remembering_the_same_content_twice_is_idempotent(clean_env, defau
         f"explicit cognify re-run changed the graph: {base} -> {rebuilt}"
     )
 
-    text = _support.result_text(
+    text = _support.content_text(
         await cognee.search(
             query_text="Who restored the Fenwick Tidal Mill?",
             query_type=SearchType.CHUNKS,
@@ -115,7 +115,7 @@ async def test_interrupted_build_is_reported_and_recovers_on_retry(clean_env, de
         )
 
         # The failed run does not raise for reads: the existing knowledge is still served.
-        text = _support.result_text(
+        text = _support.content_text(
             await cognee.search(
                 query_text="Who restored the Fenwick Tidal Mill?",
                 query_type=SearchType.CHUNKS,
@@ -138,7 +138,7 @@ async def test_interrupted_build_is_reported_and_recovers_on_retry(clean_env, de
         f"retry did not add the new document's graph: {after}"
     )
 
-    text = _support.result_text(
+    text = _support.content_text(
         await cognee.search(
             query_text="Who is the Cormorant Rowing Club captain?",
             query_type=SearchType.CHUNKS,

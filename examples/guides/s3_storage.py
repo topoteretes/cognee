@@ -1,4 +1,14 @@
+"""Remember data from S3 URIs: a single object, a whole prefix, and a mixed list with inline text.
+
+Each call targets its own dataset; the prefix form expands recursively. Nothing is printed, so
+inspect the datasets or graph afterwards.
+
+Requires: LLM_API_KEY and AWS credentials that can read the referenced S3 bucket.
+Run: uv run python examples/guides/s3_storage.py
+"""
+
 import asyncio
+
 import cognee
 
 

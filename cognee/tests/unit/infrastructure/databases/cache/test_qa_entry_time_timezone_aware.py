@@ -11,8 +11,8 @@ from datetime import datetime
 
 import pytest
 
-from cognee.infrastructure.databases.cache.sql.SqlCacheAdapter import SqlCacheAdapter
 from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import FSCacheAdapter
+from cognee.infrastructure.databases.cache.sql.SqlCacheAdapter import SqlCacheAdapter
 
 
 @pytest.mark.parametrize("adapter_cls", [SqlCacheAdapter, FSCacheAdapter])

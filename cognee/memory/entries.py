@@ -11,18 +11,51 @@ Raw data (str / bytes / file-like / list of the above) continues to
 flow through the permanent add+cognify path unchanged.
 """
 
-from typing import Any, Literal, Optional, Union
+from typing import Any, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator
 
 from cognee.shared.logging_utils import get_logger
 
-
 logger = get_logger("memory.entries")
 
 
-class QAEntry(BaseModel):
+class SessionNodeSetEntry(BaseModel):
+    """Base for the session entries that can carry a ``node_set``.
+
+    The first entry that carries one pins it on the session, later entries must
+    repeat it or omit it, and a different set is rejected with HTTP 409
+    (``SessionNodeSetConflictError``). ``improve()`` appends the pinned set to
+    the node set of everything it bridges from the session into the graph, so a
+    ``node_name``-scoped recall sees it. Like the call-level ``node_set`` on
+    ``remember()``, ``add()`` and ``update()``, the list is not size-limited.
+
+    Validation and normalization are ``normalize_node_set``'s, the rule every
+    session node-set input shares: a list of non-blank names, stored sorted
+    and deduplicated; a bare string or a blank name is refused.
+    """
+
+    node_set: list[str] | None = Field(
+        default=None,
+        description=(
+            "Optional node set pinned on the session; kept on the graph nodes "
+            "improve() builds from it. Immutable once set for a session. A list of "
+            "non-empty names, stored sorted and deduplicated."
+        ),
+    )
+
+    @field_validator("node_set", mode="before")
+    @classmethod
+    def _normalize_node_set(cls, value):
+        # Imported here: entries.py is loaded by ``import cognee`` before the
+        # session infrastructure, and the rule must stay in one place.
+        from cognee.infrastructure.session.session_node_set import normalize_node_set
+
+        return normalize_node_set(value)
+
+
+class QAEntry(SessionNodeSetEntry):
     """A Q&A turn stored in the session cache.
 
     Represents a user question + assistant answer with optional
@@ -33,12 +66,12 @@ class QAEntry(BaseModel):
     question: str = Field(examples=["What is the capital of France?"])
     answer: str = Field(examples=["The capital of France is Paris."])
     context: str = Field(default="", examples=["Retrieved from geography_notes.md"])
-    feedback_text: Optional[str] = None
-    feedback_score: Optional[int] = None
-    used_graph_element_ids: Optional[dict] = None
+    feedback_text: str | None = None
+    feedback_score: int | None = None
+    used_graph_element_ids: dict | None = None
 
 
-class TraceEntry(BaseModel):
+class TraceEntry(SessionNodeSetEntry):
     """One step of an agent trace.
 
     Structured representation of a tool/function call — origin,
@@ -52,8 +85,8 @@ class TraceEntry(BaseModel):
         description="Name of the tool/function whose execution this trace step records.",
     )
     status: Literal["success", "error"] = "success"
-    method_params: Optional[dict] = None
-    method_return_value: Optional[Any] = None
+    method_params: dict | None = None
+    method_return_value: Any | None = None
     memory_query: str = ""
     memory_context: str = ""
     error_message: str = ""
@@ -76,8 +109,8 @@ class FeedbackEntry(BaseModel):
             "feedback to that QA."
         ),
     )
-    feedback_text: Optional[str] = None
-    feedback_score: Optional[int] = None
+    feedback_text: str | None = None
+    feedback_score: int | None = None
 
 
 class SkillRunEntry(BaseModel):
@@ -93,7 +126,7 @@ class SkillRunEntry(BaseModel):
     selected_skill_id: str
     task_text: str = ""
     result_summary: str = ""
-    success_score: Optional[float] = None
+    success_score: float | None = None
     feedback: float = 0.0
     error_type: str = ""
     error_message: str = ""
@@ -107,7 +140,7 @@ class SkillRunEntry(BaseModel):
 
     @field_validator("success_score")
     @classmethod
-    def _validate_success_score(cls, value: Optional[float]) -> Optional[float]:
+    def _validate_success_score(cls, value: float | None) -> float | None:
         if value is not None and not 0.0 <= value <= 1.0:
             raise ValueError("success_score must be in range [0.0, 1.0]")
         return value
@@ -127,7 +160,7 @@ class SkillRunEntry(BaseModel):
         return value
 
 
-MemoryEntry = Union[QAEntry, TraceEntry, FeedbackEntry, SkillRunEntry]
+MemoryEntry = QAEntry | TraceEntry | FeedbackEntry | SkillRunEntry
 
 
 # Tuple used at runtime for isinstance checks; Union itself isn't
@@ -136,7 +169,16 @@ MEMORY_ENTRY_TYPES = (QAEntry, TraceEntry, FeedbackEntry, SkillRunEntry)
 
 
 RecallScope = Literal[
-    "auto", "graph", "session", "trace", "graph_context", "session_context", "all", "tools", "code"
+    "auto",
+    "graph",
+    "session",
+    "session_first",
+    "trace",
+    "graph_context",
+    "session_context",
+    "all",
+    "tools",
+    "code",
 ]
 
 
@@ -152,6 +194,7 @@ _VALID_SCOPES = {
     "auto",
     "graph",
     "session",
+    "session_first",
     "trace",
     "graph_context",
     "session_context",
@@ -161,7 +204,7 @@ _VALID_SCOPES = {
 }
 
 
-def normalize_scope(scope: Optional[Union[str, list[str]]]) -> list[str]:
+def normalize_scope(scope: str | list[str] | None) -> list[str]:
     """Normalize the recall ``scope`` parameter to a concrete source list.
 
     Accepts ``None``, a single string, or a list of strings. Returns a
@@ -199,6 +242,10 @@ def normalize_scope(scope: Optional[Union[str, list[str]]]) -> list[str]:
         expanded = ["graph", "session", "trace", "session_context"]
         if "tools" in scopes:
             expanded.append("tools")
+        # "session_first" is a strategy over sources rather than a source, so
+        # "all" neither implies nor replaces it; carry it through when asked.
+        if "session_first" in scopes:
+            expanded.append("session_first")
         return expanded
 
     # Dedupe while preserving order

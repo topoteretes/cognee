@@ -1,0 +1,31 @@
+"""Forget the dataset `self_hosted_companion`, so the next run starts from an empty memory.
+
+Runs before the ingest scripts when the cookbook is run with --clear, which is on by default
+for a sample run, so an earlier run's copies never mix with the new ones. The earlier chats
+that improve() saved into the dataset are forgotten with it.
+
+Run alone: uv run python examples/cookbooks/self_hosted_companion/scripts/clear.py
+"""
+
+import asyncio
+import os
+
+os.environ.setdefault("LOG_LEVEL", "ERROR")  # quiet cognee's logs; set before importing it
+
+import cognee
+from cognee.modules.engine.operations.setup import setup
+
+DATASET = "self_hosted_companion"  # the same in every script
+
+
+async def clear() -> None:
+    await setup()  # a fresh install has no database yet
+    if DATASET not in {dataset.name for dataset in await cognee.datasets.list_datasets()}:
+        print(f"[clear] Nothing to forget: the dataset {DATASET} does not exist yet.")
+        return
+    await cognee.forget(dataset=DATASET)
+    print(f"[clear] Forgot the dataset {DATASET}")
+
+
+if __name__ == "__main__":
+    asyncio.run(clear())

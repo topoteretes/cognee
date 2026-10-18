@@ -19,7 +19,8 @@ Vector ids mirror ``delete_from_graph_and_vector``:
     id = node_id;
   - edge -> ``EdgeType.id_for(edge_text)`` in ``EdgeType_relationship_name``;
     ``generate_node_id(source_id + relationship_name + target_id)`` in
-    ``Triplet_text`` (best-effort; the collection may not exist).
+    ``Triplet_text`` (best-effort; legacy rows only — cognee no longer writes
+    that collection, but databases built before SDK-1115 may hold it).
 """
 
 import dataclasses
@@ -223,9 +224,11 @@ async def _cleanup_orphaned_edge_types(
                     "EdgeType_relationship_name", orphaned_edge_type_ids
                 )
             except Exception as error:
-                logger.warning("EdgeType vector cleanup failed (non-fatal): %s", error)
+                logger.warning(
+                    "EdgeType vector cleanup failed (non-fatal): %s", error, exc_info=True
+                )
     except Exception as error:
-        logger.warning("EdgeType cleanup failed (non-fatal): %s", error)
+        logger.warning("EdgeType cleanup failed (non-fatal): %s", error, exc_info=True)
 
 
 async def _cleanup_orphaned_nodeset_tags(
@@ -250,9 +253,9 @@ async def _cleanup_orphaned_nodeset_tags(
     try:
         await graph_engine.remove_belongs_to_set_tags(tags_to_remove)
     except Exception as error:
-        logger.warning("Graph NodeSet tag cleanup failed (non-fatal): %s", error)
+        logger.warning("Graph NodeSet tag cleanup failed (non-fatal): %s", error, exc_info=True)
 
     try:
         await vector_engine.remove_belongs_to_set_tags(tags_to_remove)
     except Exception as error:
-        logger.warning("Vector NodeSet tag cleanup failed (non-fatal): %s", error)
+        logger.warning("Vector NodeSet tag cleanup failed (non-fatal): %s", error, exc_info=True)

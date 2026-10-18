@@ -1,14 +1,13 @@
-import unittest
 import json
 import os
-
+import unittest
 
 from cognee.eval_framework.analysis.dashboard_generator import (
-    create_distribution_plots,
     create_ci_plot,
+    create_dashboard,
+    create_distribution_plots,
     generate_details_html,
     get_dashboard_html_template,
-    create_dashboard,
 )
 
 

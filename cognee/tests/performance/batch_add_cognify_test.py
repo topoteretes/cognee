@@ -16,10 +16,10 @@ import subprocess
 import sys
 import tempfile
 import time
-import uuid
 import urllib.error
 import urllib.request
-from datetime import datetime
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
@@ -116,7 +116,7 @@ def wait_for_server(url: str, timeout: float = 240.0) -> None:
 
 
 def log(msg: str) -> None:
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
     print(f"[{ts}] {msg}", flush=True)
 
 
@@ -169,7 +169,8 @@ def main() -> None:
     base_url = f"http://{host}:{port}"
 
     perf_dir = str(Path(__file__).resolve().parent)
-    key_path = tempfile.NamedTemporaryFile(suffix=".key", delete=False).name
+    with tempfile.NamedTemporaryFile(suffix=".key", delete=False) as key_file:
+        key_path = key_file.name
 
     log("=== Bootstrapping: pruning data, creating user & API key ===")
     bootstrap_start = time.time()

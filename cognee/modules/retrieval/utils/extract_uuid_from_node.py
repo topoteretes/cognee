@@ -1,8 +1,8 @@
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 
 
-def extract_uuid_from_node(node: Any) -> Optional[UUID]:
+def extract_uuid_from_node(node: Any) -> UUID | None:
     """
     Try to pull a UUID string out of node.id or node.properties['id'],
     then return a UUID instance (or None if neither exists).

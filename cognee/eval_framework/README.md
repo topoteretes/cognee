@@ -65,9 +65,9 @@ config = EvalConfig(
 )
 
 result = asyncio.run(run_eval(config))
-print(result.aggregate_metrics)     # {'correctness': {'mean': ..., 'ci_lower': ..., ...}}
-print(result.metrics_path)          # per-answer metrics artifact
-print(result.config_path)           # resolved config, saved for reproducibility
+print(result.aggregate_metrics)  # {'correctness': {'mean': ..., 'ci_lower': ..., ...}}
+print(result.metrics_path)  # per-answer metrics artifact
+print(result.config_path)  # resolved config, saved for reproducibility
 ```
 
 `run_eval` returns an `EvalResult` with the produced artifact paths and the
@@ -92,3 +92,9 @@ the runner and CLI with no further wiring:
 ```bash
 cognee eval --benchmark <YourBenchmark> --engine direct_llm
 ```
+
+## LoCoMo
+
+LoCoMo has its own runner on top of this harness (`cognee/eval_framework/locomo/`, see its
+[README](locomo/README.md)): it ingests every conversation as dated 6-turn windows through
+`remember()` and grades the answers with an LLM judge on a separate judge model.

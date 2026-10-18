@@ -253,7 +253,6 @@ class S3FileStorage(Storage):
         # In S3, directories don't exist as separate entities - they're just prefixes
         # When you write a file to s3://bucket/path/to/file.txt, the "directories"
         # path/ and path/to/ are implicitly created. No explicit action needed.
-        pass
 
     async def copy_file(self, source_file_path: str, destination_file_path: str) -> str:
         """
@@ -342,6 +341,10 @@ class S3FileStorage(Storage):
                 return relative_files
             except Exception:
                 # If directory doesn't exist or other error, return empty list
+                logger.debug(
+                    "Falling back to [] after error in S3FileStorage.list_files.list_files_sync",
+                    exc_info=True,
+                )
                 return []
 
         return await run_async(list_files_sync)

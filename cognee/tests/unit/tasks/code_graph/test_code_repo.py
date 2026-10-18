@@ -6,6 +6,7 @@ partition semantics: code and manifests go to the repo item, prose stays in
 the document pipeline, and binaries/dotfiles can never abort an add.
 """
 
+import importlib
 import json
 from pathlib import Path
 
@@ -153,6 +154,112 @@ async def test_documents_kept_with_llm_api_key(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_documents_omitted_for_a_code_graph_only_caller(tmp_path, llm_key_set):
+    """remember(content_type="code") indexes the code graph only: the repo item
+    covers the same files as a repo add, and no document paths come back even
+    with an LLM key."""
+    from cognee.tasks.code_graph.code_repo import resolve_code_repository
+
+    repo = _make_repo(tmp_path)
+
+    manifest_item, documents, _skip_count = await resolve_code_repository(
+        repo, include_documents=False
+    )
+
+    assert documents == []
+    assert manifest_item.system_metadata["file_count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_add_code_repository_stores_the_pinned_repo_item(tmp_path, monkeypatch):
+    """The Data row remember(content_type="code") needs is the same pinned manifest
+    item add(<repo>) ingests, added without its documents and returned by id."""
+    import importlib
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from uuid import uuid4
+
+    from cognee.tasks.code_graph.code_repo import add_code_repository
+
+    # importlib, not `import a.b as m`: these packages re-export a function under
+    # the submodule's own name, which the attribute lookup would bind instead.
+    add_module = importlib.import_module("cognee.api.v1.add")
+    data_methods_module = importlib.import_module("cognee.modules.data.methods")
+    unique_id_module = importlib.import_module("cognee.modules.data.methods.get_unique_data_id")
+
+    repo = _make_repo(tmp_path)
+    user = SimpleNamespace(id=uuid4())
+    dataset = SimpleNamespace(id=uuid4(), name="my_code")
+    pinned_id = uuid4()
+    data_row = SimpleNamespace(id=pinned_id)
+
+    monkeypatch.setattr(unique_id_module, "get_unique_data_id", AsyncMock(return_value=pinned_id))
+    calls = []
+    reset_mock = AsyncMock(side_effect=lambda *_args, **_kwargs: calls.append("reset"))
+    monkeypatch.setattr(data_methods_module, "reset_data_pipeline_status", reset_mock)
+    add_mock = AsyncMock(side_effect=lambda *_args, **_kwargs: calls.append("add"))
+    monkeypatch.setattr(add_module, "add", add_mock)
+    get_data_mock = AsyncMock(return_value=data_row)
+    monkeypatch.setattr(data_methods_module, "get_data", get_data_mock)
+
+    stored = await add_code_repository(
+        repo, user=user, dataset=dataset, source_url="https://github.com/org/repo"
+    )
+
+    assert stored is data_row
+    # Only the pinned row's add stamp is cleared before add(), or its
+    # incremental check would skip a changed repo's manifest as already added;
+    # the cognify stamps stay for ingestion's content comparison to decide.
+    reset_mock.assert_awaited_once_with(pinned_id, dataset.id, pipeline_names=("add_pipeline",))
+    assert calls == ["reset", "add"]
+    manifest_item = add_mock.await_args.args[0]
+    assert manifest_item.data_id == pinned_id
+    assert manifest_item.system_metadata["source"] == "code_repo"
+    assert manifest_item.system_metadata["repo_url"] == "https://github.com/org/repo"
+    assert add_mock.await_args.kwargs["dataset_id"] == dataset.id
+    assert add_mock.await_args.kwargs["user"] is user
+    get_data_mock.assert_awaited_once_with(user.id, pinned_id, dataset.id)
+
+
+@pytest.mark.asyncio
+async def test_add_code_repository_surfaces_an_errored_ingest(tmp_path, monkeypatch):
+    """With RAISE_INCREMENTAL_LOADING_ERRORS=false add() returns an errored run
+    instead of raising; the caller must see its cause, not a missing row."""
+    import importlib
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from uuid import uuid4
+
+    from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunErrored
+    from cognee.tasks.code_graph.code_repo import add_code_repository
+    from cognee.tasks.code_graph.resolve_repo import CodeRepositoryError
+
+    add_module = importlib.import_module("cognee.api.v1.add")
+    data_methods_module = importlib.import_module("cognee.modules.data.methods")
+    unique_id_module = importlib.import_module("cognee.modules.data.methods.get_unique_data_id")
+
+    dataset = SimpleNamespace(id=uuid4(), name="my_code")
+    monkeypatch.setattr(unique_id_module, "get_unique_data_id", AsyncMock(return_value=uuid4()))
+    monkeypatch.setattr(data_methods_module, "reset_data_pipeline_status", AsyncMock())
+    errored = PipelineRunErrored(
+        pipeline_run_id=uuid4(),
+        dataset_id=dataset.id,
+        dataset_name=dataset.name,
+        error_class="IngestionError",
+        error_message="disk full",
+    )
+    monkeypatch.setattr(add_module, "add", AsyncMock(return_value=errored))
+    get_data_mock = AsyncMock()
+    monkeypatch.setattr(data_methods_module, "get_data", get_data_mock)
+
+    with pytest.raises(CodeRepositoryError, match="disk full"):
+        await add_code_repository(
+            _make_repo(tmp_path), user=SimpleNamespace(id=uuid4()), dataset=dataset
+        )
+    get_data_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_symlinks_are_not_followed_into_the_manifest(tmp_path):
     """rglob + is_file() both follow symlinks, and read_bytes() would then hash and
     index the TARGET. A repo containing 'creds.py -> ~/.aws/credentials' must not
@@ -168,7 +275,7 @@ async def test_symlinks_are_not_followed_into_the_manifest(tmp_path):
     (repo / "real.py").write_text("x = 1")
     (repo / "creds.py").symlink_to(secret)
 
-    covered, documents, skipped = partition_repo_files(repo)
+    covered, documents, _skipped = partition_repo_files(repo)
 
     indexed = {p.name for p in covered} | {p.name for p in documents}
     assert "real.py" in indexed
@@ -202,18 +309,18 @@ async def test_repository_url_is_cloned_and_resolved_like_a_project(
     _make_repo(clone)
     cloned_specs = []
 
-    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None):
-        cloned_specs.append(spec)
+    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
+        cloned_specs.append((spec, branch))
         return clone
 
     monkeypatch.setattr(code_repo_module, "resolve_repo_source", fake_resolve_repo_source)
 
     resolved = await resolve_data_directories(
-        ["https://github.com/org/repo?tab=readme-ov-file", "plain text note"]
+        ["https://github.com/org/repo?tab=readme-ov-file", "plain text note"], branch="dev"
     )
 
-    # git gets the normalised URL, not the browser one.
-    assert cloned_specs == ["https://github.com/org/repo"]
+    # The clone gets the normalised URL, not the browser one, and the branch asked for.
+    assert cloned_specs == [("https://github.com/org/repo", "dev")]
     manifest_items = [item for item in resolved if isinstance(item, DataItem)]
     assert len(manifest_items) == 1
     manifest = manifest_items[0]
@@ -241,7 +348,7 @@ async def test_repository_url_credentials_are_redacted_from_the_manifest(
     clone = _make_repo(tmp_path)
     cloned_specs = []
 
-    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None):
+    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
         cloned_specs.append(spec)
         return clone
 
@@ -254,6 +361,47 @@ async def test_repository_url_credentials_are_redacted_from_the_manifest(
     manifest = next(item for item in resolved if isinstance(item, DataItem))
     assert manifest.system_metadata["repo_url"] == "https://github.com/org/repo"
     assert "tok" not in json.dumps(manifest.system_metadata)
+
+
+@pytest.mark.asyncio
+async def test_a_repository_url_keeps_one_data_row_whatever_the_branch(tmp_path, monkeypatch):
+    """Each branch is cloned into its own directory, but a dataset keeps one row per URL,
+    keyed as every URL row was before branches existed, so existing rows keep their ids."""
+    from unittest.mock import AsyncMock, Mock
+    from uuid import uuid4
+
+    import cognee.tasks.code_graph.code_repo as code_repo_module
+    from cognee.tasks.code_graph.resolve_repo import clone_dir
+
+    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
+        directory = tmp_path / (branch or "default")
+        directory.mkdir()
+        return _make_repo(directory)
+
+    keys = []
+
+    async def record_key(identifier, user, dataset_id=None):
+        keys.append(identifier)
+        return uuid4()
+
+    monkeypatch.setattr(code_repo_module, "resolve_repo_source", fake_resolve_repo_source)
+    monkeypatch.setattr(
+        importlib.import_module("cognee.modules.data.methods.get_unique_data_id"),
+        "get_unique_data_id",
+        record_key,
+    )
+    monkeypatch.setattr(
+        importlib.import_module("cognee.modules.data.methods"),
+        "reset_data_pipeline_status",
+        AsyncMock(),
+    )
+
+    for branch in (None, "dev"):
+        await code_repo_module.resolve_code_repository_url(
+            "https://github.com/org/repo", user=Mock(), dataset_id=uuid4(), branch=branch
+        )
+
+    assert keys == [f"code_repo:{clone_dir('https://github.com/org/repo')}"] * 2
 
 
 @pytest.mark.asyncio

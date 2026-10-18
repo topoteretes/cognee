@@ -21,8 +21,6 @@ from pathlib import Path
 
 import pytest
 
-from cognee.tests.journeys import _support
-
 SNAPSHOT_PATH = Path(__file__).parent / "api_routes_snapshot.json"
 
 DATASET = "journey_http"
@@ -102,7 +100,7 @@ class Session:
         self.password = password
         self.token = None
 
-    def register_and_login(self) -> "Session":
+    def register_and_login(self) -> Session:
         response = self.client.post(
             "/api/v1/auth/register", json={"email": self.email, "password": self.password}
         )
@@ -285,31 +283,40 @@ def test_http_api_user_journey(api):
     assert alice.get(f"/api/v1/datasets/{dataset_id}/data").status_code in (403, 404)
 
 
-@pytest.mark.journey
-def test_route_table_matches_snapshot(api):
-    """The set of public routes is part of the product contract.
+def _served_routes(api) -> list[str]:
+    """``METHOD /path`` for every operation in the served OpenAPI document.
 
-    Regenerate deliberately with ``COGNEE_UPDATE_API_SNAPSHOT=1``.
+    Read from the schema rather than ``app.routes``: newer FastAPI keeps included
+    routers as lazy objects, and the schema is what clients generate against.
     """
-    # Read the table from the served OpenAPI document rather than app.routes:
-    # newer FastAPI keeps included routers as lazy objects, and the schema is
-    # what clients actually generate against.
-    schema = api.get("/openapi.json").json()
-    routes = sorted(
+    response = api.get("/openapi.json")
+    assert response.status_code == 200, response.text
+    schema = response.json()
+    return sorted(
         f"{method.upper()} {path}"
         for path, operations in schema.get("paths", {}).items()
         for method in operations
         if method.lower() in ("get", "post", "put", "patch", "delete")
     )
+
+
+@pytest.mark.journey
+def test_route_table_matches_snapshot(api):
+    """The set of public routes is part of the product contract.
+
+    Any addition or removal fails until the checked-in snapshot is regenerated
+    with ``COGNEE_UPDATE_API_SNAPSHOT=1``, so wire-shape changes are deliberate
+    and reviewable in the diff. A normal run never writes into the source tree.
+    """
+    routes = _served_routes(api)
     assert len(routes) > 50, f"suspiciously small route table: {routes}"
 
-    if os.getenv("COGNEE_UPDATE_API_SNAPSHOT") == "1" or not SNAPSHOT_PATH.exists():
+    if os.getenv("COGNEE_UPDATE_API_SNAPSHOT") == "1":
         SNAPSHOT_PATH.write_text(json.dumps(routes, indent=2) + "\n")
-        if not os.getenv("COGNEE_UPDATE_API_SNAPSHOT"):
-            pytest.fail(
-                f"route snapshot was missing; wrote {SNAPSHOT_PATH.name}, commit it and rerun"
-            )
 
+    assert SNAPSHOT_PATH.exists(), (
+        f"{SNAPSHOT_PATH.name} is missing; generate it with COGNEE_UPDATE_API_SNAPSHOT=1 and commit"
+    )
     expected = json.loads(SNAPSHOT_PATH.read_text())
     added = sorted(set(routes) - set(expected))
     removed = sorted(set(expected) - set(routes))
@@ -322,18 +329,64 @@ def test_route_table_matches_snapshot(api):
 
 
 @pytest.mark.journey
-def test_openapi_schema_is_served_and_consistent(api):
-    response = api.get("/openapi.json")
-    assert response.status_code == 200
-    schema = response.json()
-    paths = set(schema.get("paths", {}))
+def test_openapi_schema_lists_the_memory_and_low_level_routes(api):
+    """Independent of the snapshot: the routes the SDK and CLI are built on exist."""
+    routes = set(_served_routes(api))
     for required in (
-        "/api/v1/add",
-        "/api/v1/cognify",
-        "/api/v1/search",
-        "/api/v1/datasets",
-        "/api/v1/remember",
-        "/api/v1/recall",
+        "POST /api/v1/add",
+        "POST /api/v1/cognify",
+        "POST /api/v1/search",
+        "GET /api/v1/datasets",
+        "POST /api/v1/remember",
+        "POST /api/v1/recall",
+        "POST /api/v1/improve",
+        "POST /api/v1/forget",
     ):
-        assert required in paths, f"{required} missing from OpenAPI schema"
-    assert _support.MODE in ("mock", "llm")
+        assert required in routes, f"{required} missing from OpenAPI schema"
+
+
+@pytest.mark.journey
+def test_http_session_entries_pin_a_node_set(api):
+    """The wire contract the integrations plugins rely on (SDK-336).
+
+    A typed entry with ``node_set`` pins the session; repeating or omitting it is
+    fine; a different set is a 409 that names the error, so a client can tell a
+    pinned-session conflict from the endpoint's other failures.
+    """
+    unique = uuid.uuid4().hex[:8]
+    carol = Session(api, f"carol-{unique}@cognee-journeys.org").register_and_login()
+    session_id = f"http-project-session-{unique}"
+
+    def entry(body: dict) -> dict:
+        return {"entry": body, "dataset_name": DATASET, "session_id": session_id}
+
+    pinned = carol.post(
+        "/api/v1/remember/entry",
+        json=entry({"type": "qa", "question": "q", "answer": "a", "node_set": ["project-http"]}),
+    )
+    assert pinned.status_code == 200, f"pin: {pinned.status_code} {pinned.text}"
+    assert pinned.json()["status"] == "session_stored", pinned.text
+
+    repeated = carol.post(
+        "/api/v1/remember/entry",
+        json=entry({"type": "trace", "origin_function": "f", "node_set": ["project-http"]}),
+    )
+    assert repeated.status_code == 200, f"repeat: {repeated.status_code} {repeated.text}"
+
+    omitted = carol.post(
+        "/api/v1/remember/entry", json=entry({"type": "qa", "question": "q2", "answer": "a2"})
+    )
+    assert omitted.status_code == 200, f"omit: {omitted.status_code} {omitted.text}"
+
+    conflict = carol.post(
+        "/api/v1/remember/entry",
+        json=entry({"type": "qa", "question": "q3", "answer": "a3", "node_set": ["project-other"]}),
+    )
+    assert conflict.status_code == 409, f"conflict: {conflict.status_code} {conflict.text}"
+    assert "SessionNodeSetConflictError" in conflict.text, conflict.text
+    assert "project-http" in conflict.text and "project-other" in conflict.text, conflict.text
+
+    # The schema the plugins probe before tagging capture.
+    schemas = api.get("/openapi.json").json()["components"]["schemas"]
+    assert "node_set" in schemas["QAEntry"]["properties"]
+    assert "node_set" in schemas["TraceEntry"]["properties"]

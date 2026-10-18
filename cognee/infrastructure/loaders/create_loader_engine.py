@@ -28,6 +28,6 @@ def create_loader_engine() -> LoaderEngine:
             engine.register_loader(loader_instance)
         except Exception as e:
             # Log but don't fail - allow engine to continue with other loaders
-            logger.warning(f"Failed to register loader {loader_name}: {e}")
+            logger.warning(f"Failed to register loader {loader_name}: {e}", exc_info=True)
 
     return engine

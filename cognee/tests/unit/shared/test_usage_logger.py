@@ -1,20 +1,21 @@
 """Unit tests for usage logger core functions."""
 
-import pytest
 from datetime import datetime, timezone
-from uuid import UUID
 from types import SimpleNamespace
+from uuid import UUID
 
+import pytest
+
+from cognee.shared.exceptions import UsageLoggerError
 from cognee.shared.usage_logger import (
-    _sanitize_value,
-    _sanitize_dict_key,
-    _get_param_names,
-    _get_param_defaults,
-    _extract_user_id,
     _extract_parameters,
+    _extract_user_id,
+    _get_param_defaults,
+    _get_param_names,
+    _sanitize_dict_key,
+    _sanitize_value,
     log_usage,
 )
-from cognee.shared.exceptions import UsageLoggerError
 
 
 class TestSanitizeValue:

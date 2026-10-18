@@ -17,7 +17,7 @@ runtime.
 
 
 def test_real_providers_register_themselves_when_the_real_app_is_imported():
-    from cognee.api.client import app  # noqa: F401 - import side effect is the point
+    from cognee.api.client import app  # import side effect is the point
     from cognee.modules.integrations.registry import supported_integrations
 
     assert {"slack", "github", "linear"} <= set(supported_integrations)

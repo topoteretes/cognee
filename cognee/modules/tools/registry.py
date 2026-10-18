@@ -9,19 +9,19 @@ Two storage tiers:
 """
 
 import importlib
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Any
 from uuid import UUID
 
 from cognee.modules.engine.models import Tool
 from cognee.modules.tools.errors import ToolInvocationError, ToolNotFoundError
 from cognee.shared.logging_utils import get_logger
 
-
 ToolHandler = Callable[..., Any]
 logger = get_logger("cognee.tools.registry")
 
 
-_BUILTIN_TOOLS: Dict[str, Tool] = {}
+_BUILTIN_TOOLS: dict[str, Tool] = {}
 
 
 def register_builtin_tool(tool: Tool) -> None:
@@ -54,7 +54,7 @@ def resolve_handler(handler_ref: str) -> ToolHandler:
     return handler
 
 
-async def get_tool(name: str, dataset_id: Optional[UUID] = None) -> Tool:
+async def get_tool(name: str, dataset_id: UUID | None = None) -> Tool:
     """Look up a Tool by name. Checks built-ins first, then the graph."""
     if name in _BUILTIN_TOOLS:
         return _BUILTIN_TOOLS[name]
@@ -66,14 +66,14 @@ async def get_tool(name: str, dataset_id: Optional[UUID] = None) -> Tool:
     )
 
 
-async def list_tools_for_dataset(dataset_id: Optional[UUID] = None) -> List[Tool]:
+async def list_tools_for_dataset(dataset_id: UUID | None = None) -> list[Tool]:
     """Return every tool visible for a dataset: all built-ins plus graph-scoped tools."""
-    tools: List[Tool] = list(_BUILTIN_TOOLS.values())
+    tools: list[Tool] = list(_BUILTIN_TOOLS.values())
     tools.extend(await _list_tools_in_graph(dataset_id=dataset_id))
     return tools
 
 
-async def _find_tool_in_graph(name: str, dataset_id: Optional[UUID]) -> Optional[Tool]:
+async def _find_tool_in_graph(name: str, dataset_id: UUID | None) -> Tool | None:
     """Query the graph for a Tool by name within an optional dataset scope."""
     nodes = await _query_tool_nodes(dataset_id=dataset_id)
     for node in nodes:
@@ -82,12 +82,12 @@ async def _find_tool_in_graph(name: str, dataset_id: Optional[UUID]) -> Optional
     return None
 
 
-async def _list_tools_in_graph(dataset_id: Optional[UUID]) -> List[Tool]:
+async def _list_tools_in_graph(dataset_id: UUID | None) -> list[Tool]:
     """Return every Tool DataPoint scoped to a dataset (or globally scoped)."""
     return await _query_tool_nodes(dataset_id=dataset_id)
 
 
-async def _query_tool_nodes(dataset_id: Optional[UUID]) -> List[Tool]:
+async def _query_tool_nodes(dataset_id: UUID | None) -> list[Tool]:
     """Fetch Tool DataPoints from the graph. Returns [] when the graph is empty
     or no Tool nodes are persisted.
 
@@ -97,13 +97,17 @@ async def _query_tool_nodes(dataset_id: Optional[UUID]) -> List[Tool]:
     try:
         from cognee.infrastructure.databases.graph import get_graph_engine
     except Exception as exc:
-        logger.warning("Unable to import graph engine while resolving tools: %s", exc)
+        logger.warning(
+            "Unable to import graph engine while resolving tools: %s", exc, exc_info=True
+        )
         return []
 
     try:
         graph_engine = await get_graph_engine()
     except Exception as exc:
-        logger.warning("Unable to initialize graph engine while resolving tools: %s", exc)
+        logger.warning(
+            "Unable to initialize graph engine while resolving tools: %s", exc, exc_info=True
+        )
         return []
 
     get_by_type = getattr(graph_engine, "get_nodes_by_type", None)
@@ -118,12 +122,12 @@ async def _query_tool_nodes(dataset_id: Optional[UUID]) -> List[Tool]:
         else:
             raw_nodes, _ = await get_graph_data()
     except Exception as exc:
-        logger.warning("Graph-backed Tool lookup failed: %s", exc)
+        logger.warning("Graph-backed Tool lookup failed: %s", exc, exc_info=True)
         return []
     if isinstance(raw_nodes, tuple) and len(raw_nodes) == 2:
         raw_nodes = raw_nodes[0]
 
-    tools: List[Tool] = []
+    tools: list[Tool] = []
     for raw in raw_nodes or []:
         tool = _coerce_tool(raw)
         if tool is None:
@@ -137,7 +141,7 @@ async def _query_tool_nodes(dataset_id: Optional[UUID]) -> List[Tool]:
     return tools
 
 
-def _coerce_tool(raw) -> Optional[Tool]:
+def _coerce_tool(raw) -> Tool | None:
     """Best-effort conversion of a graph-node or vector-payload dict into Tool.
 
     Graph-stored DataPoint metadata lacks the "type" key required by the MetaData
@@ -154,4 +158,5 @@ def _coerce_tool(raw) -> Optional[Tool]:
     try:
         return Tool.model_validate(data)
     except Exception:
+        logger.debug("Falling back to None after error in _coerce_tool", exc_info=True)
         return None

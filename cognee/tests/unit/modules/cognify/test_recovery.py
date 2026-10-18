@@ -1,20 +1,28 @@
-from contextlib import asynccontextmanager
+"""Startup recovery: every pipeline's STARTED runs are rolled back (if the pipeline has a
+rollback) and closed as ERRORED with the STARTED row's own metadata; nothing else is touched."""
+
+import asyncio
+from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
 
 from cognee.modules.cognify import recovery as recovery_module
+from cognee.modules.pipelines.exceptions import AbandonedPipelineRunError
 from cognee.modules.pipelines.models import PipelineRunStatus
+
+TWO_HOURS_AGO = datetime.now(timezone.utc) - timedelta(hours=2)
 
 
 class _FakeSession:
-    def __init__(self, dataset=None):
-        self._dataset = dataset
+    def __init__(self, datasets):
+        self._datasets = datasets
 
-    async def get(self, _model, _dataset_id):
-        return self._dataset
+    async def get(self, _model, dataset_id):
+        return self._datasets.get(dataset_id)
 
     async def __aenter__(self):
         return self
@@ -24,11 +32,11 @@ class _FakeSession:
 
 
 class _FakeEngine:
-    def __init__(self, sessions):
-        self._sessions = list(sessions)
+    def __init__(self, datasets):
+        self._datasets = datasets
 
     def get_async_session(self):
-        return self._sessions.pop(0)
+        return _FakeSession(self._datasets)
 
 
 @asynccontextmanager
@@ -36,115 +44,357 @@ async def _no_op_context(*_args, **_kwargs):
     yield
 
 
-@pytest.mark.asyncio
-async def test_recover_stale_cognify_runs_executes_rollback_for_latest_candidate(monkeypatch):
-    dataset_id = uuid4()
-    owner_id = uuid4()
-    pipeline_run_id = uuid4()
+def _run(pipeline_name, status=PipelineRunStatus.DATASET_PROCESSING_STARTED, **overrides):
+    fields = {
+        "pipeline_name": pipeline_name,
+        "pipeline_id": uuid4(),
+        "dataset_id": uuid4(),
+        "pipeline_run_id": uuid4(),
+        "status": status,
+        "created_at": TWO_HOURS_AGO,
+        "started_at": TWO_HOURS_AGO,
+        "user_id": uuid4(),
+        "tenant_id": uuid4(),
+        "run_info": {"data": ["doc-1", "doc-2"]},
+        "origin": "api",
+        "parent_operation_id": uuid4(),
+    }
+    fields.update(overrides)
+    return SimpleNamespace(**fields)
 
-    stale_run = SimpleNamespace(
-        pipeline_name="cognify_pipeline",
-        dataset_id=dataset_id,
-        pipeline_run_id=pipeline_run_id,
-        status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
-        created_at=datetime.now(timezone.utc) - timedelta(hours=2),
-    )
-    dataset = SimpleNamespace(id=dataset_id, owner_id=owner_id)
 
-    dataset_session = _FakeSession(dataset=dataset)
-    engine = _FakeEngine([dataset_session])
+def _wire(monkeypatch, runs, datasets, *, rollback_fails=False):
+    """Patch the module's collaborators and return the ordered list of calls made."""
+    calls = []
 
-    rollback_calls = []
-    reset_calls = []
+    async def _rollback(**kwargs):
+        if rollback_fails:
+            raise RuntimeError("graph store unavailable")
+        calls.append(("rollback", kwargs))
 
-    async def _rollback_handler(**kwargs):
-        rollback_calls.append(kwargs)
+    async def _log_error(**kwargs):
+        calls.append(("error", kwargs))
 
-    async def _reset_status(**kwargs):
-        reset_calls.append(kwargs)
+    async def _latest_runs():
+        return runs
 
-    async def _fake_latest_runs(_dataset_ids, _pipeline_name):
-        return {dataset_id: stale_run}
-
-    monkeypatch.setattr(recovery_module, "get_relational_engine", lambda: engine)
-    monkeypatch.setattr(recovery_module, "get_latest_pipeline_runs_by_datasets", _fake_latest_runs)
+    monkeypatch.setattr(recovery_module, "get_relational_engine", lambda: _FakeEngine(datasets))
+    monkeypatch.setattr(recovery_module, "get_unterminated_pipeline_runs", _latest_runs)
     monkeypatch.setattr(recovery_module, "set_database_global_context_variables", _no_op_context)
-    monkeypatch.setattr(recovery_module, "cognify_rollback_handler", _rollback_handler)
-    monkeypatch.setattr(recovery_module, "reset_pipeline_run_status", _reset_status)
-
-    await recovery_module.recover_stale_cognify_runs_on_startup()
-
-    assert len(rollback_calls) == 1
-    assert rollback_calls[0]["pipeline_run_id"] == pipeline_run_id
-    assert rollback_calls[0]["dataset"] == dataset
-    # The lingering STARTED status must be reset so a re-run is not blocked.
-    assert len(reset_calls) == 1
-    assert reset_calls[0]["dataset_id"] == dataset_id
-    assert reset_calls[0]["pipeline_name"] == "cognify_pipeline"
-
-
-@pytest.mark.asyncio
-async def test_recover_stale_cognify_runs_skips_missing_dataset(monkeypatch):
-    dataset_id = uuid4()
-    stale_run = SimpleNamespace(
-        pipeline_name="cognify_pipeline",
-        dataset_id=dataset_id,
-        pipeline_run_id=uuid4(),
-        status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
-        created_at=datetime.now(timezone.utc) - timedelta(hours=2),
-    )
-
-    dataset_session = _FakeSession(dataset=None)
-    engine = _FakeEngine([dataset_session])
-
-    rollback_calls = []
-
-    async def _rollback_handler(**kwargs):
-        rollback_calls.append(kwargs)
-
-    async def _fake_latest_runs(_dataset_ids, _pipeline_name):
-        return {dataset_id: stale_run}
-
-    monkeypatch.setattr(recovery_module, "get_relational_engine", lambda: engine)
-    monkeypatch.setattr(recovery_module, "get_latest_pipeline_runs_by_datasets", _fake_latest_runs)
-    monkeypatch.setattr(recovery_module, "set_database_global_context_variables", _no_op_context)
-    monkeypatch.setattr(recovery_module, "cognify_rollback_handler", _rollback_handler)
-
-    await recovery_module.recover_stale_cognify_runs_on_startup()
-
-    assert rollback_calls == []
-
-
-@pytest.mark.asyncio
-async def test_recover_stale_cognify_runs_skips_recent_run(monkeypatch):
-    """A STARTED run younger than the staleness threshold is left alone so a
-    live run on another worker is not rolled back out from under it."""
-    dataset_id = uuid4()
-    recent_run = SimpleNamespace(
-        pipeline_name="cognify_pipeline",
-        dataset_id=dataset_id,
-        pipeline_run_id=uuid4(),
-        status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
-        created_at=datetime.now(timezone.utc),
-    )
-
-    # No dataset session is consumed because the run is skipped before lookup.
-    engine = _FakeEngine([])
-
-    rollback_calls = []
-
-    async def _rollback_handler(**kwargs):
-        rollback_calls.append(kwargs)
-
-    async def _fake_latest_runs(_dataset_ids, _pipeline_name):
-        return {dataset_id: recent_run}
-
-    monkeypatch.setattr(recovery_module, "get_relational_engine", lambda: engine)
-    monkeypatch.setattr(recovery_module, "get_latest_pipeline_runs_by_datasets", _fake_latest_runs)
-    monkeypatch.setattr(recovery_module, "set_database_global_context_variables", _no_op_context)
-    monkeypatch.setattr(recovery_module, "cognify_rollback_handler", _rollback_handler)
+    monkeypatch.setattr(recovery_module, "ROLLBACK_HANDLERS", {"cognify_pipeline": _rollback})
+    monkeypatch.setattr(recovery_module, "log_pipeline_run_error", _log_error)
     monkeypatch.setattr(recovery_module, "STALE_RUN_MIN_AGE_SECONDS", 3600)
 
-    await recovery_module.recover_stale_cognify_runs_on_startup()
+    @contextmanager
+    def claim(run):
+        yield SimpleNamespace(closed=False)
 
-    assert rollback_calls == []
+    async def latest(run_id):
+        return next((run for run in runs if run.pipeline_run_id == run_id), None)
+
+    monkeypatch.setattr(recovery_module, "claim_run_ownership", claim)
+    monkeypatch.setattr(recovery_module, "get_latest_pipeline_run", latest)
+    return calls
+
+
+def _dataset_for(run):
+    return SimpleNamespace(id=run.dataset_id, owner_id=uuid4())
+
+
+@pytest.mark.asyncio
+async def test_cognify_run_is_rolled_back_then_closed_with_its_own_metadata(monkeypatch):
+    run = _run("cognify_pipeline")
+    dataset = _dataset_for(run)
+    calls = _wire(monkeypatch, [run], {run.dataset_id: dataset})
+
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+
+    # Rollback first, then the ERRORED row; never the other way round.
+    assert [name for name, _ in calls] == ["rollback", "error"]
+    rollback = calls[0][1]
+    assert rollback["pipeline_run_id"] == run.pipeline_run_id
+    assert rollback["dataset"] == dataset
+    assert rollback["keep_completed_data"] is True
+
+    error = calls[1][1]
+    assert isinstance(error["e"], AbandonedPipelineRunError)
+    assert error["pipeline_run_id"] == run.pipeline_run_id
+    assert error["pipeline_id"] == run.pipeline_id
+    assert error["pipeline_name"] == "cognify_pipeline"
+    assert error["dataset_id"] == run.dataset_id
+    # Everything the STARTED row knew about the run is carried onto the ERRORED row.
+    assert error["user_id"] == run.user_id
+    assert error["tenant_id"] == run.tenant_id
+    assert "user" not in error
+    assert error["started_at"] == run.started_at
+    assert error["data_info"] == ["doc-1", "doc-2"]
+    assert error["origin"] == "api"
+    assert error["parent_operation_id"] == run.parent_operation_id
+
+
+@pytest.mark.asyncio
+async def test_pipeline_without_rollback_is_only_closed(monkeypatch):
+    run = _run("add_pipeline")
+    calls = _wire(monkeypatch, [run], {run.dataset_id: _dataset_for(run)})
+
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+
+    assert [name for name, _ in calls] == ["error"]
+    error = calls[0][1]
+    assert error["pipeline_name"] == "add_pipeline"
+    assert isinstance(error["e"], AbandonedPipelineRunError)
+
+
+@pytest.mark.asyncio
+async def test_every_pipeline_with_a_stale_started_run_is_closed(monkeypatch):
+    runs = [_run("cognify_pipeline"), _run("add_pipeline"), _run("memify_pipeline")]
+    calls = _wire(monkeypatch, runs, {r.dataset_id: _dataset_for(r) for r in runs})
+
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+
+    closed = sorted(kw["pipeline_name"] for name, kw in calls if name == "error")
+    assert closed == ["add_pipeline", "cognify_pipeline", "memify_pipeline"]
+    assert sum(1 for name, _ in calls if name == "rollback") == 1
+
+
+@pytest.mark.asyncio
+async def test_only_what_the_query_returns_is_touched(monkeypatch):
+    """Selection lives in get_unterminated_pipeline_runs (newest row per run is STARTED);
+    recovery closes exactly what it is handed and nothing else."""
+    open_run = _run("cognify_pipeline")
+    calls = _wire(monkeypatch, [open_run], {open_run.dataset_id: _dataset_for(open_run)})
+
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+
+    assert [name for name, _ in calls] == ["rollback", "error"]
+    assert calls[1][1]["pipeline_run_id"] == open_run.pipeline_run_id
+
+
+@pytest.mark.asyncio
+async def test_user_less_run_is_closed_without_a_user(monkeypatch):
+    run = _run("add_pipeline", user_id=None, tenant_id=None, origin=None, parent_operation_id=None)
+    calls = _wire(monkeypatch, [run], {run.dataset_id: _dataset_for(run)})
+
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+
+    error = calls[0][1]
+    assert error["user_id"] is None
+    assert error["tenant_id"] is None
+    assert error["origin"] is None
+    assert error["parent_operation_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_failed_rollback_leaves_run_started(monkeypatch):
+    """No ERRORED row over graph data that is still there; the next boot retries."""
+    run = _run("cognify_pipeline")
+    calls = _wire(monkeypatch, [run], {run.dataset_id: _dataset_for(run)}, rollback_fails=True)
+
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_missing_dataset_is_skipped(monkeypatch):
+    run = _run("cognify_pipeline")
+    calls = _wire(monkeypatch, [run], {})
+
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_recent_run_is_treated_as_live(monkeypatch):
+    """A STARTED row younger than the floor may belong to a sibling process mid-deploy."""
+    run = _run("cognify_pipeline", created_at=datetime.now(timezone.utc) - timedelta(minutes=5))
+    calls = _wire(monkeypatch, [run], {run.dataset_id: _dataset_for(run)})
+
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_one_failure_does_not_stop_the_others(monkeypatch):
+    failing = _run("cognify_pipeline")
+    healthy = _run("add_pipeline")
+    datasets = {
+        failing.dataset_id: _dataset_for(failing),
+        healthy.dataset_id: _dataset_for(healthy),
+    }
+    calls = _wire(monkeypatch, [failing, healthy], datasets, rollback_fails=True)
+
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+
+    assert [kw["pipeline_name"] for name, kw in calls if name == "error"] == ["add_pipeline"]
+
+
+def _capture_telemetry(monkeypatch):
+    """Record every telemetry event recovery emits; settings are stubbed so the
+    test needs no provider configuration."""
+    import cognee.modules.pipelines.operations.run_tasks_with_telemetry as telemetry_module
+
+    events = []
+    monkeypatch.setattr(
+        recovery_module,
+        "send_telemetry",
+        lambda name, user=None, additional_properties=None, **kwargs: events.append(
+            (name, user, additional_properties, kwargs)
+        ),
+    )
+    monkeypatch.setattr(
+        telemetry_module, "get_current_settings", lambda: {"llm": {"provider": "openai"}}
+    )
+    return events
+
+
+@pytest.mark.asyncio
+async def test_closing_an_abandoned_run_emits_the_terminal_event_its_process_never_sent(
+    monkeypatch,
+):
+    run = _run("cognify_pipeline")
+    events = _capture_telemetry(monkeypatch)
+    _wire(monkeypatch, [run], {run.dataset_id: _dataset_for(run)})
+
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+
+    ((name, user_id, properties, kwargs),) = events
+    assert name == "Pipeline Run Errored"
+    # Joins to the Started event the dead process sent, in the shape it sent it:
+    # pipeline_name is the pipeline id there too.
+    assert properties["pipeline_run_id"] == str(run.pipeline_run_id)
+    assert properties["pipeline_name"] == str(run.pipeline_id)
+    assert properties["exception_type"] == "AbandonedPipelineRunError"
+    assert properties["recovered_at_startup"] is True
+    assert properties["tenant_id"] == str(run.tenant_id)
+    # The dead run's version and provider stack are not known here; its Started
+    # event carries them. Nothing of the recovering process is claimed for it.
+    assert properties["cognee_version"] == "unknown"
+    assert "llm" not in properties and "embedding" not in properties
+    assert user_id == run.user_id
+    assert kwargs["tenant_id"] == run.tenant_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "has_user,has_tenant", [(True, True), (True, False), (False, True), (False, False)]
+)
+async def test_recovery_emits_stored_identity_through_the_real_payload_builder(
+    monkeypatch, has_user, has_tenant
+):
+    from cognee.shared import utils
+
+    run = _run(
+        "add_pipeline",
+        user_id=uuid4() if has_user else None,
+        tenant_id=uuid4() if has_tenant else None,
+    )
+    calls = _wire(monkeypatch, [run], {run.dataset_id: _dataset_for(run)})
+    monkeypatch.setenv("ENV", "local")
+    monkeypatch.delenv("TELEMETRY_DISABLED", raising=False)
+    monkeypatch.setattr(utils, "get_anonymous_id", lambda: "test-anonymous")
+    monkeypatch.setattr(utils, "get_persistent_id", lambda: "test-persistent")
+    monkeypatch.setattr(utils, "_get_api_key_tracking_id", lambda: "")
+    request = AsyncMock()
+    monkeypatch.setattr(utils, "_send_telemetry_request", request)
+    pending_before = set(utils._TELEMETRY_TASKS)
+
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+    await asyncio.gather(*(utils._TELEMETRY_TASKS - pending_before))
+
+    request.assert_awaited_once()
+    payload = request.await_args.args[0]
+    assert payload["event_name"] == "Pipeline Run Errored"
+    for properties in (payload["properties"], payload["user_properties"]):
+        assert properties["user_id"] == str(run.user_id)
+        assert properties["tenant_id"] == (
+            str(run.tenant_id) if has_tenant else "Single User Tenant"
+        )
+    assert calls[0][1]["user_id"] == run.user_id
+    assert calls[0][1]["tenant_id"] == run.tenant_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failing_component", ["pipeline_run_telemetry_properties", "send_telemetry"]
+)
+async def test_telemetry_failure_warns_without_interrupting_recovery(
+    monkeypatch, failing_component
+):
+    runs = [_run("add_pipeline"), _run("add_pipeline")]
+    calls = _wire(monkeypatch, runs, {run.dataset_id: _dataset_for(run) for run in runs})
+    monkeypatch.setattr(
+        recovery_module, failing_component, Mock(side_effect=RuntimeError("diagnostic failed"))
+    )
+    log = Mock()
+    monkeypatch.setattr(recovery_module, "logger", log)
+
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+
+    assert [kwargs["pipeline_run_id"] for name, kwargs in calls if name == "error"] == [
+        run.pipeline_run_id for run in runs
+    ]
+    assert log.warning.call_count == 2
+    for call, run in zip(log.warning.call_args_list, runs):
+        assert call.args == ("Failed to emit telemetry for recovered run %s", run.pipeline_run_id)
+        assert call.kwargs["exc_info"] is True
+    log.exception.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_run_left_started_after_a_failed_rollback_emits_nothing(monkeypatch):
+    run = _run("cognify_pipeline")
+    events = _capture_telemetry(monkeypatch)
+    _wire(monkeypatch, [run], {run.dataset_id: _dataset_for(run)}, rollback_fails=True)
+
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+
+    assert events == []
+
+
+@pytest.mark.asyncio
+async def test_terminal_run_is_rechecked_after_claim(monkeypatch):
+    run = _run("cognify_pipeline")
+    calls = _wire(monkeypatch, [run], {run.dataset_id: _dataset_for(run)})
+
+    async def completed(run_id):
+        return _run("cognify_pipeline", status=PipelineRunStatus.DATASET_PROCESSING_COMPLETED)
+
+    monkeypatch.setattr(recovery_module, "get_latest_pipeline_run", completed)
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_unverifiable_ownership_is_never_rolled_back(monkeypatch):
+    from cognee.modules.pipelines.run_ownership import claim_run_ownership
+
+    run = _run("cognify_pipeline")
+    calls = _wire(monkeypatch, [run], {run.dataset_id: _dataset_for(run)})
+    monkeypatch.setattr(recovery_module, "claim_run_ownership", claim_run_ownership)
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_recovery_service_revisits_young_runs_and_stops_on_exit(monkeypatch):
+    run = _run("add_pipeline", created_at=datetime.now(timezone.utc))
+    calls = _wire(monkeypatch, [run], {run.dataset_id: _dataset_for(run)})
+    monkeypatch.setattr(recovery_module, "RECOVERY_POLL_SECONDS", 0.01)
+    recovered = asyncio.Event()
+
+    async def record(**kwargs):
+        calls.append(("error", kwargs))
+        run.status = PipelineRunStatus.DATASET_PROCESSING_ERRORED
+        recovered.set()
+
+    monkeypatch.setattr(recovery_module, "log_pipeline_run_error", record)
+    async with recovery_module.pipeline_recovery_service():
+        assert calls == []
+        run.created_at = TWO_HOURS_AGO
+        await asyncio.wait_for(recovered.wait(), timeout=1)
+    assert len(calls) == 1
+    await asyncio.sleep(0.03)
+    assert len(calls) == 1
