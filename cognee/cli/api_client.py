@@ -326,6 +326,7 @@ class CogneeApiClient:
         node_name: list[str] | None = None,
         only_context: bool = False,
         verbose: bool = False,
+        include_references: bool = False,
     ) -> list:
         # search_type=None (the server default) auto-routes the query; with
         # session_id and no datasets it also searches the session cache first.
@@ -335,6 +336,7 @@ class CogneeApiClient:
             "top_k": top_k,
             "only_context": only_context,
             "verbose": verbose,
+            "include_references": include_references,
         }
         if datasets:
             payload["datasets"] = datasets
