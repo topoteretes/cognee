@@ -40,7 +40,9 @@ async def require_active_credential(credential: IntegrationCredential) -> Integr
         or current.user_id != credential.user_id
         or current.workspace_id != credential.workspace_id
     ):
-        raise CredentialInactiveError("Google connection is no longer active for this owner")
+        raise CredentialInactiveError(
+            f"{credential.provider} connection is no longer active for this owner"
+        )
     return current
 
 

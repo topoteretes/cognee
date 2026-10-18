@@ -39,6 +39,10 @@ async def run_custom_pipeline(
         tasks: List of Cognee Tasks to execute.
         data: The data to ingest. Can be anything when custom extraction and enrichment tasks are used.
               Data provided here will be forwarded to the first extraction task in the pipeline as input.
+              Data rows (cognee's Data model) are read again under the dataset lock, so tasks get
+              their current values; rows deleted since are dropped (a selection left empty runs
+              over no data, not the whole dataset), and a row of another dataset raises
+              CogneeValidationError.
         dataset: Dataset name or dataset uuid to process.
         user: User context for authentication and data access. Uses default if None.
         vector_db_config: Custom vector database configuration for embeddings storage.
@@ -59,13 +63,7 @@ async def run_custom_pipeline(
                           task in the list declares needs_llm=False (e.g. the GLiNER list
                           from get_gliner_demo_tasks), run_pipeline derives it and probes only
                           embeddings.
-        pipeline_name: Name recorded on the pipeline run. Graph-writing
-                          pipelines should keep a name listed in
-                          cognee.modules.improve.graph_changes.WRITE_PIPELINE_NAMES
-                          (the default "custom_pipeline" is): improve()'s
-                          enrichment gate counts only those names as graph
-                          changes, so writes under a bespoke name can be
-                          reported as already enriched.
+        pipeline_name: Name recorded on the pipeline run.
     """
 
     custom_tasks = [

@@ -29,6 +29,7 @@ import json
 import logging
 import mimetypes
 import re
+from collections.abc import Callable
 from typing import Any, cast
 
 import litellm
@@ -176,7 +177,11 @@ class NativeLiteLLMAdapter:
     Instance variables:
         - model, api_key, endpoint, api_version, max_completion_tokens,
           fallback_model, fallback_api_key, fallback_endpoint, llm_args, name,
-          transcription_model, image_transcribe_model
+          transcription_model, image_transcribe_model, azure_ad_token_provider
+
+    ``azure_ad_token_provider`` authenticates the primary model to Azure OpenAI
+    with an Entra ID token instead of an API key (managed identity). It applies to
+    every call on the primary model; the content-policy fallback keeps its own key.
     """
 
     # The default framework's answer path, so this is the one that decides
@@ -189,7 +194,7 @@ class NativeLiteLLMAdapter:
 
     def __init__(
         self,
-        api_key: str,
+        api_key: str | None,
         model: str,
         max_completion_tokens: int,
         name: str = "LiteLLM-Native",
@@ -201,6 +206,7 @@ class NativeLiteLLMAdapter:
         llm_args: dict[str, Any] | None = None,
         transcription_model: str | None = None,
         image_transcribe_model: str | None = None,
+        azure_ad_token_provider: Callable[[], str] | None = None,
     ) -> None:
         self.name = name
         self.model = model
@@ -217,6 +223,13 @@ class NativeLiteLLMAdapter:
         # points them at a vision model when it is not.
         self.transcription_model = transcription_model or model
         self.image_transcribe_model = image_transcribe_model or model
+        self.azure_ad_token_provider = azure_ad_token_provider
+
+    def _primary_auth_kwargs(self) -> dict[str, Any]:
+        """Credentials the primary model needs besides ``api_key``, as litellm kwargs."""
+        if self.azure_ad_token_provider is None:
+            return {}
+        return {"azure_ad_token_provider": self.azure_ad_token_provider}
 
     async def _acreate_str_output(
         self,
@@ -261,6 +274,9 @@ class NativeLiteLLMAdapter:
                 api_version=api_version,
                 **merged_kwargs,
             )
+            # litellm types acompletion() as ModelResponse | CustomStreamWrapper whatever
+            # `stream` is; a call without stream=True returns a ModelResponse.
+            response = cast(litellm.ModelResponse, response)
         if not response.choices:
             raise ValueError("litellm_native returned no choices for a plain-text completion")
         return response.choices[0].message.content or ""
@@ -294,6 +310,7 @@ class NativeLiteLLMAdapter:
                 api_version=api_version,
                 **merged_kwargs,
             )
+            response = cast(litellm.ModelResponse, response)
         raw_content = response.choices[0].message.content or "{}"
         return _attach_raw_response(response_model.model_validate_json(raw_content), response)
 
@@ -346,6 +363,7 @@ class NativeLiteLLMAdapter:
                     api_version=api_version,
                     **merged_kwargs,
                 )
+                response = cast(litellm.ModelResponse, response)
 
             raw_content = _strip_json_fence(response.choices[0].message.content or "{}")
             try:
@@ -481,6 +499,7 @@ class NativeLiteLLMAdapter:
         fallback model before raising ``ContentPolicyFilterError``.
         """
         merged_kwargs = {**self.llm_args, **kwargs}
+        primary_kwargs = {**merged_kwargs, **self._primary_auth_kwargs()}
 
         # A plain string needs no schema — skip structured output entirely.
         if response_model is str:
@@ -491,7 +510,7 @@ class NativeLiteLLMAdapter:
                 api_key=self.api_key,
                 endpoint=self.endpoint,
                 api_version=self.api_version,
-                **merged_kwargs,
+                **primary_kwargs,
             )
 
         structured_model = cast(type[BaseModel], response_model)
@@ -504,7 +523,7 @@ class NativeLiteLLMAdapter:
                 api_key=self.api_key,
                 endpoint=self.endpoint,
                 api_version=self.api_version,
-                **merged_kwargs,
+                **primary_kwargs,
             )
             _enrich_llm_span(self.model, self.name)
             return result
@@ -575,6 +594,7 @@ class NativeLiteLLMAdapter:
                 api_base=self.endpoint,
                 api_version=self.api_version,
                 max_retries=self.MAX_RETRIES,
+                **self._primary_auth_kwargs(),
                 **kwargs,
             )
 
@@ -618,7 +638,7 @@ class NativeLiteLLMAdapter:
             raise ValueError(
                 f"Could not determine MIME type for image file: {input}. Is the extension correct?"
             )
-        response: litellm.ModelResponse = await litellm.acompletion(
+        response = await litellm.acompletion(
             model=self.image_transcribe_model,
             messages=[
                 {
@@ -640,5 +660,6 @@ class NativeLiteLLMAdapter:
             # drop_params ignores reasoning_effort on models that don't support it.
             reasoning_effort=reasoning_effort,
             drop_params=True,
+            **self._primary_auth_kwargs(),
         )
-        return response
+        return cast(litellm.ModelResponse, response)

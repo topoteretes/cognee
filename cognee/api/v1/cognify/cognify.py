@@ -1,10 +1,11 @@
 import asyncio
-from collections.abc import Collection
+import warnings
 from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel
 
+from cognee.infrastructure.databases.vector.compact_vector_store import compact_vector_store
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.llm import resolve_chunk_size
@@ -15,6 +16,7 @@ from cognee.modules.cognify.config import (
     ensure_extractor_runtime,
     get_cognify_config,
     resolve_extractor,
+    resolve_summary_method,
 )
 from cognee.modules.cognify.rollback import cognify_rollback_handler
 from cognee.modules.cognify.routing import CognifyRoute, cognify_route_for
@@ -46,17 +48,38 @@ from cognee.tasks.documents import (
     classify_documents,
     extract_chunks_from_documents,
 )
-from cognee.tasks.graph import detect_contradictions
 from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
-from cognee.tasks.graph.resolve_temporal_contradictions import resolve_temporal_contradictions
 from cognee.tasks.provenance import record_provenance
 from cognee.tasks.storage import add_data_points
-from cognee.tasks.temporal_graph.extract_events_and_entities import extract_events_and_timestamps
-from cognee.tasks.temporal_graph.extract_knowledge_graph_from_events import (
-    extract_knowledge_graph_from_events,
-)
 
 logger = get_logger("cognify")
+
+TEMPORAL_COGNIFY_DEPRECATED = (
+    "temporal_cognify is deprecated and ignored, and will be removed in the next release: "
+    "cognee 1.6.2 was the last release in which temporal_cognify=True built the event "
+    "graph; since 1.6.3 the flag has no effect. cognify() now extracts dates as Timestamp nodes by default, and SearchType.TEMPORAL "
+    "reranks by them. Drop the argument. A dataset built with temporal_cognify=True holds "
+    "Event nodes that current code no longer indexes: TEMPORAL search ignores them, graph "
+    "completion no longer searches their names, and the next triplet enrichment re-embeds "
+    "their triplets without the event name. Rebuild such a dataset with "
+    "forget(dataset=..., memory_only=True) and then cognify()."
+)
+
+
+def drop_deprecated_temporal_cognify(kwargs: dict) -> None:
+    """Strip the deprecated ``temporal_cognify`` flag from ``kwargs`` with a warning.
+
+    The event pipeline it switched to is gone, so any value runs the default pipeline.
+    Unknown cognify kwargs are forwarded into the extraction LLM call, so the flag
+    must never travel on. The warning is also logged: when the caller runs
+    ``asyncio.run(cognify(...))`` directly, Python attributes the warning to asyncio and
+    the default filters hide it.
+    """
+    if "temporal_cognify" not in kwargs:
+        return
+    kwargs.pop("temporal_cognify")
+    warnings.warn(TEMPORAL_COGNIFY_DEPRECATED, DeprecationWarning, stacklevel=3)
+    logger.warning(TEMPORAL_COGNIFY_DEPRECATED)
 
 
 def _wrap_cognify_exception(error: BaseException, datasets) -> "Exception":
@@ -120,8 +143,6 @@ async def cognify(
     run_in_background: bool = False,
     incremental_loading: bool = True,
     custom_prompt: str | None = None,
-    temporal_cognify: bool = False,
-    functional_relationships: Collection[str] | None = None,
     data_per_batch: int = 20,
     llm_config: LLMConfig | None = None,
     embedding_config: EmbeddingConfig | None = None,
@@ -131,6 +152,7 @@ async def cognify(
     chunk_attachment: Literal["direct", "all"] | None = None,
     extractor: Literal["llm", "gliner_demo", "gliner"] | None = None,
     ontology_file_path: str | None = None,
+    summary_method: Literal["llm", "from_extraction"] | None = None,
     **kwargs,
 ):
     """
@@ -201,12 +223,6 @@ async def cognify(
                       If provided, this prompt will be used instead of the default prompts for
                       knowledge graph extraction. The prompt should guide the LLM on how to
                       extract entities and relationships from the text content.
-        functional_relationships: Relationship names that hold a single target per source
-                      (e.g. {"ceo_of"}). Once the graph is written, conflicting assertions
-                      of those relationships are resolved by recency: the most recent one
-                      stays current and the older ones are tagged as superseded — nothing
-                      is deleted. Off by default, because most cognee relationships are
-                      legitimately many-valued and collapsing them would corrupt the graph.
         dry_run: If True, return a stage-level estimate of LLM token usage and rough cost
                  without making LLM calls or writing graph results. The estimate covers all
                  data in the selected dataset(s); an incremental run may process fewer items.
@@ -221,8 +237,8 @@ async def cognify(
                  Applies to standard-routed items only, exactly like graph_model - DLT-source
                  manifests and code files run their own task lists and ignore both.
                  Orthogonal to metadata["transparent"], which is a property of the model.
-                 SDK-only: not exposed over the REST API. Raises with temporal_cognify=True
-                 or while connected to a remote instance; permitted with dry_run=True.
+                 SDK-only: not exposed over the REST API. Raises while connected to a
+                 remote instance; permitted with dry_run=True.
                  Cost of "all": index_graph_edges embeds one EdgeType per distinct edge text,
                  and contains edge text is "<chunk label> contains <node label>." - so a model
                  yielding N nodes per chunk means roughly N extra embedded rows per chunk.
@@ -235,8 +251,14 @@ async def cognify(
                  `gliner` extra) — a demo of cognee's enterprise GLiNER extraction, no LLM call for
                  extraction or summaries; embeddings still run. It produces the
                  generic KnowledgeGraph, so a custom graph_model raises. Raises with
-                 temporal_cognify=True, with dry_run=True, or while connected to a
-                 remote instance — none of those paths can honour it yet.
+                 dry_run=True or while connected to a remote instance — neither path
+                 can honour it yet.
+        summary_method: How the standard pipeline writes each chunk's summary. "llm"
+                 makes one LLM call per chunk; "from_extraction" joins the chunk's
+                 extracted types and relation texts with no LLM call, and a chunk
+                 with no relations gets no summary. The explicit argument wins over
+                 the SUMMARY_METHOD setting ("llm" by default). Raises while
+                 connected to a remote instance.
 
     Returns:
         Union[dict, list[PipelineRunInfo], DryRunEstimate]:
@@ -314,17 +336,23 @@ async def cognify(
         - LLM_RATE_LIMIT_ENABLED: Enable rate limiting (default: False)
         - LLM_RATE_LIMIT_REQUESTS: Max requests per interval (default: 60)
     """
+    # Removed options, handled before anything else because cognify() forwards
+    # unknown kwargs into the extraction LLM call, where a deleted parameter
+    # name would be silently swallowed.
+    if "functional_relationships" in kwargs:
+        raise TypeError(
+            "cognify() no longer accepts functional_relationships; "
+            "use improve(review_conflicts=True)"
+        )
+    drop_deprecated_temporal_cognify(kwargs)
+
     cognify_config = get_cognify_config()
     # The extractor decision is made once, here, before any branch. Branches
     # that cannot honour it raise below instead of silently running something
     # other than what the caller selected.
     resolved_extractor = resolve_extractor(extractor, cognify_config)
+    resolved_summary_method = resolve_summary_method(summary_method, cognify_config)
 
-    if temporal_cognify and resolved_extractor == GLINER_DEMO_EXTRACTOR:
-        raise ValueError(
-            "extractor='gliner_demo' is not supported with temporal_cognify=True; the "
-            "temporal pipeline extracts events with the LLM."
-        )
     if dry_run and resolved_extractor == GLINER_DEMO_EXTRACTOR:
         raise ValueError(
             "dry_run estimates the LLM extraction pipeline only; it has no cost model "
@@ -342,11 +370,6 @@ async def cognify(
             raise ValueError(
                 "chunk_attachment requires a custom DataPoint graph_model; "
                 f"{getattr(graph_model, '__name__', graph_model)!r} is not a DataPoint subclass."
-            )
-        if temporal_cognify:
-            raise ValueError(
-                "chunk_attachment is not supported with temporal_cognify=True; the temporal "
-                "pipeline does not attach extracted graphs to chunks."
             )
 
     # Route to remote instance if connected via serve()
@@ -370,6 +393,12 @@ async def cognify(
             raise ValueError(
                 "extractor is not supported while connected to a remote Cognee "
                 "instance. Call cognee.disconnect() to choose the extractor locally."
+            )
+        if summary_method is not None:
+            # Same as extractor: client.cognify() has no summary_method field.
+            raise ValueError(
+                "summary_method is not supported while connected to a remote Cognee "
+                "instance. Call cognee.disconnect() to choose the summary method locally."
             )
         return await client.cognify(
             datasets,
@@ -411,8 +440,6 @@ async def cognify(
         }
 
         if dry_run:
-            if temporal_cognify:
-                raise ValueError("dry_run is supported for the default cognify pipeline only.")
             from cognee.modules.cognify.estimator import estimate_cognify_dry_run
 
             return await estimate_cognify_dry_run(
@@ -422,16 +449,10 @@ async def cognify(
                 chunker=chunker,
                 chunk_size=await resolve_chunk_size(chunk_size),
                 custom_prompt=custom_prompt,
+                summary_method=resolved_summary_method,
             )
 
-        if temporal_cognify:
-            tasks = await get_temporal_tasks(
-                user=user,
-                chunker=chunker,
-                chunk_size=chunk_size,
-                chunks_per_batch=chunks_per_batch,
-            )
-        elif resolved_extractor == GLINER_DEMO_EXTRACTOR:
+        if resolved_extractor == GLINER_DEMO_EXTRACTOR:
             if graph_model is not KnowledgeGraph:
                 raise ValueError(
                     "extractor='gliner_demo' builds the generic KnowledgeGraph; "
@@ -453,10 +474,7 @@ async def cognify(
                 chunks_per_batch=chunks_per_batch,
                 config=config,
                 chunk_attachment=chunk_attachment,
-                embed_triplets=cognify_config.triplet_embedding,
                 track_provenance=cognify_config.provenance_tracking,
-                check_contradictions=cognify_config.contradiction_detection,
-                functional_relationships=functional_relationships,
             )
         else:
             tasks = await get_default_tasks(
@@ -467,8 +485,8 @@ async def cognify(
                 config=config,
                 custom_prompt=custom_prompt,
                 chunks_per_batch=chunks_per_batch,
-                functional_relationships=functional_relationships,
                 chunk_attachment=chunk_attachment,
+                summary_method=resolved_summary_method,
                 **kwargs,
             )
 
@@ -478,7 +496,7 @@ async def cognify(
         # Per-item routing: each data item resolves to the task list its kind
         # requires — DLT-source manifests run the deterministic DLT list, code
         # files run the enola code graph list, everything else runs the
-        # standard (or temporal) list. The lists are built once up front and
+        # standard list. The lists are built once up front and
         # the resolver is a sync closure over them (the distributed runner
         # materializes per-item task columns, so it needs concrete lists, not
         # an async factory). One run_pipeline call, one cognify_pipeline run
@@ -523,6 +541,11 @@ async def cognify(
                 llm_config=llm_config,
                 embedding_config=embedding_config,
                 data_cache=data_cache,
+                extras={"graph_extractor": resolved_extractor},
+                # Fold the vector fragments this run wrote, once per dataset,
+                # after the run is recorded complete; bounded per run, so a
+                # bloated store drains over several cognify runs.
+                after_run_completed=compact_vector_store,
             )
         except Exception as error:
             # Run-level failures (e.g. an AuthenticationError escaping a task)
@@ -570,13 +593,12 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     config: Config = None,
     custom_prompt: str | None = None,
     chunks_per_batch: int | None = None,
-    functional_relationships: Collection[str] | None = None,
     chunk_attachment: Literal["direct", "all"] | None = None,
+    summary_method: Literal["llm", "from_extraction"] | None = None,
     **kwargs,
 ) -> list[Task]:
     cognify_config = get_cognify_config()
-    embed_triplets = cognify_config.triplet_embedding
-    check_contradictions = cognify_config.contradiction_detection
+    summary_method = summary_method or cognify_config.summary_method
     track_provenance = cognify_config.provenance_tracking
 
     if chunks_per_batch is None:
@@ -606,13 +628,13 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             config=config,
             custom_prompt=custom_prompt,
             chunk_attachment=chunk_attachment,
+            summary_method=summary_method,
             task_config={"batch_size": chunks_per_batch},
             **kwargs,
         ),
         # LOAD: persist nodes, edges, and embeddings to graph/vector DBs
         Task(
             add_data_points,
-            embed_triplets=embed_triplets,
             task_config={"batch_size": chunks_per_batch},
             needs_llm=False,
         ),
@@ -621,22 +643,6 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     if track_provenance:
         tasks.append(
             Task(record_provenance, task_config={"batch_size": chunks_per_batch}, needs_llm=False)
-        )
-
-    if check_contradictions:
-        tasks.append(Task(detect_contradictions, task_config={"batch_size": chunks_per_batch}))
-
-    # OPTIONAL: for the relationships declared single-valued, tag the assertions a
-    # more recent one replaced. Runs last so the new facts are already stored and
-    # comparable with the ones they supersede; disabled by default.
-    if functional_relationships:
-        tasks.append(
-            Task(
-                resolve_temporal_contradictions,
-                functional_relationships=functional_relationships,
-                task_config={"batch_size": chunks_per_batch},
-                needs_llm=False,
-            )
         )
 
     return tasks
@@ -649,10 +655,7 @@ async def get_dlt_tasks(
 
     No LLM tasks: each manifest row becomes one DocumentChunk (vector-indexed
     by add_data_points) and the graph structure comes from the relational
-    schema via extract_dlt_source_edges. Deliberate omissions relative to
-    get_default_tasks: contradiction detection (an LLM pass; DLT rows are
-    deterministic relational data) and functional_relationships (a cognify()
-    parameter that only applies to LLM-extracted temporal facts).
+    schema via extract_dlt_source_edges.
     """
     from cognee.tasks.ingestion.extract_dlt_source_edges import extract_dlt_source_edges
     from cognee.tasks.ingestion.purge_stale_dlt_source_artifacts import (
@@ -681,7 +684,6 @@ async def get_dlt_tasks(
         # LOAD: persist row chunks and embeddings to graph/vector DBs
         Task(
             add_data_points,
-            embed_triplets=cognify_config.triplet_embedding,
             task_config={"batch_size": chunks_per_batch},
             needs_llm=False,
         ),
@@ -690,52 +692,3 @@ async def get_dlt_tasks(
         # source), so these Task objects are safe to share across datasets.
         Task(extract_dlt_source_edges, needs_llm=False),
     ]
-
-
-async def get_temporal_tasks(
-    user: User = None,
-    chunker=TextChunker,
-    chunk_size: int | None = None,
-    chunks_per_batch: int | None = None,
-) -> list[Task]:
-    """
-    Builds and returns a list of temporal processing tasks to be executed in sequence.
-
-    The pipeline includes:
-    1. Document classification.
-    2. Document chunking with a specified or default chunk size.
-    3. Event and timestamp extraction from chunks.
-    4. Knowledge graph extraction from events.
-    5. Batched insertion of data points.
-
-    Args:
-        user (User, optional): The user requesting task execution.
-        chunker (Callable, optional): A text chunking function/class to split documents. Defaults to TextChunker.
-        chunk_size (int, optional): Maximum token size per chunk. If not provided, uses system default.
-        chunks_per_batch (int, optional): Number of chunks to process in a single batch in Cognify
-
-    Returns:
-        list[Task]: A list of Task objects representing the temporal processing pipeline.
-    """
-    if chunks_per_batch is None:
-        configured = get_cognify_config().chunks_per_batch
-        chunks_per_batch = configured if configured is not None else 10
-
-    temporal_tasks = [
-        # EXTRACT: classify raw Data items into typed Document objects
-        Task(classify_documents),
-        # EXTRACT: split Documents into semantic text chunks
-        Task(
-            extract_chunks_from_documents,
-            max_chunk_size=await resolve_chunk_size(chunk_size),
-            chunker=chunker,
-        ),
-        # COGNIFY: extract temporal events and timestamps from chunks
-        Task(extract_events_and_timestamps, task_config={"batch_size": chunks_per_batch}),
-        # COGNIFY: build knowledge graph from extracted events
-        Task(extract_knowledge_graph_from_events),
-        # LOAD: persist nodes, edges, and embeddings to graph/vector DBs
-        Task(add_data_points, task_config={"batch_size": chunks_per_batch}),
-    ]
-
-    return temporal_tasks

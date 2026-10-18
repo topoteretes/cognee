@@ -15,9 +15,10 @@ together.
 | `GRAPH_COMPLETION_CONTEXT_EXTENSION` | `GraphCompletionContextExtensionRetriever` | `graph_completion_context_extension_retriever.py` | yes | Iteratively widens context |
 | `GRAPH_COMPLETION_DECOMPOSITION` | `GraphCompletionDecompositionRetriever` | `graph_completion_decomposition_retriever.py` | yes | Splits the query into sub-queries first |
 | `GRAPH_SUMMARY_COMPLETION` | `GraphSummaryCompletionRetriever` | `graph_summary_completion_retriever.py` | yes | Graph context built from summaries |
-| `TEMPORAL` | `TemporalRetriever` | `temporal_retriever.py` | yes | Time-bounded traversal over the temporal graph |
+| `TEMPORAL` | `TemporalHybridRetriever` | `temporal_hybrid_retriever.py` | yes | Hybrid retrieval reranked by time: the adapter returns the `Timestamp` nodes overlapping the window the LLM extracts from the question (`GraphDBInterface.get_timestamps_in_range`), the chunks and entities anchored to them move to the front of the candidate set, nothing is dropped; plain hybrid when the question carries no time or nothing overlaps (`temporal_hybrid/matching.py`) |
 | `RAG_COMPLETION` | `CompletionRetriever` | `completion_retriever.py` | yes | Chunk vector search + completion |
-| `TRIPLET_COMPLETION` | `TripletRetriever` | `triplet_retriever.py` | yes | Triplet-embedding search + completion |
+| `BROAD` | `BroadRetriever` | `broad_retriever.py` | yes | Questions over a whole dataset (counts, totals, lists, lookups): a small dataset is shown whole; a large one is loaded into SQLite (`broad_store.py`) and answered by one model-written query |
+| `TRIPLET_COMPLETION` | `GraphCompletionRetriever` | `graph_completion_retriever.py` | yes | Deprecated, removed in the next release: triplet embeddings were removed, so `search()` / `recall()` resolve it to `GRAPH_COMPLETION` with a `FutureWarning` (`DEPRECATED_SEARCH_TYPES`) |
 | `AGENTIC_COMPLETION` | `AgenticRetriever` | `agentic_retriever.py` | yes | Special-cased in the factory (not in the dict): tool loop with `skills`, `tools`, `max_iter` |
 | `CHUNKS` | `ChunksRetriever` | `chunks_retriever.py` | no | Vector search over `DocumentChunk_text` |
 | `CHUNKS_LEXICAL` | `BM25ChunksRetriever` | `bm25_retriever.py` | no | BM25 over chunks (`LexicalRetriever` subclass) |
@@ -25,7 +26,7 @@ together.
 | `SKILLS` | `SkillsRetriever` | `skills_retriever.py` | no | Metadata-only skill discovery; exactly one dataset |
 | `CODE` | `CodeRetriever` | `code_retriever.py` | no | Deterministic code-graph operations via `code_query` |
 | `CODING_RULES` | `CodingRulesRetriever` | `coding_rules_retriever.py` | no | Returns stored coding rules |
-| `CYPHER` | `CypherSearchRetriever` | `cypher_search_retriever.py` | no | Raw Cypher; enabled by default, disabled by `ALLOW_CYPHER_QUERY=false` |
+| `CYPHER` | `CypherSearchRetriever` | `cypher_search_retriever.py` | no | Raw Cypher; disabled by default, enabled by `ALLOW_CYPHER_QUERY=true` |
 | `NATURAL_LANGUAGE` | `NaturalLanguageRetriever` | `natural_language_retriever.py` | yes | LLM writes Cypher, then runs it; same `ALLOW_CYPHER_QUERY` gate |
 | `GRAPH_REPORT` | `GraphReportRetriever` | `graph_report_retriever.py` | partly | Hubs, cross-node-set edges, provenance split, LLM-suggested questions |
 | `FEELING_LUCKY` | — | `search/operations/select_search_type.py` | — | An LLM picks one of the types above, then that retriever runs |

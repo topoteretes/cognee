@@ -17,8 +17,8 @@ from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
 )
 from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
-from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
-from cognee.modules.search.exceptions import UnsupportedSearchTypeError
+from cognee.modules.retrieval.temporal_hybrid_retriever import TemporalHybridRetriever
+from cognee.modules.search.exceptions import SearchTypeDisabledError, UnsupportedSearchTypeError
 from cognee.modules.search.types import SearchType
 
 
@@ -65,6 +65,29 @@ async def test_disallowed_cypher_search_types_raise(monkeypatch):
         await mod.get_search_type_retriever_instance(
             SearchType.NATURAL_LANGUAGE, query_text="Find nodes"
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("search_type", [SearchType.CYPHER, SearchType.NATURAL_LANGUAGE])
+async def test_cypher_search_types_are_disabled_by_default(monkeypatch, search_type):
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+
+    monkeypatch.delenv("ALLOW_CYPHER_QUERY", raising=False)
+
+    with pytest.raises(SearchTypeDisabledError, match="ALLOW_CYPHER_QUERY=true") as raised:
+        await mod.get_search_type_retriever_instance(search_type, query_text="q")
+
+    error = raised.value
+    # Existing callers that catch UnsupportedSearchTypeError still catch it.
+    assert isinstance(error, UnsupportedSearchTypeError)
+    assert error.status_code == 403
+    assert error.name == "SearchTypeDisabledError"
+    assert error.message.startswith(f"{search_type.value} search is disabled by default")
+    assert "Unsupported search type" not in error.message
+    # The fix travels as remediation, so REST answers carry it in a `remediation` key.
+    assert "ALLOW_CYPHER_QUERY=true" in error.remediation
+    # The risk details stay in the server log, not in the caller-facing message.
+    assert "remote code execution" not in error.message
 
 
 @pytest.mark.asyncio
@@ -174,25 +197,6 @@ async def test_rag_completion_retriever_receives_nodeset_filter_arguments():
     )
 
     assert isinstance(retriever_instance, CompletionRetriever)
-    assert retriever_instance.top_k == 30
-    assert retriever_instance.node_name == ["KEN", "src_type:figure"]
-    assert retriever_instance.node_name_filter_operator == "AND"
-
-
-@pytest.mark.asyncio
-async def test_triplet_completion_retriever_receives_nodeset_filter_arguments():
-    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
-    from cognee.modules.retrieval.triplet_retriever import TripletRetriever
-
-    retriever_instance = await mod.get_search_type_retriever_instance(
-        SearchType.TRIPLET_COMPLETION,
-        query_text="land cover",
-        top_k=30,
-        node_name=["KEN", "src_type:figure"],
-        node_name_filter_operator="AND",
-    )
-
-    assert isinstance(retriever_instance, TripletRetriever)
     assert retriever_instance.top_k == 30
     assert retriever_instance.node_name == ["KEN", "src_type:figure"]
     assert retriever_instance.node_name_filter_operator == "AND"
@@ -429,7 +433,6 @@ async def test_coding_rules_uses_node_name_as_rules_nodeset_name():
             GraphCompletionContextExtensionRetriever,
         ),
         (SearchType.GRAPH_SUMMARY_COMPLETION, GraphSummaryCompletionRetriever),
-        (SearchType.TEMPORAL, TemporalRetriever),
     ],
 )
 async def test_graph_search_retrievers_receive_feedback_influence(search_type, expected_class):
@@ -455,7 +458,6 @@ async def test_graph_search_retrievers_default_triplet_penalty_is_updated():
         SearchType.GRAPH_COMPLETION_COT,
         SearchType.GRAPH_COMPLETION_CONTEXT_EXTENSION,
         SearchType.GRAPH_SUMMARY_COMPLETION,
-        SearchType.TEMPORAL,
     ]:
         retriever_instance = await mod.get_search_type_retriever_instance(
             search_type, query_text="q"
@@ -488,3 +490,49 @@ async def test_graph_completion_decomposition_defaults_to_answer_per_subquery():
 
     assert isinstance(retriever_instance, GraphCompletionDecompositionRetriever)
     assert retriever_instance.decomposition_mode is DecompositionMode.ANSWER_PER_SUBQUERY
+
+
+@pytest.mark.asyncio
+async def test_temporal_forwards_include_references_like_hybrid():
+    """SDK-828: TEMPORAL is a HybridRetriever; evidence must reach it the same way."""
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+
+    retriever_instance = await mod.get_search_type_retriever_instance(
+        SearchType.TEMPORAL, query_text="q", top_k=3, include_references=True
+    )
+
+    assert isinstance(retriever_instance, TemporalHybridRetriever)
+    assert retriever_instance.include_references is True
+    assert retriever_instance.top_k == 3
+    assert retriever_instance.chunks_top_k == 12  # candidate budget: 4x top_k unless configured
+
+
+@pytest.mark.asyncio
+async def test_temporal_resolves_a_null_top_k_instead_of_crashing():
+    """The REST models accept ``top_k: null``; TEMPORAL must default it like HYBRID does."""
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+
+    retriever_instance = await mod.get_search_type_retriever_instance(
+        SearchType.TEMPORAL, query_text="q", top_k=None
+    )
+
+    assert isinstance(retriever_instance, TemporalHybridRetriever)
+    assert retriever_instance.top_k == 5
+    assert retriever_instance.chunks_top_k == 20
+
+
+@pytest.mark.asyncio
+async def test_temporal_forwards_external_metadata_keys_like_hybrid():
+    """Adding a date to a question must not strip the source metadata the caller asked for."""
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+
+    config = {"include_external_metadata": True, "external_metadata_keys": ["source_id"]}
+    temporal = await mod.get_search_type_retriever_instance(
+        SearchType.TEMPORAL, query_text="q", top_k=3, retriever_specific_config=config
+    )
+    hybrid = await mod.get_search_type_retriever_instance(
+        SearchType.HYBRID_COMPLETION, query_text="q", top_k=3, retriever_specific_config=config
+    )
+
+    assert temporal.include_external_metadata is True
+    assert temporal.external_metadata_keys == hybrid.external_metadata_keys == ["source_id"]

@@ -1,7 +1,7 @@
 from uuid import UUID
 
-from cognee import memify
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
+from cognee.modules.memify import run_memify_tasks
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.models import User
 from cognee.tasks.memify.global_context_index import (
@@ -68,7 +68,7 @@ async def global_context_index_pipeline(
         min_overlap=min_overlap,
     )
 
-    return await memify(
+    return await run_memify_tasks(
         extraction_tasks=extraction_tasks,
         enrichment_tasks=enrichment_tasks,
         dataset=dataset,
