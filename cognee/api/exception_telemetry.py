@@ -20,10 +20,7 @@ TEMPLATED route — never the resolved path, whose ids identify data.
 """
 
 from cognee import __version__ as cognee_version
-from cognee.shared.logging_utils import get_logger
-from cognee.shared.utils import send_telemetry
-
-logger = get_logger()
+from cognee.shared.utils import send_telemetry, telemetry_guard
 
 API_EXCEPTION_EVENT = "API Exception Raised"
 
@@ -75,7 +72,7 @@ def send_api_exception_telemetry(
     latency to the error path. The broad except is the belt to that braces: a
     telemetry defect must not turn a handled 404 into an unhandled crash.
     """
-    try:
+    with telemetry_guard():
         properties = {
             "endpoint": _endpoint(request),
             "exception_type": type(exc).__name__,
@@ -91,5 +88,3 @@ def send_api_exception_telemetry(
             properties["improperly_defined_exception"] = True
 
         send_telemetry(API_EXCEPTION_EVENT, None, additional_properties=properties)
-    except Exception:
-        logger.debug("API exception telemetry skipped", exc_info=True)

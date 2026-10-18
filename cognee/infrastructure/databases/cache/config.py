@@ -11,9 +11,11 @@ class CacheConfig(BaseSettings):
 
     Attributes:
     - cache_backend: Session cache backend; one of "redis", "fs", "tapes", "headroom", "sqlite",
-      "postgres" (default "sqlite"). "sqlite" and "postgres" use the SQL cache adapter, differing
-      only in default connection URL resolution. "tapes" and "headroom" keep the filesystem
-      cache as the source of truth and mirror each QA turn to an external memory system.
+      "turso", "postgres" (default "sqlite"). "sqlite", "turso" and "postgres" use the SQL cache
+      adapter, differing only in default connection URL resolution and driver: "turso" is the
+      same cache.db layout on the Turso rewrite engine (pyturso, ``pip install cognee"[turso]"``),
+      honouring the TURSO_* settings. "tapes" and "headroom" keep the filesystem cache as the
+      source of truth and mirror each QA turn to an external memory system.
     - headroom_db_path: SQLite file for Headroom's memory store (env HEADROOM_DB_PATH). Unset
       uses Headroom's own workspace store (~/.headroom/memory.db, or HEADROOM_WORKSPACE_DIR),
       i.e. the one shared with every agent Headroom wraps.
@@ -27,9 +29,9 @@ class CacheConfig(BaseSettings):
       "onnx"/"local" MiniLM; text-embedding-3-small is 1536). Must match the embedder.
     - headroom_agent_name: Tag stored on every mirrored memory's metadata (default "cognee").
     - cache_db_url: SQLAlchemy async URL for the SQL cache backends (env CACHE_DB_URL, e.g.
-      postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db). When unset, "sqlite" uses a
-      cache.db file next to the relational SQLite database and "postgres" falls back to the
-      relational DB_* settings.
+      postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db). When unset, "sqlite" and
+      "turso" use a cache.db file next to the relational database and "postgres" falls back
+      to the relational DB_* settings.
     - cache_purge_interval_seconds: Minimum interval (in seconds) between global TTL purge
       sweeps in the SQL cache backends (default: 900).
     - shared_ladybug_lock: Shared Ladybug lock logic on/off.
@@ -61,7 +63,9 @@ class CacheConfig(BaseSettings):
       its context updates reach this turn's answer -- at the cost of two calls in a row.
     """
 
-    cache_backend: Literal["redis", "fs", "tapes", "headroom", "sqlite", "postgres"] = "sqlite"
+    cache_backend: Literal["redis", "fs", "tapes", "headroom", "sqlite", "turso", "postgres"] = (
+        "sqlite"
+    )
     cache_db_url: str | None = None
     cache_purge_interval_seconds: int = 900
     caching: bool = True

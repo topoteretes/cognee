@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from cognee.modules.data.models import Data, Dataset
-from cognee.modules.integrations.google import ingestion
+from cognee.modules.integrations import ingestion
 
 
 @pytest.mark.asyncio

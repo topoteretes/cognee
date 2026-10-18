@@ -5,7 +5,8 @@ deterministically extracts an architectural graph from a codebase.
 `enola --generate <repo>` writes a `.enola/` directory whose contract
 artifacts (documented under docs/schema/ upstream, versioned by the receipt's
 ``format_version``) are `facts.jsonl` (one fact per line), `insights.json`
-(explainer findings with evidence) and `receipt.json` (provenance, counts and
+(explainer findings with evidence), `flows.json` (the ways into the program,
+ranked by what each reaches) and `receipt.json` (provenance, counts and
 extraction quality). Everything else in the directory is internal.
 """
 
@@ -187,7 +188,8 @@ def parse_enola_snapshot(
     """Parse facts.jsonl (streamed line by line) and receipt.json from a snapshot dir.
 
     Blank and corrupt lines are skipped with a warning counter. A missing or
-    unparseable receipt.json is not fatal. Returns (facts, receipt).
+    unparseable receipt.json is not fatal. Findings from insights.json and
+    flows from flows.json follow as synthesized facts. Returns (facts, receipt).
     """
     snapshot_dir = Path(snapshot_dir)
     facts_path = snapshot_dir / "facts.jsonl"
@@ -230,14 +232,17 @@ def parse_enola_snapshot(
 
     validate_receipt(receipt, snapshot_dir, fact_count=len(facts))
 
+    repos = {fact["repo"] for fact in facts if isinstance(fact.get("repo"), str) and fact["repo"]}
     insight_facts = _synthesize_insight_facts(snapshot_dir)
-    if insight_facts:
-        facts = facts + insight_facts
+    flow_facts = _synthesize_flow_facts(snapshot_dir, repos, receipt)
+    if insight_facts or flow_facts:
+        facts = facts + insight_facts + flow_facts
 
     logger.info(
-        "Parsed %d fact(s) (%d from insights.json) from %s",
+        "Parsed %d fact(s) (%d from insights.json, %d from flows.json) from %s",
         len(facts),
         len(insight_facts),
+        len(flow_facts),
         facts_path,
     )
     return facts, receipt
@@ -404,6 +409,171 @@ def _synthesize_insight_facts(snapshot_dir: Path) -> list:
     return facts
 
 
+def _synthesize_flow_facts(snapshot_dir: Path, repos: set[str], receipt: dict | None) -> list:
+    """Convert flows.json entry-point flows into fact dicts.
+
+    enola's flows renderer ranks the ways into the program (a served route's
+    handler, a ``main``, a symbol a framework invokes) by what the calls from
+    each reach. Each flow becomes a synthetic fact of kind "flow" whose
+    relations point at its entry (``flow_entry``), its stages
+    (``flow_stage``) and the routes it serves (``flow_route``) — through each
+    ref's writer-resolved fact ``id`` when present, else by name — so the
+    ordinary fact-mapping and edge-resolution paths handle it. The fact keeps
+    the flow's own id and takes the entry's file and line.
+
+    A multi-repo run writes every repository's flows into every output
+    directory, so only flows of ``repos`` (the repo labels facts.jsonl
+    carries) are kept; when facts.jsonl carries no labels, every flow is kept
+    and, like the facts, falls back to the snapshot's repository. A missing
+    flows.json is not an error (older snapshots lack it, and a configuration
+    without the flows renderer writes none).
+
+    Only a flows.json the receipt vouches for is read (_receipt_vouches_for_flows):
+    an enola run without the flows renderer leaves an earlier run's file in
+    place, and its flows would describe other facts than these.
+    """
+    flows_path = snapshot_dir / "flows.json"
+    if not flows_path.is_file():
+        return []
+    try:
+        content = flows_path.read_bytes()
+    except OSError:
+        logger.warning("Could not parse flows.json in %s; ignoring it.", snapshot_dir)
+        return []
+    if not _receipt_vouches_for_flows(receipt, content):
+        logger.info(
+            "Ignoring flows.json in %s: receipt.json does not list these bytes among this "
+            "run's outputs, so another enola run wrote them and their flows may not match "
+            "these facts.",
+            snapshot_dir,
+        )
+        return []
+    try:
+        document = json.loads(content.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        logger.warning("Could not parse flows.json in %s; ignoring it.", snapshot_dir)
+        return []
+    flows = document.get("flows") if isinstance(document, dict) else None
+    if not isinstance(flows, list):
+        return []
+
+    facts = []
+    for flow in flows:
+        if not isinstance(flow, dict):
+            continue
+        name = flow.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+        repo = flow.get("repo") if isinstance(flow.get("repo"), str) else None
+        if repos and repo not in repos:
+            continue
+        entry = flow.get("entry") if isinstance(flow.get("entry"), dict) else {}
+        props = {
+            key: flow[key]
+            for key in (
+                "mechanism",
+                "rank",
+                "summary",
+                "metrics",
+                "modules",
+                "side",
+                "routes",
+                "entry",
+                "stages",
+                "same_reach_as",
+                "nested_in",
+            )
+            if flow.get(key) is not None and (key != "side" or flow[key] is True)
+        }
+        relations = []
+        for relation_kind, refs in (
+            ("flow_entry", [entry]),
+            ("flow_stage", flow.get("stages")),
+            ("flow_route", flow.get("routes")),
+        ):
+            for ref in refs if isinstance(refs, list) else []:
+                if not isinstance(ref, dict):
+                    continue
+                target = ref.get("name")
+                if isinstance(target, str) and target:
+                    relation = {"kind": relation_kind, "target": target}
+                    if is_enola_id(ref.get("id")):
+                        relation["target_id"] = ref["id"]
+                    relations.append(relation)
+        fact = {"kind": "flow", "name": name, "props": props, "relations": relations}
+        if repos:
+            # Always one of the facts' own labels here. A label facts.jsonl
+            # does not carry would become the fallback repository of every
+            # unlabelled fact (the first labelled fact decides it).
+            fact["repo"] = repo
+        if entry.get("file") is not None:
+            fact["file"] = entry["file"]
+        if entry.get("line") is not None:
+            fact["line"] = entry["line"]
+        if is_enola_id(flow.get("id")):
+            fact["id"] = flow["id"]
+        facts.append(fact)
+    _disambiguate_flow_names(facts)
+    return facts
+
+
+def _disambiguate_flow_names(facts: list[dict]) -> None:
+    """Give flows that share a name within a repo distinct names, in place.
+
+    A node's identity is (repo, kind, name), and a route flow is named after
+    its route: two services serving ``GET /health`` write two flows with
+    different ids under one name, which would collapse into one node carrying
+    both flows' edges. Each such flow is named after its entry symbol as well,
+    then its enola id if that still collides. A flow with a unique name keeps
+    it, so its node id does not change; looking up the shared name now
+    reports both flows as ambiguous instead of merging them.
+    """
+
+    def _groups() -> dict[tuple[str | None, str], list[dict]]:
+        groups: dict[tuple[str | None, str], list[dict]] = {}
+        for fact in facts:
+            groups.setdefault((fact.get("repo"), fact["name"]), []).append(fact)
+        return groups
+
+    def _entry_name(fact: dict) -> str | None:
+        entry = fact["props"].get("entry")
+        name = entry.get("name") if isinstance(entry, dict) else None
+        return name if isinstance(name, str) and name else None
+
+    for qualifier in (_entry_name, lambda fact: fact.get("id")):
+        for (_repo, name), group in _groups().items():
+            if len(group) < 2:
+                continue
+            for fact in group:
+                tag = qualifier(fact)
+                if tag and not fact["name"].endswith(f"({tag})"):
+                    fact["name"] = f"{name} ({tag})"
+    # Still shared (no entry name and no id to tell them apart): number them in
+    # flows.json order, which enola ranks deterministically.
+    for (_repo, name), group in _groups().items():
+        if len(group) > 1:
+            for index, fact in enumerate(group, start=1):
+                fact["name"] = f"{name} #{index}"
+
+
+def _receipt_vouches_for_flows(receipt: dict | None, content: bytes) -> bool:
+    """Whether receipt.json says this run wrote flows.json, with these bytes.
+
+    enola hashes every artifact it writes into ``output_hashes``, so a file it
+    did not write this run is missing there or hashes differently. A receipt
+    without output hashes vouches through its ``renderers``. Without a receipt
+    there is nothing to check against (historical writers wrote neither a
+    receipt nor flows.json); the file is read.
+    """
+    if not isinstance(receipt, dict):
+        return True
+    output_hashes = receipt.get("output_hashes")
+    if isinstance(output_hashes, dict):
+        return output_hashes.get("flows.json") == ("sha256:" + hashlib.sha256(content).hexdigest())
+    renderers = receipt.get("renderers")
+    return isinstance(renderers, list) and "flows" in renderers
+
+
 def snapshot_identity(snapshot_dir: str | Path, receipt: dict | None) -> str | None:
     """Stable identity of a snapshot's content, used for incremental skip.
 
@@ -412,6 +582,11 @@ def snapshot_identity(snapshot_dir: str | Path, receipt: dict | None) -> str | N
     back to hashing facts.jsonl directly when the receipt is missing. Returns
     None when neither is available; callers must then treat the snapshot as
     changed (load fully, never skip).
+
+    flows.json needs no part in it: only a flows.json the receipt vouches for
+    is read, and the snapshot_id also covers the enola version and the
+    effective configuration (its renderers included), which decide whether
+    and how flows are written.
     """
     if receipt:
         snapshot_id = receipt.get("snapshot_id")
