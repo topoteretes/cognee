@@ -39,6 +39,34 @@ def _reset_agent_mode():
 
 
 @pytest.fixture(autouse=True)
+def _no_real_watchdog_timers(monkeypatch):
+    """Never arm a real 60s watchdog timer from a test.
+
+    ``_watchdog()`` re-arms itself with a ``threading.Timer`` and ``register_agent``
+    starts one too. A test that calls either leaks that timer past its own
+    ``_shutdown_server`` patch; if the pytest process is still alive a minute later
+    (slow teardown, telemetry flush in CI) the timer runs the real watchdog, finds no
+    agents and SIGTERMs the process after every test has passed (exit 143). Replace
+    the module's ``threading`` with a stand-in whose ``Timer`` is inert; the real
+    module's ``Lock`` is kept for ``_lock``.
+    """
+    import threading
+    from types import SimpleNamespace
+
+    timers: list[MagicMock] = []
+
+    def inert_timer(interval, function, *args, **kwargs):
+        timer = MagicMock(name=f"Timer({interval}, {getattr(function, '__name__', function)})")
+        timers.append(timer)
+        return timer
+
+    monkeypatch.setattr(
+        agent_mode, "threading", SimpleNamespace(Timer=inert_timer, Lock=threading.Lock)
+    )
+    yield timers
+
+
+@pytest.fixture(autouse=True)
 def _patch_persistence(monkeypatch):
     async def noop_persist(_user_id, _connection):
         pass
