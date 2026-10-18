@@ -102,17 +102,20 @@ decryptable by the key material that wrapped them.
 ```python
 from cognee.infrastructure.files.encryption import DataKey, register_file_key_provider
 
+
 class VaultTransitProvider:
     name = "vault"
 
-    def __init__(self, config):  # the FileEncryptionConfig; FILE_ENCRYPTION_* extras ride on it
+    def __init__(self, config):
+        # config is the FileEncryptionConfig; FILE_ENCRYPTION_* extras ride on it
         ...
 
     def generate_data_key(self) -> DataKey:
-        ...  # DataKey(plaintext=32 bytes, wrapped=bytes, key_id=str)
-
-    def unwrap_data_key(self, wrapped: bytes, key_id: str) -> bytes:
+        # DataKey(plaintext=32 bytes, wrapped=bytes, key_id=str)
         ...
+
+    def unwrap_data_key(self, wrapped: bytes, key_id: str) -> bytes: ...
+
 
 register_file_key_provider("vault", VaultTransitProvider)
 ```

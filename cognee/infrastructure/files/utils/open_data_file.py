@@ -15,6 +15,12 @@ from cognee.infrastructure.files.utils.local_path_safety import resolve_local_pa
 async def open_data_file(
     file_path: str, mode: str = "rb", encoding: str | None = None, **kwargs
 ) -> AsyncGenerator[FileBufferedReader]:
+    # The backends forward extra keyword arguments to the underlying open();
+    # the Storage protocol itself does not name `encoding`, so it rides along
+    # with the rest only when the caller set it.
+    if encoding is not None:
+        kwargs["encoding"] = encoding
+
     # Check if this is a file URI BEFORE normalizing (which corrupts URIs)
     if file_path.startswith("file://"):
         # Now split the actual filesystem path. Local reads go through the same
@@ -31,7 +37,7 @@ async def open_data_file(
         # a plain user path, or a plaintext object, comes back unchanged.
         file_storage = wrap_storage_if_encrypted(LocalFileStorage(file_dir_path))
 
-        async with file_storage.open(file_name, mode=mode, encoding=encoding, **kwargs) as file:
+        async with file_storage.open(file_name, mode=mode, **kwargs) as file:
             yield file
 
     elif file_path.startswith("s3://"):
@@ -70,5 +76,5 @@ async def open_data_file(
         # a plain user path, or a plaintext object, comes back unchanged.
         file_storage = wrap_storage_if_encrypted(LocalFileStorage(file_dir_path))
 
-        async with file_storage.open(file_name, mode=mode, encoding=encoding, **kwargs) as file:
+        async with file_storage.open(file_name, mode=mode, **kwargs) as file:
             yield file

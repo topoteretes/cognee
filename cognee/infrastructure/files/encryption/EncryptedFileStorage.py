@@ -2,7 +2,7 @@ import io
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from tempfile import SpooledTemporaryFile
-from typing import BinaryIO
+from typing import BinaryIO, cast
 
 from cognee.infrastructure.files.storage.storage import Storage
 from cognee.infrastructure.utils.run_async import run_async
@@ -42,7 +42,7 @@ class EncryptedFileStorage(Storage):
 
     # -- writing ----------------------------------------------------------
 
-    def _seal(self, source: BinaryIO) -> SpooledTemporaryFile:
+    def _seal(self, source: BinaryIO) -> BinaryIO:
         data_key = self.provider.generate_data_key()
         header = EnvelopeHeader.build(
             chunk_size=self.chunk_size,
@@ -50,8 +50,13 @@ class EncryptedFileStorage(Storage):
             key_id=data_key.key_id,
             wrapped_key=data_key.wrapped,
         )
-        spool = SpooledTemporaryFile(  # noqa: SIM115 - handed to the caller, closed in store()
-            max_size=SPOOL_MAX_MEMORY, mode="w+b"
+        # SpooledTemporaryFile in "w+b" mode is a binary stream, but typeshed
+        # types it as IO[bytes] rather than BinaryIO; the cast records that.
+        spool = cast(
+            BinaryIO,
+            SpooledTemporaryFile(  # noqa: SIM115 - handed to the caller, closed in store()
+                max_size=SPOOL_MAX_MEMORY, mode="w+b"
+            ),
         )
         try:
             encrypt_stream(source, spool, data_key.plaintext, header)
