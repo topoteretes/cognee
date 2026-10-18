@@ -562,7 +562,9 @@ async def search_sources(
                 query, source_hint, dataset_ids, include_connections, top_k
             )
             return [types.TextContent(type="text", text=json.dumps(result, cls=JSONEncoder))]
-        except Exception:  # noqa: BLE001 — never expose server or provider error details
+        except Exception:
+            # Log server-side only; never expose server or provider error details.
+            logger.exception("Source search failed")
             return [
                 types.TextContent(
                     type="text",

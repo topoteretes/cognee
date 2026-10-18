@@ -34,8 +34,15 @@ class SearchSources(RouteSources):
     top_k: int = Field(default=10, ge=1, le=100)
 
 
-def get_source_routes() -> APIRouter:
-    router = APIRouter()
+def get_source_routes(router: APIRouter | None = None) -> APIRouter:
+    """Register the source routes on ``router`` (a fresh one when omitted).
+
+    Registering directly, rather than via ``include_router``, keeps every
+    route a flat ``APIRoute`` on the datasets router: FastAPI 0.141+ records an
+    included router as a nested ``_IncludedRouter`` entry in ``.routes``.
+    """
+    if router is None:
+        router = APIRouter()
 
     async def guarded(operation):
         try:

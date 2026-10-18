@@ -157,7 +157,9 @@ def get_datasets_router() -> APIRouter:
     from .source_routes import get_source_routes
 
     router = APIRouter()
-    router.include_router(get_source_routes())
+    # Registered first so the static /source-* paths precede any parameterised
+    # dataset routes, and directly on this router so they stay flat APIRoutes.
+    get_source_routes(router)
 
     @router.get("", response_model=list[DatasetDTO])
     async def get_datasets(user: User = Depends(get_authenticated_user)):

@@ -17,6 +17,9 @@ from cognee.modules.data.source_catalog import route_sources, source_document
 from cognee.modules.search.types import SearchType
 from cognee.modules.tools.errors import ToolConnectionNotFoundError
 from cognee.modules.tools.text_to_sql import run_text_to_sql
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 
 async def _document_evidence(user, target, query, top_k, seen):
@@ -146,9 +149,11 @@ async def search_sources(
             except (PermissionError, ToolConnectionNotFoundError):
                 # Authorization failure aborts; never widen or retry as owner.
                 raise PermissionError("Selected source is unavailable.") from None
-            except Exception:  # noqa: BLE001 — sanitize errors at the retrieval boundary
-                # Provider errors can contain DSNs/SQL parameters. Return a
-                # safe failure marker, never disguise a failed query as empty.
+            except Exception:
+                # Provider errors can contain DSNs/SQL parameters. Log them
+                # server-side only and return a safe failure marker, never
+                # disguise a failed query as empty.
+                logger.exception("Source retrieval failed for source %s", target["id"])
                 errors.append(
                     {
                         "source_id": target["id"],
