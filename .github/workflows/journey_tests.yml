@@ -115,7 +115,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
 
@@ -143,12 +143,13 @@ jobs:
           - "neo4j,neptune,postgres,postgres-binary,turso,redis,tracing,aws"
           - "anthropic,azure,groq,mistral,ollama,posthog,debug,notebook"
           - "fastembed,huggingface,codegraph,rapidocr"
-          - "docs,langchain,llama-index,graphiti"
-          - "docling,docling-full"
-          - "dlt,gmail,scraping,evals,deepeval,baml,dev"
+          - "docs,langchain,llama-index"
+          # The torch-based extras share one job so the wheel is fetched once.
+          - "docling,docling-full,gliner"
+          - "dlt,gmail,google-drive,google-calendar,scraping,evals,deepeval,baml,dev"
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
 

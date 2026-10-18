@@ -75,7 +75,7 @@ COGNEE_MODULES_BY_EXTRA: dict[str, list[str]] = {
     "aws": ["cognee.infrastructure.files.storage.S3FileStorage"],
     "redis": ["cognee.infrastructure.databases.cache.redis.RedisAdapter"],
     "tracing": ["cognee.modules.observability.metrics"],
-    "graphiti": ["cognee.tasks.temporal_awareness.build_graph_with_temporal_awareness"],
+    "gliner": ["cognee.tasks.graph.gliner_demo"],
     "llama-index": ["cognee.tasks.ingestion.transform_data"],
     "scraping": ["cognee.tasks.web_scraper.default_url_crawler"],
     "deepeval": ["cognee.eval_framework.evaluation.deep_eval_adapter"],
@@ -211,11 +211,12 @@ def wheel(tmp_path_factory) -> Path:
 
 
 def _extra_ids() -> list[str]:
-    # Evaluated at collection so the parametrize ids are the extra names.
-    try:
-        return _selected_extras()
-    except Exception:
+    # Evaluated at collection so the parametrize ids are the extra names. An
+    # unknown name in COGNEE_EXTRAS raises here and fails collection on purpose:
+    # a matrix row naming a removed extra must not pass with zero tests.
+    if tomllib is None:
         return []
+    return _selected_extras()
 
 
 @_INSTALL_SMOKE

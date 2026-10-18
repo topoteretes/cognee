@@ -22,9 +22,12 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+import logging
 import re
 import sys
 import traceback
+
+logger = logging.getLogger("extras_probe")
 
 # Top-level names some dists expose that are not meant to be imported directly.
 _JUNK_TOP_LEVELS = {"tests", "test", "docs", "examples", "example", "scripts", "benchmarks", "bin"}
@@ -76,7 +79,10 @@ def main() -> int:
         try:
             importlib.import_module(name)
             report["imported"].append(name)
-        except BaseException as error:  # noqa: BLE001 - report everything, even SystemExit
+        except BaseException as error:
+            # Report everything, even SystemExit: an import that exits the
+            # interpreter is exactly the failure this probe exists to catch.
+            logger.exception("import of %s failed", name)
             report["failed"][name] = {
                 "bucket": bucket,
                 "error": f"{type(error).__name__}: {error}",

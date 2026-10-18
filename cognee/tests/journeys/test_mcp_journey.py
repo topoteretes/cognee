@@ -18,6 +18,7 @@ In mock mode the server subprocess gets the deterministic AI stand-ins through a
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import socket
 import subprocess
@@ -117,16 +118,15 @@ def _server_env(work: Path) -> dict:
 
 def _dataset_names(env: dict) -> list[str]:
     """Dataset names as a fresh process on the same roots sees them."""
+    script = (
+        "import asyncio, json, cognee\n"
+        "async def main():\n"
+        "    rows = await cognee.datasets.list_datasets()\n"
+        "    print('DATASETS=' + json.dumps([d.name for d in rows]))\n"
+        "asyncio.run(main())"
+    )
     probe = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            "import asyncio, json, cognee\n"
-            "async def main():\n"
-            "    rows = await cognee.datasets.list_datasets()\n"
-            "    print('DATASETS=' + json.dumps([d.name for d in rows]))\n"
-            "asyncio.run(main())",
-        ],
+        [sys.executable, "-c", script],
         env=env,
         cwd=str(REPO_ROOT),
         capture_output=True,
@@ -135,8 +135,6 @@ def _dataset_names(env: dict) -> list[str]:
     )
     for line in probe.stdout.splitlines():
         if line.startswith("DATASETS="):
-            import json
-
             return json.loads(line[len("DATASETS=") :])
     raise AssertionError(f"dataset probe failed:\n{probe.stdout[-1000:]}\n{probe.stderr[-2000:]}")
 
@@ -297,34 +295,39 @@ async def test_http_client_reads_state_written_over_stdio(work):
 
             deadline = time.monotonic() + 120
             healthy = False
-            while time.monotonic() < deadline and proc.poll() is None:
-                try:
-                    if httpx.get(f"http://127.0.0.1:{port}/health", timeout=3).status_code == 200:
+            async with httpx.AsyncClient(timeout=3) as client:
+                while time.monotonic() < deadline and proc.poll() is None:
+                    try:
+                        response = await client.get(f"http://127.0.0.1:{port}/health")
+                    except httpx.HTTPError:
+                        # Not listening yet; keep polling until the deadline.
+                        response = None
+                    if response is not None and response.status_code == 200:
                         healthy = True
                         break
-                except Exception:
-                    pass
-                await asyncio.sleep(1)
+                    await asyncio.sleep(1)
             assert healthy, (
                 f"MCP HTTP server did not become healthy:\n{(work / 'http.log').read_text()[-3000:]}"
             )
 
-            async with _http_client(f"http://127.0.0.1:{port}/mcp") as (read, write, *_):
-                async with ClientSession(read, write) as session:
-                    await asyncio.wait_for(session.initialize(), timeout=60)
-                    tools = {tool.name for tool in (await session.list_tools()).tools}
-                    assert {"remember", "recall"} <= tools, sorted(tools)
-                    recalled = await session.call_tool(
-                        "recall",
-                        arguments={
-                            "query": "Who staffed the Ashcombe signal box?",
-                            "session_id": session_id,
-                        },
-                    )
-                    assert not recalled.isError, _text(recalled)
-                    assert "prost" in _text(recalled).lower(), (
-                        f"fact written over stdio was not readable over HTTP: {_text(recalled)[:400]}"
-                    )
+            async with (
+                _http_client(f"http://127.0.0.1:{port}/mcp") as (read, write, *_),
+                ClientSession(read, write) as session,
+            ):
+                await asyncio.wait_for(session.initialize(), timeout=60)
+                tools = {tool.name for tool in (await session.list_tools()).tools}
+                assert {"remember", "recall"} <= tools, sorted(tools)
+                recalled = await session.call_tool(
+                    "recall",
+                    arguments={
+                        "query": "Who staffed the Ashcombe signal box?",
+                        "session_id": session_id,
+                    },
+                )
+                assert not recalled.isError, _text(recalled)
+                assert "prost" in _text(recalled).lower(), (
+                    f"fact written over stdio was not readable over HTTP: {_text(recalled)[:400]}"
+                )
         finally:
             proc.terminate()
             try:
