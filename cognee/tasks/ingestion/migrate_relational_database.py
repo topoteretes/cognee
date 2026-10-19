@@ -226,11 +226,11 @@ async def complete_database_ingestion(schema, migrate_column_data):
                     # Get foreign key columns to filter them out from column migration
                     foreign_keys = []
                     for fk in details.get("foreign_keys", []):
-                        foreign_keys.append(fk["ref_column"])
+                        foreign_keys.append(fk["column"])
 
                     for key, value in row_properties.items():
                         # Skip mapping primary key information to itself and mapping of foreign key information (as it will be mapped bellow)
-                        if key is primary_key_col or key in foreign_keys:
+                        if key == primary_key_col or key in foreign_keys:
                             continue
 
                         # Create column value node
