@@ -28,7 +28,7 @@ from cognee.infrastructure.engine import DataPoint
 
 class _Node(DataPoint):
     name: str
-    type: str = "Entity"
+    description: str = ""
     metadata: dict = {"index_fields": ["name"]}
 
 
@@ -58,11 +58,13 @@ async def test_add_node_creates_then_updates(adapter):
     node_id = uuid4()
 
     # Create — must not raise a parser exception.
-    await adapter.add_node(_Node(id=node_id, name="OLD"))
+    await adapter.add_node(_Node(id=node_id, name="OLD", description="first"))
     created = await adapter.get_node(node_id)
     assert created is not None
     assert created["name"] == "OLD"
-    assert created["type"] == "Entity"
+    assert created["description"] == "first"
+    # The type column is the DataPoint class name, so it is stable across re-adds.
+    assert created["type"] == "_Node"
     created_at, first_updated_at = await _timestamps(adapter, node_id)
     assert created_at is not None
     assert first_updated_at == created_at
@@ -71,13 +73,15 @@ async def test_add_node_creates_then_updates(adapter):
     # second call land measurably later so "refreshed" is a strict comparison.
     await asyncio.sleep(0.01)
 
-    # Re-add with a changed name and type — the overwrite must persist (ON MATCH
-    # SET), created_at must survive and updated_at must move.
-    await adapter.add_node(_Node(id=node_id, name="NEW", type="Other"))
+    # Re-add with a changed name and property — the overwrite must persist
+    # (ON MATCH SET on name and the properties blob), created_at must survive
+    # and updated_at must move.
+    await adapter.add_node(_Node(id=node_id, name="NEW", description="second"))
     updated = await adapter.get_node(node_id)
     assert updated is not None
     assert updated["name"] == "NEW"
-    assert updated["type"] == "Other"
+    assert updated["description"] == "second"
+    assert updated["type"] == "_Node"
     created_at_after, second_updated_at = await _timestamps(adapter, node_id)
     assert created_at_after == created_at
     assert second_updated_at > first_updated_at
