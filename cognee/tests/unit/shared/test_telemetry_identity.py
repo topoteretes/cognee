@@ -216,3 +216,76 @@ def test_send_telemetry_emits_despite_detached_user(monkeypatch):
 
     assert payloads[0]["properties"]["user_id"] == "unknown-user"
     assert payloads[0]["properties"]["tenant_id"] == "Single User Tenant"
+
+
+class FakeAgentUser(FakeUser):
+    """An agent: a child user whose email encodes its name and owner."""
+
+    def __init__(self, name="claude-code", tenant_id=None):
+        super().__init__(uuid.uuid4(), tenant_id)
+        self.parent_user_id = uuid.uuid4()
+        self.email = f"{name}+{self.parent_user_id}@cognee.agent"
+
+
+def test_payload_attributes_an_agent_user_model(monkeypatch):
+    payloads = _capture_telemetry(monkeypatch)
+    agent = FakeAgentUser("codex")
+
+    send_telemetry("cognee.remember", agent)
+
+    properties = payloads[0]["properties"]
+    assert properties["is_agent"] is True
+    assert properties["agent_id"] == str(agent.id) == properties["user_id"]
+    assert properties["agent_owner_id"] == str(agent.parent_user_id)
+    assert properties["agent_plugin"] == "codex"
+    assert payloads[0]["user_properties"]["is_agent"] is True
+
+
+def test_payload_takes_the_request_agent_when_the_emitter_passes_a_sentinel(monkeypatch):
+    """Emitters that pass ``"sdk"`` or a bare id still carry the request's agent."""
+    from cognee.modules.operations.agent import agent_identity_from_user, operation_agent_scope
+
+    payloads = _capture_telemetry(monkeypatch)
+    agent = FakeAgentUser("claude-code")
+
+    with operation_agent_scope(agent_identity_from_user(agent)):
+        send_telemetry("cognee.search EXECUTION STARTED", "sdk")
+        send_telemetry("cognee.search EXECUTION STARTED", agent.id)
+
+    for payload in payloads:
+        assert payload["properties"]["agent_id"] == str(agent.id)
+        assert payload["properties"]["agent_plugin"] == "claude-code"
+
+
+def test_payload_marks_ordinary_users_as_not_agents(monkeypatch):
+    payloads = _capture_telemetry(monkeypatch)
+
+    send_telemetry("cognee.remember", FakeUser(uuid.uuid4(), uuid.uuid4()))
+    send_telemetry("cognee.recall", "sdk")
+
+    for payload in payloads:
+        properties = payload["properties"]
+        assert properties["is_agent"] is False
+        assert properties["agent_id"] is None
+        assert properties["agent_owner_id"] is None
+        assert properties["agent_plugin"] is None
+        assert payload["user_properties"]["is_agent"] is False
+
+
+def test_payload_labels_custom_agents_without_their_name(monkeypatch):
+    payloads = _capture_telemetry(monkeypatch)
+
+    send_telemetry("cognee.remember", FakeAgentUser("acme-internal-bot"))
+
+    assert payloads[0]["properties"]["agent_plugin"] == "custom"
+    assert "acme-internal-bot" not in str(payloads[0])
+
+
+def test_payload_survives_a_detached_user_with_agent_fields(monkeypatch):
+    payloads = _capture_telemetry(monkeypatch)
+
+    send_telemetry(
+        "cognee.improve", DetachedUser(broken_attrs=("id", "tenant_id", "parent_user_id"))
+    )
+
+    assert payloads[0]["properties"]["is_agent"] is False

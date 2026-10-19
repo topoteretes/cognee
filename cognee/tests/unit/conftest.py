@@ -61,6 +61,15 @@ def _operation_origin_starts_as_the_sdk():
 
 
 @pytest.fixture(autouse=True)
+def _operation_agent_starts_unset():
+    """Authentication binds the request's agent; never let one test's leak into the next."""
+    from cognee.modules.operations.agent import operation_agent_scope
+
+    with operation_agent_scope(None):
+        yield
+
+
+@pytest.fixture(autouse=True)
 def _keyless_gates_see_a_usable_llm():
     """Unit tests mock the LLM call itself; the keyless gates must not skip it.
 

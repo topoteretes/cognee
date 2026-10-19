@@ -2,6 +2,7 @@ import os
 
 from fastapi import Depends, HTTPException
 
+from cognee.modules.operations.agent import agent_identity_from_user, set_operation_agent
 from cognee.shared.logging_utils import get_logger
 
 from ..get_fastapi_users import get_fastapi_users
@@ -107,5 +108,9 @@ async def get_authenticated_user(
         # outlive the request) can access user.tenants / user.roles without
         # DetachedInstanceError.
         user = await get_user(user.id)
+
+    # Telemetry emitted for this request (and background work it starts)
+    # attributes to the agent when the caller authenticated as one.
+    set_operation_agent(agent_identity_from_user(user))
 
     return user

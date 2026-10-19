@@ -569,6 +569,19 @@ def _resolve_identity(user) -> tuple[str, str | None]:
     return resolved_id, resolved_tenant
 
 
+def _resolve_agent(user):
+    """The agent an event is attributed to, or ``None`` for a non-agent caller.
+
+    The request's agent (bound at authentication) wins, so emitters that pass
+    ``"sdk"`` or a bare id are still attributed. Otherwise a ``User`` model
+    passed directly is checked, which covers SDK callers acting as an agent
+    and work running outside a request.
+    """
+    from cognee.modules.operations.agent import agent_identity_from_user, get_operation_agent
+
+    return get_operation_agent() or agent_identity_from_user(user)
+
+
 def send_telemetry(
     event_name: str,
     user=None,
@@ -606,6 +619,12 @@ def send_telemetry(
     - **api_key_tracking_id**: Stable pseudonymous ID derived from the full
       LLM API key when configured. Use this to group activity by key without
       sending the key or visible key fragments.
+    - **is_agent** / **agent_id** / **agent_owner_id** / **agent_plugin**:
+      Set when the event runs as an agent (a child user with its own API key,
+      such as a provisioned plugin). ``agent_id`` equals ``user_id`` then;
+      ``agent_owner_id`` is the human user who owns it, and ``agent_plugin``
+      a known plugin key or ``"custom"``. All ``None`` (``is_agent`` false)
+      otherwise.
     """
     if additional_properties is None:
         additional_properties = {}
@@ -628,6 +647,7 @@ def send_telemetry(
     # as the managed cloud set TELEMETRY_ORIGIN (e.g. "cloud") so events can be
     # segmented by origin.
     origin = telemetry_origin()
+    agent = _resolve_agent(user if user is not None else user_id)
     current_time = datetime.now(timezone.utc)
     payload = {
         "anonymous_id": anonymous_id,
@@ -638,6 +658,7 @@ def send_telemetry(
             "persistent_id": persistent_id,
             "api_key_tracking_id": api_key_tracking_id,
             "api_key_hash": api_key_tracking_id,
+            "is_agent": agent is not None,
         },
         "properties": {
             "time": current_time.strftime("%m/%d/%Y"),
@@ -648,6 +669,11 @@ def send_telemetry(
             "api_key_tracking_id": api_key_tracking_id,
             "api_key_hash": api_key_tracking_id,
             "telemetry_origin": origin,
+            "is_agent": agent is not None,
+            "agent_id": None,
+            "agent_owner_id": None,
+            "agent_plugin": None,
+            **(agent.telemetry_properties() if agent is not None else {}),
             **additional_properties,
         },
     }
