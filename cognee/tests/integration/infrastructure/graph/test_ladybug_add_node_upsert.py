@@ -8,11 +8,14 @@ even where it did run it silently dropped updates to existing nodes (the batch
 ``add_nodes`` already assigns each property individually with both ON CREATE and
 ON MATCH).
 
-This test adds a node, then re-adds it with a changed name, and asserts the
-update persists — which both exercises the per-property MERGE syntax (no parser
-crash) and the ON MATCH update.
+``add_node`` now delegates to ``add_nodes``, whose MERGE overwrites name, type and
+properties on match, keeps ``created_at`` and refreshes ``updated_at``. This test
+adds a node, then re-adds it with a changed name and type, and asserts exactly
+that contract — so a later edit of the ``add_nodes`` MERGE that sets ``created_at``
+in ON MATCH, or drops ``updated_at`` (or the whole branch) from it, fails here.
 """
 
+import asyncio
 import contextlib
 from uuid import uuid4
 
@@ -41,6 +44,15 @@ async def adapter(tmp_path):
             await a.close()
 
 
+async def _timestamps(adapter, node_id):
+    """The declared TIMESTAMP columns; get_node does not return them."""
+    rows = await adapter.query(
+        "MATCH (n:Node {id: $id}) RETURN n.created_at, n.updated_at", {"id": str(node_id)}
+    )
+    assert len(rows) == 1
+    return rows[0][0], rows[0][1]
+
+
 @pytest.mark.asyncio
 async def test_add_node_creates_then_updates(adapter):
     node_id = uuid4()
@@ -50,9 +62,22 @@ async def test_add_node_creates_then_updates(adapter):
     created = await adapter.get_node(node_id)
     assert created is not None
     assert created["name"] == "OLD"
+    assert created["type"] == "Entity"
+    created_at, first_updated_at = await _timestamps(adapter, node_id)
+    assert created_at is not None
+    assert first_updated_at == created_at
 
-    # Re-add with a changed name — the update must persist (ON MATCH SET).
-    await adapter.add_node(_Node(id=node_id, name="NEW"))
+    # The write stamps are taken per call at microsecond resolution; make the
+    # second call land measurably later so "refreshed" is a strict comparison.
+    await asyncio.sleep(0.01)
+
+    # Re-add with a changed name and type — the overwrite must persist (ON MATCH
+    # SET), created_at must survive and updated_at must move.
+    await adapter.add_node(_Node(id=node_id, name="NEW", type="Other"))
     updated = await adapter.get_node(node_id)
     assert updated is not None
     assert updated["name"] == "NEW"
+    assert updated["type"] == "Other"
+    created_at_after, second_updated_at = await _timestamps(adapter, node_id)
+    assert created_at_after == created_at
+    assert second_updated_at > first_updated_at
