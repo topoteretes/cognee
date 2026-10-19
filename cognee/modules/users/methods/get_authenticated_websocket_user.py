@@ -3,7 +3,6 @@ from fastapi import HTTPException, WebSocket
 from fastapi_users import exceptions as fastapi_users_exceptions
 
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.operations.agent import agent_identity_from_user, set_operation_agent
 from cognee.shared.logging_utils import get_logger
 
 from ..get_fastapi_users import get_fastapi_users
@@ -144,7 +143,4 @@ async def get_authenticated_websocket_user(websocket: WebSocket) -> User | None:
     # Re-fetch for the same reason get_authenticated_user does: the instance a
     # strategy returns has no eagerly loaded relationships, and a long-lived
     # socket outlives the session it was read in.
-    user = await get_user(user.id)
-    # Same telemetry attribution as get_authenticated_user, per connection.
-    set_operation_agent(agent_identity_from_user(user))
-    return user
+    return await get_user(user.id)

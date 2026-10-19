@@ -620,11 +620,14 @@ def send_telemetry(
       LLM API key when configured. Use this to group activity by key without
       sending the key or visible key fragments.
     - **is_agent** / **agent_id** / **agent_owner_id** / **agent_plugin**:
-      Set when the event runs as an agent (a child user with its own API key,
-      such as a provisioned plugin). ``agent_id`` equals ``user_id`` then;
-      ``agent_owner_id`` is the human user who owns it, and ``agent_plugin``
-      a known plugin key or ``"custom"``. All ``None`` (``is_agent`` false)
-      otherwise.
+      Set when the event is recognised as an agent's (a child user with its
+      own API key, such as a provisioned plugin). ``agent_id`` equals
+      ``user_id`` then; ``agent_owner_id`` is the human user who owns it, and
+      ``agent_plugin`` a known plugin key or ``"custom"``. All ``None``
+      (``is_agent`` false) otherwise. Recognised from the request's agent
+      (bound at authentication, which wins), else from a ``User`` model
+      passed here. A bare id outside a request is never recognised, since
+      that needs a database lookup — pass the model when you hold it.
     """
     if additional_properties is None:
         additional_properties = {}

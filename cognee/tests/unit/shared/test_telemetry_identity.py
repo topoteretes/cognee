@@ -289,3 +289,53 @@ def test_payload_survives_a_detached_user_with_agent_fields(monkeypatch):
     )
 
     assert payloads[0]["properties"]["is_agent"] is False
+
+
+def test_a_bare_agent_id_outside_a_request_is_not_recognised(monkeypatch):
+    """Documented limit: without the model or a request, an agent's id reads as a human's.
+
+    Telling them apart from a bare id needs a database lookup, which
+    send_telemetry (sync, fire-and-forget) cannot make. Emitters holding the
+    model must pass it; the guard below keeps in-tree emitters doing so.
+    """
+    payloads = _capture_telemetry(monkeypatch)
+    agent = FakeAgentUser("codex")
+
+    send_telemetry("cognee.session.add_qa", agent.id)
+
+    properties = payloads[0]["properties"]
+    assert properties["user_id"] == str(agent.id)
+    assert properties["is_agent"] is False
+    assert properties["agent_id"] is None
+
+
+def test_no_emitter_passes_user_id_while_holding_the_user():
+    """``send_telemetry(..., user.id)`` drops the agent and tenant the model carries."""
+    import ast
+    import pathlib
+
+    import cognee
+
+    root = pathlib.Path(cognee.__file__).parent
+    offenders = []
+    for path in root.rglob("*.py"):
+        if "tests" in path.relative_to(root).parts:
+            continue
+        source = path.read_text(encoding="utf-8")
+        if "send_telemetry(" not in source:
+            continue
+        for node in ast.walk(ast.parse(source)):
+            if not (isinstance(node, ast.Call) and len(node.args) >= 2):
+                continue
+            name = getattr(node.func, "id", getattr(node.func, "attr", None))
+            argument = node.args[1]
+            if (
+                name == "send_telemetry"
+                and isinstance(argument, ast.Attribute)
+                and argument.attr == "id"
+                and isinstance(argument.value, ast.Name)
+                and argument.value.id == "user"
+            ):
+                offenders.append(f"{path.relative_to(root)}:{node.lineno}")
+
+    assert offenders == [], f"pass the User model, not user.id: {offenders}"

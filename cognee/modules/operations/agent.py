@@ -6,14 +6,17 @@ authenticated with an agent's key already records the agent as ``user_id``,
 but nothing marks it as an agent, ties it to its owner, or names the plugin.
 
 A ContextVar carries that identity so every telemetry event emitted for the
-request carries it — including the many emitters that pass ``"sdk"`` or a
-bare user id rather than the ``User`` model. Set once at authentication:
-
-- per HTTP request, by ``get_authenticated_user``
-- per WebSocket connection, by ``get_authenticated_websocket_user``
+request carries it — including emitters that pass ``"sdk"`` or a bare user
+id rather than the ``User`` model. ``get_authenticated_user`` sets it once
+per HTTP request, and also stores it on ``request.state`` for the exception
+middleware (see :func:`request_operation_agent`). A deployment that
+overrides ``get_authenticated_user`` must call :func:`set_operation_agent`
+itself, or requests lose this attribution.
 
 ContextVars propagate into ``asyncio`` tasks created afterwards, so background
-work started by the request inherits the agent.
+work started by the request inherits the agent. Outside a request, only an
+emitter that passes the ``User`` model is attributed: a bare id cannot be
+told apart from a human's without a database lookup.
 
 This module must stay import-light (stdlib plus the import-free plugin
 registry) so ``send_telemetry`` can read it without cycles.
