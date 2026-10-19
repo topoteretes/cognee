@@ -196,12 +196,20 @@ async def _forget_everything(user: Any) -> dict:
     - Graph DB (nodes, edges): yes
     - Vector DB (embeddings): yes
     - Session cache (Redis/FS): yes (full prune)
-    - Search history (queries/results rows): yes, every row the user owns
+    - Search history (queries/results rows): yes — every user's rows on each
+      deleted dataset (delete_all removes shared datasets too, so other users'
+      answers from them must go as well), plus every row this user owns
     """
     from cognee.api.v1.datasets.datasets import datasets
+    from cognee.modules.data.methods import get_authorized_existing_datasets
 
     user_datasets = await datasets.list_datasets(user=user)
     count = len(user_datasets)
+
+    # The same list delete_all is about to remove; taken before it does.
+    deleted_dataset_ids = [
+        dataset.id for dataset in await get_authorized_existing_datasets([], "delete", user)
+    ]
 
     await datasets.delete_all(user=user)
 
@@ -218,7 +226,7 @@ async def _forget_everything(user: Any) -> dict:
     except Exception as e:
         logger.warning("forget: session cache cleanup failed (non-fatal): %s", e, exc_info=True)
 
-    history_removed = await _forget_search_history(user, None)
+    history_removed = await _forget_search_history(user, deleted_dataset_ids, everything=True)
 
     logger.info("forget: deleted all data for user=%s (%d datasets)", user.id, count)
     return {
@@ -228,8 +236,14 @@ async def _forget_everything(user: Any) -> dict:
     }
 
 
-async def _forget_search_history(user: Any, dataset_id: UUID | None) -> bool:
+async def _forget_search_history(
+    user: Any, dataset_ids: list[UUID], *, everything: bool = False
+) -> bool:
     """Drop the recorded questions and answers that referenced the deleted data.
+
+    Every user's rows on each of ``dataset_ids`` go (the datasets are gone for
+    everyone they were shared with); with ``everything`` every row this user
+    owns goes too, including rows a multi-dataset search left unattributed.
 
     Search history quotes the answer text, which can carry chunk text, so a
     forget that leaves it behind has not removed the content. Non-fatal: the
@@ -238,10 +252,17 @@ async def _forget_search_history(user: Any, dataset_id: UUID | None) -> bool:
     cleanup ran, so the caller can tell a success that still left history
     behind (``search_history_removed`` in the result) and retry or alert.
     """
-    from cognee.modules.search.operations import delete_search_history
+    from cognee.modules.search.operations import (
+        delete_dataset_search_history,
+        delete_user_search_history,
+    )
 
     try:
-        removed = await delete_search_history(user.id, dataset_id)
+        removed = 0
+        for dataset_id in dataset_ids:
+            removed += await delete_dataset_search_history(dataset_id)
+        if everything:
+            removed += await delete_user_search_history(user.id)
     except Exception as e:
         logger.warning("forget: search history cleanup failed (non-fatal): %s", e, exc_info=True)
         return False
@@ -271,7 +292,7 @@ async def _forget_dataset(dataset_ref: str | UUID, user: Any) -> dict:
     dataset_id = await _resolve_dataset_id(dataset_ref, user)
 
     await datasets.empty_dataset(dataset_id, user=user)
-    history_removed = await _forget_search_history(user, dataset_id)
+    history_removed = await _forget_search_history(user, [dataset_id])
 
     logger.info("forget: deleted dataset=%s for user=%s", dataset_id, user.id)
     return {
@@ -282,7 +303,15 @@ async def _forget_dataset(dataset_ref: str | UUID, user: Any) -> dict:
 
 
 async def _forget_data_item(data_id: UUID, dataset_ref: str | UUID, user: Any) -> dict:
-    """Delete a single data item from a dataset."""
+    """Delete a single data item from a dataset.
+
+    Search history is NOT purged here: rows are attributed to a dataset, not
+    to a document, so the only purge available would drop every user's
+    history for the whole dataset because one file went. Answers that quoted
+    this document's chunks therefore stay until ``forget(dataset=...)`` or
+    ``forget(everything=True)``; the result says so with
+    ``search_history_removed: False``.
+    """
     from cognee.api.v1.datasets.datasets import datasets
 
     dataset_id = await _resolve_dataset_id(dataset_ref, user)
@@ -300,7 +329,12 @@ async def _forget_data_item(data_id: UUID, dataset_ref: str | UUID, user: Any) -
         dataset_id,
         user.id,
     )
-    return {"data_id": str(data_id), "dataset_id": str(dataset_id), "status": "success"}
+    return {
+        "data_id": str(data_id),
+        "dataset_id": str(dataset_id),
+        "search_history_removed": False,
+        "status": "success",
+    }
 
 
 async def _forget_dataset_memory(dataset_ref: str | UUID, user: Any) -> dict:
@@ -419,6 +453,8 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: str | UUID, user: Any)
     - Pipeline status (for this data item): reset for cognify only
     - Relational DB (data record): preserved
     - Raw file: preserved
+    - Search history: untouched — the document stays, and history is
+      attributed per dataset, not per document (see _forget_data_item)
     """
     from sqlalchemy import select
     from sqlalchemy.orm import attributes as orm_attributes
