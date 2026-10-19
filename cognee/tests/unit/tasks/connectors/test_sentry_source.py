@@ -14,6 +14,8 @@ from cognee.tasks.ingestion.connectors.sentry import (
     SentryNotFoundError,
     SentryPermissionError,
     SentryRateLimitError,
+    SentrySettings,
+    _extract_breadcrumbs,
     _extract_stacktrace,
     _mask_token,
     _parse_link_header,
@@ -159,7 +161,20 @@ def test_render_sentry_issue_markdown():
                         }
                     ]
                 },
-            }
+            },
+            {
+                "type": "breadcrumbs",
+                "data": {
+                    "values": [
+                        {
+                            "category": "ui.click",
+                            "message": "User clicked #checkout-button",
+                            "level": "info",
+                            "timestamp": "2026-10-19T23:29:55Z",
+                        }
+                    ]
+                },
+            },
         ],
     }
 
@@ -173,6 +188,39 @@ def test_render_sentry_issue_markdown():
     assert "- `release=v1.4.2`" in md
     assert 'File "src/auth/jwt.py", line 42, in verify_token' in md
     assert "user = payload['user']" in md
+    assert "### Pre-Crash Breadcrumbs" in md
+    assert "`ui.click` (info): User clicked #checkout-button" in md
+
+
+def test_extract_breadcrumbs():
+    """Verify extraction of breadcrumbs from event entries."""
+    event = {
+        "entries": [
+            {
+                "type": "breadcrumbs",
+                "data": {
+                    "values": [
+                        {
+                            "category": "navigation",
+                            "message": "navigated to /login",
+                            "level": "info",
+                        },
+                        {
+                            "category": "http",
+                            "data": {"url": "https://api.example.com/v1/auth"},
+                            "level": "error",
+                        },
+                    ]
+                },
+            }
+        ]
+    }
+    crumbs = _extract_breadcrumbs(event)
+    assert len(crumbs) == 2
+    assert "`navigation` (info): navigated to /login" in crumbs[0]
+    assert "`http` (error): https://api.example.com/v1/auth" in crumbs[1]
+
+    assert _extract_breadcrumbs(None) == []
 
 
 def test_extract_stacktrace_formatting():
@@ -248,6 +296,7 @@ def test_sentry_source_full_crawl():
         row = rows[0]
         assert row["id"] == "sentry:my-proj:issue:1001"
         assert row["status"] == "unresolved"
+        assert row["_deleted"] is False
         assert row[NODE_SET_COLUMN] == ["sentry:my-org/my-proj"]
         assert "NullPointerException" in row["text"]
 
@@ -327,3 +376,50 @@ def test_sentry_source_incremental_state():
         # Verify the request included the cursor from state
         called_req = mock_urlopen.call_args[0][0]
         assert "cursor=cursor_12345" in called_req.full_url
+
+
+def test_sentry_source_delete_resolved():
+    """Verify resolved issues emit _deleted=True when delete_resolved=True."""
+    client = SentryClient(auth_token="dummy-token")
+    fake_issues = [
+        {"id": "7777", "title": "MemoryLeak", "culprit": "worker.py", "status": "resolved"},
+        {"id": "8888", "title": "ActiveCrash", "culprit": "server.py", "status": "unresolved"},
+    ]
+    mock_resp = _make_fake_response(fake_issues, headers={"link": ""})
+
+    with patch("urllib.request.urlopen", return_value=mock_resp):
+        src = sentry_source(
+            organization_slug="my-org",
+            project_slug="my-proj",
+            client=client,
+            fetch_events=False,
+            delete_resolved=True,
+        )
+        resource = src.selected_resources["sentry_issues"]
+        rows = list(resource)
+
+        assert len(rows) == 2
+        # Resolved is marked _deleted=True
+        assert rows[0]["id"] == "sentry:my-proj:issue:7777"
+        assert rows[0]["_deleted"] is True
+        # Unresolved is NOT deleted
+        assert rows[1]["id"] == "sentry:my-proj:issue:8888"
+        assert rows[1]["_deleted"] is False
+
+
+def test_sentry_settings_from_env():
+    """Verify SentrySettings reads from environment variables."""
+    with patch.dict(
+        "os.environ",
+        {
+            "SENTRY_AUTH_TOKEN": "env-token-999",
+            "SENTRY_ORGANIZATION_SLUG": "env-org",
+            "SENTRY_PROJECT_SLUG": "env-proj",
+            "SENTRY_BASE_URL": "https://sentry.internal.net",
+        },
+    ):
+        settings = SentrySettings()
+        assert settings.auth_token == "env-token-999"
+        assert settings.organization_slug == "env-org"
+        assert settings.project_slug == "env-proj"
+        assert settings.base_url == "https://sentry.internal.net"

@@ -1,7 +1,44 @@
-"""Sentry connector for Cognee.
+"""Sentry connector for cognee: a ``dlt`` source that turns error telemetry into memory.
 
-Ingests runtime error telemetry, exception groups, culprit stack traces, and incident
-metadata from Sentry into Cognee's memory layer using DLT document sources.
+Sync production incidents, unresolved error groups, exception types, culprit stack traces,
+and breadcrumb event streams from Sentry into Cognee's persistent memory::
+
+    import cognee
+    from cognee.tasks.ingestion.connectors import sentry_source
+
+    await cognee.remember(
+        sentry_source(
+            organization_slug="acme-corp",
+            project_slug="api-gateway",
+            auth_token="sntrys_...",
+        ),
+        dataset_name="prod_telemetry",
+        primary_key="id",
+        write_disposition="merge",
+        max_rows_per_table=0,
+    )
+
+Design
+------
+* **Rows** are flat ``{id, title, text, issue_id, project, organization, status, level, count, last_seen, _deleted, cognee_node_set}``.
+  Primary key is formatted as ``sentry:<project_slug>:issue:<issue_id>``.
+* **Structured Telemetry Ingestion** - extracts issue groups, exception types, culprit functions,
+  occurrence frequencies, and formatted stack trace frames.
+* **Breadcrumb Context** - extracts user actions, console logs, and HTTP transactions leading up
+  to the crash for autonomous root cause analysis.
+* **Deterministic Formatting** - stack trace frames, metadata attributes, and environment tags
+  are sorted deterministically to prevent redundant chunk re-embeddings across syncs.
+* **Resilient Keyset Pagination** - Sentry RFC-5988 ``Link`` headers (``rel="next"; results="true"``)
+  are parsed. The walker monitors ``X-Sentry-Rate-Limit-Remaining`` and ``Retry-After`` headers;
+  when rate limits approach exhaustion or on HTTP 429, it terminates gracefully without sleeping
+  or rolling back the cursor state in ``dlt``.
+* **Graph Scoping** - every row carries ``cognee_node_set = ["sentry:<org>/<project>"]`` with
+  ``NODE_SET_COLUMN_HINT`` to enable fine-grained, project-scoped hybrid search.
+* **Settings & Auth** - supports explicit parameters or automatic environment configuration via
+  ``SentrySettings`` (``SENTRY_*``). Token strings are masked in ``__repr__`` and exceptions.
+* **Forget-on-Resolve** - when ``delete_resolved=True`` is configured, resolved issues emit
+  ``_deleted=True`` under ``write_disposition="merge"``, enabling Cognee's ``orphan_cleanup``
+  to purge obsolete incidents.
 """
 
 from __future__ import annotations
@@ -16,6 +53,7 @@ from collections.abc import Callable, Generator
 from typing import Any
 
 import dlt  # type: ignore
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from cognee.tasks.ingestion.dlt_utils import (
     DOCUMENT_SOURCE_ATTR,
@@ -29,6 +67,22 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_SENTRY_BASE_URL = "https://sentry.io"
 _RATE_LIMIT_FLOOR = 5
+_MAX_BREADCRUMBS = 10
+
+
+class SentrySettings(BaseSettings):
+    """Cognee's Sentry settings, read from ``SENTRY_*`` environment variables."""
+
+    model_config = SettingsConfigDict(env_prefix="SENTRY_", extra="ignore")
+
+    auth_token: str = ""
+    base_url: str = DEFAULT_SENTRY_BASE_URL
+    organization_slug: str = ""
+    project_slug: str = ""
+    query: str = ""
+    fetch_events: bool = True
+    max_issues: int = 0
+    delete_resolved: bool = False
 
 
 class SentryError(Exception):
@@ -65,18 +119,13 @@ def _mask_token(token: str | None) -> str:
 
 
 def _parse_link_header(link_header: str | None) -> tuple[str | None, bool]:
-    """Parse Sentry RFC-5988 Link header for rel='next' cursor and has_more indicator.
-
-    Sentry headers look like:
-    <https://sentry.io/api/0/projects/org/proj/issues/?cursor=100:0:0>; rel="next"; results="true"
-    """
+    """Parse Sentry RFC-5988 Link header for rel='next' cursor and has_more indicator."""
     if not link_header:
         return None, False
 
     next_cursor = None
     has_results = False
 
-    # Split links by comma
     parts = link_header.split(",")
     for part in parts:
         segments = [s.strip() for s in part.split(";")]
@@ -346,6 +395,28 @@ def _extract_stacktrace(event: dict[str, Any] | None) -> list[str]:
     return frames_output
 
 
+def _extract_breadcrumbs(event: dict[str, Any] | None) -> list[str]:
+    """Extract and format recent breadcrumb actions leading up to the error."""
+    if not event:
+        return []
+
+    crumbs_output = []
+    entries = event.get("entries", [])
+    for entry in entries:
+        if entry.get("type") == "breadcrumbs":
+            raw_crumbs = entry.get("data", {}).get("values", [])
+            # Take the most recent breadcrumbs
+            for crumb in raw_crumbs[-_MAX_BREADCRUMBS:]:
+                cat = crumb.get("category", "event")
+                msg = crumb.get("message") or crumb.get("data", {}).get("url") or ""
+                lvl = crumb.get("level", "info")
+                timestamp = crumb.get("timestamp", "")
+                ts_str = f"[{timestamp[:19]}] " if timestamp else ""
+                crumbs_output.append(f"- {ts_str}`{cat}` ({lvl}): {msg}".strip())
+
+    return crumbs_output
+
+
 def _render_sentry_issue_markdown(
     issue: dict[str, Any],
     latest_event: dict[str, Any] | None,
@@ -406,6 +477,12 @@ def _render_sentry_issue_markdown(
         lines.extend(stacktrace_frames)
         lines.append("```")
 
+    # Render recent breadcrumbs timeline
+    breadcrumbs = _extract_breadcrumbs(latest_event)
+    if breadcrumbs:
+        lines.extend(["", "### Pre-Crash Breadcrumbs", ""])
+        lines.extend(breadcrumbs)
+
     return "\n".join(lines).strip()
 
 
@@ -419,37 +496,60 @@ def build_sentry_service(
 
 
 def sentry_source(
-    organization_slug: str,
-    project_slug: str,
+    organization_slug: str | None = None,
+    project_slug: str | None = None,
     auth_token: str | None = None,
     client: SentryClient | None = None,
-    base_url: str = DEFAULT_SENTRY_BASE_URL,
+    base_url: str | None = None,
     query: str | None = None,
-    fetch_events: bool = True,
+    fetch_events: bool | None = None,
     max_issues: int | None = None,
+    delete_resolved: bool | None = None,
     check_active: Callable[[], None] | None = None,
 ):
     """DLT source ingesting Sentry issue groups and telemetry into Cognee memory.
 
+    Configuration can be provided explicitly or via ``SentrySettings`` (``SENTRY_*``).
     Rows are formatted into structured markdown and tagged with:
       - ``cognee_node_set = ["sentry:<org>/<project>"]``
       - ``cognee_document_source = "sentry"``
     """
+    settings = SentrySettings()
+
+    effective_token = auth_token or settings.auth_token
+    effective_base_url = base_url or settings.base_url
+    effective_org = organization_slug or settings.organization_slug
+    effective_project = project_slug or settings.project_slug
+    effective_query = query if query is not None else (settings.query or None)
+    effective_fetch_events = fetch_events if fetch_events is not None else settings.fetch_events
+    effective_max_issues = max_issues if max_issues is not None else (settings.max_issues or None)
+    effective_delete_resolved = (
+        delete_resolved if delete_resolved is not None else settings.delete_resolved
+    )
+
+    if not effective_org or not effective_project:
+        raise ValueError(
+            "Both 'organization_slug' and 'project_slug' must be provided "
+            "or set via SENTRY_ORGANIZATION_SLUG and SENTRY_PROJECT_SLUG."
+        )
+
     if client is None:
-        if not auth_token:
-            raise SentryAuthenticationError("Either 'client' or 'auth_token' must be provided.")
-        client = build_sentry_service(auth_token=auth_token, base_url=base_url)
+        if not effective_token:
+            raise SentryAuthenticationError(
+                "Either 'client' or 'auth_token' must be provided (or set SENTRY_AUTH_TOKEN)."
+            )
+        client = build_sentry_service(auth_token=effective_token, base_url=effective_base_url)
 
     walker = _SentryWalker(
         client=client,
-        organization_slug=organization_slug,
-        project_slug=project_slug,
-        query=query,
-        fetch_events=fetch_events,
-        max_issues=max_issues,
+        organization_slug=effective_org,
+        project_slug=effective_project,
+        query=effective_query,
+        fetch_events=effective_fetch_events,
+        max_issues=effective_max_issues,
     )
 
-    node_set_tag = f"sentry:{organization_slug}/{project_slug}"
+    node_set_tag = f"sentry:{effective_org}/{effective_project}"
 
     @dlt.resource(
         name="sentry_issues",
@@ -461,35 +561,43 @@ def sentry_source(
         """Emit Sentry issues as normalized documents with cursor advancement."""
         state = dlt.current.resource_state()
         initial_cursor = state.get("cursor")
-
         rows_gen = walker.walk(initial_cursor=initial_cursor)
 
-        for item in guarded_rows(rows_gen, check_active=check_active):
+        for ingested_count, item in enumerate(
+            guarded_rows(rows_gen, check_active=check_active), start=1
+        ):
             issue = item["issue"]
             latest_event = item["latest_event"]
             issue_id = str(issue.get("id"))
+            status = issue.get("status")
+
+            is_deleted = False
+            if effective_delete_resolved and status == "resolved":
+                is_deleted = True
 
             markdown_doc = _render_sentry_issue_markdown(
                 issue=issue,
                 latest_event=latest_event,
-                org_slug=organization_slug,
-                project_slug=project_slug,
+                org_slug=effective_org,
+                project_slug=effective_project,
             )
 
             # Update latest state cursor
             state["last_seen_issue_id"] = issue_id
+            state["cognee_sync_stats"] = {"ingested": ingested_count}
 
             yield {
-                "id": f"sentry:{project_slug}:issue:{issue_id}",
+                "id": f"sentry:{effective_project}:issue:{issue_id}",
                 "text": markdown_doc,
                 "title": f"Sentry: {issue.get('title', issue_id)}",
                 "issue_id": issue_id,
-                "project": project_slug,
-                "organization": organization_slug,
-                "status": issue.get("status"),
+                "project": effective_project,
+                "organization": effective_org,
+                "status": status,
                 "level": issue.get("level"),
                 "count": issue.get("count"),
                 "last_seen": issue.get("lastSeen"),
+                "_deleted": is_deleted,
                 NODE_SET_COLUMN: [node_set_tag],
             }
 
@@ -499,5 +607,5 @@ def sentry_source(
 
     src = _source()
     setattr(src, DOCUMENT_SOURCE_ATTR, "sentry")
-    setattr(src, PIPELINE_SCOPE_ATTR, f"sentry:{organization_slug}/{project_slug}")
+    setattr(src, PIPELINE_SCOPE_ATTR, f"sentry:{effective_org}/{effective_project}")
     return src
