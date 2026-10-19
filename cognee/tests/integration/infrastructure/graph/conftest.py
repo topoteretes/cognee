@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import logging
-
 import pytest
 import pytest_asyncio
 
-logger = logging.getLogger(__name__)
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 try:
     from cognee.infrastructure.databases.graph.ladybug.adapter import LadybugAdapter

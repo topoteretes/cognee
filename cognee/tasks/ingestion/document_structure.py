@@ -57,12 +57,14 @@ class StructurePlan:
     managed: set[str] = field(default_factory=set)
     row_count: int = 0
     unresolved: int = 0
+    # Nodes whose rows name more than one parent, so they get more than one edge.
+    conflicting_parents: int = 0
 
 
 async def dataset_rows(dataset_id: UUID) -> list:
     """The dataset's rows that carry a tree position, with only the Data columns the pass
-    reads. It runs on every cognify of every dataset, so the filter is in the query: a
-    dataset without structure costs one query that returns nothing, not a read of every row."""
+    reads. It runs on every cognify of every dataset, so the filter is in the query: the
+    database scans the dataset's rows, but a dataset without structure loads none of them."""
     async with get_relational_engine().get_async_session() as session:
         result = await session.execute(
             select(Data.id, Data.system_metadata, Data.extension, Data.updated_at, Data.created_at)
@@ -129,6 +131,10 @@ def plan_document_structure(rows: list[StructureRow], dataset_id: UUID) -> Struc
             plan.managed.add(str(container_id))
             plan.edges.add((child, str(container_id)))
             child = str(container_id)
+    parents: dict[str, set[str]] = {}
+    for child, parent in plan.edges:
+        parents.setdefault(child, set()).add(parent)
+    plan.conflicting_parents = sum(len(found) > 1 for found in parents.values())
     return plan
 
 
@@ -170,10 +176,8 @@ async def reconcile_structure(
         and existing_containers[container_id].get("name") != container.name
     ]
     provenance = await stores_provenance_in_graph(graph_engine)
-    for container in new_containers + renamed_containers:
-        owner = min(plan.owners[container.id])
-        stamp = {"source_ref_key": make_source_ref_key(dataset_id, owner)} if provenance else {}
-        await graph_engine.add_nodes([container], **stamp)
+    if new_containers or renamed_containers:
+        await graph_engine.add_nodes(new_containers + renamed_containers)
     if provenance:
         await _stamp_containers(graph_engine, dataset_id, plan)
 
@@ -201,7 +205,7 @@ async def reconcile_structure(
             ]
         )
     stale_edges = sorted(edge for edge in existing_edges - plan.edges if edge[0] in plan.managed)
-    removed_edges = await _delete_edges(graph_engine, stale_edges)
+    removed_edges, edges_not_removable = await _delete_edges(graph_engine, stale_edges)
     if stale_containers:
         await graph_engine.delete_nodes(stale_containers)
     return {
@@ -211,8 +215,10 @@ async def reconcile_structure(
         "containers_removed": len(stale_containers),
         "edges_added": len(new_edges),
         "edges_removed": removed_edges,
+        "edges_not_removable": edges_not_removable,
         "edges_waiting_for_a_document": len(plan.edges - plannable),
         "unresolved_parents": plan.unresolved,
+        "conflicting_parents": plan.conflicting_parents,
     }
 
 
@@ -238,27 +244,30 @@ def _is_row_ref_of(source_ref_key: str, dataset_id: UUID) -> bool:
     return parsed.dataset_id == dataset_id and parsed.chunk_id is None
 
 
-async def _delete_edges(graph_engine, stale_edges: list[tuple[str, str]]) -> int:
-    """Delete stale ``child_of`` edges. Neptune cannot delete an edge by identity, so
-    there a moved row keeps its old parent too."""
+async def _delete_edges(graph_engine, stale_edges: list[tuple[str, str]]) -> tuple[int, int]:
+    """Delete stale ``child_of`` edges, returning how many were removed and how many could
+    not be. Neptune cannot delete an edge by identity, so there a moved row keeps its old
+    parent too, and the same edges are tried again on every cognify."""
     if not stale_edges:
-        return 0
+        return 0, 0
     identities = [EdgeIdentity(child, parent, CHILD_OF) for child, parent in stale_edges]
+    removed = 0
     try:
         for start in range(0, len(identities), _DELETE_CHUNK_SIZE):
-            await graph_engine.delete_edge_triples(identities[start : start + _DELETE_CHUNK_SIZE])
+            chunk = identities[start : start + _DELETE_CHUNK_SIZE]
+            await graph_engine.delete_edge_triples(chunk)
+            removed += len(chunk)
     except UnsupportedProvenanceCapability:
         logger.warning(
             "This graph backend cannot delete an edge by identity, so %d stale child_of "
             "edge(s) of moved rows stay until the rows are removed.",
-            len(identities),
+            len(identities) - removed,
         )
-        return 0
-    return len(identities)
+    return removed, len(identities) - removed
 
 
 async def reconcile_document_structure() -> dict[str, int] | None:
-    """The ``after_run`` step of cognify. Does nothing for a dataset whose rows carry
+    """The ``after_items_ran`` step of cognify. Does nothing for a dataset whose rows carry
     no tree position."""
     dataset_id = current_dataset_id.get()
     rows = structure_rows(await dataset_rows(dataset_id))
@@ -268,7 +277,8 @@ async def reconcile_document_structure() -> dict[str, int] | None:
     stats = await reconcile_structure(
         await get_graph_engine(), dataset_id, plan, {row.document_type for row in rows}
     )
-    (logger.info if stats["edges_added"] or stats["edges_removed"] else logger.debug)(
-        "Document structure of dataset %s: %s", dataset_id, stats
-    )
+    # Every cognify runs this pass, so only a run that changed edges is worth an info line.
+    changed = stats["edges_added"] or stats["edges_removed"]
+    log = logger.info if changed else logger.debug
+    log("Document structure of dataset %s: %s", dataset_id, stats)
     return stats

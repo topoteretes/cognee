@@ -648,7 +648,9 @@ async def _refresh_row_structure(items: list[DataItem], dataset_id: UUID) -> Non
             for data in rows.scalars():
                 if data.system_metadata.get("structure") != wanted[data.id]:
                     data.system_metadata = {**data.system_metadata, "structure": wanted[data.id]}
-        await session.commit()
+            # One transaction per batch: the first sync after the upgrade touches every row.
+            await session.commit()
+            session.expunge_all()
 
 
 def _build_document_data_item(row: DltRowData, data_id: UUID, source_tag: str) -> DataItem:
@@ -683,7 +685,10 @@ def _build_document_data_item(row: DltRowData, data_id: UUID, source_tag: str) -
     if row_data.get("id"):
         system_metadata["external_id"] = str(row_data["id"])
     structure = _row_structure(row, source_tag)
-    if structure is not None and "external_id" in system_metadata:
+    if structure is not None:
+        if "external_id" not in system_metadata:
+            # Without an external_id the structure pass could not find this row as a parent.
+            _raise_structure_shape(row, source_tag, "a structure on a row with no id")
         system_metadata["structure"] = structure
 
     return DataItem(

@@ -59,7 +59,7 @@ async def run_tasks(
     embedding_config: EmbeddingConfig | None = None,
     data_cache: bool = False,
     after_run_completed: Callable[[], Awaitable[Any]] | None = None,
-    after_run: Callable[[], Awaitable[Any]] | None = None,
+    after_items_ran: Callable[[], Awaitable[Any]] | None = None,
 ):
     """Run a pipeline over a dataset as ONE logical run.
 
@@ -77,7 +77,7 @@ async def run_tasks(
     run that already completed. An exception it raises propagates to the
     caller; the run stays recorded as completed.
 
-    ``after_run`` is awaited before it, and also when items of the run failed,
+    ``after_items_ran`` is awaited before it, and also when items of the run failed,
     whether they reported or raised it (a raised error goes on after the hook).
     Cognify reconciles the document structure with it, which one failing item must
     not freeze.
@@ -419,14 +419,18 @@ async def run_tasks(
 
                 # In case of error during incremental loading of data just let the user know the pipeline Errored, don't raise error
                 if not isinstance(error, PipelineRunFailedError):
-                    if items_failed and after_run is not None:
-                        await after_run()
+                    if items_failed and after_items_ran is not None:
+                        try:
+                            await after_items_ran()
+                        except Exception as hook_error:
+                            # The run's own error is what callers map to a status.
+                            raise error from hook_error
                     raise
 
             # Reached only once the completed run's event has been consumed: a
             # close at that yield re-raises above (``run_finished``), and the
             # swallowed per-item failure path leaves ``run_finished`` unset.
-            if (run_finished or items_failed) and after_run is not None:
-                await after_run()
+            if (run_finished or items_failed) and after_items_ran is not None:
+                await after_items_ran()
             if run_finished and after_run_completed is not None:
                 await after_run_completed()

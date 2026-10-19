@@ -545,7 +545,7 @@ async def cognify(
                 extras={"graph_extractor": resolved_extractor},
                 # Reconcile the structure document sources describe, also when an
                 # item failed: one bad page must not freeze the tree of the rest.
-                after_run=reconcile_document_structure,
+                after_items_ran=reconcile_document_structure,
                 # Fold the vector fragments this run wrote, once per dataset,
                 # after the run is recorded complete; bounded per run, so a
                 # bloated store drains over several cognify runs.

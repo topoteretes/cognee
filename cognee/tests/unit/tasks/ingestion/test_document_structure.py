@@ -5,6 +5,7 @@ The reconcile against real adapters is in
 """
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -145,6 +146,29 @@ def test_two_rows_that_name_a_container_differently_leave_it_the_newest_name():
     plan = plan_document_structure([new, old], DATASET_ID)
 
     assert [container.name for container in plan.containers.values()] == ["New"]
+
+
+def test_a_container_named_under_two_pages_is_counted_as_conflicting():
+    """One row's stored ancestors can be stale while the others are current."""
+    chain = [{"kind": "database", "id": "db"}]
+    stale = _row("a", [*chain, _page("old")])
+    fresh = _row("b", [*chain, _page("new")])
+    plan = plan_document_structure([stale, fresh, _row("old", []), _row("new", [])], DATASET_ID)
+
+    assert plan.conflicting_parents == 1
+
+
+@pytest.mark.asyncio
+async def test_edges_a_backend_cannot_delete_are_reported_not_counted_as_removed():
+    from cognee.infrastructure.databases.exceptions import UnsupportedProvenanceCapability
+
+    graph = SimpleNamespace(
+        delete_edge_triples=AsyncMock(side_effect=UnsupportedProvenanceCapability())
+    )
+
+    removed, not_removable = await document_structure._delete_edges(graph, [("a", "b"), ("c", "d")])
+
+    assert (removed, not_removable) == (0, 2)
 
 
 def test_child_of_counts_as_structure_for_visualization():

@@ -127,7 +127,7 @@ _TYPE_COLOR_MAP: dict[str, str] = {
     "DltRow": "#0DFF00",
     "SchemaTable": "#A550FF",
     "DatabaseSchema": "#6510F4",
-    "StructureContainer": "#94A3B8",
+    "StructureContainer": "#0EA5A4",
     "SchemaRelationship": "#323332",
     "default": "#7c3aed",
 }

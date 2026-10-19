@@ -73,10 +73,10 @@ async def test_a_malformed_structure_is_refused_not_dropped(staging, bad):
         _build_document_data_item(rows[0], None, "notion")
 
 
-def test_a_row_without_an_id_has_no_external_id_to_hang_children_under():
+def test_a_row_without_an_id_cannot_carry_a_structure():
     """A custom source may emit id 0 or "". Its document gets no external_id, so the
-    structure pass could not find it, and keeping the structure would make that pass
-    fail for the whole dataset."""
+    structure pass could not find it as a parent. The row is refused, not stored
+    without its structure."""
     from cognee.tasks.ingestion.dlt_row_data import DltRowData
 
     row = DltRowData(
@@ -92,6 +92,5 @@ def test_a_row_without_an_id_has_no_external_id_to_hang_children_under():
         dataset_name="brain",
     )
 
-    metadata = _build_document_data_item(row, None, "custom").system_metadata
-
-    assert "external_id" not in metadata and "structure" not in metadata
+    with pytest.raises(CogneeValidationError, match="row '0'.*a structure on a row with no id"):
+        _build_document_data_item(row, None, "custom")

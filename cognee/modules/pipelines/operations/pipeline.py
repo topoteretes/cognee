@@ -71,7 +71,7 @@ async def run_pipeline(
     needs_llm: bool = True,
     extras: dict | None = None,
     after_run_completed: Callable[[], Awaitable[Any]] | None = None,
-    after_run: Callable[[], Awaitable[Any]] | None = None,
+    after_items_ran: Callable[[], Awaitable[Any]] | None = None,
 ):
     """``tasks`` is either the task list every data item runs, or a callable
     mapping one item to its task list (a task resolver — see ``run_tasks``);
@@ -86,7 +86,7 @@ async def run_pipeline(
     list the resolver can return.
 
     ``after_run_completed`` is awaited after each dataset's run completes, and
-    ``after_run`` also when items in the run failed, both inside that dataset's
+    ``after_items_ran`` also when items in the run failed, both inside that dataset's
     database context (see ``run_tasks``)."""
     if tasks is None:
         raise ValueError(
@@ -121,7 +121,7 @@ async def run_pipeline(
             data_cache=data_cache,
             extras=extras,
             after_run_completed=after_run_completed,
-            after_run=after_run,
+            after_items_ran=after_items_ran,
         )
         async with aclosing(source):
             async for run_info in source:
@@ -142,7 +142,7 @@ async def run_pipeline_per_dataset(
     data_cache=False,
     extras: dict | None = None,
     after_run_completed: Callable[[], Awaitable[Any]] | None = None,
-    after_run: Callable[[], Awaitable[Any]] | None = None,
+    after_items_ran: Callable[[], Awaitable[Any]] | None = None,
 ):
     # The actual work of a single run, factored out so it can run either under
     # the per-dataset lock (normal case) or directly (re-entrant case below).
@@ -171,7 +171,7 @@ async def run_pipeline_per_dataset(
             data_cache=data_cache,
             extras=extras,
             after_run_completed=after_run_completed,
-            after_run=after_run,
+            after_items_ran=after_items_ran,
         )
 
         async with aclosing(pipeline_run):
