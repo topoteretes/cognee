@@ -14,6 +14,11 @@ from cognee.modules.ontology.ontology_env_config import (
     get_ontology_env_config,
     normalize_ontology_mode,
 )
+from cognee.modules.ontology.term_matching import (
+    compact_class_index,
+    find_class_named_in,
+    multiword_match_is_sound,
+)
 from cognee.shared.data_models import KnowledgeGraph, Node
 from cognee.shared.logging_utils import get_logger
 
@@ -21,6 +26,11 @@ logger = get_logger()
 
 _ONTOLOGY_CLASS_CATEGORY = "classes"
 _ONTOLOGY_INDIVIDUAL_CATEGORY = "individuals"
+# Lookup key for the "contains the class name" fallback: an extracted *name* whose head
+# noun phrase ends with an ontology class. The match itself is still a class match
+# (``OntologyMatch.node_category == "classes"``); only the key differs so it cannot be
+# confused with a match on the node's type.
+_CLASS_BY_NAME_LOOKUP = "classes_by_name"
 
 
 @dataclass(frozen=True)
@@ -77,6 +87,18 @@ def _find_ontology_match(
     if not matched_ontology_node:
         return None
 
+    # The fuzzy cutoff is tuned for single names; on multi-word strings it accepts
+    # ``enterprise customer acme`` for ``EnterpriseCustomer`` and swallows the token
+    # that named the individual. Every content word must survive into the match.
+    if not multiword_match_is_sound(normalized_extracted_name, matched_ontology_node.name):
+        logger.debug(
+            "Rejecting unsound ontology match %r -> %r (%s)",
+            normalized_extracted_name,
+            matched_ontology_node.name,
+            node_category,
+        )
+        return None
+
     return OntologyMatch(
         node_category=node_category,
         canonical_name=matched_ontology_node.name,
@@ -89,13 +111,53 @@ def _find_ontology_match(
     )
 
 
+def _ontology_class_index(ontology_resolver: BaseOntologyResolver) -> dict[str, str]:
+    """The resolver's class keys by compact form; empty for resolvers with no ``lookup``."""
+    lookup = getattr(ontology_resolver, "lookup", None)
+    if not isinstance(lookup, dict):
+        return {}
+    classes = lookup.get(_ONTOLOGY_CLASS_CATEGORY)
+    return compact_class_index(classes.keys()) if isinstance(classes, dict) else {}
+
+
+def _find_class_named_in_entity(
+    ontology_resolver: BaseOntologyResolver,
+    class_keys: dict[str, str],
+    normalized_name: str,
+    first_source_chunk: DocumentChunk,
+) -> OntologyMatch | None:
+    """Ground an entity in the class its *name* ends with (``credit exposure to Acme``).
+
+    Only names are read this way, and only against classes: an individual's name that
+    contains another individual's name says nothing about identity, and a fallback on
+    types is what the fuzzy match already is.
+    """
+    class_key = find_class_named_in(normalized_name, class_keys)
+    if class_key is None:
+        return None
+    match = _find_ontology_match(
+        ontology_resolver, class_key, _ONTOLOGY_CLASS_CATEGORY, first_source_chunk
+    )
+    if match is not None:
+        logger.debug(
+            "Grounding extracted entity %r in ontology class %r by name", normalized_name, class_key
+        )
+    return match
+
+
 def _find_ontology_matches_for_extracted_graphs(
     data_chunks: list[DocumentChunk],
     extracted_graphs: list[KnowledgeGraph],
     ontology_resolver: BaseOntologyResolver,
 ) -> OntologyMatchLookup:
-    """Find one ontology match for each distinct extracted name and type."""
+    """Find one ontology match for each distinct extracted name and type.
+
+    Three lookups per node: its type against the classes, its name against the
+    individuals, and — when the type found no class — its name against the class
+    names it contains, stored under ``_CLASS_BY_NAME_LOOKUP``.
+    """
     ontology_match_lookup: OntologyMatchLookup = {}
+    class_keys = _ontology_class_index(ontology_resolver)
     for data_chunk, extracted_graph in zip(data_chunks, extracted_graphs):
         if not extracted_graph:
             continue
@@ -116,6 +178,24 @@ def _find_ontology_matches_for_extracted_graphs(
                     node_category,
                     data_chunk,
                 )
+
+            if not class_keys:
+                continue
+            normalized_name = generate_node_name(node.name)
+            by_name_key = (_CLASS_BY_NAME_LOOKUP, normalized_name)
+            if by_name_key in ontology_match_lookup:
+                continue
+            type_matched = (
+                ontology_match_lookup.get((_ONTOLOGY_CLASS_CATEGORY, generate_node_name(node.type)))
+                is not None
+            )
+            ontology_match_lookup[by_name_key] = (
+                None
+                if type_matched
+                else _find_class_named_in_entity(
+                    ontology_resolver, class_keys, normalized_name, data_chunk
+                )
+            )
 
     return ontology_match_lookup
 
@@ -159,6 +239,10 @@ def _canonicalize_extracted_graph(
             _ONTOLOGY_CLASS_CATEGORY,
             node.type,
         )
+        if entity_type_match is None:
+            entity_type_match = _get_ontology_match(
+                ontology_match_lookup, _CLASS_BY_NAME_LOOKUP, node.name
+            )
         if entity_type_match is not None:
             node.type = entity_type_match.canonical_name
 

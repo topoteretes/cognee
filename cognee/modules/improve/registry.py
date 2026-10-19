@@ -1,6 +1,8 @@
 """The only description of the improve stages (plan Part 5.5).
 
-``DEFAULT_STAGES`` lists the stages in execution order. The order
+``DEFAULT_STAGES`` lists the stages in execution order (the last,
+``ontology_proposals``, drafts governed-model proposals and reads what the rest
+produced, so it runs last). The order
 is load-bearing — stage 4's lessons are what stage 5 gates on, stage 5's
 accepted lessons are stage 7's anchors, and stage 7 runs before conflict
 review — and ``test_registry_order`` pins it; this list is the single place it
@@ -17,6 +19,7 @@ from .stages import (
     ExtractAgentContextStage,
     FeedbackWeightsStage,
     GlobalContextIndexStage,
+    OntologyProposalsStage,
     PersistAgentTracesStage,
     PersistSessionQAStage,
     ReviewConflictsStage,
@@ -33,6 +36,7 @@ DEFAULT_STAGES: list[BaseStage] = [
     BuildTruthSubspaceStage(),
     ReviewConflictsStage(),
     GlobalContextIndexStage(),
+    OntologyProposalsStage(),
 ]
 
 # Stages that existed in earlier releases. ``IMPROVE_STAGES_DISABLED`` may

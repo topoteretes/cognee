@@ -1,5 +1,8 @@
+import json
 from typing import Any, NamedTuple
+from uuid import UUID
 
+from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
 from cognee.modules.engine.models.DltColumn import DltColumn
 from cognee.modules.engine.models.Entity import Entity
 from cognee.modules.graph.utils.fact_conflicts import (
@@ -9,6 +12,7 @@ from cognee.modules.graph.utils.fact_conflicts import (
     is_conflict_edge,
     status_label,
 )
+from cognee.modules.ontology.query_grounding import ONTOLOGY_CLASS_CATEGORY, QueryGrounding
 from cognee.modules.retrieval.hybrid.chunks import search_collections
 from cognee.modules.retrieval.hybrid.facts import connection_edge_type_id
 from cognee.modules.retrieval.hybrid.results import payload_matches_node_filter
@@ -63,6 +67,44 @@ async def search_entities(
             "Entity search failed; continuing without entities: %s", error, exc_info=True
         )
         return []
+
+
+def pin_grounded_entities(entity_hits: list[Any], grounding: QueryGrounding) -> list[Any]:
+    """Put the ontology nodes a query resolved to at the head of the entity hits.
+
+    Each grounded concept becomes an exact-score hit (0.0) carrying the payload the
+    entity formatter reads (``name``, ``description``, ``type``); a node the vector
+    search already returned is moved up rather than duplicated. The list grows by at
+    most the number of grounded concepts, so the entity budget is not squeezed.
+    """
+    if not grounding:
+        return entity_hits
+
+    pinned: list[Any] = []
+    pinned_ids: set[str] = set()
+    for concept in grounding.concepts:
+        if concept.node_id in pinned_ids:
+            continue
+        pinned_ids.add(concept.node_id)
+        if concept.category == ONTOLOGY_CLASS_CATEGORY:
+            concept_type = "ontology class"
+        else:
+            concept_type = concept.parents[0] if concept.parents else "ontology individual"
+        pinned.append(
+            ScoredResult(
+                id=UUID(concept.node_id),
+                score=0.0,
+                payload={
+                    "id": concept.node_id,
+                    "name": concept.canonical_name,
+                    "description": concept.describe(),
+                    "type": concept_type,
+                },
+            )
+        )
+
+    remaining = [hit for hit in entity_hits or [] if result_id(hit) not in pinned_ids]
+    return pinned + remaining
 
 
 async def build_entities(
@@ -346,14 +388,20 @@ def _deduplicated_bullets(connections: Any) -> list["_RankedEdge"]:
     return bullets
 
 
-def _edge_sort_key(edge: dict, edge_ranks: dict[str, int]) -> tuple[int, int]:
-    """Pinned type edges first, then query-ranked edges, then legacy graph order."""
+def _edge_sort_key(edge: dict, edge_ranks: dict[str, int]) -> tuple[int, int, int]:
+    """Pinned type edges first, then query-ranked edges, then legacy graph order.
+
+    Within each group an edge from an authoritative source (a ``realizes`` edge
+    stamped ``authoritative`` by schema alignment) sorts before the others, so when
+    several tables realize one concept the system of record survives the edge cap.
+    """
+    authority = 0 if edge.get("authoritative") else 1
     if _is_type_edge(edge):
-        return (0, 0)
+        return (0, 0, authority)
     rank = edge_ranks.get(edge.get("edge_type_id"))
     if rank is None:
-        return (2, 0)
-    return (1, rank)
+        return (2, 0, authority)
+    return (1, rank, authority)
 
 
 def _unpack_connection(connection: Any) -> tuple[dict, dict, dict] | None:
@@ -381,12 +429,27 @@ def _edge_bullet(source: dict, edge: dict, target: dict) -> _RankedEdge | None:
         text = f"{source_label} -- {relationship} -- {target_label}"
     if not text:
         return None
-    properties = edge.get("properties") or {}
+    properties = _edge_properties(edge)
     label = status_label(properties)
+    if label:
+        text = f"{text} {label}"
+
+    authoritative = bool(properties.get("authoritative"))
+    owner = display_value(properties.get("owner"))
+    if authoritative or owner:
+        qualifiers = [
+            part
+            for part in (
+                "authoritative source" if authoritative else "",
+                f"owner: {owner}" if owner else "",
+            )
+            if part
+        ]
+        text = f"{text} ({', '.join(qualifiers)})"
 
     return _RankedEdge(
         {
-            "text": f"{text} {label}" if label else text,
+            "text": text,
             "source": source_label,
             "target": target_label,
             "source_id": display_value(source.get("id")),
@@ -394,9 +457,22 @@ def _edge_bullet(source: dict, edge: dict, target: dict) -> _RankedEdge | None:
             "target_id": display_value(target.get("id")),
             "edge_type_id": connection_edge_type_id(edge),
             "edge_object_id": display_value(properties.get("edge_object_id")),
+            "authoritative": authoritative,
+            "owner": owner or None,
         },
         fact_status(properties) == "superseded",
     )
+
+
+def _edge_properties(edge: dict) -> dict:
+    """The edge's property map, whether it arrived as a dict or the stored JSON string."""
+    properties = edge.get("properties") or {}
+    if isinstance(properties, str):
+        try:
+            properties = json.loads(properties)
+        except ValueError:
+            return {}
+    return properties if isinstance(properties, dict) else {}
 
 
 def _edge_dedupe_key(edge: dict) -> tuple[str, str, str] | None:

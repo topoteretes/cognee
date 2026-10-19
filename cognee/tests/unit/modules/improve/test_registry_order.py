@@ -21,6 +21,7 @@ EXPECTED_ORDER = [
     "build_truth_subspace",
     "review_conflicts",
     "global_context_index",
+    "ontology_proposals",
 ]
 
 
@@ -55,6 +56,7 @@ def test_session_fed_stages_and_graph_stages():
     needs = {stage.name: stage.needs_sessions for stage in DEFAULT_STAGES}
     assert needs["review_conflicts"] is False
     assert needs["global_context_index"] is False
+    assert needs["ontology_proposals"] is False
     assert all(needs[name] for name in EXPECTED_ORDER[:7])
 
 

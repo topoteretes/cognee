@@ -96,6 +96,8 @@ def test_config_declares_no_shared_knobs():
         "trace_window_steps",
         "trace_windows_per_run",
         "distill_max_batches_per_run",
+        "ontology_proposals_enabled",
+        "ontology_proposals_min_occurrences",
     }
     for shared in ("triplet_embedding", "caching", "auto_feedback", "personalization_enabled"):
         assert shared not in fields

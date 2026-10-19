@@ -6,6 +6,11 @@ from cognee.context_global_variables import session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.session.get_session_manager import get_session_manager
+from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
+from cognee.modules.ontology.query_grounding import (
+    QueryGrounding,
+    ground_query_with_configured_ontology,
+)
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.hybrid.candidates import HybridCandidates
@@ -25,6 +30,7 @@ from cognee.modules.retrieval.hybrid.context import (
 from cognee.modules.retrieval.hybrid.entities import (
     build_entities,
     entity_collections,
+    pin_grounded_entities,
     search_entities,
 )
 from cognee.modules.retrieval.hybrid.external_metadata import project_external_metadata
@@ -85,6 +91,8 @@ class HybridRetriever(BaseRetriever):
         use_importance_weight: bool = True,
         use_truth_weight: bool = False,
         facts_top_k: int | None = 5,
+        ontology_grounding: bool | None = None,
+        ontology_resolver: BaseOntologyResolver | None = None,
         include_external_metadata: bool = False,
         external_metadata_keys: list[str] | None = None,
     ):
@@ -105,11 +113,23 @@ class HybridRetriever(BaseRetriever):
         self.use_importance_weight = use_importance_weight
         self.use_truth_weight = use_truth_weight
         self.facts_top_k = facts_top_k if facts_top_k is not None else 5
+        # Same contract as GraphCompletionRetriever: None follows
+        # ONTOLOGY_QUERY_GROUNDING, an explicit resolver overrides the configured one.
+        self.ontology_grounding = ontology_grounding
+        self.ontology_resolver = ontology_resolver
         # Opt-in: surface allowlisted keys of the document external_metadata
         # stored on each chunk. Off by default, so returned objects and the
         # prompt stay exactly as before.
         self.include_external_metadata = include_external_metadata
         self.external_metadata_keys = list(external_metadata_keys or [])
+
+    def ground_query(self, query: str | None) -> QueryGrounding:
+        """Resolve the query's terms against the ontology; empty when none is configured."""
+        return ground_query_with_configured_ontology(
+            query,
+            resolver=self.ontology_resolver,
+            enabled=self.ontology_grounding,
+        )
 
     def _use_session_cache(self) -> bool:
         user = session_user.get()
@@ -166,6 +186,7 @@ class HybridRetriever(BaseRetriever):
         # and fails open: flag off, no node, or any error yields {}, keeping
         # ranking byte-identical to an un-personalized run.
         personal_weights = await load_preference_weights()
+        grounding = self.ground_query(query)
 
         # One check decides for both lanes whether the DLT collections are read.
         include_dlt = await dlt_rows_indexed(self._unified_engine.vector)
@@ -188,7 +209,7 @@ class HybridRetriever(BaseRetriever):
                 personal_influence=get_base_config().personalization_influence,
                 collections=chunk_collections(include_dlt),
             ),
-            self._retrieve_entities_and_facts(query, query_vector, include_dlt),
+            self._retrieve_entities_and_facts(query, query_vector, include_dlt, grounding),
         )
         project_external_metadata(
             chunk_objects.get("chunks", []),
@@ -203,10 +224,15 @@ class HybridRetriever(BaseRetriever):
             chunk_summaries=chunk_objects["chunk_summaries"],
             entities=entities,
             fact_candidates=fact_candidates,
+            ontology_grounding=grounding.to_context_block() or "",
         )
 
     async def _retrieve_entities_and_facts(
-        self, query: str, query_vector: list[float], include_dlt: bool = False
+        self,
+        query: str,
+        query_vector: list[float],
+        include_dlt: bool = False,
+        grounding: QueryGrounding | None = None,
     ) -> tuple[list[dict], FactCandidates]:
         """Entity lane, run concurrently with the chunk lane so the graph round trip for
         edge bullets overlaps the chunk pipeline's ranking and summary loading.
@@ -235,6 +261,11 @@ class HybridRetriever(BaseRetriever):
                 query_vector=query_vector,
             ),
         )
+        if grounding:
+            # Ontology concepts the query names lead the entity lane: their 1-hop
+            # neighbourhood (instances of a class, relations of an individual) is
+            # what "this customer" or "exposure" means in the business model.
+            entity_hits = pin_grounded_entities(entity_hits, grounding)
         entities, reachable_ids = await build_entities(
             self._unified_engine.graph,
             entity_hits,

@@ -22,14 +22,26 @@ def _attached_conflict_texts(retrieved_objects: dict) -> set[str]:
 def format_hybrid_context(global_context: str, retrieved_objects: Any) -> str:
     retrieved_objects = retrieved_objects or {}
     conflict_texts = _attached_conflict_texts(retrieved_objects)
-    sections = (
-        global_context,
-        format_passages(retrieved_objects.get("chunks", [])),
-        format_entities(retrieved_objects.get("entities", [])),
-        format_facts(retrieved_objects.get("facts", []), exclude_texts=conflict_texts),
-        format_conflicts(conflict_texts),
-    )
-    return "\n\n".join(section for section in sections if section)
+    sections = [
+        section
+        for section in (
+            global_context,
+            format_passages(retrieved_objects.get("chunks", [])),
+            format_entities(retrieved_objects.get("entities", [])),
+            format_facts(retrieved_objects.get("facts", []), exclude_texts=conflict_texts),
+            format_conflicts(conflict_texts),
+        )
+        if section
+    ]
+
+    # Grounding explains terms; it never stands in for retrieved content, so an
+    # otherwise empty context stays empty (and the empty-context guard still fires).
+    grounding = display_value(retrieved_objects.get("ontology_grounding"))
+    if grounding and sections:
+        insert_at = 1 if global_context else 0
+        sections.insert(insert_at, grounding)
+
+    return "\n\n".join(sections)
 
 
 def format_hybrid_context_batch(global_contexts, retrieved_objects_list) -> list[str]:

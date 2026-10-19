@@ -61,6 +61,16 @@ class ImproveConfig(BaseSettings):
     # A cap curates only the most relevant entries that fit in this many curator
     # batches and seals the rest uncurated; 0 means no cap.
     distill_max_batches_per_run: int = 0
+    # Stage 10 (``ontology_proposals``): draft mapping / definition_conflict /
+    # ontology_extension proposals for a human to ratify. Opt-in like
+    # ``review_conflicts``: it may call the LLM and writes ``OntologyProposal``
+    # nodes that belong to the dataset's model, not to any one document, so a
+    # default-on stage would leave them behind after every document is deleted.
+    # Off = skipped with ``opt_in_disabled``. ``min_occurrences`` is how many
+    # entities must share an ungrounded EntityType before it is proposed as an
+    # ontology extension.
+    ontology_proposals_enabled: bool = False
+    ontology_proposals_min_occurrences: int = 3
 
     model_config = SettingsConfigDict(env_prefix="IMPROVE_", extra="ignore")
 
