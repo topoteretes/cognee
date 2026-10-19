@@ -24,6 +24,7 @@ import cognee.modules.integrations.gmail
 import cognee.modules.integrations.google_calendar
 import cognee.modules.integrations.google_drive
 import cognee.modules.integrations.linear
+import cognee.modules.integrations.notion
 from cognee.api.exception_telemetry import send_api_exception_telemetry
 from cognee.api.startup_checks import report_default_user_login_posture
 from cognee.api.v1.activity.routers import get_activity_router

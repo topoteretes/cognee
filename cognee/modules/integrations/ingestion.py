@@ -77,6 +77,12 @@ _PROVIDERS: dict[str, _Provider] = {
         source_name="linear_source",
         service_builder=_linear_service,
     ),
+    # ``notion_source`` takes the token itself, so there is no service to build.
+    "notion": _Provider(
+        prefix="notion_pages",
+        source_module="cognee.tasks.ingestion.connectors.notion",
+        source_name="notion_source",
+    ),
 }
 
 
