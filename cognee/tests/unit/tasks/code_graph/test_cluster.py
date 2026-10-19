@@ -463,9 +463,10 @@ async def test_refresh_runs_each_member_over_its_own_row_from_one_snapshot(refre
         env.dataset, env.user, known_repos=[(env.ui_row, env.ui)]
     )
 
-    # The row the caller just stored comes first; the dataset's other row joins it.
+    # The repository the caller just stored comes first (planned by directory,
+    # before its row exists); the dataset's other row joins it.
     env.snapshot_mock.assert_awaited_once()
-    assert env.snapshot_mock.await_args.args[1] == [(env.ui_row, env.ui), (env.golf_row, env.golf)]
+    assert env.snapshot_mock.await_args.args[1] == [(None, env.ui), (env.golf_row, env.golf)]
     assert [(run.label, run.error) for run in runs] == [("golf", None), ("ui", None)]
     calls = env.pipeline.await_args_list
     assert [call.kwargs["data"] for call in calls] == [[env.golf_row], [env.ui_row]]
@@ -538,7 +539,7 @@ async def test_refresh_of_a_large_dataset_builds_only_the_new_rows_inline(refres
         env.dataset, env.user, known_repos=[(env.ui_row, env.ui)]
     )
 
-    assert env.snapshot_mock.await_args.args[1] == [(env.ui_row, env.ui)]
+    assert env.snapshot_mock.await_args.args[1] == [(None, env.ui)]
     assert [run.data for run in runs] == [env.ui_row]
     assert [call.kwargs["data"] for call in env.pipeline.await_args_list] == [[env.ui_row]]
     assert sorted(call.args[0] for call in reset.await_args_list) == sorted(r.id for r in existing)
@@ -554,8 +555,49 @@ async def test_refresh_within_the_limit_rebuilds_every_repository(refresh_env, m
 
     await refresh_dataset_code_graph(env.dataset, env.user, known_repos=[(env.ui_row, env.ui)])
 
-    assert env.snapshot_mock.await_args.args[1] == [(env.ui_row, env.ui), (env.golf_row, env.golf)]
+    assert env.snapshot_mock.await_args.args[1] == [(None, env.ui), (env.golf_row, env.golf)]
     reset.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_refresh_leaves_out_a_repository_whose_directory_is_gone(refresh_env, monkeypatch):
+    """A stale row (its clone directory removed) is skipped with a warning, not
+    run: one such row must not fail every later remember() into the dataset."""
+    env = refresh_env
+    gone_row = _row(env.golf.parent / "gone")
+    monkeypatch.setattr(
+        cluster_module, "dataset_code_repo_rows", AsyncMock(return_value=[gone_row, env.ui_row])
+    )
+    env.snapshot_mock.return_value = None  # one directory left: not a cluster
+
+    runs = await refresh_dataset_code_graph(
+        env.dataset, env.user, known_repos=[(env.ui_row, env.ui)]
+    )
+
+    assert [(run.data, run.error) for run in runs] == [(env.ui_row, None)]
+    assert [call.kwargs["data"] for call in env.pipeline.await_args_list] == [[env.ui_row]]
+
+
+@pytest.mark.asyncio
+async def test_refresh_binds_planned_members_to_the_rows_stored_for_them(refresh_env):
+    """plan_dataset_refresh runs before the rows exist: a member planned by
+    directory is loaded under the row the caller stored for that directory."""
+    env = refresh_env
+    planned = DatasetCodeSnapshot(
+        snapshot_dir=env.snapshot.snapshot_dir,
+        members=[
+            ClusterMember(data=env.golf_row, repo_path=env.golf, label="golf"),
+            ClusterMember(data=None, repo_path=env.ui, label="ui"),
+        ],
+    )
+    plan = cluster_module.RefreshPlan(snapshot=planned, existing=[(env.golf_row, env.golf)])
+
+    runs = await refresh_dataset_code_graph(
+        env.dataset, env.user, known_repos=[(env.ui_row, env.ui)], plan=plan
+    )
+
+    env.snapshot_mock.assert_not_awaited()  # the plan's snapshot is used, none is taken
+    assert [(run.label, run.data) for run in runs] == [("golf", env.golf_row), ("ui", env.ui_row)]
 
 
 @pytest.fixture

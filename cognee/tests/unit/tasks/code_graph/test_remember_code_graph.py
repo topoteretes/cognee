@@ -343,14 +343,19 @@ async def test_row_write_run_and_stamp_hold_the_dataset_lock(code_remember_env, 
     code_remember_env["resolve"].side_effect = lambda *_a, **_k: (
         events.append(("resolve", None)) or code_remember_env["repo_dir"]
     )
+    code_remember_env["cluster"].side_effect = lambda *_a, **_k: (
+        events.append(("snapshot", None)) or None
+    )
 
     await remember("/some/repo", content_type="code")
 
     dataset_id = code_remember_env["dataset"].id
-    # The clone (resolve) is network-bound and reads no dataset state: it
-    # happens before the lock, so nothing else on the dataset waits for it.
+    # The clone (resolve) and the enola run (snapshot) are the slow parts and
+    # read no dataset state: both happen before the lock, so nothing else on
+    # the dataset waits for them; only the row write, load and stamp hold it.
     assert events == [
         ("resolve", None),
+        ("snapshot", None),
         ("lock", dataset_id),
         ("add_repo", None),
         ("pipeline", None),
@@ -467,6 +472,28 @@ async def test_failed_rebuild_of_another_repository_is_reported(code_remember_en
     assert result.error == "other: graph write failed"
     assert result.items_processed == 1
     assert result.items[0].get("status") != "errored"
+
+
+@pytest.mark.asyncio
+async def test_failed_rebuild_of_another_repository_is_not_raised(code_remember_env, tmp_path):
+    """The rows this call stored are built and stamped; another repository's
+    failed rebuild is reported on the result, not raised at the caller."""
+    other_row = SimpleNamespace(id=uuid4())
+    code_remember_env["cluster"].return_value = _cluster_of(
+        code_remember_env, other_row, tmp_path / "other"
+    )
+    code_remember_env["pipeline"].side_effect = [RuntimeError("graph write failed"), None]
+
+    result = await remember("/local/repo", dataset_name="my_code", content_type="code")
+
+    assert result.status == "errored"
+    assert result.error == "other: graph write failed"
+    assert result.items[0]["id"] == str(code_remember_env["data_row"].id)
+    assert result.items[0].get("status") != "errored"
+    code_remember_env["mark_processed"].assert_awaited_once()
+    assert (
+        code_remember_env["mark_processed"].await_args.args[0] == code_remember_env["data_row"].id
+    )
 
 
 @pytest.mark.asyncio

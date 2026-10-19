@@ -1649,7 +1649,11 @@ async def _remember_inner(
         from cognee import __version__ as cognee_version
         from cognee.infrastructure.locks.dataset_lock import dataset_lock
         from cognee.shared.utils import send_telemetry
-        from cognee.tasks.code_graph.cluster import pipeline_errored, refresh_dataset_code_graph
+        from cognee.tasks.code_graph.cluster import (
+            pipeline_errored,
+            plan_dataset_refresh,
+            refresh_dataset_code_graph,
+        )
         from cognee.tasks.code_graph.code_repo import add_code_repository
         from cognee.tasks.code_graph.resolve_repo import (
             is_remote_repo,
@@ -1778,6 +1782,23 @@ async def _remember_inner(
                         raise
                     _isolate(item, exc, position)
 
+            # The dataset's repositories are extracted together, so the ones
+            # already in it are rebuilt with the ones this call adds: that is
+            # where the edges between repositories come from. The enola run
+            # needs the directories, not the rows, so it too runs before the
+            # lock; a failure is recorded once the rows exist, below, so the
+            # caller still gets their ids.
+            plan, plan_error = None, None
+            if cloned:
+                try:
+                    plan = await plan_dataset_refresh(
+                        dataset, [repo_path for _position, _spec, _item, repo_path in cloned]
+                    )
+                except Exception as exc:
+                    plan_error = exc
+                    if isolate_failures:
+                        logger.exception("Code-graph extraction failed for the dataset")
+
             # The Data rows' stamps are read-modify-written as a whole: holding
             # the dataset lock from the first row write to the final stamp keeps
             # a concurrent add()/cognify() of the dataset from overwriting them.
@@ -1792,17 +1813,21 @@ async def _remember_inner(
                             raise
                         _isolate(item, exc, position)
 
-                # The dataset's repositories are extracted together, so the ones
-                # already in it are rebuilt with the ones this call adds: that is
-                # where the edges between repositories come from.
+                if plan_error is not None:
+                    if not isolate_failures:
+                        raise plan_error
+                    for item, _data, _repo_path in stored:
+                        _fail(item, plan_error)
+
                 runs = []
-                if stored:
+                if stored and plan_error is None:
                     try:
                         runs = await refresh_dataset_code_graph(
                             dataset,
                             user,
                             known_repos=[(data, repo_path) for _item, data, repo_path in stored],
                             index_vectors=bool(index_vectors),
+                            plan=plan,
                         )
                     except Exception as exc:
                         if not isolate_failures:
@@ -1822,16 +1847,18 @@ async def _remember_inner(
                         ),
                         None,
                     )
-                    if run.error is not None and not isolate_failures:
-                        raise run.error
                     if item is None:
-                        # A repository already in the dataset, rebuilt with this batch.
+                        # A repository already in the dataset, rebuilt with this
+                        # batch. Its failure is reported, never raised: the rows
+                        # this call stored are built and stamped by now.
                         if run.error is not None or pipeline_errored(run.pipeline_result):
                             other_errors.append(
                                 f"{run.repo_path.name}: "
                                 f"{run.error or 'code_graph_pipeline errored'}"
                             )
                         continue
+                    if run.error is not None and not isolate_failures:
+                        raise run.error
                     pending.remove(item)
                     if run.error is not None:
                         _fail(item[0], run.error)
