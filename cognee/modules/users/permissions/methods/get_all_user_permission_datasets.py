@@ -1,56 +1,75 @@
+from sqlalchemy import literal, select, union_all
+
+from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.models.Dataset import Dataset
-from cognee.modules.users.methods.get_user_agents import get_user_agents
-from cognee.modules.users.permissions.methods import get_principal_datasets
 from cognee.shared.logging_utils import get_logger
 
+from ...models.ACL import ACL
+from ...models.Permission import Permission
 from ...models.User import User
+from ...models.UserRole import UserRole
+from ...models.UserTenant import UserTenant
 
 logger = get_logger()
 
 
 async def get_all_user_permission_datasets(user: User, permission_type: str) -> list[Dataset]:
     """
-        Return a list of datasets the user has permission for.
-        If the user is part of a tenant, return datasets his roles have permission for.
+        Return the datasets the user effectively holds a permission on, within
+        the tenant they are currently in.
+
+        Effective means the union of what these principals hold directly:
+
+        * the user;
+        * the agents the user created — the user holds the agents' keys, so this
+          grants nothing the user could not already do; only the agents' own
+          grants count, their tenants and roles are the user's;
+        * every tenant the user is a member of;
+        * the user's roles, which exist only while the user is in a tenant.
+
+        Two round trips, whatever the number of principals: one UNION collects
+        the membership ids, one ACL query reads the grants of all of them and
+        narrows to the user's current tenant in SQL.
     Args:
         user
         permission_type
 
     Returns:
-        list[Dataset]: List of datasets user has permission for
+        list[Dataset]: The user's effective datasets in their current tenant,
+        each once.
     """
-    datasets = []
-    # Get all datasets User has explicit access to
-    datasets.extend(await get_principal_datasets(user, permission_type))
+    memberships = union_all(
+        select(User.id.label("principal_id"), literal("agent").label("kind")).where(
+            User.parent_user_id == user.id
+        ),
+        select(UserTenant.tenant_id, literal("tenant")).where(UserTenant.user_id == user.id),
+        select(UserRole.role_id, literal("role")).where(UserRole.user_id == user.id),
+    )
+    tenant_filter = (
+        Dataset.tenant_id == user.tenant_id if user.tenant_id else Dataset.tenant_id.is_(None)
+    )
 
-    # A user reaches what the agents they created reach: the user holds the
-    # agents' keys, so this grants nothing the user could not already do. Only
-    # the agents' own grants count; their tenants and roles are the user's.
-    for agent in await get_user_agents(user.id):
-        datasets.extend(await get_principal_datasets(agent, permission_type))
+    async with get_relational_engine().get_async_session() as session:
+        rows = (await session.execute(memberships)).all()
+        by_kind: dict[str, set] = {"agent": set(), "tenant": set(), "role": set()}
+        for principal_id, kind in rows:
+            by_kind[kind].add(principal_id)
+        principal_ids = {user.id} | by_kind["agent"] | by_kind["tenant"]
+        if by_kind["tenant"]:
+            principal_ids |= by_kind["role"]
 
-    # Get all tenants user is a part of
-    tenants = await user.awaitable_attrs.tenants
-    for tenant in tenants:
-        # Get all datasets all tenant members have access to
-        datasets.extend(await get_principal_datasets(tenant, permission_type))
-
-    # Get all datasets accessible by roles user is a part of. Roles belong to
-    # the user, not to one tenant, so they are queried once, not once per tenant.
-    if tenants:
-        for role in await user.awaitable_attrs.roles:
-            datasets.extend(await get_principal_datasets(role, permission_type))
-
-    # Deduplicate datasets with same ID
-    unique = {}
-    for dataset in datasets:
-        # If the dataset id key already exists, leave the dictionary unchanged.
-        unique.setdefault(dataset.id, dataset)
-
-    # Filter out dataset that aren't part of the selected user's tenant
-    filtered_datasets = []
-    for dataset in list(unique.values()):
-        if dataset.tenant_id == user.tenant_id:
-            filtered_datasets.append(dataset)
-
-    return filtered_datasets
+        result = await session.execute(
+            select(Dataset)
+            .join(ACL, ACL.dataset_id == Dataset.id)
+            .join(Permission, Permission.id == ACL.permission_id)
+            .where(
+                ACL.principal_id.in_(principal_ids),
+                Permission.name == permission_type,
+                tenant_filter,
+            )
+        )
+        # One dataset can be reached through several principals; keep it once.
+        unique: dict = {}
+        for dataset in result.scalars().all():
+            unique.setdefault(dataset.id, dataset)
+        return list(unique.values())

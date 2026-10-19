@@ -86,7 +86,6 @@ async def authorized_get_principal_datasets(
         # Self-queries are effective (see the docstring); other principals stay
         # direct so an admin reads back exactly the rows that were granted.
         datasets = await get_all_user_permission_datasets(requester, permission_name)
-        datasets = await get_all_user_permission_datasets(requester, permission_name)
     else:
         datasets = await get_principal_datasets(principal, permission_name)
 
