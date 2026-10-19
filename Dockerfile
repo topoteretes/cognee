@@ -8,7 +8,7 @@
 # Pinned by digest so a compromised :latest tag cannot inject binaries into
 # the shipped image — same digest as scripts/fetch_ladybug_json_extension.sh,
 # which documents how to refresh both together on a ladybug bump.
-FROM ghcr.io/ladybugdb/extension-repo@sha256:180c83fb190e9d6ef8d324850b192db26794ab7cb866a38813a45365f14bd46d AS ladybug-extensions
+FROM ghcr.io/ladybugdb/extension-repo@sha256:bfa2340d083ea52d6abce73b8b61d6421f018b4c6926f21d0eceb21a87d5a4f1 AS ladybug-extensions
 RUN mkdir -p /bundle && cd /usr/share/nginx/html && \
     for f in v*/linux_*/json/libjson.lbug_extension; do \
         d="/bundle/${f%/json/libjson.lbug_extension}"; \
@@ -91,7 +91,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 RUN --mount=type=cache,target=/root/.cache/uv \
     /app/.venv/bin/python -m cognee.tasks.graph.gliner_demo.install
 
-FROM python:3.12-slim-bookworm@sha256:782412e85d0f0984994c290652577d4018aff08145c85b262bb63dc0c7522254
+FROM python:3.14-slim-bookworm@sha256:48b13b003dda20b16f9442b8475aa05fe21bf6579a8c881db92ffb4d8fd20f83
 
 # git: the code-graph route shallow-clones GitHub/GitLab repository URLs at
 # runtime (cognee/tasks/code_graph/resolve_repo.py); without it every remote
