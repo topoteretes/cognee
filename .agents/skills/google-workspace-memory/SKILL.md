@@ -34,9 +34,6 @@ use the sample even when their account is set up. The sample lives in its own da
 3. The answer is everything after the line `[ask] Answer:`. Give it to the user, and say
    which sources went in (the `[ingest_calendar]`, `[ingest_gmail]` and `[ingest_drive]`
    lines).
-4. If a script fails, `google_workspace_memory.py` exits 1 with a line naming what went
-   wrong (a `[ingest_*]`, `[ask]` or `[error]` line). Run that script from `examples/cookbooks/google_workspace_memory/scripts/` on its
-   own to look closer.
 
 For a follow-up question on the same data, run
 `uv run python examples/cookbooks/google_workspace_memory/scripts/ask.py --ask "..."`, with

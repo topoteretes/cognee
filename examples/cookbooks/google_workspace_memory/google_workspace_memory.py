@@ -80,7 +80,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     import cognee  # loads .env, so keys set there are seen by the check
-    from cognee.exceptions import CogneeApiError
 
     if not args.sample and not (COOKBOOK_DIR / "credentials.json").exists():
         print("[setup] No Google OAuth client is set up, so this runs on the sample.")
@@ -103,10 +102,4 @@ if __name__ == "__main__":
     if args.sample:
         write_sample()
         print("[setup] Wrote the sample from setup.py.")
-    try:
-        asyncio.run(run(args))
-    # cognee wraps connector and pipeline failures in CogneeApiError; OSError covers network
-    # and file errors. A script's own SystemExit already printed its reason.
-    except (CogneeApiError, OSError) as error:
-        print(f"[error] {type(error).__name__}: {error}")
-        sys.exit(1)
+    asyncio.run(run(args))
