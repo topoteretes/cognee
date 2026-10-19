@@ -14,10 +14,11 @@ task's output, `enriches`, `ctx` injection, `Drop`) are documented in
 |---|---|---|
 | 1 | `documents.classify_documents` | `Data` rows → typed `Document`s (`TextDocument`, `PdfDocument`, …) |
 | 2 | `documents.extract_chunks_from_documents` | `Document` → `DocumentChunk`s (uses `cognee.modules.chunking`) |
-| 3 | `graph.extract_graph_from_data` | chunks → chunks with `Entity`/`EntityType` nodes and edges attached (LLM, or GLiNER with `extractor="gliner_demo"`) |
-| 4 | `summarization.summarize_text` | chunks → `TextSummary` nodes (LLM) |
-| 5 | `storage.add_data_points` | data points → written to graph + vector DB (+ edge evidence) |
-| 6 | `provenance.record_provenance` | audit-ledger rows, when `PROVENANCE_TRACKING=true` |
+| 3 | `storage.index_chunks_for_search` | chunks → chunk + document nodes written and chunk text embedded now, so chunk-based searches answer while step 4 runs; the ids go to `ctx.extras` and step 6 skips re-embedding them (`EARLY_CHUNK_INDEXING`, default on) |
+| 4 | `graph.extract_graph_from_data` | chunks → chunks with `Entity`/`EntityType` nodes and edges attached (LLM, or GLiNER with `extractor="gliner_demo"`) |
+| 5 | `summarization.summarize_text` | chunks → `TextSummary` nodes (LLM) |
+| 6 | `storage.add_data_points` | data points → written to graph + vector DB (+ edge evidence) |
+| 7 | `provenance.record_provenance` | audit-ledger rows, when `PROVENANCE_TRACKING=true` |
 
 The dlt route adds
 `ingestion.purge_stale_dlt_source_artifacts` and `ingestion.extract_dlt_source_edges`.
@@ -43,7 +44,7 @@ After each dataset's run, `cognify()` reconciles the structure document sources 
 | `presort/` | Pre-organise a folder before ingestion (`remember(dry_run="presort")`): classify, hash, dedup, version and PII detection, proposed groupings | `build_report`, `classify_files`, `detect_duplicates`, `detect_pii`, `group_files`, `apply_presort_graph` |
 | `provenance/` | Write audit-ledger provenance entries for a pipeline run | `record_provenance` |
 | `schema/` | Ingest a relational database schema as graph nodes | `ingest_database_schema` |
-| `storage/` | Persist data points: graph + vector writes, index rebuilds | `add_data_points`, `index_data_points`, `index_graph_edges` |
+| `storage/` | Persist data points: graph + vector writes, index rebuilds, the early chunk write | `add_data_points`, `index_chunks_for_search`, `index_data_points`, `index_graph_edges` |
 | `summarization/` | Chunk summaries (LLM, or relations plus entity types) and code summaries | `summarize_text`, `build_summary_from_extraction`, `summarize_code` |
 | `translation/` | Translate chunk content before extraction (provider-pluggable) | `TranslationConfig`, `TranslatedContent` |
 | `web_scraper/` | Fetch and crawl web pages for URL ingestion | `fetch_page_content`, `DefaultUrlCrawler` |

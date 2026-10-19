@@ -36,6 +36,11 @@ if TYPE_CHECKING:
 
 logger = get_logger("add_data_points")
 
+# ctx.extras key under which index_chunks_for_search records the ids of the
+# nodes it already embedded (SDK-397), so the final write of the same chunks
+# upserts their graph rows but does not embed their text a second time.
+SEARCH_INDEXED_IDS = "search_indexed_ids"
+
 
 def _group_by_all_keys(owner_map: dict) -> dict:
     """Artifacts that need the same FULL ref key set, grouped into one call.
@@ -340,8 +345,16 @@ async def add_data_points(
         await _write_nodes_grouped()
     else:
         await _write_nodes_grouped()
+        # Nodes index_chunks_for_search embedded earlier in this run (SDK-397)
+        # keep their graph upsert above but skip the embedding. Only this path
+        # can skip: hybrid backends embed inside add_nodes_with_vectors.
+        already_indexed = ctx.extras.get(SEARCH_INDEXED_IDS) if ctx is not None else None
         await index_data_points(
-            [node.model_copy(deep=True) for node in nodes],
+            [
+                node.model_copy(deep=True)
+                for node in nodes
+                if not already_indexed or str(node.id) not in already_indexed
+            ],
             vector_engine=vector_engine,
         )
 

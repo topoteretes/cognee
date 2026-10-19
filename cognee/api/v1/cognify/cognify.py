@@ -51,7 +51,7 @@ from cognee.tasks.documents import (
 from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
 from cognee.tasks.ingestion.document_structure import reconcile_document_structure
 from cognee.tasks.provenance import record_provenance
-from cognee.tasks.storage import add_data_points
+from cognee.tasks.storage import add_data_points, index_chunks_for_search
 
 logger = get_logger("cognify")
 
@@ -624,6 +624,19 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             chunker=chunker,
             needs_llm=False,
         ),
+    ]
+    if cognify_config.early_chunk_indexing:
+        # LOAD (early): store the chunks and their documents now, so chunk-based
+        # searches answer while the LLM extraction below is still running; the
+        # final add_data_points skips re-embedding them (SDK-397).
+        tasks.append(
+            Task(
+                index_chunks_for_search,
+                task_config={"batch_size": chunks_per_batch},
+                needs_llm=False,
+            )
+        )
+    tasks += [
         # COGNIFY: extract entities and relationships into a knowledge graph and
         # summarize each chunk for retrieval with the LLM.
         Task(
