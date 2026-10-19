@@ -235,6 +235,9 @@ To inspect a local installation in the UI:
 cognee-cli -ui
 ```
 
+For a shared local server with agent permissions, team invitations and reviewed
+memory promotion, see the [local memory workspace guide](docs/local-memory-workspace.md).
+
 The UI launcher requires Node.js/npm; Docker is needed for its MCP service. See [local UI setup](https://docs.cognee.ai/cognee-cli/overview).
 
 ## Explore examples

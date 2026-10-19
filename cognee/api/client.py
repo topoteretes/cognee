@@ -42,6 +42,7 @@ from cognee.api.v1.llm.routers import get_llm_router
 from cognee.api.v1.memify.routers import get_memify_router
 from cognee.api.v1.ontologies.routers.get_ontology_router import get_ontology_router
 from cognee.api.v1.permissions.routers import get_permissions_router
+from cognee.api.v1.promote.routers import get_promote_router
 from cognee.api.v1.proposals.routers import get_proposals_router
 from cognee.api.v1.recall.routers import get_recall_router
 from cognee.api.v1.remember.routers import get_remember_router
@@ -63,6 +64,7 @@ from cognee.api.v1.users.routers import (
     get_verify_router,
     get_visualize_router,
 )
+from cognee.api.v1.users.routers.get_workspace_router import get_workspace_router
 from cognee.api.v1.validate.routers import get_validate_router
 from cognee.api.v1.visualize.routers import get_schema_router
 from cognee.exceptions import CogneeApiError, remediation_for
@@ -482,6 +484,8 @@ app.include_router(get_forget_router(), prefix="/api/v1/forget", tags=["forget"]
 app.include_router(get_slack_router(), prefix="/api/v1/slack", tags=["slack"])
 app.include_router(get_slack_channels_router(), prefix="/api/v1/slack", tags=["slack"])
 app.include_router(get_integrations_router(), prefix="/api/v1/integrations", tags=["integrations"])
+app.include_router(get_promote_router(), prefix="/api/v1/promote", tags=["memory promotion"])
+app.include_router(get_workspace_router(), prefix="/api/v1/workspace", tags=["workspace"])
 
 
 @app.get("/")

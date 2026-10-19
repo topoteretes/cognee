@@ -34,6 +34,7 @@ class PromotionResult:
     target_dataset_id: UUID
     level: str
     status: Literal["planned", "copied", "already_promoted"]
+    source_revision: str
 
 
 async def _get_data(data_id: UUID, dataset_id: UUID) -> Data | None:
@@ -172,6 +173,7 @@ async def promote(
     user: User,
     dry_run: bool = False,
     max_bytes: int = 64 * 1024 * 1024,
+    expected_source_revision: str | None = None,
 ) -> PromotionResult:
     """Copy selected persisted memory upward, without changing source ACLs.
 
@@ -255,6 +257,8 @@ async def promote(
         raise ValueError("Selected memory exceeds max_bytes")
     if digest != stored_digest:
         raise ValueError("Source changed during promotion; retry with the current revision")
+    if expected_source_revision is not None and revision != expected_source_revision:
+        raise ValueError("Source memory changed after preview; review it again before promoting")
     target_id = uuid5(
         NAMESPACE_URL,
         f"cognee:promotion:v1:{source_dataset_id}:{data_id}:{revision}:{target_dataset_id}",
@@ -265,6 +269,7 @@ async def promote(
         "source_dataset_id": source_dataset_id,
         "target_dataset_id": target_dataset_id,
         "level": level,
+        "source_revision": revision,
     }
     existing = await _get_data(target_id, target_dataset_id)
     if existing is not None:

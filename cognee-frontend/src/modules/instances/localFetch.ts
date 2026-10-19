@@ -1,7 +1,9 @@
 import handleServerErrors from "@/utils/handleServerErrors";
 import { getLocalApiUrl } from "@/modules/users/getLocalApiUrl";
 
-let apiKey: string | null = process.env.NEXT_PUBLIC_COGWIT_API_KEY || null;
+// Keys may be supplied by the signed-in user at runtime. Never bake a server
+// owner's key into the public JavaScript bundle served to every teammate.
+let apiKey: string | null = null;
 
 export default async function localFetch(url: URL | RequestInfo, options: RequestInit = {}): Promise<Response> {
   const authHeaders: Record<string, string> = {};

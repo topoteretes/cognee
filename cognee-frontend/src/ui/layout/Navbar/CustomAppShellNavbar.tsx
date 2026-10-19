@@ -133,6 +133,7 @@ const NAV_SECTIONS: NavSection[] = [
     label: "CONNECT",
     items: [
       { text: "Integrations", link: "/integrations", icon: IntegrationsIcon },
+      { text: "Manage memory", link: "/workspace", icon: DatabaseIcon },
       { text: "API Keys", link: "/api-keys", icon: KeyIcon },
     ],
   },

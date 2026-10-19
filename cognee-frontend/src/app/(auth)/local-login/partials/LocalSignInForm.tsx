@@ -5,18 +5,11 @@ import { Flex, Text, Title, TextInput, PasswordInput, Button } from "@mantine/co
 import AuthCard from "@/ui/elements/Auth/AuthCard";
 import { getLocalApiUrl } from "@/modules/users/getLocalApiUrl";
 
-const DEFAULT_EMAIL = "default_user@example.com";
-// The local dev-stack password: `cognee-cli -ui` and docker-compose.yml set
-// DEFAULT_USER_PASSWORD to this value, so the prefill logs in there and on
-// deployments created before SDK-549. Against a server whose default user has
-// no password it fails until the operator sets DEFAULT_USER_PASSWORD -- the
-// field is editable either way.
-const DEFAULT_PASSWORD = "default_password";
-
 export default function LocalSignInForm() {
   const localApiUrl = getLocalApiUrl();
-  const [email, setEmail] = useState(DEFAULT_EMAIL);
-  const [password, setPassword] = useState(DEFAULT_PASSWORD);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [register, setRegister] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -26,6 +19,17 @@ export default function LocalSignInForm() {
     setIsLoading(true);
 
     try {
+      if (register) {
+        const created = await global.fetch(`${localApiUrl}/api/v1/auth/register`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password }), credentials: "include",
+        });
+        if (!created.ok) {
+          const data = await created.json().catch(() => null);
+          setError(typeof data?.detail === "string" ? data.detail : "Could not create your account.");
+          return;
+        }
+      }
       const formData = new URLSearchParams();
       formData.append("username", email);
       formData.append("password", password);
@@ -75,10 +79,10 @@ export default function LocalSignInForm() {
           className="!text-[2.5rem] !font-light !leading-[1.1] !tracking-[-0.04em] !text-[#EDECEA]"
           style={{ fontFamily: '"TWKLausanne", sans-serif' }}
         >
-          Local instance
+          Your Cognee server
         </Title>
         <Text size="sm" className="!text-[#EDECEA]/85 !font-light !text-center">
-          Sign in to your local Cognee backend
+          {register ? "Create your own account to accept a team invitation" : "Sign in with your own account"}
         </Text>
       </Flex>
 
@@ -115,7 +119,7 @@ export default function LocalSignInForm() {
           value={password}
           onChange={(e) => setPassword(e.currentTarget.value)}
           required
-          autoComplete="current-password"
+          autoComplete={register ? "new-password" : "current-password"}
           size="md"
           radius="md"
           classNames={{
@@ -127,7 +131,7 @@ export default function LocalSignInForm() {
         />
 
         <Text size="xs" className="!text-[#EDECEA]/60 !font-light" mt={-4}>
-          Default credentials are pre-filled for local development
+          Team access uses your own account and dataset permissions.
         </Text>
 
         <Button
@@ -140,8 +144,11 @@ export default function LocalSignInForm() {
           className="!bg-[#BC9BFF] !text-[#1e1e1c] hover:!bg-[#A87CFF] !transition-colors !border-none"
         >
           <Text size="sm" fw={500}>
-            Sign in
+            {register ? "Create account and sign in" : "Sign in"}
           </Text>
+        </Button>
+        <Button variant="subtle" disabled={isLoading} onClick={() => { setRegister(!register); setError(null); }}>
+          {register ? "Already have an account? Sign in" : "Create an account"}
         </Button>
       </form>
     </AuthCard>
