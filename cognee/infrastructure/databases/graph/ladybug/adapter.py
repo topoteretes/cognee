@@ -41,7 +41,7 @@ from cognee.infrastructure.databases.provenance.source_refs import (
 )
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.files.storage import get_file_storage
-from cognee.infrastructure.locks.loop_agnostic_lock import LoopAgnosticLock
+from cognee.infrastructure.locks.loop_agnostic_lock import LoopAgnosticEvent, LoopAgnosticLock
 from cognee.infrastructure.utils.run_sync import run_sync
 from cognee.modules.observability import OtelStatusCode as StatusCode
 from cognee.modules.observability import new_span
@@ -378,9 +378,12 @@ class LadybugAdapter(GraphDBInterface):
         self._connection_lock = LoopAgnosticLock()
         # Set when ``open_connections == 0``; used by transient teardown
         # paths (e.g. ``delete_graph``) to wait for in-flight queries to
-        # finish before dropping native resources. ``close()`` does NOT use
-        # this — see ``close()``'s docstring for the cross-loop reason.
-        self._all_queries_drained = asyncio.Event()
+        # finish before dropping native resources. Loop-agnostic like the
+        # locks above: the waiting teardown and the query that finally sets
+        # it may run on different loops (an ``asyncio.Event`` is bound to
+        # one loop and its ``set()`` is not thread-safe). ``close()`` does
+        # NOT use this — see ``close()``'s docstring for the reason.
+        self._all_queries_drained = LoopAgnosticEvent()
         self._all_queries_drained.set()
         # Brief sync lock for atomic counter+event mutations. Cannot reuse
         # ``_connection_lock`` here: teardown holds that lock across the
@@ -910,8 +913,9 @@ class LadybugAdapter(GraphDBInterface):
         Used by transient-teardown paths (currently ``delete_graph`` and
         the shared-lock per-query cleanup) so ``_drop_native_resources``
         doesn't tear out a connection an executor thread is still using.
-        ``close()`` does NOT use this — see its docstring for why
-        (cross-loop ``asyncio.Event.wait()`` would raise).
+        The event is loop-agnostic, so a query finishing on another loop
+        (or thread) wakes this wait. ``close()`` does NOT use this — see
+        its docstring for why.
 
         Reads the counter under ``_counter_lock`` so a stale ``set()``
         from a finishing query can't race a fresh increment from a new

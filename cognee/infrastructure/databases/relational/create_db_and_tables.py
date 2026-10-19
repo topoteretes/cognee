@@ -1,5 +1,3 @@
-import asyncio
-
 from cognee.infrastructure.locks.loop_agnostic_lock import LoopAgnosticLock
 
 from .get_relational_engine import get_relational_engine
