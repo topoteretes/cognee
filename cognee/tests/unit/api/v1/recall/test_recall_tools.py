@@ -361,3 +361,68 @@ async def test_only_context_graph_hit_is_the_prompt_and_an_empty_retrieval_still
     )
     assert tool_calls == ["analytics"]
     assert [entry.source for entry in results] == ["tools"]
+
+
+@pytest.mark.asyncio
+async def test_tools_trigger_on_empty_runs_once_per_connection_over_empty_datasets(
+    monkeypatch, api_recall_mod, no_remote_client, tools_enabled
+):
+    """SDK-270: a search over nothing but empty datasets no longer raises; it
+    returns one empty entry per dataset with the reason on ``error``. For
+    ``on_empty`` that is the same as a miss -- cognee lacks the context -- so the
+    tools lane runs, exactly once per connection, and the empty entries add no
+    items of their own."""
+    text_to_sql_mod = importlib.import_module("cognee.modules.tools.text_to_sql")
+    engine_mod = importlib.import_module("cognee.modules.tools.text_to_sql.engine")
+    search_methods = importlib.import_module("cognee.modules.search.methods.search")
+
+    tool_calls = []
+
+    async def fake_run(user_id, connection_name, question):
+        tool_calls.append(connection_name)
+        return engine_mod.TextToSqlResult(
+            connection=connection_name,
+            dialect="sqlite",
+            question=question,
+            success=True,
+            sql="SELECT 1",
+            rows=[{"n": 1}],
+            row_count=1,
+            attempts=1,
+        )
+
+    monkeypatch.setattr(text_to_sql_mod, "run_text_to_sql", fake_run)
+
+    from cognee.modules.search.types import SearchType
+
+    empty_entries = [
+        search_methods._no_data_payload(
+            types.SimpleNamespace(name=name, id=uuid4(), tenant_id=None),
+            "no data has been added; add data and run cognify before searching.",
+            query_type=SearchType.GRAPH_COMPLETION,
+            query_text="q",
+            only_context=False,
+        )
+        for name in ("fresh", "never_cognified")
+    ]
+
+    async def graph_over_empty_datasets(**kwargs):
+        return empty_entries
+
+    async def dummy_set_user(_user):
+        return None
+
+    monkeypatch.setattr(api_recall_mod, "set_session_user_context_variable", dummy_set_user)
+    monkeypatch.setattr(search_methods, "authorized_search", graph_over_empty_datasets)
+
+    results = await api_recall_mod.recall(
+        query_text="q",
+        scope=["graph", "tools"],
+        tool_connections=["analytics", "warehouse"],
+        tools_trigger="on_empty",
+        auto_route=False,
+        user=_make_user(),
+    )
+
+    assert tool_calls == ["analytics", "warehouse"]
+    assert [entry.source for entry in results] == ["tools", "tools"]

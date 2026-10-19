@@ -381,12 +381,18 @@ async def search_in_datasets_context(
                         include_references=include_references,
                     )
                 except NoDataError as error:
-                    # The retriever knows its graph (or collection) is empty but not
-                    # which dataset it was searching. This frame knows both, so tag
-                    # the error with the dataset and what it is missing; the fan-out
-                    # below decides whether that fails the whole search.
+                    if not is_empty:
+                        # A populated graph whose retriever still found nothing to
+                        # search (RAG's missing chunk collection, a lexical index
+                        # with no chunks) is a state problem with the store, not an
+                        # empty dataset: fail loudly, naming the dataset.
+                        raise _named_no_data_error(dataset, error) from error
+                    # The retriever knows its graph is empty but not which dataset
+                    # it was searching. This frame knows both, so tag the error with
+                    # the dataset and what it is missing; the fan-out below turns it
+                    # into that dataset's empty entry.
                     raise DatasetNoDataError(
-                        dataset, error, graph_is_empty=is_empty, data_item_count=data_item_count
+                        dataset, error, data_item_count=data_item_count
                     ) from error
 
     async def _report_code_seed_miss(dataset_search, dataset: Dataset) -> SearchResultPayload:
@@ -497,19 +503,37 @@ async def search_in_datasets_context(
                 try:
                     return await get_retriever_output(**retriever_kwargs)
                 except NoDataError as error:
+                    # Same rule as the access-control path above: only an empty
+                    # knowledge graph is "no memory yet". A populated graph whose
+                    # retriever found nothing to search is a state problem with
+                    # the store and fails the search.
+                    graph_engine = await get_graph_engine()
+                    if not await graph_engine.is_empty():
+                        if dataset is None:
+                            raise
+                        raise _named_no_data_error(dataset, error) from error
                     if dataset is None:
-                        # Shared single-tenant graph, no dataset to name: still a
-                        # result, not a failure — empty, with the retriever's
-                        # reason on ``error``.
-                        logger.warning("No searchable memory: %s", error.message)
+                        # Shared single-tenant graph: no dataset to name, and no
+                        # dataset whose data items could be counted. Still a
+                        # result, not a failure.
+                        reason = _no_data_reason(None)
+                        logger.warning("No searchable memory: %s", reason)
                         return _no_data_payload(
                             None,
-                            reason=error.message,
+                            reason,
                             query_type=query_type,
                             query_text=query_text,
                             only_context=only_context,
                         )
-                    raise DatasetNoDataError(dataset, error) from error
+                    # Exactly one dataset: count its data items the way the
+                    # access-control path does, so the reason the caller reads
+                    # does not depend on the deployment flag.
+                    from cognee.modules.data.methods import get_dataset_data
+
+                    data_item_count = len(await get_dataset_data(dataset.id))
+                    raise DatasetNoDataError(
+                        dataset, error, data_item_count=data_item_count
+                    ) from error
 
         tasks.append(_search_without_context())
 
@@ -522,10 +546,12 @@ async def search_in_datasets_context(
 
 
 class DatasetNoDataError(NoDataError):
-    """A retriever's NoDataError, tagged with the dataset it was searching.
+    """A retriever's NoDataError for a dataset whose knowledge graph is empty.
 
     Raised only inside the per-dataset fan-out and consumed by
-    ``_collect_dataset_results``; it never leaves ``search_in_datasets_context``.
+    ``_collect_dataset_results``, which turns it into that dataset's empty entry;
+    it never leaves ``search_in_datasets_context``. A NoDataError from a populated
+    graph is never wrapped in this — see ``_named_no_data_error``.
     """
 
     def __init__(
@@ -533,29 +559,44 @@ class DatasetNoDataError(NoDataError):
         dataset: Dataset,
         error: NoDataError,
         *,
-        graph_is_empty: bool = False,
         data_item_count: int | None = None,
     ):
         self.dataset = dataset
-        self.reason = _no_data_reason(error, graph_is_empty, data_item_count)
+        self.reason = _no_data_reason(data_item_count)
         super().__init__(
             message=f"Dataset '{dataset.name}' (id: {dataset.id}): {self.reason}",
             status_code=error.status_code,
         )
 
 
-def _no_data_reason(error: NoDataError, graph_is_empty: bool, data_item_count: int | None) -> str:
-    """What a dataset is missing, phrased as the fix the caller has to apply."""
-    if graph_is_empty and data_item_count:
+def _named_no_data_error(dataset: Dataset, error: NoDataError) -> NoDataError:
+    """The retriever's own NoDataError, with the dataset it was searching in the message.
+
+    For a populated graph whose retriever still found nothing to search (RAG's
+    missing chunk collection, a lexical index with no chunks): that is a state
+    problem with the store, not a dataset without memory, so it keeps the
+    retriever's reason and status and fails the search like any other exception.
+    """
+    return NoDataError(
+        message=f"Dataset '{dataset.name}' (id: {dataset.id}): {error.message}",
+        status_code=error.status_code,
+    )
+
+
+def _no_data_reason(data_item_count: int | None) -> str:
+    """What a dataset with an empty graph is missing, phrased as the fix to apply.
+
+    ``data_item_count`` is ``None`` for the shared single-tenant graph, which has
+    no dataset whose data items could be counted.
+    """
+    if data_item_count:
         return (
             f"holds {data_item_count} data item(s) but its knowledge graph is empty; "
             "run cognify on this dataset before searching."
         )
-    if graph_is_empty:
+    if data_item_count == 0:
         return "no data has been added; add data and run cognify before searching."
-    # A populated graph whose retriever still found nothing to search, e.g. RAG's
-    # missing chunk collection: keep the retriever's own reason.
-    return error.message
+    return "the knowledge graph is empty; add data and run cognify before searching."
 
 
 def _collect_dataset_results(
@@ -567,17 +608,20 @@ def _collect_dataset_results(
 ) -> list[SearchResultPayload]:
     """Turn the fan-out's per-dataset outcomes into one entry per dataset.
 
-    A dataset without searchable memory is a result, not a failure: it comes back
-    with empty results and its reason on ``error`` (shaped exactly like a query
-    miss, so callers that only read ``search_result`` see ``[]``), and a warning
-    names it. This holds when every searched dataset is in that state too — a
-    dataset that exists but was never cognified, or a freshly created one, is the
+    A dataset whose knowledge graph is empty is a result, not a failure: it comes
+    back with empty results and its reason on ``error`` (shaped exactly like a
+    query miss, so callers that only read ``search_result`` see ``[]``), and a
+    warning names it. This holds when every searched dataset is in that state too —
+    a dataset that exists but was never cognified, or a freshly created one, is the
     normal state of a store before its first ingestion, and a search over it has
     the same answer as a search that found nothing: no results. Callers that want
     to tell the two apart read ``error`` (``verbose=True`` over ``search()``).
     The list keeps one entry per dataset, in request order, so one empty dataset
-    never costs the siblings' answers under ``datasets=None``. Any other exception
-    propagates unchanged and fails the whole search.
+    never costs the siblings' answers under ``datasets=None``.
+
+    Only an empty graph is softened this way. A NoDataError from a populated graph
+    (a missing collection) reaches this as a plain NoDataError and, like any other
+    exception, propagates unchanged and fails the whole search.
     """
     for outcome in outcomes:
         if isinstance(outcome, BaseException) and not isinstance(outcome, DatasetNoDataError):
@@ -589,7 +633,8 @@ def _collect_dataset_results(
             logger.warning("Dataset without searchable memory: %s", outcome.message)
             payloads.append(
                 _no_data_payload(
-                    outcome,
+                    outcome.dataset,
+                    outcome.reason,
                     query_type=query_type,
                     query_text=query_text,
                     only_context=only_context,
@@ -601,21 +646,20 @@ def _collect_dataset_results(
 
 
 def _no_data_payload(
-    error: DatasetNoDataError | None,
+    dataset: Dataset | None,
+    reason: str,
     *,
     query_type: SearchType,
     query_text: str,
     only_context: bool,
-    reason: str | None = None,
 ) -> SearchResultPayload:
-    """The entry a dataset without searchable memory gets: empty results plus the reason.
+    """The entry a dataset with an empty knowledge graph gets: empty results plus the reason.
 
     Shaped like a query miss for the same request (``[]`` under ``search_result``,
     an empty context for ``only_context``) so existing callers see what they always
-    saw; only ``error`` is new. ``error`` is ``None`` for the shared single-tenant
-    graph, which has no dataset to name — pass the retriever's ``reason`` then.
+    saw; only ``error`` is new. ``dataset`` is ``None`` for the shared single-tenant
+    graph, which has no dataset to name.
     """
-    dataset = error.dataset if error is not None else None
     return SearchResultPayload(
         result_object=[],
         context=[] if only_context else None,
@@ -625,7 +669,7 @@ def _no_data_payload(
         dataset_name=dataset.name if dataset is not None else None,
         dataset_id=dataset.id if dataset is not None else None,
         dataset_tenant_id=dataset.tenant_id if dataset is not None else None,
-        error=error.reason if error is not None else reason,
+        error=reason,
     )
 
 
@@ -684,6 +728,11 @@ def _backwards_compatible_search_results(search_results, verbose: bool):
                         reference.model_dump(mode="json") for reference in search_result.evidence
                     ],
                 }
+                if search_result.error is not None:
+                    # An empty knowledge graph: the reason rides on the verbose
+                    # dict, as it does with access control on. The non-verbose
+                    # shape stays a bare result list for backwards compatibility.
+                    search_result_dict["error"] = search_result.error
                 return_value.append(search_result_dict)
             return return_value
         else:
