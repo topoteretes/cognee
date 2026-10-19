@@ -533,6 +533,7 @@ The MCP server exposes four tools (three memory tools pinned in `tools/list`, pl
 - **remember**: Store data in memory. Pass `data` for text, or `filename` + `content_base64` to ingest an uploaded file (up to 10 MB). With `session_id`: fast session cache (text only). Without `session_id`: permanent graph memory
 - **recall**: Search memory with auto-routing. Searches session cache first when `session_id` is provided, then falls through to the permanent graph
 - **forget**: Delete memory by dataset name or id, a single data item by `data_id`, or delete all owned memory with `everything=True`
+- **search_sources**: Search the caller's authorized sources (datasets, node sets and, with `include_connections=True`, read-only SQL over tool connections the server has enabled with `TOOL_CALLS_ENABLED`) with metadata-driven routing. Advertised alongside the memory tools; requires a server with the source-search API
 - **cognify_status**: Check the progress of background ingestion started by `remember(background=True)`. Unadvertised by default; discoverable via `search_tools` and callable by name
 
 ### Recall result summaries

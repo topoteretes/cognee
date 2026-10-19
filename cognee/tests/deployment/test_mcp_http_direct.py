@@ -27,6 +27,7 @@ PINNED_TOOLS = {
     "remember",
     "recall",
     "forget",
+    "search_sources",
 }
 # Advertised alongside the memory API so clients can discover it (#5275); the
 # same split as CODE_SEARCH_TOOLS in cognee-mcp/tests/test_mcp_server_hardening.py.

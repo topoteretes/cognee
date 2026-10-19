@@ -101,7 +101,7 @@ def test_cognee_client_auth_schemes():
 # Tools that the MCP server is expected to expose. Kept as named groups so the
 # contract documents intent rather than just enumerating names. Keep the memory
 # API minimal while exposing code-graph search as a separate tool.
-MEMORY_API_TOOLS = {"remember", "recall", "forget"}
+MEMORY_API_TOOLS = {"remember", "recall", "forget", "search_sources"}
 CODE_SEARCH_TOOLS = {"code_search"}
 STATUS_TOOLS = {
     # Ingestion is queued (remember(background=True)) because it outruns the
