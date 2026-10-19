@@ -42,7 +42,6 @@ from cognee.infrastructure.databases.provenance.source_refs import (
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.files.storage import get_file_storage
 from cognee.infrastructure.utils.run_sync import run_sync
-from cognee.modules.engine.utils.generate_timestamp_datapoint import date_to_int
 from cognee.modules.observability import OtelStatusCode as StatusCode
 from cognee.modules.observability import new_span
 from cognee.modules.observability.tracing import (
@@ -53,7 +52,6 @@ from cognee.modules.observability.tracing import (
 )
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.shared.logging_utils import get_logger
-from cognee.tasks.temporal_graph.models import Timestamp
 
 logger = get_logger()
 
@@ -1139,6 +1137,7 @@ class LadybugAdapter(GraphDBInterface):
             ON CREATE SET n += {{{", ".join(fields)}}}
             """
             await self.query(merge_query, params)
+            await self.checkpoint()
 
         except Exception as e:
             logger.error(f"Failed to add node: {e}")
@@ -1285,6 +1284,7 @@ class LadybugAdapter(GraphDBInterface):
         """
         query_str = "MATCH (n:Node) WHERE n.id = $id DETACH DELETE n"
         await self.query(query_str, {"id": node_id})
+        await self.checkpoint()
 
     async def delete_nodes(self, node_ids: list[str]) -> None:
         """
@@ -1301,6 +1301,7 @@ class LadybugAdapter(GraphDBInterface):
         """
         query_str = "MATCH (n:Node) WHERE n.id IN $ids DETACH DELETE n"
         await self.query(query_str, {"ids": node_ids})
+        await self.checkpoint()
 
     # ------------------------------------------------------------------
     # Graph provenance (COG-5522 Part 1)
@@ -2034,6 +2035,7 @@ class LadybugAdapter(GraphDBInterface):
                 from_node, to_node, relationship_name, edge_properties
             )
             await self.query(query, params)
+            await self.checkpoint()
         except Exception as e:
             logger.error(f"Failed to add edge: {e}")
             raise
@@ -2389,6 +2391,7 @@ class LadybugAdapter(GraphDBInterface):
         RETURN n.id AS node_id
         """
         result = await self.query(query, {"items": updates, "updated_at": now})
+        await self.checkpoint()
         rows_dicts = self._rows_to_dicts(result, ["node_id"])
         return {str(r["node_id"]) for r in rows_dicts if r.get("node_id") is not None}
 
@@ -2431,6 +2434,7 @@ class LadybugAdapter(GraphDBInterface):
         RETURN n.id AS node_id
         """
         result = await self.query(query, {"items": updates, "updated_at": now})
+        await self.checkpoint()
         rows_dicts = self._rows_to_dicts(result, ["node_id"])
         return {str(r["node_id"]) for r in rows_dicts if r.get("node_id") is not None}
 
@@ -2482,6 +2486,7 @@ class LadybugAdapter(GraphDBInterface):
         RETURN item.edge_object_id AS edge_object_id
         """
         result = await self.query(query, {"items": edge_updates, "updated_at": now})
+        await self.checkpoint()
         rows_dicts = self._rows_to_dicts(result, ["edge_object_id"])
         return {str(r["edge_object_id"]) for r in rows_dicts if r.get("edge_object_id") is not None}
 
@@ -2594,6 +2599,8 @@ class LadybugAdapter(GraphDBInterface):
             query,
             {"id": node_id, "properties": json.dumps(properties, cls=JSONEncoder)},
         )
+        if result:
+            await self.checkpoint()
         return bool(result)
 
     async def get_edge_feedback_weights(self, edge_object_ids: list[str]) -> dict[str, float]:
@@ -2832,6 +2839,7 @@ class LadybugAdapter(GraphDBInterface):
         DELETE r
         """
         await self.query(query_str, {"node_ids": node_ids, "edge_label": edge_label})
+        await self.checkpoint()
 
     async def remove_connection_to_successors_of(
         self, node_ids: list[str], edge_label: str
@@ -2855,6 +2863,7 @@ class LadybugAdapter(GraphDBInterface):
         DELETE r
         """
         await self.query(query_str, {"node_ids": node_ids, "edge_label": edge_label})
+        await self.checkpoint()
 
     # Graph-wide Operations
 
@@ -3724,137 +3733,6 @@ class LadybugAdapter(GraphDBInterface):
         """
         result = await self.query(query)
         return [record[0] for record in result] if result else []
-
-    def _normalize_temporal_ids(self, ids: list[str] | str) -> list[str]:
-        if isinstance(ids, str):
-            return [uid.strip().strip("'\"") for uid in ids.split(",") if uid.strip()]
-
-        return ids
-
-    async def collect_events(self, ids: list[str] | str) -> Any:
-        """
-        Collect all Event-type nodes reachable within 1..2 hops
-        from the given node IDs.
-
-        Args:
-            graph_engine: Object exposing an async .query(str) -> Any
-            ids: List of node IDs (strings)
-
-        Returns:
-            List of events
-        """
-
-        event_collection_cypher = """UNWIND $ids AS uid
-            MATCH (start {id: uid})
-            MATCH (start)-[*1..2]-(event)
-            WHERE event.type = 'Event'
-            WITH DISTINCT event
-            RETURN collect(event) AS events;
-        """
-
-        ids = self._normalize_temporal_ids(ids)
-        result = await self.query(event_collection_cypher, {"ids": ids})
-        events = []
-        if not result or not result[0] or not result[0][0]:
-            return [{"events": events}]
-
-        for node in result[0][0]:
-            # ``properties`` is a raw JSON string that can be None, empty or
-            # malformed; one bad Event node must not abort the TEMPORAL search.
-            props = _parse_properties_blob(node.get("properties"))
-
-            event = {
-                "id": node["id"],
-                "name": node["name"],
-                "description": props.get("description"),
-            }
-
-            if props.get("location"):
-                event["location"] = props["location"]
-
-            events.append(event)
-
-        return [{"events": events}]
-
-    async def collect_time_ids(
-        self,
-        time_from: Timestamp | None = None,
-        time_to: Timestamp | None = None,
-    ) -> list[str]:
-        """
-        Collect IDs of Timestamp nodes between time_from and time_to.
-
-        Args:
-            graph_engine: Object exposing an async .query(query, params) -> list[dict]
-            time_from: Lower bound int (inclusive), optional
-            time_to: Upper bound int (inclusive), optional
-
-        Returns:
-            A list of timestamp node IDs.
-        """
-
-        ids: list[str] = []
-
-        if time_from and time_to:
-            time_from = date_to_int(time_from)
-            time_to = date_to_int(time_to)
-
-            cypher = f"""
-            MATCH (n:Node)
-            WHERE n.type = 'Timestamp'
-            // Extract time_at from the JSON string and cast to INT64
-            WITH n, json_extract(n.properties, '$.time_at') AS t_str
-            WITH n,
-                 CASE
-                   WHEN t_str IS NULL OR t_str = '' THEN NULL
-                   ELSE CAST(t_str AS INT64)
-                 END AS t
-            WHERE t >= {time_from}
-            AND t <= {time_to}
-            RETURN n.id as id
-            """
-
-        elif time_from:
-            time_from = date_to_int(time_from)
-
-            cypher = f"""
-            MATCH (n:Node)
-            WHERE n.type = 'Timestamp'
-            // Extract time_at from the JSON string and cast to INT64
-            WITH n, json_extract(n.properties, '$.time_at') AS t_str
-            WITH n,
-                 CASE
-                   WHEN t_str IS NULL OR t_str = '' THEN NULL
-                   ELSE CAST(t_str AS INT64)
-                 END AS t
-            WHERE t >= {time_from}
-            RETURN n.id as id
-            """
-
-        elif time_to:
-            time_to = date_to_int(time_to)
-
-            cypher = f"""
-            MATCH (n:Node)
-            WHERE n.type = 'Timestamp'
-            // Extract time_at from the JSON string and cast to INT64
-            WITH n, json_extract(n.properties, '$.time_at') AS t_str
-            WITH n,
-                 CASE
-                   WHEN t_str IS NULL OR t_str = '' THEN NULL
-                   ELSE CAST(t_str AS INT64)
-                 END AS t
-            WHERE t <= {time_to}
-            RETURN n.id as id
-            """
-
-        else:
-            return ids
-
-        time_nodes = await self.query(cypher)
-        time_ids_list = [item[0] for item in time_nodes]
-
-        return time_ids_list
 
     async def get_timestamps_in_range(
         self, start: int | None, end: int | None

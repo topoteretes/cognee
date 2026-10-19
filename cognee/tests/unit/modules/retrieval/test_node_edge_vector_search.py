@@ -137,6 +137,22 @@ async def test_node_edge_vector_search_extract_relevant_node_ids_single_query():
     assert set(node_ids) == {"node1", "node2", "node3"}
 
 
+def test_node_edge_vector_search_extract_relevant_node_ids_ordered_by_score():
+    """Node IDs come back nearest first (lowest distance), using each node's best score."""
+    vector_search = NodeEdgeVectorSearch(vector_engine=AsyncMock())
+    vector_search.query_list_length = None
+    vector_search.node_distances = {
+        "Entity_name": [
+            MockScoredResult("far", 0.9),
+            MockScoredResult("near", 0.1),
+            MockScoredResult("shared", 0.8),
+        ],
+        "TextSummary_text": [MockScoredResult("shared", 0.2), MockScoredResult("mid", 0.5)],
+    }
+
+    assert vector_search.extract_relevant_node_ids() == ["near", "shared", "mid", "far"]
+
+
 @pytest.mark.asyncio
 async def test_node_edge_vector_search_extract_relevant_node_ids_batch():
     """Test that extract_relevant_node_ids returns empty list for batch mode."""
@@ -154,28 +170,6 @@ async def test_node_edge_vector_search_extract_relevant_node_ids_batch():
     assert node_ids == []
 
 
-def test_ranked_node_ids_use_the_best_distance_across_collections():
-    vector_search = NodeEdgeVectorSearch(vector_engine=AsyncMock())
-    vector_search.node_distances = {
-        "Entity_name": [
-            MockScoredResult("farthest", 0.9),
-            MockScoredResult("nearest", 0.8),
-            MockScoredResult("middle", 0.4),
-        ],
-        "TextSummary_text": [
-            MockScoredResult("nearest", 0.1),
-            MockScoredResult("middle", 0.6),
-            MockScoredResult(None, 0.0),
-        ],
-    }
-
-    assert vector_search.extract_relevant_node_ids(rank_by_score=True) == [
-        "nearest",
-        "middle",
-        "farthest",
-    ]
-
-
 def test_ranked_node_ids_keep_result_order_for_equal_distances():
     vector_search = NodeEdgeVectorSearch(vector_engine=AsyncMock())
     vector_search.node_distances = {
@@ -183,11 +177,7 @@ def test_ranked_node_ids_keep_result_order_for_equal_distances():
         "TextSummary_text": [MockScoredResult("first", 0.1), MockScoredResult("third", 0.1)],
     }
 
-    assert vector_search.extract_relevant_node_ids(rank_by_score=True) == [
-        "first",
-        "second",
-        "third",
-    ]
+    assert vector_search.extract_relevant_node_ids() == ["first", "second", "third"]
 
 
 @pytest.mark.asyncio

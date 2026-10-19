@@ -234,3 +234,6 @@ pr_body.md
 cognee/tests/e2e/keyless/.keyless_run/
 cognee/tests/e2e/keyless/.chunk_budget_run/
 cognee/tests/e2e/keyless/.crash_run/
+
+# Local benchmark / eval run artifacts (BEAM and LoCoMo default output dirs)
+temp/

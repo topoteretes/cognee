@@ -28,7 +28,7 @@ async def test_ladybug_update_node_merges_and_persists():
     ok = await adapter.update_node("n1", {"text": "Prefer concise answers.", "turn_counter": 3})
 
     assert ok is True
-    _, params = adapter.query.await_args.args
+    _, params = adapter.query.await_args_list[0].args
     stored = json.loads(params["properties"])
     assert stored["text"] == "Prefer concise answers."
     assert stored["turn_counter"] == 3

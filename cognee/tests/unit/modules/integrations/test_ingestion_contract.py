@@ -18,6 +18,12 @@ CREDENTIAL = SimpleNamespace(user_id=USER_ID, provider_account_id="acct-1")
         ("gmail", "", "gmail_messages_e8ba1b716982492b069485f8"),
         ("google_drive", "folder-1", "google_drive_files_c0d03acdd392958b38a3b6c4"),
         ("google_drive", "folder-é", "google_drive_files_4a926936081ee8448fba9596"),
+        ("google_calendar", "", "google_calendar_events_e8ba1b716982492b069485f8"),
+        (
+            "google_calendar",
+            "team@group.calendar.google.com",
+            "google_calendar_events_834ee7babdf83d4d429c35f3",
+        ),
     ],
 )
 def test_google_resource_names_are_pinned(provider, scope, expected):

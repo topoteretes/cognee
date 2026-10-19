@@ -20,12 +20,11 @@ from cognee.modules.improve import (
 from cognee.modules.improve.stages import (
     REASON_OPT_IN_DISABLED,
     REASON_PERSONALIZATION_DISABLED,
-    REASON_TRIPLET_EMBEDDING_DISABLED,
     BuildTruthSubspaceStage,
+    DistillSessionsStage,
     FeedbackWeightsStage,
     GlobalContextIndexStage,
     PersistSessionQAStage,
-    TripletEnrichmentStage,
     UpdateUserPreferencesStage,
 )
 
@@ -49,15 +48,6 @@ def _patch_base_config(monkeypatch, **fields):
     defaults = {"default_feedback_influence": 0.0, "personalization_enabled": False}
     defaults.update(fields)
     monkeypatch.setattr(base_mod, "get_base_config", lambda: types.SimpleNamespace(**defaults))
-
-
-def _patch_cognify_config(monkeypatch, triplet_embedding):
-    mod = importlib.import_module("cognee.modules.cognify.config")
-    monkeypatch.setattr(
-        mod,
-        "get_cognify_config",
-        lambda: types.SimpleNamespace(triplet_embedding=triplet_embedding),
-    )
 
 
 # --- stage 1 ---------------------------------------------------------------
@@ -106,6 +96,46 @@ async def test_feedback_weights_passes_resolved_id_and_alpha(monkeypatch):
     )
     assert result.status == "completed"
     assert result.counts == {"sessions": 2}
+
+
+# --- stage 5 ---------------------------------------------------------------
+
+
+def _distilled(status="completed"):
+    return types.SimpleNamespace(status=status, documents=["lesson"], uncurated_entries=0)
+
+
+@pytest.mark.asyncio
+async def test_distill_stops_at_the_first_exhausted_budget(monkeypatch):
+    """A 402 on one session ends the loop: every later session would fail the same
+    way, and the stage result must still classify the run as budget-exhausted."""
+    from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
+
+    distill_mod = importlib.import_module("cognee.modules.session_distillation")
+    distill = AsyncMock(side_effect=[_distilled(), LLMPaymentRequiredError(), _distilled()])
+    monkeypatch.setattr(distill_mod, "distill_session", distill)
+
+    result = await DistillSessionsStage().run(_inputs(session_ids=("a", "b", "c")))
+
+    assert [call.args[0] for call in distill.await_args_list] == ["a", "b"]
+    assert result.status == "errored"
+    assert result.budget_exhausted
+    assert result.counts["sessions_completed"] == 1
+    assert result.counts["sessions_failed"] == 1
+
+
+@pytest.mark.asyncio
+async def test_distill_continues_past_an_ordinary_session_failure(monkeypatch):
+    distill_mod = importlib.import_module("cognee.modules.session_distillation")
+    distill = AsyncMock(side_effect=[RuntimeError("one session broke"), _distilled()])
+    monkeypatch.setattr(distill_mod, "distill_session", distill)
+
+    result = await DistillSessionsStage().run(_inputs(session_ids=("a", "b")))
+
+    assert distill.await_count == 2
+    assert result.status == "errored"
+    assert not result.budget_exhausted
+    assert result.counts["sessions_completed"] == 1
 
 
 # --- stage 6 ---------------------------------------------------------------
@@ -238,109 +268,6 @@ async def test_truth_subspace_maps_a_skipped_build_onto_the_stage(monkeypatch):
     assert result.reason == "backend_unsupported"
 
 
-# --- stage 8 ---------------------------------------------------------------
-
-
-def test_triplet_enrichment_skipped_when_triplet_embedding_off(monkeypatch):
-    _patch_cognify_config(monkeypatch, triplet_embedding=False)
-    assert TripletEnrichmentStage().gate(_inputs()) == REASON_TRIPLET_EMBEDDING_DISABLED
-
-
-def test_triplet_enrichment_runs_with_flag_on(monkeypatch):
-    _patch_cognify_config(monkeypatch, triplet_embedding=True)
-    assert TripletEnrichmentStage().gate(_inputs()) is None
-
-
-def test_triplet_enrichment_custom_tasks_bypass_the_flag(monkeypatch):
-    _patch_cognify_config(monkeypatch, triplet_embedding=False)
-    inputs = _inputs(memify_kwargs={"enrichment_tasks": [object()]})
-    assert TripletEnrichmentStage().gate(inputs) is None
-
-
-@pytest.mark.asyncio
-async def test_triplet_enrichment_custom_tasks_skip_the_change_check(monkeypatch):
-    changes_mod = importlib.import_module("cognee.modules.improve.graph_changes")
-    changed = AsyncMock(return_value=False)
-    monkeypatch.setattr(changes_mod, "has_graph_changed_since_last_improve", changed)
-    memify_mod = importlib.import_module("cognee.modules.memify")
-    memify = AsyncMock(return_value={"ok": 1})
-    monkeypatch.setattr(memify_mod, "memify", memify)
-    tasks = [object()]
-    inputs = _inputs(memify_kwargs={"extraction_tasks": tasks}, node_name=["n"])
-
-    result = await TripletEnrichmentStage().run(inputs)
-
-    changed.assert_not_awaited()
-    memify.assert_awaited_once()
-    kwargs = memify.await_args.kwargs
-    assert kwargs["extraction_tasks"] == tasks
-    assert kwargs["dataset"] == inputs.dataset_id
-    assert kwargs["node_name"] == ["n"]
-    assert kwargs["run_in_background"] is False
-    assert "data" not in kwargs
-    assert result.raw_run == {"ok": 1}
-
-
-def _enrichment_stamp(result):
-    from cognee.modules.improve.graph_changes import ENRICHMENT_WATERMARK_KEY
-
-    return (result.run_info_stamp or {}).get(ENRICHMENT_WATERMARK_KEY)
-
-
-def _patch_enrichment_deps(monkeypatch, *, changed, memify_returns):
-    changes_mod = importlib.import_module("cognee.modules.improve.graph_changes")
-    monkeypatch.setattr(
-        changes_mod, "has_graph_changed_since_last_improve", AsyncMock(return_value=changed)
-    )
-    memify_mod = importlib.import_module("cognee.modules.memify")
-    monkeypatch.setattr(memify_mod, "memify", AsyncMock(return_value=memify_returns))
-
-
-@pytest.mark.asyncio
-async def test_triplet_enrichment_stamps_full_scope_runs(monkeypatch):
-    """The watermark's write side: a full-scope stage 8 that enriched (or
-    verified nothing changed) stamps its own START time, so a write racing
-    the operation-row close stays visible to the next run's gate."""
-    from datetime import datetime, timezone
-
-    _patch_enrichment_deps(monkeypatch, changed=True, memify_returns={"ok": 1})
-    before = datetime.now(timezone.utc)
-
-    enriched = await TripletEnrichmentStage().run(_inputs())
-
-    stamp = _enrichment_stamp(enriched)
-    assert stamp["status"] == "completed"
-    assert before <= datetime.fromisoformat(stamp["started_at"]) <= datetime.now(timezone.utc)
-
-    _patch_enrichment_deps(monkeypatch, changed=False, memify_returns={"ok": 1})
-    verified = await TripletEnrichmentStage().run(_inputs())
-    assert _enrichment_stamp(verified)["status"] == "already_completed"
-
-
-@pytest.mark.asyncio
-async def test_triplet_enrichment_never_stamps_scoped_or_errored_runs(monkeypatch):
-    """node_name / custom-task runs do narrower or different work, and an
-    errored run enriched nothing; 'nothing changed since' for the whole
-    dataset must not be inferred from any of them."""
-    from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunErrored
-
-    _patch_enrichment_deps(monkeypatch, changed=True, memify_returns={"ok": 1})
-    scoped = await TripletEnrichmentStage().run(_inputs(node_name=["only_this"]))
-    assert scoped.run_info_stamp is None
-    custom = await TripletEnrichmentStage().run(
-        _inputs(memify_kwargs={"extraction_tasks": [object()]})
-    )
-    assert custom.run_info_stamp is None
-
-    errored_run = PipelineRunErrored(
-        pipeline_run_id=uuid4(), dataset_id=uuid4(), dataset_name="docs", error_message="bad"
-    )
-    _patch_enrichment_deps(monkeypatch, changed=True, memify_returns=errored_run)
-    errored = await TripletEnrichmentStage().run(_inputs())
-    assert errored.status == "errored"
-    assert errored.run_info_stamp is None
-
-
 # --- stage 9 ---------------------------------------------------------------
 
 
@@ -357,8 +284,6 @@ def test_inputs_are_frozen():
     inputs = _inputs()
     with pytest.raises(FrozenInstanceError):
         inputs.dataset_id = uuid4()  # type: ignore[misc]
-    with pytest.raises(TypeError):
-        inputs.memify_kwargs["data"] = 1  # type: ignore[index]
     assert not hasattr(inputs, "run_in_background")
 
 

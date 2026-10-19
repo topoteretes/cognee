@@ -43,6 +43,13 @@ class SessionStatus(str, Enum):
     ABANDONED = "abandoned"  # computed at read time, not stored
 
 
+class UsageKind(str, Enum):
+    """What a session_model_usage row counts: LLM completions or embeddings."""
+
+    LLM = "llm"
+    EMBEDDING = "embedding"
+
+
 # 30 minutes by default; overridable via env var for tests.
 def _abandon_after_seconds() -> int:
     raw = os.environ.get("SESSION_ABANDON_AFTER_SECONDS", "")
@@ -176,7 +183,10 @@ async def accumulate_usage(
     tokens_in: int = 0,
     tokens_out: int = 0,
     cost_usd: float = 0.0,
+    embedding_tokens: int = 0,
+    embedding_cost_usd: float = 0.0,
     model: str | None = None,
+    kind: UsageKind = UsageKind.LLM,
     errored: bool = False,
 ) -> None:
     """Atomically add usage counters to the session row + per-model row.
@@ -185,8 +195,20 @@ async def accumulate_usage(
     frozen. Per-model accumulation runs against
     ``session_model_usage`` via an upsert so mixed-model sessions
     attribute correctly in ``cost-by-model``.
+
+    Embedding usage (``kind=UsageKind.EMBEDDING``) goes to the session's own
+    embedding columns, never into its LLM ``tokens_in``/``cost_usd``; the
+    embedding model's per-model row is tagged with that kind.
     """
-    if tokens_in == 0 and tokens_out == 0 and cost_usd == 0.0 and not errored and model is None:
+    if (
+        tokens_in == 0
+        and tokens_out == 0
+        and cost_usd == 0.0
+        and embedding_tokens == 0
+        and embedding_cost_usd == 0.0
+        and not errored
+        and model is None
+    ):
         return
 
     engine = get_relational_engine()
@@ -201,9 +223,13 @@ async def accumulate_usage(
             values["tokens_out"] = SessionRecord.tokens_out + tokens_out
         if cost_usd:
             values["cost_usd"] = SessionRecord.cost_usd + cost_usd
+        if embedding_tokens:
+            values["embedding_tokens"] = SessionRecord.embedding_tokens + embedding_tokens
+        if embedding_cost_usd:
+            values["embedding_cost_usd"] = SessionRecord.embedding_cost_usd + embedding_cost_usd
         if errored:
             values["error_count"] = SessionRecord.error_count + 1
-        if model:
+        if model and kind == UsageKind.LLM:
             values["last_model"] = model
 
         if values:
@@ -219,6 +245,11 @@ async def accumulate_usage(
                 .values(**values)
             )
 
+        # An embedding model's own row counts its input tokens and cost in the
+        # ordinary columns; kind tells it apart from an LLM's row.
+        if kind == UsageKind.EMBEDDING:
+            tokens_in, tokens_out, cost_usd = embedding_tokens, 0, embedding_cost_usd
+
         # 2) Per-model row — only when there's usage to credit.
         if model and (tokens_in or tokens_out or cost_usd):
             now = datetime.now(timezone.utc)
@@ -231,6 +262,7 @@ async def accumulate_usage(
                     session_id=session_id,
                     user_id=user_id,
                     model=model,
+                    kind=kind.value,
                     tokens_in=tokens_in,
                     tokens_out=tokens_out,
                     cost_usd=cost_usd,
@@ -265,6 +297,7 @@ async def accumulate_usage(
                             session_id=session_id,
                             user_id=user_id,
                             model=model,
+                            kind=kind.value,
                             tokens_in=tokens_in,
                             tokens_out=tokens_out,
                             cost_usd=cost_usd,

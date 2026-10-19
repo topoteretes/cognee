@@ -166,9 +166,7 @@ async def _get_top_triplet_importances(
         if wide_search_limit is None and neighborhood_depth is None:
             relevant_node_ids = None
         else:
-            relevant_node_ids = vector_search.extract_relevant_node_ids(
-                rank_by_score=neighborhood_depth is not None
-            )
+            relevant_node_ids = vector_search.extract_relevant_node_ids()
 
         memory_fragment = await get_memory_fragment(
             properties_to_project=properties_to_project,

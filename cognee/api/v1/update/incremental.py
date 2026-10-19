@@ -1088,9 +1088,7 @@ async def _write_and_publish(
             chunk.belongs_to_set = document.belongs_to_set
             chunk.source_node_set = document.source_node_set
         summaries = await extract(batch, context)
-        await add_data_points(
-            summaries, ctx=context, embed_triplets=cognify_config.triplet_embedding
-        )
+        await add_data_points(summaries, ctx=context)
     if reused_chunks:
         await _restore_repositioned_chunks(reused_chunks, context)
 

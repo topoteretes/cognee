@@ -125,10 +125,15 @@ class SearchPayloadDTO(InDTO):
         default=None,
         description=(
             "Structured arguments for search_type=CODE. Set operation to query_facts, "
-            "explore, traverse, find_path, impact_analysis, insights, architecture, or "
-            "delta. Add diagram='mermaid' (or 'dot', or true) to receive the result "
-            "rendered as diagram source under search_result[0].diagram; architecture "
-            "includes a Mermaid diagram unless diagram=false."
+            "explore, traverse, find_path, impact_analysis, insights, architecture, "
+            "delta, capabilities, search, neighbors, subgraph, flows, hubs, or ask "
+            "(ask answers a natural-language question with seeds, flows, a one-hop "
+            "neighbourhood and file:line citations). Add diagram='mermaid' (or 'dot', or "
+            "true) to receive the result rendered as diagram source under "
+            "search_result[0].diagram; architecture includes a Mermaid diagram unless "
+            "diagram=false. A rejected request answers 422 with a stable 'code' "
+            "(unknown_operation, invalid_argument, not_found, ambiguous, no_code_graph, "
+            "feature_unavailable) and, when one argument is at fault, its 'param'."
         ),
     )
 
