@@ -1,6 +1,6 @@
 import os
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 
 from cognee.modules.operations.agent import agent_identity_from_user, set_operation_agent
 from cognee.shared.logging_utils import get_logger
@@ -84,6 +84,9 @@ _auth_dependency = fastapi_users.current_user(active=True, optional=not REQUIRE_
 
 async def get_authenticated_user(
     user: User | None = Depends(_auth_dependency),
+    # FastAPI injects the request; the None default keeps direct callers
+    # working. ``Request | None`` would not be injected, hence the ignore.
+    request: Request = None,  # type: ignore[assignment]
 ) -> User:
     """
     Get authenticated user with environment-controlled behavior:
@@ -110,7 +113,8 @@ async def get_authenticated_user(
         user = await get_user(user.id)
 
     # Telemetry emitted for this request (and background work it starts)
-    # attributes to the agent when the caller authenticated as one.
-    set_operation_agent(agent_identity_from_user(user))
+    # attributes to the agent when the caller authenticated as one. Stored on
+    # the request too, for the exception middleware outside this context.
+    set_operation_agent(agent_identity_from_user(user), request)
 
     return user

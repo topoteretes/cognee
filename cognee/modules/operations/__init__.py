@@ -3,6 +3,7 @@ from .agent import (
     agent_identity_from_user,
     get_operation_agent,
     operation_agent_scope,
+    request_operation_agent,
     set_operation_agent,
 )
 from .origin import (
@@ -51,6 +52,7 @@ __all__ = [
     "operation_usage_scope",
     "parent_run_scope",
     "record_operation",
+    "request_operation_agent",
     "scrub_error_message",
     "set_operation_agent",
     "set_operation_origin",

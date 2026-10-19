@@ -54,6 +54,7 @@ class AgentIdentity:
 _operation_agent: ContextVar[AgentIdentity | None] = ContextVar(
     "cognee_operation_agent", default=None
 )
+_REQUEST_STATE_ATTR = "operation_agent"
 
 
 def plugin_key_from_agent_email(email: str | None, parent_id: UUID | str) -> str | None:
@@ -98,9 +99,27 @@ def get_operation_agent() -> AgentIdentity | None:
     return _operation_agent.get()
 
 
-def set_operation_agent(agent: AgentIdentity | None) -> None:
-    """Bind the agent for the current context and everything spawned from it."""
+def request_operation_agent(request) -> AgentIdentity | None:
+    """The agent authentication stored on ``request.state``, if any.
+
+    ``@app.middleware("http")`` runs the rest of the app in a child task, so
+    the ContextVar binding made during authentication never flows back out
+    to it. ``request.state`` lives on the ASGI scope, which both sides share,
+    so the outer exception middleware reads the agent from here instead.
+    """
+    return getattr(getattr(request, "state", None), _REQUEST_STATE_ATTR, None)
+
+
+def set_operation_agent(agent: AgentIdentity | None, request=None) -> None:
+    """Bind the agent for the current context and everything spawned from it.
+
+    Pass the HTTP ``request`` to also store it on ``request.state``, where
+    code running outside the handler's context can read it (see
+    :func:`request_operation_agent`).
+    """
     _operation_agent.set(agent)
+    if request is not None:
+        setattr(request.state, _REQUEST_STATE_ATTR, agent)
 
 
 @contextmanager

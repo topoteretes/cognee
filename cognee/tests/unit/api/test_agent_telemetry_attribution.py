@@ -2,7 +2,9 @@
 
 Runs the real ``get_authenticated_user`` (only the credential check beneath it
 is overridden), so this guards the hook that binds the agent, and that the
-binding reaches the handler and background tasks the handler starts.
+binding reaches the handler, background tasks the handler starts, and the
+error telemetry — including the unhandled-500 middleware, which runs outside
+the handler's context and only sees the agent through ``request.state``.
 """
 
 import asyncio
@@ -10,9 +12,12 @@ import importlib
 import uuid
 from typing import Any
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request, status
+from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 
+from cognee.api.exception_telemetry import API_EXCEPTION_EVENT, send_api_exception_telemetry
+from cognee.exceptions import CogneeApiError
 from cognee.shared import utils
 from cognee.shared.utils import send_telemetry
 
@@ -31,8 +36,16 @@ class FakeUser:
 def _app_for(user, monkeypatch) -> tuple[FastAPI, list[dict[str, Any]]]:
     payloads: list[dict[str, Any]] = []
 
-    async def capture(payload: dict[str, Any]) -> None:
+    def capture(payload: dict[str, Any]):
+        # Recorded when send_telemetry builds the event, not when its
+        # fire-and-forget task runs, so events raised after the response
+        # (the exception middleware) are never missed.
         payloads.append(payload)
+
+        async def noop() -> None:
+            return None
+
+        return noop()
 
     async def get_user(_user_id):
         return user
@@ -47,6 +60,28 @@ def _app_for(user, monkeypatch) -> tuple[FastAPI, list[dict[str, Any]]]:
     app = FastAPI()
     app.dependency_overrides[auth_module._auth_dependency] = lambda: user
 
+    # Wired like cognee/api/client.py.
+    @app.middleware("http")
+    async def _report_unhandled_exceptions(request, call_next):
+        try:
+            return await call_next(request)
+        except Exception as error:
+            send_api_exception_telemetry(request, error, status.HTTP_500_INTERNAL_SERVER_ERROR)
+            raise
+
+    @app.exception_handler(CogneeApiError)
+    async def _cognee_error(request: Request, exc: CogneeApiError):
+        send_api_exception_telemetry(request, exc, exc.status_code, error_name=exc.name)
+        return JSONResponse(status_code=exc.status_code, content={"detail": "error"})
+
+    @app.post("/crash")
+    async def crash(_user=Depends(auth_module.get_authenticated_user)):
+        raise RuntimeError("unhandled")
+
+    @app.post("/handled")
+    async def handled(_user=Depends(auth_module.get_authenticated_user)):
+        raise CogneeApiError(message="handled", name="HandledError", status_code=409, log=False)
+
     @app.post("/work")
     async def work(_user=Depends(auth_module.get_authenticated_user)):
         send_telemetry("handler event", "sdk")
@@ -55,8 +90,6 @@ def _app_for(user, monkeypatch) -> tuple[FastAPI, list[dict[str, Any]]]:
             send_telemetry("background event", "sdk")
 
         await asyncio.create_task(background())
-        # Let the fire-and-forget telemetry tasks run before the response.
-        await asyncio.sleep(0)
         return {}
 
     return app, payloads
@@ -86,3 +119,45 @@ def test_human_requests_carry_no_agent(monkeypatch):
 
     assert payloads
     assert all(payload["properties"]["is_agent"] is False for payload in payloads)
+
+
+def _agent() -> FakeUser:
+    parent_id = uuid.uuid4()
+    return FakeUser(parent_id, f"codex+{parent_id}@cognee.agent")
+
+
+def _exception_events(payloads):
+    return [payload for payload in payloads if payload["event_name"] == API_EXCEPTION_EVENT]
+
+
+def test_an_agents_unhandled_500_keeps_the_agent(monkeypatch):
+    """The exception middleware sits outside the handler's context (review finding)."""
+    agent = _agent()
+    app, payloads = _app_for(agent, monkeypatch)
+
+    response = TestClient(app, raise_server_exceptions=False).post("/crash")
+
+    assert response.status_code == 500
+    [event] = _exception_events(payloads)
+    assert event["properties"]["status_code"] == 500
+    assert event["properties"]["agent_id"] == str(agent.id)
+    assert event["properties"]["agent_plugin"] == "codex"
+
+
+def test_an_agents_handled_error_keeps_the_agent(monkeypatch):
+    agent = _agent()
+    app, payloads = _app_for(agent, monkeypatch)
+
+    assert TestClient(app).post("/handled").status_code == 409
+
+    [event] = _exception_events(payloads)
+    assert event["properties"]["agent_id"] == str(agent.id)
+
+
+def test_a_humans_unhandled_500_carries_no_agent(monkeypatch):
+    app, payloads = _app_for(FakeUser(), monkeypatch)
+
+    TestClient(app, raise_server_exceptions=False).post("/crash")
+
+    [event] = _exception_events(payloads)
+    assert event["properties"]["is_agent"] is False
