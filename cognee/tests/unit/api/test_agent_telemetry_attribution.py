@@ -141,6 +141,7 @@ def test_an_agents_unhandled_500_keeps_the_agent(monkeypatch):
     [event] = _exception_events(payloads)
     assert event["properties"]["status_code"] == 500
     assert event["properties"]["agent_id"] == str(agent.id)
+    assert event["properties"]["user_id"] == str(agent.id)
     assert event["properties"]["agent_plugin"] == "codex"
 
 

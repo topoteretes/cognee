@@ -251,10 +251,28 @@ def test_payload_takes_the_request_agent_when_the_emitter_passes_a_sentinel(monk
     with operation_agent_scope(agent_identity_from_user(agent)):
         send_telemetry("cognee.search EXECUTION STARTED", "sdk")
         send_telemetry("cognee.search EXECUTION STARTED", agent.id)
+        send_telemetry("API Exception Raised", None)
 
+    assert len(payloads) == 3
     for payload in payloads:
         assert payload["properties"]["agent_id"] == str(agent.id)
+        assert payload["properties"]["user_id"] == str(agent.id)
+        assert payload["user_properties"]["user_id"] == str(agent.id)
         assert payload["properties"]["agent_plugin"] == "claude-code"
+
+
+def test_a_bound_agent_never_replaces_a_real_user_id(monkeypatch):
+    """Only the placeholders are filled from the agent; an explicit principal is kept."""
+    from cognee.modules.operations.agent import agent_identity_from_user, operation_agent_scope
+
+    payloads = _capture_telemetry(monkeypatch)
+    agent = FakeAgentUser("codex")
+    other_id = uuid.uuid4()
+
+    with operation_agent_scope(agent_identity_from_user(agent)):
+        send_telemetry("cognee.remember", other_id)
+
+    assert payloads[0]["properties"]["user_id"] == str(other_id)
 
 
 def test_payload_marks_ordinary_users_as_not_agents(monkeypatch):

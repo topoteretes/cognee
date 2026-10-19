@@ -569,6 +569,11 @@ def _resolve_identity(user) -> tuple[str, str | None]:
     return resolved_id, resolved_tenant
 
 
+# What an emitter passes when it has no principal in hand: the default
+# ``user=None`` (resolved as ``"None"``) and the ``"sdk"`` sentinel.
+_PLACEHOLDER_USER_IDS = frozenset({"None", "sdk"})
+
+
 def _resolve_agent(user):
     """The agent an event is attributed to, or ``None`` for a non-agent caller.
 
@@ -622,7 +627,9 @@ def send_telemetry(
     - **is_agent** / **agent_id** / **agent_owner_id** / **agent_plugin**:
       Set when the event is recognised as an agent's (a child user with its
       own API key, such as a provisioned plugin). ``agent_id`` equals
-      ``user_id`` then; ``agent_owner_id`` is the human user who owns it, and
+      ``user_id`` then (an emitter that passes ``None`` or ``"sdk"`` while an
+      agent is bound, such as the unhandled-500 middleware, has ``user_id``
+      filled from the agent); ``agent_owner_id`` is the human user who owns it, and
       ``agent_plugin`` a known plugin key or ``"custom"``. All ``None``
       (``is_agent`` false) otherwise. Recognised from the request's agent
       (bound at authentication, which wins), else from a ``User`` model
@@ -651,6 +658,10 @@ def send_telemetry(
     # segmented by origin.
     origin = telemetry_origin()
     agent = _resolve_agent(user if user is not None else user_id)
+    if agent is not None and resolved_user_id in _PLACEHOLDER_USER_IDS:
+        # The emitter had no principal, but the work runs as the bound agent:
+        # keep agent_id == user_id so per-user counts don't split one agent.
+        resolved_user_id = agent.agent_id
     current_time = datetime.now(timezone.utc)
     payload = {
         "anonymous_id": anonymous_id,
