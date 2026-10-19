@@ -87,10 +87,24 @@
       if (beyond > 0) chipsHtml += '<span class="si-more">… +' + beyond + " more</span>";
     }
 
+    var fieldsHtml = "";
+    if (Array.isArray(t.fields) && t.fields.length) {
+      fieldsHtml =
+        '<div class="si-heading">Fields / Columns</div><div class="si-chips">' +
+        t.fields.map(function (f) {
+          var label = f.name + (f.type ? " (" + f.type + ")" : "");
+          return chip(label, null);
+        }).join("") +
+        "</div>";
+    }
+
+    var countLabel = count > 0 ? (count + (count === 1 ? " instance" : " instances")) : (Array.isArray(t.fields) && t.fields.length ? (t.fields.length + (t.fields.length === 1 ? " column" : " columns")) : "0 instances");
+
     panel.innerHTML =
       '<div class="si-close" data-action="close" title="Close">&times;</div>' +
       '<div class="si-title">' + esc(t.name) + "</div>" +
-      '<div class="si-count">' + esc(t.name) + " — " + count + (count === 1 ? " instance" : " instances") + "</div>" +
+      '<div class="si-count">' + esc(t.name) + " — " + countLabel + "</div>" +
+      fieldsHtml +
       '<div class="si-heading">Instances</div>' + chipsHtml +
       '<div class="si-heading">Relationships</div>' + renderTypeRelationships(t) +
       '<button class="si-highlight" data-action="highlight">Highlight in graph</button>';
