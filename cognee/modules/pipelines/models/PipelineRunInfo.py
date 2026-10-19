@@ -1,20 +1,46 @@
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, computed_field
+from pydantic import BaseModel, Field
 
 from cognee.modules.data.models.Data import Data
 
 
-def extract_data_ids(data_ingestion_info: Any) -> list[UUID]:
-    """Ids of the data items a run processed, read from its per-item results.
+def _run_info_status(run_info: Any) -> str:
+    """Status of a per-item ``run_info``, whether it is a run-info object or the
+    dict a JSON round-trip (``model_validate(json.loads(...))``) leaves behind."""
+    if isinstance(run_info, dict):
+        return str(run_info.get("status") or "")
+    return str(getattr(run_info, "status", "") or "")
 
-    ``run_tasks`` reports one ``{"run_info": ..., "data_id": ...}`` entry per
-    data item. Entries whose item errored are skipped (they identify nothing
-    that was stored); entries reporting ``PipelineRunAlreadyCompleted`` are
-    kept — the row exists and holds the content, which is exactly what a
-    caller re-adding known content wants back. Order follows the run's
-    results; duplicates and ids that are not UUIDs are dropped.
+
+def _to_uuid(value: Any) -> UUID | None:
+    if isinstance(value, UUID):
+        return value
+    if value is None:
+        return None
+    try:
+        return UUID(str(value))
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+def extract_data_ids(
+    data_ingestion_info: Any, *, include_already_completed: bool = True
+) -> list[UUID]:
+    """Ids of the ``Data`` rows a run's per-item results name.
+
+    ``run_tasks`` collects one ``{"run_info": ..., "data_id": ...}`` entry per
+    work item. The ids come back in the order the entries were collected,
+    deduplicated, and without the items that errored (nothing was stored for
+    them). Entries reporting ``PipelineRunAlreadyCompleted`` are kept by
+    default: for ``add()`` that is a dedup hit, the row that already holds the
+    content. Pass ``include_already_completed=False`` to keep only the items
+    this run processed itself (what ``cognify`` counts as its own work; see
+    ``cognify/rollback.py``).
+
+    Entries are read in their live form or after a dict/JSON round-trip, and
+    ids that are not UUIDs are dropped.
     """
     if not isinstance(data_ingestion_info, list):
         return []
@@ -24,20 +50,20 @@ def extract_data_ids(data_ingestion_info: Any) -> list[UUID]:
     for entry in data_ingestion_info:
         if not isinstance(entry, dict):
             continue
-        status = getattr(entry.get("run_info"), "status", "") or ""
+        status = _run_info_status(entry.get("run_info"))
         if "Errored" in status:
             continue
-        raw_id = entry.get("data_id")
-        if raw_id is None:
+        if not include_already_completed and "AlreadyCompleted" in status:
             continue
-        try:
-            data_id = raw_id if isinstance(raw_id, UUID) else UUID(str(raw_id))
-        except (ValueError, TypeError, AttributeError):
-            continue
-        if data_id in seen:
-            continue
-        seen.add(data_id)
-        data_ids.append(data_id)
+        raw_ids = entry.get("data_ids")
+        if not isinstance(raw_ids, list):
+            raw_ids = [entry.get("data_id")]
+        for raw_id in raw_ids:
+            data_id = _to_uuid(raw_id)
+            if data_id is None or data_id in seen:
+                continue
+            seen.add(data_id)
+            data_ids.append(data_id)
     return data_ids
 
 
@@ -49,9 +75,14 @@ class PipelineRunInfo(BaseModel):
     # Data must be mentioned in typing to allow custom encoders for Data to be activated
     payload: Any | list[Data] | None = None
     # Per-item results: one {"run_info": PipelineRunInfo, "data_id": UUID}
-    # entry per data item the run handled. Read ``data_ids`` instead of
-    # walking this.
+    # entry per work item the run handled.
     data_ingestion_info: list | None = None
+    # Ids of the Data rows the run's per-item results name. add() fills this
+    # on the run info it returns (its docstring states the exact semantics);
+    # every other run info leaves it None, and a None is left out of the
+    # serialized form, so the nested per-item run infos and progress ticks
+    # never carry the key.
+    data_ids: list[UUID] | None = Field(default=None, exclude_if=lambda value: value is None)
 
     model_config = {
         "arbitrary_types_allowed": True,
@@ -59,21 +90,6 @@ class PipelineRunInfo(BaseModel):
         # Add custom encoding handler for Data ORM model
         "json_encoders": {Data: lambda d: d.to_json()},
     }
-
-    @computed_field(return_type=list[UUID])
-    @property
-    def data_ids(self) -> list[UUID]:
-        """Ids of the ``Data`` rows this run processed, in result order.
-
-        For ``add()`` this is the id of every item that was stored (or already
-        existed with the same content — dedup returns the existing row), so a
-        caller can key later ``update()`` / ``delete_data()`` / ``find_data``
-        calls on cognee's own ids instead of re-deriving them. Empty for run
-        infos that carry no per-item results (``PipelineRunStarted``,
-        progress ticks) and for items that errored. Serialized with the model,
-        so ``POST /api/v1/add`` responses carry it too.
-        """
-        return extract_data_ids(self.data_ingestion_info)
 
 
 class PipelineRunStarted(PipelineRunInfo):

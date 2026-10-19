@@ -22,6 +22,9 @@ from cognee.modules.pipelines.layers.resolve_authorized_user_dataset import (
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunAlreadyCompleted,
     PipelineRunCompleted,
+    PipelineRunInfo,
+    PipelineRunStarted,
+    extract_data_ids,
 )
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -154,10 +157,19 @@ async def add(
             - Pipeline run ID for tracking
             - Dataset ID where data was stored
             - Processing status and any errors
-            - ``data_ids``: the id of every ``Data`` row this call stored (or found
-              already present with identical content), in input order — use these
-              for later ``update()`` / ``datasets.delete_data()`` calls instead of
-              re-deriving ids from content
+            - ``data_ids``: the ``Data`` rows this call stored, or found already
+              present with identical content — the ids ``update()`` and
+              ``datasets.delete_data()`` take, so nothing has to be re-derived from
+              content. Filled on every foreground path, incremental or not. The list
+              is read from the run's per-item results: first-seen order,
+              deduplicated, errored items left out — so it does NOT line up with
+              ``data`` positionally (``add(["a", "a"])`` yields one id; a directory
+              yields one id per file it holds); do not ``zip`` it with the inputs.
+              ``None`` when ``run_in_background=True``: that call returns a
+              ``PipelineRunStarted`` before any row exists — once the run completes,
+              ``cognee.datasets.list_data(dataset_id)`` lists the rows. While
+              connected to a remote instance the ids are converted from the
+              server's strings; a server without the field yields ``None``.
             - Execution timestamps and metadata
 
     Next Steps:
@@ -253,6 +265,15 @@ async def add(
         # Wrap in a simple namespace so callers expecting .model_dump() still work
         from types import SimpleNamespace
 
+        # The server's data_ids arrive as strings; an older server sends none.
+        # Hand both back the way the local path does: UUIDs, or None.
+        result = dict(result)
+        remote_data_ids = result.get("data_ids")
+        result["data_ids"] = (
+            [UUID(str(value)) for value in remote_data_ids]
+            if isinstance(remote_data_ids, list)
+            else None
+        )
         return SimpleNamespace(**result)
 
     if branch is not None:
@@ -394,6 +415,13 @@ async def add(
     # expect a single PipelineRunInfo (add always processes one dataset).
     if isinstance(result, dict) and len(result) == 1:
         result = next(iter(result.values()))
+
+    # The per-item results already name the rows; stamp them once on the run
+    # info this call hands back (the HTTP route serializes the same object).
+    # A background run has started but reported no items yet: its data_ids
+    # stay None rather than an empty list that would read as "nothing stored".
+    if isinstance(result, PipelineRunInfo) and not isinstance(result, PipelineRunStarted):
+        result.data_ids = extract_data_ids(result.data_ingestion_info)
 
     # Executors may return an error result rather than raise. Only a successful
     # foreground completion proves it is safe to remove the previous records.

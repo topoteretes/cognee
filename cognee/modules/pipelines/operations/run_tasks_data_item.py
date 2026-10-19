@@ -292,6 +292,30 @@ async def run_tasks_data_item_incremental(
             raise
 
 
+def _pinned_data_id(data_item: Any) -> Any:
+    """The id a work item already carries: a ``Data`` row's own id, or the stable
+    id a ``DataItem`` was given (DLT sources, ``update()`` re-ingests)."""
+    if isinstance(data_item, Data):
+        return data_item.id
+    from cognee.tasks.ingestion.data_item import DataItem as DataItemType
+
+    if isinstance(data_item, DataItemType):
+        return data_item.data_id
+    return None
+
+
+def _collect_data_row_ids(result: Any, data_ids: list) -> None:
+    """Append the ids of the ``Data`` rows in one task result, in order, once each.
+
+    ``add``'s last task (``ingest_data``) returns the rows it stored, so this is
+    how the regular path learns which row an item ended up under.
+    """
+    rows = result if isinstance(result, list) else [result]
+    for row in rows:
+        if isinstance(row, Data) and row.id not in data_ids:
+            data_ids.append(row.id)
+
+
 async def run_tasks_data_item_regular(
     data_item: Any,
     dataset: Dataset,
@@ -317,8 +341,16 @@ async def run_tasks_data_item_regular(
         user: User performing the operation
 
     Yields:
-        Dict containing run_info for each processing step
+        A ``PipelineRunYield`` per intermediate result, then the item's final
+        ``{"run_info": PipelineRunCompleted, "data_id": ...}`` entry. ``data_id``
+        is the ``Data`` row the item was stored under: the id it carried in, or
+        else the row the last task returned (``add``'s ``ingest_data``); it is
+        None for pipelines whose items are not Data rows. Should one item end
+        up under several rows, the entry lists them all under ``data_ids``.
     """
+    pinned_data_id = _pinned_data_id(data_item)
+    data_ids: list = []
+
     # Process data based on data_item and list of tasks. aclosing closes the
     # telemetry generator as soon as this one is closed early.
     async with aclosing(
@@ -331,6 +363,8 @@ async def run_tasks_data_item_regular(
         )
     ) as results:
         async for result in results:
+            if pinned_data_id is None:
+                _collect_data_row_ids(result, data_ids)
             yield PipelineRunYield(
                 pipeline_run_id=pipeline_run_id,
                 dataset_id=dataset.id,
@@ -338,13 +372,20 @@ async def run_tasks_data_item_regular(
                 payload=result,
             )
 
-    yield {
+    if pinned_data_id is not None:
+        data_ids = [pinned_data_id]
+
+    item_result: dict[str, Any] = {
         "run_info": PipelineRunCompleted(
             pipeline_run_id=pipeline_run_id,
             dataset_id=dataset.id,
             dataset_name=dataset.name,
-        )
+        ),
+        "data_id": data_ids[0] if data_ids else None,
     }
+    if len(data_ids) > 1:
+        item_result["data_ids"] = data_ids
+    yield item_result
 
 
 async def run_tasks_data_item(
