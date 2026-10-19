@@ -210,7 +210,10 @@ class datasets:
         added no such content to the dataset.
 
         Routes to the remote instance when connected via ``serve()``, like
-        ``list_data``. Requires read access to the dataset.
+        ``list_data``; the client re-checks every returned row's hash and
+        raises ``RuntimeError`` against a server that predates the lookup,
+        so an old server can never make the whole dataset look like a match.
+        Requires read access to the dataset.
         """
         if (content is None) == (content_hash is None):
             raise ValueError("find_data takes exactly one of `content` or `content_hash`.")
