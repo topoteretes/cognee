@@ -438,7 +438,7 @@ async def test_recovering_an_agents_run_attributes_the_agent(monkeypatch):
     await asyncio.gather(*(utils._TELEMETRY_TASKS - pending_before))
 
     properties = request.await_args.args[0]["properties"]
-    assert properties["user_id"] == properties["agent_id"] == str(run.user_id)
+    assert properties["user_id"] == str(run.user_id)
     assert properties["is_agent"] is True
     assert properties["agent_owner_id"] == str(parent_id)
     assert properties["agent_plugin"] == "codex"

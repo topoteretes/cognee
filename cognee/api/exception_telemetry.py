@@ -20,11 +20,6 @@ TEMPLATED route — never the resolved path, whose ids identify data.
 """
 
 from cognee import __version__ as cognee_version
-from cognee.modules.operations.agent import (
-    get_operation_agent,
-    operation_agent_scope,
-    request_operation_agent,
-)
 from cognee.shared.utils import send_telemetry, telemetry_guard
 
 API_EXCEPTION_EVENT = "API Exception Raised"
@@ -92,9 +87,8 @@ def send_api_exception_telemetry(
             # The exception class itself is malformed — our bug, not a user error.
             properties["improperly_defined_exception"] = True
 
-        # The unhandled-500 middleware runs outside the handler's context and
-        # never sees the agent authentication bound there; request.state
-        # carries it across. Handled errors see both, and they agree.
-        agent = request_operation_agent(request) or get_operation_agent()
-        with operation_agent_scope(agent):
-            send_telemetry(API_EXCEPTION_EVENT, None, additional_properties=properties)
+        # The caller get_authenticated_user stored on the request, so the event
+        # carries its id, tenant and agent fields; None for an error raised
+        # before authentication (or on a route without it).
+        user = getattr(getattr(request, "state", None), "user", None)
+        send_telemetry(API_EXCEPTION_EVENT, user, additional_properties=properties)

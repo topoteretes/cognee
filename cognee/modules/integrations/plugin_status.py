@@ -33,8 +33,8 @@ from sqlalchemy import case, func, or_, select
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.agents.registry import AGENT_CONFIG_NAME, list_persisted_agent_connections
+from cognee.modules.integrations.agent_identity import plugin_key_from_agent_email
 from cognee.modules.integrations.plugins import KNOWN_PLUGINS
-from cognee.modules.operations.agent import plugin_key_from_agent_email
 from cognee.modules.session_lifecycle.models import SessionRecord
 from cognee.modules.session_lifecycle.visibility import child_agent_emails
 from cognee.modules.users.methods.get_principal_configuration import (

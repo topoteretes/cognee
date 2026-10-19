@@ -235,44 +235,12 @@ def test_payload_attributes_an_agent_user_model(monkeypatch):
 
     properties = payloads[0]["properties"]
     assert properties["is_agent"] is True
-    assert properties["agent_id"] == str(agent.id) == properties["user_id"]
+    # The agent is the user: user_id identifies which agent it is.
+    assert properties["user_id"] == str(agent.id)
+    assert "agent_id" not in properties
     assert properties["agent_owner_id"] == str(agent.parent_user_id)
     assert properties["agent_plugin"] == "codex"
     assert payloads[0]["user_properties"]["is_agent"] is True
-
-
-def test_payload_takes_the_request_agent_when_the_emitter_passes_a_sentinel(monkeypatch):
-    """Emitters that pass ``"sdk"`` or a bare id still carry the request's agent."""
-    from cognee.modules.operations.agent import agent_identity_from_user, operation_agent_scope
-
-    payloads = _capture_telemetry(monkeypatch)
-    agent = FakeAgentUser("claude-code")
-
-    with operation_agent_scope(agent_identity_from_user(agent)):
-        send_telemetry("cognee.search EXECUTION STARTED", "sdk")
-        send_telemetry("cognee.search EXECUTION STARTED", agent.id)
-        send_telemetry("API Exception Raised", None)
-
-    assert len(payloads) == 3
-    for payload in payloads:
-        assert payload["properties"]["agent_id"] == str(agent.id)
-        assert payload["properties"]["user_id"] == str(agent.id)
-        assert payload["user_properties"]["user_id"] == str(agent.id)
-        assert payload["properties"]["agent_plugin"] == "claude-code"
-
-
-def test_a_bound_agent_never_replaces_a_real_user_id(monkeypatch):
-    """Only the placeholders are filled from the agent; an explicit principal is kept."""
-    from cognee.modules.operations.agent import agent_identity_from_user, operation_agent_scope
-
-    payloads = _capture_telemetry(monkeypatch)
-    agent = FakeAgentUser("codex")
-    other_id = uuid.uuid4()
-
-    with operation_agent_scope(agent_identity_from_user(agent)):
-        send_telemetry("cognee.remember", other_id)
-
-    assert payloads[0]["properties"]["user_id"] == str(other_id)
 
 
 def test_payload_marks_ordinary_users_as_not_agents(monkeypatch):
@@ -284,7 +252,6 @@ def test_payload_marks_ordinary_users_as_not_agents(monkeypatch):
     for payload in payloads:
         properties = payload["properties"]
         assert properties["is_agent"] is False
-        assert properties["agent_id"] is None
         assert properties["agent_owner_id"] is None
         assert properties["agent_plugin"] is None
         assert payload["user_properties"]["is_agent"] is False
@@ -309,8 +276,8 @@ def test_payload_survives_a_detached_user_with_agent_fields(monkeypatch):
     assert payloads[0]["properties"]["is_agent"] is False
 
 
-def test_a_bare_agent_id_outside_a_request_is_not_recognised(monkeypatch):
-    """Documented limit: without the model or a request, an agent's id reads as a human's.
+def test_a_bare_agent_id_is_not_recognised(monkeypatch):
+    """Documented limit: without the model, an agent's id reads as a human's.
 
     Telling them apart from a bare id needs a database lookup, which
     send_telemetry (sync, fire-and-forget) cannot make. Emitters holding the
@@ -324,7 +291,6 @@ def test_a_bare_agent_id_outside_a_request_is_not_recognised(monkeypatch):
     properties = payloads[0]["properties"]
     assert properties["user_id"] == str(agent.id)
     assert properties["is_agent"] is False
-    assert properties["agent_id"] is None
 
 
 def test_no_emitter_passes_user_id_while_holding_the_user():

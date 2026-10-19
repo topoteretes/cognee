@@ -2,7 +2,6 @@ import os
 
 from fastapi import Depends, HTTPException, Request
 
-from cognee.modules.operations.agent import agent_identity_from_user, set_operation_agent
 from cognee.shared.logging_utils import get_logger
 
 from ..get_fastapi_users import get_fastapi_users
@@ -112,9 +111,10 @@ async def get_authenticated_user(
         # DetachedInstanceError.
         user = await get_user(user.id)
 
-    # Telemetry emitted for this request (and background work it starts)
-    # attributes to the agent when the caller authenticated as one. Stored on
-    # the request too, for the exception middleware outside this context.
-    set_operation_agent(agent_identity_from_user(user), request)
+    # Who the request is, for code with the request but not this dependency's
+    # result: the exception middleware, which runs outside the handler's
+    # context, reads it to attribute error telemetry.
+    if request is not None:
+        request.state.user = user
 
     return user

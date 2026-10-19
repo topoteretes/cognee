@@ -1,13 +1,13 @@
-"""An agent authenticating over HTTP is attributed in every event of its request.
+"""API error telemetry carries the authenticated caller, agents included.
 
-Runs the real ``get_authenticated_user`` (only the credential check beneath it
-is overridden), so this guards the hook that binds the agent, and that the
-binding reaches the handler, background tasks the handler starts, and the
-error telemetry — including the unhandled-500 middleware, which runs outside
-the handler's context and only sees the agent through ``request.state``.
+The error helper sends no ``User`` of its own: it reads the one
+``get_authenticated_user`` stored on ``request.state``. That matters most for
+the unhandled-500 middleware, which runs outside the handler's context and so
+cannot see the dependency's result any other way. Runs the real
+``get_authenticated_user`` (only the credential check beneath it is
+overridden), so this guards the line that stores the caller.
 """
 
-import asyncio
 import importlib
 import uuid
 from typing import Any
@@ -19,7 +19,6 @@ from fastapi.testclient import TestClient
 from cognee.api.exception_telemetry import API_EXCEPTION_EVENT, send_api_exception_telemetry
 from cognee.exceptions import CogneeApiError
 from cognee.shared import utils
-from cognee.shared.utils import send_telemetry
 
 # The methods package re-exports the function under the module's own name.
 auth_module = importlib.import_module("cognee.modules.users.methods.get_authenticated_user")
@@ -28,9 +27,14 @@ auth_module = importlib.import_module("cognee.modules.users.methods.get_authenti
 class FakeUser:
     def __init__(self, parent_user_id=None, email=None):
         self.id = uuid.uuid4()
-        self.tenant_id = None
+        self.tenant_id = uuid.uuid4()
         self.parent_user_id = parent_user_id
         self.email = email
+
+
+def _agent() -> FakeUser:
+    parent_id = uuid.uuid4()
+    return FakeUser(parent_id, f"codex+{parent_id}@cognee.agent")
 
 
 def _app_for(user, monkeypatch) -> tuple[FastAPI, list[dict[str, Any]]]:
@@ -82,55 +86,19 @@ def _app_for(user, monkeypatch) -> tuple[FastAPI, list[dict[str, Any]]]:
     async def handled(_user=Depends(auth_module.get_authenticated_user)):
         raise CogneeApiError(message="handled", name="HandledError", status_code=409, log=False)
 
-    @app.post("/work")
-    async def work(_user=Depends(auth_module.get_authenticated_user)):
-        send_telemetry("handler event", "sdk")
-
-        async def background():
-            send_telemetry("background event", "sdk")
-
-        await asyncio.create_task(background())
-        return {}
+    @app.post("/unauthenticated-crash")
+    async def unauthenticated_crash():
+        raise RuntimeError("unhandled")
 
     return app, payloads
 
 
-def test_agent_requests_attribute_handler_and_background_events(monkeypatch):
-    parent_id = uuid.uuid4()
-    agent = FakeUser(parent_id, f"opencode+{parent_id}@cognee.agent")
-    app, payloads = _app_for(agent, monkeypatch)
-
-    assert TestClient(app).post("/work").status_code == 200
-
-    assert {payload["event_name"] for payload in payloads} == {
-        "handler event",
-        "background event",
-    }
-    for payload in payloads:
-        assert payload["properties"]["agent_id"] == str(agent.id)
-        assert payload["properties"]["agent_owner_id"] == str(parent_id)
-        assert payload["properties"]["agent_plugin"] == "opencode"
+def _exception_event(payloads) -> dict[str, Any]:
+    [event] = [payload for payload in payloads if payload["event_name"] == API_EXCEPTION_EVENT]
+    return event["properties"]
 
 
-def test_human_requests_carry_no_agent(monkeypatch):
-    app, payloads = _app_for(FakeUser(), monkeypatch)
-
-    assert TestClient(app).post("/work").status_code == 200
-
-    assert payloads
-    assert all(payload["properties"]["is_agent"] is False for payload in payloads)
-
-
-def _agent() -> FakeUser:
-    parent_id = uuid.uuid4()
-    return FakeUser(parent_id, f"codex+{parent_id}@cognee.agent")
-
-
-def _exception_events(payloads):
-    return [payload for payload in payloads if payload["event_name"] == API_EXCEPTION_EVENT]
-
-
-def test_an_agents_unhandled_500_keeps_the_agent(monkeypatch):
+def test_an_agents_unhandled_500_carries_the_agent(monkeypatch):
     """The exception middleware sits outside the handler's context (review finding)."""
     agent = _agent()
     app, payloads = _app_for(agent, monkeypatch)
@@ -138,27 +106,44 @@ def test_an_agents_unhandled_500_keeps_the_agent(monkeypatch):
     response = TestClient(app, raise_server_exceptions=False).post("/crash")
 
     assert response.status_code == 500
-    [event] = _exception_events(payloads)
-    assert event["properties"]["status_code"] == 500
-    assert event["properties"]["agent_id"] == str(agent.id)
-    assert event["properties"]["user_id"] == str(agent.id)
-    assert event["properties"]["agent_plugin"] == "codex"
+    properties = _exception_event(payloads)
+    assert properties["status_code"] == 500
+    assert properties["user_id"] == str(agent.id)
+    assert properties["tenant_id"] == str(agent.tenant_id)
+    assert properties["is_agent"] is True
+    assert properties["agent_owner_id"] == str(agent.parent_user_id)
+    assert properties["agent_plugin"] == "codex"
 
 
-def test_an_agents_handled_error_keeps_the_agent(monkeypatch):
+def test_an_agents_handled_error_carries_the_agent(monkeypatch):
     agent = _agent()
     app, payloads = _app_for(agent, monkeypatch)
 
     assert TestClient(app).post("/handled").status_code == 409
 
-    [event] = _exception_events(payloads)
-    assert event["properties"]["agent_id"] == str(agent.id)
+    properties = _exception_event(payloads)
+    assert properties["user_id"] == str(agent.id)
+    assert properties["agent_plugin"] == "codex"
 
 
-def test_a_humans_unhandled_500_carries_no_agent(monkeypatch):
-    app, payloads = _app_for(FakeUser(), monkeypatch)
+def test_a_humans_unhandled_500_carries_the_human_and_no_agent(monkeypatch):
+    human = FakeUser()
+    app, payloads = _app_for(human, monkeypatch)
 
     TestClient(app, raise_server_exceptions=False).post("/crash")
 
-    [event] = _exception_events(payloads)
-    assert event["properties"]["is_agent"] is False
+    properties = _exception_event(payloads)
+    assert properties["user_id"] == str(human.id)
+    assert properties["is_agent"] is False
+
+
+def test_an_error_before_authentication_still_reports(monkeypatch):
+    """No caller was stored, so the event carries none — and nothing breaks."""
+    app, payloads = _app_for(_agent(), monkeypatch)
+
+    response = TestClient(app, raise_server_exceptions=False).post("/unauthenticated-crash")
+
+    assert response.status_code == 500
+    properties = _exception_event(payloads)
+    assert properties["user_id"] == "None"
+    assert properties["is_agent"] is False
