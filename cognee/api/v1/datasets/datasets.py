@@ -5,7 +5,7 @@ from cognee.api.v1.datasets.dto import DataDTO
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.locks import dataset_lock
-from cognee.modules.data.content_hash import compute_content_hash
+from cognee.modules.data.content_hash import compute_content_hash, normalize_content_hash
 from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
 from cognee.modules.data.methods import (
     get_authorized_dataset,
@@ -105,6 +105,25 @@ async def _invalidate_sessions_for_deleted_data_nonfatal(
         )
 
 
+def _is_reference_string(text: str) -> bool:
+    """True when ``add(text)`` would have ingested a file or page, not the text.
+
+    Mirrors the string branch of ``save_data_item_to_storage``: an ``s3://``,
+    ``http(s)://`` or ``file://`` URL is always a reference, and any other
+    string is one when it names an existing local file the ingestion
+    allowlist accepts. A ``"/"``-prefixed note that is not a file stays text
+    on both sides.
+    """
+    from urllib.parse import urlparse
+
+    if urlparse(text).scheme in ("s3", "http", "https", "file"):
+        return True
+
+    from cognee.tasks.ingestion.save_data_item_to_storage import _resolve_local_file_uri
+
+    return _resolve_local_file_uri(text) is not None
+
+
 class datasets:
     """
     Dataset management namespace for Cognee.
@@ -167,30 +186,61 @@ class datasets:
         content_hash: str | None = None,
         user: User | None = None,
     ) -> list[Data]:
-        """Find the data items in a dataset that hold a given piece of content.
+        """Find the data items *you* added to a dataset with a given content.
 
-        Pass exactly one of ``content`` (the text or bytes that were added —
-        hashed locally with ``compute_content_hash``) or ``content_hash`` (a
-        hash computed earlier, or read off another ``Data`` row). A row
-        matches on its ``content_hash`` (the ingested payload) or its
-        ``raw_content_hash`` (the stored file). Newest first; an empty list
-        means the dataset holds no such content — callers can act on that
-        without listing the whole dataset and comparing hashes themselves.
+        Pass exactly one of ``content`` or ``content_hash``:
 
-        Requires read access to the dataset.
+        - ``content`` is the **literal** text or bytes that were added, hashed
+          locally with ``compute_content_hash``. It is not resolved the way
+          ``add()`` resolves a string: a path, ``file://`` URI, ``s3://`` or
+          ``http(s)://`` URL is refused with ``ValueError`` rather than hashed
+          as text (which would match nothing and read as "not present"). For
+          content that was added by reference, pass the ``content_hash`` read
+          off the ``Data`` row or the listing instead.
+        - ``content_hash`` is a hash computed earlier or read off another
+          ``Data`` row; case and surrounding whitespace are normalized, and a
+          value that is not a 32-character hex digest is a ``ValueError``.
+
+        A row matches on its ``content_hash`` (the ingested payload) only —
+        never on the loader-derived ``raw_content_hash``, so a PDF whose
+        extracted text equals ``content`` is not returned. Matches are scoped
+        to the caller's own rows (owner and tenant), exactly like ingestion
+        dedup: in a shared dataset another user's copy of the same content is
+        not yours to find or delete. Newest first; an empty list means you
+        added no such content to the dataset.
+
+        Routes to the remote instance when connected via ``serve()``, like
+        ``list_data``. Requires read access to the dataset.
         """
         if (content is None) == (content_hash is None):
             raise ValueError("find_data takes exactly one of `content` or `content_hash`.")
 
         if content_hash is None:
+            if isinstance(content, str) and _is_reference_string(content):
+                raise ValueError(
+                    "find_data(content=...) takes the literal text or bytes that were added; "
+                    f"{content!r} is a path or URL that add() would have resolved to a file "
+                    "or page. Pass content_hash= (from the Data row or the listing) instead."
+                )
             content_hash = compute_content_hash(content)
+        else:
+            content_hash = normalize_content_hash(content_hash)
+
+        from cognee.api.v1.serve.state import get_remote_client
+
+        client = get_remote_client()
+        if client is not None:
+            return [
+                DataDTO.model_validate(row)
+                for row in await client.list_data(dataset_id, content_hash=content_hash)
+            ]
 
         if not user:
             user = await get_default_user()
 
         dataset = await get_authorized_dataset(user, dataset_id)
 
-        return await get_dataset_data_by_content_hash(dataset.id, content_hash)
+        return await get_dataset_data_by_content_hash(dataset.id, content_hash, user)
 
     @staticmethod
     async def has_data(dataset_id: str, user: User | None = None) -> bool:

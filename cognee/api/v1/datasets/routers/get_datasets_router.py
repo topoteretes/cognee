@@ -16,6 +16,7 @@ from cognee.api.v1.datasets.dto import DataDTO
 from cognee.api.v1.exceptions import DataNotFoundError
 from cognee.exceptions import CogneeApiError
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.data.content_hash import normalize_content_hash
 from cognee.modules.data.methods import (
     get_authorized_existing_datasets,
     get_datasets_by_name,
@@ -411,11 +412,11 @@ def get_datasets_router() -> APIRouter:
         ),
         content_hash: str | None = Query(
             None,
-            min_length=1,
+            pattern=r"^[0-9a-fA-F]{32}$",
             description=(
-                "Return only the data items whose content_hash or raw_content_hash equals "
-                "this MD5 hex digest (the hash of the text/bytes that were added). "
-                "limit/offset are ignored when set."
+                "Return only your data items whose content_hash equals this MD5 hex digest "
+                "(the hash of the text/bytes that were added; case-insensitive). "
+                "Scoped to rows you added; limit/offset page the matches."
             ),
         ),
         user: User = Depends(get_authenticated_user),
@@ -440,10 +441,13 @@ def get_datasets_router() -> APIRouter:
         ## Query Parameters
         - **limit** (int, 1-1000, default 100): Maximum number of items to return
         - **offset** (int, default 0): Number of items to skip
-        - **content_hash** (str, optional): Return only the items holding this content
-          (MD5 hex digest of the added text/bytes, as recorded in each item's
-          `content_hash`). An exact lookup, not a page: `limit`/`offset` are ignored,
-          and an empty list means the dataset holds no such content.
+        - **content_hash** (str, optional): Return only the items *you* added holding
+          this content (MD5 hex digest of the added text/bytes, as recorded in each
+          item's `content_hash`; case-insensitive, anything but 32 hex characters is
+          a 422). Scoped to your own rows like ingestion dedup, so another user's
+          copy in a shared dataset is not returned. `limit`/`offset` page the matches
+          exactly as they page the listing; an empty first page means you added no
+          such content.
 
         ## Response
         Returns a list of data objects containing:
@@ -493,7 +497,13 @@ def get_datasets_router() -> APIRouter:
         dataset_id = dataset[0].id
 
         if content_hash is not None:
-            dataset_data = await get_dataset_data_by_content_hash(dataset_id, content_hash)
+            dataset_data = await get_dataset_data_by_content_hash(
+                dataset_id,
+                normalize_content_hash(content_hash),
+                user,
+                limit=limit,
+                offset=offset,
+            )
         else:
             dataset_data = await get_dataset_data(
                 dataset_id=dataset_id, limit=limit, offset=offset, order_by="created_at"
@@ -525,7 +535,7 @@ def get_datasets_router() -> APIRouter:
                 label=data.label,
                 external_metadata=data.external_metadata,
                 data_size=data.data_size,
-                content_hash=getattr(data, "content_hash", None),
+                content_hash=data.content_hash,
             )
             for data in dataset_data
         ]

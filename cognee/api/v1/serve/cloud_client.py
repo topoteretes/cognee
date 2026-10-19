@@ -451,12 +451,16 @@ class CloudClient:
             # UUIDs as UUID objects, the fallback reason as its enum member.
             return UpdateResult.model_validate(await resp.json()).model_dump()
 
-    async def list_data(self, dataset_id: UUID) -> list:
+    async def list_data(self, dataset_id: UUID, *, content_hash: str | None = None) -> list:
         """Traverse bounded pages, deduplicating overlaps during concurrent ingest.
 
         This is not a snapshot: inserts/deletes can make rows unreachable during
         offset traversal. Above offset 1,000,000 the server rejects requests;
         /data/count still reports the full dataset size.
+
+        ``content_hash`` narrows the listing to the caller's rows holding that
+        content (``?content_hash=`` on the server); the pages are traversed the
+        same way, so a hash shared by many rows still comes back whole.
         """
         session = await self._get_session()
         rows = []
@@ -464,9 +468,12 @@ class CloudClient:
         limit = 1000
         offset = 0
         while True:
+            params: dict = {"limit": limit, "offset": offset}
+            if content_hash is not None:
+                params["content_hash"] = content_hash
             async with session.get(
                 f"{self.service_url}/api/v1/datasets/{dataset_id}/data",
-                params={"limit": limit, "offset": offset},
+                params=params,
             ) as resp:
                 if resp.status >= 400:
                     body = await resp.text()
