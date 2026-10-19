@@ -332,6 +332,101 @@ async def test_forget_data_item_returns_the_receipt_unchanged():
     )
 
 
+@pytest.mark.asyncio
+async def test_forget_data_item_logs_not_found_instead_of_deleted():
+    """A ``not_found`` receipt is never logged as a deletion."""
+    dataset_id, data_id = uuid4(), uuid4()
+    user = SimpleNamespace(id=uuid4())
+    receipt = {"status": "not_found", "dataset_id": str(dataset_id), "data_id": str(data_id)}
+
+    with (
+        patch.object(forget_module, "_resolve_dataset_id", AsyncMock(return_value=dataset_id)),
+        patch.object(datasets_module.datasets, "delete_data", AsyncMock(return_value=receipt)),
+        patch.object(forget_module, "logger") as logger,
+    ):
+        result = await forget_module._forget_data_item(data_id, dataset_id, user)
+
+    assert result is receipt
+    logger.info.assert_called_once()
+    message = logger.info.call_args.args[0]
+    assert "nothing to delete" in message and "not found" in message
+    assert "deleted" not in message
+
+
+def _receipt_dict(dataset_id, data_id, status="success"):
+    return {
+        "status": status,
+        "dataset_id": str(dataset_id),
+        "data_id": str(data_id),
+        "data_record_found": True,
+        "deleted_nodes": 2,
+        "deleted_edges": 1,
+        "data_remaining": False,
+        "dataset_deleted": False,
+    }
+
+
+def test_receipt_casing_is_pinned_across_the_three_delete_routes():
+    """One receipt, one wire shape per route family. ``DELETE /datasets/{id}/data/{id}``
+    and the deprecated ``DELETE /delete`` both declare ``DeleteDataReceiptDTO`` and send
+    identical camelCase bodies. ``POST /forget`` answers a union of shapes and stays
+    snake_case: its body for a data_id delete is the DTO's fields in snake_case, as its
+    docstring says."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from cognee.api.v1.datasets.routers.get_datasets_router import get_datasets_router
+    from cognee.api.v1.delete.routers.get_delete_router import get_delete_router
+    from cognee.api.v1.forget.routers.get_forget_router import get_forget_router
+    from cognee.modules.users.methods import get_authenticated_user
+
+    dataset_id, data_id = uuid4(), uuid4()
+    receipt = _receipt_dict(dataset_id, data_id)
+    camel = {
+        "status": "success",
+        "datasetId": str(dataset_id),
+        "dataId": str(data_id),
+        "dataRecordFound": True,
+        "deletedNodes": 2,
+        "deletedEdges": 1,
+        "dataRemaining": False,
+        "datasetDeleted": False,
+    }
+
+    app = FastAPI()
+    app.include_router(get_datasets_router(), prefix="/datasets")
+    app.include_router(get_delete_router(), prefix="/delete")
+    app.include_router(get_forget_router(), prefix="/forget")
+    app.dependency_overrides[get_authenticated_user] = lambda: SimpleNamespace(id=uuid4())
+
+    datasets_router_module = importlib.import_module(
+        "cognee.api.v1.datasets.routers.get_datasets_router"
+    )
+    delete_router_module = importlib.import_module("cognee.api.v1.delete.routers.get_delete_router")
+    forget_router_module = importlib.import_module("cognee.api.v1.forget.routers.get_forget_router")
+    forget_pkg = importlib.import_module("cognee.api.v1.forget")
+
+    with (
+        patch.object(datasets_module.datasets, "delete_data", AsyncMock(return_value=receipt)),
+        patch.object(forget_pkg, "forget", AsyncMock(return_value=dict(receipt))),
+        patch.object(datasets_router_module, "send_telemetry"),
+        patch.object(delete_router_module, "send_telemetry"),
+        patch.object(forget_router_module, "send_telemetry"),
+    ):
+        client = TestClient(app)
+        via_datasets = client.delete(f"/datasets/{dataset_id}/data/{data_id}")
+        via_delete = client.delete(f"/delete?data_id={data_id}&dataset_id={dataset_id}")
+        via_forget = client.post(
+            "/forget", json={"datasetId": str(dataset_id), "dataId": str(data_id)}
+        )
+
+    assert via_datasets.status_code == via_delete.status_code == via_forget.status_code == 200
+    assert via_datasets.json() == camel
+    assert via_delete.json() == camel
+    assert via_forget.json() == receipt
+    assert set(via_forget.json()) == set(DeleteDataReceiptDTO.model_fields)
+
+
 def test_delete_route_answers_with_the_receipt_dto():
     """``DELETE /datasets/{id}/data/{id}`` declares ``DeleteDataReceiptDTO`` and
     serializes the receipt through it: every field present, camelCase on the wire,

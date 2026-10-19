@@ -799,6 +799,13 @@ async def forget(
             status = result.get("status", "unknown") if isinstance(result, dict) else "completed"
             if everything:
                 text = f"All data deleted (status={status})."
+            elif parsed_data_id and status == "not_found":
+                # The receipt says nothing existed for the id: a wrong id or an
+                # already-deleted item. Never word that as a deletion.
+                text = (
+                    f"Data item '{data_id}' was not found in dataset '{dataset or dataset_id}' "
+                    "(wrong id, or already deleted); nothing was deleted (status=not_found)."
+                )
             elif parsed_data_id:
                 text = f"Data item '{data_id}' deleted (status={status})."
             else:

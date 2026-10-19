@@ -93,6 +93,14 @@ records, so the dataset (or item) can be re-cognified later.
                     raise CliCommandInnerException(f"Failed to forget: {e!s}") from e
 
             result = asyncio.run(run_forget())
+            if isinstance(result, dict) and result.get("status") == "not_found":
+                # A single-item forget whose id owned nothing: wrong id, or already
+                # deleted. Not a success line — nothing was removed.
+                fmt.warning(
+                    f"Nothing to delete: data item {data_id} was not found in the dataset "
+                    f"(wrong id, or already deleted). {result}"
+                )
+                return
             fmt.success(f"Done: {result}")
 
             # After a successful forget the natural next step is to seed the
