@@ -685,3 +685,138 @@ async def test_spawned_integration_work_is_registered_for_the_shutdown_drain():
     gate.set()
     assert await background_tasks.wait_for_background_tasks(timeout=2)
     assert finished == [True]
+
+
+class _Connection:
+    def __init__(self, account_id, label="Workspace"):
+        self.provider_account_id = account_id
+        self.account_label = label
+        self.created_at = None
+
+
+def test_the_connections_of_a_provider_are_listed_with_their_account_ids(client):
+    connections = [_Connection("ACC2", "Second"), _Connection("ACC1", "First")]
+    with patch.object(
+        _router_module,
+        "list_active_credentials_for_provider",
+        new=AsyncMock(return_value=connections),
+    ) as listing:
+        response = client.get("/api/v1/integrations/fake/connections")
+
+    assert response.status_code == 200
+    assert [item["providerAccountId"] for item in response.json()["connections"]] == [
+        "ACC2",
+        "ACC1",
+    ]
+    listing.assert_awaited_once_with(USER_ID, "fake")
+
+
+_ACCOUNT_ROUTES = [
+    ("get", "/api/v1/integrations/fake/connection"),
+    ("get", "/api/v1/integrations/fake/resources"),
+    ("put", "/api/v1/integrations/fake/resources"),
+    ("post", "/api/v1/integrations/fake/sync"),
+    ("delete", "/api/v1/integrations/fake/connection"),
+]
+
+
+def _call(client, method, url, **params):
+    kwargs = {"json": {"resource_ids": ["a"]}} if method == "put" else {}
+    return getattr(client, method)(url, params=params, **kwargs)
+
+
+@pytest.mark.parametrize("method, url", _ACCOUNT_ROUTES)
+def test_a_named_account_that_is_not_the_users_is_a_404_not_another_account(client, method, url):
+    integration = supported_integrations["fake"]
+    integration.resource_selection_key = "picked"
+    lookup = AsyncMock(return_value=None)
+    try:
+        with patch.object(_router_module, "get_active_credential_for_user", new=lookup):
+            response = _call(client, method, url, account_id="SOMEONE-ELSES")
+    finally:
+        integration.resource_selection_key = None
+
+    # The body tells "that account" from "no connection at all": the other 404s of these
+    # routes ("fake is not connected") would pass for the second.
+    assert response.status_code == 404
+    assert response.json()["detail"] == "fake account is not connected"
+    lookup.assert_awaited_once_with(USER_ID, "fake", "SOMEONE-ELSES")
+
+
+@pytest.mark.parametrize("method, url", _ACCOUNT_ROUTES)
+def test_without_an_account_id_the_lookup_is_the_newest_connection_as_before(client, method, url):
+    integration = supported_integrations["fake"]
+    integration.resource_selection_key = "picked"
+    lookup = AsyncMock(return_value=None)
+    try:
+        with patch.object(_router_module, "get_active_credential_for_user", new=lookup):
+            response = _call(client, method, url)
+    finally:
+        integration.resource_selection_key = None
+
+    # No connection at all keeps each route's own answer: a status, a 404 or a false.
+    assert response.status_code in (200, 404)
+    lookup.assert_awaited_once_with(USER_ID, "fake", None)
+
+
+def test_a_manual_sync_runs_for_the_named_account(client):
+    credential = type("Cred", (), {"provider_account_id": "ACC2"})()
+    integration = supported_integrations["fake"]
+    sync_now = AsyncMock()
+    lookup = AsyncMock(return_value=credential)
+    with (
+        patch.object(_router_module, "get_active_credential_for_user", new=lookup),
+        patch.object(integration, "sync_now", sync_now),
+    ):
+        response = client.post("/api/v1/integrations/fake/sync", params={"account_id": "ACC2"})
+
+    assert response.json() == {"accepted": True}
+    lookup.assert_awaited_once_with(USER_ID, "fake", "ACC2")
+    sync_now.assert_called_once_with(credential)
+
+
+def test_disconnect_revokes_the_named_account_only(client):
+    credential = type("Cred", (), {"provider_account_id": "ACC2"})()
+    integration = supported_integrations["fake"]
+    with (
+        patch.object(
+            _router_module, "get_active_credential_for_user", new=AsyncMock(return_value=credential)
+        ),
+        patch.object(integration, "revoke_remote", AsyncMock()) as revoke_remote,
+        patch.object(_router_module, "revoke_credential_by_account", AsyncMock()) as revoke_local,
+    ):
+        response = client.delete(
+            "/api/v1/integrations/fake/connection", params={"account_id": "ACC2"}
+        )
+
+    assert response.json() == {"disconnected": True}
+    revoke_remote.assert_awaited_once_with(credential)
+    revoke_local.assert_awaited_once_with("fake", "ACC2")
+
+
+@pytest.mark.parametrize("method, url", _ACCOUNT_ROUTES)
+@pytest.mark.parametrize("blank", ["", "  "])
+def test_a_blank_account_id_names_nothing_and_is_refused(client, method, url, blank):
+    integration = supported_integrations["fake"]
+    integration.resource_selection_key = "picked"
+    lookup = AsyncMock(return_value=None)
+    try:
+        with patch.object(_router_module, "get_active_credential_for_user", new=lookup):
+            response = _call(client, method, url, account_id=blank)
+    finally:
+        integration.resource_selection_key = None
+
+    assert response.status_code == 422
+    lookup.assert_not_awaited()
+
+
+def test_a_connection_without_a_label_leaves_the_field_out(client):
+    connections = [_Connection("ACC1", None)]
+    with patch.object(
+        _router_module,
+        "list_active_credentials_for_provider",
+        new=AsyncMock(return_value=connections),
+    ):
+        body = client.get("/api/v1/integrations/fake/connections").json()
+
+    assert body == {"connections": [{"providerAccountId": "ACC1"}]}

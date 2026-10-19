@@ -66,6 +66,7 @@ from cognee.modules.integrations.connect import complete_installation
 from cognee.modules.integrations.credentials import (
     CrossUserConflictError,
     get_active_credential_for_user,
+    list_active_credentials_for_provider,
     list_active_credentials_for_user,
     revoke_credential_by_account,
     update_provider_metadata,
@@ -157,6 +158,16 @@ class DisconnectResultDTO(OutDTO):
     disconnected: bool
 
 
+class ConnectionSummaryDTO(OutDTO):
+    provider_account_id: str
+    account_label: str | None = None
+    connected_at: datetime | None = None
+
+
+class ConnectionListDTO(OutDTO):
+    connections: list[ConnectionSummaryDTO]
+
+
 class IntegrationResourceDTO(OutDTO):
     id: str
     name: str
@@ -220,6 +231,23 @@ def _integration_or_404(provider: str) -> OAuthIntegration:
         return get_integration(provider)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Unknown integration provider: {provider!r}")
+
+
+async def _credential_or_404(user: User, integration: OAuthIntegration, account_id: str | None):
+    """The user's newest active connection, or the one ``account_id`` names.
+
+    ``None`` means the user has no connection at all. A named account that is not the
+    user's (unknown, disconnected, or someone else's) is a 404 and never falls back to
+    another account: the caller asked for that one. A blank id names nothing and is a 422.
+    """
+    if account_id is not None and not account_id.strip():
+        raise HTTPException(status_code=422, detail="account_id must not be blank")
+    credential = await get_active_credential_for_user(user.id, integration.provider, account_id)
+    if credential is None and account_id is not None:
+        raise HTTPException(
+            status_code=404, detail=f"{integration.provider} account is not connected"
+        )
+    return credential
 
 
 def _plugin_or_404(plugin_key: str) -> dict:
@@ -786,18 +814,53 @@ def get_integrations_router():
             )
             return {"ok": True}
 
+    @integrations_router.get("/{provider}/connections", response_model_exclude_none=True)
+    async def list_connections(
+        provider: str, user: User = Depends(get_authenticated_user)
+    ) -> ConnectionListDTO:
+        """The requesting user's active connections for a provider, newest first.
+
+        A provider authorized per workspace (Notion, Slack) can hold several. The
+        ``provider_account_id`` of one is what the other routes take as ``account_id``.
+
+        ## Path Parameters
+        - **provider** (str): Key of a registered OAuth provider (see GET
+          /api/v1/integrations/status).
+        """
+        with new_span("cognee.integrations.connections") as span:
+            span.set_attribute("cognee.integrations.provider", provider)
+            integration = _integration_or_404(provider)
+            connections = await list_active_credentials_for_provider(user.id, integration.provider)
+            return ConnectionListDTO(
+                connections=[
+                    ConnectionSummaryDTO(
+                        provider_account_id=credential.provider_account_id,
+                        account_label=credential.account_label,
+                        connected_at=as_utc(credential.created_at),
+                    )
+                    for credential in connections
+                ]
+            )
+
     @integrations_router.get("/{provider}/connection", response_model_exclude_none=True)
     async def connection_status(
-        provider: str, user: User = Depends(get_authenticated_user)
+        provider: str,
+        account_id: str | None = None,
+        user: User = Depends(get_authenticated_user),
     ) -> ConnectionStatusDTO:
         """Connection state for the Integrations page.
 
         ## Path Parameters
         - **provider** (str): Key of a registered OAuth provider (see GET
           /api/v1/integrations/status).
+
+        ## Query Parameters
+        - **account_id** (str, optional): The ``provider_account_id`` of one of the
+          user's connections (see GET /{provider}/connections). Without it the newest
+          connection answers. An id that is not the user's is a 404, never another account.
         """
         integration = _integration_or_404(provider)
-        credential = await get_active_credential_for_user(user.id, integration.provider)
+        credential = await _credential_or_404(user, integration, account_id)
         if credential is None:
             return ConnectionStatusDTO(connected=False)
 
@@ -831,7 +894,9 @@ def get_integrations_router():
     @integrations_router.get("/{provider}/folders")
     @integrations_router.get("/{provider}/labels")
     async def integration_resources(
-        provider: str, user: User = Depends(get_authenticated_user)
+        provider: str,
+        account_id: str | None = None,
+        user: User = Depends(get_authenticated_user),
     ) -> IntegrationResourceListDTO:
         """List selectable resources for a connected integration.
 
@@ -839,11 +904,12 @@ def get_integrations_router():
         want provider vocabulary; ``/resources`` is the stable generic path.
         The returned selection is three-state: ``null`` means all resources,
         an empty list means none, and a non-empty list is an allowlist.
+        ``account_id`` picks one of the user's connections (see GET /{provider}/connections).
         """
         integration = _integration_or_404(provider)
         if integration.resource_selection_key is None:
             raise HTTPException(status_code=404, detail=f"{provider} has no selectable resources")
-        credential = await get_active_credential_for_user(user.id, integration.provider)
+        credential = await _credential_or_404(user, integration, account_id)
         if credential is None:
             raise HTTPException(status_code=404, detail=f"{provider} is not connected")
         try:
@@ -884,14 +950,18 @@ def get_integrations_router():
     async def set_integration_resources(
         provider: str,
         payload: IntegrationResourceSelectionPayload,
+        account_id: str | None = None,
         user: User = Depends(get_authenticated_user),
     ) -> IntegrationResourceSelectionResultDTO:
-        """Persist a full resource selection for a connected integration."""
+        """Persist a full resource selection for a connected integration.
+
+        ``account_id`` picks one of the user's connections (see GET /{provider}/connections).
+        """
         integration = _integration_or_404(provider)
         selection_key = integration.resource_selection_key
         if selection_key is None:
             raise HTTPException(status_code=404, detail=f"{provider} has no selectable resources")
-        credential = await get_active_credential_for_user(user.id, integration.provider)
+        credential = await _credential_or_404(user, integration, account_id)
         if credential is None:
             raise HTTPException(status_code=404, detail=f"{provider} is not connected")
         if payload.resource_ids is None and not integration.resource_selection_allows_all:
@@ -919,11 +989,16 @@ def get_integrations_router():
 
     @integrations_router.post("/{provider}/sync")
     async def sync_integration(
-        provider: str, user: User = Depends(get_authenticated_user)
+        provider: str,
+        account_id: str | None = None,
+        user: User = Depends(get_authenticated_user),
     ) -> IntegrationSyncResultDTO:
-        """Start a provider sync without changing its stored selection."""
+        """Start a provider sync without changing its stored selection.
+
+        ``account_id`` picks one of the user's connections (see GET /{provider}/connections).
+        """
         integration = _integration_or_404(provider)
-        credential = await get_active_credential_for_user(user.id, integration.provider)
+        credential = await _credential_or_404(user, integration, account_id)
         if credential is None:
             raise HTTPException(status_code=404, detail=f"{provider} is not connected")
         from cognee.modules.integrations.ingestion import sync_is_running
@@ -939,9 +1014,13 @@ def get_integrations_router():
     async def disconnect(
         provider: str,
         delete_data: bool = False,
+        account_id: str | None = None,
         user: User = Depends(get_authenticated_user),
     ) -> DisconnectResultDTO:
         """Disconnect the account connected by the requesting user.
+
+        ``account_id`` picks which of the user's connections to disconnect (see GET
+        /{provider}/connections); without it the newest one goes.
 
         Marks the stored installation revoked, and best-effort asks the
         provider to kill the token on its own side via
@@ -957,7 +1036,7 @@ def get_integrations_router():
         with new_span("cognee.integrations.disconnect") as span:
             span.set_attribute("cognee.integrations.provider", provider)
             integration = _integration_or_404(provider)
-            credential = await get_active_credential_for_user(user.id, integration.provider)
+            credential = await _credential_or_404(user, integration, account_id)
             if credential is None or credential.provider_account_id is None:
                 return DisconnectResultDTO(disconnected=False)
 
