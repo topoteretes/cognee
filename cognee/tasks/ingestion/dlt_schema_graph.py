@@ -37,7 +37,7 @@ async def emit_dlt_schema_graph(
     """Build and persist the DLT schema graph for the given tables and rows.
 
     Args:
-        tables: {table_name: {"schema_info", "foreign_keys", "dlt_db_name"}}
+        tables: {table_name: {"schema_info", "foreign_keys", "primary_key", "row_count"}}
         row_records: [{"source_id": str, "table_name": str, "fk_references": [...],
             "column_values": {column: value}, "timestamps": {column: str}}] —
             column_values is optional and produces one shared ColumnValue node
@@ -94,13 +94,13 @@ async def emit_dlt_schema_graph(
             id=_table_node_id(table_name),
             name=table_name,
             columns=columns_str,
-            primary_key=None,
+            primary_key=table_meta["primary_key"],
             foreign_keys=fk_str,
             sample_rows="[]",
-            row_count_estimate=None,
+            row_count_estimate=table_meta["row_count"],
             description=(
-                f"DLT-ingested relational table '{table_name}' "
-                f"from database '{table_meta['dlt_db_name']}'."
+                f"Relational table '{table_name}' with {table_meta['row_count']} rows, "
+                "loaded through dlt."
             ),
         )
         schema_nodes.append(table_node)

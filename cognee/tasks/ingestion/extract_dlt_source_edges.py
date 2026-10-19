@@ -75,15 +75,20 @@ async def extract_dlt_source_edges(
     for doc_id, doc in source_docs.items():
         manifest = await load_dlt_manifest(doc.raw_data_location)
 
-        # Emit a doc's schema nodes only once per data item's run.
+        # Emit a doc's schema nodes only once per data item's run. A table's key
+        # and size come from its rows, which every manifest carries.
         if doc_id not in emitted_schema_docs:
+            rows_of: dict[str, list[dict]] = {}
+            for row in manifest.get("rows", []):
+                rows_of.setdefault(row["table_name"], []).append(row)
             for table_name, table_meta in manifest.get("tables", {}).items():
                 if table_name in tables:
                     continue
                 tables[table_name] = {
                     "schema_info": table_meta.get("schema_info"),
                     "foreign_keys": table_meta.get("foreign_keys", []),
-                    "dlt_db_name": table_meta.get("dlt_db_name", ""),
+                    "primary_key": rows_of[table_name][0]["primary_key_column"],
+                    "row_count": len(rows_of[table_name]),
                 }
             newly_emitted_doc_ids.append(doc_id)
 

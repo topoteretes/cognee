@@ -324,6 +324,11 @@ def _apply_key_hints(schema: dict, key_hints: dict[str, dict]) -> None:
         ]
 
 
+def _is_dlt_column(name: str) -> bool:
+    """dlt's bookkeeping columns, ``_dlt_id`` and ``_dlt_load_id``."""
+    return "_dlt_" in name
+
+
 def _is_dlt_internal_table(qualified_name: str) -> bool:
     """Identify DLT's own artifacts in the staging database.
 
@@ -462,14 +467,17 @@ async def _read_single_table(
     At most ``max_rows`` rows are read.  Pass 0 or a negative value to
     read all rows (no limit).
     """
-    raw_columns = table_info.get("columns", [])
     foreign_keys = table_info.get("foreign_keys", [])
 
     # extract_schema() returns columns as a list of dicts for SQLite
-    # (e.g. [{"name": "col", "type": "TEXT"}, ...]) or a dict for Postgres
+    # (e.g. [{"name": "col", "type": "TEXT"}, ...]) or a dict for Postgres.
+    # dlt's bookkeeping columns are left out, as they are from the row data.
+    raw_columns = table_info.get("columns", [])
     if isinstance(raw_columns, list):
+        raw_columns = [c for c in raw_columns if not _is_dlt_column(c["name"])]
         column_names = [c["name"] for c in raw_columns]
     else:
+        raw_columns = {k: v for k, v in raw_columns.items() if not _is_dlt_column(k)}
         column_names = list(raw_columns.keys())
 
     # Auto-detect primary key with validation
@@ -514,13 +522,8 @@ async def _read_single_table(
 
     row_data_list = []
     for row in rows:
-        row_dict = {k: v for k, v in row.items()}
+        row_dict = {k: v for k, v in row.items() if not _is_dlt_column(k)}
         pk_value = str(row_dict.get(pk_col, ""))
-
-        row_keys = list(row_dict.keys())
-        for k in row_keys:
-            if "_dlt_" in k:
-                row_dict.pop(k)
 
         content_hash = _row_content_hash(row_dict)
 

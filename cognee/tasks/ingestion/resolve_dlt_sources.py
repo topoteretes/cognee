@@ -844,52 +844,16 @@ def _clean(value: Any) -> str:
 
 
 def _build_schema_context_text(dlt_row: DltRowData) -> str:
-    """Build a human-readable, schema-enriched text representation of a DLT row.
+    """Build the text of a DLT row: its table, then one line per cell.
 
-    This text is stored as the document content and used for vector search.
-    DLT rows bypass LLM extraction — their graph is built deterministically
-    from the relational schema by ``extract_dlt_source_edges``.
+    The text is the row's document content and what vector search embeds, so it
+    holds only what is specific to the row; the table's columns and foreign keys
+    are on its SchemaTable node. DLT rows bypass LLM extraction — their graph is
+    built deterministically from the relational schema by
+    ``extract_dlt_source_edges``.
     """
-    lines = []
-    lines.append(f"Table: {dlt_row.table_name}")
-
-    # Build column descriptions
-    schema_info = dlt_row.schema_info
-    col_descriptions = []
-    if isinstance(schema_info, list):
-        # SQLite format: [{"name": "col", "type": "TEXT"}, ...]
-        for col in schema_info:
-            col_name = col.get("name", "")
-            col_type = col.get("type", "")
-            col_descriptions.append(f"  - {col_name} ({col_type})")
-    elif isinstance(schema_info, dict):
-        # Postgres format: {"col_name": {"type": "TEXT", ...}, ...}
-        for col_name, col_info in schema_info.items():
-            col_type = col_info.get("type", "") if isinstance(col_info, dict) else str(col_info)
-            col_descriptions.append(f"  - {col_name} ({col_type})")
-
-    if col_descriptions:
-        lines.append("Columns:")
-        lines.extend(col_descriptions)
-
-    # Add FK context
-    if dlt_row.foreign_keys:
-        fk_lines = []
-        for fk in dlt_row.foreign_keys:
-            col = fk.get("column", "")
-            ref_table = fk.get("ref_table", "")
-            ref_col = fk.get("ref_column", "")
-            fk_lines.append(f"  - {col} references {ref_table}.{ref_col}")
-        if fk_lines:
-            lines.append("Foreign Keys:")
-            lines.extend(fk_lines)
-
-    # Add the actual row data
-    lines.append("")
-    lines.append("Row Data:")
-    for key, value in dlt_row.row_data.items():
-        lines.append(f"  {key}: {value}")
-
+    lines = [f"Table: {dlt_row.table_name}", "Row Data:"]
+    lines.extend(f"  {key}: {value}" for key, value in dlt_row.row_data.items())
     return "\n".join(lines)
 
 

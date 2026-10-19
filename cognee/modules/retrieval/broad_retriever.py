@@ -15,6 +15,7 @@ A query runs read-only in SQLite, and the model phrases its result. Code appends
 answer was reached, and the full result when it has more than one row.
 """
 
+import json
 import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -246,6 +247,7 @@ class BroadRetriever(CompletionRetriever):
     async def get_retrieved_objects(self, query: str) -> BroadContext:
         engine = await get_unified_engine()
         store = RecordStore()
+        store.add_dlt_tables(await self.dlt_foreign_keys(engine.graph))
         try:
             total = await self.dataset_size()
             corpus = None
@@ -295,6 +297,17 @@ class BroadRetriever(CompletionRetriever):
         return int(total or 0)
 
     # --- loading ----------------------------------------------------------------------
+
+    async def dlt_foreign_keys(self, graph_engine) -> dict[str, list[str]]:
+        """Each DLT table's foreign keys, read from its SchemaTable node."""
+        nodes, _ = await graph_engine.get_filtered_graph_data([{"type": ["SchemaTable"]}])
+        return {
+            str(props["name"]): [
+                f"{fk['column']} references {fk['ref_table']}.{fk['ref_column']}"
+                for fk in json.loads(props["foreign_keys"])
+            ]
+            for _, props in nodes
+        }
 
     async def open_corpus(self, graph_engine) -> Corpus:
         """The dataset's documents, their names and stored sizes; text is fetched later."""

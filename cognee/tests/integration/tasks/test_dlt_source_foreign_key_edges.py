@@ -100,14 +100,7 @@ EXPECTED_ROW_EDGES = {
 }
 
 
-def _row_fields(text: str) -> dict[str, str]:
-    return dict(line.strip().split(": ", 1) for line in text.splitlines() if ": " in line)
-
-
-def _row_label(fields: dict[str, str]) -> str:
-    """'users:u1' or 'orders:1' from a row's fields, keyed on its primary key."""
-    table = fields["Table"]
-    return f"{table}:{fields['user_code' if table == 'users' else 'id']}"
+SOURCE_TABLES = {"users", "orders", "visits"}
 
 
 def _write_source_db(path: pathlib.Path) -> pathlib.Path:
@@ -118,18 +111,16 @@ def _write_source_db(path: pathlib.Path) -> pathlib.Path:
 
 
 async def _row_edges() -> set[tuple[str, str, str]]:
-    """Edges between the SQL source's rows, labelled by table and primary key.
+    """Edges between the SQL source's rows, by the rows' names (``table:pk``).
     Rows of other sources in the dataset (a CSV's) are left out."""
     from cognee.infrastructure.databases.graph import get_graph_engine
 
     nodes, edges = await (await get_graph_engine()).get_graph_data()
-    rows = {}
-    for node_id, props in nodes:
-        if props.get("type") != "DltRow":
-            continue
-        fields = _row_fields(props["text"])
-        if fields.get("Table") in {"users", "orders", "visits"}:
-            rows[str(node_id)] = _row_label(fields)
+    rows = {
+        str(node_id): props["name"]
+        for node_id, props in nodes
+        if props.get("type") == "DltRow" and props["name"].split(":")[0] in SOURCE_TABLES
+    }
     return {
         (rows[str(source)], relation, rows[str(target)])
         for source, target, relation, _ in edges

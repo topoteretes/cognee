@@ -28,13 +28,13 @@ def _source_doc():
 
 def _manifest(row_id):
     return {
-        "tables": {
-            "people": {"schema_info": {"columns": {}}, "foreign_keys": [], "dlt_db_name": "db"}
-        },
+        "tables": {"people": {"schema_info": {"columns": {}}, "foreign_keys": []}},
         "rows": [
             {
                 "node_id": str(row_id),
                 "table_name": "people",
+                "primary_key_column": "id",
+                "primary_key_value": "1",
                 "fk_references": [],
                 "column_values": {},
             }
@@ -133,6 +133,7 @@ async def test_dlt_rows_index_into_their_own_collection(monkeypatch):
     from cognee.tasks.storage.index_data_points import index_data_points as run_indexing
 
     chunk = DltRow(
+        name="people:1",
         id=uuid4(),
         text="row text",
         chunk_size=2,
