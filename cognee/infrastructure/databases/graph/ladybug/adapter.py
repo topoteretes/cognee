@@ -20,6 +20,7 @@ from ladybug.database import Database
 import cognee_db_workers
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.cache.config import get_cache_config
+from cognee.infrastructure.databases.graph.deduplicate_edges import deduplicate_edges
 from cognee.infrastructure.databases.graph.graph_db_interface import (
     GraphDBInterface,
     temporal_anchors_from_rows,
@@ -2077,13 +2078,12 @@ class LadybugAdapter(GraphDBInterface):
 
             # Duplicate (from, to, relationship_name) rows in one UNWIND+MERGE
             # statement crash ladybug 0.19.0 (assertion in csr_node_group.cpp
-            # or SIGSEGV, issue #5221), so collapse them before the statement.
-            # Last occurrence wins, matching what sequential MERGE ... ON MATCH
-            # SET would have produced; first-seen order of each key is kept.
-            unique_edges: dict[tuple[str, str, str], tuple] = {}
-            for edge in edges:
-                unique_edges[(str(edge[0]), str(edge[1]), str(edge[2]))] = edge
-            edges = list(unique_edges.values())
+            # or SIGSEGV, issue #5221), so collapse them before the statement
+            # and before chunking. Last-wins reproduces what this MERGE's
+            # ON MATCH SET yields for the same rows on engines that survive
+            # them; the key is the same str()-normalized tuple the per-row
+            # provenance lookup below uses. Policy notes: deduplicate_edges.
+            edges = deduplicate_edges(edges, keep="last")
 
             edge_params = [
                 {

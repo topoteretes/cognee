@@ -3,6 +3,7 @@ the subprocess engine's per-call deadline on large graphs (COG: ladybug
 ingestion of e.g. 30k-fact code graphs previously sent one statement for all
 rows and could never finish)."""
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -117,6 +118,82 @@ async def test_add_edges_collapses_duplicate_rows_in_one_statement():
     rows = adapter.query.await_args.args[1]["edges"]
     assert [(row["from_id"], row["to_id"]) for row in rows] == [("a", "b"), ("b", "c")]
     assert '"k": 2' in rows[0]["properties"]
+
+
+@pytest.mark.asyncio
+async def test_add_edges_collapses_duplicates_with_per_row_refs():
+    """The per-row provenance path (add_data_points, create_chunk_associations)
+    looks each row's ref up by (str(from), str(to), str(rel)). The collapse must
+    key the same way, so UUID endpoints with a duplicate pair neither crash the
+    engine nor raise KeyError, and the survivor carries its own ref."""
+    from uuid import uuid4
+
+    from cognee.infrastructure.databases.provenance.source_refs import make_source_ref_key
+
+    adapter = _adapter_with_mocked_writes()
+    adapter._source_ref_change_lock = asyncio.Lock()  # folded provenance writes take it
+    a, b, c = uuid4(), uuid4(), uuid4()
+    ref_ab = make_source_ref_key(uuid4(), uuid4())
+    ref_bc = make_source_ref_key(uuid4(), uuid4())
+    refs = {
+        (str(a), str(b), "contradicts"): ref_ab,
+        (str(b), str(c), "contradicts"): ref_bc,
+    }
+
+    await adapter.add_edges(
+        [
+            (a, b, "contradicts", {"k": 1}),
+            (a, b, "contradicts", {"k": 2}),
+            (b, c, "contradicts", {"k": 3}),
+        ],
+        source_ref_key=refs,
+        pipeline_run_id=str(uuid4()),
+    )
+
+    adapter.query.assert_awaited_once()
+    rows = adapter.query.await_args.args[1]["edges"]
+    assert [(row["from_id"], row["to_id"]) for row in rows] == [(a, b), (b, c)]
+    assert '"k": 2' in rows[0]["properties"]
+    assert rows[0]["sr_token"] == f"|{ref_ab}|"
+    assert rows[1]["sr_token"] == f"|{ref_bc}|"
+    assert "edge.sr_token" in adapter.query.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_add_edges_collapses_duplicates_across_chunk_boundary():
+    """The collapse runs over the whole batch before it is split into
+    _WRITE_CHUNK_SIZE statements. A pair whose first row lands in chunk 1 and
+    second row in chunk 2 looks distinct within each chunk, so collapsing after
+    chunking would let it through; the survivor must also keep the LAST row's
+    properties even though that row was in the later chunk."""
+    adapter = _adapter_with_mocked_writes()
+    edges = _fake_edges(_WRITE_CHUNK_SIZE + 1)
+    first = edges[0]
+    edges.append((first[0], first[1], first[2], {"k": "last"}))
+
+    await adapter.add_edges(edges)
+
+    chunk_sizes = [len(call.args[1]["edges"]) for call in adapter.query.await_args_list]
+    assert chunk_sizes == [_WRITE_CHUNK_SIZE, 1]
+    rows = [row for call in adapter.query.await_args_list for row in call.args[1]["edges"]]
+    keys = [(row["from_id"], row["to_id"], row["relationship_name"]) for row in rows]
+    assert len(keys) == len(set(keys)), "a duplicate pair survived across chunks"
+    assert rows[0]["from_id"] == first[0]
+    assert '"k": "last"' in rows[0]["properties"]
+
+
+@pytest.mark.asyncio
+async def test_add_edges_duplicate_can_pull_batch_under_chunk_size():
+    """_WRITE_CHUNK_SIZE + 1 rows with one duplicate collapse to exactly one
+    chunk: the statement count follows the collapsed batch, not the input."""
+    adapter = _adapter_with_mocked_writes()
+    edges = _fake_edges(_WRITE_CHUNK_SIZE)
+    edges.append((*edges[0][:3], {"k": "last"}))
+
+    await adapter.add_edges(edges)
+
+    adapter.query.assert_awaited_once()
+    assert len(adapter.query.await_args.args[1]["edges"]) == _WRITE_CHUNK_SIZE
 
 
 def _fake_edge_identities(count):
