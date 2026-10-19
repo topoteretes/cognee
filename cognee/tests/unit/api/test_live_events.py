@@ -106,6 +106,53 @@ async def test_timezone_aware_since_is_normalized_before_comparing():
 
 
 @pytest.mark.asyncio
+async def test_timezone_aware_event_string_is_normalized_before_comparing():
+    """The cache adapters now stamp ``SessionQAEntry.time`` with
+    ``datetime.now(timezone.utc).isoformat()`` — offset-aware. Compared raw
+    against the naive cutoff it raises ``TypeError: can't compare offset-naive
+    and offset-aware datetimes``, which fails the whole live-events payload."""
+    aware_event = _event("2026-08-03T09:00:10.000000+00:00")
+    since = datetime(2026, 8, 3, 9, 0, 5)  # noqa: DTZ001 - naive by contract: event cursors are naive ISO strings
+
+    ctx_a, ctx_b = _patches([aware_event])
+    with ctx_a, ctx_b:
+        result = await visualize_module.get_live_events(DATASET_ID, since=since)
+
+    assert result["events"] == [aware_event]
+
+
+@pytest.mark.asyncio
+async def test_offset_event_is_normalized_to_utc_rather_than_dropped():
+    """A non-UTC offset must be converted, not ignored: 11:00+02:00 is 09:00 UTC
+    and survives the cutoff, 10:59+02:00 is 08:59 UTC and does not."""
+    older = _event("2026-08-03T10:59:00+02:00")
+    newer = _event("2026-08-03T11:00:10+02:00")
+    since = datetime(2026, 8, 3, 9, 0, 5)  # noqa: DTZ001 - naive by contract: event cursors are naive ISO strings
+
+    ctx_a, ctx_b = _patches([older, newer])
+    with ctx_a, ctx_b:
+        result = await visualize_module.get_live_events(DATASET_ID, since=since)
+
+    assert result["events"] == [newer]
+
+
+@pytest.mark.asyncio
+async def test_naive_and_aware_events_are_compared_on_one_scale():
+    """Rows written by the older (naive) and current (aware) writers can land in
+    the same payload; both must be ordered against a single cutoff."""
+    before_cutoff = _event("2026-08-03T09:00:04.000000+00:00")
+    naive = _event("2026-08-03T09:00:06.000000")
+    aware = _event("2026-08-03T09:00:07.000000+00:00")
+    since = datetime(2026, 8, 3, 9, 0, 5)  # noqa: DTZ001 - naive by contract: event cursors are naive ISO strings
+
+    ctx_a, ctx_b = _patches([before_cutoff, naive, aware])
+    with ctx_a, ctx_b:
+        result = await visualize_module.get_live_events(DATASET_ID, since=since)
+
+    assert result["events"] == [naive, aware]
+
+
+@pytest.mark.asyncio
 async def test_unauthorized_dataset_raises_permission_denied():
     ctx_a, ctx_b = _patches([], authorized=False)
     with ctx_a, ctx_b, pytest.raises(PermissionDeniedError):
