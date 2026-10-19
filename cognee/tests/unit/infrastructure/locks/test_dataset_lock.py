@@ -137,22 +137,22 @@ def test_lock_usable_across_sequential_event_loops():
 async def test_cancelled_contended_acquire_does_not_wedge_lock():
     """A waiter cancelled while parked behind the holder never leaves the lock held.
 
-    The blocking acquire on the executor thread cannot be interrupted; once
-    the holder releases, that thread obtains the lock with no owner left to
-    release it. The lock must give it back by itself, or the dataset (and, at
-    interpreter exit, the executor join) is wedged.
+    The cancellation handler must drop the waiter's future from the queue and,
+    if a release had already picked it, pass the wake-up on. An earlier design
+    (a blocking acquire on a worker thread) could not undo an acquisition that
+    completed after the cancel and wedged the dataset lock for good.
     """
     lock = await get_dataset_lock(uuid4())
     await lock.acquire()
 
     waiter = asyncio.create_task(lock.acquire())
-    await asyncio.sleep(0.05)  # parked on the executor thread
+    await asyncio.sleep(0.05)  # parked in the lock's waiter queue
     waiter.cancel()
     with pytest.raises(asyncio.CancelledError):
         await waiter
 
     lock.release()
-    # Wedged forever before: the cancelled waiter's thread held it.
+    # Must not hang: the cancelled waiter neither holds the lock nor blocks the queue.
     await asyncio.wait_for(lock.acquire(), timeout=2)
     lock.release()
     assert not lock.locked()

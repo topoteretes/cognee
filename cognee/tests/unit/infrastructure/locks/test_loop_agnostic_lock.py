@@ -8,6 +8,7 @@ the lock. ``LoopAgnosticEvent`` must be settable from any thread.
 
 import asyncio
 import threading
+import time
 
 import pytest
 
@@ -147,6 +148,61 @@ def test_waiter_woken_then_orphaned_by_loop_close_does_not_keep_lock():
 def test_release_of_unlocked_lock_raises():
     with pytest.raises(RuntimeError):
         LoopAgnosticLock().release()
+
+
+def _park_waiter_then_orphan_after_release(lock: LoopAgnosticLock, order: list[str]):
+    """Holder releases to W1 on loop L1; W2 queues behind W1; then L1 closes.
+
+    Returns the thread running W2, which appends "w2" to ``order`` when it
+    gets the lock and releases it again. The release's wake-up to W1 is
+    scheduled on L1 but never runs, so ownership was never confirmed; W2
+    must not be stranded behind W1.
+    """
+    asyncio.run(lock.acquire())  # holder
+
+    dead_loop = asyncio.new_event_loop()
+    dead_loop.create_task(lock.acquire())  # W1
+    dead_loop.run_until_complete(asyncio.sleep(0.01))  # parked, head of the queue
+    lock.release()  # wake-up scheduled on dead_loop
+
+    async def w2():
+        await asyncio.wait_for(lock.acquire(), timeout=3)
+        order.append("w2")
+        lock.release()
+
+    thread = threading.Thread(target=lambda: asyncio.run(w2()))
+    thread.start()
+    time.sleep(0.1)  # W2 is parked behind W1, whose loop is still open
+    dead_loop.close()  # W1 is orphaned: its wake-up will never run
+    return thread
+
+
+def test_lone_waiter_behind_orphaned_head_is_woken():
+    """No newcomer ever arrives: W2 recovers through its own periodic re-check."""
+    lock = LoopAgnosticLock()
+    order: list[str] = []
+    w2 = _park_waiter_then_orphan_after_release(lock, order)
+    w2.join(timeout=5)
+    assert order == ["w2"], "W2 was stranded behind the orphaned head"
+    assert not lock.locked()
+
+
+def test_newcomer_after_orphaned_head_wakes_the_queue_and_keeps_fifo():
+    """A newcomer on a free lock re-issues the wake-up: W2 goes first, then it."""
+    lock = LoopAgnosticLock()
+    order: list[str] = []
+    w2 = _park_waiter_then_orphan_after_release(lock, order)
+
+    async def w3():
+        await asyncio.wait_for(lock.acquire(), timeout=3)
+        order.append("w3")
+        lock.release()
+
+    # Newcomer arrives right after the close, long before W2's re-check fires.
+    asyncio.run(w3())
+    w2.join(timeout=5)
+    assert order == ["w2", "w3"]
+    assert not lock.locked()
 
 
 @pytest.mark.asyncio

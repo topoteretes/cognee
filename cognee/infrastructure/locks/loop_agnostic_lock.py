@@ -23,10 +23,15 @@ round-trip, and a contended one costs one scheduled callback, the same as
 of waiters on one lock cannot delay another lock.
 
 A waiter that can no longer be woken — its loop was closed while it was
-parked — is dropped the next time the lock is released or acquired, so a
-loop that went away mid-wait never keeps the lock, and nothing is left to
-block interpreter exit. (A loop that is stopped but never closed, and never
-run again, is indistinguishable from a slow one; its waiter keeps its place
+parked — is dropped, and the live waiter behind it woken, by whoever
+touches the lock next: the next ``release()``, the next ``acquire()`` on a
+free lock (a release's wake-up is only confirmed when the woken waiter
+claims; an acquire that finds the lock free re-issues it to the current
+head), and, so that a lone parked waiter recovers even when nobody comes
+by, each parked waiter's own periodic re-check. A loop that went away
+mid-wait therefore never keeps the lock, and nothing is left to block
+interpreter exit. (A loop that is stopped but never closed, and never run
+again, is indistinguishable from a slow one; its waiter keeps its place
 like an ``asyncio.Lock`` waiter on a stalled loop would.)
 
 :class:`LoopAgnosticEvent` is the matching ``asyncio.Event``: ``set()`` may
@@ -36,6 +41,11 @@ be called from any thread and wakes the waiters of every loop.
 import asyncio
 import threading
 from collections import deque
+
+# How often a parked waiter re-checks whether the head it queued behind was
+# orphaned by a closed loop (see the module docstring). Only parked waiters
+# pay for this, one timer each; it does not affect the uncontended path.
+_RECHECK_INTERVAL_SECONDS = 1.0
 
 
 def _resolve(future: asyncio.Future) -> None:
@@ -81,15 +91,24 @@ class LoopAgnosticLock:
     async def acquire(self) -> bool:
         loop = asyncio.get_running_loop()
         with self._mutex:
-            if not self._locked and not self._has_live_waiters_locked():
-                self._locked = True
-                return True
+            if not self._locked:
+                # The lock is free, so a wake-up is in flight to the head
+                # waiter (or there is none). Re-issue it: this drops a head
+                # whose loop died since the release and wakes the live one
+                # behind it, so a lost wake-up never strands the queue.
+                self._wake_next_locked()
+                if not self._waiters:
+                    self._locked = True
+                    return True
             future = loop.create_future()
             self._waiters.append(future)
 
         while True:
             try:
-                await future
+                # Bounded wait: a parked waiter re-checks now and then in case
+                # the head it queued behind was orphaned by a closed loop
+                # while no newcomer came by to notice (see module docstring).
+                done, _ = await asyncio.wait({future}, timeout=_RECHECK_INTERVAL_SECONDS)
             except asyncio.CancelledError:
                 with self._mutex:
                     self._discard_locked(future)
@@ -100,6 +119,10 @@ class LoopAgnosticLock:
                 raise
 
             with self._mutex:
+                if not done:
+                    if not self._locked:
+                        self._wake_next_locked()  # may wake us, if we are head now
+                    continue
                 self._discard_locked(future)
                 if not self._locked:
                     self._locked = True
@@ -124,13 +147,6 @@ class LoopAgnosticLock:
         self.release()
 
     # -- internals; the caller holds ``self._mutex`` ------------------------
-
-    def _has_live_waiters_locked(self) -> bool:
-        # Dead waiters at the head would otherwise block newcomers for good
-        # once nobody is left to release (and so to pop them).
-        while self._waiters and _is_dead(self._waiters[0]):
-            self._waiters.popleft()
-        return bool(self._waiters)
 
     def _discard_locked(self, future: asyncio.Future) -> None:
         try:
