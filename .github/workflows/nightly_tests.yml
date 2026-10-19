@@ -12,9 +12,10 @@ on:
   # branch's copy of this file, so a plain schedule could only ever test main's
   # stale copy of the job graph. `.github/workflows/nightly_scheduler.yml`
   # carries the cron on main and dispatches this workflow at the ref we want:
-  # main Mon-Sat 18:00 UTC = cadence daily (the datasheets corpus plus every
-  # mock arm; peak US hours, so the cloud arm measures the platform under real
-  # load); main Sun 18:00 UTC = cadence weekly (the full set, still at peak);
+  # main Mon-Sat 18:00 UTC = cadence daily (the real-LLM journeys, the
+  # datasheets corpus plus every mock arm; peak US hours, so the cloud arm
+  # measures the platform under real load); main Sun 18:00 UTC = cadence
+  # weekly (the full set, still at peak);
   # dev Sun 06:00 UTC = cadence weekly. See nightly_scheduler.yml.
   # Deliberately NOT on pull_request. This workflow used to run on any PR that
   # touched the nightly/perf workflow files, to validate the edit before merge.
@@ -27,7 +28,7 @@ on:
   workflow_dispatch:
     inputs:
       cadence:
-        description: 'Why this run happened: daily (main, datasheets + all mock arms), weekly (full set), manual (full set).'
+        description: 'Why this run happened: daily (main, journeys + datasheets + all mock arms), weekly (full set), manual (full set).'
         required: false
         default: manual
         type: string
@@ -45,8 +46,18 @@ jobs:
   # ══ Product journeys against the real providers ═══════════════════════════
   # The PR gate runs these in mock mode; nightly is where the hit-rate and
   # answer-leak thresholds are measured against the model we actually ship with.
+  # Daily on purpose, unlike the other paid arms: this is the product contract,
+  # and a few hundred calls is a small fraction of one datasheets perf run.
+  # It waits for every paid perf arm so its calls never overlap theirs: the
+  # journeys read LLM_API_KEY while perf reads OPENAI_API_KEY, so the shared
+  # resources are EMBEDDING_API_KEY and the provider's org rate limit, and a
+  # 429 backoff from either would land in the perf timings, the numbers those
+  # arms exist to measure. The weekly-only arms are skipped on daily;
+  # `!cancelled()` keeps this running when a perf arm is skipped or fails.
   journeys-llm:
     name: Product Journeys (real LLM)
+    needs: [perf-datasheets-llm, perf-wap-llm, perf-rust-wap-llm]
+    if: ${{ !cancelled() }}
     uses: ./.github/workflows/journey_tests.yml
     with:
       mode: llm
@@ -311,6 +322,7 @@ jobs:
           # One arm per line: emoji|title|result|metrics-json|report-url.
           # Adding a benchmark arm is a line here plus its REPORT_KEYS entry.
           ARMS: |
+            🧭|Product Journeys — Real LLM|${{ needs.journeys-llm.result }}||
             📚|File Based — War and Peace — Real LLM|${{ needs.perf-wap-llm.result }}|${{ needs.perf-wap-llm.outputs.file_based_metrics }}|${{ steps.presign.outputs.url_file_wap_llm }}
             📚|File Based — War and Peace — Mock LLM|${{ needs.perf-wap-mock.result }}|${{ needs.perf-wap-mock.outputs.file_based_metrics }}|${{ steps.presign.outputs.url_file_wap_mock }}
             🧪|File Based — Datasheets — Real LLM|${{ needs.perf-datasheets-llm.result }}|${{ needs.perf-datasheets-llm.outputs.file_based_metrics }}|${{ steps.presign.outputs.url_file_datasheets_llm }}

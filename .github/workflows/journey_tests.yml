@@ -60,8 +60,11 @@ env:
   EMBEDDING_ENDPOINT: ${{ inputs.mode == 'llm' && secrets.EMBEDDING_ENDPOINT || '' }}
   EMBEDDING_API_KEY: ${{ inputs.mode == 'llm' && secrets.EMBEDDING_API_KEY || 'mock-key' }}
   EMBEDDING_DIMENSIONS: ${{ inputs.mode == 'llm' && '300' || '256' }}
+  # Both skip flags are read by the same preflight gate (any truthy one skips
+  # it), so both must clear in llm mode or a provider/dimension mismatch only
+  # surfaces mid-journey instead of at startup.
   COGNEE_SKIP_PREFLIGHT: ${{ inputs.mode == 'mock' && '1' || '' }}
-  COGNEE_SKIP_CONNECTION_TEST: 'true'
+  COGNEE_SKIP_CONNECTION_TEST: ${{ inputs.mode == 'mock' && 'true' || '' }}
 
 jobs:
   journeys:
@@ -76,16 +79,28 @@ jobs:
         with:
           fetch-depth: 0
 
+      # The env block falls back to the mock values when a secret is empty, so
+      # a missing secret in llm mode would otherwise surface as a 401 deep
+      # inside a journey. Fail here, with the cause in the step name.
+      - name: Require provider secrets (llm mode)
+        if: ${{ inputs.mode == 'llm' }}
+        run: |
+          [ "$LLM_API_KEY" != mock-key ] && [ "$EMBEDDING_API_KEY" != mock-key ] \
+            || { echo "::error::mode=llm but the LLM/embedding secrets are missing"; exit 1; }
+
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
           python-version: ${{ inputs.python-version }}
 
+      # pytest-timeout is per test. The cap is sized to the slowest single
+      # journey (not the suite), so one hung provider await fails with a
+      # traceback and still leaves the 90 min job bound room for the rest.
       - name: Memory correctness, sessions, lifecycle, idempotency, HTTP API, extras resolution
         run: |
           uv run pytest cognee/tests/journeys -m "journey and not quickstart" \
             --ignore=cognee/tests/journeys/test_mcp_journey.py \
-            -v --timeout=4800 -p no:cacheprovider -W ignore
+            -v --timeout=${{ inputs.mode == 'llm' && 1800 || 1500 }} -p no:cacheprovider -W ignore
 
   quickstart:
     name: Quickstart in a fresh venv (${{ inputs.mode }} LLM, wheel install)
@@ -96,6 +111,12 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
+
+      - name: Require provider secrets (llm mode)
+        if: ${{ inputs.mode == 'llm' }}
+        run: |
+          [ "$LLM_API_KEY" != mock-key ] && [ "$EMBEDDING_API_KEY" != mock-key ] \
+            || { echo "::error::mode=llm but the LLM/embedding secrets are missing"; exit 1; }
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup

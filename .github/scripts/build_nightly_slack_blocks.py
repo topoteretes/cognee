@@ -82,7 +82,10 @@ def arm_block(emoji, title, result, metrics_json, url):
 
     lines = [f"*{emoji} {title}* (`{result}`)  •  runs `{metrics.get('success', '')}`"]
     lines += [metric_row(metrics, label, pad) for label, pad in rows]
-    lines.append(f"<{url}|HTML report>")
+    # Pass/fail arms (the product journeys) have no report; `<|HTML report>`
+    # would render as a broken link.
+    if url:
+        lines.append(f"<{url}|HTML report>")
     return section("\n".join(lines) + "\n")
 
 
