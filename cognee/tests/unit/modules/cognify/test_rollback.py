@@ -63,8 +63,21 @@ class _FakeEngine:
         return self._sessions.pop(0)
 
 
+@pytest.fixture(autouse=True)
+def ledger_tombstones(monkeypatch):
+    """Capture the audit-ledger retraction instead of touching the real ledger."""
+    calls = []
+
+    async def _tombstone(dataset_id, pipeline_run_id, *, user=None, keep_data_ids=None):
+        calls.append((dataset_id, str(pipeline_run_id), set(keep_data_ids or ())))
+        return 0
+
+    monkeypatch.setattr(rollback_module, "tombstone_pipeline_run", _tombstone)
+    return calls
+
+
 @pytest.mark.asyncio
-async def test_cognify_rollback_deletes_graph_before_relational(monkeypatch):
+async def test_cognify_rollback_deletes_graph_before_relational(monkeypatch, ledger_tombstones):
     pipeline_run_id = uuid4()
     dataset_id = uuid4()
     data_id = uuid4()
@@ -129,6 +142,8 @@ async def test_cognify_rollback_deletes_graph_before_relational(monkeypatch):
     assert call_log == ["graph_delete", "relational_delete", "relational_delete"]
     assert str(dataset_id) not in data_record.pipeline_status["cognify_pipeline"]
     assert session_mutation.committed is True
+    # The audit ledger retracts what the run asserted, after the deletes.
+    assert ledger_tombstones == [(dataset_id, str(pipeline_run_id), set())]
 
 
 @pytest.mark.asyncio
@@ -341,7 +356,9 @@ async def test_rollback_preserves_markers_of_previously_extracted_data(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_graph_provenance_rollback_keeps_completed_documents_when_asked(monkeypatch):
+async def test_graph_provenance_rollback_keeps_completed_documents_when_asked(
+    monkeypatch, ledger_tombstones
+):
     """Startup recovery asks for keep_completed_data: a document the run marked
     complete keeps its refs and its completed status; the unfinished one is
     rolled back and its status cleared."""
@@ -409,6 +426,8 @@ async def test_graph_provenance_rollback_keeps_completed_documents_when_asked(mo
     )
     assert str(dataset_id) not in unfinished_record.pipeline_status["cognify_pipeline"]
     assert reset_session.committed is True
+    # The kept document's ledger rows are left alone too.
+    assert ledger_tombstones == [(dataset_id, str(pipeline_run_id), {done_id})]
 
 
 def test_without_kept_refs_drops_only_the_kept_documents_refs():

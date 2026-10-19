@@ -22,7 +22,7 @@ same name would cross-contaminate one version chain. The cognify task
 dataset id for exactly this reason; readers join with the same prefixed key.
 """
 
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from functools import lru_cache
 from typing import Any
 
@@ -31,9 +31,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cognee.shared.logging_utils import get_logger
 
 from . import storage
-from .integrity import compute_checksum, verify_checksum
+from .integrity import canonical_entity_id, compute_checksum, verify_checksum
 from .models import ProvenanceEntry
 from .models.ProvenanceEntry import utc_now_iso
+from .snapshot import diff_snapshots
 
 logger = get_logger("provenance_manager")
 
@@ -137,6 +138,12 @@ class ProvenanceManager:
                 parent_id = source
             explicit_parent_supplied = parent_id is not None
 
+            metadata_out = dict(metadata or {})
+            if existing_row is not None:
+                decision = self._mutation_decision(existing_row, metadata_out, kwargs)
+                if decision == "noop":
+                    return ProvenanceEntry.from_row(existing_row)
+
             now = utc_now_iso()
             archived_history_id = None
             old_snapshot = None
@@ -161,7 +168,7 @@ class ProvenanceManager:
                 entity_id=entity_id,
                 entity_type=kwargs.get("entity_type", "entity"),
                 activity_id=kwargs.get("activity_id", "entity_tracking"),
-                metadata=dict(metadata or {}),
+                metadata=metadata_out,
                 timestamp=now,
                 first_seen=first_seen,
                 last_updated=now,
@@ -179,20 +186,86 @@ class ProvenanceManager:
             entry.checksum = compute_checksum(entry)
 
             if existing_row is not None:
-                # Statement order matters: the unique sequence index is checked
-                # per statement. UPDATE the live row first (freeing its old
-                # slot), then INSERT the archive row carrying the old values.
-                entry.apply_to_row(existing_row)
-                await session.flush()
-                archive_entry = old_snapshot.model_copy(update={"entity_id": archived_history_id})
-                session.add(archive_entry.to_row())
-                await session.flush()
+                await storage.archive_and_replace(
+                    session, existing_row, old_snapshot, archived_history_id, entry
+                )
             else:
                 session.add(entry.to_row())
                 await session.flush()
             return entry
 
         return write
+
+    @staticmethod
+    def _mutation_decision(
+        existing_row: Any, metadata: dict[str, Any], kwargs: dict[str, Any]
+    ) -> str:
+        """Decide what a re-track of an existing entity row means.
+
+        With a snapshot on both sides (see ``snapshot.py``):
+
+        - identical content, same owning document, no explicit revision intent
+          -> ``"noop"``: the mention is not a new version;
+        - otherwise -> ``"version"``, and ``metadata["delta"]`` is filled with
+          the field-level difference against the previous snapshot.
+
+        Without snapshots (callers that pass only name/type) every re-track
+        versions, as before. A tombstoned row is never a no-op: re-tracking it
+        is a resurrection.
+        """
+        new_snapshot = metadata.get("snapshot")
+        old_metadata = getattr(existing_row, "entry_metadata", None) or {}
+        old_snapshot = old_metadata.get("snapshot") if isinstance(old_metadata, dict) else None
+        if not (isinstance(new_snapshot, dict) and isinstance(old_snapshot, dict)):
+            return "version"
+
+        delta = diff_snapshots(old_snapshot.get("fields"), new_snapshot.get("fields"))
+        unchanged = (
+            not delta
+            and old_snapshot.get("hash") == new_snapshot.get("hash")
+            and not existing_row.invalidated
+            and existing_row.source_ref_key == kwargs.get("source_ref_key")
+            and not kwargs.get("revision_type")
+            and not kwargs.get("supersedes")
+        )
+        if unchanged:
+            return "noop"
+        metadata["delta"] = delta
+        return "version"
+
+    @staticmethod
+    async def _resurrect_or_noop(
+        session: AsyncSession,
+        existing_row,
+        next_seq: int,
+        prev_checksum: str | None,
+        build_entry: Callable[[str], ProvenanceEntry],
+    ) -> ProvenanceEntry:
+        """Shared re-track rule for the non-versioning kinds (relationship, chunk).
+
+        A live existing row is a chain-preserving no-op returning the stored
+        entry. A tombstoned one is *resurrected*: the content came back (ids
+        are deterministic content hashes, so a re-ingest after ``forget()``
+        reproduces them), so the tombstone is archived and a fresh live entry
+        chained after it, exactly as ``track_entity`` versions. Without this a
+        relationship or chunk would stay invalidated forever once forgotten.
+        """
+        old_snapshot = ProvenanceEntry.from_row(existing_row)
+        if not old_snapshot.invalidated:
+            return old_snapshot
+
+        archived_history_id = await storage.find_free_archive_id(
+            session, existing_row.entity_id, existing_row.last_updated
+        )
+        entry = build_entry(old_snapshot.first_seen)
+        entry.previous_version_id = archived_history_id
+        entry.sequence_id = next_seq
+        entry.previous_checksum = prev_checksum
+        entry.checksum = compute_checksum(entry)
+        await storage.archive_and_replace(
+            session, existing_row, old_snapshot, archived_history_id, entry
+        )
+        return entry
 
     async def track_entity(
         self,
@@ -230,25 +303,30 @@ class ProvenanceManager:
     ) -> Callable[[AsyncSession, int, str | None], Awaitable[ProvenanceEntry]]:
         """Build the chained write for one relationship track (never versions)."""
 
-        async def write(
-            session: AsyncSession, next_seq: int, prev_checksum: str | None
-        ) -> ProvenanceEntry:
-            existing_row = await storage.retrieve_row(session, relationship_id)
-            if existing_row is not None:
-                return ProvenanceEntry.from_row(existing_row)
-
+        def build_entry(first_seen: str | None) -> ProvenanceEntry:
             now = utc_now_iso()
-            entry = ProvenanceEntry(
+            return ProvenanceEntry(
                 entity_id=relationship_id,
                 entity_type="relationship",
                 activity_id=kwargs.get("activity_id", "relationship_tracking"),
                 metadata=dict(metadata or {}),
                 timestamp=now,
-                first_seen=now,
+                first_seen=first_seen or now,
                 last_updated=now,
                 used_entities=list(kwargs.get("used_entities") or []),
                 **self._base_entry_fields(source, kwargs),
             )
+
+        async def write(
+            session: AsyncSession, next_seq: int, prev_checksum: str | None
+        ) -> ProvenanceEntry:
+            existing_row = await storage.retrieve_row(session, relationship_id)
+            if existing_row is not None:
+                return await self._resurrect_or_noop(
+                    session, existing_row, next_seq, prev_checksum, build_entry
+                )
+
+            entry = build_entry(None)
             entry.sequence_id = next_seq
             entry.previous_checksum = prev_checksum
             entry.checksum = compute_checksum(entry)
@@ -270,7 +348,9 @@ class ProvenanceManager:
         Re-tracking an already-recorded relationship id is a no-op returning
         the stored entry: relationship ids are deterministic content hashes
         (``rel:{src}:{name}:{dst}``), and rewriting the row would either forge
-        a gap in the sequence chain or invalidate its checksum.
+        a gap in the sequence chain or invalidate its checksum. The one
+        exception is a tombstoned id, which is resurrected (see
+        ``_resurrect_or_noop``).
         """
         self._validate_id(relationship_id, "relationship_id")
         self._warn_unknown_kwargs("track_relationship", kwargs)
@@ -301,21 +381,15 @@ class ProvenanceManager:
         }
         column_kwargs.setdefault("source_location", source_path)
 
-        async def write(
-            session: AsyncSession, next_seq: int, prev_checksum: str | None
-        ) -> ProvenanceEntry:
-            existing_row = await storage.retrieve_row(session, chunk_id)
-            if existing_row is not None:
-                return ProvenanceEntry.from_row(existing_row)
-
+        def build_entry(first_seen: str | None) -> ProvenanceEntry:
             now = utc_now_iso()
-            entry = ProvenanceEntry(
+            return ProvenanceEntry(
                 entity_id=chunk_id,
                 entity_type="chunk",
                 activity_id=column_kwargs.get("activity_id", "chunking"),
                 metadata=dict(metadata),
                 timestamp=now,
-                first_seen=now,
+                first_seen=first_seen or now,
                 last_updated=now,
                 start_index=start_index,
                 end_index=end_index,
@@ -324,6 +398,17 @@ class ProvenanceManager:
                 used_entities=list(column_kwargs.get("used_entities") or []),
                 **self._base_entry_fields(source_document, column_kwargs),
             )
+
+        async def write(
+            session: AsyncSession, next_seq: int, prev_checksum: str | None
+        ) -> ProvenanceEntry:
+            existing_row = await storage.retrieve_row(session, chunk_id)
+            if existing_row is not None:
+                return await self._resurrect_or_noop(
+                    session, existing_row, next_seq, prev_checksum, build_entry
+                )
+
+            entry = build_entry(None)
             entry.sequence_id = next_seq
             entry.previous_checksum = prev_checksum
             entry.checksum = compute_checksum(entry)
@@ -348,7 +433,8 @@ class ProvenanceManager:
 
         Column-backed keys in ``**metadata`` (agent/activity/bundle/source-ref
         etc.) are lifted onto the entry; the remainder is free-form metadata.
-        Re-tracking an existing chunk id is a chain-preserving no-op.
+        Re-tracking an existing chunk id is a chain-preserving no-op, unless
+        the chunk was tombstoned, in which case it is resurrected.
         """
         self._validate_id(chunk_id, "chunk_id")
         try:
@@ -376,23 +462,14 @@ class ProvenanceManager:
 
     # === Invalidation (tombstone, not hard delete) ===
 
-    async def invalidate(
+    def _invalidate_write(
         self,
         entity_id: str,
         agent_id: str,
-        reason: str | None = None,
-        metadata: dict[str, Any] | None = None,
-    ) -> ProvenanceEntry:
-        """Mark a tracked entity invalidated (prov:Invalidation) — never delete.
-
-        Archives the pre-invalidation state under a versioned key (the same
-        pattern ``track_entity`` uses), then writes the tombstone as a fresh
-        chained append. Mutating the row's checksum in place would falsely
-        break any later entry already chained from the old value.
-
-        Raises ``ValueError`` if the entity was never tracked — this is a
-        user-initiated audit action, NOT gracefully degraded.
-        """
+        reason: str | None,
+        metadata: dict[str, Any] | None,
+    ) -> Callable[[AsyncSession, int, str | None], Awaitable[ProvenanceEntry]]:
+        """Build the chained tombstone write for one entity (see ``invalidate``)."""
 
         async def write(
             session: AsyncSession, next_seq: int, prev_checksum: str | None
@@ -404,6 +481,13 @@ class ProvenanceManager:
                 )
 
             old_snapshot = ProvenanceEntry.from_row(existing_row)
+            if old_snapshot.invalidated:
+                # Already a tombstone: a second invalidation (a dataset delete
+                # after a data delete, a retried forget) is a chain-preserving
+                # no-op — re-tombstoning would forge a spurious version and
+                # re-date the invalidation.
+                return old_snapshot
+
             archived_history_id = await storage.find_free_archive_id(
                 session, entity_id, existing_row.last_updated
             )
@@ -421,20 +505,48 @@ class ProvenanceManager:
             entry.invalidated_by = agent_id
             entry.invalidation_reason = reason
             entry.previous_version_id = archived_history_id
+            # The snapshot stays (it is what was retracted); the previous
+            # version's delta does not describe this event.
+            entry.metadata = {k: v for k, v in entry.metadata.items() if k != "delta"}
             if metadata:
                 entry.metadata = {**entry.metadata, **metadata}
             entry.sequence_id = next_seq
             entry.previous_checksum = prev_checksum
             entry.checksum = compute_checksum(entry)
 
-            entry.apply_to_row(existing_row)
-            await session.flush()
-            archive_entry = old_snapshot.model_copy(update={"entity_id": archived_history_id})
-            session.add(archive_entry.to_row())
-            await session.flush()
+            await storage.archive_and_replace(
+                session, existing_row, old_snapshot, archived_history_id, entry
+            )
             return entry
 
-        return await storage.append_chained(write)
+        return write
+
+    async def invalidate(
+        self,
+        entity_id: str,
+        agent_id: str,
+        reason: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> ProvenanceEntry:
+        """Mark a tracked entity invalidated (prov:Invalidation) — never delete.
+
+        Archives the pre-invalidation state under a versioned key (the same
+        pattern ``track_entity`` uses), then writes the tombstone as a fresh
+        chained append. Mutating the row's checksum in place would falsely
+        break any later entry already chained from the old value.
+
+        Idempotent: invalidating an already-tombstoned entity returns the
+        stored tombstone and consumes no sequence slot. A later ``track_*`` of
+        the same id resurrects it (archive the tombstone, chain a live entry).
+
+        Raises ``ValueError`` if the entity was never tracked — this is a
+        user-initiated audit action, NOT gracefully degraded. Bulk callers
+        (deletion sweeps) should queue ``batch().invalidate(...)`` instead.
+        """
+        self._validate_id(entity_id, "entity_id")
+        return await storage.append_chained(
+            self._invalidate_write(entity_id, agent_id, reason, metadata)
+        )
 
     # === Queries ===
 
@@ -526,19 +638,41 @@ class ProvenanceManager:
                 version_dict["revision_type"] = entry.revision_type
             if entry.supersedes:
                 version_dict["supersedes"] = entry.supersedes
+            if isinstance(entry.metadata, dict):
+                snapshot = entry.metadata.get("snapshot")
+                if isinstance(snapshot, dict) and snapshot.get("hash"):
+                    version_dict["content_hash"] = snapshot["hash"]
+                if "delta" in entry.metadata:
+                    version_dict["delta"] = entry.metadata["delta"]
+            if entry.invalidated:
+                # A tombstone version: who retracted it and why, so the history
+                # reads "asserted by A, retracted by B" rather than as a third
+                # ordinary edit.
+                version_dict["invalidated"] = True
+                version_dict["invalidated_by"] = entry.invalidated_by
+                version_dict["invalidation_reason"] = entry.invalidation_reason
             history.append(version_dict)
         return history
 
     # === Integrity ===
 
-    async def verify_chain(self) -> dict[str, Any]:
+    async def verify_chain(self, dataset_id: Any = None) -> dict[str, Any]:
         """Verify per-row checksums and the sequence hash chain.
 
         Expected state advances from each entry's OWN stored values, so a
         single corrupted entry never cascades into spurious breaks for every
         entry after it. Entries are STREAMED in sequence order (keyset
         pagination) — the ledger is never materialized client-side.
+
+        With ``dataset_id`` only that dataset's rows are read. The chain is
+        ledger-wide, so a dataset's positions are sparse: each row is then
+        checked against the checksum stored at ``sequence_id - 1`` (one
+        lookup per page) instead of against the previous row of the stream.
+        A break there means either this row or its predecessor was altered.
         """
+        if dataset_id is not None:
+            return await self._verify_scoped_chain(dataset_id)
+
         broken_links: list[dict[str, Any]] = []
         total_entries = 0
         expected_previous: str | None = None
@@ -579,13 +713,68 @@ class ProvenanceManager:
             "valid": len(broken_links) == 0,
             "total_entries": total_entries,
             "broken_links": broken_links,
+            "dataset_id": None,
         }
 
-    async def check(self, strict: bool = False) -> dict[str, Any]:
+    async def _verify_scoped_chain(self, dataset_id: Any) -> dict[str, Any]:
+        broken_links: list[dict[str, Any]] = []
+        total_entries = 0
+        page: list[ProvenanceEntry] = []
+
+        async def flush() -> None:
+            predecessors = await storage.retrieve_checksums_by_sequence(
+                [entry.sequence_id - 1 for entry in page if entry.sequence_id > 1]
+            )
+            for entry in page:
+                if not verify_checksum(entry):
+                    broken_links.append(
+                        {
+                            "entity_id": entry.entity_id,
+                            "sequence_id": entry.sequence_id,
+                            "reason": "checksum_mismatch",
+                        }
+                    )
+                    continue
+                expected_previous = (
+                    predecessors.get(entry.sequence_id - 1) if entry.sequence_id > 1 else None
+                )
+                if entry.previous_checksum != expected_previous:
+                    broken_links.append(
+                        {
+                            "entity_id": entry.entity_id,
+                            "sequence_id": entry.sequence_id,
+                            "reason": "chain_break",
+                            "expected_previous_checksum": expected_previous,
+                            "actual_previous_checksum": entry.previous_checksum,
+                            "expected_sequence_id": entry.sequence_id,
+                        }
+                    )
+            page.clear()
+
+        async for entry in storage.iter_chained(dataset_id=dataset_id):
+            total_entries += 1
+            page.append(entry)
+            if len(page) >= 500:
+                await flush()
+        if page:
+            await flush()
+
+        return {
+            "valid": len(broken_links) == 0,
+            "total_entries": total_entries,
+            "broken_links": broken_links,
+            "dataset_id": str(dataset_id),
+        }
+
+    async def check(self, strict: bool = False, dataset_id: Any = None) -> dict[str, Any]:
         """Referential-integrity check (dangling lineage links), not hashes.
 
         Loads only the id columns for the reference sets, then STREAMS full
         rows page by page — never a client-side full-table materialization.
+        ``dataset_id`` narrows the rows checked; references are still resolved
+        against the whole ledger. ``invalidated_count`` counts live tombstones
+        only (an archived copy of a resurrected tombstone is not a retraction
+        in force).
         """
         all_ids = await storage.retrieve_all_ids()
         all_activity_ids = await storage.retrieve_all_activity_ids()
@@ -593,9 +782,9 @@ class ProvenanceManager:
         missing_refs: list[str] = []
         total_entries = 0
         invalidated_count = 0
-        async for entry in storage.iter_all():
+        async for entry in storage.iter_all(dataset_id=dataset_id):
             total_entries += 1
-            if entry.invalidated:
+            if entry.invalidated and canonical_entity_id(entry) == entry.entity_id:
                 invalidated_count += 1
             if entry.parent_entity_id and entry.parent_entity_id not in all_ids:
                 missing_refs.append(f"{entry.entity_id} -> {entry.parent_entity_id}")
@@ -617,13 +806,51 @@ class ProvenanceManager:
             "invalidated_count": invalidated_count,
             "strict": strict,
             "errors": len(missing_refs),
+            "dataset_id": str(dataset_id) if dataset_id is not None else None,
         }
+
+    async def check_drift(self, dataset_id: Any, owner_id: Any = None) -> dict[str, Any]:
+        """Compare each live node row's snapshot with the graph (see ``drift.py``)."""
+        from . import drift
+
+        return await drift.check_drift(dataset_id, owner_id)
+
+    async def anchor(self) -> dict[str, Any] | None:
+        """Sign the chain head and append it to the external anchor file.
+
+        Requires ``PROVENANCE_ANCHOR_KEY``; see ``anchors.py``. None when the
+        ledger is empty.
+        """
+        from . import anchors
+
+        return await anchors.anchor_chain_head()
+
+    async def verify_anchors(self) -> dict[str, Any]:
+        """Replay every external anchor against the ledger (see ``anchors.py``)."""
+        from . import anchors
+
+        return await anchors.verify_anchors()
 
     # === Utility ===
 
-    async def get_statistics(self) -> dict[str, Any]:
+    async def get_statistics(self, dataset_id: Any = None) -> dict[str, Any]:
         """DB-side aggregates (counts, group-by, distinct) — no full-table load."""
-        return await storage.aggregate_statistics()
+        return await storage.aggregate_statistics(dataset_id=dataset_id)
+
+    async def export(
+        self, dataset_id: Any = None, include_archived: bool = True
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Stream ledger rows as dicts for an external audit copy (JSONL-ready).
+
+        Rows come in ``sequence_id`` order so the hash chain can be re-verified
+        from the export alone with ``integrity.compute_checksum``. Archive
+        copies are included by default — they are what makes a version history
+        verifiable; ``include_archived=False`` exports current rows only.
+        """
+        async for entry in storage.iter_chained(dataset_id=dataset_id):
+            if not include_archived and canonical_entity_id(entry) != entry.entity_id:
+                continue
+            yield entry.to_dict()
 
     async def clear(self) -> int:
         """Bulk ledger reset for dev/test teardown — use invalidate() for audits."""
@@ -687,6 +914,21 @@ class ProvenanceBatch:
                 parent_chunk_id,
                 metadata,
             )
+        )
+
+    def invalidate(
+        self,
+        entity_id: str,
+        agent_id: str,
+        reason: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Queue a tombstone. Unlike the manager method the failure surfaces at
+        ``commit()`` (an untracked id fails the whole batch — pre-select live
+        ids, as ``tombstones.py`` does)."""
+        self._manager._validate_id(entity_id, "entity_id")
+        self._write_fns.append(
+            self._manager._invalidate_write(entity_id, agent_id, reason, metadata)
         )
 
     async def commit(self) -> list[ProvenanceEntry | None] | None:

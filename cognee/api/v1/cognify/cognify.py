@@ -49,7 +49,6 @@ from cognee.tasks.documents import (
     extract_chunks_from_documents,
 )
 from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
-from cognee.tasks.provenance import record_provenance
 from cognee.tasks.storage import add_data_points
 
 logger = get_logger("cognify")
@@ -599,7 +598,6 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
 ) -> list[Task]:
     cognify_config = get_cognify_config()
     summary_method = summary_method or cognify_config.summary_method
-    track_provenance = cognify_config.provenance_tracking
 
     if chunks_per_batch is None:
         chunks_per_batch = (
@@ -639,11 +637,8 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             needs_llm=False,
         ),
     ]
-
-    if track_provenance:
-        tasks.append(
-            Task(record_provenance, task_config={"batch_size": chunks_per_batch}, needs_llm=False)
-        )
+    # The audit ledger (PROVENANCE_TRACKING) is not a task here: add_data_points
+    # records it at the storage seam, so every writer is covered, not just cognify.
 
     return tasks
 

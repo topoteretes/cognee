@@ -17,6 +17,7 @@ from cognee.modules.graph.methods.delete_from_graph_and_vector import delete_fro
 from cognee.modules.graph.models import Edge, Node
 from cognee.modules.pipelines.models.DataItemStatus import is_data_item_completed
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunAlreadyCompleted
+from cognee.modules.provenance.tombstones import tombstone_pipeline_run
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("cognify.rollback")
@@ -184,6 +185,11 @@ async def cognify_rollback_handler(
                 await _reset_pipeline_status(session, target_data_ids - kept_data_ids, dataset_id)
                 await session.commit()
 
+            # Audit ledger: what the run first asserted is retracted (non-fatal).
+            await tombstone_pipeline_run(
+                dataset_id, pipeline_run_id, user=user, keep_data_ids=kept_data_ids
+            )
+
             logger.info(
                 "Graph-provenance cognify rollback completed for run %s (dataset=%s, user=%s).",
                 pipeline_run_id,
@@ -312,6 +318,11 @@ async def cognify_rollback_handler(
         await _reset_pipeline_status(session, target_data_ids - kept_data_ids, dataset_id)
 
         await session.commit()
+
+    # Audit ledger: what the run first asserted is retracted (non-fatal).
+    await tombstone_pipeline_run(
+        dataset_id, pipeline_run_id, user=user, keep_data_ids=kept_data_ids
+    )
 
     logger.info(
         "Cognify rollback completed for run %s (dataset=%s, user=%s, rows=%d nodes/%d edges).",
