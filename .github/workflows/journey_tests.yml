@@ -76,15 +76,26 @@ jobs:
         with:
           fetch-depth: 0
 
+      # The env block falls back to the mock values when a secret is empty, so
+      # a missing secret in llm mode would otherwise surface as a 401 deep
+      # inside a journey. Fail here, with the cause in the step name.
+      - name: Require provider secrets (llm mode)
+        if: ${{ inputs.mode == 'llm' }}
+        run: |
+          [ "$LLM_API_KEY" != mock-key ] && [ "$EMBEDDING_API_KEY" != mock-key ] \
+            || { echo "::error::mode=llm but the LLM/embedding secrets are missing"; exit 1; }
+
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
           python-version: ${{ inputs.python-version }}
 
+      # The per-test limit stays under the job's timeout-minutes in both modes,
+      # so a hung journey fails with a traceback instead of a runner kill.
       - name: Memory correctness, sessions, lifecycle, idempotency, HTTP API
         run: |
           uv run pytest cognee/tests/journeys -m "journey and not quickstart" \
-            -v --timeout=4800 -p no:cacheprovider -W ignore
+            -v --timeout=${{ inputs.mode == 'llm' && 4800 || 1500 }} -p no:cacheprovider -W ignore
 
   quickstart:
     name: Quickstart in a fresh venv (${{ inputs.mode }} LLM, wheel install)
@@ -95,6 +106,12 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
+
+      - name: Require provider secrets (llm mode)
+        if: ${{ inputs.mode == 'llm' }}
+        run: |
+          [ "$LLM_API_KEY" != mock-key ] && [ "$EMBEDDING_API_KEY" != mock-key ] \
+            || { echo "::error::mode=llm but the LLM/embedding secrets are missing"; exit 1; }
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup

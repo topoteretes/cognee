@@ -12,9 +12,10 @@ on:
   # branch's copy of this file, so a plain schedule could only ever test main's
   # stale copy of the job graph. `.github/workflows/nightly_scheduler.yml`
   # carries the cron on main and dispatches this workflow at the ref we want:
-  # main Mon-Sat 18:00 UTC = cadence daily (the datasheets corpus plus every
-  # mock arm; peak US hours, so the cloud arm measures the platform under real
-  # load); main Sun 18:00 UTC = cadence weekly (the full set, still at peak);
+  # main Mon-Sat 18:00 UTC = cadence daily (the real-LLM journeys, the
+  # datasheets corpus plus every mock arm; peak US hours, so the cloud arm
+  # measures the platform under real load); main Sun 18:00 UTC = cadence
+  # weekly (the full set, still at peak);
   # dev Sun 06:00 UTC = cadence weekly. See nightly_scheduler.yml.
   # Deliberately NOT on pull_request. This workflow used to run on any PR that
   # touched the nightly/perf workflow files, to validate the edit before merge.
@@ -27,7 +28,7 @@ on:
   workflow_dispatch:
     inputs:
       cadence:
-        description: 'Why this run happened: daily (main, datasheets + all mock arms), weekly (full set), manual (full set).'
+        description: 'Why this run happened: daily (main, journeys + datasheets + all mock arms), weekly (full set), manual (full set).'
         required: false
         default: manual
         type: string
@@ -45,8 +46,15 @@ jobs:
   # ══ Product journeys against the real providers ═══════════════════════════
   # The PR gate runs these in mock mode; nightly is where the hit-rate and
   # answer-leak thresholds are measured against the model we actually ship with.
+  # Daily on purpose, unlike the other paid arms: this is the product contract,
+  # and a few hundred calls is a small fraction of one datasheets perf run.
+  # It waits for perf-datasheets-llm so the two never share LLM_API_KEY at the
+  # same time -- a 429 backoff would land in the perf timings, the numbers that
+  # arm exists to measure. `!cancelled()` keeps it running when perf fails.
   journeys-llm:
     name: Product Journeys (real LLM)
+    needs: [perf-datasheets-llm]
+    if: ${{ !cancelled() }}
     uses: ./.github/workflows/journey_tests.yml
     with:
       mode: llm
