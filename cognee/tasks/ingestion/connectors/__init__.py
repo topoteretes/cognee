@@ -11,15 +11,18 @@ from .google_calendar import build_calendar_service_from_access_token, google_ca
 from .google_drive import build_drive_service_from_access_token, google_drive_source
 from .linear import build_linear_service, linear_source
 from .notion import notion_source
+from .sentry import build_sentry_service, sentry_source
 
 __all__ = [
     "build_calendar_service_from_access_token",
     "build_drive_service_from_access_token",
     "build_gmail_service_from_access_token",
     "build_linear_service",
+    "build_sentry_service",
     "gmail_source",
     "google_calendar_source",
     "google_drive_source",
     "linear_source",
     "notion_source",
+    "sentry_source",
 ]
