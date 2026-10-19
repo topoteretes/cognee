@@ -2,7 +2,7 @@ import asyncio
 from uuid import UUID
 
 from cognee.api.v1.datasets.dto import DataDTO, DeleteDataReceiptDTO
-from cognee.api.v1.exceptions import DataDeletionIncompleteError, DocumentNotFoundError
+from cognee.api.v1.exceptions import DataDeletionIncompleteError
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.locks import dataset_lock
@@ -125,6 +125,7 @@ def _delete_data_receipt(
     deleted_elements: DeletedGraphElements,
     data_remaining: bool | None,
     dataset_deleted: bool,
+    status: str = "success",
 ) -> dict:
     """Build the receipt ``datasets.delete_data`` returns.
 
@@ -133,7 +134,7 @@ def _delete_data_receipt(
     re-validate that dict against the same model, so the two cannot drift.
     """
     return DeleteDataReceiptDTO(
-        status="success",
+        status=status,
         dataset_id=dataset_id,
         data_id=data_id,
         data_record_found=data_record_found,
@@ -269,18 +270,23 @@ class datasets:
     ) -> dict:
         """Delete one data item and return a receipt of what was removed.
 
-        A returned receipt always means the delete succeeded; the two ways a
-        delete can fall short raise instead of coming back as ``success``:
+        ``status`` never contradicts the outcome:
 
-        - ``DocumentNotFoundError`` (404): no ``Data`` row for ``data_id`` in
-          this dataset and no graph element owned by it either — a mistyped
-          id, an id from another dataset, or an already-deleted item.
-        - ``DataDeletionIncompleteError`` (500): the ``Data`` row was still
-          present when checked after the relational delete.
+        - ``"success"``: something was removed and, when a ``Data`` row
+          existed, it is verifiably gone.
+        - ``"not_found"``: no ``Data`` row for ``data_id`` in this dataset and
+          no graph element owned by it either — a mistyped id, an id from
+          another dataset, or an already-deleted item. Nothing was removed and
+          the counts are ``0``. Deleting is idempotent, so this is a receipt,
+          not an error; ``delete_dataset_if_empty`` is still honoured, so a
+          repeat delete of the last item can still drop the empty dataset.
+        - A ``Data`` row still present when checked after the relational
+          delete raises ``DataDeletionIncompleteError`` (500) instead of any
+          receipt.
 
-        The receipt keeps the historical ``{"status": "success"}`` key and
-        adds the facts a caller needs to trust the deletion without listing
-        the dataset again (``DeleteDataReceiptDTO`` is the schema):
+        The receipt keeps the historical ``status`` key and adds the facts a
+        caller needs to trust the deletion without listing the dataset again
+        (``DeleteDataReceiptDTO`` is the schema):
 
         - ``dataset_id`` / ``data_id``: the targets, as strings (``data_id``
           is the resolved id when a legacy id was passed).
@@ -329,19 +335,17 @@ class datasets:
 
                 if data is None:
                     # No Data row: the id can only own graph elements (custom graph
-                    # model). Removing none of those means the id is unknown here.
+                    # model). Removing none of those means the id is unknown here —
+                    # reported as status "not_found", never as a success.
                     async with set_database_global_context_variables(dataset_id, dataset.owner_id):
                         deleted_elements = await delete_data_nodes_and_edges(
                             dataset_id, data_id, user.id
                         )
-                        if not (deleted_elements.node_ids or deleted_elements.edge_ids):
-                            raise DocumentNotFoundError(
-                                f"Data {data_id} not found in dataset {dataset.id}: no Data "
-                                "row and no graph elements owned by it."
+                        removed = bool(deleted_elements.node_ids or deleted_elements.edge_ids)
+                        if removed:
+                            await _invalidate_sessions_for_deleted_data_nonfatal(
+                                dataset.id, deleted_elements, user.id
                             )
-                        await _invalidate_sessions_for_deleted_data_nonfatal(
-                            dataset.id, deleted_elements, user.id
-                        )
                         dataset_deleted = await _delete_dataset_if_empty(
                             dataset, delete_dataset_if_empty
                         )
@@ -353,6 +357,7 @@ class datasets:
                         deleted_elements=deleted_elements,
                         data_remaining=None,
                         dataset_deleted=dataset_deleted,
+                        status="success" if removed else "not_found",
                     )
 
                 if str(data.dataset_id) != str(dataset_id):

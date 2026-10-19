@@ -7,6 +7,7 @@ local and remote mode.
 """
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import Field
@@ -41,19 +42,22 @@ class DeleteDataReceiptDTO(OutDTO):
     /delete``, ``DELETE /forget`` with a ``data_id``) carry the same dict, this
     route validating it as its ``response_model`` (camelCase on the wire).
 
-    A receipt is only ever returned for a delete that succeeded. A delete that
-    finds nothing to remove raises ``DocumentNotFoundError`` (404); one whose
-    ``Data`` row is still present afterwards raises
-    ``DataDeletionIncompleteError`` (500). So ``data_remaining`` is ``false``
-    (observed by an existence check after the delete, the verified outcome —
-    read it together with ``data_record_found: true``) or ``null`` (no ``Data``
-    row existed, so there was nothing to observe; graph elements were removed
-    for a custom graph model).
+    ``status`` never contradicts the outcome: ``success`` when something was
+    removed, ``not_found`` when neither a ``Data`` row nor a graph element
+    existed for the id (nothing removed, counts ``0``; deleting is idempotent,
+    so this is a 200, and ``delete_dataset_if_empty`` is still honoured). A
+    delete whose ``Data`` row is still present afterwards raises
+    ``DataDeletionIncompleteError`` (500) instead of any receipt. So
+    ``data_remaining`` is ``false`` (observed by an existence check after the
+    delete, the verified outcome — read it together with
+    ``data_record_found: true``) or ``null`` (no ``Data`` row existed, so there
+    was nothing to observe).
     """
 
-    status: str = Field(
-        description="Always 'success': a delete that removed nothing answers 404 and one "
-        "whose Data row survived answers 500 instead of a receipt."
+    status: Literal["success", "not_found"] = Field(
+        description="'success' when something was removed; 'not_found' when neither a Data "
+        "row nor a graph element existed for the id (nothing removed). A Data row that "
+        "survives the delete answers 500 instead of a receipt."
     )
     dataset_id: UUID = Field(description="The dataset the item was deleted from.")
     data_id: UUID = Field(

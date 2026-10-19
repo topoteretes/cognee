@@ -333,7 +333,9 @@ def get_datasets_router() -> APIRouter:
 
         ## Response
         A deletion receipt (``DeleteDataReceiptDTO``, camelCase on the wire): ``status``
-        (``"success"``), ``datasetId``, ``dataId`` (the resolved id), ``dataRecordFound``
+        (``"success"``, or ``"not_found"`` when neither a Data row nor a graph element
+        existed for the id — nothing removed, counts ``0``, still a 200 because deleting
+        is idempotent), ``datasetId``, ``dataId`` (the resolved id), ``dataRecordFound``
         (a Data row for the id existed), ``deletedNodes`` / ``deletedEdges`` (graph
         elements removed), ``dataRemaining`` (``false`` when an existence check after the
         delete no longer finds the Data row — the verified outcome; ``null`` when no Data
@@ -345,15 +347,16 @@ def get_datasets_router() -> APIRouter:
 
         ## Error Codes
         - **401 Unauthorized**: Dataset doesn't exist or user lacks delete permission
-        - **404 Not Found**: No Data row for ``data_id`` in the dataset and no graph
-          elements owned by it (mistyped id, another dataset's id, or already deleted)
         - **500 Internal Server Error**: The Data row was still present after the delete
           (``DataDeletionIncompleteError``; retry), or another error during deletion
 
         ## Notes
         A ``data_id`` with no Data row but with graph elements it owns is a custom-graph-
         model deletion: those elements are removed and the receipt says
-        ``dataRecordFound: false``, ``dataRemaining: null``.
+        ``dataRecordFound: false``, ``dataRemaining: null``. A ``data_id`` that owns
+        nothing (mistyped, another dataset's, or already deleted) answers
+        ``status: "not_found"`` with zero counts — check ``status``, not just the HTTP
+        code, before treating a delete as verified.
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",

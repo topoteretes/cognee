@@ -19,7 +19,7 @@ from uuid import uuid4
 import pytest
 
 from cognee.api.v1.datasets.dto import DeleteDataReceiptDTO
-from cognee.api.v1.exceptions import DataDeletionIncompleteError, DocumentNotFoundError
+from cognee.api.v1.exceptions import DataDeletionIncompleteError
 from cognee.modules.graph.methods.deleted_graph_elements import DeletedGraphElements
 
 datasets_module = importlib.import_module("cognee.api.v1.datasets.datasets")
@@ -203,26 +203,55 @@ async def test_receipt_for_untracked_id_reports_no_data_record_and_nothing_obser
 
 
 @pytest.mark.asyncio
-async def test_untracked_id_that_owns_nothing_is_not_found():
-    """A mistyped id, or another dataset's id: no Data row and no graph element to
-    remove. That is a 404, not a success receipt with zero counts."""
+async def test_untracked_id_that_owns_nothing_reports_not_found():
+    """A mistyped id, another dataset's id, or an already-deleted one: no Data row
+    and no graph element to remove. The receipt says so (``status: not_found``,
+    zero counts) instead of ``success``; deleting stays idempotent, so it does not
+    raise, and ``delete_dataset_if_empty`` is still honoured — re-deleting the last
+    item can still drop the now-empty dataset."""
     dataset_id, data_id, user, dataset, _data = _fixture()
     session_invalidate = AsyncMock()
+    delete_dataset = AsyncMock()
 
-    with pytest.raises(DocumentNotFoundError) as excinfo:
-        await _run(
-            dataset_id,
-            data_id,
-            user,
-            dataset,
-            None,
-            DeletedGraphElements(),
-            session_invalidate=session_invalidate,
-        )
+    result = await _run(
+        dataset_id,
+        data_id,
+        user,
+        dataset,
+        None,
+        DeletedGraphElements(),
+        session_invalidate=session_invalidate,
+        delete_dataset=delete_dataset,
+    )
 
-    assert excinfo.value.status_code == 404
-    assert str(data_id) in excinfo.value.message
+    assert result == {
+        "status": "not_found",
+        "dataset_id": str(dataset_id),
+        "data_id": str(data_id),
+        "data_record_found": False,
+        "deleted_nodes": 0,
+        "deleted_edges": 0,
+        "data_remaining": None,
+        "dataset_deleted": False,
+    }
     session_invalidate.assert_not_awaited()
+    delete_dataset.assert_not_awaited()
+
+    result = await _run(
+        dataset_id,
+        data_id,
+        user,
+        dataset,
+        None,
+        DeletedGraphElements(),
+        delete_dataset_if_empty=True,
+        dataset_has_data=False,
+        delete_dataset=delete_dataset,
+    )
+
+    assert result["status"] == "not_found"
+    assert result["dataset_deleted"] is True
+    delete_dataset.assert_awaited_once_with(dataset)
 
 
 @pytest.mark.asyncio
