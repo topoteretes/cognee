@@ -1,5 +1,6 @@
 """Explicit, permission-checked promotion of one persisted memory snapshot."""
 
+import asyncio
 import hashlib
 import io
 from dataclasses import dataclass
@@ -13,6 +14,7 @@ from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.files.storage import get_file_storage
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
+from cognee.modules.cognify.routing import CognifyRoute, cognify_route_for
 from cognee.modules.data.methods.get_authorized_dataset import get_authorized_dataset
 from cognee.modules.data.models import Data
 from cognee.modules.users.methods import get_user
@@ -43,6 +45,30 @@ async def _get_data(data_id: UUID, dataset_id: UUID) -> Data | None:
         ).scalar_one_or_none()
 
 
+_READ_CHUNK = 1024 * 1024
+
+
+def _read_and_digest(stream, max_bytes: int) -> tuple[bytes, str, str]:
+    """Read at most ``max_bytes + 1`` bytes and hash them in one pass.
+
+    Blocking by design: it runs in a worker thread. Both digests are fed as
+    the chunks arrive so the payload is traversed once, and the read stops as
+    soon as the bound is exceeded.
+    """
+    md5, sha256 = hashlib.md5(), hashlib.sha256()
+    parts: list[bytes] = []
+    remaining = max_bytes + 1
+    while remaining > 0:
+        chunk = stream.read(min(_READ_CHUNK, remaining))
+        if not chunk:
+            break
+        parts.append(chunk)
+        md5.update(chunk)
+        sha256.update(chunk)
+        remaining -= len(chunk)
+    return b"".join(parts), md5.hexdigest(), sha256.hexdigest()
+
+
 async def _persist_copy(row, content, provenance, actor, target, target_id) -> bool:
     """Insert only: a concurrent retry must never UPDATE an existing memory."""
     storage = get_file_storage(get_base_config().data_root_directory)
@@ -67,7 +93,9 @@ async def _persist_copy(row, content, provenance, actor, target, target_id) -> b
         loader_engine=row.loader_engine,
         raw_data_location=location,
         original_data_location=location,
-        content_hash=row.raw_content_hash,
+        # ingest_data dedups on the original file's hash, so a later add() of
+        # the same original into the destination must find this row.
+        content_hash=row.content_hash,
         raw_content_hash=row.raw_content_hash,
         data_size=len(content),
         token_count=-1,
@@ -192,16 +220,29 @@ async def promote(
     row = await _get_data(data_id, source_dataset_id)
     if row is None:
         raise ValueError("Selected memory is unavailable in the source dataset")
+    # The copy keeps none of the source's system_metadata, and cognify reads
+    # its route from that stamp: a code file, a code_repo manifest or a DLT
+    # manifest would be re-cognified as plain text in the destination (the
+    # manifests also point at clone paths and source configs that mean nothing
+    # there). Only standard documents promote.
+    if cognify_route_for(row) is not CognifyRoute.STANDARD:
+        raise ValueError(
+            "Only standard documents can be promoted; code files and code/DLT manifests "
+            "must be re-added in the destination dataset"
+        )
     stored_digest = row.raw_content_hash
     if not stored_digest:
         raise ValueError("Source memory lacks a content revision; re-ingest before promotion")
+    if row.data_size is not None and row.data_size > max_bytes:
+        raise ValueError("Selected memory exceeds max_bytes")
+    # The file handle is blocking (local open(), or an s3fs handle whose only
+    # async part is the open), so read and hash off the event loop.
     async with open_data_file(row.raw_data_location, "rb") as stream:
-        content = stream.read(max_bytes + 1)
+        content, digest, revision = await asyncio.to_thread(_read_and_digest, stream, max_bytes)
     if len(content) > max_bytes:
         raise ValueError("Selected memory exceeds max_bytes")
-    if hashlib.md5(content).hexdigest() != stored_digest:
+    if digest != stored_digest:
         raise ValueError("Source changed during promotion; retry with the current revision")
-    revision = hashlib.sha256(content).hexdigest()
     target_id = uuid5(
         NAMESPACE_URL,
         f"cognee:promotion:v1:{source_dataset_id}:{data_id}:{revision}:{target_dataset_id}",
