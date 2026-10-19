@@ -143,7 +143,7 @@ The bundled GLiNER extractor is a demo of Cognee's small-model pipeline. For a p
 ```python
 import os
 
-os.environ["LLM_API_KEY"] = "YOUR OPENAI_API_KEY"
+os.environ["LLM_API_KEY"] = "YOUR_OPENAI_API_KEY"
 ```
 Alternatively, create a `.env` file using our [template](https://github.com/topoteretes/cognee/blob/main/.env.template).
 
