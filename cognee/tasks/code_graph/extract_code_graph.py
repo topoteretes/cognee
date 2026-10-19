@@ -1380,30 +1380,18 @@ async def add_code_graph_docs(
     repository indexed before docstrings were stored, or with them switched
     off, gets them on its next sync.
 
-    Best effort: a tail that fails (no usable embedding provider, say) is
-    logged with the switches that address it, and the route goes on with the
-    code graph it just built -- the item completes and the run is not rolled
-    back, which would remove that graph too. The docstrings are stored on the
-    next sync, or by cognify_code_docs_pipeline. Passthrough: returns
-    data_points unchanged.
+    Fails fast: a tail that raises (no usable embedding provider, say) fails
+    the item like any other task, and the pipeline's rollback handles the
+    run. CODE_GRAPH_DOCS=false or cognify(code_docs=False) builds the code
+    graph without docstrings; a keyless install that sets COGNEE_SKIP_PREFLIGHT,
+    COGNEE_SKIP_CONNECTION_TEST or MOCK_EMBEDDING names EMBEDDING_PROVIDER=fastembed
+    to embed locally. Passthrough: returns data_points unchanged.
     """
     from cognee.tasks.code_docs import code_docs_tail
 
     sources = code_graph_repo_sources(data_points, repo_path, snapshot_dir)
     for repo in sorted(sources):
-        try:
-            counts = await code_docs_tail(repo=repo, ctx=ctx, repo_path=sources[repo])
-        except Exception:
-            logger.exception(
-                "Code docs of repository '%s' were not stored; its code graph is kept. "
-                "CODE_GRAPH_DOCS=false builds code graphs without docstrings; otherwise name "
-                "an embedding provider (EMBEDDING_PROVIDER=fastembed runs locally without a "
-                "key -- the keyless fallback to it is off while COGNEE_SKIP_PREFLIGHT, "
-                "COGNEE_SKIP_CONNECTION_TEST or MOCK_EMBEDDING is set). "
-                "cognify_code_docs_pipeline stores the docstrings once that is fixed.",
-                repo,
-            )
-            continue
+        counts = await code_docs_tail(repo=repo, ctx=ctx, repo_path=sources[repo])
         logger.info("Code docs stored for repository '%s': %s", repo, counts)
     return data_points
 

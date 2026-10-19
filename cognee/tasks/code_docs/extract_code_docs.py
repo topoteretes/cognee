@@ -503,7 +503,7 @@ def _extract_repository(
         document = CodeDocument(
             id=code_document_id(repo, file_path),
             name=file_path,
-            raw_data_location=os.path.join(repo_path, file_path)
+            raw_data_location=os.path.normpath(os.path.join(repo_path, file_path))
             if repo_path is not None and file_docs.readable
             else file_path,
             external_metadata=normalize_external_metadata(

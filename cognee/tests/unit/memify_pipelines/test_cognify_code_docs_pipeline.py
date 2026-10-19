@@ -27,8 +27,13 @@ graph_engine_module = importlib.import_module(
 
 EMBED_ONLY_NAMES = ["extract_code_docs", "store_code_docs", "add_code_doc_edges"]
 ENTITY_ENRICHMENT_NAMES = ["cognify_code_doc_chunks", "store_code_docs", "add_code_doc_edges"]
-EXTRACT_TARGET = "cognee.tasks.code_docs.cognify_code_doc_chunks.extract_graph_and_summarize"
-CONFIG_TARGET = "cognee.tasks.code_docs.cognify_code_doc_chunks.get_cognify_config"
+# The submodule itself: ``cognee.tasks.code_docs`` re-exports the function
+# ``cognify_code_doc_chunks`` under the same name, and on Python 3.10
+# ``mock.patch`` of the dotted string resolves that attribute (the function)
+# instead of the module, so the names are patched on the module object.
+_CHUNKS_MODULE = importlib.import_module("cognee.tasks.code_docs.cognify_code_doc_chunks")
+EXTRACT_NAME = "extract_graph_and_summarize"
+CONFIG_NAME = "get_cognify_config"
 SUMMARY_READ = [{"type": ["TextSummary", "DocumentChunk"]}]
 
 
@@ -138,9 +143,13 @@ def test_every_task_is_a_coroutine_so_the_sweep_sees_the_whole_run(extract_entit
 
 
 def test_batch_size_follows_the_cognify_config():
-    with patch(CONFIG_TARGET, return_value=SimpleNamespace(chunks_per_batch=None)):
+    with patch.object(
+        _CHUNKS_MODULE, CONFIG_NAME, return_value=SimpleNamespace(chunks_per_batch=None)
+    ):
         assert cognify_chunks_per_batch() == 2000
-    with patch(CONFIG_TARGET, return_value=SimpleNamespace(chunks_per_batch=7)):
+    with patch.object(
+        _CHUNKS_MODULE, CONFIG_NAME, return_value=SimpleNamespace(chunks_per_batch=7)
+    ):
         assert cognify_chunks_per_batch() == 7
         _extraction, enrichment = get_code_docs_memify_tasks(extract_entities=True)
         assert enrichment[0].default_params["kwargs"]["chunks_per_batch"] == 7
@@ -163,7 +172,9 @@ async def test_cognify_code_doc_chunks_runs_extraction_one_cognify_batch_at_a_ti
         pieces.append([chunk.chunk_index for chunk in data_chunks])
         return [TextSummary(text=f"summary {c.chunk_index}", made_from=c) for c in data_chunks]
 
-    with patch(EXTRACT_TARGET, new=AsyncMock(side_effect=fake_extract)) as extract:
+    with patch.object(
+        _CHUNKS_MODULE, EXTRACT_NAME, new=AsyncMock(side_effect=fake_extract)
+    ) as extract:
         result = await cognify_code_doc_chunks([document, *chunks], ctx=ctx, chunks_per_batch=2)
 
     # The documents are dropped (extraction reads chunk text); the chunks are
@@ -180,8 +191,8 @@ async def test_cognify_code_doc_chunks_runs_extraction_one_cognify_batch_at_a_ti
     # Without an explicit size the pieces are cognify's chunks_per_batch.
     pieces.clear()
     with (
-        patch(CONFIG_TARGET, return_value=SimpleNamespace(chunks_per_batch=3)),
-        patch(EXTRACT_TARGET, new=AsyncMock(side_effect=fake_extract)),
+        patch.object(_CHUNKS_MODULE, CONFIG_NAME, return_value=SimpleNamespace(chunks_per_batch=3)),
+        patch.object(_CHUNKS_MODULE, EXTRACT_NAME, new=AsyncMock(side_effect=fake_extract)),
     ):
         await cognify_code_doc_chunks(chunks)
     assert pieces == [[0, 1, 2], [3, 4]]
@@ -206,7 +217,9 @@ async def test_cognify_code_doc_chunks_sends_only_unsummarized_chunks_to_the_llm
     async def fake_extract(data_chunks, graph_model, ctx):
         return [TextSummary(text=f"summary {c.chunk_index}", made_from=c) for c in data_chunks]
 
-    with patch(EXTRACT_TARGET, new=AsyncMock(side_effect=fake_extract)) as extract:
+    with patch.object(
+        _CHUNKS_MODULE, EXTRACT_NAME, new=AsyncMock(side_effect=fake_extract)
+    ) as extract:
         result = await cognify_code_doc_chunks([document, *chunks], chunks_per_batch=10)
 
     # Only the new chunks reached the LLM, in one piece.
@@ -230,7 +243,7 @@ async def test_cognify_code_doc_chunks_passes_a_chunkless_batch_through(graph):
     # Nothing to extract from: the batch goes on as it is (its documents reach
     # storage, an empty run still reaches the sweep), without a graph read.
     documents = [_document()]
-    with patch(EXTRACT_TARGET, new=AsyncMock()) as extract:
+    with patch.object(_CHUNKS_MODULE, EXTRACT_NAME, new=AsyncMock()) as extract:
         assert await cognify_code_doc_chunks(documents) is documents
         assert await cognify_code_doc_chunks([]) == []
     extract.assert_not_awaited()
