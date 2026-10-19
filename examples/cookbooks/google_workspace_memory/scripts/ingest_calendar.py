@@ -5,7 +5,8 @@ same client links across meetings. Calendar comes in through cognee's Google Cal
 connector, `google_calendar_source`. Needs credentials.json (a Google OAuth Desktop client)
 in the cookbook folder; calendar_token.json is written there on the first run. The first run
 reads the whole calendar, past and future; later runs fetch only what changed. With
---sample, it reads the events setup.py wrote instead.
+--sample, it reads the events setup.py wrote into the dataset `google_workspace_memory_sample`
+instead.
 
 Run alone: uv run python examples/cookbooks/google_workspace_memory/scripts/ingest_calendar.py [--sample]
 """
@@ -22,6 +23,7 @@ from cognee.tasks.ingestion.connectors import google_calendar_source
 from cognee.tasks.ingestion.connectors.google_calendar import GoogleCalendarSettings
 
 DATASET = "google_workspace_memory"  # the same in every script
+SAMPLE_DATASET = "google_workspace_memory_sample"  # the sample never mixes with your data
 COOKBOOK_DIR = Path(__file__).parent.parent
 CREDENTIALS, TOKEN = COOKBOOK_DIR / "credentials.json", COOKBOOK_DIR / "calendar_token.json"
 SAMPLE = COOKBOOK_DIR / "sample" / "calendar"
@@ -31,7 +33,7 @@ async def ingest_calendar(sample: bool = False) -> None:
     if sample:
         events = [path.read_text() for path in sorted(SAMPLE.glob("*.txt"))]
         await cognee.remember(
-            events, dataset_name=DATASET, node_set=["calendar"], self_improvement=False
+            events, dataset_name=SAMPLE_DATASET, node_set=["calendar"], self_improvement=False
         )
         print(f"[ingest_calendar] Remembered {len(events)} sample calendar events")
         return
@@ -54,7 +56,6 @@ async def ingest_calendar(sample: bool = False) -> None:
         node_set=["calendar"],
         write_disposition="merge",  # the connector's rows are merged by event id
         primary_key="id",
-        max_rows_per_table=0,
         self_improvement=False,
     )
     stats = source.cognee_sync_stats

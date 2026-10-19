@@ -11,6 +11,7 @@ missing, 1 a script failed (its message says why).
 
 import argparse
 import asyncio
+import importlib.util
 import os
 import sys
 from pathlib import Path
@@ -25,6 +26,8 @@ from scripts.ingest_gmail import email_count, ingest_gmail
 from setup import write_sample
 
 COOKBOOK_DIR = Path(__file__).parent
+# Installed by any of the extras gmail, google-drive and google-calendar.
+GOOGLE_LIBRARIES = ("googleapiclient", "google_auth_oauthlib")
 
 
 def missing_setup(args: argparse.Namespace) -> list[str]:
@@ -36,6 +39,11 @@ def missing_setup(args: argparse.Namespace) -> list[str]:
         missing.append("Every app is skipped; drop one of --no-calendar, --no-gmail, --no-drive.")
     if args.sample:  # the sample replaces all three apps
         return missing
+    if not all(importlib.util.find_spec(name) for name in GOOGLE_LIBRARIES):
+        missing.append(
+            "Google client libraries are not installed "
+            "(uv sync --extra gmail --extra google-drive --extra google-calendar)."
+        )
     if not (COOKBOOK_DIR / "credentials.json").exists():
         missing.append("Google OAuth client not found at credentials.json in the cookbook folder.")
     if not args.no_drive and not os.environ.get("GOOGLE_DRIVE_FOLDER_ID"):
@@ -45,14 +53,14 @@ def missing_setup(args: argparse.Namespace) -> list[str]:
 
 async def run(args: argparse.Namespace) -> None:
     if args.clear:
-        await clear()
+        await clear(args.sample)
     if not args.no_calendar:
         await ingest_calendar(args.sample)
     if not args.no_gmail:
         await ingest_gmail(args.emails, args.sample)
     if not args.no_drive:
         await ingest_drive(args.sample)
-    await ask(args.ask)
+    await ask(args.ask, args.sample)
 
 
 if __name__ == "__main__":
@@ -72,6 +80,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     import cognee  # loads .env, so keys set there are seen by the check
+    from cognee.exceptions import CogneeApiError
 
     if not args.sample and not (COOKBOOK_DIR / "credentials.json").exists():
         print("[setup] No Google OAuth client is set up, so this runs on the sample.")
@@ -94,4 +103,10 @@ if __name__ == "__main__":
     if args.sample:
         write_sample()
         print("[setup] Wrote the sample from setup.py.")
-    asyncio.run(run(args))
+    try:
+        asyncio.run(run(args))
+    # cognee wraps connector and pipeline failures in CogneeApiError; OSError covers network
+    # and file errors. A script's own SystemExit already printed its reason.
+    except (CogneeApiError, OSError) as error:
+        print(f"[error] {type(error).__name__}: {error}")
+        sys.exit(1)

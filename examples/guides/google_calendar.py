@@ -42,13 +42,11 @@ DATASET_NAME = "google_calendar_demo"
 CALENDARS = ["primary"]
 
 # "merge" is required: it makes re-runs incremental and propagates deleted
-# events through orphan cleanup. max_rows_per_table=0 lifts the default
-# 50-row read cap, which a calendar exceeds.
+# events through orphan cleanup.
 REMEMBER_KWARGS = {
     "dataset_name": DATASET_NAME,
     "primary_key": "id",
     "write_disposition": "merge",
-    "max_rows_per_table": 0,
 }
 
 

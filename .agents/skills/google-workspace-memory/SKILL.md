@@ -18,7 +18,8 @@ Run every command from the repo root.
 Without `credentials.json` in the cookbook folder, the commands below run on a sample
 workspace (the `[setup]` line says so) and answer about a fictional ceramics business; only
 `LLM_API_KEY` is needed. Tell the user the answer is about sample data. Add `--sample` to
-use the sample even when their account is set up.
+use the sample even when their account is set up. The sample lives in its own dataset,
+`google_workspace_memory_sample`, and never mixes with the user's data.
 
 1. Run `uv run python examples/cookbooks/google_workspace_memory/google_workspace_memory.py --check`.
    - Exit 0: go to step 2.
@@ -34,19 +35,19 @@ use the sample even when their account is set up.
    which sources went in (the `[ingest_calendar]`, `[ingest_gmail]` and `[ingest_drive]`
    lines).
 4. If a script fails, `google_workspace_memory.py` exits 1 with a line naming what went
-   wrong. Run that script from `examples/cookbooks/google_workspace_memory/scripts/` on its
+   wrong (a `[ingest_*]`, `[ask]` or `[error]` line). Run that script from `examples/cookbooks/google_workspace_memory/scripts/` on its
    own to look closer.
 
 For a follow-up question on the same data, run
-`uv run python examples/cookbooks/google_workspace_memory/scripts/ask.py --ask "..."`; it
-doesn't ingest again.
+`uv run python examples/cookbooks/google_workspace_memory/scripts/ask.py --ask "..."`, with
+`--sample` if the first run was on the sample; it doesn't ingest again.
 
 ## Rules
 
 - Google access is read-only: nothing is created, changed or sent.
 - Don't print the contents of `credentials.json`, the `*_token.json` files or `.env`.
-- A sample run forgets the cookbook's dataset `google_workspace_memory` before it ingests
-  (the `[clear]` line). On the user's own data, pass `--clear` only when they asked to
+- A sample run forgets the sample's dataset `google_workspace_memory_sample` before it
+  ingests (the `[clear]` line). On the user's own data (`google_workspace_memory`), pass `--clear` only when they asked to
   start over: it forgets everything the dataset holds.
 - Ingesting reads the user's real calendar, mailbox and Drive files, and every run uses LLM
   credits. The first run cognifies the whole primary calendar, which can take ten minutes
@@ -56,4 +57,5 @@ doesn't ingest again.
 
 ```bash
 uv run cognee-cli forget --dataset google_workspace_memory
+uv run cognee-cli forget --dataset google_workspace_memory_sample
 ```

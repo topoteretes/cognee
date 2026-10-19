@@ -4,7 +4,8 @@ Gmail comes in through cognee's Gmail connector, `gmail_source`. Needs credentia
 Google OAuth Desktop client) in the cookbook folder; gmail_token.json is written there on
 the first run. Each run is a snapshot of the newest emails: those already remembered are
 skipped, and emails that left the newest N (archived, deleted or pushed out by new mail)
-are forgotten. With --sample, it reads the emails setup.py wrote instead.
+are forgotten. With --sample, it reads the emails setup.py wrote into the dataset
+`google_workspace_memory_sample` instead.
 
 Run alone: uv run python examples/cookbooks/google_workspace_memory/scripts/ingest_gmail.py [--emails N] [--sample]
 """
@@ -20,6 +21,7 @@ import cognee
 from cognee.tasks.ingestion.connectors import gmail_source
 
 DATASET = "google_workspace_memory"  # the same in every script
+SAMPLE_DATASET = "google_workspace_memory_sample"  # the sample never mixes with your data
 COOKBOOK_DIR = Path(__file__).parent.parent
 CREDENTIALS, TOKEN = COOKBOOK_DIR / "credentials.json", COOKBOOK_DIR / "gmail_token.json"
 SAMPLE = COOKBOOK_DIR / "sample" / "gmail"
@@ -37,7 +39,7 @@ async def ingest_gmail(count: int = 50, sample: bool = False) -> None:
     if sample:
         emails = [path.read_text() for path in sorted(SAMPLE.glob("*.txt"))]
         await cognee.remember(
-            emails, dataset_name=DATASET, node_set=["email"], self_improvement=False
+            emails, dataset_name=SAMPLE_DATASET, node_set=["email"], self_improvement=False
         )
         print(f"[ingest_gmail] Remembered {len(emails)} sample emails")
         return

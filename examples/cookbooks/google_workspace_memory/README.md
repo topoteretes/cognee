@@ -19,7 +19,7 @@ Agents run this cookbook through the `google-workspace-memory` skill,
 | `credentials.json` | Google OAuth client, type *Desktop app*, with the Calendar, Gmail and Drive APIs enabled in Google Cloud | the cookbook folder, next to `google_workspace_memory.py` |
 | `calendar_token.json`, `gmail_token.json`, `drive_token.json` | Written on the first run, after you consent in the browser, one per app. Scopes: `calendar.readonly`, `gmail.readonly`, `drive.readonly` | the cookbook folder, created for you |
 | `GOOGLE_DRIVE_FOLDER_ID` | The Drive folder to remember: the ID at the end of its URL | `.env` at the repo root |
-| `cognee[gmail,google-drive,google-calendar]` | The Google client libraries | `uv sync --extra gmail --extra google-drive --extra google-calendar` |
+| `cognee[gmail,google-drive,google-calendar]` | The Google client libraries; `--check` reports them missing | `uv sync --extra gmail --extra google-drive --extra google-calendar` |
 
 To create `credentials.json`: in the Google Cloud Console, enable the Google Calendar, Gmail
 and Google Drive APIs. In Google Auth Platform, add your account as a test user (Audience),
@@ -44,13 +44,13 @@ uv run python examples/cookbooks/google_workspace_memory/google_workspace_memory
 ```
 
 Without `credentials.json`, the script runs `setup.py` itself and uses the sample, as below.
-Pass `--sample` to use it even when your own Google account is set up. A sample run first
-forgets the cookbook's dataset (`google_workspace_memory`), so copies from an earlier run
-(the sample is dated relative to today, so it changes daily) never mix with this one.
-`--no-clear` keeps it.
+Pass `--sample` to use it even when your own Google account is set up. The sample lives in
+its own dataset, `google_workspace_memory_sample`, so it never mixes with your own data. A
+sample run first forgets that dataset, so copies from an earlier run (the sample is dated
+relative to today, so it changes daily) never mix with this one. `--no-clear` keeps it.
 
 ```text
-[clear] Forgot the dataset google_workspace_memory
+[clear] Forgot the dataset google_workspace_memory_sample
 [ingest_calendar] Remembered 4 sample calendar events
 [ingest_gmail] Remembered 4 sample emails
 [ingest_drive] Remembered 1 sample Drive file
@@ -103,13 +103,14 @@ script also runs alone with the same options.
 | # | Command (`uv run python examples/cookbooks/google_workspace_memory/...`) | Does | Writes |
 |---|---|---|---|
 | 0 | `google_workspace_memory.py --check` | Reports what is missing. Does no work | nothing |
-| 1 | `scripts/clear.py` (or `--clear`) | Forgets the dataset `google_workspace_memory`. Runs first with `--clear`, which is on by default for a sample run (`--no-clear` turns it off) | cognee dataset |
+| 1 | `scripts/clear.py [--sample]` (or `--clear`) | Forgets the dataset `google_workspace_memory` (with `--sample`, `google_workspace_memory_sample`). Runs first with `--clear`, which is on by default for a sample run (`--no-clear` turns it off) | cognee dataset |
 | 2 | `scripts/ingest_calendar.py [--sample]` | Remembers every event of your primary calendar, past and future, through cognee's Google Calendar connector `google_calendar_source` (node set `calendar`) | cognee dataset |
 | 3 | `scripts/ingest_gmail.py [--emails N] [--sample]` | Remembers the newest 50 inbox emails by default (`--emails N`, at least 1), through cognee's Gmail connector `gmail_source` (node set `email`). Emails that leave the newest N are forgotten on the next run | cognee dataset |
-| 4 | `scripts/ingest_drive.py [--sample]` | Remembers the Docs, Sheets (first sheet, as CSV), PDFs and text files in `GOOGLE_DRIVE_FOLDER_ID` and its subfolders (files over 25 MB are skipped), through cognee's Google Drive connector `google_drive_source` (node set `drive`) | cognee dataset |
-| 5 | `scripts/ask.py [--ask "question"]` | Answers one question across all three with a `HYBRID_COMPLETION` recall. Today's date goes into the question; the default prepares your client meetings of the next seven days | nothing |
+| 4 | `scripts/ingest_drive.py [--sample]` | Remembers the Docs, Sheets (first sheet, as CSV), PDFs and text files in `GOOGLE_DRIVE_FOLDER_ID` and its subfolders (PDFs and text files over 25 MB are skipped; `GOOGLE_DRIVE_INCLUDE_SUBFOLDERS` and `GOOGLE_DRIVE_MAX_FILE_SIZE_MB` in `.env` change these defaults), through cognee's Google Drive connector `google_drive_source` (node set `drive`) | cognee dataset |
+| 5 | `scripts/ask.py [--ask "question"] [--sample]` | Answers one question across all three with a `HYBRID_COMPLETION` recall. Today's date goes into the question; the default prepares your client meetings of the next seven days | nothing |
 
-All scripts use the cognee dataset `google_workspace_memory`, named once in each script.
+All scripts use the cognee dataset `google_workspace_memory`, or `google_workspace_memory_sample`
+with `--sample`, named once in each script.
 
 ## Run it
 
@@ -129,7 +130,7 @@ The output looks like this (an illustration; yours comes from your own account):
 [ingest_gmail] Remembering your newest 50 inbox emails…
 [ingest_gmail] Remembered your newest inbox emails: 50 read
 [ingest_drive] Remembering your Drive folder. The first run reads every file in it…
-[ingest_drive] Remembered your Drive folder: 3 files read
+[ingest_drive] Remembered your Drive folder: 3 new or changed files checked
 [ask] Which client meetings do I have in the next seven days? ...
 [ask] Answer:
 
@@ -149,4 +150,5 @@ forget the dataset `google_workspace_memory` first and start over.
 
 ```bash
 uv run cognee-cli forget --dataset google_workspace_memory
+uv run cognee-cli forget --dataset google_workspace_memory_sample
 ```
