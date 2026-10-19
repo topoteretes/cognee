@@ -1,11 +1,13 @@
 """``datasets.delete_data`` returns a verifiable deletion receipt.
 
-The receipt keeps the historical ``{"status": "success"}`` key and adds what
-was removed (``deleted_nodes`` / ``deleted_edges``), whether a Data row existed
-(``data_record_found``), and — observed from a re-list after the delete, not
-inferred — whether the Data row is still present (``data_remaining``). A caller
-that needs proof of removal reads ``data_remaining is False`` instead of
-listing the dataset itself.
+A returned receipt means the delete succeeded: an id with nothing to remove
+raises ``DocumentNotFoundError`` (404) and a Data row that survives the delete
+raises ``DataDeletionIncompleteError`` (500), so ``status`` can never contradict
+the outcome. The receipt keeps the historical ``{"status": "success"}`` key and
+adds what was removed (``deleted_nodes`` / ``deleted_edges``), whether a Data row
+existed (``data_record_found``) and ``data_remaining`` — ``False`` observed by a
+single-row existence check after the delete, ``None`` when no row existed.
+``DeleteDataReceiptDTO`` is the one definition of the shape.
 """
 
 import importlib
@@ -16,6 +18,8 @@ from uuid import uuid4
 
 import pytest
 
+from cognee.api.v1.datasets.dto import DeleteDataReceiptDTO
+from cognee.api.v1.exceptions import DataDeletionIncompleteError, DocumentNotFoundError
 from cognee.modules.graph.methods.deleted_graph_elements import DeletedGraphElements
 
 datasets_module = importlib.import_module("cognee.api.v1.datasets.datasets")
@@ -28,11 +32,23 @@ async def _context(*_args, **_kwargs):
     yield
 
 
-def _patches(dataset, listings, deleted_elements, delete_dataset=None):
-    """Patch the delete path for the relational-ledger branch."""
+def _patches(
+    dataset,
+    data,
+    deleted_elements,
+    *,
+    row_remaining=False,
+    dataset_has_data=True,
+    delete_dataset=None,
+    has_dataset_data=None,
+    session_invalidate=None,
+):
+    """Patch the delete path. ``data`` is the row ``get_data`` resolves (None for
+    the custom-graph-model path); ``row_remaining`` is what the post-delete
+    existence check observes."""
     return (
         patch.object(datasets_module, "get_authorized_dataset", AsyncMock(return_value=dataset)),
-        patch.object(datasets_module, "get_dataset_data", AsyncMock(side_effect=listings)),
+        patch.object(data_methods_module, "get_data", AsyncMock(return_value=data)),
         patch.object(datasets_module, "set_database_global_context_variables", _context),
         patch.object(datasets_module, "has_data_related_nodes", AsyncMock(return_value=True)),
         patch.object(
@@ -40,34 +56,44 @@ def _patches(dataset, listings, deleted_elements, delete_dataset=None):
             "delete_data_nodes_and_edges",
             AsyncMock(return_value=deleted_elements),
         ),
-        patch.object(data_methods_module, "resolve_data_id", AsyncMock(return_value=None)),
         patch.object(
-            datasets_module, "_invalidate_sessions_for_deleted_data_nonfatal", AsyncMock()
+            datasets_module,
+            "_invalidate_sessions_for_deleted_data_nonfatal",
+            session_invalidate or AsyncMock(),
         ),
         patch.object(data_methods_module, "delete_data", AsyncMock()),
+        patch.object(datasets_module, "has_data", AsyncMock(return_value=row_remaining)),
+        patch.object(
+            datasets_module,
+            "has_dataset_data",
+            has_dataset_data or AsyncMock(return_value=dataset_has_data),
+        ),
         patch.object(data_methods_module, "delete_dataset", delete_dataset or AsyncMock()),
     )
 
 
-async def _run(dataset_id, data_id, user, dataset, listings, deleted_elements, **kwargs):
-    delete_dataset = kwargs.pop("delete_dataset", None)
+async def _run(dataset_id, data_id, user, dataset, data, deleted_elements, **kwargs):
+    call_kwargs = {key: kwargs.pop(key) for key in ("delete_dataset_if_empty",) if key in kwargs}
     with ExitStack() as stack:
-        for patcher in _patches(dataset, listings, deleted_elements, delete_dataset):
+        for patcher in _patches(dataset, data, deleted_elements, **kwargs):
             stack.enter_context(patcher)
-        return await datasets_module.datasets.delete_data(dataset_id, data_id, user, **kwargs)
+        return await datasets_module.datasets.delete_data(dataset_id, data_id, user, **call_kwargs)
 
 
-@pytest.mark.asyncio
-async def test_receipt_reports_removed_elements_and_verified_absence():
+def _fixture():
     dataset_id, data_id, owner_id = uuid4(), uuid4(), uuid4()
     user = SimpleNamespace(id=uuid4())
     dataset = SimpleNamespace(id=dataset_id, owner_id=owner_id)
     data = SimpleNamespace(id=data_id, dataset_id=dataset_id)
-    other = SimpleNamespace(id=uuid4(), dataset_id=dataset_id)
+    return dataset_id, data_id, user, dataset, data
+
+
+@pytest.mark.asyncio
+async def test_receipt_reports_removed_elements_and_verified_absence():
+    dataset_id, data_id, user, dataset, data = _fixture()
     deleted = DeletedGraphElements(node_ids={"n1", "n2", "n3"}, edge_ids={"e1", "e2"})
 
-    # First listing finds the row; the post-delete re-list no longer shows it.
-    result = await _run(dataset_id, data_id, user, dataset, [[data, other], [other]], deleted)
+    result = await _run(dataset_id, data_id, user, dataset, data, deleted)
 
     assert result == {
         "status": "success",
@@ -82,30 +108,23 @@ async def test_receipt_reports_removed_elements_and_verified_absence():
 
 
 @pytest.mark.asyncio
-async def test_receipt_reports_data_remaining_when_relist_still_shows_the_row():
-    """``data_remaining`` is observed from the re-list, never assumed."""
-    dataset_id, data_id, owner_id = uuid4(), uuid4(), uuid4()
-    user = SimpleNamespace(id=uuid4())
-    dataset = SimpleNamespace(id=dataset_id, owner_id=owner_id)
-    data = SimpleNamespace(id=data_id, dataset_id=dataset_id)
+async def test_delete_fails_when_the_row_survives_instead_of_reporting_success():
+    """A Data row still present after the delete is a failed delete: raise, never
+    answer ``status: success`` with ``data_remaining: True``."""
+    dataset_id, data_id, user, dataset, data = _fixture()
 
-    result = await _run(
-        dataset_id, data_id, user, dataset, [[data], [data]], DeletedGraphElements()
-    )
+    with pytest.raises(DataDeletionIncompleteError) as excinfo:
+        await _run(
+            dataset_id, data_id, user, dataset, data, DeletedGraphElements(), row_remaining=True
+        )
 
-    assert result["status"] == "success"
-    assert result["data_record_found"] is True
-    assert result["data_remaining"] is True
-    assert result["deleted_nodes"] == 0
-    assert result["deleted_edges"] == 0
+    assert excinfo.value.status_code == 500
+    assert str(data_id) in excinfo.value.message
 
 
 @pytest.mark.asyncio
 async def test_receipt_marks_dataset_deleted_when_emptied_and_requested():
-    dataset_id, data_id, owner_id = uuid4(), uuid4(), uuid4()
-    user = SimpleNamespace(id=uuid4())
-    dataset = SimpleNamespace(id=dataset_id, owner_id=owner_id)
-    data = SimpleNamespace(id=data_id, dataset_id=dataset_id)
+    dataset_id, data_id, user, dataset, data = _fixture()
     delete_dataset = AsyncMock()
 
     result = await _run(
@@ -113,9 +132,10 @@ async def test_receipt_marks_dataset_deleted_when_emptied_and_requested():
         data_id,
         user,
         dataset,
-        [[data], []],
+        data,
         DeletedGraphElements(node_ids={"n1"}),
         delete_dataset_if_empty=True,
+        dataset_has_data=False,
         delete_dataset=delete_dataset,
     )
 
@@ -125,26 +145,50 @@ async def test_receipt_marks_dataset_deleted_when_emptied_and_requested():
 
 
 @pytest.mark.asyncio
-async def test_receipt_for_untracked_id_reports_no_data_record():
-    """The custom-graph-model path (no Data row) still returns a full receipt."""
-    dataset_id, data_id, owner_id = uuid4(), uuid4(), uuid4()
-    user = SimpleNamespace(id=uuid4())
-    dataset = SimpleNamespace(id=dataset_id, owner_id=owner_id)
+async def test_emptiness_is_a_count_query_and_only_when_requested():
+    """The receipt never lists the dataset: emptiness is ``has_dataset_data`` and it is
+    not even asked when the caller did not request the dataset's removal."""
+    dataset_id, data_id, user, dataset, data = _fixture()
+    has_dataset_data = AsyncMock(return_value=True)
+    delete_dataset = AsyncMock()
+
+    result = await _run(
+        dataset_id,
+        data_id,
+        user,
+        dataset,
+        data,
+        DeletedGraphElements(),
+        has_dataset_data=has_dataset_data,
+        delete_dataset=delete_dataset,
+    )
+    has_dataset_data.assert_not_awaited()
+    assert result["dataset_deleted"] is False
+
+    result = await _run(
+        dataset_id,
+        data_id,
+        user,
+        dataset,
+        data,
+        DeletedGraphElements(),
+        delete_dataset_if_empty=True,
+        has_dataset_data=has_dataset_data,
+        delete_dataset=delete_dataset,
+    )
+    has_dataset_data.assert_awaited_once_with(dataset_id)
+    delete_dataset.assert_not_awaited()
+    assert result["dataset_deleted"] is False
+
+
+@pytest.mark.asyncio
+async def test_receipt_for_untracked_id_reports_no_data_record_and_nothing_observed():
+    """The custom-graph-model path (no Data row) returns a receipt whose
+    ``data_remaining`` is ``None``: there was no row to verify the absence of."""
+    dataset_id, data_id, user, dataset, _data = _fixture()
     deleted = DeletedGraphElements(node_ids={"n1", "n2"}, edge_ids={"e1"})
 
-    with (
-        patch.object(datasets_module, "get_authorized_dataset", AsyncMock(return_value=dataset)),
-        patch.object(datasets_module, "get_dataset_data", AsyncMock(side_effect=[[], []])),
-        patch.object(datasets_module, "set_database_global_context_variables", _context),
-        patch.object(
-            datasets_module, "delete_data_nodes_and_edges", AsyncMock(return_value=deleted)
-        ),
-        patch.object(data_methods_module, "resolve_data_id", AsyncMock(return_value=None)),
-        patch.object(
-            datasets_module, "_invalidate_sessions_for_deleted_data_nonfatal", AsyncMock()
-        ),
-    ):
-        result = await datasets_module.datasets.delete_data(dataset_id, data_id, user)
+    result = await _run(dataset_id, data_id, user, dataset, None, deleted)
 
     assert result == {
         "status": "success",
@@ -153,73 +197,85 @@ async def test_receipt_for_untracked_id_reports_no_data_record():
         "data_record_found": False,
         "deleted_nodes": 2,
         "deleted_edges": 1,
-        "data_remaining": False,
+        "data_remaining": None,
         "dataset_deleted": False,
     }
+
+
+@pytest.mark.asyncio
+async def test_untracked_id_that_owns_nothing_is_not_found():
+    """A mistyped id, or another dataset's id: no Data row and no graph element to
+    remove. That is a 404, not a success receipt with zero counts."""
+    dataset_id, data_id, user, dataset, _data = _fixture()
+    session_invalidate = AsyncMock()
+
+    with pytest.raises(DocumentNotFoundError) as excinfo:
+        await _run(
+            dataset_id,
+            data_id,
+            user,
+            dataset,
+            None,
+            DeletedGraphElements(),
+            session_invalidate=session_invalidate,
+        )
+
+    assert excinfo.value.status_code == 404
+    assert str(data_id) in excinfo.value.message
+    session_invalidate.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_receipt_uses_resolved_legacy_id():
-    """A legacy id resolves to the current row; the receipt names the resolved id."""
-    dataset_id, legacy_id, resolved_id, owner_id = uuid4(), uuid4(), uuid4(), uuid4()
-    user = SimpleNamespace(id=uuid4())
-    dataset = SimpleNamespace(id=dataset_id, owner_id=owner_id)
-    data = SimpleNamespace(id=resolved_id, dataset_id=dataset_id)
+    """A legacy id resolves (inside ``get_data``) to the current row; the receipt
+    names the resolved id and the row delete targets that row."""
+    dataset_id, legacy_id, user, dataset, _data = _fixture()
+    resolved = SimpleNamespace(id=uuid4(), dataset_id=dataset_id)
 
-    with (
-        patch.object(datasets_module, "get_authorized_dataset", AsyncMock(return_value=dataset)),
-        patch.object(datasets_module, "get_dataset_data", AsyncMock(side_effect=[[data], []])),
-        patch.object(datasets_module, "set_database_global_context_variables", _context),
-        patch.object(datasets_module, "has_data_related_nodes", AsyncMock(return_value=True)),
-        patch.object(
-            datasets_module,
-            "delete_data_nodes_and_edges",
-            AsyncMock(return_value=DeletedGraphElements()),
-        ),
-        patch.object(data_methods_module, "resolve_data_id", AsyncMock(return_value=resolved_id)),
-        patch.object(
-            datasets_module, "_invalidate_sessions_for_deleted_data_nonfatal", AsyncMock()
-        ),
-        patch.object(data_methods_module, "delete_data", AsyncMock()),
-        patch.object(data_methods_module, "delete_dataset", AsyncMock()),
-    ):
+    with ExitStack() as stack:
+        for patcher in _patches(dataset, resolved, DeletedGraphElements()):
+            stack.enter_context(patcher)
+        delete_row = stack.enter_context(
+            patch.object(data_methods_module, "delete_data", AsyncMock())
+        )
+        get_data = stack.enter_context(
+            patch.object(data_methods_module, "get_data", AsyncMock(return_value=resolved))
+        )
         result = await datasets_module.datasets.delete_data(dataset_id, legacy_id, user)
 
-    assert result["data_id"] == str(resolved_id)
+    get_data.assert_awaited_once_with(user.id, legacy_id, dataset_id, verify_owner=False)
+    delete_row.assert_awaited_once_with(resolved, dataset_id)
+    assert result["data_id"] == str(resolved.id)
     assert result["data_record_found"] is True
     assert result["data_remaining"] is False
 
 
-@pytest.mark.asyncio
-async def test_forget_data_item_passes_the_receipt_through():
-    """``forget(data_id=...)`` exposes the receipt fields alongside its own keys."""
+def test_receipt_shape_is_the_dto():
+    """``_delete_data_receipt`` is derived from ``DeleteDataReceiptDTO``: same keys,
+    snake_case, ids as strings, and the dict re-validates through the model."""
     dataset_id, data_id = uuid4(), uuid4()
-    user = SimpleNamespace(id=uuid4())
-    receipt = {
-        "status": "success",
-        "dataset_id": str(dataset_id),
-        "data_id": str(data_id),
-        "data_record_found": True,
-        "deleted_nodes": 4,
-        "deleted_edges": 3,
-        "data_remaining": False,
-        "dataset_deleted": False,
-    }
 
-    with (
-        patch.object(forget_module, "_resolve_dataset_id", AsyncMock(return_value=dataset_id)),
-        patch.object(datasets_module.datasets, "delete_data", AsyncMock(return_value=receipt)),
-    ):
-        result = await forget_module._forget_data_item(data_id, dataset_id, user)
+    receipt = datasets_module._delete_data_receipt(
+        dataset_id=dataset_id,
+        data_id=data_id,
+        data_record_found=False,
+        deleted_elements=DeletedGraphElements(node_ids={"n1"}),
+        data_remaining=None,
+        dataset_deleted=False,
+    )
 
-    assert result == receipt
+    assert list(receipt) == list(DeleteDataReceiptDTO.model_fields)
+    assert receipt["dataset_id"] == str(dataset_id)
+    assert receipt["data_remaining"] is None
+    parsed = DeleteDataReceiptDTO.model_validate(receipt)
+    assert parsed.data_id == data_id
+    assert parsed.model_dump(mode="json") == receipt
 
 
 @pytest.mark.asyncio
-async def test_forget_data_item_keeps_the_resolved_id_over_a_legacy_input():
-    """A legacy id passed to ``forget`` resolves inside ``delete_data``; the
-    receipt names the resolved id and ``forget`` must not overwrite it with the
-    caller's legacy value."""
+async def test_forget_data_item_returns_the_receipt_unchanged():
+    """``forget(data_id=...)`` returns exactly what ``delete_data`` produced, so the
+    resolved ``data_id`` is never overwritten with the caller's (legacy) value."""
     dataset_id, legacy_id, resolved_id = uuid4(), uuid4(), uuid4()
     user = SimpleNamespace(id=uuid4())
     receipt = {
@@ -235,22 +291,25 @@ async def test_forget_data_item_keeps_the_resolved_id_over_a_legacy_input():
 
     with (
         patch.object(forget_module, "_resolve_dataset_id", AsyncMock(return_value=dataset_id)),
-        patch.object(datasets_module.datasets, "delete_data", AsyncMock(return_value=receipt)),
+        patch.object(
+            datasets_module.datasets, "delete_data", AsyncMock(return_value=receipt)
+        ) as delete_data,
     ):
         result = await forget_module._forget_data_item(legacy_id, dataset_id, user)
 
-    assert result["data_id"] == str(resolved_id)
-    assert result == receipt
+    assert result is receipt
+    delete_data.assert_awaited_once_with(
+        dataset_id=dataset_id, data_id=legacy_id, user=user, delete_dataset_if_empty=False
+    )
 
 
 def test_delete_route_answers_with_the_receipt_dto():
     """``DELETE /datasets/{id}/data/{id}`` declares ``DeleteDataReceiptDTO`` and
     serializes the receipt through it: every field present, camelCase on the wire,
-    ids as strings."""
+    ids as strings, ``dataRemaining`` nullable."""
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
-    from cognee.api.v1.datasets.dto import DeleteDataReceiptDTO
     from cognee.api.v1.datasets.routers.get_datasets_router import get_datasets_router
     from cognee.modules.users.methods import get_authenticated_user
 
@@ -259,10 +318,10 @@ def test_delete_route_answers_with_the_receipt_dto():
         "status": "success",
         "dataset_id": str(dataset_id),
         "data_id": str(data_id),
-        "data_record_found": True,
+        "data_record_found": False,
         "deleted_nodes": 4,
         "deleted_edges": 3,
-        "data_remaining": False,
+        "data_remaining": None,
         "dataset_deleted": False,
     }
 
@@ -294,10 +353,10 @@ def test_delete_route_answers_with_the_receipt_dto():
         "status": "success",
         "datasetId": str(dataset_id),
         "dataId": str(data_id),
-        "dataRecordFound": True,
+        "dataRecordFound": False,
         "deletedNodes": 4,
         "deletedEdges": 3,
-        "dataRemaining": False,
+        "dataRemaining": None,
         "datasetDeleted": False,
     }
     called_dataset_id, called_data_id, _user = delete_data.await_args.args

@@ -335,17 +335,25 @@ def get_datasets_router() -> APIRouter:
         A deletion receipt (``DeleteDataReceiptDTO``, camelCase on the wire): ``status``
         (``"success"``), ``datasetId``, ``dataId`` (the resolved id), ``dataRecordFound``
         (a Data row for the id existed), ``deletedNodes`` / ``deletedEdges`` (graph
-        elements removed), ``dataRemaining`` (``false`` when a re-list of the dataset
-        after the delete no longer shows the Data row — the verified outcome) and
-        ``datasetDeleted`` (always ``false`` here).
+        elements removed), ``dataRemaining`` (``false`` when an existence check after the
+        delete no longer finds the Data row — the verified outcome; ``null`` when no Data
+        row existed) and ``datasetDeleted`` (always ``false`` here).
+
+        Changed (SDK-1150): releases up to 1.6.x answered ``null`` (no body) on success.
+        Clients that asserted an empty 200 now receive the receipt; the ``status`` key
+        keeps its historical value.
 
         ## Error Codes
         - **401 Unauthorized**: Dataset doesn't exist or user lacks delete permission
-        - **500 Internal Server Error**: Error during deletion
+        - **404 Not Found**: No Data row for ``data_id`` in the dataset and no graph
+          elements owned by it (mistyped id, another dataset's id, or already deleted)
+        - **500 Internal Server Error**: The Data row was still present after the delete
+          (``DataDeletionIncompleteError``; retry), or another error during deletion
 
         ## Notes
-        Deleting a data_id not tracked in the dataset is treated as a custom-graph-model
-        deletion and returns success with ``data_record_found: false``.
+        A ``data_id`` with no Data row but with graph elements it owns is a custom-graph-
+        model deletion: those elements are removed and the receipt says
+        ``dataRecordFound: false``, ``dataRemaining: null``.
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
