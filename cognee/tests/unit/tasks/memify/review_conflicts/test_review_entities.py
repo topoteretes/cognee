@@ -1,10 +1,10 @@
+"""Which sections share a review call, what an oversized one loses, and how calls run."""
+
 import asyncio
 import importlib
 import re
-from copy import deepcopy
-from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
@@ -15,13 +15,22 @@ from cognee.modules.engine.models.FactConflict import FactConflict
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.tasks.memify.review_conflicts import read_facts
-from cognee.tasks.memify.review_conflicts.models import ReviewScope
-
-review_facts = importlib.import_module("cognee.tasks.memify.review_conflicts.review_facts")
-schema = importlib.import_module("cognee.tasks.memify.review_conflicts.schema")
-trim_facts_to_budget = importlib.import_module(
-    "cognee.tasks.memify.review_conflicts.trim_facts_to_budget"
+from cognee.tasks.memify.review_conflicts.build_review_prompt import build_review_prompt
+from cognee.tasks.memify.review_conflicts.models import ConflictsToFinalize, ReviewScope
+from cognee.tasks.memify.review_conflicts.select_review_facts import find_fact_comparisons
+from cognee.tests.unit.tasks.memify.review_conflicts.review_builders import (
+    alice_group_and_lone_statement,
+    build_prompt,
+    existing_conflict,
+    fact,
+    response,
 )
+
+review_entities = importlib.import_module("cognee.tasks.memify.review_conflicts.review_entities")
+select_review_facts = importlib.import_module(
+    "cognee.tasks.memify.review_conflicts.select_review_facts"
+)
+schema = importlib.import_module("cognee.tasks.memify.review_conflicts.schema")
 
 
 class WordTokenizer:
@@ -29,539 +38,318 @@ class WordTokenizer:
         return len(text.split())
 
 
-class CountingTokenizer(WordTokenizer):
-    """Counts measurements of the whole multi-line prompt, not of single lines."""
-
-    def __init__(self):
-        self.whole_text_counts = 0
-
-    def count_tokens(self, text):
-        self.whole_text_counts += "\n" in text
-        return super().count_tokens(text)
+def words(scope, subjects):
+    """One section's size as the planner measures it, in words."""
+    return WordTokenizer().count_tokens(build_prompt(scope, subjects).text)
 
 
-def fact(fact_id, target, date, *, relationship="has_ceo", text=None, source=None):
-    return {
-        "id": fact_id,
-        "source": source or ("acme" if relationship != "contains" else f"chunk-{fact_id}"),
-        "target": target,
-        "relationship": relationship,
-        "properties": {"edge_text": text or f"{target} is Acme's CEO", "conflict_marks": []},
-        "sources": [
-            {
-                "chunk_id": f"chunk-{fact_id}",
-                "data_id": f"doc-{fact_id}",
-                "document": f"{fact_id}.txt",
-                "effective_date": date,
-            }
-        ],
-        "effective_date": date,
-        "observed_at": None,
-    }
-
-
-def competing_context(scope):
-    """Alice competes with Bob for Acme's CEO, so Alice's own facts become Acme's context."""
-    scope.facts["e5"] = fact("e5", "english", "2026-06-01", relationship="speaks", source="alice")
-    scope.facts["e6"] = fact("e6", "german", "2026-06-02", relationship="speaks", source="alice")
-    scope.facts["e7"] = fact("e7", "acme", "2019-01-01", relationship="contains")
-
-
-@pytest.fixture
-def scope():
-    entities = {
-        name: {
-            "id": name,
-            "name": name.title(),
-            "types": ["Company" if name == "acme" else "Person"],
-        }
-        for name in ("acme", "alice", "bob")
-    }
-    return ReviewScope(
-        dataset_id="dataset",
-        entities=entities,
-        facts={"e1": fact("e1", "alice", "2020-05-01"), "e2": fact("e2", "bob", "2026-01-10")},
-        nodes=entities,
+def plan(scope, token_budget):
+    """The calls the planner packs, each as the facts its prompt shows per subject."""
+    comparisons = find_fact_comparisons(scope.facts, scope.nodes, scope.since)
+    calls = review_entities._plan_calls(
+        scope, comparisons, list(scope.entities), WordTokenizer(), token_budget, []
     )
+    return [build_review_prompt(scope, comparisons, call).shown_facts for call in calls]
 
 
 @pytest.fixture(autouse=True)
 def offline(monkeypatch):
-    monkeypatch.setattr(review_facts, "get_llm_tokenizer", lambda: WordTokenizer())
-    monkeypatch.setattr(review_facts, "get_llm_token_ceiling", lambda: 20_000)
+    monkeypatch.setattr(review_entities, "get_llm_tokenizer", lambda: WordTokenizer())
+    monkeypatch.setattr(review_entities, "get_llm_token_ceiling", lambda: 16_384)
 
 
-def response(**conflict):
-    return schema.ReviewOutput(
-        descriptions=[
-            schema.ReviewedEntity(entity=f"n{i}", description=name)
-            for i, name in enumerate(("Acme", "Alice", "Bob"), 1)
-        ],
-        conflicts=[
-            schema.ReviewedConflict(
-                about="n1",
-                attribute="ceo",
-                kind="time_varying",
-                text="Bob succeeded Alice.",
-                current=["r2"],
-                superseded=["r1"],
-                **conflict,
-            )
-        ],
+@pytest.fixture
+def every_entity_a_subject(monkeypatch):
+    """Review every entity of the scope, whether or not it has something to compare."""
+    monkeypatch.setattr(
+        review_entities, "select_subject_ids", lambda scope, comparisons: list(scope.entities)
     )
 
 
-def validate(scope, output):
-    call = review_facts.ReviewCall(scope, list(scope.entities))
-    return review_facts.validate_review_output(output, call, call.render())
+def test_calls_pack_whole_sections(scope):
+    """A section is never cut: a subject moves to the next call rather than lose a fact."""
+    alice_group_and_lone_statement(scope)
+    acme, alice, bob = (words(scope, [subject]) for subject in ("acme", "alice", "bob"))
+    assert plan(scope, acme + alice + bob) == [
+        {"acme": ["e2", "e1"], "alice": ["e6", "e5"], "bob": []},
+    ]
+    assert plan(scope, max(acme, alice + bob)) == [
+        {"acme": ["e2", "e1"]},
+        {"alice": ["e6", "e5"], "bob": []},
+    ]
 
 
-def test_dated_conflict_uses_relationship_identity_and_preserves_facts(scope):
-    before = deepcopy(scope.facts)
-    batch = validate(scope, response())
-    accepted = batch.conflicts[0]
-    assert accepted.conflict.attribute == "has_ceo"
-    assert accepted.conflict.status == "resolved"
-    assert accepted.conflict.values == ["alice", "bob"]
-    assert accepted.conflict.sources == ["chunk-e1", "chunk-e2"]
-    assert accepted.fact_statuses == {"e2": "current", "e1": "superseded"}
-    assert batch.scope is scope
-    assert scope.facts == before
+def section_words(scope, fact_ids):
+    """acme's section showing only these facts, as the planner measures it, in words."""
+    comparisons = find_fact_comparisons(scope.facts, scope.nodes, scope.since)
+    prompt = build_review_prompt(scope, comparisons, {"acme": fact_ids})
+    return WordTokenizer().count_tokens(prompt.text)
 
 
-@pytest.mark.parametrize(
-    "case", ["undated", "time_words", "fixed", "restored", "reversed", "mixed"]
-)
-def test_status_rules(scope, case):
-    output = response()
-    result = output.conflicts[0]
-    expected = "resolved"
-    if case in {"undated", "time_words"}:
-        for value in scope.facts.values():
-            value["effective_date"] = None
-            value["sources"][0]["effective_date"] = None
-        if case == "undated":
-            result.current = result.superseded = []
-            result.conflicting = ["r1", "r2"]
-            expected = "unresolved"
-        else:
-            scope.facts["e1"]["properties"]["edge_text"] = "Alice was the former CEO."
-    elif case == "fixed":
-        result.kind = "fixed"
-        expected = "unresolved"
-    elif case == "restored":
-        scope.facts["e1"]["effective_date"] = "2027-03-01"
-        result.current, result.superseded = ["r1"], ["r2"]
-    else:
-        scope.facts["e1"]["effective_date"] = "2027-03-01"
-        expected = "unresolved"
-        if case == "mixed":
-            scope.facts["e1"]["relationship"] = "led_by"
-            result.attribute = "CEO's Office"
-    accepted = validate(scope, output).conflicts[0]
-    assert accepted.conflict.status == expected
-    if expected == "unresolved":
-        assert set(accepted.fact_statuses.values()) == {"conflicting"}
-    if case in {"reversed", "mixed"}:
-        assert "dates disagree" in accepted.conflict.text
-    if case == "mixed":
-        assert accepted.conflict.attribute == "ceos office"
+def add_facts(scope, relationship, *people, date="2021-01-01"):
+    """One fact per person, acme --relationship--> person, numbered after the existing ones."""
+    scope.nodes = dict(scope.nodes)  # the fixture shares one dict for entities and nodes
+    for person in people:
+        scope.nodes[person] = {"id": person, "name": person.title(), "types": ["Person"]}
+        fact_id = f"e{len(scope.facts) + 1}"
+        scope.facts[fact_id] = fact(fact_id, person, date, relationship=relationship)
 
 
-@pytest.mark.parametrize(
-    "case",
-    ["unknown", "overlap", "unrelated", "duplicate", "no_descriptions", "unknown_subject", "empty"],
-)
-def test_invalid_output_rejects_call(scope, case):
-    output = response()
-    if case == "unknown":
-        output.conflicts[0].current = ["r99"]
-    elif case == "overlap":
-        output.conflicts[0].current = ["r1"]
-    elif case == "unrelated":
-        output.conflicts[0].about = "n2"
-    elif case == "duplicate":
-        output.conflicts.append(output.conflicts[0])
-    elif case == "no_descriptions":
-        output.descriptions.clear()
-    elif case == "unknown_subject":
-        output.descriptions[0].entity = "n99"
-    else:
-        output.conflicts[0].current = output.conflicts[0].superseded = []
-    with pytest.raises(ValueError):
-        validate(scope, output)
+def test_oversized_section_loses_list_like_names_first(scope, monkeypatch):
+    """works_with lists people and goes; the CEO facts still meet under their two names.
 
-
-def test_conflict_about_an_undescribed_subject_is_not_accepted(scope):
-    output = response()
-    output.descriptions = [item for item in output.descriptions if item.entity != "n1"]
-    batch = validate(scope, output)
-    assert batch.conflicts == []
-    assert batch.unreviewed_entity_ids == ["acme"]
-
-
-def existing_conflict(scope):
-    conflict = FactConflict(
+    A mark that another subject's conflict left on a works_with fact keeps nothing.
+    """
+    monkeypatch.setattr(select_review_facts, "MIN_LIST_VALUES", 3)
+    scope.facts["e1"]["relationship"] = "is_ceo_of"
+    scope.facts["e2"]["relationship"] = "ceo_of"
+    add_facts(scope, "works_with", "carol", "dave", "erin")  # e3 to e5
+    carols = FactConflict(
         dataset_id="dataset",
-        about_id="acme",
-        attribute="has_ceo",
+        about_id="carol",
+        attribute="employer",
         kind="time_varying",
         status="resolved",
-        text="Old explanation",
-        values=["alice", "bob"],
-        sources=["chunk-e1", "chunk-e2"],
+        text="Carol moved.",
+        values=["acme", "bob"],
+        sources=["chunk-e3"],
     )
-    scope.conflicts[str(conflict.id)] = conflict.model_dump(mode="json")
-    for value in scope.facts.values():
-        value["properties"]["conflict_marks"] = [
-            {"conflict_id": str(conflict.id), "status": "current"}
-        ]
-    return str(conflict.id)
+    scope.conflicts[str(carols.id)] = carols.model_dump(mode="json")
+    scope.facts["e3"]["properties"]["conflict_marks"] = [
+        {"conflict_id": str(carols.id), "status": "superseded"}
+    ]
+    logger = Mock()
+    monkeypatch.setattr(review_entities, "logger", logger)
+    calls = plan(scope, section_words(scope, ["e1", "e2"]))
+    assert [call["acme"] for call in calls if "acme" in call] == [["e2", "e1"]]
+    assert "works_with" in str(logger.warning.call_args_list)
 
 
-def test_drop_checks_all_surviving_support_and_replacement_collision(scope):
-    conflict_id = existing_conflict(scope)
-    output = response()
-    output.drop = ["f1"]
-    with pytest.raises(ValueError, match="replaced drop"):
-        validate(scope, output)
-    output.conflicts = []
-    assert validate(scope, output).dropped_conflict_ids == [conflict_id]
-    call = review_facts.ReviewCall(scope, list(scope.entities))
-    for ids in call.shown_facts.values():
-        ids.remove("e1")
-    assert (
-        review_facts.validate_review_output(output, call, call.render()).dropped_conflict_ids == []
+def test_oversized_section_loses_one_list_at_a_time_most_values_first(scope, monkeypatch):
+    """works_with, four people, goes first; then advises, which ties with mentors at three
+    and sorts first. mentors stays, because the section then fits."""
+    monkeypatch.setattr(select_review_facts, "MIN_LIST_VALUES", 3)
+    add_facts(scope, "works_with", "carol", "dave", "erin", "frank")  # e3 to e6
+    add_facts(scope, "advises", "gina", "hank", "ivy")  # e7 to e9
+    add_facts(scope, "mentors", "jack", "kate", "liam")  # e10 to e12
+    kept = ["e1", "e2", "e10", "e11", "e12"]
+    calls = plan(scope, section_words(scope, kept))
+    assert [set(call["acme"]) for call in calls if "acme" in call] == [set(kept)]
+
+
+def test_oversized_section_keeps_what_its_stored_conflict_needs(scope, monkeypatch):
+    """Kept: has_ceo, which the stored conflict marks, with its new values; e4, which
+    shares a cited chunk; and ceo_of, one value and so no list. Left out: e5 and e6."""
+    monkeypatch.setattr(select_review_facts, "MIN_LIST_VALUES", 2)
+    existing_conflict(scope)  # marks e1 and e2, cites chunk-e1 and chunk-e2
+    add_facts(scope, "has_ceo", "carol", date="2027-01-01")  # e3
+    add_facts(scope, "works_with", "dave", "erin", "frank")  # e4 to e6
+    add_facts(scope, "has_ceo", "gina", date="2028-01-01")  # e7
+    add_facts(scope, "ceo_of", "hank", date="2029-01-01")  # e8
+    scope.facts["e4"]["sources"][0]["chunk_id"] = "chunk-e1"
+    kept = ["e1", "e2", "e3", "e4", "e7", "e8"]
+    calls = plan(scope, section_words(scope, kept))
+    assert [set(call["acme"]) for call in calls if "acme" in call] == [set(kept)]
+
+
+def test_statements_are_never_a_list(scope, monkeypatch):
+    """Four paired statements cite four chunks, but a chunk is no value: they stay, and
+    works_with, three people, goes."""
+    monkeypatch.setattr(select_review_facts, "MIN_LIST_VALUES", 3)
+    for fact_id, staff in (("e3", 120), ("e4", 150), ("e5", 180), ("e6", 210)):
+        scope.facts[fact_id] = fact(
+            fact_id, "acme", "2020-01-01", relationship="contains", text=f"Acme has {staff} staff"
+        )
+    add_facts(scope, "works_with", "carol", "dave", "erin")  # e7 to e9
+    kept = ["e1", "e2", "e3", "e4", "e5", "e6"]
+    calls = plan(scope, section_words(scope, kept))
+    assert [set(call["acme"]) for call in calls if "acme" in call] == [set(kept)]
+
+
+@pytest.mark.asyncio
+async def test_section_that_only_fits_without_an_attribute_is_skipped(
+    scope, monkeypatch, every_entity_a_subject
+):
+    """has_ceo and works_with have two values each, too few to be lists: neither is cut,
+    so acme gets no call, and no retry stamp."""
+    add_facts(scope, "works_with", "carol", "dave")
+    budget = section_words(scope, ["e3", "e4"])
+    assert words(scope, ["acme"]) > budget
+    monkeypatch.setattr(review_entities, "_compute_user_prompt_token_budget", lambda *_: budget)
+    llm = AsyncMock(side_effect=reviewed_only)
+    monkeypatch.setattr(review_entities.LLMGateway, "acreate_structured_output", llm)
+    _, failed = await review_all(scope)
+    assert llm.await_count == 1
+    assert not re.search(
+        r"^Subject \[n\d+\] Acme ", llm.call_args.kwargs["text_input"], re.MULTILINE
     )
+    assert failed == []
 
 
-def test_partial_answer_writes_nothing_for_an_undescribed_subject(scope):
-    existing_conflict(scope)
-    output = response()
-    output.conflicts = []
-    output.drop = ["f1"]
-    output.descriptions = [item for item in output.descriptions if item.entity != "n1"]
-    batch = validate(scope, output)
-    assert set(batch.descriptions) == {"alice", "bob"}
-    assert batch.unreviewed_entity_ids == ["acme"]
-    assert batch.dropped_conflict_ids == []
-
-
-def test_prompt_uses_sources_and_types_without_stored_descriptions(scope):
-    scope.entities["acme"]["description"] = "STALE_DESCRIPTION"
-    existing_conflict(scope)
-    call = review_facts.ReviewCall(scope, ["acme"])
-    text = call.render().text
-    assert "e1.txt (2020-05-01)" in text
-    assert "Company" in text and "Competing relationships:" in text
-    assert "STALE_DESCRIPTION" not in text and "Old explanation" not in text
-    assert "[f1] has_ceo" in text
-
-
-def test_existing_action_labels_belong_only_to_batch_subjects(scope):
-    conflict_id = existing_conflict(scope)
-    call = review_facts.ReviewCall(scope, ["alice"])
-    text = call.render().text
-    assert "Existing has_ceo (value)" in text
-    assert call.render().conflicts == {}
-    assert "[f1]" not in text
-    output = schema.ReviewOutput(
-        descriptions=[schema.ReviewedEntity(entity="n1", description="Alice's facts")],
-        drop=["f1"],
-    )
-    with pytest.raises(ValueError, match="Unknown, repeated, or replaced drop"):
-        review_facts.validate_review_output(output, call, call.render())
-
-    owned_call = review_facts.ReviewCall(scope, ["acme", "alice"])
-    assert owned_call.render().conflicts == {"f1": conflict_id}
-
-
-def test_pending_subject_header_requests_reconciliation_without_auto_acceptance(scope):
-    conflict_id = existing_conflict(scope)
-    scope.conflicts[conflict_id]["review_pending"] = True
-    call = review_facts.ReviewCall(scope, ["acme"])
-    assert "Existing [f1] has_ceo (subject; pending write)" in call.render().text
-    value_call = review_facts.ReviewCall(scope, ["alice"])
-    assert "pending write" not in value_call.render().text
-
-    # Incomplete evidence still permits omission, and cannot authorize a drop.
-    call.shown_facts["acme"].remove("e1")
-    rendered = call.render()
-    output = schema.ReviewOutput(
-        descriptions=[schema.ReviewedEntity(entity="n1", description="Shown facts")],
-        drop=["f1"],
-    )
-    batch = review_facts.validate_review_output(output, call, rendered)
-    assert batch.conflicts == [] and batch.dropped_conflict_ids == []
-    assert scope.conflicts[conflict_id]["review_pending"] is True
-
-
-def test_legacy_textless_relationship_and_unnamed_sources(scope):
-    del scope.facts["e1"]["properties"]["edge_text"]
-    scope.facts["e1"]["sources"][0]["document"] = None
-    scope.facts["e2"]["properties"]["edge_text"] = None
-    scope.facts["e2"]["sources"][0].update(document=None, data_id=None)
-    before = deepcopy(scope.facts)
-    text = review_facts.ReviewCall(scope, ["acme"]).render().text
-    assert "| has_ceo | doc-e1 (2020-05-01)" in text
-    assert "| has_ceo | unnamed document (2026-01-10)" in text
-    assert scope.facts == before
-
-
-@pytest.mark.parametrize("cap,shown", [(15, ["e4"]), (25, ["e4", "e1"]), (40, ["e4", "e1", "e2"])])
-def test_trim_priority_and_marks_remain_intact(scope, monkeypatch, cap, shown):
-    existing_conflict(scope)
-    scope.facts["e2"]["properties"]["conflict_marks"] = []
-    scope.conflicts.clear()
-    scope.facts["e3"] = fact("e3", "acme", "2026-09-01", relationship="contains")
-    scope.facts["e4"] = fact("e4", "acme", "2020-01-01", relationship="contains")
-    scope.facts["e4"]["observed_at"] = datetime(2026, 9, 2, tzinfo=timezone.utc)
-    scope.since = datetime(2026, 9, 1, tzinfo=timezone.utc)
-    # Existing conflict support has a citation and keeps its mark when omitted.
-    scope.conflicts["saved"] = {
-        "id": "saved",
-        "about_id": "acme",
-        "attribute": "title",
-        "sources": ["chunk-e1"],
-        "values": [],
-    }
-    call = review_facts.ReviewCall(scope, ["acme"])
-    assert call.shown_facts["acme"] == ["e4", "e1", "e2", "e3"]
-    before = deepcopy(scope.facts)
-    monkeypatch.setattr(trim_facts_to_budget, "FACT_TOKENS_PER_ENTITY", cap)
-    trim_facts_to_budget.fit_to_budget(
-        call, trim_facts_to_budget.TokenBudget(WordTokenizer(), 0, 10_000)
-    )
-    assert call.shown_facts["acme"] == shown
-    assert scope.facts == before
-    scope.since = None
-    call = review_facts.ReviewCall(scope, ["acme"])
-    assert call.shown_facts["acme"] == ["e1", "e2", "e3", "e4"]
-
-
-def test_context_facts_rank_below_the_subjects_own_facts(scope):
-    # validate_review_output only accepts a fact that touches the subject, so context can never be one
-    # of its conflict sides. Ranking by priority alone gave ["e6", "e5", "e2", "e1", "e7"].
-    competing_context(scope)
-    call = review_facts.ReviewCall(scope, ["acme"])
-    assert call.shown_facts["acme"] == ["e2", "e1", "e7", "e6", "e5"]
-
-
-def test_chunk_statements_rank_below_ungrouped_relationship_facts(scope):
-    # Only e5 and e6 move: one tier held both, ordered by date, so the newer statement won.
-    scope.facts["e5"] = fact("e5", "leeds", "2026-02-01", relationship="has_headquarters")
-    scope.facts["e6"] = fact("e6", "acme", "2026-03-01", relationship="contains")
-    call = review_facts.ReviewCall(scope, ["acme"])
-    assert call.shown_facts["acme"] == ["e2", "e1", "e5", "e6"]
-
-
-def test_undated_competing_facts_outrank_a_newer_ungrouped_fact(scope):
-    # Both sides of a fixed-attribute conflict are often undated. The competing tier is
-    # what keeps them in the section; without it the date tiebreak sorts them last.
-    for value in scope.facts.values():
-        value["effective_date"] = None
-        value["sources"][0]["effective_date"] = None
-    scope.facts["e5"] = fact("e5", "leeds", "2026-02-01", relationship="has_headquarters")
-    call = review_facts.ReviewCall(scope, ["acme"])
-    assert call.shown_facts["acme"] == ["e1", "e2", "e5"]
-
-
-def test_whole_call_trim_drops_context_before_any_direct_fact(scope, monkeypatch):
-    # Zeta's only fact is an older statement, so a run-level comparator donates it first.
-    competing_context(scope)
-    scope.entities["zeta"] = {"id": "zeta", "name": "Zeta", "types": []}
-    scope.facts["e8"] = fact("e8", "zeta", "2018-01-01", relationship="contains")
-    monkeypatch.setattr(trim_facts_to_budget, "FACT_TOKENS_PER_ENTITY", 10_000)
-    tokenizer = WordTokenizer()
-    call = review_facts.ReviewCall(scope, ["zeta", "alice"])
-    before = {subject: list(ids) for subject, ids in call.shown_facts.items()}
-    trim_facts_to_budget.fit_to_budget(
-        call,
-        trim_facts_to_budget.TokenBudget(
-            tokenizer, 0, tokenizer.count_tokens(call.render().text) - 1
-        ),
-    )
-    assert [
-        (subject, fact_id)
-        for subject, ids in before.items()
-        for fact_id in ids
-        if fact_id not in call.shown_facts[subject]
-    ] == [("alice", "e7")]
-
-
-def test_trim_keeps_every_fact_the_cap_allows(scope, monkeypatch):
-    """The per-subject cut is the longest prefix that fits, never a rounded batch."""
-    for index in range(3, 16):
-        scope.facts[f"e{index}"] = fact(f"e{index}", f"person{index}", "2020-01-01")
-    tokenizer = WordTokenizer()
-    call = review_facts.ReviewCall(scope, ["acme"])
-    order = list(call.shown_facts["acme"])
-    lines = call.render().fact_lines["acme"]
-    monkeypatch.setattr(
-        trim_facts_to_budget,
-        "FACT_TOKENS_PER_ENTITY",
-        sum(tokenizer.count_tokens(line) for line in lines[:9]),
-    )
-    trim_facts_to_budget.fit_to_budget(call, trim_facts_to_budget.TokenBudget(tokenizer, 0, 10_000))
-    assert call.shown_facts["acme"] == order[:9]
-
-
-def test_trim_stays_cheap_when_the_call_is_barely_over_budget(scope, monkeypatch):
-    """One fact over budget must not pay a search across the whole fact list."""
-    for index in range(3, 203):
-        scope.facts[f"e{index}"] = fact(f"e{index}", f"person{index}", "2020-01-01")
-    monkeypatch.setattr(trim_facts_to_budget, "FACT_TOKENS_PER_ENTITY", 10_000)
-    tokenizer = CountingTokenizer()
-    call = review_facts.ReviewCall(scope, ["acme"])
-    limit = tokenizer.count_tokens(call.render().text) - 1
-    before = tokenizer.whole_text_counts
-    rendered = trim_facts_to_budget.fit_to_budget(
-        call, trim_facts_to_budget.TokenBudget(tokenizer, 0, limit)
-    )
-    # Two: the budget probes zero drops, then one. The per-subject cut renders but
-    # measures only single lines, which this tokenizer does not count.
-    assert tokenizer.whole_text_counts - before <= 4
-    assert len(call.shown_facts["acme"]) == 201
-    assert tokenizer.count_tokens(rendered.text) <= limit
-
-
-def test_trim_measures_the_whole_prompt_a_bounded_number_of_times(scope):
-    """A drop must not cost a re-render and a re-count of the whole call."""
-    for index in range(3, 203):
-        scope.facts[f"e{index}"] = fact(f"e{index}", f"person{index}", "2020-01-01")
-    tokenizer = CountingTokenizer()
-    call = review_facts.ReviewCall(scope, ["acme"])
-    limit = tokenizer.count_tokens(call.render().text) // 4
-    rendered = trim_facts_to_budget.fit_to_budget(
-        call, trim_facts_to_budget.TokenBudget(tokenizer, 0, limit)
-    )
-    # Seventeen: the limit, the per-subject cut, then the doubling probes and the bisect.
-    # Measuring once per dropped fact needed 154 here.
-    assert tokenizer.whole_text_counts <= 30
-    assert tokenizer.count_tokens(rendered.text) <= limit
-
-
-def test_competing_line_names_only_labels_in_that_subjects_section(scope):
-    # A label trimmed out of this section is not a candidate here, even though its fact
-    # line survives under another subject: validate_review_output rejects it and discards the batch.
-    competing_context(scope)
-    call = review_facts.ReviewCall(scope, ["acme", "alice"])
-    call.shown_facts["acme"] = ["e2", "e7"]
-    acme_section, alice_section = call.render().text.split("\n\n")[:2]
-    assert "Competing relationships" not in acme_section
-    assert "Competing relationships: r1, r2" in alice_section
-
-
-async def descriptions_only(**kwargs):
+async def reviewed_only(**kwargs):
     labels = re.findall(r"Subject \[(n\d+)\]", kwargs["text_input"])
-    return schema.ReviewOutput(
-        descriptions=[
-            schema.ReviewedEntity(entity=label, description="Surviving facts.") for label in labels
-        ]
-    )
+    return schema.ReviewResponse(reviewed=labels)
+
+
+async def review_all(scope):
+    """Every item the reviewer yields, and the subjects it reports it could not review."""
+    failed = []
+    items = [item async for item in review_entities.review_entities(scope, failed, [])]
+    return items, failed
 
 
 @pytest.mark.asyncio
 async def test_generator_auto_drop_before_calls_and_no_output_cap(scope, monkeypatch):
-    scope.drop_conflict_ids = ["orphan"]
-    llm = AsyncMock(side_effect=descriptions_only)
-    monkeypatch.setattr(review_facts.LLMGateway, "acreate_structured_output", llm)
-    stream = review_facts.review_entities(scope)
+    scope.conflict_ids_to_drop = ["orphan"]
+    llm = AsyncMock(side_effect=reviewed_only)
+    monkeypatch.setattr(review_entities.LLMGateway, "acreate_structured_output", llm)
+    failed = []
+    stream = review_entities.review_entities(scope, failed, [])
     assert (await anext(stream)).dropped_conflict_ids == ["orphan"]
     llm.assert_not_awaited()
     batches = [batch async for batch in stream]
-    assert set(batches[0].descriptions) == set(scope.entities)
-    assert batches[0].conflicts == []  # Multivalued or compatible facts need no conflict.
-    assert batches[-1].final
-    assert batches[-1].unreviewed_entity_ids == []
+    assert batches[0].accepted_conflicts == []  # Multivalued or compatible facts need no conflict.
+    assert isinstance(batches[-1], ConflictsToFinalize)
+    assert failed == []
     assert "max_completion_tokens" not in llm.call_args.kwargs
 
 
 @pytest.mark.asyncio
-async def test_failed_call_splits_once_and_continues(scope, monkeypatch):
+async def test_failed_call_splits_once_and_continues(scope, monkeypatch, every_entity_a_subject):
     llm = AsyncMock(
         side_effect=[
             ValueError("bad batch"),
             ValueError("bad first half"),
-            await descriptions_only(text_input="Subject [n1] Alice\nSubject [n2] Bob"),
+            await reviewed_only(text_input="Subject [n1] Alice\nSubject [n2] Bob"),
         ]
     )
-    monkeypatch.setattr(review_facts.LLMGateway, "acreate_structured_output", llm)
-    batches = [batch async for batch in review_facts.review_entities(scope)]
+    monkeypatch.setattr(review_entities.LLMGateway, "acreate_structured_output", llm)
+    batches, failed = await review_all(scope)
     assert llm.await_count == 3
-    assert batches[-1].unreviewed_entity_ids == ["acme"]
-    assert set(batches[0].descriptions) == {"alice", "bob"}
-    assert batches[-1].final
+    assert failed == ["acme"]
+    assert isinstance(batches[-1], ConflictsToFinalize)
 
 
 @pytest.mark.asyncio
-async def test_partial_descriptions_reach_the_final_batch(scope, monkeypatch):
+async def test_partial_answer_is_reported_to_the_caller(scope, monkeypatch, every_entity_a_subject):
     async def omit_first(**kwargs):
-        output = await descriptions_only(**kwargs)
-        output.descriptions = output.descriptions[1:]
+        output = await reviewed_only(**kwargs)
+        output.reviewed = output.reviewed[1:]
         return output
 
     monkeypatch.setattr(
-        review_facts.LLMGateway, "acreate_structured_output", AsyncMock(side_effect=omit_first)
+        review_entities.LLMGateway, "acreate_structured_output", AsyncMock(side_effect=omit_first)
     )
-    batches = [batch async for batch in review_facts.review_entities(scope)]
-    assert set(batches[0].descriptions) == {"alice", "bob"}
+    batches, failed = await review_all(scope)
     assert batches[0].unreviewed_entity_ids == ["acme"]
-    assert batches[-1].final and batches[-1].unreviewed_entity_ids == ["acme"]
+    assert isinstance(batches[-1], ConflictsToFinalize)
+    assert failed == ["acme"]
+
+
+@pytest.mark.asyncio
+async def test_review_end_lists_every_conflict_the_run_decided(
+    scope, monkeypatch, every_entity_a_subject
+):
+    """The writer finalizes from ConflictsToFinalize alone: it must name each decided conflict."""
+    scope.conflict_ids_to_drop = ["orphan"]
+    monkeypatch.setattr(
+        review_entities.LLMGateway, "acreate_structured_output", AsyncMock(return_value=response())
+    )
+    (drops, answer, end), failed = await review_all(scope)
+    assert len(answer.accepted_conflicts) == 1
+    assert end.accepted_conflicts == answer.accepted_conflicts
+    assert end.dropped_conflict_ids == drops.dropped_conflict_ids == ["orphan"]
+    assert failed == []
+
+
+@pytest.mark.asyncio
+async def test_next_call_selects_facts_after_the_last_write(
+    scope, monkeypatch, every_entity_a_subject
+):
+    """Alice's section is selected after Acme's answer is written, so it shows what that write left.
+
+    The write stores a conflict about Acme that marks the claim naming Alice as its CEO.
+    The claim then supports a stored conflict, so Alice's section shows it.
+    """
+    monkeypatch.setattr(review_entities, "SUBJECTS_PER_CALL", 1)
+    llm = AsyncMock(side_effect=reviewed_only)
+    monkeypatch.setattr(review_entities.LLMGateway, "acreate_structured_output", llm)
+    stream = review_entities.review_entities(scope, [], [])
+    await anext(stream)  # Acme's answer
+    existing_conflict(scope)  # what the writer leaves in the scope for a conflict about Acme
+    _ = [item async for item in stream]
+    alice_prompt = llm.call_args_list[1].kwargs["text_input"]
+    assert alice_prompt.startswith("Subject [n1] Alice ")
+    assert "alice is Acme's CEO" in alice_prompt
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("error", [LLMPaymentRequiredError(), asyncio.CancelledError()])
 async def test_budget_and_cancellation_propagate_without_retry(scope, monkeypatch, error):
     llm = AsyncMock(side_effect=error)
-    monkeypatch.setattr(review_facts.LLMGateway, "acreate_structured_output", llm)
+    monkeypatch.setattr(review_entities.LLMGateway, "acreate_structured_output", llm)
     with pytest.raises(type(error)):
-        _ = [batch async for batch in review_facts.review_entities(scope)]
+        _ = [batch async for batch in review_entities.review_entities(scope, [], [])]
     assert llm.await_count == 1
 
 
 @pytest.mark.asyncio
-async def test_oversized_header_skipped_and_call_budget_enforced(scope, monkeypatch):
+async def test_oversized_header_skipped_without_retry_and_call_budget_enforced(
+    scope, monkeypatch, every_entity_a_subject
+):
+    """A header too large for a call is skipped like any section that cannot fit, and
+    reported as skipped, not failed: a retry would only skip it again."""
     scope.entities["acme"]["name"] = "very long name " * 10_000
-    monkeypatch.setattr(review_facts, "get_llm_token_ceiling", lambda: 2_000)
-    llm = AsyncMock(side_effect=descriptions_only)
-    monkeypatch.setattr(review_facts.LLMGateway, "acreate_structured_output", llm)
-    batches = [batch async for batch in review_facts.review_entities(scope)]
-    assert batches[-1].unreviewed_entity_ids == ["acme"]
-    assert set(batches[0].descriptions) == {"alice", "bob"}
+    monkeypatch.setattr(review_entities, "REVIEW_INPUT_TOKENS", 1_000)
+    llm = AsyncMock(side_effect=reviewed_only)
+    monkeypatch.setattr(review_entities.LLMGateway, "acreate_structured_output", llm)
+    failed, skipped = [], []
+    _ = [item async for item in review_entities.review_entities(scope, failed, skipped)]
+    assert (failed, skipped) == ([], ["acme"])
+    assert all("very long name" not in call.kwargs["text_input"] for call in llm.call_args_list)
     kwargs = llm.call_args.kwargs
     tokens = WordTokenizer().count_tokens(kwargs["system_prompt"] + kwargs["text_input"])
     tokens += WordTokenizer().count_tokens(
-        review_facts.json.dumps(schema.ReviewOutput.model_json_schema(), sort_keys=True)
+        review_entities.json.dumps(schema.ReviewResponse.model_json_schema(), sort_keys=True)
     )
     assert tokens <= 1_000
 
 
-# Every review call pays words(prompt) + words(schema) before its first fact line,
-# so growth here drops facts silently instead of failing. The budget test above
-# gives a call 1_000 words, and the scope fixture's alice and bob need 70
-# for headers and facts; past 990 they stop sharing a call and that test fails as
-# a lost subject.
-PROMPT_OVERHEAD_WORDS = 1_000 - 70
+# Every review call pays words(prompt) + words(schema) before its first section, so
+# growth here leaves less room for sections; nothing is dropped. The budget test above
+# gives a call 1_000 words, and alice's and bob's headers take 10 together; past 990
+# they stop sharing a call and past 995 that test loses them.
+PROMPT_OVERHEAD_WORDS = 1_000 - 10
 
 
 def test_system_prompt_leaves_room_for_facts():
     overhead = WordTokenizer().count_tokens(
         render_prompt("review_conflicts.txt", {})
         + " "
-        + review_facts.json.dumps(schema.ReviewOutput.model_json_schema(), sort_keys=True)
+        + review_entities.json.dumps(schema.ReviewResponse.model_json_schema(), sort_keys=True)
     )
     assert overhead <= PROMPT_OVERHEAD_WORDS
 
 
+def test_a_call_is_at_most_half_the_token_ceiling(monkeypatch):
+    """A model whose token ceiling is under twice REVIEW_INPUT_TOKENS gets half its ceiling."""
+
+    def budget(ceiling):
+        monkeypatch.setattr(review_entities, "get_llm_token_ceiling", lambda: ceiling)
+        return review_entities._compute_user_prompt_token_budget("prompt", WordTokenizer())
+
+    assert budget(16_384) - budget(8_192) == review_entities.REVIEW_INPUT_TOKENS - 4_096
+
+
 @pytest.mark.asyncio
-async def test_pipeline_tasks_preserve_reader_object_and_writer_batch(monkeypatch):
-    entity = {"id": "acme", "name": "Acme", "type": "Entity", "description": "Old"}
+async def test_pipeline_tasks_preserve_reader_object_and_skip_subjects_without_a_group(
+    monkeypatch,
+):
+    entity = {"id": "acme", "name": "Acme", "type": "Entity"}
     graph = SimpleNamespace(
         get_filtered_graph_data=AsyncMock(
             side_effect=lambda filters: ([("acme", entity)] if "id" in filters[0] else [], [])
         ),
-        get_nodes=AsyncMock(return_value=[entity]),
         get_neighborhood=AsyncMock(return_value=([("acme", entity)], [])),
     )
     monkeypatch.setattr(read_facts, "get_graph_engine", AsyncMock(return_value=graph))
@@ -572,20 +360,20 @@ async def test_pipeline_tasks_preserve_reader_object_and_writer_batch(monkeypatc
         "get_improve_config",
         lambda: SimpleNamespace(effective_date_key="effective_date"),
     )
-    monkeypatch.setattr(
-        review_facts.LLMGateway,
-        "acreate_structured_output",
-        AsyncMock(side_effect=descriptions_only),
-    )
+    llm = AsyncMock()
+    monkeypatch.setattr(review_entities.LLMGateway, "acreate_structured_output", llm)
     written = []
 
     async def write_batch(data):
         assert isinstance(data, list) and len(data) == 1
-        assert isinstance(data[0], review_facts.ReviewBatch)
+        assert isinstance(data[0], (review_entities.ConflictsToWrite, ConflictsToFinalize))
         written.append(data[0])
 
     reader = Task(read_facts.read_entity_facts, entity_ids=["acme"], needs_llm=False)
-    reviewer = Task(review_facts.review_entities)
+    failed = []
+    reviewer = Task(
+        review_entities.review_entities, failed_entity_ids=failed, skipped_entity_ids=[]
+    )
     writer = Task(write_batch, batch_size=1, needs_llm=False)
     ctx = PipelineContext(dataset=SimpleNamespace(id=uuid4()))
     async for scope in reader.execute([[{}]], {"ctx": ctx}):
@@ -593,112 +381,21 @@ async def test_pipeline_tasks_preserve_reader_object_and_writer_batch(monkeypatc
         async for batches in reviewer.execute([scope], {}, writer.task_config["batch_size"]):
             async for _ in writer.execute([batches], {}):
                 pass
-    assert written[0].descriptions == {"acme": "Surviving facts."}
-    assert written[1].final
-
-
-def test_reused_index_reads_support_changed_by_previous_batch(scope):
-    scope.facts["e3"] = fact("e3", "acme", "2026-09-01", relationship="contains")
-    fact_index = review_facts.FactIndex(scope.facts)
-    assert review_facts.ReviewCall(scope, ["acme"], fact_index).shown_facts["acme"] == [
-        "e2",
-        "e1",
-        "e3",
-    ]
-
-    # The writer updates the shared input between yielded batches. Neither marks
-    # nor citations may be cached with the immutable fact index.
-    scope.conflicts["saved"] = {
-        "id": "saved",
-        "about_id": "acme",
-        "attribute": "title",
-        "sources": ["chunk-e1"],
-        "values": [],
-    }
-    scope.facts["e3"]["properties"]["conflict_marks"] = [
-        {"conflict_id": "saved", "status": "current"}
-    ]
-    assert review_facts.ReviewCall(scope, ["acme"], fact_index).shown_facts["acme"] == [
-        "e3",
-        "e1",
-        "e2",
-    ]
-
-    scope.facts["e3"]["properties"]["conflict_marks"].clear()
-    scope.conflicts["saved"]["sources"] = ["chunk-e2"]
-    assert review_facts.ReviewCall(scope, ["acme"], fact_index).shown_facts["acme"] == [
-        "e2",
-        "e1",
-        "e3",
-    ]
+    # Acme has no value group and owns no conflict: no call is made, and it is not counted as failed.
+    assert [type(item) for item in written] == [ConflictsToFinalize]
+    assert failed == []
+    llm.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_batch_planning_builds_fact_context_only_for_llm_calls(monkeypatch):
-    entities = {str(i): {"id": str(i), "name": f"Entity {i}"} for i in range(23)}
+async def test_calls_hold_at_most_subjects_per_call(monkeypatch, every_entity_a_subject):
+    entities = {str(i): {"id": str(i), "name": f"Entity {i}"} for i in range(60)}
     data = ReviewScope(dataset_id="dataset", entities=entities, facts={})
-    calls = []
-    original_init = review_facts.ReviewCall.__init__
-
-    def record_call(self, scope, subjects, fact_index=None):
-        calls.append((list(subjects), fact_index))
-        original_init(self, scope, subjects, fact_index)
-
-    monkeypatch.setattr(review_facts.ReviewCall, "__init__", record_call)
-    monkeypatch.setattr(
-        review_facts.LLMGateway,
-        "acreate_structured_output",
-        AsyncMock(side_effect=descriptions_only),
-    )
-    batches = [batch async for batch in review_facts.review_entities(data)]
-    assert [len(batch.descriptions) for batch in batches[:-1]] == [10, 10, 3]
-    assert len(calls) == 3
-    assert calls[0][1] is calls[1][1] is calls[2][1]
-
-
-def test_validation_uses_the_snapshot_sent_to_the_llm(scope):
-    call = review_facts.ReviewCall(scope, list(scope.entities))
-    sent = trim_facts_to_budget.fit_to_budget(
-        call, trim_facts_to_budget.TokenBudget(WordTokenizer(), 0, 10_000)
-    )
-    for facts in call.shown_facts.values():
-        facts.remove("e1")
-    later = call.render()
-    assert later.facts != sent.facts
-    batch = review_facts.validate_review_output(response(), call, sent)
-    assert batch.shown_fact_ids == {"e1", "e2"}
-    assert batch.conflicts[0].fact_statuses == {"e2": "current", "e1": "superseded"}
-
-
-@pytest.mark.parametrize(
-    "other, kept",
-    [("2015-05-12", True), ("Bristol", False)],
-    ids=["two dates compete", "a date beside a place does not"],
-)
-def test_a_date_competes_only_with_another_date(scope, other, kept):
-    for name in ("2014-05-12", other):
-        scope.entities[name] = {"id": name, "name": name, "types": []}
-        scope.nodes[name] = scope.entities[name]
-    scope.facts = {
-        "e1": fact("e1", "2014-05-12", None, relationship="incorporated_on"),
-        "e2": fact("e2", other, "2026-01-10", relationship="incorporated_on"),
-    }
-    output = schema.ReviewOutput(
-        descriptions=[
-            schema.ReviewedEntity(entity=f"n{i}", description=name)
-            for i, name in enumerate(scope.entities, 1)
-        ],
-        conflicts=[
-            schema.ReviewedConflict(
-                about="n1",
-                attribute="incorporated_on",
-                kind="fixed",
-                text="Two incorporation dates are recorded.",
-                conflicting=["r1", "r2"],
-            )
-        ],
-    )
-    batch = validate(scope, output)
-    assert [item.conflict.values for item in batch.conflicts] == (
-        [sorted(["2014-05-12", other])] if kept else []
-    )
+    llm = AsyncMock(side_effect=reviewed_only)
+    monkeypatch.setattr(review_entities.LLMGateway, "acreate_structured_output", llm)
+    _, failed = await review_all(data)
+    assert [
+        len(re.findall(r"^Subject \[", call.kwargs["text_input"], re.MULTILINE))
+        for call in llm.call_args_list
+    ] == [25, 25, 10]
+    assert failed == []

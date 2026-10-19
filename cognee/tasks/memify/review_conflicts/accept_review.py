@@ -1,85 +1,81 @@
-"""Decide how much of the model's review may be written, and as what.
+"""Decide how much of the LLM's response to a review call may be written, and as what.
 
-Only validated, batch-local labels reach the writer. A label the call did not
+Only validated labels of this call reach the writer. A label the call did not
 show, a repeated label or a conflict about a subject this call never asked
-about is a rejected answer: the caller discards the whole batch and retries on
-a smaller one. A subject the answer simply left out is not an error — it is
+about rejects the whole response: the caller discards it and retries on a
+smaller call. A subject the response simply left out is not an error — it is
 left unreviewed and selected again on the next run.
 """
 
 from datetime import datetime
-from typing import TYPE_CHECKING
 
 from cognee.modules.engine.models.FactConflict import FactConflict
 from cognee.modules.engine.utils import generate_node_name
 from cognee.shared.logging_utils import get_logger
 
+from .build_review_prompt import ReviewPrompt
 from .facts import (
     CHUNK_STATEMENT,
     NO_DATE,
-    endpoints,
-    fact_date,
+    TIMESTAMP,
+    get_endpoints,
     is_statement,
-    supporting_fact_ids,
+    parse_date,
+    select_supporting_facts,
 )
-from .models import AcceptedConflict, ReviewBatch
-from .schema import ReviewedConflict, ReviewOutput
-
-if TYPE_CHECKING:  # review_facts.py imports this module, so these are annotations only.
-    from .review_facts import RenderedCall, ReviewCall
+from .models import AcceptedConflict, ConflictsToWrite, ReviewScope
+from .schema import ReportedConflict, ReviewResponse
 
 logger = get_logger("review_conflicts")
 
 
-def validate_review_output(
-    output: ReviewOutput, call: "ReviewCall", rendered: "RenderedCall"
-) -> ReviewBatch:
-    """Resolve an answer's labels against the call that produced it."""
-    descriptions = _reviewed_descriptions(output.descriptions, call, rendered)
-    # Before the two steps below, either of which can reject the whole answer: a
-    # partial review is worth recording even when the rest of it turns out invalid.
-    unreviewed = _unreviewed_subjects(call, descriptions)
-    shown_fact_ids = set(rendered.facts.values())
-    conflicts = _accepted_conflicts(output.conflicts, call, rendered, descriptions)
-    drops = _accepted_drops(output.drop, call, rendered, descriptions, conflicts, shown_fact_ids)
-    return ReviewBatch(
-        scope=call.scope,
-        descriptions=descriptions,
-        conflicts=conflicts,
+def accept_review_response(
+    response: ReviewResponse, scope: ReviewScope, prompt: ReviewPrompt
+) -> ConflictsToWrite:
+    """Resolve a response's labels against the prompt that was sent."""
+    reviewed = _resolve_reviewed_subjects(response.reviewed, prompt)
+    # Logged before the two steps below, either of which can reject the whole response:
+    # a partial response is worth its warning even when the rest of it is invalid.
+    unreviewed = _find_unreviewed_subjects(prompt, reviewed)
+    shown_fact_ids = set(prompt.fact_labels.values())
+    accepted_conflicts = _accept_conflicts(response.conflicts, scope, prompt, reviewed)
+    drops = _accept_drops(
+        response.drop, scope, prompt, reviewed, accepted_conflicts, shown_fact_ids
+    )
+    return ConflictsToWrite(
+        scope=scope,
+        accepted_conflicts=accepted_conflicts,
         dropped_conflict_ids=drops,
         shown_fact_ids=shown_fact_ids,
         unreviewed_entity_ids=unreviewed,
     )
 
 
-def _reviewed_descriptions(
-    reviewed: list, call: "ReviewCall", rendered: "RenderedCall"
-) -> dict[str, str]:
-    """One rewritten description per subject the call asked about."""
-    descriptions: dict[str, str] = {}
-    for entry in reviewed:
-        subject = rendered.entities.get(entry.entity)
-        if subject not in call.subject_ids or subject in descriptions:
-            raise ValueError("Unknown or repeated description subject")
-        descriptions[subject] = entry.description
-    if not descriptions:
-        raise ValueError("A review requires at least one description")
-    return descriptions
+def _resolve_reviewed_subjects(labels: list[str], prompt: ReviewPrompt) -> set[str]:
+    """The subjects the response says it reviewed, each one a subject of this call."""
+    reviewed: set[str] = set()
+    for label in labels:
+        subject = prompt.node_labels.get(label)
+        if subject not in prompt.subject_ids or subject in reviewed:
+            raise ValueError("Unknown or repeated reviewed subject")
+        reviewed.add(subject)
+    if not reviewed:
+        raise ValueError("A review requires at least one reviewed subject")
+    return reviewed
 
 
-def _unreviewed_subjects(call: "ReviewCall", descriptions: dict[str, str]) -> list[str]:
-    """Subjects the answer left out.
+def _find_unreviewed_subjects(prompt: ReviewPrompt, reviewed: set[str]) -> list[str]:
+    """Subjects the response left out.
 
-    An undescribed subject was not reviewed: nothing this call says about it is
-    written, it is not stamped conflicts_reviewed_at, and the improve stage
-    selects it again on the next run.
+    Nothing this call says about an unreviewed subject is written, and the next
+    review selects it again.
     """
-    unreviewed = [subject for subject in call.subject_ids if subject not in descriptions]
+    unreviewed = [subject for subject in prompt.subject_ids if subject not in reviewed]
     if unreviewed:
         logger.warning(
-            "Fact review returned %d of %d descriptions; not reviewing %s",
-            len(descriptions),
-            len(call.subject_ids),
+            "Conflict review returned %d of %d subjects; not reviewing %s",
+            len(reviewed),
+            len(prompt.subject_ids),
             unreviewed,
         )
     return unreviewed
@@ -88,21 +84,21 @@ def _unreviewed_subjects(call: "ReviewCall", descriptions: dict[str, str]) -> li
 # --- conflicts ---------------------------------------------------------------
 
 
-def _accepted_conflicts(
-    reported: list[ReviewedConflict],
-    call: "ReviewCall",
-    rendered: "RenderedCall",
-    descriptions: dict[str, str],
+def _accept_conflicts(
+    reported: list[ReportedConflict],
+    scope: ReviewScope,
+    prompt: ReviewPrompt,
+    reviewed: set[str],
 ) -> list[AcceptedConflict]:
     accepted: list[AcceptedConflict] = []
     identities: set[str] = set()
     for result in reported:
-        about = rendered.entities.get(result.about)
-        if about not in call.subject_ids:
-            raise ValueError("A conflict must belong to a batch subject")
-        if about not in descriptions:
+        about = prompt.node_labels.get(result.about)
+        if about not in prompt.subject_ids:
+            raise ValueError("A conflict must belong to a subject of this call")
+        if about not in reviewed:
             continue
-        item = _accept_conflict(result, about, call, rendered)
+        item = _accept_conflict(result, about, scope, prompt)
         if item is None:
             continue
         identity = str(item.conflict.id)
@@ -114,29 +110,30 @@ def _accepted_conflicts(
 
 
 def _accept_conflict(
-    result: ReviewedConflict, about: str, call: "ReviewCall", rendered: "RenderedCall"
+    result: ReportedConflict, about: str, scope: ReviewScope, prompt: ReviewPrompt
 ) -> AcceptedConflict | None:
     """One reported conflict, or None when no two values are left to compare."""
-    statuses = _labelled_fact_statuses(result, about, call, rendered)
+    statuses = _resolve_fact_statuses(result, about, scope, prompt)
     # Identity is decided from the facts the LLM grouped, before the date filter
     # narrows them. The attribute is part of the conflict's node id, so deriving
     # it from the narrowed set would write a second node beside the one it means
     # to replace.
-    attribute = _conflict_attribute(result, [call.scope.facts[fact_id] for fact_id in statuses])
-    values, statuses = _without_date_endpoints(about, statuses, call)
-    if values is None:
+    attribute = _choose_conflict_attribute(result, [scope.facts[fact_id] for fact_id in statuses])
+    statuses = _exclude_date_values(about, statuses, scope)
+    if statuses is None:
         return None
 
-    facts = [call.scope.facts[fact_id] for fact_id in statuses]
+    values = _collect_conflict_values(about, statuses, scope)
+    facts = [scope.facts[fact_id] for fact_id in statuses]
     text = " ".join(result.text.split())
-    reversed_dates = _dates_reverse_the_ordering(facts, statuses)
+    reversed_dates = _is_ordering_reversed_by_dates(facts, statuses)
     if result.kind == "fixed" or reversed_dates:
         statuses = dict.fromkeys(statuses, "conflicting")
     if reversed_dates:
         text += " Supplied dates disagree with the proposed ordering."
 
     conflict = FactConflict(
-        dataset_id=call.scope.dataset_id,
+        dataset_id=scope.dataset_id,
         about_id=about,
         attribute=attribute,
         kind=result.kind,
@@ -148,10 +145,14 @@ def _accept_conflict(
     return AcceptedConflict(conflict, statuses)
 
 
-def _labelled_fact_statuses(
-    result: ReviewedConflict, about: str, call: "ReviewCall", rendered: "RenderedCall"
+def _resolve_fact_statuses(
+    result: ReportedConflict, about: str, scope: ReviewScope, prompt: ReviewPrompt
 ) -> dict[str, str]:
-    """Each labelled fact in exactly one status, rejecting any label not shown for its subject."""
+    """Each labelled fact in exactly one status.
+
+    A label must be one this call showed, in any subject's section, and its fact must
+    touch the conflict's subject; any other label rejects the response.
+    """
     statuses: dict[str, str] = {}
     for status, labels in (
         ("current", result.current),
@@ -159,10 +160,10 @@ def _labelled_fact_statuses(
         ("conflicting", result.conflicting),
     ):
         for label in labels:
-            fact_id = rendered.facts.get(label)
+            fact_id = prompt.fact_labels.get(label)
             if fact_id is None or fact_id in statuses:
                 raise ValueError("Unknown or repeated conflict fact")
-            if about not in endpoints(call.scope.facts[fact_id]):
+            if about not in get_endpoints(scope.facts[fact_id]):
                 raise ValueError("Conflict fact is unrelated to its subject")
             statuses[fact_id] = status
     if not statuses:
@@ -170,7 +171,7 @@ def _labelled_fact_statuses(
     return statuses
 
 
-def _conflict_attribute(result: ReviewedConflict, facts: list[dict]) -> str:
+def _choose_conflict_attribute(result: ReportedConflict, facts: list[dict]) -> str:
     """One shared relationship name is the attribute; anything else needs the LLM's name."""
     relationships = {fact["relationship"] for fact in facts}
     attribute = (
@@ -183,59 +184,58 @@ def _conflict_attribute(result: ReviewedConflict, facts: list[dict]) -> str:
     return attribute
 
 
-def _conflict_values(about: str, statuses: dict[str, str], call: "ReviewCall") -> set[str]:
+def _collect_conflict_values(about: str, statuses: dict[str, str], scope: ReviewScope) -> set[str]:
     """The competing values: every endpoint of a labelled claim that is not the subject."""
     return {
         endpoint
         for fact_id in statuses
-        if not is_statement(call.scope.facts[fact_id])
-        for endpoint in endpoints(call.scope.facts[fact_id])
+        if not is_statement(scope.facts[fact_id])
+        for endpoint in get_endpoints(scope.facts[fact_id])
         if endpoint != about
     }
 
 
-def _is_date_name(name) -> bool:
-    """A bare ISO date names when a fact holds, never a thing the fact is about."""
+def _is_date_node(node: dict) -> bool:
+    """A Timestamp or a bare ISO date names when a fact holds, never a thing the fact is about."""
+    if node.get("type") == TIMESTAMP:
+        return True
     try:
-        datetime.fromisoformat(str(name))
+        datetime.fromisoformat(str(node.get("name")))
     except (TypeError, ValueError):
         return False
     return True
 
 
-def _without_date_endpoints(
-    about: str, statuses: dict[str, str], call: "ReviewCall"
-) -> tuple[set[str] | None, dict[str, str]]:
-    """Drop the facts whose value is a bare date, unless every value is one.
+def _exclude_date_values(
+    about: str, statuses: dict[str, str], scope: ReviewScope
+) -> dict[str, str] | None:
+    """Exclude the facts whose value is a Timestamp or a bare date, unless every value is one.
 
     Extraction turns "as of <date>, X is Y" into an edge to a date entity under the
     attribute's own relationship name. A date beside a value of any other kind is when
-    the fact holds, not an alternative to it. A None result means too little is left
-    to call a conflict.
+    the fact holds, not an alternative to it. None means that, once the dates are
+    excluded, fewer than two values are left to call a conflict.
     """
-    values = _conflict_values(about, statuses, call)
-    dated = {
-        value for value in values if _is_date_name(call.scope.nodes.get(value, {}).get("name"))
-    }
+    values = _collect_conflict_values(about, statuses, scope)
+    dated = {value for value in values if _is_date_node(scope.nodes.get(value, {}))}
     if not dated or dated == values:
-        return values, statuses
-    values -= dated
-    statuses = {
+        return statuses
+    kept = {
         fact_id: status
         for fact_id, status in statuses.items()
-        if not dated.intersection(endpoints(call.scope.facts[fact_id]))
+        if not dated.intersection(get_endpoints(scope.facts[fact_id]))
     }
-    if len(values) < 2 or not statuses:
-        return None, statuses
-    return values, statuses
+    if len(values - dated) < 2 or not kept:
+        return None
+    return kept
 
 
-def _dates_reverse_the_ordering(facts: list[dict], statuses: dict[str, str]) -> bool:
+def _is_ordering_reversed_by_dates(facts: list[dict], statuses: dict[str, str]) -> bool:
     """True when a superseded fact is dated after the current one."""
     latest = {
         status: max(
             (
-                fact_date(fact.get("effective_date"))
+                parse_date(fact.get("effective_date"))
                 for fact in facts
                 if statuses[fact["id"]] == status
             ),
@@ -249,26 +249,27 @@ def _dates_reverse_the_ordering(facts: list[dict], statuses: dict[str, str]) -> 
 # --- drops -------------------------------------------------------------------
 
 
-def _accepted_drops(
+def _accept_drops(
     labels: list[str],
-    call: "ReviewCall",
-    rendered: "RenderedCall",
-    descriptions: dict[str, str],
+    scope: ReviewScope,
+    prompt: ReviewPrompt,
+    reviewed: set[str],
     accepted: list[AcceptedConflict],
     shown_fact_ids: set[str],
 ) -> list[str]:
-    """Stored conflicts to retire, once every fact still supporting them was shown."""
+    """Stored conflicts to drop, once every fact still supporting them was shown."""
     replaced = {str(item.conflict.id) for item in accepted}
     drops: list[str] = []
     for label in labels:
-        conflict_id = rendered.conflicts.get(label)
+        conflict_id = prompt.conflict_labels.get(label)
         if conflict_id is None or conflict_id in replaced or conflict_id in drops:
             raise ValueError("Unknown, repeated, or replaced drop")
-        conflict = call.scope.conflicts[conflict_id]
-        if str(conflict["about_id"]) not in call.subject_ids:
-            raise ValueError("A dropped conflict must belong to a batch subject")
-        if str(conflict["about_id"]) not in descriptions:
+        conflict = scope.conflicts[conflict_id]
+        if str(conflict["about_id"]) not in prompt.subject_ids:
+            raise ValueError("A dropped conflict must belong to a subject of this call")
+        if str(conflict["about_id"]) not in reviewed:
             continue
-        if supporting_fact_ids(call.scope, conflict) <= shown_fact_ids:
+        still_supporting = select_supporting_facts(scope.facts, scope.facts, [conflict])
+        if still_supporting <= shown_fact_ids:
             drops.append(conflict_id)
     return drops

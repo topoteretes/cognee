@@ -12,7 +12,7 @@ from uuid import uuid4
 
 import pytest
 
-from cognee.modules.improve import graph_changes
+from cognee.modules.improve import watermarks
 
 
 class _Result:
@@ -55,13 +55,13 @@ def _install_engine(monkeypatch, answers):
     return session
 
 
-@pytest.mark.parametrize("key", [graph_changes.REVIEW_WATERMARK_KEY])
+@pytest.mark.parametrize("key", [watermarks.REVIEW_WATERMARK_KEY])
 @pytest.mark.asyncio
 async def test_stamp_lookup_filters_in_sql_for_sqlite_and_postgres(monkeypatch, key):
     from sqlalchemy.dialects import postgresql, sqlite
 
     session = _install_engine(monkeypatch, [[]])
-    assert await graph_changes.last_improve_watermark(uuid4(), key) is None
+    assert await watermarks.last_improve_watermark(uuid4(), key) is None
     statement = session.statements[0]
     sqlite_sql = str(
         statement.compile(dialect=sqlite.dialect(), compile_kwargs={"literal_binds": True})
@@ -75,7 +75,7 @@ async def test_stamp_lookup_filters_in_sql_for_sqlite_and_postgres(monkeypatch, 
     assert "LIMIT 1" in sqlite_sql and "LIMIT 1" in postgres_sql
 
 
-@pytest.mark.parametrize("key", [graph_changes.REVIEW_WATERMARK_KEY])
+@pytest.mark.parametrize("key", [watermarks.REVIEW_WATERMARK_KEY])
 @pytest.mark.asyncio
 async def test_stamp_survives_long_history_and_excludes_failed_rows(monkeypatch, tmp_path, key):
     import importlib
@@ -115,7 +115,7 @@ async def test_stamp_survives_long_history_and_excludes_failed_rows(monkeypatch,
                 row(
                     0,
                     pipeline_run_id=operation_id,
-                    run_info=graph_changes.watermark_stamp(key, "completed", start),
+                    run_info=watermarks.watermark_stamp(key, "completed", start),
                 )
             )
             session.add_all(row(i) for i in range(1, 102))
@@ -131,12 +131,12 @@ async def test_stamp_survives_long_history_and_excludes_failed_rows(monkeypatch,
                 session.add(
                     row(
                         offset,
-                        run_info=graph_changes.watermark_stamp(key, "completed", start),
+                        run_info=watermarks.watermark_stamp(key, "completed", start),
                         **fields,
                     )
                 )
             await session.commit()
-        watermark = await graph_changes.last_improve_watermark(
+        watermark = await watermarks.last_improve_watermark(
             dataset_id, key, exclude_operation_id=current_id
         )
         assert (watermark.operation_id, watermark.started_at) == (operation_id, start)
@@ -145,7 +145,7 @@ async def test_stamp_survives_long_history_and_excludes_failed_rows(monkeypatch,
             await session.commit()
         # An invalid newest stamp cannot borrow an older success to skip work.
         assert (
-            await graph_changes.last_improve_watermark(
+            await watermarks.last_improve_watermark(
                 dataset_id, key, exclude_operation_id=current_id
             )
             is None
