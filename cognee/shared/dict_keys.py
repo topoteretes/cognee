@@ -20,12 +20,17 @@ def unique_string_keys(names: Sequence[str], preferred: Sequence[bool]) -> list[
     taken: set[str] = set()
     result = [""] * len(names)
     order = sorted(range(len(names)), key=lambda index: not preferred[index])
+    # Where the last key with this name stopped searching. A suffix it skipped
+    # stays unavailable (taken, or another key's literal name), so the next
+    # loser resumes from there and k colliding keys cost O(k), not O(k^2).
+    next_suffix: dict[str, int] = {}
     for index in order:
         name = candidate = names[index]
-        suffix = 2
+        suffix = next_suffix.get(name, 2)
         while candidate in taken or (candidate != name and candidate in reserved):
             candidate = f"{name}_{suffix}"
             suffix += 1
+        next_suffix[name] = suffix
         taken.add(candidate)
         result[index] = candidate
     return result
