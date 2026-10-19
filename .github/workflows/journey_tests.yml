@@ -60,8 +60,11 @@ env:
   EMBEDDING_ENDPOINT: ${{ inputs.mode == 'llm' && secrets.EMBEDDING_ENDPOINT || '' }}
   EMBEDDING_API_KEY: ${{ inputs.mode == 'llm' && secrets.EMBEDDING_API_KEY || 'mock-key' }}
   EMBEDDING_DIMENSIONS: ${{ inputs.mode == 'llm' && '300' || '256' }}
+  # Both skip flags are read by the same preflight gate (any truthy one skips
+  # it), so both must clear in llm mode or a provider/dimension mismatch only
+  # surfaces mid-journey instead of at startup.
   COGNEE_SKIP_PREFLIGHT: ${{ inputs.mode == 'mock' && '1' || '' }}
-  COGNEE_SKIP_CONNECTION_TEST: 'true'
+  COGNEE_SKIP_CONNECTION_TEST: ${{ inputs.mode == 'mock' && 'true' || '' }}
 
 jobs:
   journeys:
@@ -90,12 +93,13 @@ jobs:
         with:
           python-version: ${{ inputs.python-version }}
 
-      # The per-test limit stays under the job's timeout-minutes in both modes,
-      # so a hung journey fails with a traceback instead of a runner kill.
+      # pytest-timeout is per test. The cap is sized to the slowest single
+      # journey (not the suite), so one hung provider await fails with a
+      # traceback and still leaves the 90 min job bound room for the rest.
       - name: Memory correctness, sessions, lifecycle, idempotency, HTTP API
         run: |
           uv run pytest cognee/tests/journeys -m "journey and not quickstart" \
-            -v --timeout=${{ inputs.mode == 'llm' && 4800 || 1500 }} -p no:cacheprovider -W ignore
+            -v --timeout=${{ inputs.mode == 'llm' && 1800 || 1500 }} -p no:cacheprovider -W ignore
 
   quickstart:
     name: Quickstart in a fresh venv (${{ inputs.mode }} LLM, wheel install)

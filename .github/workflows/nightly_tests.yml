@@ -48,12 +48,15 @@ jobs:
   # answer-leak thresholds are measured against the model we actually ship with.
   # Daily on purpose, unlike the other paid arms: this is the product contract,
   # and a few hundred calls is a small fraction of one datasheets perf run.
-  # It waits for perf-datasheets-llm so the two never share LLM_API_KEY at the
-  # same time -- a 429 backoff would land in the perf timings, the numbers that
-  # arm exists to measure. `!cancelled()` keeps it running when perf fails.
+  # It waits for every paid perf arm so its calls never overlap theirs: the
+  # journeys read LLM_API_KEY while perf reads OPENAI_API_KEY, so the shared
+  # resources are EMBEDDING_API_KEY and the provider's org rate limit, and a
+  # 429 backoff from either would land in the perf timings, the numbers those
+  # arms exist to measure. The weekly-only arms are skipped on daily;
+  # `!cancelled()` keeps this running when a perf arm is skipped or fails.
   journeys-llm:
     name: Product Journeys (real LLM)
-    needs: [perf-datasheets-llm]
+    needs: [perf-datasheets-llm, perf-wap-llm, perf-rust-wap-llm]
     if: ${{ !cancelled() }}
     uses: ./.github/workflows/journey_tests.yml
     with:
@@ -319,6 +322,7 @@ jobs:
           # One arm per line: emoji|title|result|metrics-json|report-url.
           # Adding a benchmark arm is a line here plus its REPORT_KEYS entry.
           ARMS: |
+            🧭|Product Journeys — Real LLM|${{ needs.journeys-llm.result }}||
             📚|File Based — War and Peace — Real LLM|${{ needs.perf-wap-llm.result }}|${{ needs.perf-wap-llm.outputs.file_based_metrics }}|${{ steps.presign.outputs.url_file_wap_llm }}
             📚|File Based — War and Peace — Mock LLM|${{ needs.perf-wap-mock.result }}|${{ needs.perf-wap-mock.outputs.file_based_metrics }}|${{ steps.presign.outputs.url_file_wap_mock }}
             🧪|File Based — Datasheets — Real LLM|${{ needs.perf-datasheets-llm.result }}|${{ needs.perf-datasheets-llm.outputs.file_based_metrics }}|${{ steps.presign.outputs.url_file_datasheets_llm }}
