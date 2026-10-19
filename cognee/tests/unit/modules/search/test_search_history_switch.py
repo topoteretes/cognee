@@ -125,22 +125,41 @@ async def test_flag_can_be_toggled_after_import(history_engine, monkeypatch):
 @pytest.mark.asyncio
 async def test_delete_history_for_dataset_leaves_other_rows(history_engine, monkeypatch):
     monkeypatch.setenv("COGNEE_LOG_SEARCH_HISTORY", "true")
-    user_id, other_user = uuid4(), uuid4()
+    user_id = uuid4()
     dataset_a, dataset_b = uuid4(), uuid4()
 
-    for owner, dataset_id in ((user_id, dataset_a), (user_id, dataset_b), (user_id, None)):
-        query = await log_query_mod.log_query("q?", "CHUNKS", owner, dataset_id)
-        await log_result_mod.log_result(query.id, "a", owner, dataset_id)
-    query = await log_query_mod.log_query("q?", "CHUNKS", other_user, dataset_a)
-    await log_result_mod.log_result(query.id, "a", other_user, dataset_a)
+    for dataset_id in (dataset_a, dataset_b, None):
+        query = await log_query_mod.log_query("q?", "CHUNKS", user_id, dataset_id)
+        await log_result_mod.log_result(query.id, "a", user_id, dataset_id)
 
     removed = await delete_history_mod.delete_search_history(user_id, dataset_a)
 
     assert removed == 2
     remaining = await get_history_mod.get_history(user_id, limit=0)
     assert {row["dataset_id"] for row in remaining} == {dataset_b, None}
-    # Another user's rows on the same dataset are untouched.
-    assert len(await get_history_mod.get_history(other_user, limit=0)) == 2
+
+
+@pytest.mark.asyncio
+async def test_delete_history_for_dataset_covers_every_user(history_engine, monkeypatch):
+    """Owner A forgets a dataset user B searched through a read grant.
+
+    The dataset is gone for B too, and B's answers can quote its chunks, so
+    B's rows on that dataset go with it. B's other history is untouched.
+    """
+    monkeypatch.setenv("COGNEE_LOG_SEARCH_HISTORY", "true")
+    owner, reader = uuid4(), uuid4()
+    shared, readers_own = uuid4(), uuid4()
+
+    for user_id, dataset_id in ((owner, shared), (reader, shared), (reader, readers_own)):
+        query = await log_query_mod.log_query("q?", "CHUNKS", user_id, dataset_id)
+        await log_result_mod.log_result(query.id, "a", user_id, dataset_id)
+
+    removed = await delete_history_mod.delete_search_history(owner, shared)
+
+    assert removed == 4
+    assert await get_history_mod.get_history(owner, limit=0) == []
+    remaining = await get_history_mod.get_history(reader, limit=0)
+    assert {row["dataset_id"] for row in remaining} == {readers_own}
 
 
 @pytest.mark.asyncio
@@ -191,7 +210,11 @@ async def test_forget_everything_purges_user_history():
     ):
         result = await forget_mod._forget_everything(user)
 
-    assert result == {"datasets_removed": 2, "status": "success"}
+    assert result == {
+        "datasets_removed": 2,
+        "search_history_removed": True,
+        "status": "success",
+    }
     delete_history.assert_awaited_once_with(user.id, None)
 
 
@@ -212,14 +235,21 @@ async def test_forget_dataset_purges_that_dataset_history():
     ):
         result = await forget_mod._forget_dataset(dataset_id, user)
 
-    assert result == {"dataset_id": str(dataset_id), "status": "success"}
+    assert result == {
+        "dataset_id": str(dataset_id),
+        "search_history_removed": True,
+        "status": "success",
+    }
     fake_datasets.empty_dataset.assert_awaited_once_with(dataset_id, user=user)
     delete_history.assert_awaited_once_with(user.id, dataset_id)
 
 
 @pytest.mark.asyncio
 async def test_history_cleanup_failure_does_not_fail_forget():
-    """The data is already gone; an unreachable history table is logged, not raised."""
+    """The data is already gone; an unreachable history table is logged, not raised.
+
+    The result still says so, so a caller with retention duties can retry.
+    """
     user = SimpleNamespace(id=uuid4())
     dataset_id = uuid4()
     fake_datasets = SimpleNamespace(empty_dataset=AsyncMock())
@@ -235,3 +265,4 @@ async def test_history_cleanup_failure_does_not_fail_forget():
         result = await forget_mod._forget_dataset(dataset_id, user)
 
     assert result["status"] == "success"
+    assert result["search_history_removed"] is False

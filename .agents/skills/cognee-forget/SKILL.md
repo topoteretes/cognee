@@ -80,10 +80,13 @@ candidates (name + a short preview) before deleting.
 | Every dataset the user can delete | `forget(everything=True)` | Nothing, in any dataset the user has `delete` on in the current tenant (shared ones included). Only on explicit request (see the hard limits) |
 
 Return values: `{"data_id", "dataset_id", "status"}` for a document,
-`{"dataset_id", "status"}` for a dataset (plus `data_records_reset` with
-`memory_only`), `{"datasets_removed", "status"}` for everything
-(`datasets_removed` counts the datasets the user can *read*, not the delete
-set).
+`{"dataset_id", "search_history_removed", "status"}` for a dataset (plus
+`data_records_reset` with `memory_only`), `{"datasets_removed",
+"search_history_removed", "status"}` for everything (`datasets_removed`
+counts the datasets the user can *read*, not the delete set).
+`search_history_removed` is `False` when the recorded questions and answers
+could not be purged even though the data is gone; retry the forget or clear
+the history yourself.
 
 **HTTP:** `POST /api/v1/forget` with a JSON body; camelCase and snake_case
 keys both work: `{"datasetId": "...", "dataId": "..."}`,
