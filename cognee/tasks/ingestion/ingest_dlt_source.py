@@ -132,6 +132,7 @@ async def ingest_dlt_source(
             raise DLTIngestionError(
                 message=f"DLT pipeline execution failed for dataset '{original_dataset_name}': {e}"
             ) from e
+        key_hints = _dlt_key_hints(pipeline.default_schema)
 
         # An incremental source can emit no rows (or only update its cursor),
         # so its load package need not contain a table job. Its previously
@@ -183,6 +184,7 @@ async def ingest_dlt_source(
         raise DLTIngestionError(
             message=f"Failed to extract schema from DLT database '{dlt_db_name}': {e}"
         ) from e
+    _apply_key_hints(filtered_schema, key_hints)
 
     # Read rows from each table and produce DltRowData objects
     from cognee.tasks.ingestion.config import get_ingestion_config
@@ -261,6 +263,47 @@ async def _extract_dlt_schema(
         )
 
     return schema, filtered_schema
+
+
+def _dlt_key_hints(schema) -> dict[str, dict]:
+    """Each data table's primary and foreign keys, as dlt's schema records them.
+
+    dlt creates its staging tables without key constraints, so reflecting them finds
+    none; the source's keys survive only as schema hints. ``references`` holds one
+    entry per referenced table, merging every foreign key to it into two aligned
+    column lists, which are paired back into one entry per column.
+    """
+    return {
+        table["name"]: {
+            "primary_key": [
+                name for name, column in table["columns"].items() if column.get("primary_key")
+            ],
+            "foreign_keys": [
+                {"column": column, "ref_table": ref["referenced_table"], "ref_column": ref_column}
+                for ref in table.get("references", [])
+                for column, ref_column in zip(ref["columns"], ref["referenced_columns"])
+            ],
+        }
+        for table in schema.data_tables()
+    }
+
+
+def _apply_key_hints(schema: dict, key_hints: dict[str, dict]) -> None:
+    """Set each reflected table's keys from dlt's hints.
+
+    A composite primary key is left to ``_resolve_primary_key``'s detection, which
+    keys a row on a single column. Postgres names tables "<dataset>.<table>", so a
+    foreign key's target gets the same prefix to match the row lookup.
+    """
+    for qualified_name, table_info in schema.items():
+        table_name = qualified_name.split(".")[-1]
+        prefix = qualified_name[: -len(table_name)]
+        hints = key_hints[table_name]
+        if len(hints["primary_key"]) == 1:
+            table_info["primary_key"] = hints["primary_key"][0]
+        table_info["foreign_keys"] = [
+            {**fk, "ref_table": prefix + fk["ref_table"]} for fk in hints["foreign_keys"]
+        ]
 
 
 def _is_dlt_internal_table(qualified_name: str) -> bool:

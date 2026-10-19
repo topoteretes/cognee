@@ -927,7 +927,8 @@ def _resolve_fk_references(
         target_node_id = row_id_lookup.get(target_key)
 
         if target_node_id is not None:
-            relationship_name = f"{fk_column}_references_{ref_table}"
+            # The bare table name, so Postgres' "<dataset>.<table>" names the edge as SQLite does.
+            relationship_name = f"{fk_column}_references_{ref_table.split('.')[-1]}"
             references.append(
                 {
                     "column": fk_column,
