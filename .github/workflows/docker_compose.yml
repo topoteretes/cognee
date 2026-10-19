@@ -60,6 +60,7 @@ jobs:
         printenv | grep -E '^(LLM_|EMBEDDING_)[A-Za-z0-9_]*=.+' > .env
         echo "EMBEDDING_DIMENSIONS=300" >> .env
         echo "COGNEE_SKIP_CONNECTION_TEST=true" >> .env
+        echo "TELEMETRY_DISABLED=1" >> .env
         # Point the relational store at the postgres service so the e2e
         # persistence test is genuinely Postgres-backed. docker compose reads
         # the same .env for ${DB_*} interpolation in docker-compose.yml, which
