@@ -17,6 +17,7 @@ from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.code_graph.enola import (
+    ParsedSnapshot,
     is_enola_id,
     normalize_relation,
     parse_enola_snapshot,
@@ -682,6 +683,7 @@ async def extract_code_graph(
     timeout: float = 600.0,
     repo_scope: str | None = None,
     node_set: list[str] | None = None,
+    snapshot: ParsedSnapshot | None = None,
 ) -> list[DataPoint]:
     """Run enola on repo_path (or reuse an existing snapshot) and return DataPoints.
 
@@ -695,18 +697,23 @@ async def extract_code_graph(
     repo_scope loads one member of a multi-repo snapshot (snapshot_dir is then
     the cluster's snapshot and repo_path the member's directory): the skip
     check reads that member's repository node and only its facts are mapped.
+    ``snapshot`` is that snapshot already parsed (a cluster load parses it
+    once for all its members); it stands in for snapshot_dir.
     """
     # When used as the first pipeline task, the pipeline payload arrives as the
     # first positional argument; accept a repo path there, ignore anything else.
     if repo_path is None and isinstance(data, (str, Path)):
         repo_path = data
 
-    if snapshot_dir is None:
-        if repo_path is None:
-            raise ValueError("extract_code_graph requires repo_path or snapshot_dir.")
-        snapshot_dir = await run_enola_generate(repo_path, timeout=timeout)
-
-    facts, receipt = parse_enola_snapshot(snapshot_dir)
+    if snapshot is not None:
+        snapshot_dir = snapshot.snapshot_dir
+        facts, receipt = snapshot.facts, snapshot.receipt
+    else:
+        if snapshot_dir is None:
+            if repo_path is None:
+                raise ValueError("extract_code_graph requires repo_path or snapshot_dir.")
+            snapshot_dir = await run_enola_generate(repo_path, timeout=timeout)
+        facts, receipt = parse_enola_snapshot(snapshot_dir)
 
     if receipt:
         logger.info(
@@ -965,6 +972,7 @@ async def add_code_graph_edges(
     ctx: Optional["PipelineContext"] = None,
     repo_scope: str | None = None,
     node_set: list[str] | None = None,
+    snapshot: ParsedSnapshot | None = None,
 ) -> list[DataPoint]:
     """Insert typed relation edges (calls/imports/...) after add_data_points ran.
 
@@ -988,13 +996,22 @@ async def add_code_graph_edges(
         # sweep, or stamp.
         return data_points
 
-    if snapshot_dir is None:
-        if repo_path is None:
-            raise ValueError("add_code_graph_edges requires repo_path or snapshot_dir.")
-        snapshot_dir = Path(repo_path) / ".enola"
-
-    facts, receipt = parse_enola_snapshot(snapshot_dir)
-    edges, skipped = build_code_graph_edges(facts, repo_path=repo_path)
+    if snapshot is not None:
+        # A cluster load: the snapshot was parsed once for every member, and
+        # its edges resolved once; repo_scope narrows both below.
+        snapshot_dir = snapshot.snapshot_dir
+        facts, receipt = snapshot.facts, snapshot.receipt
+        if snapshot.edges is not None:
+            edges, skipped = snapshot.edges, 0
+        else:
+            edges, skipped = build_code_graph_edges(facts, repo_path=repo_path)
+    else:
+        if snapshot_dir is None:
+            if repo_path is None:
+                raise ValueError("add_code_graph_edges requires repo_path or snapshot_dir.")
+            snapshot_dir = Path(repo_path) / ".enola"
+        facts, receipt = parse_enola_snapshot(snapshot_dir)
+        edges, skipped = build_code_graph_edges(facts, repo_path=repo_path)
     logger.info("Resolved %d code graph edge(s), skipped %d.", len(edges), skipped)
 
     try:
@@ -1374,13 +1391,15 @@ def get_code_graph_tasks(
     timeout: float = 600.0,
     index_vectors: bool = False,
     repo_scope: str | None = None,
+    snapshot: ParsedSnapshot | None = None,
 ) -> list[Task]:
     """Build the ordered task list for the enola code graph pipeline.
 
     index_vectors is opt-in because SearchType.CODE uses graph indexes only.
     Enable it when the same code facts must also feed semantic/completion
     retrievers, which may require an embedding provider API key. repo_scope
-    loads one member of the multi-repo snapshot in snapshot_dir.
+    loads one member of the multi-repo snapshot in snapshot_dir; ``snapshot``
+    is that snapshot already parsed, shared by the members' task lists.
     """
     return [
         # EXTRACT: run enola and map its facts to DataPoints
@@ -1390,6 +1409,7 @@ def get_code_graph_tasks(
             snapshot_dir=snapshot_dir,
             timeout=timeout,
             repo_scope=repo_scope,
+            snapshot=snapshot,
         ),
         # LOAD: persist graph nodes; vector indexing is explicitly opt-in
         Task(add_code_graph_data_points, graph_only=not index_vectors),
@@ -1399,5 +1419,6 @@ def get_code_graph_tasks(
             repo_path=repo_path,
             snapshot_dir=snapshot_dir,
             repo_scope=repo_scope,
+            snapshot=snapshot,
         ),
     ]

@@ -18,6 +18,7 @@ import platform
 import shutil
 import sysconfig
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -285,6 +286,23 @@ async def run_enola_cluster(
         )
 
     return snapshot_dir
+
+
+@dataclass(frozen=True)
+class ParsedSnapshot:
+    """A snapshot read once: its directory, facts and receipt.
+
+    extract_code_graph and add_code_graph_edges take it in place of a
+    ``snapshot_dir`` so a load that covers several repositories (a dataset's
+    cluster) parses ``facts.jsonl`` once, not once per task per member.
+    ``edges`` are the typed relation edges already resolved from these facts
+    (``build_code_graph_edges``), when the caller resolved them once as well.
+    """
+
+    snapshot_dir: Path
+    facts: list
+    receipt: dict | None
+    edges: list | None = None
 
 
 def parse_enola_snapshot(

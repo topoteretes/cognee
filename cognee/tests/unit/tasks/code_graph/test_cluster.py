@@ -236,6 +236,33 @@ async def test_cluster_snapshot_runs_enola_once_and_labels_each_member(monkeypat
         (golf_row, "golf"),
         (ui_row, "ui"),
     ]
+    # Parsed once, with the edges resolved once, for every member's load.
+    assert snapshot.parsed is not None
+    assert snapshot.parsed.snapshot_dir == snapshot_dir
+    assert [fact["name"] for fact in snapshot.parsed.facts] == [
+        fact["name"] for fact in CLUSTER_FACTS
+    ]
+    assert snapshot.parsed.edges is not None
+
+
+@pytest.mark.asyncio
+async def test_cluster_timeout_scales_with_the_members_up_to_the_cap(monkeypatch, tmp_path):
+    golf, ui = _repos(tmp_path, "golf", "ui")
+    snapshot_dir = _write_snapshot(golf, label="golf")
+    _write_snapshot(ui, label="ui")
+    run_cluster = AsyncMock(return_value=snapshot_dir)
+    monkeypatch.setattr(cluster_module, "run_enola_cluster", run_cluster)
+    repos = [(_row(golf), golf), (_row(ui), ui)]
+
+    await snapshot_dataset_code_repos(uuid4(), repos, timeout=3000.0)
+    # 2 x 3000 s would exceed the cap: the cluster gets the cap.
+    assert (
+        run_cluster.await_args.kwargs["timeout"] == cluster_module.CLUSTER_ENOLA_TIMEOUT_CAP_SECONDS
+    )
+
+    await snapshot_dataset_code_repos(uuid4(), repos, timeout=7200.0)
+    # ... but never less than one repository's own budget.
+    assert run_cluster.await_args.kwargs["timeout"] == 7200.0
 
 
 # --- loading one member of a cluster snapshot ---------------------------------
@@ -493,6 +520,44 @@ async def test_refresh_applies_index_vectors_only_to_the_rows_this_call_stored(r
     assert ui_call.kwargs["skip_connection_test"] is False
 
 
+@pytest.mark.asyncio
+async def test_refresh_of_a_large_dataset_builds_only_the_new_rows_inline(refresh_env, monkeypatch):
+    """Past CLUSTER_INLINE_REBUILD_LIMIT existing repositories, remember() builds
+    the new rows now and marks the rest for the next cognify(), as delete does."""
+    env = refresh_env
+    existing = [_row(env.golf.parent / f"svc{i}") for i in range(6)]
+    monkeypatch.setattr(
+        cluster_module, "dataset_code_repo_rows", AsyncMock(return_value=existing + [env.ui_row])
+    )
+    reset = AsyncMock()
+    publish_module = importlib.import_module("cognee.modules.data.methods.publish_updated_data")
+    monkeypatch.setattr(publish_module, "reset_data_pipeline_status", reset)
+    env.snapshot_mock.return_value = None  # one new repository: no cluster to snapshot
+
+    runs = await refresh_dataset_code_graph(
+        env.dataset, env.user, known_repos=[(env.ui_row, env.ui)]
+    )
+
+    assert env.snapshot_mock.await_args.args[1] == [(env.ui_row, env.ui)]
+    assert [run.data for run in runs] == [env.ui_row]
+    assert [call.kwargs["data"] for call in env.pipeline.await_args_list] == [[env.ui_row]]
+    assert sorted(call.args[0] for call in reset.await_args_list) == sorted(r.id for r in existing)
+    assert all(call.args[1] == env.dataset.id for call in reset.await_args_list)
+
+
+@pytest.mark.asyncio
+async def test_refresh_within_the_limit_rebuilds_every_repository(refresh_env, monkeypatch):
+    env = refresh_env
+    reset = AsyncMock()
+    publish_module = importlib.import_module("cognee.modules.data.methods.publish_updated_data")
+    monkeypatch.setattr(publish_module, "reset_data_pipeline_status", reset)
+
+    await refresh_dataset_code_graph(env.dataset, env.user, known_repos=[(env.ui_row, env.ui)])
+
+    assert env.snapshot_mock.await_args.args[1] == [(env.ui_row, env.ui), (env.golf_row, env.golf)]
+    reset.assert_not_awaited()
+
+
 @pytest.fixture
 def delete_env(monkeypatch, refresh_env):
     env = refresh_env
@@ -644,6 +709,53 @@ async def test_route_does_not_run_enola_again_once_it_failed_in_the_run(route_en
     )
     assert await load_dataset_cluster(later) is True
     assert env.snapshot_mock.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_cluster_load_parses_the_snapshot_once_for_all_members(monkeypatch, tmp_path):
+    """One parse of facts.jsonl per cluster load, shared by every member's
+    extract and edge tasks, instead of one per task per member."""
+    cluster_module._cluster_runs.clear()
+    golf, ui = _repos(tmp_path, "golf", "ui")
+    snapshot_dir = _write_snapshot(golf, label="golf")
+    _write_snapshot(ui, label="ui")
+    golf_row, ui_row = _row(golf), _row(ui)
+    monkeypatch.setattr(cluster_module, "run_enola_cluster", AsyncMock(return_value=snapshot_dir))
+    monkeypatch.setattr(
+        cluster_module, "dataset_code_repo_rows", AsyncMock(return_value=[golf_row, ui_row])
+    )
+    storage_module = importlib.import_module("cognee.tasks.storage.add_data_points")
+    monkeypatch.setattr(storage_module, "add_data_points", AsyncMock())
+    graph_methods = importlib.import_module("cognee.modules.graph.methods")
+    monkeypatch.setattr(graph_methods, "upsert_edges", AsyncMock())
+    engine = _mock_engine(monkeypatch)
+    enola_module = importlib.import_module("cognee.tasks.code_graph.enola")
+    real_parse, parses = enola_module.parse_enola_snapshot, []
+
+    def counting_parse(directory):
+        parses.append(str(directory))
+        return real_parse(directory)
+
+    monkeypatch.setattr(cluster_module, "parse_enola_snapshot", counting_parse)
+    monkeypatch.setattr(extract_module, "parse_enola_snapshot", counting_parse)
+    ctx = PipelineContext(
+        user=SimpleNamespace(id=uuid4(), tenant_id=uuid4()),
+        data_item=ui_row,
+        dataset=SimpleNamespace(id=uuid4()),
+        pipeline_run_id=uuid4(),
+    )
+
+    assert await load_dataset_cluster(ctx) is True
+
+    assert parses == [str(snapshot_dir)]
+    # Both members were loaded from that one parse: each repository node was stamped.
+    stamped = {
+        node.name
+        for call in engine.add_nodes.await_args_list
+        for node in call.args[0]
+        if isinstance(node, CodeRepository)
+    }
+    assert stamped == {"golf", "ui"}
 
 
 @pytest.mark.asyncio
