@@ -1079,7 +1079,13 @@ async def add_code_graph_edges(
         # remember(content_type="code") path (both always pass node_set=None)
         # never pay for this.
         detagged = await _detag_stale_code_graph(
-            graph_engine, facts, repo_path, existing_nodes, existing_edge_keys, node_set
+            graph_engine,
+            facts,
+            repo_path,
+            existing_nodes,
+            existing_edge_keys,
+            node_set,
+            repo_scope=repo_scope,
         )
 
         snapshot_id = snapshot_identity(snapshot_dir, receipt)
@@ -1217,6 +1223,7 @@ async def _detag_stale_code_graph(
     existing_nodes: list[tuple],
     existing_edge_keys: set,
     node_set: list[str] | None,
+    repo_scope: str | None = None,
 ) -> list[str]:
     """Strip node_set tags this repo's surviving code nodes carry but should not.
 
@@ -1227,12 +1234,22 @@ async def _detag_stale_code_graph(
 
     Edges are stale by NodeSet id, the property by exact name: a respelling
     ("Team-A" -> "team-a") keeps the shared edge but drops the old spelling.
+
+    With repo_scope (one member of a multi-repo snapshot) only that member's
+    nodes are considered: the other members carry their own rows' tags, which
+    are not stale just because they differ from this row's.
     """
     from cognee.infrastructure.databases.provenance.delete_data import EdgeIdentity
 
     fallback_repo = _resolve_fallback_repo(facts, repo_path)
-    snapshot_repos = _snapshot_repos(facts, fallback_repo)
-    current_ids = _current_code_node_ids(facts, fallback_repo)
+    if repo_scope is not None:
+        snapshot_repos = {repo_scope}
+        current_ids = _current_code_node_ids(
+            [fact for fact in facts if _fact_repo(fact, fallback_repo) == repo_scope], repo_scope
+        )
+    else:
+        snapshot_repos = _snapshot_repos(facts, fallback_repo)
+        current_ids = _current_code_node_ids(facts, fallback_repo)
     code_types = _code_graph_node_types()
 
     code_node_ids = [

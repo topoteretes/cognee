@@ -1718,9 +1718,14 @@ async def _remember_inner(
                     getattr(run_info, "error_message", None) or "code_graph_pipeline errored"
                 )
 
-        async def _store_repo(spec, item: dict):
+        async def _clone_repo(spec, item: dict) -> Path:
+            # Resolving a spec may clone a remote repository: network-bound
+            # work that needs no dataset state, so it runs before the lock.
             repo_path = await resolve_repo_source(spec, credentials=repo_credentials)
             item["path"] = str(repo_path)
+            return repo_path
+
+        async def _store_repo(spec, item: dict, repo_path: Path):
             # One Data row per repository gives the caller a data_id for
             # forget() and lists the repo on the dataset. Running the pipeline
             # over that row lets the graph writes record it as their owner, so
@@ -1739,41 +1744,53 @@ async def _remember_inner(
                 skip_connection_test=not bool(index_vectors),
             )
             item["id"] = str(data.id)
-            return data, repo_path
+            return data
 
         def _fail(item: dict, exc: Exception) -> None:
             item["status"] = "errored"
             item["error"] = str(exc)
 
+        def _isolate(item: dict, exc: Exception, position: int) -> None:
+            # Isolating (background runs, and raise_on_error=False as the
+            # HTTP router and the GitHub sync pass): one failing repo must
+            # not abort the rest of the batch, so record the failure per
+            # item and keep going.
+            # Specs can embed URL credentials — never log spec-derived values.
+            logger.exception("Code-graph run failed for repo %d of %d", position, len(repo_specs))
+            _fail(item, exc)
+
         async def _run_repos(isolate_failures: bool) -> None:
+            # Clone first, outside the lock: a remote repository's clone is
+            # the slow, network-bound part and reads no dataset state, so
+            # nothing else on the dataset should wait for it.
+            cloned = []
+            for position, spec in enumerate(repo_specs, start=1):
+                # redact: connector-supplied URLs may carry a token in the
+                # userinfo, which must not surface in results or logs. The
+                # item exists before the run so a failure after the repo's
+                # Data row was written still reports that row's id.
+                item = {"kind": "code_repository", "source": redact_repo_spec(spec)}
+                result.items.append(item)
+                try:
+                    cloned.append((position, spec, item, await _clone_repo(spec, item)))
+                except Exception as exc:
+                    if not isolate_failures:
+                        raise
+                    _isolate(item, exc, position)
+
             # The Data rows' stamps are read-modify-written as a whole: holding
             # the dataset lock from the first row write to the final stamp keeps
             # a concurrent add()/cognify() of the dataset from overwriting them.
             # The lock is re-entrant, so add() and the pipeline run inside it.
             async with dataset_lock(dataset.id):
                 stored = []
-                for position, spec in enumerate(repo_specs, start=1):
-                    # redact: connector-supplied URLs may carry a token in the
-                    # userinfo, which must not surface in results or logs. The
-                    # item exists before the run so a failure after the repo's
-                    # Data row was written still reports that row's id.
-                    item = {"kind": "code_repository", "source": redact_repo_spec(spec)}
-                    result.items.append(item)
+                for position, spec, item, repo_path in cloned:
                     try:
-                        data, repo_path = await _store_repo(spec, item)
-                        stored.append((item, data, repo_path))
+                        stored.append((item, await _store_repo(spec, item, repo_path), repo_path))
                     except Exception as exc:
                         if not isolate_failures:
                             raise
-                        # Isolating (background runs, and raise_on_error=False as
-                        # the HTTP router and the GitHub sync pass): one failing
-                        # repo must not abort the rest of the batch, so record the
-                        # failure per item and keep going.
-                        # Specs can embed URL credentials — never log spec-derived values.
-                        logger.exception(
-                            "Code-graph run failed for repo %d of %d", position, len(repo_specs)
-                        )
-                        _fail(item, exc)
+                        _isolate(item, exc, position)
 
                 # The dataset's repositories are extracted together, so the ones
                 # already in it are rebuilt with the ones this call adds: that is

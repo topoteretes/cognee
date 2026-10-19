@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import pytest
 
+from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.tasks.code_graph.cluster import (
     ClusterMember,
@@ -338,6 +339,55 @@ async def test_member_load_does_not_sweep_the_other_members_edges(monkeypatch, t
     assert REACHES in _written_edges(engine)
 
 
+@pytest.mark.asyncio
+async def test_member_load_keeps_the_other_members_node_set_tags(monkeypatch, tmp_path):
+    """Each row carries its own node_set: loading one member must not treat the
+    other members' tags as stale (only its own stale tag goes)."""
+    snapshot_dir = _write_snapshot(tmp_path)
+    storage_module = importlib.import_module("cognee.tasks.storage.add_data_points")
+    monkeypatch.setattr(storage_module, "add_data_points", AsyncMock())
+    ui_symbol = str(fact_node_id("ui", "symbol", "api.fetchRounds"))
+    golf_symbol = str(fact_node_id("golf", "symbol", "handlers.ListRounds"))
+    team_ui, old_golf = str(NodeSet.id_for("team-ui")), str(NodeSet.id_for("old-golf"))
+    nodes = [
+        (ui_symbol, {"type": "CodeSymbol", "repo": "ui", "belongs_to_set": ["team-ui"]}),
+        (golf_symbol, {"type": "CodeSymbol", "repo": "golf", "belongs_to_set": ["old-golf"]}),
+        (team_ui, {"type": "NodeSet", "name": "team-ui"}),
+        (old_golf, {"type": "NodeSet", "name": "old-golf"}),
+    ]
+    edges = [
+        (ui_symbol, team_ui, "belongs_to_set", {}),
+        (golf_symbol, old_golf, "belongs_to_set", {}),
+    ]
+    engine = _mock_engine(monkeypatch, nodes=nodes, edges=edges)
+
+    data_points = await extract_code_graph(
+        repo_path=tmp_path, snapshot_dir=snapshot_dir, repo_scope="golf", node_set=["team-golf"]
+    )
+    state = await add_code_graph_data_points(data_points)
+    await add_code_graph_edges(
+        state,
+        repo_path=tmp_path,
+        snapshot_dir=snapshot_dir,
+        repo_scope="golf",
+        node_set=["team-golf"],
+    )
+
+    detagged = {
+        (edge.source_id, edge.target_id)
+        for call in engine.delete_edge_triples.await_args_list
+        for edge in call.args[0]
+        if edge.relationship_name == "belongs_to_set"
+    }
+    assert detagged == {(golf_symbol, old_golf)}
+    retagged_nodes = {
+        node_id
+        for call in engine.remove_belongs_to_set_tags.await_args_list
+        for node_id in call.kwargs["node_ids"]
+    }
+    assert retagged_nodes == {golf_symbol}
+
+
 # --- rebuilding a dataset -----------------------------------------------------
 
 
@@ -423,6 +473,24 @@ async def test_refresh_without_a_cluster_runs_each_repository_unscoped(refresh_e
     for call in env.pipeline.await_args_list:
         assert _task_kwargs(call)["repo_scope"] is None
         assert _task_kwargs(call)["snapshot_dir"] is None
+
+
+@pytest.mark.asyncio
+async def test_refresh_applies_index_vectors_only_to_the_rows_this_call_stored(refresh_env):
+    """index_vectors is this call's setting: the dataset's other repositories
+    are rebuilt graph-only, never embedded (or key-checked) on another call's behalf."""
+    env = refresh_env
+
+    runs = await refresh_dataset_code_graph(
+        env.dataset, env.user, known_repos=[(env.ui_row, env.ui)], index_vectors=True
+    )
+
+    assert [(run.label, run.index_vectors) for run in runs] == [("golf", False), ("ui", True)]
+    golf_call, ui_call = env.pipeline.await_args_list
+    assert _task_kwargs(golf_call, 1)["graph_only"] is True
+    assert golf_call.kwargs["skip_connection_test"] is True
+    assert _task_kwargs(ui_call, 1)["graph_only"] is False
+    assert ui_call.kwargs["skip_connection_test"] is False
 
 
 @pytest.fixture
@@ -550,6 +618,32 @@ async def test_route_retries_a_failed_member_load_from_the_same_snapshot(route_e
         "golf",
         "ui",
     ]
+
+
+@pytest.mark.asyncio
+async def test_route_does_not_run_enola_again_once_it_failed_in_the_run(route_env):
+    """An enola failure on the cluster is the run's verdict: the dataset's other
+    rows in the same run get the same error instead of another enola run each."""
+    env = route_env
+    env.snapshot_mock.side_effect = RuntimeError("enola exited with code 1")
+    ctx = PipelineContext(
+        user=env.user, data_item=env.ui_row, dataset=env.dataset, pipeline_run_id=uuid4()
+    )
+
+    with pytest.raises(RuntimeError, match="exited with code 1"):
+        await load_dataset_cluster(ctx)
+    with pytest.raises(RuntimeError, match="exited with code 1"):
+        await load_dataset_cluster(ctx)
+
+    env.snapshot_mock.assert_awaited_once()
+    env.extract.assert_not_awaited()
+    # A new pipeline run of the dataset tries again.
+    env.snapshot_mock.side_effect = None
+    later = PipelineContext(
+        user=env.user, data_item=env.ui_row, dataset=env.dataset, pipeline_run_id=uuid4()
+    )
+    assert await load_dataset_cluster(later) is True
+    assert env.snapshot_mock.await_count == 2
 
 
 @pytest.mark.asyncio

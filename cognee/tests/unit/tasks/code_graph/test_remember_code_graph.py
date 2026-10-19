@@ -340,11 +340,17 @@ async def test_row_write_run_and_stamp_hold_the_dataset_lock(code_remember_env, 
     code_remember_env["add_repo"].side_effect = lambda *_a, **_k: (
         events.append(("add_repo", None)) or code_remember_env["data_row"]
     )
+    code_remember_env["resolve"].side_effect = lambda *_a, **_k: (
+        events.append(("resolve", None)) or code_remember_env["repo_dir"]
+    )
 
     await remember("/some/repo", content_type="code")
 
     dataset_id = code_remember_env["dataset"].id
+    # The clone (resolve) is network-bound and reads no dataset state: it
+    # happens before the lock, so nothing else on the dataset waits for it.
     assert events == [
+        ("resolve", None),
         ("lock", dataset_id),
         ("add_repo", None),
         ("pipeline", None),

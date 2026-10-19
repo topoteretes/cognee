@@ -65,6 +65,7 @@ class MemberRun:
     data: Any
     repo_path: Path
     label: str | None = None
+    index_vectors: bool = False
     pipeline_result: Any = None
     error: Exception | None = field(default=None, repr=False)
 
@@ -231,6 +232,12 @@ async def refresh_dataset_code_graph(
     the caller just stored, with their resolved directories; the dataset's
     other ``code_repo`` rows are added from their metadata.
 
+    ``index_vectors`` is this call's setting and applies to ``known_repos``
+    only. The dataset's other repositories are rebuilt graph-only, as the
+    cognify CODE_REPO route rebuilds them: a rebuild never embeds on behalf
+    of an earlier call, nor demands an embedding key the caller did not opt
+    into.
+
     A repository whose run fails is reported on its MemberRun and does not
     stop the others. An enola failure on the cluster itself raises.
     """
@@ -245,16 +252,26 @@ async def refresh_dataset_code_graph(
         if row.id not in known_ids and repo_path is not None:
             repos.append((row, repo_path))
 
+    def _member_index_vectors(data: Any) -> bool:
+        return bool(index_vectors) and getattr(data, "id", None) in known_ids
+
     snapshot = await snapshot_dataset_code_repos(dataset.id, repos, timeout=timeout)
     if snapshot is not None:
         runs = [
-            MemberRun(data=member.data, repo_path=member.repo_path, label=member.label)
+            MemberRun(
+                data=member.data,
+                repo_path=member.repo_path,
+                label=member.label,
+                index_vectors=_member_index_vectors(member.data),
+            )
             for member in snapshot.members
         ]
     else:
-        runs = [MemberRun(data=data, repo_path=repo_path) for data, repo_path in repos]
+        runs = [
+            MemberRun(data=data, repo_path=repo_path, index_vectors=_member_index_vectors(data))
+            for data, repo_path in repos
+        ]
 
-    skip_connection_test = not index_vectors
     for run in runs:
         try:
             run.pipeline_result = await run_custom_pipeline(
@@ -262,14 +279,14 @@ async def refresh_dataset_code_graph(
                     str(run.repo_path),
                     snapshot_dir=snapshot.snapshot_dir if snapshot is not None else None,
                     timeout=timeout,
-                    index_vectors=index_vectors,
+                    index_vectors=run.index_vectors,
                     repo_scope=run.label,
                 ),
                 data=[run.data],
                 dataset=dataset.id,
                 user=user,
                 pipeline_name="code_graph_pipeline",
-                skip_connection_test=skip_connection_test,
+                skip_connection_test=not run.index_vectors,
             )
             if not pipeline_errored(run.pipeline_result):
                 # The row's graph is built, exactly as the cognify CODE_REPO
@@ -355,6 +372,9 @@ class _ClusterRun:
     done: bool = False
     is_cluster: bool = False
     snapshot: DatasetCodeSnapshot | None = None
+    # The enola failure that ended this run's cluster load, re-raised for the
+    # run's later rows so enola is not run again once per row.
+    error: Exception | None = field(default=None, repr=False)
 
 
 _cluster_runs: dict[str, _ClusterRun] = {}
@@ -396,6 +416,10 @@ async def load_dataset_cluster(ctx: Optional["PipelineContext"]) -> bool:
     run = _cluster_run(dataset_id, run_id)
     async with run.lock:
         if run.done and run.run_id is not None:
+            if run.error is not None:
+                # enola already failed on this dataset in this run; running it
+                # again for every remaining row would fail the same way.
+                raise run.error
             return run.is_cluster
 
         if run.snapshot is None:
@@ -404,7 +428,12 @@ async def load_dataset_cluster(ctx: Optional["PipelineContext"]) -> bool:
                 for row in await dataset_code_repo_rows(dataset_id)
                 if (repo_path := code_repo_path(row)) is not None
             ]
-            run.snapshot = await snapshot_dataset_code_repos(dataset_id, repos)
+            try:
+                run.snapshot = await snapshot_dataset_code_repos(dataset_id, repos)
+            except Exception as error:
+                run.error = error
+                run.done = True
+                raise
         if run.snapshot is None:
             run.done = True
             return False
