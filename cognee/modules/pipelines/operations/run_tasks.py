@@ -78,9 +78,10 @@ async def run_tasks(
     caller; the run stays recorded as completed.
 
     ``after_items_ran`` is awaited before it, and also when items of the run failed,
-    whether they reported or raised it (a raised error goes on after the hook).
-    Cognify reconciles the document structure with it, which one failing item must
-    not freeze.
+    whether they reported or raised it. Cognify reconciles the document structure
+    with it, which one failing item must not freeze. On a completed run its error
+    propagates. On a failed run the run's own error wins: a raised one goes on with
+    the hook's error as its cause, a reported one is returned and the hook's is logged.
     """
     task_resolver = tasks if callable(tasks) else None
     if not user:
@@ -423,7 +424,9 @@ async def run_tasks(
                         try:
                             await after_items_ran()
                         except Exception as hook_error:
-                            # The run's own error is what callers map to a status.
+                            # The run's own error is what callers map to a status, so it
+                            # is the one raised; this log is the only trace of the hook's.
+                            logger.exception("after_items_ran failed while the run was failing")
                             raise error from hook_error
                     raise
 
@@ -431,6 +434,13 @@ async def run_tasks(
             # close at that yield re-raises above (``run_finished``), and the
             # swallowed per-item failure path leaves ``run_finished`` unset.
             if (run_finished or items_failed) and after_items_ran is not None:
-                await after_items_ran()
+                try:
+                    await after_items_ran()
+                except Exception:
+                    if run_finished:
+                        raise
+                    # The reported failure was already yielded and is what callers act on
+                    # (improve reads its budget error), so a broken hook must not replace it.
+                    logger.exception("after_items_ran failed after a reported item failure")
             if run_finished and after_run_completed is not None:
                 await after_run_completed()

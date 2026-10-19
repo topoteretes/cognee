@@ -170,6 +170,33 @@ async def test_after_items_ran_still_runs_when_an_item_failed_but_after_run_comp
 
 
 @pytest.mark.asyncio
+async def test_a_failing_after_items_ran_after_a_reported_failure_keeps_the_reported_error(
+    monkeypatch, runner_plumbing
+):
+    """A reported failure is returned, not raised, and callers act on its error class
+    (improve stops its run on a budget error). A broken hook must not replace it."""
+    from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
+
+    async def budget_item(*args, **kwargs):
+        return {
+            "run_info": PipelineRunErrored(
+                pipeline_run_id=uuid4(), payload="budget", dataset_id=uuid4(), dataset_name="d"
+            ),
+            "error": LLMPaymentRequiredError(),
+        }
+
+    async def broken_hook():
+        raise ValueError("structure pass failed")
+
+    dataset, _logs = _setup(monkeypatch, runner_plumbing, budget_item)
+
+    events = await _drive(dataset, after_items_ran=broken_hook)
+
+    errored = [event for event in events if isinstance(event, PipelineRunErrored)]
+    assert [event.error_class for event in errored] == ["LLMPaymentRequiredError"]
+
+
+@pytest.mark.asyncio
 async def test_after_items_ran_runs_when_an_item_raises_its_own_error(monkeypatch, runner_plumbing):
     """The default (RAISE_INCREMENTAL_LOADING_ERRORS=true): a failing item re-raises its own
     exception instead of reporting a failure, and the run ends with that error."""
@@ -250,7 +277,12 @@ def test_only_cognify_runs_the_after_hooks(name):
         if name not in source:
             continue
         for node in ast.walk(ast.parse(source)):
-            if isinstance(node, ast.Name) and node.id == name:
+            # A call, a module attribute or an import alias are all a use of the hook.
+            if (
+                (isinstance(node, ast.Name) and node.id == name)
+                or (isinstance(node, ast.Attribute) and node.attr == name)
+                or (isinstance(node, ast.alias) and node.name == name)
+            ):
                 referencing.add(relative.as_posix())
                 break
 

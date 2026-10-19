@@ -176,8 +176,19 @@ async def reconcile_structure(
         and existing_containers[container_id].get("name") != container.name
     ]
     provenance = await stores_provenance_in_graph(graph_engine)
-    if new_containers or renamed_containers:
-        await graph_engine.add_nodes(new_containers + renamed_containers)
+    written = new_containers + renamed_containers
+    if provenance:
+        # Each container carries a row's ref from the moment it exists, so a crash before
+        # _stamp_containers cannot leave one that forget() would never reach.
+        by_owner: dict[UUID, list[StructureContainer]] = {}
+        for container in written:
+            by_owner.setdefault(min(plan.owners[container.id]), []).append(container)
+        for owner, group in by_owner.items():
+            await graph_engine.add_nodes(
+                group, source_ref_key=make_source_ref_key(dataset_id, owner)
+            )
+    elif written:
+        await graph_engine.add_nodes(written)
     if provenance:
         await _stamp_containers(graph_engine, dataset_id, plan)
 
