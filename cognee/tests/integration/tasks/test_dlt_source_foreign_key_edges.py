@@ -3,7 +3,9 @@
 dlt stages a database source in tables without key constraints, so the keys come
 from dlt's schema hints. Covers the shapes that hints merge or rename: two foreign
 keys to one table, a self reference, and a primary key that is neither ``id`` nor
-the first column.
+the first column. Rows reach cognify in table order, two per batch, so one edge
+has both rows in one batch, and the others have the target row written after or
+before its source.
 
 Real add + cognify against local stores; the DLT route is LLM-free, and embeddings
 are mocked so the vector store works offline.
@@ -35,8 +37,10 @@ CREATE TABLE orders (
     seller_code TEXT REFERENCES users (user_code),
     parent_id INTEGER REFERENCES orders (id)
 );
+CREATE TABLE visits (id INTEGER PRIMARY KEY, user_code TEXT REFERENCES users (user_code));
 INSERT INTO users VALUES ('Ann', 'u1'), ('Bob', 'u2');
 INSERT INTO orders VALUES (1, 'u1', 'u2', NULL), (2, 'u2', 'u1', 1);
+INSERT INTO visits VALUES (1, 'u2');
 """
 
 
@@ -101,7 +105,7 @@ async def test_source_foreign_keys_become_edges_between_rows(clean_env):
     connection.close()
 
     await cognee.add(f"sqlite:///{source_db}", dataset_name="shop")
-    await cognee.cognify(datasets=["shop"])
+    await cognee.cognify(datasets=["shop"], chunks_per_batch=2)
 
     from cognee.infrastructure.databases.graph import get_graph_engine
 
@@ -123,4 +127,5 @@ async def test_source_foreign_keys_become_edges_between_rows(clean_env):
         ("orders:2", "buyer_code_references_users", "users:u2"),
         ("orders:2", "seller_code_references_users", "users:u1"),
         ("orders:2", "parent_id_references_orders", "orders:1"),
+        ("visits:1", "user_code_references_users", "users:u2"),
     }
