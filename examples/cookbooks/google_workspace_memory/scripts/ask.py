@@ -15,6 +15,7 @@ from datetime import datetime
 os.environ.setdefault("LOG_LEVEL", "ERROR")  # quiet cognee's logs; set before importing it
 
 import cognee
+from cognee.modules.engine.operations.setup import setup
 from cognee.modules.search.types import SearchType
 
 DATASET = "google_workspace_memory"  # the same in every script
@@ -27,6 +28,11 @@ DEFAULT_QUESTION = (
 
 async def ask(question: str | None = None) -> None:
     question = question or DEFAULT_QUESTION
+    await setup()  # a fresh install has no database yet
+    if DATASET not in {dataset.name for dataset in await cognee.datasets.list_datasets()}:
+        raise SystemExit(
+            f"[ask] The dataset {DATASET} does not exist yet. Run the ingest scripts first."
+        )
     print(f"[ask] {question}")
     answer = await cognee.recall(
         f"Today is {datetime.now().astimezone().date().isoformat()}. {question}",

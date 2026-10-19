@@ -1,7 +1,8 @@
 """Remember the Docs, Sheets, PDFs and text files in one Google Drive folder (node set `drive`).
 
-Drive comes in through cognee's Google Drive connector, `google_drive_source`. Docs export
-as text and Sheets as CSV (first sheet only); other file types are skipped. Needs
+Drive comes in through cognee's Google Drive connector, `google_drive_source`. It reads the
+folder and its subfolders. Docs export as text and Sheets as CSV (first sheet only); other
+file types and files over 25 MB are skipped. Needs
 credentials.json (a Google OAuth Desktop client) in the cookbook folder and
 GOOGLE_DRIVE_FOLDER_ID in .env (the ID at the end of the folder's URL); drive_token.json is
 written in the cookbook folder on the first run. Later runs process only changed files. With

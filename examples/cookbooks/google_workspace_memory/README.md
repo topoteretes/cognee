@@ -105,8 +105,8 @@ script also runs alone with the same options.
 | 0 | `google_workspace_memory.py --check` | Reports what is missing. Does no work | nothing |
 | 1 | `scripts/clear.py` (or `--clear`) | Forgets the dataset `google_workspace_memory`. Runs first with `--clear`, which is on by default for a sample run (`--no-clear` turns it off) | cognee dataset |
 | 2 | `scripts/ingest_calendar.py [--sample]` | Remembers every event of your primary calendar, past and future, through cognee's Google Calendar connector `google_calendar_source` (node set `calendar`) | cognee dataset |
-| 3 | `scripts/ingest_gmail.py [--emails N] [--sample]` | Remembers the newest 50 inbox emails by default, through cognee's Gmail connector `gmail_source` (node set `email`) | cognee dataset |
-| 4 | `scripts/ingest_drive.py [--sample]` | Remembers the Docs, Sheets (first sheet, as CSV), PDFs and text files in `GOOGLE_DRIVE_FOLDER_ID`, through cognee's Google Drive connector `google_drive_source` (node set `drive`) | cognee dataset |
+| 3 | `scripts/ingest_gmail.py [--emails N] [--sample]` | Remembers the newest 50 inbox emails by default (`--emails N`, at least 1), through cognee's Gmail connector `gmail_source` (node set `email`). Emails that leave the newest N are forgotten on the next run | cognee dataset |
+| 4 | `scripts/ingest_drive.py [--sample]` | Remembers the Docs, Sheets (first sheet, as CSV), PDFs and text files in `GOOGLE_DRIVE_FOLDER_ID` and its subfolders (files over 25 MB are skipped), through cognee's Google Drive connector `google_drive_source` (node set `drive`) | cognee dataset |
 | 5 | `scripts/ask.py [--ask "question"]` | Answers one question across all three with a `HYBRID_COMPLETION` recall. Today's date goes into the question; the default prepares your client meetings of the next seven days | nothing |
 
 All scripts use the cognee dataset `google_workspace_memory`, named once in each script.
@@ -127,7 +127,7 @@ The output looks like this (an illustration; yours comes from your own account):
 [ingest_calendar] Remembering your primary calendar. The first run reads every event and can take ten minutes or more; later runs fetch only changes.
 [ingest_calendar] Remembered your primary calendar: 262 new or changed events, 0 deleted
 [ingest_gmail] Remembering your newest 50 inbox emails…
-[ingest_gmail] Remembered your newest 50 inbox emails
+[ingest_gmail] Remembered your newest inbox emails: 50 read
 [ingest_drive] Remembering your Drive folder. The first run reads every file in it…
 [ingest_drive] Remembered your Drive folder: 3 files read
 [ask] Which client meetings do I have in the next seven days? ...
@@ -137,12 +137,13 @@ The output looks like this (an illustration; yours comes from your own account):
 ```
 
 The first run opens the browser three times, once per app, to consent. It reads your whole
-primary calendar and every supported file in the folder, and cognifies each item with your
-LLM: a calendar with a few hundred events takes about ten minutes. Later runs are quick:
-Calendar and Drive fetch only what changed since the last run, and deleted events and files
-are forgotten. Gmail loads the newest emails again, and cognee skips the ones it already
-holds. Add `--clear` to forget the dataset `google_workspace_memory` first and start over
-from your account as it is now.
+primary calendar and every supported file in the folder and its subfolders, and cognifies
+each item with your LLM: a calendar with a few hundred events takes about ten minutes. Later
+runs are quick: Calendar and Drive fetch only what changed since the last run, and deleted
+events and files are forgotten. Gmail reads the newest emails again each run. cognee skips
+the ones it already holds, unless their labels changed (read, starred), and forgets those
+no longer among the newest, so memory holds your inbox as it is now. Add `--clear` to
+forget the dataset `google_workspace_memory` first and start over.
 
 ## Clean up
 

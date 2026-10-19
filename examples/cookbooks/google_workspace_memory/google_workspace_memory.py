@@ -21,7 +21,7 @@ from scripts.ask import ask
 from scripts.clear import clear
 from scripts.ingest_calendar import ingest_calendar
 from scripts.ingest_drive import ingest_drive
-from scripts.ingest_gmail import ingest_gmail
+from scripts.ingest_gmail import email_count, ingest_gmail
 from setup import write_sample
 
 COOKBOOK_DIR = Path(__file__).parent
@@ -32,14 +32,14 @@ def missing_setup(args: argparse.Namespace) -> list[str]:
     missing = []
     if not os.environ.get("LLM_API_KEY"):
         missing.append("LLM_API_KEY is not set (put it in .env).")
+    if args.no_calendar and args.no_gmail and args.no_drive:
+        missing.append("Every app is skipped; drop one of --no-calendar, --no-gmail, --no-drive.")
     if args.sample:  # the sample replaces all three apps
         return missing
     if not (COOKBOOK_DIR / "credentials.json").exists():
         missing.append("Google OAuth client not found at credentials.json in the cookbook folder.")
     if not args.no_drive and not os.environ.get("GOOGLE_DRIVE_FOLDER_ID"):
         missing.append("GOOGLE_DRIVE_FOLDER_ID is not set (put it in .env), or pass --no-drive.")
-    if args.no_calendar and args.no_gmail and args.no_drive:
-        missing.append("Every app is skipped; drop one of --no-calendar, --no-gmail, --no-drive.")
     return missing
 
 
@@ -67,7 +67,7 @@ if __name__ == "__main__":
     parser.add_argument("--no-calendar", action="store_true", help="skip the Calendar step")
     parser.add_argument("--no-gmail", action="store_true", help="skip the Gmail step")
     parser.add_argument("--no-drive", action="store_true", help="skip the Drive step")
-    parser.add_argument("--emails", type=int, default=50, help="inbox emails to remember")
+    parser.add_argument("--emails", type=email_count, default=50, help="inbox emails to remember")
     parser.add_argument("--ask", help="your own question instead of the meeting prep")
     args = parser.parse_args()
 
