@@ -11,8 +11,10 @@ from .google_calendar import build_calendar_service_from_access_token, google_ca
 from .google_drive import build_drive_service_from_access_token, google_drive_source
 from .linear import build_linear_service, linear_source
 from .notion import notion_source
+from .square import SquareClient, square_source
 
 __all__ = [
+    "SquareClient",
     "build_calendar_service_from_access_token",
     "build_drive_service_from_access_token",
     "build_gmail_service_from_access_token",
@@ -22,4 +24,5 @@ __all__ = [
     "google_drive_source",
     "linear_source",
     "notion_source",
+    "square_source",
 ]
