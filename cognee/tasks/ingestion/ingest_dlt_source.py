@@ -14,7 +14,6 @@ from cognee.modules.data.models import Data
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.dlt_row_data import DltRowData, DltRows
 from cognee.tasks.ingestion.dlt_utils import (
-    NODE_SET_COLUMN,
     NODE_SET_COLUMN_HINT,
     document_source_tag,
     pipeline_name_for_source,
@@ -292,24 +291,21 @@ def _quote_identifier(name: str) -> str:
     return f'"{escaped}"'
 
 
-# What an unset reserved column reads back as: NULL, or the empty forms a
-# connector may emit for "no tags" (an empty list, or its text encodings).
-_EMPTY_RESERVED_VALUES = (None, [], "", "[]", "null")
+# What an unset column reads back as: NULL, or the empty forms a connector
+# may emit for "no value" (an empty list, or its text encodings).
+_EMPTY_COLUMN_VALUES = (None, [], "", "[]", "null")
 
 
 def _row_content_hash(row_dict: dict) -> str:
     """Hash a row's columns (``_dlt_*`` already stripped).
 
-    The reserved node_set column is left out while it is unset, so a table
-    that merely gained the column (NULL or empty on every row) hashes exactly
-    as it did before and no existing document gets a new id. A row that sets
-    it is re-hashed like any other column change.
+    Columns that are unset are left out, so a table that merely gained a
+    column — e.g. a nullable metadata column like ``thread_ts`` that dlt adds
+    on a later export and reads back as NULL on every existing row — hashes
+    exactly as it did before and no existing document gets a new id. A row
+    that sets the column is re-hashed like any other column change.
     """
-    hashable = {
-        key: value
-        for key, value in row_dict.items()
-        if not (key == NODE_SET_COLUMN and value in _EMPTY_RESERVED_VALUES)
-    }
+    hashable = {key: value for key, value in row_dict.items() if value not in _EMPTY_COLUMN_VALUES}
     return hashlib.md5(json.dumps(hashable, sort_keys=True, default=str).encode()).hexdigest()
 
 
