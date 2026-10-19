@@ -263,9 +263,10 @@ async def test_graph_completion_context_complex(setup_test_environment_complex):
 
 @pytest.mark.asyncio
 async def test_get_graph_completion_context_on_empty_graph(setup_test_environment_empty):
-    """Integration test: an empty graph is a state error (NoDataError -> 404 over the
-    API), raised before any retrieval or LLM work, not a quiet empty context
-    (SDK-270 / gh #3728)."""
+    """Integration test: an empty graph is a state error at the retriever
+    (NoDataError), raised before any retrieval or LLM work, not a quiet empty
+    context (SDK-270 / gh #3728). The search fan-out turns it into that dataset's
+    empty entry with the reason on ``error`` (200 over the API)."""
     retriever = GraphCompletionRetriever()
 
     with pytest.raises(NoDataError, match="knowledge graph is empty"):

@@ -516,8 +516,9 @@ async def test_combined_mode_internal_batch_does_not_fail_with_session_cache():
 
 @pytest.mark.asyncio
 async def test_get_retrieved_objects_and_context_handle_empty_graph():
-    """An empty graph is a loud state error (NoDataError -> 404 over the API),
-    not a quiet miss (SDK-270 / gh #3728)."""
+    """An empty graph is a loud state error at the retriever (NoDataError), not a
+    quiet miss (SDK-270 / gh #3728). The search fan-out turns it into that
+    dataset's empty entry with the reason on ``error`` (200 over the API)."""
     from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 
     retriever = GraphCompletionDecompositionRetriever()

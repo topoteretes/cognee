@@ -573,9 +573,11 @@ async def test_empty_context_skips_llm_across_completion_retrievers(
 
 @pytest.mark.asyncio
 async def test_empty_graph_raises_no_data_error():
-    """An empty graph is a loud state error (NoDataError -> 404 over the API),
-    not a quiet miss: symmetric with the RAG retriever's missing-collection
-    behavior (SDK-270 / gh #3728)."""
+    """An empty graph is a loud state error at the retriever (NoDataError), not a
+    quiet miss: symmetric with the RAG retriever's missing-collection behavior
+    (SDK-270 / gh #3728). The search fan-out turns it into that dataset's empty
+    entry with the reason on ``error`` (200 over the API); a populated graph's
+    NoDataError still fails the search with a 404."""
     from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 
     mock_graph_engine = AsyncMock()

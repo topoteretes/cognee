@@ -197,8 +197,10 @@ async def test_query_batch_with_session_cache_is_rejected():
 
 @pytest.mark.asyncio
 async def test_empty_graph_raises_no_data_without_embedding():
-    """An empty graph is a state error (404), as for GRAPH_COMPLETION -- hybrid is
-    the default type, so a fresh install must not get a dict of empty channels."""
+    """An empty graph is a state error at the retriever (NoDataError), as for
+    GRAPH_COMPLETION -- hybrid is the default type, so a fresh install must not
+    get a dict of empty channels. The search fan-out turns it into that dataset's
+    empty entry with the reason on ``error`` (200 over the API)."""
     from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 
     unified = _unified()
