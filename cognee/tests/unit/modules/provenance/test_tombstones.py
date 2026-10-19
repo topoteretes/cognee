@@ -246,6 +246,46 @@ class TestTombstonePipelineRun:
         # Idempotent.
         assert await tombstone_pipeline_run(dataset_id, run_b, keep_data_ids={doc_kept}) == 0
 
+    async def test_retracts_a_row_the_run_resurrected(self, manager):
+        """forget(memory_only=True), re-cognify, then the re-cognify rolls back.
+
+        The resurrected row carries ``previous_version_id`` (the archived
+        tombstone), but nothing outside the run owns the entity, so the
+        rollback deletes it from the graph and the ledger must follow.
+        """
+        dataset_id, run_a, run_b = uuid4(), uuid4(), uuid4()
+        key = ledger_node_key(dataset_id, "n1")
+        await manager.track_entity(key, source="a", bundle_id=str(run_a))
+        assert await tombstone_dataset(dataset_id) == 1
+        await manager.track_entity(key, source="b", bundle_id=str(run_b))
+        resurrected = await manager.get_provenance(key)
+        assert resurrected["invalidated"] is False
+        assert resurrected["previous_version_id"]
+
+        assert await tombstone_pipeline_run(dataset_id, run_b) == 1
+        tombstone = await manager.get_provenance(key)
+        assert tombstone["invalidated"] is True
+        assert tombstone["metadata"]["rolled_back_pipeline_run_id"] == str(run_b)
+        assert (await manager.verify_chain())["valid"] is True
+
+    async def test_retracts_a_row_the_run_versioned_twice(self, manager):
+        """Two chunks of one run mention n1 with different content: the live
+        row's chain leads back only to the run's own first version, so a
+        rollback must tombstone it. n0, re-mentioned twice by the run but
+        first asserted by another run, survives."""
+        dataset_id, run_a, run_b = uuid4(), uuid4(), uuid4()
+        own, shared = ledger_node_key(dataset_id, "n1"), ledger_node_key(dataset_id, "n0")
+        await manager.track_entity(shared, source="a", bundle_id=str(run_a))
+        for _ in range(2):  # no snapshots: every re-track versions
+            await manager.track_entity(own, source="b", bundle_id=str(run_b))
+            await manager.track_entity(shared, source="b", bundle_id=str(run_b))
+        assert (await manager.get_provenance(own))["previous_version_id"]
+
+        assert await tombstone_pipeline_run(dataset_id, run_b) == 1
+        assert (await manager.get_provenance(own))["invalidated"] is True
+        assert (await manager.get_provenance(shared))["invalidated"] is False
+        assert (await manager.verify_chain())["valid"] is True
+
     async def test_unknown_run_is_noop(self, manager):
         assert await tombstone_pipeline_run(uuid4(), uuid4()) == 0
 

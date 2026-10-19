@@ -164,6 +164,38 @@ async def tombstone_deleted_elements(
         return 0
 
 
+# Versions walked back per row when deciding whether a rolled-back run merely
+# re-mentioned an artifact. Deeper chains keep the row live (the pre-existing,
+# conservative behaviour) rather than tombstone something that may still exist.
+_CHAIN_WALK_LIMIT = 64
+
+
+async def _owned_outside_run(entry, pipeline_run_id: str) -> bool:
+    """Whether a live row the run wrote still has an owner the rollback keeps.
+
+    Walks ``previous_version_id`` back past versions the same run wrote. The
+    row survives only when the first version written by another run is live:
+    the run re-mentioned an artifact that stays in the graph. A chain that
+    ends, or reaches a tombstone first, means the run (re)created the artifact
+    — a first assertion, a second version of its own row, or a resurrection
+    after ``forget()`` — and the rollback hard-deleted it.
+    """
+    visited = {entry.entity_id}
+    cursor = entry
+    for _ in range(_CHAIN_WALK_LIMIT):
+        previous_id = cursor.previous_version_id
+        if not previous_id or previous_id in visited:
+            return False
+        visited.add(previous_id)
+        previous = await storage.retrieve(previous_id)
+        if previous is None or previous.invalidated:
+            return False
+        if previous.bundle_id != pipeline_run_id:
+            return True
+        cursor = previous
+    return True
+
+
 async def tombstone_pipeline_run(
     dataset_id: UUID,
     pipeline_run_id: UUID | str,
@@ -172,24 +204,27 @@ async def tombstone_pipeline_run(
     keep_data_ids: Iterable[UUID | str] | None = None,
     reason: str = "pipeline_run_rolled_back",
 ) -> int:
-    """Tombstone what a rolled-back cognify run first asserted.
+    """Tombstone what a rolled-back cognify run (re)created.
 
     Rows are matched by ``bundle_id`` (the run id) inside the dataset's
-    namespace. Only rows with no earlier version are tombstoned: a rollback
-    removes the run's ownership refs and hard-deletes artifacts left unowned,
-    so an entity the run merely re-mentioned (``previous_version_id`` set)
-    survives in the graph and stays live here too — its chain still shows the
-    run's version, which is what happened. Rows attributed to documents in
-    ``keep_data_ids`` (completed documents a recovery rollback keeps) are left
-    alone. Never raises.
+    namespace. A rollback removes the run's ownership refs and hard-deletes
+    artifacts left unowned, so a row is tombstoned unless its version chain
+    reaches a live version written by another run (see
+    ``_owned_outside_run``): an entity the run merely re-mentioned survives in
+    the graph and stays live here too — its chain still shows the run's
+    version, which is what happened. A row the run resurrected from a
+    tombstone, or versioned twice itself, is gone from the graph and is
+    tombstoned. Rows attributed to documents in ``keep_data_ids`` (completed
+    documents a recovery rollback keeps) are left alone. Never raises.
     """
     try:
         kept = {str(data_id) for data_id in (keep_data_ids or ())}
-        pending: list[str] = []
+        run_id = str(pipeline_run_id)
+        # Collected before any chain walk: the walk opens its own sessions and
+        # must not interleave with the paging scan's.
+        candidates = []
         for prefix in (f"{dataset_id}:", f"rel:{dataset_id}:"):
-            async for entry in storage.iter_live_by_bundle(str(pipeline_run_id), prefix):
-                if entry.previous_version_id:
-                    continue
+            async for entry in storage.iter_live_by_bundle(run_id, prefix):
                 if kept and entry.source_ref_key:
                     try:
                         data_id = str(get_data_id_from_source_ref_key(entry.source_ref_key))
@@ -197,7 +232,12 @@ async def tombstone_pipeline_run(
                         data_id = None
                     if data_id in kept:
                         continue
-                pending.append(entry.entity_id)
+                candidates.append(entry)
+        pending: list[str] = []
+        for entry in candidates:
+            if entry.previous_version_id and await _owned_outside_run(entry, run_id):
+                continue
+            pending.append(entry.entity_id)
         if not pending:
             return 0
         written = await _tombstone_ids(
