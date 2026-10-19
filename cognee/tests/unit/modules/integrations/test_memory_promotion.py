@@ -24,7 +24,9 @@ def state(monkeypatch):
         id=uuid4(),
         dataset_id=source.id,
         raw_data_location="file:///memory.txt",
+        content_hash=hashlib.md5(b"the original upload").hexdigest(),
         raw_content_hash=hashlib.md5(content).hexdigest(),
+        data_size=len(content),
         extension="txt",
         label="lesson",
         external_metadata={"tag": "verified"},
@@ -158,6 +160,29 @@ async def test_bounded_copy_rejects_oversized_memory(state):
     with pytest.raises(ValueError, match="max_bytes"):
         await state.run(max_bytes=3)
     state.add.assert_not_awaited()
+    # The recorded size already exceeds the bound: refused without opening the file.
+    assert not state.opened
+
+
+@pytest.mark.asyncio
+async def test_oversized_memory_with_unknown_size_is_rejected_after_bounded_read(state):
+    state.row.data_size = None
+    with pytest.raises(ValueError, match="max_bytes"):
+        await state.run(max_bytes=3)
+    assert len(state.opened) == 1
+    state.add.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["code", "code_repo", "dlt_source"])
+async def test_routed_documents_are_not_promoted(state, source):
+    """The copy carries no routing stamp, so a code file or manifest would be
+    re-cognified as plain text: refuse it before the file is read."""
+    state.row.system_metadata = {"source": source}
+    with pytest.raises(ValueError, match="standard documents"):
+        await state.run()
+    assert not state.opened
+    state.add.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -229,6 +254,7 @@ async def test_concurrent_promotion_inserts_once_and_never_overwrites_edits(tmp_
         extension="txt",
         mime_type="text/plain",
         loader_engine="text_loader",
+        content_hash="original-upload-hash",
         raw_content_hash=revision,
         external_metadata={},
     )
@@ -248,6 +274,9 @@ async def test_concurrent_promotion_inserts_once_and_never_overwrites_edits(tmp_
         async with engine.get_async_session() as session:
             rows = (await session.execute(select(Data))).scalars().all()
             assert len(rows) == 1 and rows[0].name == "user-edited"
+            # add() dedups on content_hash (the original upload), not the stored copy.
+            assert rows[0].content_hash == "original-upload-hash"
+            assert rows[0].raw_content_hash == revision
         assert len(objects) == 1
     finally:
         await engine.engine.dispose()
@@ -443,6 +472,7 @@ async def test_commit_ack_failure_never_removes_published_storage(
         extension="txt",
         mime_type="text/plain",
         loader_engine="text_loader",
+        content_hash=hashlib.md5(b"lesson").hexdigest(),
         raw_content_hash=hashlib.md5(b"lesson").hexdigest(),
         external_metadata={},
     )
