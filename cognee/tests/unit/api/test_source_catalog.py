@@ -13,6 +13,78 @@ def dataset(name="workspace"):
     return SimpleNamespace(id=uuid4(), name=name)
 
 
+@pytest.fixture(autouse=True)
+def _fresh_catalog_cache():
+    catalog.clear_source_catalog_cache()
+    yield
+    catalog.clear_source_catalog_cache()
+
+
+class _Session:
+    """An async session stand-in that returns fixed rows and counts reads."""
+
+    def __init__(self, rows, reads):
+        self.rows, self.reads = rows, reads
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def execute(self, statement):
+        self.reads.append(statement)
+        return SimpleNamespace(all=lambda: list(self.rows))
+
+
+@pytest.mark.asyncio
+async def test_catalog_descriptors_are_cached_briefly_per_user_and_datasets(monkeypatch):
+    one, other = dataset("research"), dataset("ops")
+    rows = [(one.id, ["research"], None, "Doc", "source", None)]
+    reads, clock = [], [0.0]
+    monkeypatch.setattr(catalog, "_monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        catalog,
+        "get_relational_engine",
+        lambda: SimpleNamespace(get_async_session=lambda: _Session(rows, reads)),
+    )
+    permission = AsyncMock(return_value=[one])
+    monkeypatch.setattr(catalog, "get_all_user_permission_datasets", permission)
+    alice, bob = SimpleNamespace(id=uuid4()), SimpleNamespace(id=uuid4())
+
+    first = await catalog.source_catalog(alice)
+    assert len(first["items"]) == 2 and len(reads) == 1
+    # Within the TTL the rows are not re-read, but authorization still runs live.
+    assert await catalog.source_catalog(alice) == first
+    assert await catalog.source_catalog(alice, [one.id]) == first
+    assert len(reads) == 1 and permission.await_count == 3
+    # Another user is another entry.
+    await catalog.source_catalog(bob)
+    assert len(reads) == 2
+    # An explicit refresh bypasses the entry and replaces it.
+    await catalog.source_catalog(alice, refresh=True)
+    assert len(reads) == 3
+    # Past the TTL the next call rebuilds.
+    clock[0] += catalog.CATALOG_CACHE_TTL_SECONDS + 1
+    await catalog.source_catalog(alice)
+    assert len(reads) == 4
+    # A changed grant changes the key: the cached list for the old grant is not served.
+    permission.return_value = [one, other]
+    assert len((await catalog.source_catalog(alice))["items"]) == 3 and len(reads) == 5
+    permission.return_value = []
+    assert (await catalog.source_catalog(alice))["items"] == [] and len(reads) == 5
+    # The cache is bounded: the oldest entry is evicted first.
+    monkeypatch.setattr(catalog, "CATALOG_CACHE_MAX_ENTRIES", 2)
+    permission.return_value = [one]
+    carol = SimpleNamespace(id=uuid4())
+    await catalog.source_catalog(bob)
+    await catalog.source_catalog(carol)
+    await catalog.source_catalog(alice)
+    assert len(catalog._catalog_cache) == 2
+    await catalog.source_catalog(bob)
+    assert reads and len(reads) == 9  # bob was evicted and rebuilt
+
+
 def test_new_sources_and_node_sets_need_no_provider_registration():
     data = dataset()
     rows = [
@@ -324,7 +396,7 @@ async def test_native_metadata_projection_pages_aliases_and_revocation(monkeypat
             await catalog.source_document(None, one.id, UUID(int=(10 << 124) + 5))
         monkeypatch.setattr(catalog, "source_catalog", real_source_catalog)
         monkeypatch.setattr(catalog, "MAX_METADATA_ROWS", 2)
-        assert (await catalog.source_catalog(None))["complete"] is False
+        assert (await catalog.source_catalog(None, refresh=True))["complete"] is False
         # A dataset target needs no metadata scan at all, and scoping a node-set
         # lookup to its dataset keeps it reachable when the user's other datasets
         # would exhaust the row cap first.

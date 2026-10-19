@@ -8,6 +8,9 @@ rank its descriptors, but only the server resolves IDs into search targets.
 import asyncio
 import contextvars
 import json
+import os
+import time
+from collections import OrderedDict
 from typing import Literal, TypedDict
 from uuid import NAMESPACE_URL, UUID, uuid5
 
@@ -28,6 +31,38 @@ MAX_CATALOG_ENTRIES = 1024
 # trimmed, which keeps a full 64-item batch near 16k tokens instead of 85k.
 ROUTING_FIELD_LIMITS = {"aliases": 3, "descriptions": 2, "sample_labels": 3}
 ROUTING_VALUE_CHARS = 120
+# The folded descriptor list for one (user, selected datasets) is kept for a
+# short while so paging the catalog, routing and then searching do not each
+# re-read up to MAX_METADATA_ROWS rows. Authorization is never cached: the
+# readable datasets are resolved live on every call and form the cache key, so
+# a revoked dataset drops out of the key at once. `refresh=True` bypasses it.
+CATALOG_CACHE_TTL_SECONDS = float(os.getenv("SOURCE_CATALOG_CACHE_TTL_SECONDS", "30"))
+CATALOG_CACHE_MAX_ENTRIES = 256
+# key -> (expires_at, descriptors, complete)
+_catalog_cache: OrderedDict[tuple, tuple[float, list, bool]] = OrderedDict()
+_monotonic = time.monotonic
+
+
+def clear_source_catalog_cache() -> None:
+    _catalog_cache.clear()
+
+
+def _cached_catalog(key):
+    entry = _catalog_cache.get(key)
+    if entry is None:
+        return None
+    if entry[0] <= _monotonic():
+        del _catalog_cache[key]
+        return None
+    _catalog_cache.move_to_end(key)
+    return entry[1], entry[2]
+
+
+def _remember_catalog(key, items, complete) -> None:
+    _catalog_cache[key] = (_monotonic() + CATALOG_CACHE_TTL_SECONDS, items, complete)
+    _catalog_cache.move_to_end(key)
+    while len(_catalog_cache) > CATALOG_CACHE_MAX_ENTRIES:
+        _catalog_cache.popitem(last=False)
 
 
 def routing_context() -> contextvars.Context:
@@ -179,7 +214,7 @@ async def connection_descriptors(user):
     return items
 
 
-async def source_catalog(user, dataset_ids=None, *, include_connections=False):
+async def source_catalog(user, dataset_ids=None, *, include_connections=False, refresh=False):
     datasets = await get_all_user_permission_datasets(user, "read")
     allowed = {d.id for d in datasets}
     if dataset_ids is not None:
@@ -193,6 +228,12 @@ async def source_catalog(user, dataset_ids=None, *, include_connections=False):
     )
     if not datasets:
         return {"items": connections, "complete": True}
+    # Keyed by the live authorization result, never by the request alone.
+    key = (getattr(user, "id", None), tuple(sorted(str(d.id) for d in datasets)))
+    cached = None if refresh else _cached_catalog(key)
+    if cached is not None:
+        items, complete = cached
+        return {"items": list(items) + connections, "complete": complete}
     # Explicit projections avoid exposing arbitrary external metadata (which may
     # contain credentials). Never open graph databases or fetch source bodies here.
     async with get_relational_engine().get_async_session() as db:
@@ -213,7 +254,9 @@ async def source_catalog(user, dataset_ids=None, *, include_connections=False):
     # Folding up to MAX_METADATA_ROWS rows is CPU work (json.loads, uuid5 per
     # row); keep it off the event loop so other requests are not stalled.
     items = await asyncio.to_thread(build_catalog, datasets, rows[:MAX_METADATA_ROWS])
-    return {"items": items + connections, "complete": len(rows) <= MAX_METADATA_ROWS}
+    complete = len(rows) <= MAX_METADATA_ROWS
+    _remember_catalog(key, items, complete)
+    return {"items": list(items) + connections, "complete": complete}
 
 
 class SourceChoice(BaseModel):
@@ -318,10 +361,13 @@ async def route_sources(
     max_catalog_entries: int = 512,
     exclude_source_ids: list[UUID] | None = None,
     include_connections: bool = False,
+    refresh: bool = False,
 ):
     if not 1 <= max_sources <= 8 or not 1 <= max_catalog_entries <= MAX_CATALOG_ENTRIES:
         raise ValueError("Source routing budget is out of bounds.")
-    catalog = await source_catalog(user, dataset_ids, include_connections=include_connections)
+    catalog = await source_catalog(
+        user, dataset_ids, include_connections=include_connections, refresh=refresh
+    )
     excluded = {str(ident) for ident in exclude_source_ids or []}
     items = catalog["items"]
     # Exact names or homogeneous provenance are constraints, not a ranking hint.

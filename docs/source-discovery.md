@@ -29,6 +29,12 @@ All routes use the existing authenticated principal and native dataset read ACLs
   (`source_resolution: exact_metadata` / `single_candidate`, `routing_llm_calls: 0`).
   Routing and retrieval run in a copy of the caller's context with only ambient agent
   memory removed, so a per-request LLM override and usage accounting still apply.
+  The folded descriptor list is cached in-process for `SOURCE_CATALOG_CACHE_TTL_SECONDS`
+  (default 30) per (user, readable selected datasets), at most 256 entries, so catalog
+  paging, routing and search do not each re-read the metadata rows. Authorization is
+  resolved live on every call and forms the cache key, so a revoked dataset is never
+  served from the cache; tool connections are listed live. `refresh=true` (catalog query
+  parameter, or the `refresh` body field on route/search) bypasses the cache.
 - `GET /api/v1/datasets/source-documents/{source_id}`: metadata pages, `limit`
   (1–500), optional `after` document UUID, and optional `dataset_id` (the one every
   catalog and routing target carries). The source is authorized directly, without

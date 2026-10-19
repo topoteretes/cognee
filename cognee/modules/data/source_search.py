@@ -143,6 +143,7 @@ async def search_sources(
     exclude_source_ids: list[UUID] | None = None,
     include_connections: bool = True,
     top_k: int = 10,
+    refresh: bool = False,
 ):
     """Search likely sources with the acting user's native permissions.
 
@@ -167,6 +168,7 @@ async def search_sources(
             max_catalog_entries,
             exclude_source_ids,
             include_connections,
+            refresh,
         )
         targets = routing.get("targets", [])
         # Every source finishes (or times out) before the result is assembled,

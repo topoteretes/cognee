@@ -28,6 +28,8 @@ class RouteSources(BaseModel):
     include_connections: bool = True
     max_sources: int = Field(default=6, ge=1, le=8)
     max_catalog_entries: int = Field(default=512, ge=1, le=1024)
+    # Bypass the short-lived descriptor cache (authorization is live either way).
+    refresh: bool = False
 
 
 class SearchSources(RouteSources):
@@ -62,9 +64,12 @@ def get_source_routes(router: APIRouter | None = None) -> APIRouter:
         offset: Annotated[int, Query(ge=0)] = 0,
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         include_connections: bool = True,
+        refresh: bool = False,
     ):
         result = await guarded(
-            source_catalog(user, dataset_ids, include_connections=include_connections)
+            source_catalog(
+                user, dataset_ids, include_connections=include_connections, refresh=refresh
+            )
         )
         return {
             "items": result["items"][offset : offset + limit],
