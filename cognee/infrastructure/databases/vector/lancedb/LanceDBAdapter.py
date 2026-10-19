@@ -462,7 +462,23 @@ class LanceDBAdapter(VectorDBInterface):
             raise CollectionNotFoundError(f"Collection '{collection_name}' not found!")
 
         connection = await self.get_connection()
-        return await connection.open_table(collection_name)
+        try:
+            return await connection.open_table(collection_name)
+        except ValueError as error:
+            if "not found" not in str(error).lower():
+                raise
+            # has_collection lists table directories, and a concurrent
+            # create_collection (another data item of the same pipeline run
+            # writing the same index) makes the directory visible before the
+            # first manifest is committed, so open_table can still fail. The
+            # creator holds VECTOR_DB_LOCK for the whole creation; wait for it
+            # and open once more.
+            async with self.VECTOR_DB_LOCK:
+                if not await self.has_collection(collection_name):
+                    raise CollectionNotFoundError(
+                        f"Collection '{collection_name}' not found!"
+                    ) from error
+                return await connection.open_table(collection_name)
 
     async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
         """Upsert DataPoints into `collection_name`, merging belongs_to_set with any prior rows."""
