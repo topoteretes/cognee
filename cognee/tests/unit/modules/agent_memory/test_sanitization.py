@@ -68,6 +68,20 @@ def test_long_keys_are_truncated_like_values():
     assert result_key.endswith("...")
 
 
+def test_long_keys_that_collide_after_truncation_stay_within_the_cap():
+    """Two keys that differ only past the cap collide once cut; the suffix must fit too."""
+    prefix = "x" * (MAX_SERIALIZED_VALUE_LENGTH * 2)
+    first, second = prefix + "a", prefix + "b"
+
+    result = sanitize_value({first: 1, second: 2})
+
+    assert sorted(result.values()) == [1, 2]
+    assert all(len(key) <= MAX_SERIALIZED_VALUE_LENGTH for key in result)
+    kept, suffixed = result
+    assert kept == "x" * (MAX_SERIALIZED_VALUE_LENGTH - 3) + "..."
+    assert suffixed == "x" * (MAX_SERIALIZED_VALUE_LENGTH - 5) + "..._2"
+
+
 def test_object_keys_are_deterministic():
     class Opaque:
         pass

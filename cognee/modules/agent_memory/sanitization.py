@@ -50,8 +50,12 @@ def sanitize_value(value: Any) -> Any:
         return [sanitize_value(item) for item in value[:MAX_TRACE_CONTAINER_ITEMS]]
     if isinstance(value, dict):
         items = list(islice(value.items(), MAX_TRACE_CONTAINER_ITEMS))
+        # Names are capped first (two keys that differ only past the cap collide
+        # once stored), and the suffix a loser gets stays within the same cap.
         keys = unique_string_keys(
-            [_key_name(key) for key, _ in items], [isinstance(key, str) for key, _ in items]
+            [_key_name(key) for key, _ in items],
+            [isinstance(key, str) for key, _ in items],
+            max_length=MAX_SERIALIZED_VALUE_LENGTH,
         )
         return {key: sanitize_value(item) for key, (_, item) in zip(keys, items, strict=True)}
     if hasattr(value, "id") and hasattr(value, "__class__"):

@@ -21,6 +21,29 @@ def test_preferred_key_keeps_its_name(names, preferred, expected):
     assert unique_string_keys(names, preferred) == expected
 
 
+def test_max_length_shortens_the_name_not_the_suffix():
+    names = ["abcdefghij", "abcdefghij", "abcdefghij", "abcdefg_2"]
+    preferred = [True, False, False, True]
+
+    result = unique_string_keys(names, preferred, max_length=10)
+
+    # "abcdefghij_2" would be 12 chars, so the name is cut to make room for the
+    # suffix; the literal "abcdefg_2" is a different key and keeps its slot.
+    assert result == ["abcdefghij", "abcdefgh_2", "abcdefgh_3", "abcdefg_2"]
+    assert all(len(key) <= 10 for key in result)
+    assert len(set(result)) == len(names)
+
+
+def test_max_length_keeps_a_truncation_marker_and_skips_a_cut_collision():
+    names = ["abcdef...", "abcdef...", "abcd..._2"]
+    preferred = [True, False, True]
+
+    result = unique_string_keys(names, preferred, max_length=9)
+
+    # The cut candidate "abcd..._2" is a literal key, so the loser moves on to _3.
+    assert result == ["abcdef...", "abcd..._3", "abcd..._2"]
+
+
 def test_many_colliding_keys_stay_unique_and_ordered():
     count = 5000
     names = ["k"] * count + ["k_2", "k_7"]
