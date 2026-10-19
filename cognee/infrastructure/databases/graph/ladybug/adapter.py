@@ -20,7 +20,7 @@ from ladybug.database import Database
 import cognee_db_workers
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.cache.config import get_cache_config
-from cognee.infrastructure.databases.graph.deduplicate_edges import deduplicate_edges
+from cognee.infrastructure.databases.graph.deduplicate_edges import deduplicate_edges, edge_key
 from cognee.infrastructure.databases.graph.graph_db_interface import (
     GraphDBInterface,
     temporal_anchors_from_rows,
@@ -2096,7 +2096,7 @@ class LadybugAdapter(GraphDBInterface):
                     # KeyError on a missing identity is deliberate — see add_nodes.
                     **(
                         fold_fields(
-                            source_ref_key[(str(from_node), str(to_node), str(relationship_name))]
+                            source_ref_key[edge_key((from_node, to_node, relationship_name))]
                         )
                         if per_row_refs
                         else {}

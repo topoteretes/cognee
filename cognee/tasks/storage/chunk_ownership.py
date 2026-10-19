@@ -28,13 +28,14 @@ statement), and the remaining owners are attached afterwards.
 
 from uuid import UUID
 
+from cognee.infrastructure.databases.graph.deduplicate_edges import EdgeKey, edge_key
 from cognee.infrastructure.databases.provenance import make_chunk_source_ref_key
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.data.processing.document_types import Document
 from cognee.modules.engine.models import NodeSet
 from cognee.modules.graph.utils.get_graph_from_model import get_graph_from_model
 
-EdgeKey = tuple[str, str, str]
+__all__ = ["ChunkOwnership", "EdgeKey", "edge_key"]
 
 
 class ChunkOwnership:
@@ -48,10 +49,6 @@ class ChunkOwnership:
     @property
     def has_chunks(self) -> bool:
         return bool(self.chunk_ref_keys)
-
-
-def _edge_key(edge) -> EdgeKey:
-    return (str(edge[0]), str(edge[1]), str(edge[2]))
 
 
 def _is_chunk(data_point) -> bool:
@@ -198,7 +195,7 @@ async def collect_chunk_ownership(
             # exists only because the chunk does, and must die with it.
             if str(sub_edge[0]) in document_scoped_ids and str(sub_edge[1]) in document_scoped_ids:
                 continue
-            owners = ownership.edge_owners.setdefault(_edge_key(sub_edge), [])
+            owners = ownership.edge_owners.setdefault(edge_key(sub_edge), [])
             for key in owner_keys:
                 if key not in owners:
                     owners.append(key)

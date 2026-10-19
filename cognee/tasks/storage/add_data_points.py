@@ -2,6 +2,7 @@ import asyncio
 import warnings
 from typing import TYPE_CHECKING, Optional
 
+from cognee.infrastructure.databases.graph.deduplicate_edges import edge_key
 from cognee.infrastructure.databases.provenance import (
     EdgeIdentity,
     data_item_id,
@@ -241,11 +242,7 @@ async def add_data_points(
     def _group_edges(edge_list):
         groups: dict = {}
         for edge in edge_list:
-            owners = (
-                ownership.edge_owners.get((str(edge[0]), str(edge[1]), str(edge[2])))
-                if ownership
-                else None
-            )
+            owners = ownership.edge_owners.get(edge_key(edge)) if ownership else None
             key = owners[0] if owners else fold_source_ref_key
             groups.setdefault(key, []).append(edge)
         return groups
@@ -283,10 +280,7 @@ async def add_data_points(
     async def _write_edges_grouped(edge_list):
         if per_row_refs:
             mapping = {
-                (str(e[0]), str(e[1]), str(e[2])): (
-                    ownership.edge_owners.get((str(e[0]), str(e[1]), str(e[2])))
-                    or [fold_source_ref_key]
-                )[0]
+                edge_key(e): (ownership.edge_owners.get(edge_key(e)) or [fold_source_ref_key])[0]
                 for e in edge_list
             }
             await graph_engine.add_edges(
@@ -298,11 +292,9 @@ async def add_data_points(
                     group, source_ref_key=key, pipeline_run_id=fold_run_arg
                 )
         if ownership:
-            batch_keys = {(str(e[0]), str(e[1]), str(e[2])) for e in edge_list}
+            batch_keys = {edge_key(e) for e in edge_list}
             in_batch = {
-                edge_key: owners
-                for edge_key, owners in ownership.edge_owners.items()
-                if edge_key in batch_keys
+                key: owners for key, owners in ownership.edge_owners.items() if key in batch_keys
             }
             # Grouped by key set, like the nodes above.
             for keys, edge_keys in _group_by_extra_keys(in_batch).items():
@@ -314,9 +306,9 @@ async def add_data_points(
             # (weights, feedback) stay untouched — otherwise the edge would be
             # deleted with its FIRST producer while these chunks still state it.
             existing = {
-                edge_key: owners
-                for edge_key, owners in ownership.edge_owners.items()
-                if edge_key not in batch_keys
+                key: owners
+                for key, owners in ownership.edge_owners.items()
+                if key not in batch_keys
             }
             for keys, edge_keys in _group_by_all_keys(existing).items():
                 identities = [EdgeIdentity(key[0], key[1], key[2]) for key in edge_keys]
@@ -394,22 +386,18 @@ async def add_data_points(
         attach_edges: dict = {}
         written_edge_keys = set()
         for edge in edges:
-            edge_key = (str(edge[0]), str(edge[1]), str(edge[2]))
-            written_edge_keys.add(edge_key)
-            owners = ownership.edge_owners.get(edge_key) if ownership else None
+            written_key = edge_key(edge)
+            written_edge_keys.add(written_key)
+            owners = ownership.edge_owners.get(written_key) if ownership else None
             for key in owners or [fold_source_ref_key]:
-                attach_edges.setdefault(key, []).append(
-                    EdgeIdentity(edge_key[0], edge_key[1], edge_key[2])
-                )
+                attach_edges.setdefault(key, []).append(EdgeIdentity(*written_key))
         # Produced-but-existing relationship edges (see the non-hybrid path).
         if ownership:
-            for edge_key, owners in ownership.edge_owners.items():
-                if edge_key in written_edge_keys:
+            for existing_key, owners in ownership.edge_owners.items():
+                if existing_key in written_edge_keys:
                     continue
                 for key in owners:
-                    attach_edges.setdefault(key, []).append(
-                        EdgeIdentity(edge_key[0], edge_key[1], edge_key[2])
-                    )
+                    attach_edges.setdefault(key, []).append(EdgeIdentity(*existing_key))
         for ref_key, identities in attach_edges.items():
             await graph_engine.attach_edge_source_refs(identities, [ref_key], run_arg)
 
