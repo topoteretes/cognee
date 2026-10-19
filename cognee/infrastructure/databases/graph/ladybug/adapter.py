@@ -1085,75 +1085,18 @@ class LadybugAdapter(GraphDBInterface):
 
     async def add_node(self, node: DataPoint) -> None:
         """
-        Add a single node to the graph if it doesn't exist.
+        Upsert a single node: create it, or overwrite name/type/properties on match.
 
-        This method constructs and executes a query to add a node to the graph, ensuring that it
-        is not duplicated by checking its existence first. An error is raised if the operation
-        fails.
+        Delegates to ``add_nodes`` so there is one MERGE write path. That path keeps
+        ``created_at`` on an existing node, refreshes ``updated_at``, and checkpoints
+        after the write. An error is raised if the operation fails.
 
         Parameters:
         -----------
 
             - node (DataPoint): The node to be added, represented as a DataPoint.
         """
-        try:
-            properties = node.model_dump() if hasattr(node, "model_dump") else vars(node)
-
-            # Extract core fields with defaults if not present
-            core_properties = {
-                "id": str(properties.get("id", "")),
-                "name": str(properties.get("name", "")),
-                "type": str(properties.get("type", "")),
-            }
-
-            # Remove core fields from other properties
-            for key in core_properties:
-                properties.pop(key, None)
-
-            # Provenance lives in declared STRING columns, never the JSON blob.
-            for key in PROVENANCE_COLUMNS:
-                properties.pop(key, None)
-
-            core_properties["properties"] = json.dumps(properties, cls=JSONEncoder)
-
-            # Add timestamps for new node
-            now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
-            # Build per-property SET assignments. The map-literal form
-            # (``SET n += {{...}}``) does not parse on the Kuzu/Ladybug backend, so
-            # mirror the batch add_nodes which assigns each property individually.
-            create_assignments = []
-            match_assignments = []
-            params = {}
-            for key, value in core_properties.items():
-                if value is None:
-                    continue
-                param_name = f"param_{key}"
-                params[param_name] = value
-                # id is the MERGE key; no need to re-assign it.
-                if key == "id":
-                    continue
-                create_assignments.append(f"n.{key} = ${param_name}")
-                match_assignments.append(f"n.{key} = ${param_name}")
-
-            params.update({"created_at": now, "updated_at": now})
-            create_assignments.append("n.created_at = TIMESTAMP($created_at)")
-            create_assignments.append("n.updated_at = TIMESTAMP($updated_at)")
-            # ON MATCH updates the same fields but preserves the original created_at,
-            # and must be present at all — without it, re-adding an existing node
-            # silently drops the update (the batch add_nodes already does this).
-            match_assignments.append("n.updated_at = TIMESTAMP($updated_at)")
-
-            merge_query = f"""
-            MERGE (n:Node {{id: $param_id}})
-            ON CREATE SET {", ".join(create_assignments)}
-            ON MATCH SET {", ".join(match_assignments)}
-            """
-            await self.query(merge_query, params)
-            await self.checkpoint()
-
-        except Exception as e:
-            logger.error(f"Failed to add node: {e}")
-            raise
+        await self.add_nodes([node])
 
     async def add_nodes(
         self,
