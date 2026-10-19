@@ -266,27 +266,40 @@ async def get_credential_by_account(
 
 
 async def get_active_credential_for_user(
-    user_id: UUID, provider: str
+    user_id: UUID, provider: str, provider_account_id: str | None = None
 ) -> IntegrationCredential | None:
     """The user's active connection for a provider, for the Integrations UI.
 
     A user *can* hold more than one active connection for a provider (two
     Slack workspaces, both provider='slack', same user) — the schema allows
     it. Ordered newest-first so the choice is deterministic (the most recently
-    connected wins) rather than DB-arbitrary.
+    connected wins) rather than DB-arbitrary. With ``provider_account_id`` the
+    answer is that account's connection, or ``None`` when it is not this
+    user's: there is no fallback to another account.
     """
+    connections = await list_active_credentials_for_provider(user_id, provider, provider_account_id)
+    return connections[0] if connections else None
+
+
+async def list_active_credentials_for_provider(
+    user_id: UUID, provider: str, provider_account_id: str | None = None
+) -> list[IntegrationCredential]:
+    """The user's active connections for one provider, newest first."""
+    conditions = [
+        IntegrationCredential.user_id == user_id,
+        IntegrationCredential.provider == provider,
+        IntegrationCredential.status == STATUS_ACTIVE,
+    ]
+    if provider_account_id is not None:
+        conditions.append(IntegrationCredential.provider_account_id == provider_account_id)
     engine = get_relational_engine()
     async with engine.get_async_session() as db:
         result = await db.execute(
             select(IntegrationCredential)
-            .where(
-                IntegrationCredential.user_id == user_id,
-                IntegrationCredential.provider == provider,
-                IntegrationCredential.status == STATUS_ACTIVE,
-            )
+            .where(*conditions)
             .order_by(IntegrationCredential.created_at.desc())
         )
-        return result.scalars().first()
+        return list(result.scalars().all())
 
 
 async def list_active_credentials_for_user(user_id: UUID) -> dict[str, IntegrationCredential]:
@@ -294,10 +307,12 @@ async def list_active_credentials_for_user(user_id: UUID) -> dict[str, Integrati
 
     Returns a dict of ``provider -> credential`` holding at most one
     credential per provider, chosen newest-first — the same tiebreak as
-    :func:`get_active_credential_for_user`, so the aggregate status endpoint
-    and the per-provider connection endpoint always agree on which
-    connection represents a provider. For display use: token material stays
-    encrypted on the rows and must not be surfaced by callers.
+    :func:`get_active_credential_for_user` called without an account, so the
+    aggregate status endpoint and the per-provider connection endpoint agree on
+    which connection represents a provider. A user's other connections to that
+    provider are not here: :func:`list_active_credentials_for_provider` lists
+    them. For display use: token material stays encrypted on the rows and must
+    not be surfaced by callers.
     """
     engine = get_relational_engine()
     async with engine.get_async_session() as db:
