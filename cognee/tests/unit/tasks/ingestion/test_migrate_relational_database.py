@@ -1,9 +1,11 @@
+import importlib
 from types import SimpleNamespace
 
 import pytest
 
-import cognee.tasks.ingestion.migrate_relational_database as migration_module
 from cognee.modules.engine.models import ColumnValue
+
+migration_module = importlib.import_module("cognee.tasks.ingestion.migrate_relational_database")
 
 
 class _Result:
