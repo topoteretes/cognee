@@ -22,7 +22,8 @@ services:
       # - /path/to/your/data:/data
     environment:
       - DEBUG=false # Change to true if debugging
-      - ENV=local
+      - ENV=${ENV:-local}
+      - TELEMETRY_DISABLED=${TELEMETRY_DISABLED:-false}
       - LOG_LEVEL=INFO
       - SYSTEM_ROOT_DIRECTORY=/cognee-storage/system
       - DATA_ROOT_DIRECTORY=/cognee-storage/data
@@ -86,7 +87,8 @@ services:
       # - /path/to/your/data:/data
     environment:
       - DEBUG=false # Change to true if debugging
-      - ENV=local
+      - ENV=${ENV:-local}
+      - TELEMETRY_DISABLED=${TELEMETRY_DISABLED:-false}
       - LOG_LEVEL=INFO
       - SYSTEM_ROOT_DIRECTORY=/cognee-storage/system
       - DATA_ROOT_DIRECTORY=/cognee-storage/data
