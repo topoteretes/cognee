@@ -90,42 +90,76 @@ async def clean_env(tmp_path, monkeypatch):
         logger.debug("Ignoring exception in clean_env", exc_info=True)
 
 
-def _row_label(text: str) -> str:
-    """'users:u1' or 'orders:1' from a row's text, keyed on its primary key."""
-    fields = dict(line.strip().split(": ", 1) for line in text.splitlines() if ": " in line)
+EXPECTED_ROW_EDGES = {
+    ("orders:1", "buyer_code_references_users", "users:u1"),
+    ("orders:1", "seller_code_references_users", "users:u2"),
+    ("orders:2", "buyer_code_references_users", "users:u2"),
+    ("orders:2", "seller_code_references_users", "users:u1"),
+    ("orders:2", "parent_id_references_orders", "orders:1"),
+    ("visits:1", "user_code_references_users", "users:u2"),
+}
+
+
+def _row_fields(text: str) -> dict[str, str]:
+    return dict(line.strip().split(": ", 1) for line in text.splitlines() if ": " in line)
+
+
+def _row_label(fields: dict[str, str]) -> str:
+    """'users:u1' or 'orders:1' from a row's fields, keyed on its primary key."""
     table = fields["Table"]
     return f"{table}:{fields['user_code' if table == 'users' else 'id']}"
 
 
-@pytest.mark.asyncio
-async def test_source_foreign_keys_become_edges_between_rows(clean_env):
-    source_db = clean_env / "source.sqlite"
-    connection = sqlite3.connect(source_db)
+def _write_source_db(path: pathlib.Path) -> pathlib.Path:
+    connection = sqlite3.connect(path)
     connection.executescript(SOURCE_SQL)
     connection.close()
+    return path
 
-    await cognee.add(f"sqlite:///{source_db}", dataset_name="shop")
-    await cognee.cognify(datasets=["shop"], chunks_per_batch=2)
 
+async def _row_edges() -> set[tuple[str, str, str]]:
+    """Edges between the SQL source's rows, labelled by table and primary key.
+    Rows of other sources in the dataset (a CSV's) are left out."""
     from cognee.infrastructure.databases.graph import get_graph_engine
 
     nodes, edges = await (await get_graph_engine()).get_graph_data()
-    rows = {
-        str(node_id): _row_label(props["text"])
-        for node_id, props in nodes
-        if props.get("type") == "DltRow"
-    }
-    row_edges = {
+    rows = {}
+    for node_id, props in nodes:
+        if props.get("type") != "DltRow":
+            continue
+        fields = _row_fields(props["text"])
+        if fields.get("Table") in {"users", "orders", "visits"}:
+            rows[str(node_id)] = _row_label(fields)
+    return {
         (rows[str(source)], relation, rows[str(target)])
         for source, target, relation, _ in edges
         if str(source) in rows and str(target) in rows
     }
 
-    assert row_edges == {
-        ("orders:1", "buyer_code_references_users", "users:u1"),
-        ("orders:1", "seller_code_references_users", "users:u2"),
-        ("orders:2", "buyer_code_references_users", "users:u2"),
-        ("orders:2", "seller_code_references_users", "users:u1"),
-        ("orders:2", "parent_id_references_orders", "orders:1"),
-        ("visits:1", "user_code_references_users", "users:u2"),
-    }
+
+@pytest.mark.asyncio
+async def test_source_foreign_keys_become_edges_between_rows(clean_env):
+    source_db = _write_source_db(clean_env / "source.sqlite")
+
+    await cognee.add(f"sqlite:///{source_db}", dataset_name="shop")
+    await cognee.cognify(datasets=["shop"], chunks_per_batch=2)
+
+    assert await _row_edges() == EXPECTED_ROW_EDGES
+
+
+@pytest.mark.asyncio
+async def test_sql_source_keys_survive_an_earlier_csv_in_the_same_pipeline(clean_env):
+    """Unscoped sources share one dlt pipeline, and dlt keeps the first schema it
+    saw as the default. A SQL source ingested after a CSV lands in its own schema,
+    so its keys must be read from that schema, not from the pipeline default."""
+    csv_path = clean_env / "notes.csv"
+    csv_path.write_text("id,kind,unit\n1,thermometer,C\n2,hygrometer,%\n3,anemometer,m/s\n")
+    source_db = _write_source_db(clean_env / "source.sqlite")
+
+    # Not "shop": get_dlt_destination is cached per staging database name, so a
+    # dataset name reused across tests would stage into the earlier test's files.
+    await cognee.add(str(csv_path), dataset_name="shop_after_csv")
+    await cognee.add(f"sqlite:///{source_db}", dataset_name="shop_after_csv")
+    await cognee.cognify(datasets=["shop_after_csv"])
+
+    assert await _row_edges() == EXPECTED_ROW_EDGES

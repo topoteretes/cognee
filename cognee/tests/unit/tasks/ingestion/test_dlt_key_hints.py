@@ -2,7 +2,11 @@
 
 from types import SimpleNamespace
 
-from cognee.tasks.ingestion.ingest_dlt_source import _apply_key_hints, _dlt_key_hints
+from cognee.tasks.ingestion.ingest_dlt_source import (
+    _apply_key_hints,
+    _dlt_key_hints,
+    _loaded_schema,
+)
 
 
 def _schema(*tables):
@@ -61,3 +65,29 @@ def test_keys_follow_the_reflected_table_names():
     }
     # A composite key stays unset: rows are keyed on a single column.
     assert schema["shop.line"] == {"primary_key": None, "foreign_keys": []}
+
+
+def test_a_table_without_a_hint_keeps_its_reflected_keys():
+    reflected = {"primary_key": "id", "foreign_keys": [{"column": "a", "ref_table": "b"}]}
+    schema = {"notes": dict(reflected)}
+
+    _apply_key_hints(schema, key_hints={})
+
+    assert schema["notes"] == reflected
+
+
+def test_hints_come_from_the_schema_the_source_loaded_into():
+    """A shared pipeline keeps the first schema it saw as the default; a source's
+    tables live in the source's own schema, a bare resource's in the default."""
+    from dlt.common.schema import Schema
+    from dlt.extract.source import DltSource
+
+    csv_schema, sql_schema = Schema("notes"), Schema("sql_database")
+    pipeline = SimpleNamespace(
+        default_schema=csv_schema,
+        schemas={"notes": csv_schema, "sql_database": sql_schema},
+    )
+    sql_source = DltSource(Schema("sql_database"), section="shop")
+
+    assert _loaded_schema(pipeline, sql_source) is sql_schema
+    assert _loaded_schema(pipeline, SimpleNamespace(name="a bare resource")) is csv_schema
