@@ -10,7 +10,6 @@ from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessErro
 from cognee.modules.data.methods import (
     get_authorized_dataset,
     get_authorized_existing_datasets,
-    get_dataset_data,
     has_data,
     has_dataset_data,
 )
@@ -186,6 +185,10 @@ class datasets:
         # with, so callers read the same attributes (``row.id`` as a UUID,
         # ``row.mime_type`` not ``mimeType``) in both modes.
         from cognee.api.v1.serve.state import get_remote_client
+
+        # Imported at call time so the package attribute is the seam (tests
+        # patch cognee.modules.data.methods.get_dataset_data).
+        from cognee.modules.data.methods import get_dataset_data
 
         client = get_remote_client()
         if client is not None:

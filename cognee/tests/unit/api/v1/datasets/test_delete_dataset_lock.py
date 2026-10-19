@@ -67,7 +67,6 @@ async def test_empty_dataset_waits_for_pipeline_lock():
         ),
         patch.object(datasets_module, "set_database_global_context_variables", _NoopContextManager),
         patch.object(datasets_module, "delete_dataset_nodes_and_edges", delete_nodes_and_edges),
-        patch.object(datasets_module, "get_dataset_data", AsyncMock(return_value=[])),
         patch.object(
             data_methods_module,
             "delete_dataset",
