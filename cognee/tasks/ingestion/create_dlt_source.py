@@ -55,13 +55,8 @@ def create_dlt_source_from_connection_string(
     import sqlalchemy
     from dlt.sources.sql_database import sql_database
 
-    # SQLite paths must be absolute for SQLAlchemy to find the file.
-    # sqlite:/// = relative, sqlite://// = absolute
-    if connection_string.startswith("sqlite:///") and not connection_string.startswith(
-        "sqlite:////"
-    ):
-        relative_path = connection_string[len("sqlite:///") :]
-        connection_string = "sqlite:///" + os.path.abspath(relative_path)
+    if connection_string.startswith("sqlite:///"):
+        connection_string = _allowed_sqlite_connection_string(connection_string)
 
     if query:
         table_name, where_clause = _parse_sql_query(query)
@@ -98,6 +93,56 @@ def _database_label(connection_string: str) -> str:
     url = make_url(connection_string)
     database = url.database or ""
     return os.path.basename(database) if url.get_backend_name() == "sqlite" else database
+
+
+def _allowed_sqlite_connection_string(connection_string: str) -> str:
+    """Return the SQLite connection string with its file path made absolute, or
+    raise when the file is one cognee must not read as a source.
+
+    A SQLite file has no credentials, so whoever names it reads it. Refused:
+    files inside cognee's own storage (every tenant's users, ACLs and data), and
+    files outside COGNEE_ALLOWED_LOCAL_FILE_ROOTS when that allowlist is set.
+    """
+    from sqlalchemy.engine import make_url
+
+    from cognee.exceptions import CogneeValidationError
+    from cognee.infrastructure.files.utils.local_path_safety import (
+        get_cognee_internal_roots,
+        is_within_roots,
+        resolve_local_path,
+    )
+
+    # Parsed with the same parser the connection uses, so the path checked here
+    # is the path that gets opened.
+    url = make_url(connection_string)
+    # `uri=true` makes SQLite read the path as a `file:` URI, a second path
+    # syntax; refuse it rather than parse it.
+    if "uri" in url.query:
+        raise CogneeValidationError(
+            message="SQLite connection strings with the 'uri' option are not supported.",
+            name="SqliteSourceRefused",
+        )
+    if not url.database:
+        # In-memory database: there is no file to read.
+        return connection_string
+
+    # realpath, not abspath: a symlink is resolved to the file it points at.
+    database_path = os.path.realpath(os.path.expanduser(url.database))
+    if is_within_roots(database_path, get_cognee_internal_roots()):
+        raise CogneeValidationError(
+            message="This SQLite file is part of cognee's own storage and cannot be "
+            "ingested as a source.",
+            name="SqliteSourceRefused",
+        )
+    try:
+        resolve_local_path(database_path)
+    except ValueError as error:
+        raise CogneeValidationError(
+            message="This SQLite file is outside COGNEE_ALLOWED_LOCAL_FILE_ROOTS.",
+            name="SqliteSourceRefused",
+        ) from error
+
+    return url.set(database=database_path).render_as_string(hide_password=False)
 
 
 CSV_DELIMITER_CANDIDATES = (",", ";", "\t", "|")
