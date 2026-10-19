@@ -32,6 +32,13 @@ async def authorized_get_principal_datasets(
           if they can manage users.
         * tenant — only the tenant they are currently in.
 
+        A user asking about themselves gets their EFFECTIVE datasets: direct
+        grants plus what their tenant, their roles and the agents they created
+        hold, which is what a dataset picker needs. Every other query (an
+        admin asking about another user, a role, the tenant) lists the
+        principal's direct ACL rows only, so the two answers for one user can
+        legitimately differ.
+
         The tenant is read off the requester rather than taken as an argument:
         it is the tenant they are currently in, and a caller must not be able
         to name a different one. Results are narrowed to it, so a principal
@@ -76,8 +83,9 @@ async def authorized_get_principal_datasets(
         raise PermissionDeniedError(message=f"Unsupported principal type: {principal.type}")
 
     if principal.type == "user" and principal.id == requester_id:
-        # The plugin dataset picker needs effective write access, including
-        # tenant and role grants, rather than direct ACL rows alone.
+        # Self-queries are effective (see the docstring); other principals stay
+        # direct so an admin reads back exactly the rows that were granted.
+        datasets = await get_all_user_permission_datasets(requester, permission_name)
         datasets = await get_all_user_permission_datasets(requester, permission_name)
     else:
         datasets = await get_principal_datasets(principal, permission_name)

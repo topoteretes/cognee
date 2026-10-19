@@ -24,6 +24,7 @@ def state(monkeypatch):
         id=uuid4(),
         dataset_id=source.id,
         raw_data_location="file:///memory.txt",
+        original_data_location="file:///memory.txt",
         content_hash=hashlib.md5(b"the original upload").hexdigest(),
         raw_content_hash=hashlib.md5(content).hexdigest(),
         data_size=len(content),
@@ -151,6 +152,19 @@ async def test_bounded_copy_rejects_oversized_memory(state):
     state.add.assert_not_awaited()
     # The recorded size already exceeds the bound: refused without opening the file.
     assert not state.opened
+
+
+@pytest.mark.asyncio
+async def test_size_precheck_ignores_a_larger_original_than_the_copied_text(state):
+    # A converted upload (a scanned PDF) records the original's size, while the
+    # bytes copied are its extracted text; the read, not the record, is the bound.
+    state.row.original_data_location = "file:///scan.pdf"
+    state.row.data_size = len(state.content) * 50
+    result = await state.run(max_bytes=len(state.content))
+    assert result.status == "copied"
+    assert state.opened
+    with pytest.raises(ValueError, match="max_bytes"):
+        await state.run(max_bytes=len(state.content) - 1)
 
 
 @pytest.mark.asyncio
@@ -502,3 +516,58 @@ async def test_personal_source_exception_is_limited_to_explicit_own_team_promoti
     else:
         with pytest.raises(PermissionDeniedError):
             await m.get_promotion_source(*args)
+
+
+@pytest.mark.asyncio
+async def test_later_add_of_the_original_dedups_only_for_the_promoting_actor(tmp_path, monkeypatch):
+    from sqlalchemy import select
+
+    from cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter import (
+        SQLAlchemyAdapter,
+    )
+    from cognee.modules.data.models import Data
+    from cognee.modules.ingestion.identify_many import identify_many
+
+    engine = SQLAlchemyAdapter(f"sqlite+aiosqlite:///{tmp_path / 'dedup.db'}")
+    await engine.create_database()
+
+    class Storage:
+        async def store(self, path, stream):
+            return path
+
+        async def remove(self, path):
+            pass
+
+    monkeypatch.setattr(m, "get_relational_engine", lambda: engine)
+    monkeypatch.setattr(m, "get_file_storage", lambda root: Storage())
+    actor = SimpleNamespace(id=uuid4(), tenant_id=None)
+    parent = SimpleNamespace(id=uuid4(), tenant_id=None)
+    target = SimpleNamespace(id=uuid4(), tenant_id=None)
+    original_hash = hashlib.md5(b"the original upload").hexdigest()
+    row = SimpleNamespace(
+        name="lesson",
+        label=None,
+        extension="txt",
+        mime_type="text/plain",
+        loader_engine=None,
+        content_hash=original_hash,
+        raw_content_hash=hashlib.md5(b"lesson").hexdigest(),
+        external_metadata={},
+    )
+    provenance = {"source_revision": hashlib.sha256(b"lesson").hexdigest()}
+    target_id = uuid4()
+    try:
+        assert await m._persist_copy(row, b"lesson", provenance, actor, target, target_id) is True
+        async with engine.get_async_session() as session:
+            # ingest_data resolves an add() through this lookup: the actor's own
+            # re-add of the original lands on the promoted copy ...
+            assert await identify_many([original_hash], actor, target.id, session=session) == {
+                original_hash: target_id
+            }
+            # ... while the destination owner's add() of it gets their own row.
+            assert await identify_many([original_hash], parent, target.id, session=session) == {}
+            copied = (await session.execute(select(Data))).scalar_one()
+        assert copied.owner_id == actor.id
+        assert copied.system_metadata["promotion"] == provenance
+    finally:
+        await engine.engine.dispose()

@@ -93,8 +93,12 @@ async def _persist_copy(row, content, provenance, actor, target, target_id) -> b
         loader_engine=row.loader_engine,
         raw_data_location=location,
         original_data_location=location,
-        # ingest_data dedups on the original file's hash, so a later add() of
-        # the same original into the destination must find this row.
+        # Keep the original upload's hash: ingest_data dedups on it, scoped to
+        # (dataset, owner, tenant), and the copy is owned by the actor. So only
+        # the actor's own later add() of the same original resolves to this
+        # row (another owner gets their own row, as in any shared dataset);
+        # that re-add keeps the promotion provenance, since ingest_data only
+        # replaces system_metadata on changed content or a routed item.
         content_hash=row.content_hash,
         raw_content_hash=row.raw_content_hash,
         data_size=len(content),
@@ -233,7 +237,15 @@ async def promote(
     stored_digest = row.raw_content_hash
     if not stored_digest:
         raise ValueError("Source memory lacks a content revision; re-ingest before promotion")
-    if row.data_size is not None and row.data_size > max_bytes:
+    # data_size is the original upload's size; the bounded read below copies
+    # the processed text, which only matches when the stored file is the
+    # original itself. A converted document (a scanned PDF whose text is a
+    # fraction of the upload) is bounded by the read alone.
+    if (
+        row.data_size is not None
+        and row.data_size > max_bytes
+        and row.raw_data_location == row.original_data_location
+    ):
         raise ValueError("Selected memory exceeds max_bytes")
     # The file handle is blocking (local open(), or an s3fs handle whose only
     # async part is the open), so read and hash off the event loop.
