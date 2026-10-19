@@ -153,7 +153,14 @@ _ADD_ONLY = frozenset(
     }
 )
 _COGNIFY_ONLY = frozenset(
-    {"graph_model", "extractor", "summary_method", "chunks_per_batch", "config"}
+    {
+        "graph_model",
+        "extractor",
+        "summary_method",
+        "early_chunk_indexing",
+        "chunks_per_batch",
+        "config",
+    }
 )
 _SHARED = frozenset(
     {

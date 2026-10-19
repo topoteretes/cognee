@@ -154,6 +154,7 @@ async def cognify(
     extractor: Literal["llm", "gliner_demo", "gliner"] | None = None,
     ontology_file_path: str | None = None,
     summary_method: Literal["llm", "from_extraction"] | None = None,
+    early_chunk_indexing: bool | None = None,
     **kwargs,
 ):
     """
@@ -259,6 +260,12 @@ async def cognify(
                  extracted types and relation texts with no LLM call, and a chunk
                  with no relations gets no summary. The explicit argument wins over
                  the SUMMARY_METHOD setting ("llm" by default). Raises while
+                 connected to a remote instance.
+        early_chunk_indexing: Whether to store the chunks (and embed their text)
+                 right after chunking, before extraction, so chunk-based searches
+                 answer while entities are still being extracted; the final write
+                 does not embed them again. The explicit argument wins over the
+                 EARLY_CHUNK_INDEXING setting (on by default). Raises while
                  connected to a remote instance.
 
     Returns:
@@ -401,6 +408,12 @@ async def cognify(
                 "summary_method is not supported while connected to a remote Cognee "
                 "instance. Call cognee.disconnect() to choose the summary method locally."
             )
+        if early_chunk_indexing is not None:
+            # Same again: the remote runs its own EARLY_CHUNK_INDEXING setting.
+            raise ValueError(
+                "early_chunk_indexing is not supported while connected to a remote Cognee "
+                "instance. Call cognee.disconnect() to choose it locally."
+            )
         return await client.cognify(
             datasets,
             chunk_size=chunk_size,
@@ -476,6 +489,7 @@ async def cognify(
                 config=config,
                 chunk_attachment=chunk_attachment,
                 track_provenance=cognify_config.provenance_tracking,
+                early_chunk_indexing=early_chunk_indexing,
             )
         else:
             tasks = await get_default_tasks(
@@ -488,6 +502,7 @@ async def cognify(
                 chunks_per_batch=chunks_per_batch,
                 chunk_attachment=chunk_attachment,
                 summary_method=resolved_summary_method,
+                early_chunk_indexing=early_chunk_indexing,
                 **kwargs,
             )
 
@@ -599,11 +614,14 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     chunks_per_batch: int | None = None,
     chunk_attachment: Literal["direct", "all"] | None = None,
     summary_method: Literal["llm", "from_extraction"] | None = None,
+    early_chunk_indexing: bool | None = None,
     **kwargs,
 ) -> list[Task]:
     cognify_config = get_cognify_config()
     summary_method = summary_method or cognify_config.summary_method
     track_provenance = cognify_config.provenance_tracking
+    if early_chunk_indexing is None:
+        early_chunk_indexing = cognify_config.early_chunk_indexing
 
     if chunks_per_batch is None:
         chunks_per_batch = (
@@ -625,7 +643,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             needs_llm=False,
         ),
     ]
-    if cognify_config.early_chunk_indexing:
+    if early_chunk_indexing:
         # LOAD (early): store the chunks and their documents now, so chunk-based
         # searches answer while the LLM extraction below is still running; the
         # final add_data_points skips re-embedding them (SDK-397).

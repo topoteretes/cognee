@@ -102,7 +102,9 @@ from cognee.modules.ontology.get_default_ontology_resolver import (
 )
 from cognee.modules.ontology.ontology_config import Config
 from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
+from cognee.modules.pipelines.methods.get_pipeline_run import get_latest_pipeline_run
 from cognee.modules.pipelines.models.PipelineContext import PipelineContext
+from cognee.modules.pipelines.models.PipelineRun import PipelineRunStatus
 from cognee.modules.pipelines.operations.log_pipeline_run_complete import (
     log_pipeline_run_complete,
 )
@@ -235,6 +237,39 @@ async def _require_chunk_scoped_ownership(
         if snapshot is None or expected_ref not in snapshot.source_ref_keys:
             raise IncrementalUpdateNotPossible(
                 f"stored chunk {chunk_id} has no chunk-scoped ownership baseline",
+                RefusalReason.NO_BASELINE,
+            )
+    return delete_data
+
+
+async def _require_chunk_writers_completed(delete_data: dict) -> None:
+    """Refuse a baseline whose chunks were written by a run that never finished.
+
+    ``index_chunks_for_search`` stores a document's chunks before its entities
+    are extracted (SDK-397). A cognify killed between those two writes leaves
+    a chunk set that tiles the text and carries v2 ownership but has no
+    entities. Treating it as a baseline would re-extract only the edited
+    regions and stamp the document complete, so the untouched chunks would
+    never get their entities. A run that ended in an error is swept by
+    rollback; a run with no terminal row is the case this guards. Chunks that
+    carry no run ids (older graphs, adapters without run stamping) keep the
+    previous behaviour.
+    """
+    run_ids: set[str] = set()
+    for snapshot in delete_data.values():
+        run_ids.update(getattr(snapshot, "source_run_ids", None) or [])
+    for run_id in sorted(run_ids):
+        try:
+            run_uuid = UUID(run_id)
+        except ValueError:
+            continue
+        run = await get_latest_pipeline_run(run_uuid)
+        if run is None:
+            continue
+        if run.status != PipelineRunStatus.DATASET_PROCESSING_COMPLETED:
+            raise IncrementalUpdateNotPossible(
+                f"stored chunks were written by pipeline run {run_id}, which did not "
+                f"complete ({getattr(run.status, 'value', run.status)})",
                 RefusalReason.NO_BASELINE,
             )
 
@@ -824,8 +859,9 @@ async def _stage_and_plan(
 
     old_text = await _read_processed_text(old_data.raw_data_location)
     stored_chunks = await _get_stored_chunks(data_id)
-    await _require_chunk_scoped_ownership(stored_chunks, dataset_id, data_id)
+    delete_data = await _require_chunk_scoped_ownership(stored_chunks, dataset_id, data_id)
     _require_stored_chunks_tile(stored_chunks, old_text)
+    await _require_chunk_writers_completed(delete_data)
 
     # Stage the new content through ingestion's own loader machinery. The Data
     # row is NOT written: readers keep resolving the old version until publish.

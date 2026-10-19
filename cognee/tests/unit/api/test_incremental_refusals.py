@@ -359,7 +359,7 @@ async def test_a_document_built_by_another_chunker_is_refused_by_name(monkeypatc
     monkeypatch.setattr(incremental, "get_data", _get_data)
     monkeypatch.setattr(incremental, "_read_processed_text", _read)
     monkeypatch.setattr(incremental, "_get_stored_chunks", _stored_chunks)
-    monkeypatch.setattr(incremental, "_require_chunk_scoped_ownership", AsyncMock())
+    monkeypatch.setattr(incremental, "_require_chunk_scoped_ownership", AsyncMock(return_value={}))
     monkeypatch.setattr(incremental, "_stage_new_content", _stage)
     monkeypatch.setattr(incremental, "_build_document", lambda *a, **k: SimpleNamespace(id=uuid4()))
 
@@ -416,7 +416,7 @@ async def test_changed_content_with_changed_metadata_refuses_before_planning(mon
         "_get_stored_chunks",
         AsyncMock(return_value=[{"id": str(uuid4()), "text": "old content"}]),
     )
-    monkeypatch.setattr(incremental, "_require_chunk_scoped_ownership", AsyncMock())
+    monkeypatch.setattr(incremental, "_require_chunk_scoped_ownership", AsyncMock(return_value={}))
     monkeypatch.setattr(incremental, "_stage_new_content", AsyncMock(return_value=staged))
 
     with pytest.raises(IncrementalUpdateNotPossible) as raised:
@@ -741,3 +741,49 @@ async def test_chunkless_routes_refuse_before_reading_the_graph(
     assert "rebuilt" in str(raised.value)
     stored_chunks.assert_not_awaited()
     run_incremental.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_chunks_from_an_unfinished_cognify_are_no_baseline(monkeypatch):
+    """A cognify killed after the early chunk write (SDK-397) leaves entity-less
+    chunks that tile and are v2-owned; they must not seed an incremental update."""
+    from cognee.api.v1.update import incremental
+    from cognee.modules.pipelines.models.PipelineRun import PipelineRunStatus
+
+    run_id = uuid4()
+    snapshot = SimpleNamespace(source_run_ids=[str(run_id)])
+    monkeypatch.setattr(
+        incremental,
+        "get_latest_pipeline_run",
+        AsyncMock(
+            return_value=SimpleNamespace(status=PipelineRunStatus.DATASET_PROCESSING_STARTED)
+        ),
+    )
+
+    with pytest.raises(IncrementalUpdateNotPossible) as raised:
+        await incremental._require_chunk_writers_completed({"chunk": snapshot})
+
+    assert raised.value.reason is RefusalReason.NO_BASELINE
+    assert str(run_id) in str(raised.value)
+
+
+@pytest.mark.asyncio
+async def test_chunks_from_completed_or_unstamped_runs_are_a_baseline(monkeypatch):
+    from cognee.api.v1.update import incremental
+    from cognee.modules.pipelines.models.PipelineRun import PipelineRunStatus
+
+    completed = AsyncMock(
+        return_value=SimpleNamespace(status=PipelineRunStatus.DATASET_PROCESSING_COMPLETED)
+    )
+    monkeypatch.setattr(incremental, "get_latest_pipeline_run", completed)
+
+    await incremental._require_chunk_writers_completed(
+        {"a": SimpleNamespace(source_run_ids=[str(uuid4())]), "b": SimpleNamespace()}
+    )
+    # Chunks without run ids (older graphs, adapters without run stamping) and
+    # unknown run records keep the previous behaviour: no lookup, no refusal.
+    await incremental._require_chunk_writers_completed({"c": SimpleNamespace(source_run_ids=[])})
+    completed.return_value = None
+    await incremental._require_chunk_writers_completed(
+        {"d": SimpleNamespace(source_run_ids=[str(uuid4())])}
+    )

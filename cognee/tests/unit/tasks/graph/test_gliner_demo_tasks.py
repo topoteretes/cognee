@@ -398,7 +398,9 @@ async def test_gliner_demo_tasks_reuse_configured_ontology_resolver():
             chunk_size=512,
         )
     schema = tasks[1].default_params["kwargs"]["schema"]
-    extraction_config = tasks[3].default_params["kwargs"]["config"]
+    extraction_config = next(
+        t for t in tasks if t.executable.__name__ == "extract_graph_and_summarize_with_gliner"
+    ).default_params["kwargs"]["config"]
 
     assert set(schema.entity_types) == {"person", "software_company"}
     assert extraction_config["ontology_config"]["ontology_resolver"] is resolver
@@ -750,13 +752,14 @@ async def test_get_gliner_demo_tasks_shape():
         patch.object(tasks_module, "resolve_chunk_size", AsyncMock(return_value=512)),
     ):
         tasks = await get_gliner_demo_tasks(
-            ["person"], ["works_for"], chunks_per_batch=7, stats=stats
+            ["person"], ["works_for"], chunks_per_batch=7, stats=stats, early_chunk_indexing=True
         )
 
     assert [t.executable.__name__ for t in tasks] == [
         "classify_documents",
         "prepare_gliner_schema",
         "extract_chunks_from_documents",
+        "index_chunks_for_search",
         "extract_graph_and_summarize_with_gliner",
         "add_data_points",
     ]
@@ -764,10 +767,11 @@ async def test_get_gliner_demo_tasks_shape():
     assert schema_task.default_params["kwargs"]["max_chunk_size"] == 512
     assert schema_task.default_params["kwargs"]["schema"].entity_types == {"person": ""}
     assert tasks[2].default_params["kwargs"]["max_chunk_size"] == 512
-    extraction = tasks[3]
+    assert tasks[3].task_config["batch_size"] == 7
+    extraction = tasks[4]
     assert extraction.task_config["batch_size"] == 7
     assert extraction.default_params["kwargs"]["stats"] is stats
-    assert tasks[4].task_config["batch_size"] == 7
+    assert tasks[5].task_config["batch_size"] == 7
     # No task in this list calls an LLM, so run_pipeline derives needs_llm=False.
     assert all(t.needs_llm is False for t in tasks)
 
@@ -873,10 +877,11 @@ async def test_cognify_extractor_argument_selects_the_gliner_task_list():
     with patch.object(tasks_module, "require_gliner2"):
         tasks = await _cognify_standard_tasks(extractor="gliner_demo")
     names = _task_names(tasks)
-    assert names[:5] == [
+    assert names[:6] == [
         "classify_documents",
         "prepare_gliner_schema",
         "extract_chunks_from_documents",
+        "index_chunks_for_search",
         "extract_graph_and_summarize_with_gliner",
         "add_data_points",
     ]

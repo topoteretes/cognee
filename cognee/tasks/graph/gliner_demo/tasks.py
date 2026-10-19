@@ -2,7 +2,9 @@
 
 ``get_gliner_demo_tasks`` returns the complete task list
 ``classify_documents -> prepare_gliner_schema -> extract_chunks_from_documents ->
-extract_graph_and_summarize_with_gliner -> add_data_points``. Run it with
+index_chunks_for_search -> extract_graph_and_summarize_with_gliner ->
+add_data_points`` (the early chunk write is dropped when
+``EARLY_CHUNK_INDEXING`` is off). Run it with
 ``cognee.run_custom_pipeline(tasks=..., dataset=..., pipeline_name="cognify_pipeline")``;
 the pipeline loads the dataset's Data records itself, exactly as ``cognify()`` does.
 
@@ -36,7 +38,7 @@ from cognee.tasks.documents import classify_documents, extract_chunks_from_docum
 from cognee.tasks.graph.exceptions import InvalidDataChunksError
 from cognee.tasks.graph.extract_graph_from_data import extract_graph_from_data
 from cognee.tasks.provenance import record_provenance
-from cognee.tasks.storage import add_data_points
+from cognee.tasks.storage import add_data_points, index_chunks_for_search
 from cognee.tasks.summarization.models import TextSummary
 
 from .extractor import (
@@ -226,8 +228,8 @@ def build_gliner_extraction_task(
 ) -> Task:
     """Build only the GLiNER extract+summarize ``Task``.
 
-    This is the task ``get_gliner_demo_tasks`` places fourth and the one
-    ``get_gliner_demo_tasks`` places in its extraction step. Raises
+    This is the task ``get_gliner_demo_tasks`` places right before the final
+    ``add_data_points`` and the one it uses as its extraction step. Raises
     :class:`GlinerNotInstalledError` when ``gliner2`` is not installed and
     ``ValueError`` on bad options.
     """
@@ -296,6 +298,7 @@ async def get_gliner_demo_tasks(
     config: Config | None = None,
     chunk_attachment: Literal["direct", "all"] | None = None,
     track_provenance: bool = False,
+    early_chunk_indexing: bool | None = None,
     stats: GlinerRunStats | None = None,
 ) -> list[Task]:
     """Build the GLiNER cognify task list.
@@ -308,12 +311,17 @@ async def get_gliner_demo_tasks(
     document sketch. ``stats`` is filled in as the run progresses.
 
     Embeddings in ``add_data_points`` still run; graph extraction and summaries
-    are LLM-free. Raises :class:`GlinerNotInstalledError` when ``gliner2`` is
+    are LLM-free. ``early_chunk_indexing`` (default: the ``EARLY_CHUNK_INDEXING``
+    setting) stores the chunks before extraction so chunk searches answer while
+    GLiNER runs. Raises :class:`GlinerNotInstalledError` when ``gliner2`` is
     not installed.
     """
+    cognify_config = get_cognify_config()
     if chunks_per_batch is None:
-        configured = get_cognify_config().chunks_per_batch
+        configured = cognify_config.chunks_per_batch
         chunks_per_batch = configured if configured is not None else 2000
+    if early_chunk_indexing is None:
+        early_chunk_indexing = cognify_config.early_chunk_indexing
 
     ontology_resolver = None
     if not entity_types and not relation_types:
@@ -355,6 +363,18 @@ async def get_gliner_demo_tasks(
             chunker=chunker,
             needs_llm=False,
         ),
+    ]
+    if early_chunk_indexing:
+        # Same early write as the LLM route (SDK-397): chunk searches answer
+        # while GLiNER is still extracting; add_data_points skips re-embedding.
+        tasks.append(
+            Task(
+                index_chunks_for_search,
+                task_config={"batch_size": chunks_per_batch},
+                needs_llm=False,
+            )
+        )
+    tasks += [
         extraction_task,
         Task(
             add_data_points,

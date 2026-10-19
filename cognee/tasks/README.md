@@ -14,7 +14,7 @@ task's output, `enriches`, `ctx` injection, `Drop`) are documented in
 |---|---|---|
 | 1 | `documents.classify_documents` | `Data` rows → typed `Document`s (`TextDocument`, `PdfDocument`, …) |
 | 2 | `documents.extract_chunks_from_documents` | `Document` → `DocumentChunk`s (uses `cognee.modules.chunking`) |
-| 3 | `storage.index_chunks_for_search` | chunks → chunk + document nodes written and chunk text embedded now, so chunk-based searches answer while step 4 runs; the ids go to `ctx.extras` and step 6 skips re-embedding them (`EARLY_CHUNK_INDEXING`, default on) |
+| 3 | `storage.index_chunks_for_search` | chunks → chunk + document nodes written and chunk text embedded now, so chunk-based searches answer while step 4 runs; the ids go to `ctx.extras` and step 6 skips re-embedding them. Both extractors; `EARLY_CHUNK_INDEXING=false` or `cognify(early_chunk_indexing=False)` drops the step |
 | 4 | `graph.extract_graph_from_data` | chunks → chunks with `Entity`/`EntityType` nodes and edges attached (LLM, or GLiNER with `extractor="gliner_demo"`) |
 | 5 | `summarization.summarize_text` | chunks → `TextSummary` nodes (LLM) |
 | 6 | `storage.add_data_points` | data points → written to graph + vector DB (+ edge evidence) |

@@ -66,6 +66,7 @@ async def test_stores_the_chunks_and_records_what_it_embedded(mock_add):
     mock_add.assert_awaited_once()
     stored, kwargs = mock_add.await_args.args[0], mock_add.await_args.kwargs
     assert stored == chunks and kwargs["ctx"] is ctx
+    assert kwargs["index_edges"] is False, "structural edges are indexed by the final write"
     assert ctx.extras[SEARCH_INDEXED_IDS] == {
         str(chunks[0].id),
         str(chunks[1].id),
@@ -125,6 +126,63 @@ async def test_add_data_points_skips_embedding_already_indexed_nodes(
     assert {node.id for node in written} == {early.id, late.id}
     embedded = mock_index_nodes.await_args.args[0]
     assert [node.id for node in embedded] == [late.id]
+
+
+@pytest.mark.asyncio
+@patch.object(adp_module, "index_graph_edges")
+@patch.object(adp_module, "index_data_points")
+@patch.object(adp_module, "get_unified_engine")
+@patch.object(adp_module, "deduplicate_nodes_and_edges")
+@patch.object(adp_module, "get_graph_from_model")
+async def test_add_data_points_skips_the_record_on_hybrid_backends_too(
+    mock_get_graph, mock_dedup, mock_get_unified, mock_index_nodes, mock_index_edges
+):
+    """Hybrid backends embed inside the graph write: the recorded nodes go in
+    without vectors, the rest with them."""
+    from cognee.infrastructure.databases.unified.capabilities import EngineCapability
+
+    early = SimplePoint(text="embedded by index_chunks_for_search")
+    late = SimplePoint(text="an entity extracted afterwards")
+    mock_get_graph.side_effect = [([early, late], [])]
+    mock_dedup.side_effect = lambda n, e: (n, e)
+    unified, graph_engine, _ = _make_unified_mock()
+    unified.has_capability = MagicMock(
+        side_effect=lambda capability: capability == EngineCapability.HYBRID_WRITE
+    )
+    mock_get_unified.return_value = unified
+    ctx = PipelineContext(extras={SEARCH_INDEXED_IDS: {str(early.id)}})
+
+    await add_data_points([early], ctx=ctx)
+
+    plain = graph_engine.add_nodes.await_args.args[0]
+    with_vectors = graph_engine.add_nodes_with_vectors.await_args.args[0]
+    assert [node.id for node in plain] == [early.id]
+    assert [node.id for node in with_vectors] == [late.id]
+    mock_index_nodes.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@patch.object(adp_module, "index_graph_edges")
+@patch.object(adp_module, "index_data_points")
+@patch.object(adp_module, "get_unified_engine")
+@patch.object(adp_module, "deduplicate_nodes_and_edges")
+@patch.object(adp_module, "get_graph_from_model")
+async def test_add_data_points_can_leave_edge_indexing_to_a_later_write(
+    mock_get_graph, mock_dedup, mock_get_unified, mock_index_nodes, mock_index_edges
+):
+    first = SimplePoint(text="a chunk")
+    second = SimplePoint(text="its document")
+    edge = (str(first.id), str(second.id), "is_part_of", {})
+    mock_get_graph.side_effect = [([first, second], [edge])]
+    mock_dedup.side_effect = lambda n, e: (n, e)
+    unified, graph_engine, _ = _make_unified_mock()
+    mock_get_unified.return_value = unified
+
+    await add_data_points([first], ctx=PipelineContext(), index_edges=False)
+
+    graph_engine.add_edges.assert_awaited_once(), "the edges are still written"
+    mock_index_nodes.assert_awaited_once()
+    mock_index_edges.assert_not_awaited()
 
 
 @pytest.mark.asyncio

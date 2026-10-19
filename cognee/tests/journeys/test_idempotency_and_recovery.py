@@ -113,6 +113,21 @@ async def test_interrupted_build_is_reported_and_recovers_on_retry(clean_env, de
         assert not any("obuya" in n for n in names), (
             "entities from the failed document reached the graph"
         )
+        # The chunks are written before extraction (index_chunks_for_search), so
+        # a failed build must roll those back too: no vector rows and no chunk
+        # search hit may survive from the failed document.
+        if before.vector_rows is not None:
+            assert during.vector_rows == before.vector_rows, (
+                f"failed build left vector rows behind: {before.vector_rows} -> {during.vector_rows}"
+            )
+        failed_text = _support.content_text(
+            await cognee.search(
+                query_text="Who is the Cormorant Rowing Club captain?",
+                query_type=SearchType.CHUNKS,
+                datasets=[DATASET],
+            )
+        )
+        assert "obuya" not in failed_text, "chunks of the failed document are still searchable"
 
         # The failed run does not raise for reads: the existing knowledge is still served.
         text = _support.content_text(
