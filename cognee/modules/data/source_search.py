@@ -6,14 +6,17 @@ are checked against native document membership before returning evidence.
 """
 
 import asyncio
-from contextvars import Context
 from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi.encoders import jsonable_encoder
 
 from cognee.api.v1.search import search as native_search
-from cognee.modules.data.source_catalog import route_sources, source_document
+from cognee.modules.data.source_catalog import (
+    route_sources,
+    routing_context,
+    source_documents_by_id,
+)
 from cognee.modules.search.types import SearchType
 from cognee.modules.tools.errors import ToolConnectionNotFoundError
 from cognee.modules.tools.text_to_sql import run_text_to_sql
@@ -42,29 +45,28 @@ async def _document_evidence(user, target, query, top_k):
             verbose=True,
         )
     )
-    evidence, rejected, metadata = [], 0, {}
+    hits = [
+        hit.get("payload") or {} for result in results for hit in result.get("objects_result") or []
+    ]
+    # One dataset authorization and one row load per source, not per hit.
+    documents = [payload["document_id"] for payload in hits if payload.get("document_id")]
+    metadata = (
+        await source_documents_by_id(user, UUID(target["dataset_id"]), documents)
+        if documents
+        else {}
+    )
+    evidence, rejected = [], 0
     for result in results:
         for hit in result.get("objects_result") or []:
             payload = hit.get("payload") or {}
-            document = payload.get("document_id")
-            if not document:
-                rejected += 1
-                continue
-            if document not in metadata:
-                metadata[document] = await source_document(
-                    user, UUID(target["dataset_id"]), UUID(document)
-                )
-            row = metadata[document]
-            if not set(target["node_sets"]).issubset(row.get("node_sets") or []):
-                # source_document already authorized the dataset. A chunk whose
-                # graph node-set tags disagree with the current Data row (re-adding
-                # content rewrites Data.node_set while earlier chunks keep their
-                # tags) is a consistency problem, not an access one: drop the hit
-                # as unverifiable and keep searching.
-                logger.warning(
-                    "Rejected unverifiable hit for source %s: node sets do not match",
-                    target["id"],
-                )
+            row = metadata.get(payload.get("document_id") or "")
+            if row is None or not set(target["node_sets"]).issubset(row.get("node_sets") or []):
+                # The dataset itself was authorized above. A chunk with no current
+                # Data row, or whose graph node-set tags disagree with that row
+                # (re-adding content rewrites Data.node_set while earlier chunks
+                # keep their tags), is a consistency problem, not an access one:
+                # drop the hit as unverifiable and keep searching.
+                logger.warning("Rejected unverifiable hit for source %s", target["id"])
                 rejected += 1
                 continue
             external = row.get("external_metadata") or {}
@@ -153,7 +155,8 @@ async def search_sources(
     if not query.strip() or len(query) > 8000 or not 1 <= top_k <= 100:
         raise ValueError("Invalid source search query or result budget.")
 
-    # Keep ambient session/agent memory out of both routing and SQL generation.
+    # Keep ambient agent memory out of routing and SQL generation while the
+    # caller's LLM override and usage accounting stay in effect (routing_context).
     async def run():
         routing = await route_sources(
             user,
@@ -214,5 +217,6 @@ async def search_sources(
 
     # Bound the entire invocation as well as each selected source.
     return await asyncio.wait_for(
-        Context().run(lambda: asyncio.create_task(run())), timeout=OVERALL_TIMEOUT_SECONDS
+        routing_context().run(lambda: asyncio.create_task(run())),
+        timeout=OVERALL_TIMEOUT_SECONDS,
     )

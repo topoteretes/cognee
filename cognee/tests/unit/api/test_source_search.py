@@ -214,13 +214,49 @@ async def test_node_set_mismatch_is_rejected_without_failing_the_search(user, mo
         ),
     )
     monkeypatch.setattr(
-        search, "source_document", AsyncMock(return_value={"node_sets": ["unselected"]})
+        search,
+        "source_documents_by_id",
+        AsyncMock(return_value={str(document): {"node_sets": ["unselected"]}}),
     )
     result = await search.search_sources(user, "q")
     # The dataset was authorized; the stale node-set tag drops the hit, not the search.
     assert result["evidence"] == [] and result["errors"] == []
     assert result["coverage"]["rejected_unverifiable_hits"] == 1
     assert [t["id"] for t in result["coverage"]["searched_targets"]] == [target["id"]]
+
+
+@pytest.mark.asyncio
+async def test_document_metadata_is_loaded_once_per_source(user, monkeypatch):
+    dataset, first, second, orphan = uuid4(), uuid4(), uuid4(), uuid4()
+    target = {
+        "id": str(uuid4()),
+        "name": "notes",
+        "dataset_id": str(dataset),
+        "node_sets": [],
+        "retrieval_method": "chunks",
+    }
+    monkeypatch.setattr(search, "route_sources", AsyncMock(return_value={"targets": [target]}))
+    hits = [
+        {"payload": {"document_id": str(first), "text": "one"}, "score": 0.9},
+        {"payload": {"document_id": str(second), "text": "two"}, "score": 0.8},
+        {"payload": {"document_id": str(first), "text": "three"}, "score": 0.7},
+        {"payload": {"document_id": str(orphan), "text": "orphan chunk"}, "score": 0.6},
+    ]
+    monkeypatch.setattr(search, "native_search", AsyncMock(return_value=[{"objects_result": hits}]))
+    rows = {
+        str(first): {"id": str(first), "dataset_id": str(dataset), "node_sets": []},
+        str(second): {"id": str(second), "dataset_id": str(dataset), "node_sets": []},
+    }
+    load = AsyncMock(return_value=rows)
+    monkeypatch.setattr(search, "source_documents_by_id", load)
+    result = await search.search_sources(user, "q")
+    # One authorization + one row load for the whole source, not one per hit.
+    load.assert_awaited_once()
+    assert load.await_args.args[1] == dataset
+    assert set(load.await_args.args[2]) == {str(first), str(second), str(orphan)}
+    assert [hit["text"] for hit in result["evidence"]] == ["one", "two", "three"]
+    # A chunk whose document no longer exists is unverifiable, not a 403.
+    assert result["coverage"]["rejected_unverifiable_hits"] == 1
 
 
 @pytest.mark.asyncio

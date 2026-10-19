@@ -27,7 +27,7 @@ class RouteSources(BaseModel):
     exclude_source_ids: list[UUID] | None = Field(default=None, max_length=2048)
     include_connections: bool = True
     max_sources: int = Field(default=6, ge=1, le=8)
-    max_catalog_entries: int = Field(default=512, ge=1, le=2048)
+    max_catalog_entries: int = Field(default=512, ge=1, le=1024)
 
 
 class SearchSources(RouteSources):

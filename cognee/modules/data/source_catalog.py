@@ -6,13 +6,13 @@ rank its descriptors, but only the server resolves IDs into search targets.
 """
 
 import asyncio
+import contextvars
 import json
-from contextvars import Context
 from typing import Literal, TypedDict
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from typing_extensions import NotRequired
 
 from cognee.infrastructure.databases.relational import get_relational_engine
@@ -22,6 +22,30 @@ from cognee.modules.users.permissions.methods import get_all_user_permission_dat
 
 MAX_METADATA_ROWS = 50000
 ROUTING_BATCH = 64
+MAX_CATALOG_ENTRIES = 1024
+# What one descriptor contributes to a routing prompt: the catalog keeps the full
+# alias/description/label lists for callers, but the model only needs a sample,
+# trimmed, which keeps a full 64-item batch near 16k tokens instead of 85k.
+ROUTING_FIELD_LIMITS = {"aliases": 3, "descriptions": 2, "sample_labels": 3}
+ROUTING_VALUE_CHARS = 120
+
+
+def routing_context() -> contextvars.Context:
+    """The caller's context minus ambient agent memory.
+
+    Routing and retrieval must not inherit another agent's or session's memory
+    through ``LLMGateway``, but they must keep everything else the caller set:
+    the per-request ``llm_config``/``embedding_config`` override, the operation
+    and session usage accounting, the operation origin. A fresh ``Context()``
+    dropped all of those, so only the agent-memory variable is reset here.
+    """
+    from cognee.modules.agent_memory.runtime import _agent_memory_context_var
+
+    context = contextvars.copy_context()
+    context.run(_agent_memory_context_var.set, None)
+    return context
+
+
 # Upper bound on the Data rows one document page may examine. The node_set
 # filter runs in Python (legacy rows keep it in external_metadata), so a sparse
 # source in a large dataset would otherwise scan the whole dataset for a single
@@ -186,10 +210,10 @@ async def source_catalog(user, dataset_ids=None, *, include_connections=False):
             .limit(MAX_METADATA_ROWS + 1)
         )
         rows = result.all()
-    return {
-        "items": build_catalog(datasets, rows[:MAX_METADATA_ROWS]) + connections,
-        "complete": len(rows) <= MAX_METADATA_ROWS,
-    }
+    # Folding up to MAX_METADATA_ROWS rows is CPU work (json.loads, uuid5 per
+    # row); keep it off the event loop so other requests are not stalled.
+    items = await asyncio.to_thread(build_catalog, datasets, rows[:MAX_METADATA_ROWS])
+    return {"items": items + connections, "complete": len(rows) <= MAX_METADATA_ROWS}
 
 
 class SourceChoice(BaseModel):
@@ -212,6 +236,33 @@ class RoutingChoices(BaseModel):
     choices: list[RoutingChoice] = Field(default_factory=list, max_length=8)
 
 
+def routing_descriptor(item: SourceDescriptor) -> dict:
+    """The bounded view of one catalog entry that a routing prompt receives."""
+    descriptor = {}
+    for key, value in item.items():
+        if key in ("id", "dataset_id"):
+            continue
+        if key in ROUTING_FIELD_LIMITS:
+            value = [str(v)[:ROUTING_VALUE_CHARS] for v in value[: ROUTING_FIELD_LIMITS[key]]]
+        elif isinstance(value, str):
+            value = value[:ROUTING_VALUE_CHARS]
+        descriptor[key] = value
+    return descriptor
+
+
+def _routing_result(selected, catalog, items, *, calls, resolution):
+    return {
+        "targets": selected,
+        "status": "selected" if selected else "inconclusive",
+        "complete": catalog["complete"],
+        "catalog_entries": len(items),
+        "searched_content": False,
+        "selection_is_exhaustive": False,
+        "routing_llm_calls": calls,
+        "source_resolution": resolution,
+    }
+
+
 async def rank_descriptors(query, source_hint, candidates):
     from cognee.infrastructure.llm.LLMGateway import LLMGateway
 
@@ -221,8 +272,7 @@ async def rank_descriptors(query, source_hint, candidates):
     # Local integer handles avoid asking the model to copy long opaque UUIDs.
     # Only server code can turn those handles into real dataset/node-set targets.
     descriptors = [
-        {"index": index, **{k: v for k, v in item.items() if k not in ("id", "dataset_id")}}
-        for index, item in enumerate(candidates)
+        {"index": index, **routing_descriptor(item)} for index, item in enumerate(candidates)
     ]
     payload = json.dumps({"question": query, "source_hint": source_hint, "catalog": descriptors})
     prompt = (
@@ -244,7 +294,7 @@ async def rank_descriptors(query, source_hint, candidates):
         )
         return RoutingChoices.model_validate(result)
 
-    response = await Context().run(lambda: asyncio.create_task(run()))
+    response = await routing_context().run(lambda: asyncio.create_task(run()))
     if any(choice.index >= len(candidates) for choice in response.choices):
         raise ValueError("Source router returned an unknown catalog index.")
     return SourceChoices(
@@ -269,7 +319,7 @@ async def route_sources(
     exclude_source_ids: list[UUID] | None = None,
     include_connections: bool = False,
 ):
-    if not 1 <= max_sources <= 8 or not 1 <= max_catalog_entries <= 2048:
+    if not 1 <= max_sources <= 8 or not 1 <= max_catalog_entries <= MAX_CATALOG_ENTRIES:
         raise ValueError("Source routing budget is out of bounds.")
     catalog = await source_catalog(user, dataset_ids, include_connections=include_connections)
     excluded = {str(ident) for ident in exclude_source_ids or []}
@@ -290,6 +340,18 @@ async def route_sources(
     if named:
         items = named
     items = [item for item in items if item["id"] not in excluded]
+    if named and len(items) <= max_sources:
+        # An exact name match is a constraint the catalog already resolved; there
+        # is nothing left for the model to rank, so no routing call is made.
+        selected = [
+            {**item, "reason": "Exact source name match.", "relevance": 1.0} for item in items
+        ]
+        return _routing_result(selected, catalog, items, calls=0, resolution="exact_metadata")
+    if len(items) == 1:
+        # One authorized candidate: the model could only accept or reject it, and
+        # retrieval itself reports whether that source holds anything relevant.
+        selected = [{**items[0], "reason": "Only authorized source.", "relevance": 1.0}]
+        return _routing_result(selected, catalog, items, calls=0, resolution="single_candidate")
     # Do not truncate a sorted catalog and pretend it covered every source. The
     # caller can narrow by dataset or increase its explicit metadata budget.
     if len(items) > max_catalog_entries:
@@ -335,16 +397,13 @@ async def route_sources(
                 {**by_id[choice.source_id], "reason": choice.reason, "relevance": choice.relevance}
             )
             seen.add(choice.source_id)
-    return {
-        "targets": selected,
-        "status": "selected" if selected else "inconclusive",
-        "complete": catalog["complete"],
-        "catalog_entries": len(items),
-        "searched_content": False,
-        "selection_is_exhaustive": False,
-        "routing_llm_calls": calls,
-        "source_resolution": "exact_metadata" if named else "semantic_metadata",
-    }
+    return _routing_result(
+        selected,
+        catalog,
+        items,
+        calls=calls,
+        resolution="exact_metadata" if named else "semantic_metadata",
+    )
 
 
 async def resolve_source_target(user, source_id, dataset_id=None) -> SourceDescriptor:
@@ -441,6 +500,22 @@ async def source_documents(user, source_id, after=None, limit=100, dataset_id=No
     }
 
 
+def _document_metadata(row) -> dict:
+    return {
+        "id": str(row.id),
+        "dataset_id": str(row.dataset_id),
+        "label": row.label,
+        "node_sets": node_names(
+            row.node_set
+            if row.node_set is not None
+            else (row.external_metadata or {}).get("node_set")
+        ),
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+        "external_metadata": row.external_metadata,
+    }
+
+
 async def source_document(user, dataset_id, document_id):
     datasets = await get_authorized_existing_datasets([dataset_id], "read", user)
     if not datasets:
@@ -455,16 +530,33 @@ async def source_document(user, dataset_id, document_id):
         row = result.scalar_one_or_none()
     if row is None:
         raise PermissionError("Document is unavailable.")
-    return {
-        "id": str(row.id),
-        "dataset_id": str(row.dataset_id),
-        "label": row.label,
-        "node_sets": node_names(
-            row.node_set
-            if row.node_set is not None
-            else (row.external_metadata or {}).get("node_set")
-        ),
-        "created_at": row.created_at,
-        "updated_at": row.updated_at,
-        "external_metadata": row.external_metadata,
-    }
+    return _document_metadata(row)
+
+
+async def source_documents_by_id(user, dataset_id, document_ids) -> dict[str, dict]:
+    """Authorize the dataset once and load many documents in one query.
+
+    The result is keyed by the ids as requested; an id only known as a row's
+    ``legacy_id`` maps to that row, the exact id winning when both match, the
+    same precedence as ``resolve_data_id``. Ids unknown in this dataset are
+    simply absent, so the caller decides what an unverifiable reference means.
+    """
+    datasets = await get_authorized_existing_datasets([dataset_id], "read", user)
+    if not datasets:
+        raise PermissionError("Dataset is unavailable.")
+    wanted = {UUID(str(document_id)) for document_id in document_ids}
+    if not wanted:
+        return {}
+    async with get_relational_engine().get_async_session() as db:
+        result = await db.execute(
+            select(Data).where(
+                Data.dataset_id == dataset_id,
+                or_(Data.id.in_(wanted), Data.legacy_id.in_(wanted)),
+            )
+        )
+        rows = result.scalars().all()
+    documents = {str(row.id): _document_metadata(row) for row in rows if row.id in wanted}
+    for row in rows:
+        if row.legacy_id in wanted:
+            documents.setdefault(str(row.legacy_id), _document_metadata(row))
+    return documents

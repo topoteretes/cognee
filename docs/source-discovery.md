@@ -20,8 +20,15 @@ All routes use the existing authenticated principal and native dataset read ACLs
   and `limit` (1–200). Returns descriptors, total, next offset and completeness.
 - `POST /api/v1/datasets/source-route`: `query`, optional free-form `source_hint`,
   `dataset_ids`, `exclude_source_ids`, `max_sources` (1–8, default 6), and
-  `max_catalog_entries` (1–2048, default 512). Returns validated targets and reasons.
+  `max_catalog_entries` (1–1024, default 512). Returns validated targets and reasons.
   Routing does not search content. Explicit inaccessible datasets fail the request.
+  The model sees a trimmed descriptor per source (name, kind, capabilities, up to 3
+  aliases, 2 descriptions and 3 sample labels, 120 characters each), so a 64-entry
+  batch costs about 16k tokens; an exact `source_hint` match that fits `max_sources`,
+  or a single authorized candidate, is selected without a routing call
+  (`source_resolution: exact_metadata` / `single_candidate`, `routing_llm_calls: 0`).
+  Routing and retrieval run in a copy of the caller's context with only ambient agent
+  memory removed, so a per-request LLM override and usage accounting still apply.
 - `GET /api/v1/datasets/source-documents/{source_id}`: metadata pages, `limit`
   (1–500), optional `after` document UUID, and optional `dataset_id` (the one every
   catalog and routing target carries). The source is authorized directly, without

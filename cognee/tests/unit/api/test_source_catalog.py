@@ -86,7 +86,7 @@ async def test_hundreds_of_descriptors_are_routed_in_bounded_batches(monkeypatch
 
 @pytest.mark.asyncio
 async def test_llm_cannot_invent_an_unauthorized_target(monkeypatch):
-    items = catalog.build_catalog([dataset()], [])
+    items = catalog.build_catalog([dataset("a"), dataset("b")], [])
     monkeypatch.setattr(
         catalog, "source_catalog", AsyncMock(return_value={"items": items, "complete": True})
     )
@@ -130,23 +130,67 @@ async def test_inconclusive_routing_does_not_claim_no_content(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_router_does_not_inherit_ambient_context(monkeypatch):
-    from contextvars import ContextVar
-
+async def test_router_drops_agent_memory_but_keeps_the_callers_context(monkeypatch):
+    from cognee.context_global_variables import llm_config
     from cognee.infrastructure.llm.LLMGateway import LLMGateway
+    from cognee.modules.agent_memory.runtime import (
+        _agent_memory_context_var,
+        get_current_agent_memory_context,
+    )
+    from cognee.modules.operations.usage_accumulator import (
+        get_active_operation_usage,
+        operation_usage_scope,
+    )
 
-    secret = ContextVar("unrelated_memory", default=None)
-    token = secret.set("another session")
+    override, seen = object(), {}
 
     async def operation(**kwargs):
-        assert secret.get() is None
+        seen["memory"] = get_current_agent_memory_context()
+        seen["llm_config"] = llm_config.get()
+        seen["usage"] = get_active_operation_usage()
         return catalog.RoutingChoices()
 
     monkeypatch.setattr(LLMGateway, "acreate_structured_output", operation)
+    memory = _agent_memory_context_var.set(SimpleNamespace(memory_context="another session"))
+    config = llm_config.set(override)
     try:
-        await catalog.rank_descriptors("question", None, [])
+        with operation_usage_scope() as usage:
+            await catalog.rank_descriptors("question", None, [])
     finally:
-        secret.reset(token)
+        llm_config.reset(config)
+        _agent_memory_context_var.reset(memory)
+    # Another agent's memory never reaches the router prompt, while the caller's
+    # LLM override and operation usage tally stay in effect for the routing call.
+    assert seen["memory"] is None
+    assert seen["llm_config"] is override
+    assert seen["usage"] is usage
+
+
+@pytest.mark.asyncio
+async def test_single_candidate_is_selected_without_a_routing_call(monkeypatch):
+    items = catalog.build_catalog([dataset("only")], [])
+    monkeypatch.setattr(
+        catalog, "source_catalog", AsyncMock(return_value={"items": items, "complete": True})
+    )
+    rank = AsyncMock(side_effect=AssertionError("one candidate needs no LLM"))
+    monkeypatch.setattr(catalog, "rank_descriptors", rank)
+    result = await catalog.route_sources(None, "anything")
+    assert [t["id"] for t in result["targets"]] == [items[0]["id"]]
+    assert result["routing_llm_calls"] == 0
+    assert result["source_resolution"] == "single_candidate"
+    rank.assert_not_awaited()
+
+
+def test_routing_descriptor_is_bounded():
+    data = dataset()
+    rows = [(data.id, ["set"], None, f"label {i}", f"alias {i}", "d" * 500) for i in range(12)]
+    item = next(i for i in catalog.build_catalog([data], rows) if i["kind"] == "node_set")
+    assert len(item["aliases"]) == 12  # the catalog keeps everything for callers
+    descriptor = catalog.routing_descriptor(item)
+    assert "id" not in descriptor and "dataset_id" not in descriptor
+    assert len(descriptor["aliases"]) == 3
+    assert len(descriptor["descriptions"]) == 1 and len(descriptor["descriptions"][0]) == 120
+    assert descriptor["documents"] == 12 and descriptor["retrieval_method"] == "chunks"
 
 
 @pytest.mark.asyncio
@@ -259,6 +303,23 @@ async def test_native_metadata_projection_pages_aliases_and_revocation(monkeypat
         monkeypatch.setattr(catalog, "MAX_SCAN_ROWS", 10_000)
         old = await catalog.source_document(None, one.id, UUID(int=(10 << 124) + 99))
         assert old["id"] == str(UUID(int=(10 << 124) + 1))
+        # One batched load per source: exact and legacy ids resolve, keyed as
+        # requested; another dataset's row and an unknown id are simply absent.
+        batch = await catalog.source_documents_by_id(
+            None,
+            one.id,
+            [
+                str(UUID(int=(10 << 124) + 99)),
+                UUID(int=(10 << 124) + 3),
+                UUID(int=(10 << 124) + 5),
+                uuid4(),
+            ],
+        )
+        assert {k: v["id"] for k, v in batch.items()} == {
+            str(UUID(int=(10 << 124) + 99)): str(UUID(int=(10 << 124) + 1)),
+            str(UUID(int=(10 << 124) + 3)): str(UUID(int=(10 << 124) + 3)),
+        }
+        assert batch[str(UUID(int=(10 << 124) + 3))]["node_sets"] == ["research"]
         with pytest.raises(PermissionError):
             await catalog.source_document(None, one.id, UUID(int=(10 << 124) + 5))
         monkeypatch.setattr(catalog, "source_catalog", real_source_catalog)
@@ -299,21 +360,15 @@ async def test_named_source_cannot_expand_to_mixed_topic_group(monkeypatch):
         catalog, "source_catalog", AsyncMock(return_value={"items": items, "complete": True})
     )
 
-    async def rank(query, hint, candidates):
-        assert len(candidates) == 1
-        assert candidates[0]["name"] == "origin:custom-a"
-        return catalog.SourceChoices(
-            choices=[
-                catalog.SourceChoice(
-                    source_id=candidates[0]["id"], relevance=1, reason="Exact provenance"
-                )
-            ]
-        )
-
+    # An exact name is a constraint the catalog resolves itself: no routing call.
+    rank = AsyncMock(side_effect=AssertionError("exact match needs no LLM"))
     monkeypatch.setattr(catalog, "rank_descriptors", rank)
     result = await catalog.route_sources(None, "commitments", source_hint="Custom A")
     assert result["source_resolution"] == "exact_metadata"
+    assert result["routing_llm_calls"] == 0
+    assert [t["name"] for t in result["targets"]] == ["origin:custom-a"]
     assert result["targets"][0]["node_sets"] == ["origin:custom-a"]
+    rank.assert_not_awaited()
     from uuid import UUID
 
     empty = await catalog.route_sources(
