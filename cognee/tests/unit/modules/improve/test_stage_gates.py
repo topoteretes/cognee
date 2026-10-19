@@ -21,6 +21,7 @@ from cognee.modules.improve.stages import (
     REASON_OPT_IN_DISABLED,
     REASON_PERSONALIZATION_DISABLED,
     BuildTruthSubspaceStage,
+    DistillSessionsStage,
     FeedbackWeightsStage,
     GlobalContextIndexStage,
     PersistSessionQAStage,
@@ -95,6 +96,46 @@ async def test_feedback_weights_passes_resolved_id_and_alpha(monkeypatch):
     )
     assert result.status == "completed"
     assert result.counts == {"sessions": 2}
+
+
+# --- stage 5 ---------------------------------------------------------------
+
+
+def _distilled(status="completed"):
+    return types.SimpleNamespace(status=status, documents=["lesson"], uncurated_entries=0)
+
+
+@pytest.mark.asyncio
+async def test_distill_stops_at_the_first_exhausted_budget(monkeypatch):
+    """A 402 on one session ends the loop: every later session would fail the same
+    way, and the stage result must still classify the run as budget-exhausted."""
+    from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
+
+    distill_mod = importlib.import_module("cognee.modules.session_distillation")
+    distill = AsyncMock(side_effect=[_distilled(), LLMPaymentRequiredError(), _distilled()])
+    monkeypatch.setattr(distill_mod, "distill_session", distill)
+
+    result = await DistillSessionsStage().run(_inputs(session_ids=("a", "b", "c")))
+
+    assert [call.args[0] for call in distill.await_args_list] == ["a", "b"]
+    assert result.status == "errored"
+    assert result.budget_exhausted
+    assert result.counts["sessions_completed"] == 1
+    assert result.counts["sessions_failed"] == 1
+
+
+@pytest.mark.asyncio
+async def test_distill_continues_past_an_ordinary_session_failure(monkeypatch):
+    distill_mod = importlib.import_module("cognee.modules.session_distillation")
+    distill = AsyncMock(side_effect=[RuntimeError("one session broke"), _distilled()])
+    monkeypatch.setattr(distill_mod, "distill_session", distill)
+
+    result = await DistillSessionsStage().run(_inputs(session_ids=("a", "b")))
+
+    assert distill.await_count == 2
+    assert result.status == "errored"
+    assert not result.budget_exhausted
+    assert result.counts["sessions_completed"] == 1
 
 
 # --- stage 6 ---------------------------------------------------------------

@@ -147,6 +147,21 @@ def test_resolve_trace_window(total, persisted, last_n_steps, expected):
     assert resolve_trace_window(total, persisted, last_n_steps) == expected
 
 
+@pytest.mark.parametrize(
+    ("total", "persisted", "step_limit", "expected"),
+    [
+        (130, 50, 100, (50, 50)),  # the limit bounds the reach, not the start
+        (130, 100, 100, (100, 0)),  # drained up to the limit: done
+        (130, 120, 100, (120, 0)),  # moved past the limit by another persister: done, NOT stale
+        (130, 130, 100, (130, 0)),  # fully persisted beyond the limit: done
+        (20, 100, 100, (0, 20)),  # stale against the LIVE count: start over
+        (80, 0, 100, (0, 80)),  # limit above the live count: the live count wins
+    ],
+)
+def test_resolve_trace_window_with_a_step_limit(total, persisted, step_limit, expected):
+    assert resolve_trace_window(total, persisted, None, step_limit=step_limit) == expected
+
+
 # ------------------------------------------------------------------ extraction contract
 
 

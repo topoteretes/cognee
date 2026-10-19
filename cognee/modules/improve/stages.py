@@ -81,10 +81,17 @@ async def _watermarks_show_nothing_new(inputs: ImproveRunInputs, *, kind: str) -
         return False
 
 
-async def _pending_trace_watermarks(inputs: ImproveRunInputs) -> dict[str, int] | None:
-    """The trace persist watermark of each session with unpersisted steps.
+async def _pending_trace_watermarks(
+    inputs: ImproveRunInputs, backlog: dict[str, int] | None = None
+) -> dict[str, tuple[int, int]] | None:
+    """``(persisted, total)`` step counts of each session with unpersisted steps.
 
-    None when the session store cannot be read.
+    ``persisted`` is the effective watermark (a stale one, above the LIVE
+    count, reads as 0). With ``backlog``, the step counts a run started with,
+    only sessions still below their starting count are pending: steps written
+    while the run goes on wait for the next run, and a watermark another
+    persister moved past the starting count reads as done, not stale. None
+    when the session store cannot be read.
     """
     try:
         from cognee.infrastructure.session.get_session_manager import get_session_manager
@@ -105,8 +112,17 @@ async def _pending_trace_watermarks(inputs: ImproveRunInputs) -> dict[str, int] 
             persisted = await TRACE_PERSIST_WATERMARK.read_count(
                 session_manager, user_id, session_id
             )
-            if total and resolve_trace_window(total, persisted, None, session_id=session_id)[1]:
-                pending[session_id] = persisted
+            step_limit = None
+            if backlog is not None:
+                if session_id not in backlog:
+                    continue
+                step_limit = backlog[session_id]
+            # The live total drives the stale check; the limit only bounds the reach.
+            effective, pending_steps = resolve_trace_window(
+                total, persisted, None, session_id=session_id, step_limit=step_limit
+            )
+            if total and pending_steps:
+                pending[session_id] = (effective, total)
         return pending
     except Exception as error:
         logger.debug("improve: trace watermarks unreadable: %s", error, exc_info=True)
@@ -172,6 +188,12 @@ class PersistSessionQAStage(BaseStage):
         return StageResult.from_pipeline_run(self.name, result, sessions=len(inputs.session_ids))
 
 
+# Sessions one persist_agent_traces pass cognifies, one window each. A pass is
+# one memify run, which holds the dataset lock until it ends, so this bounds how
+# long a remember() or cognify() on the dataset waits behind a draining run.
+TRACE_SESSIONS_PER_PASS = 10
+
+
 class PersistAgentTracesStage(BaseStage):
     """Stage 3: cognify per-step agent trace feedback (``agent_trace_feedbacks``)."""
 
@@ -183,56 +205,91 @@ class PersistAgentTracesStage(BaseStage):
             persist_agent_trace_feedbacks_in_knowledge_graph_pipeline,
         )
 
-        from .config import get_improve_config
-
         if await _watermarks_show_nothing_new(inputs, kind="traces"):
             return _already_completed(self.name, REASON_NO_NEW_TRACE_STEPS)
 
-        # Each pipeline call cognifies the OLDEST trace_window_steps pending steps
-        # of each pending session and advances their watermarks, so a failure
-        # repeats one bounded window, not the whole backlog.
-        config = get_improve_config()
+        # Each pipeline call cognifies every pending step of each pending session
+        # as one document (the OLDEST trace_window_steps of them when that cap is
+        # set) and advances their watermarks, so a long session costs one cognify
+        # run, not one per window. The loop drains the backlog the run started
+        # with, unless trace_windows_per_run caps the run; steps an agent writes
+        # meanwhile wait for the next run (the window is cut at the starting
+        # count, persist_up_to), so a live session cannot keep the run (and the
+        # dataset's improve lock) going. A pass's windows build in one cognify
+        # run; a failed build raises with its cause and ends the run, nothing
+        # built, every watermark in place. A pass takes at most
+        # TRACE_SESSIONS_PER_PASS sessions, those with the fewest windows so far,
+        # so the dataset lock is released between passes and sessions late in
+        # the list get their turn before earlier ones drain.
+        config = inputs.config
+        max_windows = config.trace_windows_per_run
         sessions = len(inputs.session_ids)
         windows = 0
+        stuck: list[str] = []
+        served: dict[str, int] = {}
         stage_result = None
         pending = await _pending_trace_watermarks(inputs)
-        while pending and windows < config.trace_windows_per_run:
-            batch = dict(list(pending.items())[: config.trace_windows_per_run - windows])
+        backlog = {sid: total for sid, (_mark, total) in (pending or {}).items()}
+        while pending:
+            limit = TRACE_SESSIONS_PER_PASS
+            if max_windows:
+                limit = max(0, min(limit, max_windows - windows))
+            candidates = sorted(
+                (sid for sid in pending if sid not in stuck), key=lambda sid: served.get(sid, 0)
+            )
+            batch = {sid: pending[sid][0] for sid in candidates[:limit]}
+            if not batch:
+                break
             result = await persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
                 user=inputs.user,
                 session_ids=list(batch),
                 dataset=inputs.dataset_id,
                 node_set_name=AGENT_TRACE_FEEDBACKS_NODE_SET,
                 raw_trace_content=False,
-                last_n_steps=config.trace_window_steps,
+                last_n_steps=config.trace_window_steps or None,
                 run_in_background=False,
+                persist_up_to=backlog,
             )
             windows += len(batch)
+            for sid in batch:
+                served[sid] = served.get(sid, 0) + 1
             stage_result = StageResult.from_pipeline_run(
                 self.name, result, sessions=sessions, windows=windows
             )
             if stage_result.status == "errored":
                 break
-            # A failed window build is logged, not raised, so the pipeline still
-            # reports completed. Only an unmoved watermark shows the failure.
-            pending = await _pending_trace_watermarks(inputs)
-            if pending is None or any(pending.get(sid) == mark for sid, mark in batch.items()):
-                stage_result = StageResult.errored(
-                    self.name,
-                    "an agent trace window did not advance its persist watermark",
-                    sessions=sessions,
-                    windows=windows,
-                )
+            # A failed build raises and ended the run above. A session can still
+            # come back unmoved when extraction skipped it (its context could not
+            # be read): set it aside for the rest of the run and report it.
+            pending = await _pending_trace_watermarks(inputs, backlog)
+            if pending is None:
                 break
+            stuck.extend(
+                sid for sid, mark in batch.items() if sid in pending and pending[sid][0] == mark
+            )
         logger.info(
             "improve: persisted %d agent trace window(s) from %d session(s)", windows, sessions
         )
-        if stage_result is not None:
+        if stage_result is not None and stage_result.status == "errored":
             return stage_result
         if pending is None:
             return StageResult.errored(
-                self.name, "agent trace watermarks could not be read", sessions=sessions
+                self.name,
+                "agent trace watermarks could not be read",
+                sessions=sessions,
+                windows=windows,
             )
+        if stuck:
+            return StageResult.errored(
+                self.name,
+                f"{len(stuck)} session(s) did not advance their trace persist watermark: "
+                + ", ".join(stuck),
+                sessions=sessions,
+                windows=windows,
+                sessions_stuck=len(stuck),
+            )
+        if stage_result is not None:
+            return stage_result
         return _already_completed(self.name, REASON_NO_NEW_TRACE_STEPS)
 
 
@@ -314,18 +371,24 @@ class DistillSessionsStage(BaseStage):
         return None
 
     async def run(self, inputs: ImproveRunInputs) -> StageResult:
+        from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
         from cognee.modules.session_distillation import distill_session
 
         distilled = 0
         completed = 0
         failed = 0
+        uncurated = 0
         last_error: BaseException | None = None
         for session_id in inputs.session_ids:
             try:
                 result = await distill_session(
-                    session_id, dataset=inputs.dataset_id, user=inputs.user
+                    session_id,
+                    dataset=inputs.dataset_id,
+                    user=inputs.user,
+                    max_batches=inputs.config.distill_max_batches_per_run,
                 )
                 distilled += len(result.documents)
+                uncurated += result.uncurated_entries
                 if result.status == "completed":
                     completed += 1
                 logger.info(
@@ -334,6 +397,18 @@ class DistillSessionsStage(BaseStage):
                     result.status,
                     len(result.documents),
                 )
+            except LLMPaymentRequiredError as e:
+                # Every later session would fail the same way: stop here, and keep
+                # this error so the stage result reports the exhausted budget.
+                failed += 1
+                last_error = e
+                logger.warning(
+                    "improve: LLM budget exhausted distilling session '%s'; "
+                    "skipping the remaining sessions: %s",
+                    session_id,
+                    e,
+                )
+                break
             except Exception as e:
                 failed += 1
                 last_error = e
@@ -347,6 +422,7 @@ class DistillSessionsStage(BaseStage):
             "documents": distilled,
             "sessions_completed": completed,
             "sessions_failed": failed,
+            "entries_uncurated": uncurated,
         }
         if failed:
             return StageResult.errored(self.name, last_error, **counts)

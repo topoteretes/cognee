@@ -585,6 +585,29 @@ class TestSessionManager:
         mock_cache.get_all_qa_entries.assert_called_once_with("u1", "s1")
 
     @pytest.mark.asyncio
+    async def test_get_session_since_calls_the_bounded_read(self, sm, mock_cache):
+        from datetime import datetime, timezone
+
+        since = datetime(2026, 6, 11, tzinfo=timezone.utc)
+        mock_cache.get_qa_entries_since = AsyncMock(return_value=[])
+
+        await sm.get_session(user_id="u1", session_id="s1", since=since, lead_in=1)
+
+        mock_cache.get_qa_entries_since.assert_called_once_with("u1", "s1", since, lead_in=1)
+        mock_cache.get_all_qa_entries.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_get_session_since_is_exclusive_with_last_n(self, sm):
+        from datetime import datetime, timezone
+
+        with pytest.raises(SessionParameterValidationError):
+            await sm.get_session(
+                user_id="u1", session_id="s1", since=datetime.now(timezone.utc), last_n=3
+            )
+        with pytest.raises(SessionParameterValidationError):
+            await sm.get_session(user_id="u1", session_id="s1", lead_in=1)
+
+    @pytest.mark.asyncio
     async def test_get_session_formatted(self, sm, mock_cache):
         """get_session with formatted=True returns string."""
         mock_cache.get_all_qa_entries.return_value = [
