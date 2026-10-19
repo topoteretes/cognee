@@ -49,6 +49,22 @@ def test_extract_data_ids_can_leave_out_already_completed_items():
     assert extract_data_ids(info, include_already_completed=False) == [processed]
 
 
+def test_extract_data_ids_can_keep_errored_items_for_rollback():
+    """cognify's rollback owns the errored item: it is what gets rolled back.
+    Together with include_already_completed=False this is rollback's policy."""
+    processed, skipped, errored = uuid4(), uuid4(), uuid4()
+    info = [
+        {"run_info": _run_info(PipelineRunCompleted), "data_id": processed},
+        {"run_info": _run_info(PipelineRunAlreadyCompleted), "data_id": skipped},
+        {"run_info": _run_info(PipelineRunErrored), "data_id": errored},
+    ]
+
+    assert extract_data_ids(info, include_already_completed=False, include_errored=True) == [
+        processed,
+        errored,
+    ]
+
+
 def test_extract_data_ids_reads_run_infos_in_their_dict_form():
     """A JSON round-trip leaves the nested run infos as dicts; the errored
     filter must still apply to them."""

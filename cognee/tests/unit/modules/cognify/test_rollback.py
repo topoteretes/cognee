@@ -277,6 +277,14 @@ def test_extract_data_ids_skips_already_completed_items():
 
     assert rollback_module._extract_data_ids(data_ingestion_info) == {completed_id, errored_id}
 
+    # The same policy after a dict/JSON round-trip (a run info rebuilt from
+    # its serialized form): the already-completed item is still left out.
+    revived = [
+        {"run_info": entry["run_info"].model_dump(mode="json"), "data_id": str(entry["data_id"])}
+        for entry in data_ingestion_info
+    ]
+    assert rollback_module._extract_data_ids(revived) == {completed_id, errored_id}
+
 
 @pytest.mark.asyncio
 async def test_rollback_preserves_markers_of_previously_extracted_data(monkeypatch):

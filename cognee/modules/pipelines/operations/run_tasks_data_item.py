@@ -304,15 +304,17 @@ def _pinned_data_id(data_item: Any) -> Any:
     return None
 
 
-def _collect_data_row_ids(result: Any, data_ids: list) -> None:
+def _collect_data_row_ids(result: Any, data_ids: list, seen: set) -> None:
     """Append the ids of the ``Data`` rows in one task result, in order, once each.
 
     ``add``'s last task (``ingest_data``) returns the rows it stored, so this is
-    how the regular path learns which row an item ended up under.
+    how the regular path learns which row an item ended up under. ``seen``
+    keeps the membership check O(1): one work item can carry thousands of rows.
     """
     rows = result if isinstance(result, list) else [result]
     for row in rows:
-        if isinstance(row, Data) and row.id not in data_ids:
+        if isinstance(row, Data) and row.id not in seen:
+            seen.add(row.id)
             data_ids.append(row.id)
 
 
@@ -350,6 +352,7 @@ async def run_tasks_data_item_regular(
     """
     pinned_data_id = _pinned_data_id(data_item)
     data_ids: list = []
+    seen: set = set()
 
     # Process data based on data_item and list of tasks. aclosing closes the
     # telemetry generator as soon as this one is closed early.
@@ -364,7 +367,7 @@ async def run_tasks_data_item_regular(
     ) as results:
         async for result in results:
             if pinned_data_id is None:
-                _collect_data_row_ids(result, data_ids)
+                _collect_data_row_ids(result, data_ids, seen)
             yield PipelineRunYield(
                 pipeline_run_id=pipeline_run_id,
                 dataset_id=dataset.id,

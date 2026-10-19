@@ -42,6 +42,7 @@ from cognee.modules.operations import record_operation
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
 )
+from cognee.modules.pipelines.models.PipelineRunInfo import extract_data_ids, run_info_status
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.data_item import DataItem
 
@@ -988,17 +989,21 @@ class RememberResult:
             # in data_ingestion_info as {"run_info": ..., "data_id": ...} dicts.
             ingestion_info = getattr(run_info, "data_ingestion_info", None)
             if ingestion_info and isinstance(ingestion_info, list):
-                processed = 0
-                for entry in ingestion_info:
-                    if not isinstance(entry, dict):
-                        continue
-                    status = getattr(entry.get("run_info"), "status", "")
-                    if "Errored" in status:
-                        continue
-                    processed += 1
-                    if entry.get("data_id") is not None:
-                        self.items.append({"id": str(entry["data_id"])})
-                self.items_processed = processed
+                # add() stamps data_ids on the run info it returns; a cognify
+                # result carries the same per-item list without the field, so
+                # it is read the same way the stamp was made.
+                data_ids = getattr(run_info, "data_ids", None)
+                if data_ids is None:
+                    data_ids = extract_data_ids(ingestion_info)
+                self.items.extend({"id": str(data_id)} for data_id in data_ids)
+                # Items the run got through, errored ones aside: an entry with
+                # no data_id still counts as processed.
+                self.items_processed = sum(
+                    1
+                    for entry in ingestion_info
+                    if isinstance(entry, dict)
+                    and "Errored" not in run_info_status(entry.get("run_info"))
+                )
 
     def _fail(self, exc: BaseException):
         """Mark the result as failed with an error message and elapsed time."""

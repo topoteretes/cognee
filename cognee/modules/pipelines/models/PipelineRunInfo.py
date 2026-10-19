@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 from cognee.modules.data.models.Data import Data
 
 
-def _run_info_status(run_info: Any) -> str:
+def run_info_status(run_info: Any) -> str:
     """Status of a per-item ``run_info``, whether it is a run-info object or the
     dict a JSON round-trip (``model_validate(json.loads(...))``) leaves behind."""
     if isinstance(run_info, dict):
@@ -26,18 +26,25 @@ def _to_uuid(value: Any) -> UUID | None:
 
 
 def extract_data_ids(
-    data_ingestion_info: Any, *, include_already_completed: bool = True
+    data_ingestion_info: Any,
+    *,
+    include_already_completed: bool = True,
+    include_errored: bool = False,
 ) -> list[UUID]:
     """Ids of the ``Data`` rows a run's per-item results name.
 
     ``run_tasks`` collects one ``{"run_info": ..., "data_id": ...}`` entry per
     work item. The ids come back in the order the entries were collected,
-    deduplicated, and without the items that errored (nothing was stored for
-    them). Entries reporting ``PipelineRunAlreadyCompleted`` are kept by
-    default: for ``add()`` that is a dedup hit, the row that already holds the
-    content. Pass ``include_already_completed=False`` to keep only the items
-    this run processed itself (what ``cognify`` counts as its own work; see
-    ``cognify/rollback.py``).
+    deduplicated. The two switches say which items count; between them they
+    cover every reader of the list:
+
+    - ``add()`` and ``remember()`` (the defaults): items that errored are
+      left out, nothing was stored for them; ``PipelineRunAlreadyCompleted``
+      items are kept, a dedup hit is the row that already holds the content.
+    - ``cognify``'s rollback (``include_already_completed=False,
+      include_errored=True``): an already-completed item belongs to an
+      earlier run, while the errored item is exactly what gets rolled back
+      (``cognify/rollback.py`` explains why).
 
     Entries are read in their live form or after a dict/JSON round-trip, and
     ids that are not UUIDs are dropped.
@@ -50,8 +57,8 @@ def extract_data_ids(
     for entry in data_ingestion_info:
         if not isinstance(entry, dict):
             continue
-        status = _run_info_status(entry.get("run_info"))
-        if "Errored" in status:
+        status = run_info_status(entry.get("run_info"))
+        if not include_errored and "Errored" in status:
             continue
         if not include_already_completed and "AlreadyCompleted" in status:
             continue
@@ -81,7 +88,9 @@ class PipelineRunInfo(BaseModel):
     # on the run info it returns (its docstring states the exact semantics);
     # every other run info leaves it None, and a None is left out of the
     # serialized form, so the nested per-item run infos and progress ticks
-    # never carry the key.
+    # never carry the key. ``exclude_if`` exists from pydantic 2.12, the
+    # floor pyproject.toml sets; an older pydantic would treat it as an
+    # unknown extra and serialize the None.
     data_ids: list[UUID] | None = Field(default=None, exclude_if=lambda value: value is None)
 
     model_config = {
