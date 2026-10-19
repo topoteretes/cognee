@@ -16,11 +16,18 @@ agent-trace steps, session-context entries, and usage logs stay local. ``prune()
 removes only the memories this adapter wrote -- the Headroom store is shared with
 other agents and is never wiped wholesale.
 
+The ``qa_id -> memory_id`` map that makes this possible lives in the FS cache
+without an expiry: Headroom memories never expire, so the map must outlive the
+session TTL or an expired session's turns could no longer be removed through
+cognee. A map entry is dropped only once its memory is deleted; a delete that
+fails keeps its entry so a later delete or ``prune()`` retries it.
+
 Mirror failures are logged and swallowed so the FS write remains authoritative.
 """
 
 import importlib.util
 import json
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -111,17 +118,16 @@ class HeadroomCacheAdapter(FSCacheAdapter):
         value = self.cache.get(self._memory_ids_key(user_id, session_id))
         return json.loads(value) if value else {}
 
-    def _save_memory_ids(self, user_id: str, session_id: str, mapping: dict[str, str]) -> None:
-        key = self._memory_ids_key(user_id, session_id)
+    def _write_memory_ids(self, key: str, mapping: dict[str, str]) -> None:
+        # No expiry: the memories this map points at never expire in Headroom,
+        # so the map must survive the session TTL for them to stay deletable.
         if not mapping:
             self.cache.delete(key)
             return
-        expire = (
-            self.session_ttl_seconds
-            if self.session_ttl_seconds and self.session_ttl_seconds > 0
-            else None
-        )
-        self.cache.set(key, json.dumps(mapping), expire=expire)
+        self.cache.set(key, json.dumps(mapping))
+
+    def _save_memory_ids(self, user_id: str, session_id: str, mapping: dict[str, str]) -> None:
+        self._write_memory_ids(self._memory_ids_key(user_id, session_id), mapping)
 
     def _record_memory_id(self, user_id: str, session_id: str, qa_id: str, memory_id: str) -> None:
         with self.cache.transact():
@@ -129,18 +135,39 @@ class HeadroomCacheAdapter(FSCacheAdapter):
             mapping[qa_id] = memory_id
             self._save_memory_ids(user_id, session_id, mapping)
 
-    def _pop_memory_id(self, user_id: str, session_id: str, qa_id: str) -> str | None:
+    def _restore_memory_ids(self, key: str, failed: dict[str, str]) -> None:
+        """Put back the entries of memories that could not be deleted, so they are retried."""
+        if not failed:
+            return
+        with self.cache.transact():
+            value = self.cache.get(key)
+            mapping = json.loads(value) if value else {}
+            mapping.update(failed)
+            self._write_memory_ids(key, mapping)
+
+    @staticmethod
+    def _stale_key(qa_id: str, memory_id: str) -> str:
+        """Map key for a replaced memory whose delete failed; still owned by ``qa_id``."""
+        return f"{qa_id}@{memory_id}"
+
+    def _pop_memory_ids(self, user_id: str, session_id: str, qa_id: str) -> dict[str, str]:
+        """Pop the entry's current memory plus any replaced ones still awaiting deletion."""
+        stale_prefix = self._stale_key(qa_id, "")
         with self.cache.transact():
             mapping = self._load_memory_ids(user_id, session_id)
-            memory_id = mapping.pop(qa_id, None)
+            popped = {
+                key: mapping.pop(key)
+                for key in list(mapping)
+                if key == qa_id or key.startswith(stale_prefix)
+            }
             self._save_memory_ids(user_id, session_id, mapping)
-        return memory_id
+        return popped
 
-    def _pop_all_memory_ids(self, user_id: str, session_id: str) -> list[str]:
+    def _pop_all_memory_ids(self, user_id: str, session_id: str) -> dict[str, str]:
         with self.cache.transact():
             mapping = self._load_memory_ids(user_id, session_id)
             self.cache.delete(self._memory_ids_key(user_id, session_id))
-        return list(mapping.values())
+        return mapping
 
     # ------------------------------------------------------------------
     # Mirroring
@@ -176,16 +203,44 @@ class HeadroomCacheAdapter(FSCacheAdapter):
                 "Headroom mirror failed, continuing with FS cache only: %s", e, exc_info=True
             )
 
-    async def _delete_headroom_memories(self, memory_ids: list[str]) -> None:
+    async def _delete_headroom_memories(self, memory_ids: list[str]) -> set[str]:
+        """Delete each memory on its own; return the ids whose delete failed.
+
+        One failing id must not stop the rest, and callers put the failed ids
+        back into the map so a later delete or ``prune()`` retries them.
+        """
         if not memory_ids:
-            return
+            return set()
         try:
             backend = self._get_backend()
-            for memory_id in memory_ids:
-                await backend.delete_memory(memory_id)
         except Exception as e:
             logger.warning(
-                "Headroom memory delete failed, FS cache already updated: %s", e, exc_info=True
+                "Headroom backend unavailable, %d memories kept for a later delete: %s",
+                len(memory_ids),
+                e,
+                exc_info=True,
+            )
+            return set(memory_ids)
+        failed: set[str] = set()
+        for memory_id in memory_ids:
+            try:
+                await backend.delete_memory(memory_id)
+            except Exception as e:
+                failed.add(memory_id)
+                logger.warning(
+                    "Headroom memory %s delete failed, kept for a later delete: %s",
+                    memory_id,
+                    e,
+                    exc_info=True,
+                )
+        return failed
+
+    async def _delete_mapped_memories(self, key: str, mapping: dict[str, str]) -> None:
+        """Delete the memories of a popped ``qa_id -> memory_id`` map; re-record failures."""
+        failed = await self._delete_headroom_memories(list(mapping.values()))
+        if failed:
+            self._restore_memory_ids(
+                key, {qa_id: mid for qa_id, mid in mapping.items() if mid in failed}
             )
 
     # ------------------------------------------------------------------
@@ -206,6 +261,9 @@ class HeadroomCacheAdapter(FSCacheAdapter):
         memify_metadata: dict | None = None,
         used_session_context_ids: list | None = None,
     ):
+        # Generate the id here rather than reading the last entry back: another
+        # process appending to the same session could otherwise slip in between.
+        qa_id = qa_id or str(uuid.uuid4())
         await super().create_qa_entry(
             user_id,
             session_id,
@@ -219,10 +277,6 @@ class HeadroomCacheAdapter(FSCacheAdapter):
             memify_metadata=memify_metadata,
             used_session_context_ids=used_session_context_ids,
         )
-        if qa_id is None:
-            # FSCacheAdapter generated the id; read it back so the mirror can be addressed.
-            entries = self._load_entries(self._session_key(user_id, session_id))
-            qa_id = entries[-1]["qa_id"]
         await self._mirror_qa_to_headroom(
             user_id=user_id,
             session_id=session_id,
@@ -265,9 +319,15 @@ class HeadroomCacheAdapter(FSCacheAdapter):
         entries = await self.get_qa_entries_by_ids(user_id, session_id, [qa_id])
         if not entries:
             return updated
-        old_memory_id = self._pop_memory_id(user_id, session_id, qa_id)
-        if old_memory_id:
-            await self._delete_headroom_memories([old_memory_id])
+        old = self._pop_memory_ids(user_id, session_id, qa_id)
+        failed = await self._delete_headroom_memories(list(old.values()))
+        if failed:
+            # The slot is about to hold the new memory; park the undeletable old
+            # ones under the entry's stale keys so delete/prune still reach them.
+            self._restore_memory_ids(
+                self._memory_ids_key(user_id, session_id),
+                {self._stale_key(qa_id, mid): mid for mid in failed},
+            )
         await self._mirror_qa_to_headroom(
             user_id=user_id,
             session_id=session_id,
@@ -280,35 +340,37 @@ class HeadroomCacheAdapter(FSCacheAdapter):
     async def delete_qa_entry(self, user_id: str, session_id: str, qa_id: str) -> bool:
         deleted = await super().delete_qa_entry(user_id, session_id, qa_id)
         if deleted:
-            memory_id = self._pop_memory_id(user_id, session_id, qa_id)
-            if memory_id:
-                await self._delete_headroom_memories([memory_id])
+            mapping = self._pop_memory_ids(user_id, session_id, qa_id)
+            await self._delete_mapped_memories(self._memory_ids_key(user_id, session_id), mapping)
         return deleted
 
     async def delete_session(self, user_id: str, session_id: str) -> bool:
         existed = await super().delete_session(user_id, session_id)
-        memory_ids = self._pop_all_memory_ids(user_id, session_id)
-        await self._delete_headroom_memories(memory_ids)
-        return existed or bool(memory_ids)
+        mapping = self._pop_all_memory_ids(user_id, session_id)
+        await self._delete_mapped_memories(self._memory_ids_key(user_id, session_id), mapping)
+        return existed or bool(mapping)
 
     async def prune(self) -> None:
         """Empty the FS cache and remove the Headroom memories it had mirrored.
 
         Only memories recorded by this adapter are deleted; the Headroom store is
-        shared with other agents and is never cleared wholesale.
+        shared with other agents and is never cleared wholesale. Memories whose
+        delete fails keep their map entry past the prune, so the next prune or
+        session delete retries them.
         """
-        mirrored_ids: list[str] = []
+        mirrored: dict[str, dict[str, str]] = {}
         try:
             for key in list(self.cache.iterkeys()):
                 if isinstance(key, str) and key.startswith(self._MEMORY_IDS_PREFIX):
                     value = self.cache.get(key)
                     if value:
-                        mirrored_ids.extend(json.loads(value).values())
+                        mirrored[key] = json.loads(value)
         except Exception as e:
             logger.warning("Could not enumerate mirrored Headroom memories: %s", e, exc_info=True)
 
         await super().prune()
-        await self._delete_headroom_memories(mirrored_ids)
+        for key, mapping in mirrored.items():
+            await self._delete_mapped_memories(key, mapping)
 
     async def close(self):
         if self._headroom_backend is not None:

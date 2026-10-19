@@ -27,6 +27,7 @@ class FakeHeadroomBackend:
         self.delete_calls: list[str] = []
         self.closed = False
         self.fail_save = False
+        self.fail_delete_ids: set[str] = set()
 
     async def save_memory(self, *, content, user_id, session_id=None, metadata=None, **_):
         if self.fail_save:
@@ -46,6 +47,8 @@ class FakeHeadroomBackend:
 
     async def delete_memory(self, memory_id, reason=None, user_id=None):
         self.delete_calls.append(memory_id)
+        if memory_id in self.fail_delete_ids:
+            raise RuntimeError("database is locked")
         return self.memories.pop(memory_id, None) is not None
 
     async def close(self):
@@ -120,6 +123,105 @@ async def test_generated_qa_id_is_tracked(headroom_adapter):
     entries = await headroom_adapter.get_all_qa_entries("u1", "s1")
     mapping = headroom_adapter._load_memory_ids("u1", "s1")
     assert list(mapping) == [entries[0].qa_id]
+    # The id is generated up front and handed to both writers, never read back.
+    (call,) = _backend(headroom_adapter).save_calls
+    assert call["metadata"]["qa_id"] == entries[0].qa_id
+
+
+@pytest.mark.asyncio
+async def test_memory_id_map_does_not_expire_with_the_session(headroom_adapter):
+    """Headroom memories never expire, so the map that addresses them must not either."""
+    assert headroom_adapter.session_ttl_seconds
+    await headroom_adapter.create_qa_entry(
+        user_id="u1", session_id="s1", question="Q?", context="", answer="A.", qa_id="qa-ttl"
+    )
+
+    _, session_expiry = headroom_adapter.cache.get(
+        headroom_adapter._session_key("u1", "s1"), expire_time=True
+    )
+    _, map_expiry = headroom_adapter.cache.get(
+        headroom_adapter._memory_ids_key("u1", "s1"), expire_time=True
+    )
+    assert session_expiry is not None
+    assert map_expiry is None
+
+    # Once the session itself is gone (expired or deleted), its memories are still reachable.
+    headroom_adapter.cache.delete(headroom_adapter._session_key("u1", "s1"))
+    assert await headroom_adapter.delete_session("u1", "s1")
+    assert _backend(headroom_adapter).memories == {}
+    assert headroom_adapter._load_memory_ids("u1", "s1") == {}
+
+
+@pytest.mark.asyncio
+async def test_failed_memory_delete_is_kept_for_retry(headroom_adapter):
+    backend = _backend(headroom_adapter)
+    for i in range(3):
+        await headroom_adapter.create_qa_entry(
+            user_id="u1",
+            session_id="s1",
+            question=f"Q{i}?",
+            context="",
+            answer="A.",
+            qa_id=f"qa-{i}",
+        )
+    mapping = headroom_adapter._load_memory_ids("u1", "s1")
+    backend.fail_delete_ids = {mapping["qa-1"]}
+
+    assert await headroom_adapter.delete_session("u1", "s1")
+
+    # Every id was attempted; only the failing one survives, and it is still mapped.
+    assert set(backend.delete_calls) == set(mapping.values())
+    assert set(backend.memories) == {mapping["qa-1"]}
+    assert headroom_adapter._load_memory_ids("u1", "s1") == {"qa-1": mapping["qa-1"]}
+
+    backend.fail_delete_ids = set()
+    assert await headroom_adapter.delete_session("u1", "s1")
+    assert backend.memories == {}
+    assert headroom_adapter._load_memory_ids("u1", "s1") == {}
+
+
+@pytest.mark.asyncio
+async def test_prune_retries_memories_it_could_not_delete(headroom_adapter):
+    backend = _backend(headroom_adapter)
+    await headroom_adapter.create_qa_entry(
+        user_id="u1", session_id="s1", question="Q?", context="", answer="A.", qa_id="qa-p"
+    )
+    memory_id = headroom_adapter._load_memory_ids("u1", "s1")["qa-p"]
+    backend.fail_delete_ids = {memory_id}
+
+    await headroom_adapter.prune()
+
+    assert await headroom_adapter.get_all_qa_entries("u1", "s1") == []
+    assert set(backend.memories) == {memory_id}
+    assert headroom_adapter._load_memory_ids("u1", "s1") == {"qa-p": memory_id}
+
+    backend.fail_delete_ids = set()
+    await headroom_adapter.prune()
+    assert backend.memories == {}
+    assert headroom_adapter._load_memory_ids("u1", "s1") == {}
+
+
+@pytest.mark.asyncio
+async def test_update_keeps_undeletable_old_memory_addressable(headroom_adapter):
+    backend = _backend(headroom_adapter)
+    await headroom_adapter.create_qa_entry(
+        user_id="u1", session_id="s1", question="Q?", context="", answer="A.", qa_id="qa-u"
+    )
+    old_id = headroom_adapter._load_memory_ids("u1", "s1")["qa-u"]
+    backend.fail_delete_ids = {old_id}
+
+    assert await headroom_adapter.update_qa_entry("u1", "s1", "qa-u", answer="A, revised.")
+
+    mapping = headroom_adapter._load_memory_ids("u1", "s1")
+    new_id = mapping["qa-u"]
+    assert new_id != old_id
+    assert set(mapping.values()) == {old_id, new_id}
+    assert set(backend.memories) == {old_id, new_id}
+
+    backend.fail_delete_ids = set()
+    assert await headroom_adapter.delete_qa_entry("u1", "s1", "qa-u")
+    assert backend.memories == {}
+    assert headroom_adapter._load_memory_ids("u1", "s1") == {}
 
 
 @pytest.mark.asyncio
