@@ -225,7 +225,13 @@ async def test_native_metadata_projection_pages_aliases_and_revocation(monkeypat
         assert "must-not-be-exposed" not in str(result)
         assert any("new-provider" in item["aliases"] for item in result["items"])
         source_id = catalog.target_id(one.id, "research")
+        # Paging authorizes the one source directly; it never rebuilds the catalog.
+        real_source_catalog = catalog.source_catalog
+        monkeypatch.setattr(
+            catalog, "source_catalog", AsyncMock(side_effect=AssertionError("catalog rebuilt"))
+        )
         page = await catalog.source_documents(None, source_id, limit=2)
+        assert page["source"]["id"] == source_id and page["source"]["node_sets"] == ["research"]
         assert [item["id"] for item in page["items"]] == [
             str(UUID(int=(10 << 124) + 1)),
             str(UUID(int=(10 << 124) + 3)),
@@ -255,8 +261,23 @@ async def test_native_metadata_projection_pages_aliases_and_revocation(monkeypat
         assert old["id"] == str(UUID(int=(10 << 124) + 1))
         with pytest.raises(PermissionError):
             await catalog.source_document(None, one.id, UUID(int=(10 << 124) + 5))
+        monkeypatch.setattr(catalog, "source_catalog", real_source_catalog)
         monkeypatch.setattr(catalog, "MAX_METADATA_ROWS", 2)
         assert (await catalog.source_catalog(None))["complete"] is False
+        # A dataset target needs no metadata scan at all, and scoping a node-set
+        # lookup to its dataset keeps it reachable when the user's other datasets
+        # would exhaust the row cap first.
+        permission.return_value = [one, hidden]
+        monkeypatch.setattr(catalog, "MAX_METADATA_ROWS", 1)
+        whole = await catalog.source_documents(None, catalog.target_id(hidden.id))
+        assert [item["id"] for item in whole["items"]] == [str(UUID(int=(10 << 124) + 5))]
+        scoped = await catalog.source_documents(
+            None, catalog.target_id(hidden.id, "research"), dataset_id=hidden.id
+        )
+        assert [item["id"] for item in scoped["items"]] == [str(UUID(int=(10 << 124) + 5))]
+        with pytest.raises(PermissionError):
+            # A dataset the user cannot read is not a valid scope, whatever the id.
+            await catalog.source_documents(None, source_id, dataset_id=uuid4())
         permission.return_value = []
         with pytest.raises(PermissionError):
             await catalog.source_documents(None, source_id, after=page["next_cursor"])

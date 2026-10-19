@@ -89,8 +89,9 @@ def get_source_routes(router: APIRouter | None = None) -> APIRouter:
         user: Annotated[User, Depends(get_authenticated_user)],
         after: UUID | None = None,
         limit: Annotated[int, Query(ge=1, le=500)] = 100,
+        dataset_id: UUID | None = None,
     ):
-        return await guarded(source_documents(user, str(source_id), after, limit))
+        return await guarded(source_documents(user, str(source_id), after, limit, dataset_id))
 
     @router.get("/source-document/{dataset_id}/{document_id}")
     async def document(

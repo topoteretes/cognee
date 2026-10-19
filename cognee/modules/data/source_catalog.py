@@ -60,26 +60,30 @@ def target_id(dataset_id, node_set=None):
     return str(uuid5(NAMESPACE_URL, json.dumps([str(dataset_id), node_set])))
 
 
+def document_descriptor(dataset, node_set=None) -> SourceDescriptor:
+    """The dataset target, or one of its node-set targets, before any metadata is folded in."""
+    return {
+        "id": target_id(dataset.id, node_set),
+        "name": dataset.name if node_set is None else node_set,
+        "dataset_id": str(dataset.id),
+        "dataset_name": dataset.name,
+        "node_sets": [] if node_set is None else [node_set],
+        "kind": "dataset" if node_set is None else "node_set",
+        "descriptions": [],
+        "aliases": [],
+        "sample_labels": [],
+        "documents": 0,
+        "source_name": None,
+        "capabilities": ["search", "list_documents", "read_document"],
+        "retrieval_method": "chunks",
+    }
+
+
 def build_catalog(datasets, rows) -> list[SourceDescriptor]:
     """rows contain only projected, permitted metadata, never raw document text."""
     items: dict[str, SourceDescriptor] = {}
     for dataset in datasets:
-        ident = target_id(dataset.id)
-        items[ident] = {
-            "id": ident,
-            "name": dataset.name,
-            "dataset_id": str(dataset.id),
-            "dataset_name": dataset.name,
-            "node_sets": [],
-            "kind": "dataset",
-            "descriptions": [],
-            "aliases": [],
-            "sample_labels": [],
-            "documents": 0,
-            "source_name": None,
-            "capabilities": ["search", "list_documents", "read_document"],
-            "retrieval_method": "chunks",
-        }
+        items[target_id(dataset.id)] = document_descriptor(dataset)
     by_dataset = {str(d.id): d for d in datasets}
     for dataset_id, native_sets, legacy_sets, label, source, description in rows:
         dataset = by_dataset.get(str(dataset_id))
@@ -89,24 +93,7 @@ def build_catalog(datasets, rows) -> list[SourceDescriptor]:
         targets = [target_id(dataset.id)]
         for name in names:
             ident = target_id(dataset.id, name)
-            items.setdefault(
-                ident,
-                {
-                    "id": ident,
-                    "name": name,
-                    "dataset_id": str(dataset.id),
-                    "dataset_name": dataset.name,
-                    "node_sets": [name],
-                    "kind": "node_set",
-                    "descriptions": [],
-                    "aliases": [],
-                    "sample_labels": [],
-                    "documents": 0,
-                    "source_name": None,
-                    "capabilities": ["search", "list_documents", "read_document"],
-                    "retrieval_method": "chunks",
-                },
-            )
+            items.setdefault(ident, document_descriptor(dataset, name))
             targets.append(ident)
         for ident in targets:
             item = items[ident]
@@ -360,14 +347,48 @@ async def route_sources(
     }
 
 
-async def source_documents(user, source_id, after=None, limit=100):
+async def resolve_source_target(user, source_id, dataset_id=None) -> SourceDescriptor:
+    """Authorize one document source id without rebuilding the catalog.
+
+    A dataset target is recognised from its id alone. A node-set target's id is
+    a hash of (dataset, node set), so its name is recovered from the first
+    matching projected row; ``dataset_id`` (carried by every catalog and routing
+    target) confines that lookup to one dataset, which keeps a node set in a
+    late-sorting dataset reachable regardless of how many documents the user can
+    read in total.
+    """
+    datasets = await get_all_user_permission_datasets(user, "read")
+    if dataset_id is not None:
+        datasets = [d for d in datasets if d.id == dataset_id]
+    for dataset in datasets:
+        if target_id(dataset.id) == source_id:
+            return document_descriptor(dataset)
+    if not datasets:
+        raise PermissionError("Source is unavailable.")
+    by_dataset = {str(d.id): d for d in datasets}
+    async with get_relational_engine().get_async_session() as db:
+        stmt = (
+            select(Data.dataset_id, Data.node_set, Data.external_metadata["node_set"])
+            .where(Data.dataset_id.in_([d.id for d in datasets]))
+            .order_by(Data.dataset_id, Data.id)
+            .limit(MAX_METADATA_ROWS)
+        )
+        result = await db.stream(stmt.execution_options(yield_per=500))
+        checked = set()
+        async for owner, native_sets, legacy_sets in result:
+            for name in node_names(native_sets if native_sets is not None else legacy_sets):
+                if (str(owner), name) in checked:
+                    continue
+                checked.add((str(owner), name))
+                if target_id(owner, name) == source_id:
+                    return document_descriptor(by_dataset[str(owner)], name)
+    raise PermissionError("Source is unavailable.")
+
+
+async def source_documents(user, source_id, after=None, limit=100, dataset_id=None):
     if not 1 <= limit <= 500:
         raise ValueError("Document page limit is out of bounds.")
-    catalog = await source_catalog(user)
-    targets = [item for item in catalog["items"] if item["id"] == source_id]
-    if not targets:
-        raise PermissionError("Source is unavailable.")
-    target = targets[0]
+    target = await resolve_source_target(user, source_id, dataset_id)
     # Keyset pages scan metadata only; records are never downloaded to decide
     # source membership. A cursor is a Data UUID, scoped and reauthorized per call.
     async with get_relational_engine().get_async_session() as db:

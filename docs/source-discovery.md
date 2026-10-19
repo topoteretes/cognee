@@ -23,8 +23,12 @@ All routes use the existing authenticated principal and native dataset read ACLs
   `max_catalog_entries` (1–2048, default 512). Returns validated targets and reasons.
   Routing does not search content. Explicit inaccessible datasets fail the request.
 - `GET /api/v1/datasets/source-documents/{source_id}`: metadata pages, `limit`
-  (1–500), and optional `after` document UUID. Membership and permissions are
-  rechecked for each page. `next_cursor: null` ends the stored-document listing.
+  (1–500), optional `after` document UUID, and optional `dataset_id` (the one every
+  catalog and routing target carries). The source is authorized directly, without
+  rebuilding the catalog; passing `dataset_id` confines a node-set lookup to that
+  dataset, so it stays reachable however many documents the caller can read in
+  total. Membership and permissions are rechecked for each page. `next_cursor:
+  null` ends the stored-document listing.
 - `GET /api/v1/datasets/source-document/{dataset_id}/{document_id}`: authorized
   metadata for a document, including canonical IDs and node sets. Native legacy
   document aliases resolve within the selected dataset.
@@ -100,8 +104,12 @@ that flag is true: dataset ACLs and connection permissions are independent. With
 an explicit dataset selection, source search discovers the full readable catalog.
 This endpoint is only for explicit searches; automatic session recall is unchanged.
 
-Up to eight selected sources execute, with a 90-second per-source budget and a
-270-second overall budget. Empty selection, retrieval failure and partial coverage
-remain distinguishable. Metadata routing is not exhaustive content search, and
+Up to eight selected sources execute concurrently, each under its own 90-second
+budget, inside a 270-second overall budget that covers routing plus the slowest
+source rather than their sum. A source that fails or times out is listed in
+`errors` and costs the others nothing; only an authorization failure fails the
+whole call. A document hit whose node-set tags no longer match its current
+metadata row is dropped and counted in `rejected_unverifiable_hits`. Empty
+selection, retrieval failure and partial coverage remain distinguishable. Metadata routing is not exhaustive content search, and
 unselected sources have not been queried. `browse`/`read` apply only to targets
 advertising document capabilities, not to database connections.

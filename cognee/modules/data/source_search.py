@@ -21,8 +21,14 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
+# Each selected source gets its own bound and runs concurrently with the others,
+# so one slow source degrades only itself. The overall bound covers routing plus
+# the slowest source, never the sum of the sources.
+PER_SOURCE_TIMEOUT_SECONDS = 90
+OVERALL_TIMEOUT_SECONDS = 270
 
-async def _document_evidence(user, target, query, top_k, seen):
+
+async def _document_evidence(user, target, query, top_k):
     results = jsonable_encoder(
         await native_search(
             query_text=query,
@@ -50,11 +56,17 @@ async def _document_evidence(user, target, query, top_k, seen):
                 )
             row = metadata[document]
             if not set(target["node_sets"]).issubset(row.get("node_sets") or []):
-                raise PermissionError("Evidence is outside the selected source.")
-            key = (target["dataset_id"], document, payload.get("text"))
-            if key in seen:
+                # source_document already authorized the dataset. A chunk whose
+                # graph node-set tags disagree with the current Data row (re-adding
+                # content rewrites Data.node_set while earlier chunks keep their
+                # tags) is a consistency problem, not an access one: drop the hit
+                # as unverifiable and keep searching.
+                logger.warning(
+                    "Rejected unverifiable hit for source %s: node sets do not match",
+                    target["id"],
+                )
+                rejected += 1
                 continue
-            seen.add(key)
             external = row.get("external_metadata") or {}
             evidence.append(
                 {
@@ -70,6 +82,53 @@ async def _document_evidence(user, target, query, top_k, seen):
                 }
             )
     return evidence, rejected
+
+
+async def _retrieve_target(user, target, query, top_k):
+    """Retrieve one selected source: ``(evidence, error, rejected, searched)``.
+
+    Only an authorization failure escapes, as ``PermissionError``; every other
+    failure, including the per-source timeout, is returned as a sanitized error
+    entry so the other sources' evidence survives.
+    """
+    method = target.get("retrieval_method", "chunks")
+    failure = {"source_id": target["id"], "retrieval_method": method}
+    try:
+        if method == "sql":
+            # Re-resolves the same caller's connection at execution. Native
+            # guards enforce feature gate, read-only SQL, table allowlists,
+            # statement timeout and row limits.
+            result = await asyncio.wait_for(
+                run_text_to_sql(user.id, target["connection"], query),
+                timeout=PER_SOURCE_TIMEOUT_SECONDS,
+            )
+            if not result.success:
+                return [], {**failure, "error": "Native database retrieval failed."}, 0, False
+            evidence = {
+                "retrieval_method": "sql",
+                "source_target": target["name"],
+                "queried_at": datetime.now(timezone.utc).isoformat(),
+                "success": True,
+                "text": result.render_text(),
+                "structured": result.structured(),
+            }
+            return [evidence], None, 0, True
+        if method == "chunks":
+            hits, rejected = await asyncio.wait_for(
+                _document_evidence(user, target, query, top_k),
+                timeout=PER_SOURCE_TIMEOUT_SECONDS,
+            )
+            return hits, None, rejected, True
+        raise ValueError("Unsupported source retrieval capability.")
+    except (PermissionError, ToolConnectionNotFoundError):
+        # Authorization failure aborts; never widen or retry as owner.
+        raise PermissionError("Selected source is unavailable.") from None
+    except Exception:
+        # Provider errors can contain DSNs/SQL parameters. Log them server-side
+        # only and return a safe failure marker, never disguise a failed query
+        # as empty.
+        logger.exception("Source retrieval failed for source %s", target["id"])
+        return [], {**failure, "error": "Source retrieval failed or timed out."}, 0, False
 
 
 async def search_sources(
@@ -106,61 +165,33 @@ async def search_sources(
             exclude_source_ids,
             include_connections,
         )
-        evidence, errors, searched, seen, rejected = [], [], [], set(), 0
-        for target in routing.get("targets", []):
-            method = target.get("retrieval_method", "chunks")
-            try:
-
-                async def retrieve(target=target, method=method):
-                    nonlocal rejected
-                    if method == "sql":
-                        # Re-resolves the same caller's connection at execution.
-                        # Native guards enforce feature gate, read-only SQL,
-                        # table allowlists, statement timeout and row limits.
-                        result = await run_text_to_sql(user.id, target["connection"], query)
-                        if not result.success:
-                            errors.append(
-                                {
-                                    "source_id": target["id"],
-                                    "retrieval_method": method,
-                                    "error": "Native database retrieval failed.",
-                                }
-                            )
-                            return False
-                        evidence.append(
-                            {
-                                "retrieval_method": "sql",
-                                "source_target": target["name"],
-                                "queried_at": datetime.now(timezone.utc).isoformat(),
-                                "success": True,
-                                "text": result.render_text(),
-                                "structured": result.structured(),
-                            }
-                        )
-                    elif method == "chunks":
-                        hits, count = await _document_evidence(user, target, query, top_k, seen)
-                        evidence.extend(hits)
-                        rejected += count
-                    else:
-                        raise ValueError("Unsupported source retrieval capability.")
-
-                if await asyncio.wait_for(retrieve(), timeout=90) is not False:
-                    searched.append(target)
-            except (PermissionError, ToolConnectionNotFoundError):
-                # Authorization failure aborts; never widen or retry as owner.
-                raise PermissionError("Selected source is unavailable.") from None
-            except Exception:
-                # Provider errors can contain DSNs/SQL parameters. Log them
-                # server-side only and return a safe failure marker, never
-                # disguise a failed query as empty.
-                logger.exception("Source retrieval failed for source %s", target["id"])
-                errors.append(
-                    {
-                        "source_id": target["id"],
-                        "retrieval_method": method,
-                        "error": "Source retrieval failed or timed out.",
-                    }
-                )
+        targets = routing.get("targets", [])
+        # Every source finishes (or times out) before the result is assembled,
+        # so a revoked source still fails the whole call closed, but a slow one
+        # costs the others nothing.
+        outcomes = await asyncio.gather(
+            *(_retrieve_target(user, target, query, top_k) for target in targets),
+            return_exceptions=True,
+        )
+        evidence, errors, searched, rejected, seen = [], [], [], 0, set()
+        for target, outcome in zip(targets, outcomes, strict=True):
+            if isinstance(outcome, BaseException):
+                raise outcome
+            hits, error, count, ok = outcome
+            rejected += count
+            if error is not None:
+                errors.append(error)
+            if ok:
+                searched.append(target)
+            for hit in hits:
+                # A dataset target and one of its node sets can select the same
+                # chunk; keep the first occurrence in routing order.
+                key = (hit.get("dataset_id"), hit.get("document_id"), hit.get("text"))
+                if hit["retrieval_method"] == "chunks":
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                evidence.append(hit)
         return {
             "mode": "search",
             "routing": routing,
@@ -182,4 +213,6 @@ async def search_sources(
         }
 
     # Bound the entire invocation as well as each selected source.
-    return await asyncio.wait_for(Context().run(lambda: asyncio.create_task(run())), timeout=270)
+    return await asyncio.wait_for(
+        Context().run(lambda: asyncio.create_task(run())), timeout=OVERALL_TIMEOUT_SECONDS
+    )

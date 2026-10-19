@@ -141,7 +141,56 @@ async def test_disabled_tool_gate_never_lists_connections(user, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_unverifiable_document_membership_fails_closed(user, monkeypatch):
+async def test_sources_are_retrieved_concurrently_and_a_slow_one_degrades_only_itself(
+    user, monkeypatch
+):
+    import asyncio
+
+    fast_a, fast_b, slow = sql_target(), sql_target(), sql_target()
+    fast_a["connection"], fast_b["connection"], slow["connection"] = "a", "b", "slow"
+    monkeypatch.setattr(
+        search, "route_sources", AsyncMock(return_value={"targets": [fast_a, slow, fast_b]})
+    )
+    monkeypatch.setattr(search, "PER_SOURCE_TIMEOUT_SECONDS", 0.3)
+    in_flight, peak = 0, 0
+
+    async def sql(user_id, connection, question):
+        nonlocal in_flight, peak
+        in_flight += 1
+        peak = max(peak, in_flight)
+        try:
+            # The slow source would run far past the overall budget if awaited alone.
+            await asyncio.sleep(600 if connection == "slow" else 0.05)
+        finally:
+            in_flight -= 1
+        return TextToSqlResult(
+            connection=connection,
+            dialect="db",
+            question=question,
+            success=True,
+            sql="SELECT 1",
+            rows=[{"from": connection}],
+            row_count=1,
+        )
+
+    monkeypatch.setattr(search, "run_text_to_sql", sql)
+    result = await search.search_sources(user, "count")
+    # All three sources were in flight at once, and the slow one was cut at its
+    # own bound; evidence keeps routing order regardless of completion order.
+    assert peak == 3
+    assert [hit["structured"]["rows"][0]["from"] for hit in result["evidence"]] == ["a", "b"]
+    assert result["errors"] == [
+        {
+            "source_id": slow["id"],
+            "retrieval_method": "sql",
+            "error": "Source retrieval failed or timed out.",
+        }
+    ]
+    assert [t["id"] for t in result["coverage"]["searched_targets"]] == [fast_a["id"], fast_b["id"]]
+
+
+@pytest.mark.asyncio
+async def test_node_set_mismatch_is_rejected_without_failing_the_search(user, monkeypatch):
     dataset, document = uuid4(), uuid4()
     target = {
         "id": str(uuid4()),
@@ -167,8 +216,11 @@ async def test_unverifiable_document_membership_fails_closed(user, monkeypatch):
     monkeypatch.setattr(
         search, "source_document", AsyncMock(return_value={"node_sets": ["unselected"]})
     )
-    with pytest.raises(PermissionError):
-        await search.search_sources(user, "q")
+    result = await search.search_sources(user, "q")
+    # The dataset was authorized; the stale node-set tag drops the hit, not the search.
+    assert result["evidence"] == [] and result["errors"] == []
+    assert result["coverage"]["rejected_unverifiable_hits"] == 1
+    assert [t["id"] for t in result["coverage"]["searched_targets"]] == [target["id"]]
 
 
 @pytest.mark.asyncio
