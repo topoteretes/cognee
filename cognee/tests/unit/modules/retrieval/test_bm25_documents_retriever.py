@@ -58,6 +58,15 @@ def test_best_passage_picks_the_densest_window_and_falls_back_to_the_first():
     assert best_passage("", ["x"]) == ""
 
 
+def test_a_snippet_finds_the_passage_a_stem_or_a_folded_accent_matched():
+    """With LEXICAL_SEARCH_LANGUAGE=english the index matches stems; LanceDB folds accents."""
+    text = "An introduction with nothing in it.\n\nThe runner runs every morning."
+    assert best_passage(text, ["running"]) == "The runner runs every morning."
+    cafe = "Opening hours.\n\nLe café est ouvert le dimanche."
+    assert best_passage(cafe, ["cafe"]) == "Le café est ouvert le dimanche."
+    assert best_passage(text, ["libraries"]) == "An introduction with nothing in it."
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("row", [_lancedb_row, _pgvector_row], ids=["lancedb", "pgvector"])
 async def test_a_native_hit_has_the_same_shape_on_every_backend(row):

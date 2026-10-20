@@ -9,6 +9,7 @@ nodes. A hit is one document; its ``text`` is the passage with the most query
 terms, never the whole document, so a result stays readable and bounded.
 """
 
+import unicodedata
 from typing import Any
 
 from cognee.infrastructure.databases.vector.lexical import split_passages, tokenize_words
@@ -30,20 +31,62 @@ _FILTERED_FETCH_FACTOR = 10
 _FILTERED_FETCH_MAX = 1000
 
 
+# Suffixes cut by _loose, longest first; "ies"/"ied" become "y".
+_SUFFIXES = ("ingly", "edly", "ing", "ies", "ied", "ed", "es", "ly", "s")
+
+
+def _fold(token: str) -> str:
+    """``token`` without accents, as LanceDB's ascii folding indexes it."""
+    decomposed = unicodedata.normalize("NFKD", token)
+    return "".join(char for char in decomposed if not unicodedata.combining(char))
+
+
+def _loose(token: str) -> str:
+    """``token`` reduced for snippet matching: accents folded, one common English suffix cut.
+
+    Not a stemmer: just enough that a passage the index matched by its stem
+    ("runs" for "running", with ``LEXICAL_SEARCH_LANGUAGE=english``) or by a
+    folded accent ("café" for "cafe") is found again.
+    """
+    token = _fold(token)
+    for suffix in _SUFFIXES:
+        if len(token) > len(suffix) + 2 and token.endswith(suffix):
+            stem = token[: -len(suffix)]
+            if suffix in ("ies", "ied"):
+                return stem + "y"
+            if len(stem) > 2 and stem[-1] == stem[-2] and stem[-1] not in "lsz":
+                stem = stem[:-1]  # "running" -> "runn" -> "run"
+            return stem
+    return token
+
+
+def _densest(passages: list[str], wanted: set[str], normalize) -> str | None:
+    """The passage with the most hits of ``wanted``, the first one on a tie; None without any."""
+    best, best_hits = None, 0
+    for passage in passages:
+        hits = sum(1 for token in tokenize_words(passage) if normalize(token) in wanted)
+        if hits > best_hits:
+            best, best_hits = passage, hits
+    return best
+
+
 def best_passage(text: str, query_tokens: list[str], max_tokens: int = SNIPPET_TOKENS) -> str:
-    """The passage of ``text`` with the most query-term hits; the first one on a tie."""
+    """The passage of ``text`` with the most query-term hits; the first one on a tie.
+
+    Exact tokens first. When no passage has one, the backend index matched
+    the document some other way (a stem, a folded accent), so the tokens are
+    compared loosely before falling back to the first passage.
+    """
     passages = split_passages(text or "", max_tokens=max_tokens, pack=False)
     if not passages:
         return ""
     wanted = set(query_tokens)
     if not wanted:
         return passages[0]
-    best, best_hits = passages[0], -1
-    for passage in passages:
-        hits = sum(1 for token in tokenize_words(passage) if token in wanted)
-        if hits > best_hits:
-            best, best_hits = passage, hits
-    return best
+    best = _densest(passages, wanted, lambda token: token)
+    if best is None:
+        best = _densest(passages, {_loose(token) for token in wanted}, _loose)
+    return best if best is not None else passages[0]
 
 
 class BM25DocumentsRetriever(BM25ChunksRetriever):
