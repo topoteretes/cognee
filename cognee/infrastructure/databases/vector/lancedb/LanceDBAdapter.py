@@ -470,12 +470,14 @@ class LanceDBAdapter(VectorDBInterface):
         self._mark_written(collection_name)
 
         if not await self.has_collection(collection_name):
-            async with self.VECTOR_DB_LOCK:
-                if not await self.has_collection(collection_name):
-                    await self.create_collection(
-                        collection_name,
-                        payload_schema,
-                    )
+            # NOTE: do NOT hold VECTOR_DB_LOCK here. `create_collection` acquires
+            # the same non-reentrant asyncio.Lock internally (and is idempotent
+            # via its own has_collection guard), so re-acquiring it here deadlocks
+            # when the collection does not yet exist. See issue #5987.
+            await self.create_collection(
+                collection_name,
+                payload_schema,
+            )
 
         collection = await self.get_collection(collection_name)
 
