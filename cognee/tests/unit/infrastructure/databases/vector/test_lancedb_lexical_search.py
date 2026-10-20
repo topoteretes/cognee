@@ -10,7 +10,10 @@ the pylance release line lancedb bundles and is skipped elsewhere.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 from uuid import NAMESPACE_OID, uuid5
 
 import pytest
@@ -245,6 +248,96 @@ async def test_create_lexical_index_is_idempotent(mode, tmp_path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("mode", MODES)
+async def test_a_stale_handle_does_not_race_into_a_second_index(mode, tmp_path):
+    """Regression: every data item of a caching run indexes the same collection
+    at once. A writer whose table handle was opened before another writer
+    committed the index must see that index, not create it again (which Lance
+    refuses with a commit conflict and which failed the whole caching run)."""
+    async with _adapter(mode, tmp_path) as (adapter, _):
+        await adapter.create_collection("Cached_text", payload_schema=adapter_module.IndexSchema)
+        stale = await adapter.get_collection("Cached_text")
+        await adapter.create_lexical_index("Cached", "text")
+
+        await adapter._ensure_lexical_index("Cached_text", stale)
+
+        table = await adapter.get_collection("Cached_text")
+        assert [index.index_type for index in await table.list_indices()] == ["FTS"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", MODES)
+async def test_concurrent_writers_of_a_fresh_collection_all_succeed(mode, tmp_path):
+    """The caching run's shape: many items write the same new collection at once."""
+    async with _adapter(mode, tmp_path) as (adapter, _):
+
+        async def write(i):
+            point = _cached(f"doc-{i}", f"document {i} about the white rabbit")
+            await adapter.create_lexical_index("Cached", "text")
+            await adapter.index_lexical_data_points("Cached", "text", [point], owns_rows=True)
+
+        await asyncio.gather(*(write(i) for i in range(8)))
+
+        assert len(await adapter.lexical_search("Cached_text", "rabbit", limit=20)) == 8
+        table = await adapter.get_collection("Cached_text")
+        assert [index.index_type for index in await table.list_indices()] == ["FTS"]
+
+
+@pytest.mark.asyncio
+async def test_a_commit_conflict_is_answered_by_checking_again(tmp_path):
+    """A creator outside this adapter's lock (another adapter, another process)
+    wins the commit: the conflict is not an error once the index exists."""
+    async with _adapter("local", tmp_path) as (adapter, _):
+        await adapter.create_collection("Cached_text", payload_schema=adapter_module.IndexSchema)
+        index = SimpleNamespace(index_type="FTS", columns=[LEXICAL_TEXT_COLUMN])
+        handles = [
+            SimpleNamespace(
+                list_indices=AsyncMock(return_value=[]),
+                create_index=AsyncMock(
+                    side_effect=RuntimeError(
+                        "lance error: Retryable commit conflict for version 2: This "
+                        "CreateIndex transaction was preempted by concurrent transaction "
+                        "CreateIndex at version 2. Please retry."
+                    )
+                ),
+            ),
+            SimpleNamespace(list_indices=AsyncMock(return_value=[index]), create_index=AsyncMock()),
+        ]
+        stale = SimpleNamespace(list_indices=AsyncMock(return_value=[]))
+        with patch.object(adapter, "get_collection", AsyncMock(side_effect=handles)):
+            await adapter._ensure_lexical_index("Cached_text", stale)
+
+        handles[0].create_index.assert_awaited_once()
+        handles[1].create_index.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_other_index_errors_are_not_swallowed(tmp_path):
+    async with _adapter("local", tmp_path) as (adapter, _):
+        handle = SimpleNamespace(
+            list_indices=AsyncMock(return_value=[]),
+            create_index=AsyncMock(side_effect=RuntimeError("lance error: disk full")),
+        )
+        with (
+            patch.object(adapter, "get_collection", AsyncMock(return_value=handle)),
+            pytest.raises(RuntimeError, match="disk full"),
+        ):
+            await adapter._ensure_lexical_index("Cached_text", handle)
+        handle.create_index.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", MODES)
+async def test_has_lexical_index_reports_the_tables_index(mode, tmp_path):
+    async with _adapter(mode, tmp_path) as (adapter, _):
+        assert await adapter.has_lexical_index("Cached_text") is False  # no table
+        await adapter.create_collection("Cached_text", payload_schema=adapter_module.IndexSchema)
+        assert await adapter.has_lexical_index("Cached_text") is False  # table, no index
+        await adapter.create_lexical_index("Cached", "text")
+        assert await adapter.has_lexical_index("Cached_text") is True
+
+
+@pytest.mark.asyncio
 async def test_rows_added_after_the_index_was_built_are_searched_at_once(tmp_path):
     """LanceDB scans the rows an index does not cover yet, so nothing has to run
     between a write and a search; the compaction pass folds them in later. The
@@ -378,34 +471,34 @@ needs_matching_pylance = pytest.mark.skipif(
 
 @needs_matching_pylance
 @pytest.mark.asyncio
-async def test_compaction_folds_new_rows_into_the_index_and_merges_segments(tmp_path, monkeypatch):
+async def test_compaction_folds_new_rows_into_the_index_and_bounds_its_segments(
+    tmp_path, monkeypatch
+):
+    """Every compaction pass folds the rows written since the last one into the
+    full-text index, and once the index has the configured number of segments
+    the pass merges them. The index is built over the empty table, as the
+    driver does it; Lance stops listing that empty first segment after the
+    first pass, so the merge comes once two real segments exist rather than on
+    a fixed pass number."""
     monkeypatch.setattr(adapter_module, "DEFAULT_RETENTION_SECONDS", 0)
     monkeypatch.setattr(adapter_module, "DEFAULT_MAX_INDEX_SEGMENTS", 2)
     async with _adapter("local", tmp_path) as (adapter, db_path):
-        await _index_cached(adapter, [_cached("old", "pelican report")])
-        await adapter.index_lexical_data_points(
-            "Cached", "text", [_cached("new", "pelican update")], owns_rows=True
-        )
-        assert (await _index_stats(db_path, "Cached_text")).num_unindexed_rows == 2
+        await _index_cached(adapter, [_cached("doc-0", "pelican report 0")])
+        merged = 0
+        for i in range(1, 5):
+            await adapter.index_lexical_data_points(
+                "Cached", "text", [_cached(f"doc-{i}", f"pelican report {i}")], owns_rows=True
+            )
+            stats = await adapter.compact()
 
-        stats = await adapter.compact()
-
-        assert stats["Cached_text"]["inverted_indices"] == 1
-        assert stats["Cached_text"]["inverted_indices_merged"] == 0
-        after = await _index_stats(db_path, "Cached_text")
-        assert (after.num_unindexed_rows, after.num_indices) == (0, 2)
-        assert len(await adapter.lexical_search("Cached_text", "pelican")) == 2
-
-        # Two segments is the configured cap: the next pass merges them into one.
-        await adapter.index_lexical_data_points(
-            "Cached", "text", [_cached("third", "pelican addendum")], owns_rows=True
-        )
-        stats = await adapter.compact()
-
-        assert stats["Cached_text"]["inverted_indices_merged"] == 1
-        after = await _index_stats(db_path, "Cached_text")
-        assert (after.num_unindexed_rows, after.num_indices) == (0, 1)
-        assert len(await adapter.lexical_search("Cached_text", "pelican")) == 3
+            assert stats["Cached_text"]["inverted_indices"] == 1
+            merged += stats["Cached_text"]["inverted_indices_merged"]
+            after = await _index_stats(db_path, "Cached_text")
+            assert after.num_unindexed_rows == 0, f"pass {i} left rows unindexed"
+            assert after.num_indices <= 3, f"pass {i} left {after.num_indices} segments"
+            found = await adapter.lexical_search("Cached_text", "pelican", limit=20)
+            assert len(found) == i + 1, f"pass {i} lost rows from the index"
+        assert merged >= 1, "the segments were never merged"
 
 
 @needs_matching_pylance

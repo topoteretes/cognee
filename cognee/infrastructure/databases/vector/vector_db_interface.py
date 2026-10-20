@@ -33,7 +33,7 @@ class VectorDBInterface(Protocol):
       in ``retrieve``/``score_by_ids`` are omitted from the result, not an error.
     * **Lexical (BM25) index, optional.** A backend that sets
       ``supports_lexical_search = True`` keeps a keyword index per collection next to the
-      embedding index and implements ``create_lexical_index``,
+      embedding index and implements ``has_lexical_index``, ``create_lexical_index``,
       ``index_lexical_data_points`` and ``lexical_search``. ``DataPoint.metadata``
       names the fields with ``lexical_fields``; ``index_data_points`` drives the three
       methods. ``lexical_search`` returns ``ScoredResult`` rows ordered best first with
@@ -130,8 +130,20 @@ class VectorDBInterface(Protocol):
         """
         raise NotImplementedError
 
-    # Set True by backends that implement the three lexical methods below.
+    # Set True by backends that implement the lexical methods below.
     supports_lexical_search: bool = False
+
+    async def has_lexical_index(self, collection_name: str) -> bool:
+        """
+        Whether ``collection_name`` (the full name, ``CachedDocument_text``) has a
+        lexical index that ranks every row of the collection.
+
+        The lexical retrievers ask before querying: a collection whose rows were
+        written before it had an index (data stored by an older release, a type
+        that declares no ``lexical_fields``) is scored in memory instead, so
+        keyword search never silently loses rows. ``False`` by default.
+        """
+        return False
 
     async def create_lexical_index(self, index_name: str, index_property_name: str) -> None:
         """

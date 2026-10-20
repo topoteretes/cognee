@@ -61,6 +61,23 @@ _NO_DEFAULT = object()
 # data point field was, so the column the lexical (full-text) index covers is
 # the same nested column in every collection.
 LEXICAL_TEXT_COLUMN = "payload.text"
+
+# Attempts at creating a collection's full-text index when a concurrent
+# creator wins the commit (see _ensure_lexical_index).
+_LEXICAL_INDEX_ATTEMPTS = 3
+
+
+def _is_commit_conflict(error: BaseException) -> bool:
+    """Whether Lance refused a commit because a concurrent one won it.
+
+    Lance reports it as a retryable error ("Retryable commit conflict ...
+    preempted by concurrent transaction ..."); in subprocess mode the worker
+    re-raises it with the same message.
+    """
+    message = str(error).lower()
+    return "commit conflict" in message or "preempted by concurrent transaction" in message
+
+
 _SIMPLE_TYPE_DEFAULTS = {
     str: "",
     int: 0,
@@ -1834,13 +1851,34 @@ class LanceDBAdapter(VectorDBInterface):
         table the schema migration rebuilt has lost its indexes. One index
         listing per call; the creation itself is a Lance index commit and takes
         the write lock like the other commits here.
+
+        Concurrent creators are the normal case, not an edge: every data item
+        of a caching run indexes the same collection at once. Under the lock
+        the table is opened again, because a handle opened before the lock can
+        be a version behind the creator that just committed the index, and a
+        commit conflict (a creator outside this lock: another adapter on the
+        same store, another process) is answered by checking again on a fresh
+        handle.
         """
         if self._has_lexical_index(await collection.list_indices()):
             return
         async with self.VECTOR_DB_LOCK:
-            if self._has_lexical_index(await collection.list_indices()):
-                return
-            await collection.create_index(LEXICAL_TEXT_COLUMN, config=self._lexical_index_config())
+            for attempt in range(_LEXICAL_INDEX_ATTEMPTS):
+                current = await self.get_collection(collection_name)
+                if self._has_lexical_index(await current.list_indices()):
+                    return
+                try:
+                    await current.create_index(
+                        LEXICAL_TEXT_COLUMN, config=self._lexical_index_config()
+                    )
+                    break
+                except (RuntimeError, OSError, ValueError) as error:
+                    if not _is_commit_conflict(error) or attempt == _LEXICAL_INDEX_ATTEMPTS - 1:
+                        raise
+                    logger.debug(
+                        "Full-text index creation on %s lost a commit race; checking again.",
+                        collection_name,
+                    )
         self._mark_written(collection_name)
 
     @staticmethod
@@ -1951,6 +1989,18 @@ class LanceDBAdapter(VectorDBInterface):
             schema = await collection.schema()
             await collection.delete(predicate)
             await collection.add(pyarrow.Table.from_pylist(list(rows.values()), schema=schema))
+
+    async def has_lexical_index(self, collection_name: str) -> bool:
+        """Whether the table exists and carries the full-text index (``VectorDBInterface``).
+
+        LanceDB's index covers every row of the table, the rows written before
+        it was built included, so its presence is the whole answer.
+        """
+        try:
+            collection = await self.get_collection(collection_name)
+        except CollectionNotFoundError:
+            return False
+        return self._has_lexical_index(await collection.list_indices())
 
     async def lexical_search(
         self, collection_name: str, query_text: str, limit: int = 15

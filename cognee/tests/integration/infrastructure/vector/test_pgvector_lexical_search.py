@@ -123,7 +123,9 @@ def pg_url() -> str:
 
     try:
         asyncio.run(probe())
-    except Exception as error:  # noqa: BLE001 - any failure to reach the server skips
+    except (OSError, asyncio.TimeoutError, asyncpg.PostgresError) as error:
+        # Refused or timed-out connections, bad credentials, a server without
+        # the vector extension: no usable Postgres here.
         pytest.skip(
             f"Postgres at {url.render_as_string(hide_password=True)} is unreachable: "
             f"{type(error).__name__}: {error}"
@@ -439,3 +441,10 @@ async def test_index_data_points_task_drives_both_lexical_paths(pg_url):
         results = await adapter.lexical_search(collection, "zebra")
         assert [result.id for result in results] == [points[0].id]
         assert results[0].payload["text"] == "quantum zebra"
+
+
+async def test_has_lexical_index_follows_the_posting_tables(pg_url):
+    async with _adapter_with_collection(pg_url) as (adapter, type_name, collection):
+        assert await adapter.has_lexical_index(collection) is False
+        await adapter.create_lexical_index(type_name, "text")
+        assert await adapter.has_lexical_index(collection) is True

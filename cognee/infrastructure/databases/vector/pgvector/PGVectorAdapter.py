@@ -556,6 +556,16 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         docs_table, terms_table = lexical_table_names(collection_name)
         return await self.has_collection(docs_table) and await self.has_collection(terms_table)
 
+    async def has_lexical_index(self, collection_name: str) -> bool:
+        """Whether ``collection_name`` has its posting tables (``VectorDBInterface``).
+
+        The tables are created by the first lexical write of the collection's
+        field, and every later write of that field indexes its rows, so a
+        collection with posting tables ranks all of its rows. A collection that
+        never had a lexical field has none and is scored in memory.
+        """
+        return await self._has_lexical_tables(collection_name)
+
     def _forget_lexical_tables(self, collection_name: str) -> None:
         """Drop the posting tables of ``collection_name`` from the reflection cache."""
         for table_name in lexical_table_names(collection_name):
