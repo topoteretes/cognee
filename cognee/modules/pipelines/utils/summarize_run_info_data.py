@@ -3,6 +3,7 @@ from typing import Any
 from cognee.modules.data.models import Data
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunAlreadyCompleted,
+    PipelineRunCompleted,
     PipelineRunErrored,
 )
 
@@ -66,7 +67,7 @@ def summarize_run_data(data: list[Data], results: list | None) -> dict:
             # error is recorded in run_info["error"] by the error writer.
             if data_id is not None:
                 errored_data_ids.append(str(data_id))
-        elif data_id is not None:
+        elif isinstance(run_info, PipelineRunCompleted) and data_id is not None:
             processed_data_ids.append(str(data_id))
 
     summary["processed_data_ids"] = processed_data_ids
