@@ -19,6 +19,14 @@ on:
         required: false
         type: string
         default: ''
+      ref:
+        required: false
+        type: string
+        default: ''
+        description: >-
+          Git ref to check out before running the tests. Defaults to the caller's
+          triggering revision. The canary release passes `dev` so the test gate
+          exercises the same commit that gets published (see cognee#6074).
     secrets:
       LLM_PROVIDER:
         required: true
@@ -74,6 +82,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
+          ref: ${{ inputs.ref }}
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -112,6 +121,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
+          ref: ${{ inputs.ref }}
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
