@@ -39,11 +39,8 @@ async def index_data_points(data_points: list[DataPoint], vector_engine=None):
         The original data_points list.
     """
     data_points_by_type = {}
-    # (type, field) -> (owns_rows, points) for the lexical index.
-    lexical_points_by_field: dict[tuple[str, str], tuple[bool, list[DataPoint]]] = {}
 
     vector_engine = vector_engine or await get_vector_engine_async()
-    lexical_supported = getattr(vector_engine, "supports_lexical_search", False) is True
 
     for data_point in data_points:
         # Skip non-DataPoint objects (e.g. CogneeGraph) that may be
@@ -70,18 +67,6 @@ async def index_data_points(data_points: list[DataPoint], vector_engine=None):
             indexed_data_point.metadata["index_fields"] = [field_name]
             data_points_by_type[type_name][field_name].append(indexed_data_point)
 
-        if not lexical_supported:
-            continue
-        for field_name in data_point.metadata.get("lexical_fields") or []:
-            if getattr(data_point, field_name, None) is None:
-                continue
-            owns_rows = field_name not in index_fields
-            key = (type_name, field_name)
-            if key not in lexical_points_by_field:
-                await vector_engine.create_lexical_index(type_name, field_name)
-                lexical_points_by_field[key] = (owns_rows, [])
-            lexical_points_by_field[key][1].append(data_point)
-
     batch_size = vector_engine.embedding_engine.get_batch_size()
     max_concurrent_data_points = get_embedding_context_config().embedding_max_concurrent_data_points
     semaphore = asyncio.Semaphore(max(1, max_concurrent_data_points // batch_size))
@@ -100,12 +85,42 @@ async def index_data_points(data_points: list[DataPoint], vector_engine=None):
     await asyncio.gather(*tasks)
 
     # After the embeddings: a field that is both embedded and lexical must find
-    # its rows written (owns_rows=False keeps the vector); a lexical-only field
-    # writes its own rows here.
-    for (type_name, field_name), (owns_rows, points) in lexical_points_by_field.items():
+    # its rows written (owns_rows=False keeps the vector).
+    await index_lexical_fields(data_points, vector_engine=vector_engine)
+
+    return data_points
+
+
+async def index_lexical_fields(data_points: list[DataPoint], vector_engine=None) -> None:
+    """Write the ``lexical_fields`` of ``data_points`` to the keyword (BM25) index.
+
+    A no-op on a backend without ``supports_lexical_search``. A field that is
+    not in ``index_fields`` is stored as rows without a vector
+    (``owns_rows=True``); an embedded one must already have its rows, so this
+    runs after the embeddings. ``index_data_points`` calls it, and so does
+    ``add_data_points`` after a hybrid backend's combined write, which embeds
+    but does not index.
+    """
+    vector_engine = vector_engine or await get_vector_engine_async()
+    if getattr(vector_engine, "supports_lexical_search", False) is not True:
+        return
+    # (type, field) -> (owns_rows, points)
+    by_field: dict[tuple[str, str], tuple[bool, list[DataPoint]]] = {}
+    for data_point in data_points:
+        if not hasattr(data_point, "metadata") or not data_point.metadata:
+            continue
+        index_fields = data_point.metadata.get("index_fields") or []
+        type_name = type(data_point).__name__
+        for field_name in data_point.metadata.get("lexical_fields") or []:
+            if getattr(data_point, field_name, None) is None:
+                continue
+            key = (type_name, field_name)
+            if key not in by_field:
+                await vector_engine.create_lexical_index(type_name, field_name)
+                by_field[key] = (field_name not in index_fields, [])
+            by_field[key][1].append(data_point)
+    for (type_name, field_name), (owns_rows, points) in by_field.items():
         for i in range(0, len(points), LEXICAL_BATCH_SIZE):
             await vector_engine.index_lexical_data_points(
                 type_name, field_name, points[i : i + LEXICAL_BATCH_SIZE], owns_rows=owns_rows
             )
-
-    return data_points

@@ -28,7 +28,7 @@ from cognee.tasks.storage.exceptions import (
 )
 
 from .chunk_ownership import collect_chunk_ownership
-from .index_data_points import index_data_points
+from .index_data_points import index_data_points, index_lexical_fields
 from .index_graph_edges import index_graph_edges
 
 if TYPE_CHECKING:
@@ -42,9 +42,17 @@ logger = get_logger("add_data_points")
 SEARCH_INDEXED_IDS = "search_indexed_ids"
 
 
-def _without_vector_only_fields(node: DataPoint) -> DataPoint:
-    """A copy of ``node`` with its ``vector_only_fields`` set to None, for the graph write."""
-    fields = (getattr(node, "metadata", None) or {}).get("vector_only_fields") or []
+def _without_vector_only_fields(node: DataPoint, keep_embedded: bool = False) -> DataPoint:
+    """A copy of ``node`` with its ``vector_only_fields`` set to None, for the graph write.
+
+    ``keep_embedded`` keeps the ones in ``index_fields``: a hybrid backend embeds
+    from the very node it stores, so it must still see the text it embeds.
+    """
+    metadata = getattr(node, "metadata", None) or {}
+    fields = metadata.get("vector_only_fields") or []
+    if keep_embedded:
+        embedded = set(metadata.get("index_fields") or [])
+        fields = [field for field in fields if field not in embedded]
     present = {field: None for field in fields if getattr(node, field, None) is not None}
     if not present:
         return node
@@ -181,9 +189,10 @@ async def add_data_points(
     # full text) stay off the graph node, and off its rollback-ledger row, when
     # that index exists; without it the in-memory fallback reads them from the
     # node, so they stay.
+    lexical_store = getattr(vector_engine, "supports_lexical_search", False) is True
     graph_nodes = (
-        [_without_vector_only_fields(node) for node in nodes]
-        if not use_hybrid and getattr(vector_engine, "supports_lexical_search", False) is True
+        [_without_vector_only_fields(node, keep_embedded=use_hybrid) for node in nodes]
+        if lexical_store
         else nodes
     )
 
@@ -374,12 +383,19 @@ async def add_data_points(
     if use_hybrid:
         # Hybrid backends embed inside the graph write, so the already embedded
         # nodes are written without vectors and only the rest with them.
+        stored = {str(node.id): node for node in graph_nodes}
         if len(nodes_to_embed) != len(nodes):
             await graph_engine.add_nodes(
-                [node for node in nodes if str(node.id) in already_indexed]
+                [stored[str(node.id)] for node in nodes if str(node.id) in already_indexed]
             )
         if nodes_to_embed:
-            await graph_engine.add_nodes_with_vectors(nodes_to_embed)
+            await graph_engine.add_nodes_with_vectors(
+                [stored[str(node.id)] for node in nodes_to_embed]
+            )
+        # The combined write embeds but does not keep a keyword index: a hybrid
+        # backend with one (SDK-397) gets the lexical fields here, full text included.
+        if lexical_store:
+            await index_lexical_fields(nodes, vector_engine=vector_engine)
     elif graph_only:
         await _write_nodes_grouped()
     else:

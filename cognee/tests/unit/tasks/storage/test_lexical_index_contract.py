@@ -190,3 +190,69 @@ async def test_the_rollback_ledger_gets_the_node_without_its_vector_only_text(
     assert ledger_nodes[0].id == point.id
     assert ledger_nodes[0].text is None
     assert mock_index_nodes.await_args.args[0][0].text == "the full document text"
+
+
+def _hybrid(supports_lexical):
+    """A hybrid backend: one adapter is both engines and writes graph and vectors together."""
+    adapter = MagicMock()
+    adapter.supports_lexical_search = supports_lexical
+    adapter.is_empty = AsyncMock(return_value=False)
+    adapter.get_graph_metadata = AsyncMock(return_value={})
+    adapter.add_nodes = AsyncMock()
+    adapter.add_nodes_with_vectors = AsyncMock()
+    adapter.add_edges_with_vectors = AsyncMock()
+    adapter.create_lexical_index = AsyncMock()
+    adapter.index_lexical_data_points = AsyncMock()
+    unified = AsyncMock()
+    unified.graph = adapter
+    unified.vector = adapter
+    unified.has_capability = MagicMock(
+        side_effect=lambda capability: capability is adp_module.EngineCapability.HYBRID_WRITE
+    )
+    return unified, adapter
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("supports_lexical", [True, False])
+@patch.object(adp_module, "get_unified_engine")
+@patch.object(adp_module, "deduplicate_nodes_and_edges")
+@patch.object(adp_module, "get_graph_from_model")
+async def test_a_hybrid_backend_with_a_keyword_index_gets_the_lexical_fields(
+    mock_get_graph, mock_dedup, mock_get_unified, supports_lexical
+):
+    """Its combined write embeds but does not index, so add_data_points does."""
+    point = LexicalOnly(text="the full document text")
+    mock_get_graph.side_effect = [([point], [])]
+    mock_dedup.side_effect = lambda n, e: (n, e)
+    unified, adapter = _hybrid(supports_lexical)
+    mock_get_unified.return_value = unified
+
+    await add_data_points([point], ctx=PipelineContext())
+
+    (written,) = adapter.add_nodes_with_vectors.await_args.args[0]
+    if supports_lexical:
+        assert written.text is None, "served from the keyword index, not the graph row"
+        adapter.create_lexical_index.assert_awaited_once_with("LexicalOnly", "text")
+        type_name, field, points = adapter.index_lexical_data_points.await_args.args
+        assert (type_name, field) == ("LexicalOnly", "text")
+        assert points[0].text == "the full document text"
+        assert adapter.index_lexical_data_points.await_args.kwargs == {"owns_rows": True}
+    else:
+        assert written.text == "the full document text", "the in-memory fallback reads it"
+        adapter.index_lexical_data_points.assert_not_awaited()
+
+
+def test_a_hybrid_write_keeps_a_vector_only_field_it_embeds():
+    """A hybrid backend embeds from the node it stores, so an embedded field stays on it."""
+
+    class EmbeddedVectorOnly(DataPoint):
+        text: str
+        metadata: dict = {
+            "index_fields": ["text"],
+            "lexical_fields": ["text"],
+            "vector_only_fields": ["text"],
+        }
+
+    point = EmbeddedVectorOnly(text="embedded text")
+    assert adp_module._without_vector_only_fields(point, keep_embedded=True).text == "embedded text"
+    assert adp_module._without_vector_only_fields(point).text is None
