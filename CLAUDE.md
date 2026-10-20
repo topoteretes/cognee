@@ -17,7 +17,7 @@ Cognee is an open-source AI memory platform that transforms raw data into persis
 5. **No backups**: Trust the primary mechanism.
 6. **Separation of concerns**: Each function has a single responsibility.
 7. **Be concise but informative**: No essays, but the docstrings and comments a reader needs.
-8. **No invented limits**: No cutoffs (`max_n`, `[:k]`, "older than X") or expiries (TTLs, cooldowns, eviction) unless asked for — both are silent data loss. An unavoidable bound is a named setting, unbounded by default, loud when hit.
+8. **No invented limits**: Never add a cutoff (`max_n`, `[:k]`, "older than X") or an expiry (TTL, cooldown, eviction) the task did not ask for — both are silent data loss. If you believe one is unavoidable, stop and ask, stating what would be dropped and why; do not add it and explain afterwards.
 
 **Methodology**: surgical changes only; evidence-based debugging (minimal, targeted logging); fix root causes, not symptoms. Debug like a detective: form the theory of the crime, collect evidence, and change code only once the evidence proves it.
 
