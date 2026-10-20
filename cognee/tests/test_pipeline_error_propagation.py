@@ -1,6 +1,7 @@
 """E2E contract test: an exception raised inside a pipeline task is never swallowed.
 
-Runs a real cognee pipeline (memify with custom tasks over an added dataset)
+Runs a real cognee pipeline (the internal memify runner with custom tasks over
+an added dataset)
 whose enrichment task raises, and asserts the three parts of the error
 contract:
 
@@ -19,6 +20,7 @@ import pathlib
 
 import cognee
 from cognee.modules.data.methods import get_datasets_by_name
+from cognee.modules.memify import run_memify_tasks
 from cognee.modules.pipelines.models.PipelineRun import PipelineRunStatus
 from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
 from cognee.modules.pipelines.tasks.task import Task
@@ -69,7 +71,7 @@ async def main():
     # 1. The task's own exception must reach the caller.
     raised = None
     try:
-        await cognee.memify(
+        await run_memify_tasks(
             extraction_tasks=[Task(passthrough_extraction)],
             enrichment_tasks=[Task(exploding_enrichment)],
             data=["payload for the failing pipeline"],
@@ -99,7 +101,7 @@ async def main():
     logger.info("Failed pipeline run recorded as DATASET_PROCESSING_ERRORED")
 
     # 3. One failed run must not wedge the system: a healthy run now succeeds.
-    result = await cognee.memify(
+    result = await run_memify_tasks(
         extraction_tasks=[Task(passthrough_extraction)],
         enrichment_tasks=[Task(healthy_enrichment)],
         data=["payload for the healthy pipeline"],

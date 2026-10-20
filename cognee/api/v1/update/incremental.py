@@ -115,7 +115,6 @@ from cognee.shared.data_models import KnowledgeGraph
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
 from cognee.tasks.documents.classify_documents import document_class_for, update_node_set
-from cognee.tasks.graph.detect_contradictions import detect_contradictions
 from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
 from cognee.tasks.ingestion.data_item import DataItem
 from cognee.tasks.ingestion.data_item_to_text_file import data_item_to_text_file
@@ -749,7 +748,7 @@ async def _run_incremental_update(
     )
     send_telemetry(
         "Incremental Update Run Started",
-        user.id,
+        user,
         additional_properties={"dataset_id": str(dataset.id), "data_id": str(data_id)},
     )
     try:
@@ -785,7 +784,7 @@ async def _run_incremental_update(
     )
     send_telemetry(
         "Incremental Update Run Completed",
-        user.id,
+        user,
         additional_properties={"dataset_id": str(dataset.id), "data_id": str(data_id), **result},
     )
     return {**result, "pipeline_run_id": pipeline_run.pipeline_run_id}
@@ -1089,11 +1088,7 @@ async def _write_and_publish(
             chunk.belongs_to_set = document.belongs_to_set
             chunk.source_node_set = document.source_node_set
         summaries = await extract(batch, context)
-        await add_data_points(
-            summaries, ctx=context, embed_triplets=cognify_config.triplet_embedding
-        )
-        if cognify_config.contradiction_detection:
-            await detect_contradictions(summaries)
+        await add_data_points(summaries, ctx=context)
     if reused_chunks:
         await _restore_repositioned_chunks(reused_chunks, context)
 

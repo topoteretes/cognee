@@ -223,7 +223,7 @@ def collect_diagram_graph(
                 seen.add(node_id)
                 nodes.append(dict(fact))
 
-    if operation in {"explore", "traverse", "architecture"}:
+    if operation in {"explore", "traverse", "architecture", "subgraph"}:
         for fact in result.get("nodes") or []:
             add_node(fact)
         edges = [dict(edge) for edge in result.get("edges") or []]
@@ -236,6 +236,22 @@ def collect_diagram_graph(
             for fact in result.get("nodes") or []
             if isinstance(fact, Mapping) and fact.get("depth") == 0
         )
+    elif operation == "neighbors":
+        # Each entry is one edge of the anchor, oriented by its direction.
+        anchor = result.get("anchor")
+        if isinstance(anchor, Mapping) and anchor.get("id") is not None:
+            add_node(anchor)
+            highlight.append(str(anchor["id"]))
+            for entry in result.get("neighbors") or []:
+                node = entry.get("node") if isinstance(entry, Mapping) else None
+                if not isinstance(node, Mapping) or node.get("id") is None:
+                    continue
+                add_node(node)
+                ends = (str(anchor["id"]), str(node["id"]))
+                source, target = ends if entry.get("direction") == "out" else ends[::-1]
+                edges.append(
+                    {"source_id": source, "target_id": target, "type": entry.get("relation")}
+                )
     elif operation == "find_path":
         for key in ("from", "to", "matched_to"):
             add_node(result.get(key))
@@ -322,6 +338,11 @@ def _diagram_title(result: Mapping[str, Any]) -> str | None:
     operation = str(result.get("operation") or "")
     if operation == "explore" and isinstance(result.get("focus"), Mapping):
         return f"explore: {result['focus'].get('name')}"
+    if operation == "neighbors" and isinstance(result.get("anchor"), Mapping):
+        return f"neighbors: {result['anchor'].get('name')}"
+    if operation == "subgraph":
+        names = [str(fact.get("name")) for fact in result.get("seeds") or []]
+        return f"subgraph: {', '.join(names)}" if names else "subgraph"
     if operation == "find_path":
         source = result.get("from") or {}
         target = result.get("to") or {}

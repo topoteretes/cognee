@@ -1,0 +1,162 @@
+{
+  "roots": {
+    "main": 2,
+    "route": 1
+  },
+  "leaves": 0,
+  "total": 3,
+  "flows": [
+    {
+      "id": "19fff23f7659d1e32f5ff8a83f1abda9",
+      "name": "POST /checkout",
+      "rank": 1,
+      "repo": "shop",
+      "mechanism": "route",
+      "routes": [
+        {
+          "name": "/checkout",
+          "id": "01c1396efb449bb82f899a68648fdd30",
+          "method": "POST",
+          "file": "orders/routes.py",
+          "line": 8
+        }
+      ],
+      "entry": {
+        "name": "orders/checkout.place_order",
+        "id": "7005efd41c3df03d785196bc41a50700",
+        "file": "orders/checkout.py",
+        "line": 14,
+        "doc": "Turn the cart in the request into an order and charge the customer."
+      },
+      "summary": "POST /checkout is served by orders/checkout.place_order (\"Turn the cart in the request into an order and charge the customer.\"). It hands off to tokens.validate_token, which calls tokens.decode, and to repository.OrderRepository.save. Its 4 symbols sit in auth (2 symbols) and orders (2).",
+      "metrics": {
+        "reach": 4,
+        "modules": 2,
+        "max_depth": 2,
+        "unresolved_calls": 1
+      },
+      "modules": [
+        {
+          "name": "auth",
+          "symbols": 2
+        },
+        {
+          "name": "orders",
+          "symbols": 2
+        }
+      ],
+      "stages": [
+        {
+          "order": 1,
+          "depth": 1,
+          "name": "auth/tokens.validate_token",
+          "id": "d18f1ba5d1f48d7dd7aaa47130f7c10b",
+          "file": "auth/tokens.py",
+          "line": 9,
+          "doc": "Check a bearer token's signature and expiry, then return the user it was issued to.",
+          "reach": 2
+        },
+        {
+          "order": 2,
+          "depth": 2,
+          "parent": "d18f1ba5d1f48d7dd7aaa47130f7c10b",
+          "name": "auth/tokens.decode",
+          "id": "918ab0aca0d00d8356108f913d08596e",
+          "file": "auth/tokens.py",
+          "line": 30,
+          "reach": 1
+        },
+        {
+          "order": 3,
+          "depth": 1,
+          "name": "orders/repository.OrderRepository.save",
+          "id": "902fefc888717ece9db7fc355f660556",
+          "file": "orders/repository.py",
+          "line": 12,
+          "reach": 1
+        }
+      ]
+    },
+    {
+      "id": "f31a15f82e4314c2fc5c507ae5b7dccb",
+      "name": "app.main",
+      "rank": 2,
+      "repo": "shop",
+      "mechanism": "main",
+      "entry": {
+        "name": "app.main",
+        "id": "8ea13bd2c0d8bbd731ae334cb2acc8d7",
+        "file": "app.py",
+        "line": 12,
+        "doc": "Start the shop's HTTP server and register its routes."
+      },
+      "summary": "The program starts at app.main (\"Start the shop's HTTP server and register its routes.\"). It hands off to app.serve. Its 2 symbols sit in . (2 symbols).",
+      "metrics": {
+        "reach": 2,
+        "modules": 1,
+        "max_depth": 1,
+        "unresolved_calls": 0
+      },
+      "modules": [
+        {
+          "name": ".",
+          "symbols": 2
+        }
+      ],
+      "stages": [
+        {
+          "order": 1,
+          "depth": 1,
+          "name": "app.serve",
+          "id": "abd4ad58261e68be12abd3bf6adba5ab",
+          "file": "app.py",
+          "line": 21,
+          "reach": 1
+        }
+      ]
+    },
+    {
+      "id": "30a87d2645d2b11df9ad16984e1a0589",
+      "name": "scripts/seed.main",
+      "rank": 3,
+      "repo": "shop",
+      "mechanism": "main",
+      "side": true,
+      "entry": {
+        "name": "scripts/seed.main",
+        "id": "2476070b88f851c09edd9a7eb4005798",
+        "file": "scripts/seed.py",
+        "line": 5,
+        "doc": "Fill a development database with sample orders."
+      },
+      "summary": "A side entry: scripts/seed.main (\"Fill a development database with sample orders.\") hands off to repository.OrderRepository.save. Its 2 symbols sit in orders (1 symbol) and scripts (1).",
+      "metrics": {
+        "reach": 2,
+        "modules": 2,
+        "max_depth": 1,
+        "unresolved_calls": 0
+      },
+      "modules": [
+        {
+          "name": "orders",
+          "symbols": 1
+        },
+        {
+          "name": "scripts",
+          "symbols": 1
+        }
+      ],
+      "stages": [
+        {
+          "order": 1,
+          "depth": 1,
+          "name": "orders/repository.OrderRepository.save",
+          "id": "902fefc888717ece9db7fc355f660556",
+          "file": "orders/repository.py",
+          "line": 12,
+          "reach": 1
+        }
+      ]
+    }
+  ]
+}
