@@ -39,13 +39,12 @@ class _EngineContext:
 @pytest.mark.asyncio
 async def test_column_migration_skips_local_foreign_key_and_primary_key_columns(monkeypatch):
     engine = SimpleNamespace(engine=SimpleNamespace(begin=lambda: _EngineContext()))
-    monkeypatch.setattr(
-        migration_module, "get_migration_relational_engine", lambda: engine
-    )
+    monkeypatch.setattr(migration_module, "get_migration_relational_engine", lambda: engine)
 
     # Keep equal string values in separate objects to cover value equality over identity.
-    primary_key = "".join(["employee", "_id"])
-    column_primary_key = "".join(["employee", "_id"])
+    primary_key_parts = ["employee", "_id"]
+    primary_key = "".join(primary_key_parts)
+    column_primary_key = "".join(primary_key_parts)
     assert primary_key == column_primary_key
     assert primary_key is not column_primary_key
 
@@ -85,8 +84,6 @@ async def test_column_migration_skips_local_foreign_key_and_primary_key_columns(
     employee_id = node_mapping["employees:10"].id
     company_id = node_mapping["companies:7"].id
     assert any(
-        source_id == employee_id
-        and target_id == company_id
-        and relationship_name == "company_id"
+        source_id == employee_id and target_id == company_id and relationship_name == "company_id"
         for source_id, target_id, relationship_name, _ in edge_mapping
     )
