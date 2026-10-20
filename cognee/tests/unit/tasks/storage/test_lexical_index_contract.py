@@ -141,3 +141,52 @@ async def test_vector_only_fields_leave_the_graph_node_only_when_the_index_exist
     # The vector write always gets the text.
     embedded = mock_index_nodes.await_args.args[0]
     assert embedded[0].text == "the full document text"
+
+
+@pytest.mark.asyncio
+@patch.object(adp_module, "index_graph_edges")
+@patch.object(adp_module, "index_data_points")
+@patch.object(adp_module, "upsert_edges", new_callable=AsyncMock)
+@patch.object(adp_module, "upsert_nodes", new_callable=AsyncMock)
+@patch.object(adp_module, "mark_graph_provenance_if_empty", new_callable=AsyncMock)
+@patch.object(adp_module, "get_unified_engine")
+@patch.object(adp_module, "deduplicate_nodes_and_edges")
+@patch.object(adp_module, "get_graph_from_model")
+async def test_the_rollback_ledger_gets_the_node_without_its_vector_only_text(
+    mock_get_graph,
+    mock_dedup,
+    mock_get_unified,
+    mock_mark,
+    mock_upsert_nodes,
+    mock_upsert_edges,
+    mock_index_nodes,
+    mock_index_edges,
+):
+    """A graph without in-graph provenance keeps a relational ledger row per node; a
+    cached document's text there would be a second full copy of every document."""
+    from contextlib import asynccontextmanager
+    from uuid import uuid4
+
+    point = LexicalOnly(text="the full document text")
+    mock_get_graph.side_effect = [([point], [])]
+    mock_dedup.side_effect = lambda n, e: (n, e)
+    unified, _ = _unified(supports_lexical=True)
+    mock_get_unified.return_value = unified
+    mock_mark.return_value = False  # the ledger path
+
+    @asynccontextmanager
+    async def session():
+        yield SimpleNamespace(commit=AsyncMock())
+
+    ctx = PipelineContext(
+        user=SimpleNamespace(id=uuid4(), tenant_id=None),
+        dataset=SimpleNamespace(id=uuid4()),
+        data_item=SimpleNamespace(id=uuid4()),
+    )
+    with patch.object(adp_module, "get_async_session", session):
+        await add_data_points([point], ctx=ctx)
+
+    ledger_nodes = mock_upsert_nodes.await_args.args[0]
+    assert ledger_nodes[0].id == point.id
+    assert ledger_nodes[0].text is None
+    assert mock_index_nodes.await_args.args[0][0].text == "the full document text"

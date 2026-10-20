@@ -177,6 +177,16 @@ async def add_data_points(
     # file/text item, or the CogneeGraph memify passes in), in which case there
     # is nothing to attribute and both the ledger and graph-fold paths are skipped.
     data_id = data_item_id(data_item)
+    # Fields the vector store serves from its lexical index (a cached document's
+    # full text) stay off the graph node, and off its rollback-ledger row, when
+    # that index exists; without it the in-memory fallback reads them from the
+    # node, so they stay.
+    graph_nodes = (
+        [_without_vector_only_fields(node) for node in nodes]
+        if not use_hybrid and getattr(vector_engine, "supports_lexical_search", False) is True
+        else nodes
+    )
+
     stores_provenance = False
     if user and dataset and data_id is not None:
         # Graph-provenance graphs (empty graphs marked via graph metadata) carry
@@ -198,7 +208,7 @@ async def add_data_points(
             # failed write can always be swept by the rollback handler.
             async with get_async_session() as session:
                 await upsert_nodes(
-                    nodes,
+                    graph_nodes,
                     tenant_id=user.tenant_id,
                     user_id=user.id,
                     dataset_id=dataset.id,
@@ -248,15 +258,6 @@ async def add_data_points(
         ownership = await collect_chunk_ownership(data_points, dataset.id, data_id)
         if not ownership.has_chunks:
             ownership = None
-
-    # Fields the vector store serves from its lexical index (a cached document's
-    # full text) stay off the graph node when that index exists; without it the
-    # in-memory fallback reads them from the node, so they stay.
-    graph_nodes = (
-        [_without_vector_only_fields(node) for node in nodes]
-        if not use_hybrid and getattr(vector_engine, "supports_lexical_search", False) is True
-        else nodes
-    )
 
     def _group_nodes():
         groups: dict = {}
