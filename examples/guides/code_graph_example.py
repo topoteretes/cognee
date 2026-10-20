@@ -118,18 +118,6 @@ async def main():
     )
     print(json.dumps(insights, indent=2, default=str))
 
-    # Other deterministic operations use the same API shape. Ids may be
-    # cognee node ids or enola's own 32-hex fact ids (from facts.jsonl):
-    # code_query={"operation": "explore", "id": "<fact id>", "max_depth": 2}
-    # code_query={"operation": "traverse", "node_ids": ["<fact id>"], "direction": "reverse"}
-    # code_query={"operation": "find_path", "source_id": "<id>", "target_id": "<id>"}
-    # code_query={"operation": "impact_analysis", "id": "<fact id>", "max_depth": 3}
-    # code_query={"operation": "query_facts", "kind": "dependency", "prop": "type",
-    #             "prop_value": "package"}   # declared packages from manifests (purl names)
-    # code_query={"operation": "delta"}    # last ingestion's changes + the snapshot receipt
-    # code_query={"operation": "ask", "question": "How is an order placed?"}
-    #     # seeds, flows, one-hop neighbourhood and file:line citations to read
-
     # Docstrings as memory. The last task of the pipeline above stored each
     # documented symbol's docstring as a DocumentChunk whose text starts with
     # "file:line" and the signature, linked to its CodeSymbol with a `describes`
@@ -147,6 +135,18 @@ async def main():
             top_k=3,
         )
         print(json.dumps(docstring_hits, indent=2, default=str))
+
+    # Other deterministic operations use the same API shape. Ids may be
+    # cognee node ids or enola's own 32-hex fact ids (from facts.jsonl):
+    # code_query={"operation": "explore", "id": "<fact id>", "max_depth": 2}
+    # code_query={"operation": "traverse", "node_ids": ["<fact id>"], "direction": "reverse"}
+    # code_query={"operation": "find_path", "source_id": "<id>", "target_id": "<id>"}
+    # code_query={"operation": "impact_analysis", "id": "<fact id>", "max_depth": 3}
+    # code_query={"operation": "query_facts", "kind": "dependency", "prop": "type",
+    #             "prop_value": "package"}   # declared packages from manifests (purl names)
+    # code_query={"operation": "delta"}    # last ingestion's changes + the snapshot receipt
+    # code_query={"operation": "ask", "question": "How is an order placed?"}
+    #     # seeds, flows, one-hop neighbourhood and file:line citations to read
 
 
 if __name__ == "__main__":

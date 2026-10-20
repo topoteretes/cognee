@@ -21,6 +21,9 @@ task's output, `enriches`, `ctx` injection, `Drop`) are documented in
 
 The dlt route adds
 `ingestion.purge_stale_dlt_source_artifacts` and `ingestion.extract_dlt_source_edges`.
+After each dataset's run, `cognify()` reconciles the structure document sources describe
+(`ingestion.reconcile_document_structure`: `child_of` edges between a row and its parent, from
+`system_metadata["structure"]`) and then compacts the vector store.
 `improve()` stages run the pre-assembled lists in `cognee/memify_pipelines/`.
 
 ## Subpackages
@@ -36,7 +39,7 @@ The dlt route adds
 | `documents/` | Classify `Data` rows into `Document` types and chunk them | `classify_documents`, `extract_chunks_from_documents` |
 | `entity_completion/` | Pluggable entity extractors (`entity_extractors/`: LLM-based and regex-based) | `LLMEntityExtractor`, `RegexEntityExtractor` |
 | `graph/` | Extract entities/relations into the graph; the GLiNER (`graph/gliner_demo/`) and code (`extract_graph_from_code`) variants | `extract_graph_from_data`, `extract_graph_from_code` |
-| `ingestion/` | Ingest and normalise inputs for `add()`: resolve paths/directories, save to storage, dedup, dlt sources, relational-DB migration | `ingest_data`, `resolve_data_directories`, `save_data_item_to_storage`, `resolve_dlt_sources`, `migrate_relational_database` |
+| `ingestion/` | Ingest and normalise inputs for `add()`: resolve paths/directories, save to storage, dedup, dlt sources, relational-DB migration | `ingest_data`, `resolve_data_directories`, `save_data_item_to_storage`, `resolve_dlt_sources`, `migrate_relational_database`, `reconcile_document_structure` |
 | `memify/` | Tasks behind the `improve()` stages: session and agent-trace persistence, feedback weights, entity dedup/consolidation, fact-conflict review, global context index | `cognify_session`, `apply_feedback_weights`, `extract_feedback_qas`, `detect_entity_duplicates`, `review_conflicts`, … |
 | `presort/` | Pre-organise a folder before ingestion (`remember(dry_run="presort")`): classify, hash, dedup, version and PII detection, proposed groupings | `build_report`, `classify_files`, `detect_duplicates`, `detect_pii`, `group_files`, `apply_presort_graph` |
 | `provenance/` | Write audit-ledger provenance entries for a pipeline run | `record_provenance` |

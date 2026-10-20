@@ -50,6 +50,7 @@ from cognee.tasks.documents import (
     extract_chunks_from_documents,
 )
 from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
+from cognee.tasks.ingestion.document_structure import reconcile_document_structure
 from cognee.tasks.provenance import record_provenance
 from cognee.tasks.storage import add_data_points
 
@@ -561,6 +562,9 @@ async def cognify(
                 embedding_config=embedding_config,
                 data_cache=data_cache,
                 extras={"graph_extractor": resolved_extractor},
+                # Reconcile the structure document sources describe, also when an
+                # item failed: one bad page must not freeze the tree of the rest.
+                after_items_ran=reconcile_document_structure,
                 # Fold the vector fragments this run wrote, once per dataset,
                 # after the run is recorded complete; bounded per run, so a
                 # bloated store drains over several cognify runs.
