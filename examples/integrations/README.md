@@ -1,9 +1,9 @@
 # Data-source connectors
 
 Connectors pull data from external sources (Gmail, Slack, Notion, Google Drive,
-Google Calendar, Confluence, …) into cognee memory. **Gmail, Google Drive, Google Calendar and
-Linear ship in the SDK**; install the Google extras for their client libraries and DLT (Linear
-needs none). Other connectors are distributed under [topoteretes/cognee-community](https://github.com/topoteretes/cognee-community).
+Google Calendar, Confluence, …) into cognee memory. **Gmail, Google Drive, Google Calendar,
+Linear, Notion and Apollo ship in the SDK**; install the Google extras for their client libraries
+and DLT (Linear, Notion and Apollo need none). Other connectors are distributed under [topoteretes/cognee-community](https://github.com/topoteretes/cognee-community).
 
 Every connector is built on cognee's **DLT ingestion subsystem**, so they all share
 the same guarantees instead of each reinventing ingestion:
@@ -30,6 +30,7 @@ Install from PyPI; you do **not** need to clone the community monorepo to use th
 | Google Drive | `cognee[google-drive]` |
 | Google Calendar | `cognee[google-calendar]` |
 | Linear | bundled, no extra |
+| Apollo | bundled, no extra |
 
 ## Quickstart (Gmail)
 
@@ -55,10 +56,14 @@ answer = await cognee.search(
 )
 ```
 
-See the SDK [Gmail guide](../../cognee/tasks/ingestion/connectors/gmail.md) and
-[Drive guide](../../cognee/tasks/ingestion/connectors/google_drive.md) for setup,
-incremental re-sync, and privacy notes. Other connectors are documented in their
-community packages.
+The bundled connectors have a guide next to their code, with setup, incremental re-sync, and
+privacy notes: [Gmail](../../cognee/tasks/ingestion/connectors/gmail.md),
+[Google Drive](../../cognee/tasks/ingestion/connectors/google_drive.md),
+[Google Calendar](../../cognee/tasks/ingestion/connectors/google_calendar.md),
+[Linear](../../cognee/tasks/ingestion/connectors/linear.md),
+[Notion](../../cognee/tasks/ingestion/connectors/notion.md) and
+[Apollo](../../cognee/tasks/ingestion/connectors/apollo.md). The other connectors are documented
+in their community packages.
 
 ## Writing a new connector
 
