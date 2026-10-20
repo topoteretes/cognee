@@ -190,7 +190,8 @@ class TestAddFileDetection:
             files_arg = call_kwargs.kwargs.get("files") or call_kwargs[1].get("files")
             # First file tuple: ("data", ("text_0.txt", BytesIO, "text/plain"))
             assert files_arg[0][0] == "data"
-            assert files_arg[0][1][0] == "text_0.txt"
+            assert files_arg[0][1][0].startswith("text_")
+            assert files_arg[0][1][0].endswith(".txt")
             assert files_arg[0][1][2] == "text/plain"
 
     def test_real_file_sent_as_upload(self):
@@ -268,20 +269,19 @@ class TestImproveEndpoint:
 
 
 def test_distinct_text_uploads_have_distinct_filenames():
-    """Different text uploads should not reuse a document filename."""
+    """Different text inputs should produce distinct filenames."""
+    from unittest.mock import MagicMock
+
+    client = CogneeApiClient("http://localhost:8000")
+    mock_http_client = MagicMock()
+    mock_http_client.post.return_value.status_code = 200
+    mock_http_client.post.return_value.json.return_value = {}
+    client._client = mock_http_client
+
     filenames = []
-
-    with patch("cognee.cli.api_client.httpx.Client"):
-        client = CogneeApiClient("http://localhost:8000")
-
-        mock_http_client = MagicMock()
-        mock_http_client.post.return_value.json.return_value = {}
-        client._client = mock_http_client
-
-        for text in ["First research note", "Second research note"]:
-            client.add([text])
-
-            files = mock_http_client.post.call_args.kwargs["files"]
-            filenames.append(files[0][1][0])
+    for text in ["First research note", "Second research note"]:
+        client.add([text])
+        files = mock_http_client.post.call_args.kwargs["files"]
+        filenames.append(files[0][1][0])
 
     assert filenames[0] != filenames[1]
