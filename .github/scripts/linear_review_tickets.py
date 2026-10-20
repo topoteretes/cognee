@@ -1,0 +1,467 @@
+"""Create a Linear ticket for every approval on a merged pull request.
+
+Once a day this finds the pull requests of this repository merged since the
+start of the workflow's last successful run (or LOOKBACK_HOURS back, when set or
+when there is no earlier run), and for every reviewer who approved one of them
+creates a ticket assigned to that reviewer in the review team, already in a
+completed state, so time spent on reviews shows up in Linear.
+
+Reviewers are matched to Linear users by GitHub account: a Linear user who has
+connected GitHub carries the numeric GitHub user id (``gitHubUserId``), which is
+the id GitHub reports for the reviewer. Approvals by bots, and by people with no
+Linear user (external contributors, or members who never connected GitHub in
+Linear), get no ticket; they are listed in the run summary.
+
+Every ticket's id is derived from (repository, pull request, reviewer), so a
+pull request is ticketed once per reviewer however often it is seen: windows of
+consecutive runs may overlap, a failed run's pull requests are picked up by the
+next one, and re-running a day is harmless.
+
+Input (env):
+  GITHUB_TOKEN, GITHUB_REPOSITORY            the repository and a token to read it.
+  GITHUB_RUN_ID, GITHUB_WORKFLOW_REF,
+  GITHUB_REF_NAME                            this workflow's run history, for the
+                                             window start (absent: LOOKBACK_HOURS).
+  LINEAR_API_KEY                             Linear personal API key.
+  LINEAR_REVIEW_TEAM_KEY                     team the tickets go to, e.g. SDK.
+  LINEAR_REVIEW_LABEL                        optional label name put on every ticket.
+  LOOKBACK_HOURS                             optional fixed window instead of the
+                                             run history (manual runs, backfills).
+  DRY_RUN                                    "true": read everything, write nothing,
+                                             print the tickets that would be created.
+  GITHUB_STEP_SUMMARY                        where the run summary is appended.
+"""
+
+import json
+import os
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+
+GITHUB_API = "https://api.github.com"
+LINEAR_API = "https://api.linear.app/graphql"
+HTTP_TIMEOUT = 30  # seconds
+DEFAULT_LOOKBACK = timedelta(hours=24)
+# A window never reaches further back than this, however long ago the last
+# successful run was: GitHub search caps results at 1000 per query.
+MAX_LOOKBACK = timedelta(days=14)
+# Namespace for the deterministic ticket ids.
+TICKET_NAMESPACE = uuid.UUID("6f1c2b7e-2d4a-4e0b-9a51-8c3f6f0d5a11")
+MAX_TITLE = 200
+
+
+@dataclass(frozen=True)
+class Approval:
+    pr_number: int
+    pr_title: str
+    pr_url: str
+    pr_author: str
+    base_ref: str
+    merged_at: str
+    additions: int
+    deletions: int
+    changed_files: int
+    reviewer_login: str
+    reviewer_github_id: int
+    approved_at: str
+
+
+# --------------------------------------------------------------------------- #
+# Entry point
+# --------------------------------------------------------------------------- #
+
+
+def main() -> None:
+    repo = os.environ["GITHUB_REPOSITORY"]
+    dry_run = os.environ.get("DRY_RUN", "false").lower() == "true"
+    until = datetime.now(timezone.utc)
+    since = window_start(until)
+    approvals = find_approvals(repo, since, until)
+    print(
+        f"{len(approvals)} approval(s) on pull requests merged "
+        f"{since:%Y-%m-%d %H:%M} .. {until:%Y-%m-%d %H:%M} UTC"
+    )
+
+    linear = Linear(os.environ["LINEAR_API_KEY"])
+    team = linear.team(os.environ["LINEAR_REVIEW_TEAM_KEY"])
+    label_name = os.environ.get("LINEAR_REVIEW_LABEL") or None
+    label_id = linear.label_id(team, label_name) if label_name else None
+    users = linear.users_by_github_id()
+
+    created, existing, unmatched = [], [], []
+    for approval in approvals:
+        user = users.get(str(approval.reviewer_github_id))
+        if user is None:
+            unmatched.append(approval)
+            continue
+        ticket_id = ticket_uuid(repo, approval)
+        if linear.issue_exists(ticket_id):
+            existing.append(approval)
+            continue
+        if not dry_run:
+            linear.create_ticket(ticket_id, team, user["id"], label_id, repo, approval, run_url())
+        created.append((approval, user))
+
+    write_summary(repo, since, until, dry_run, created, existing, unmatched)
+
+
+# --------------------------------------------------------------------------- #
+# Window
+# --------------------------------------------------------------------------- #
+
+
+def window_start(until: datetime) -> datetime:
+    """LOOKBACK_HOURS when set; else the start of the last successful run; else 24 h back."""
+    lookback = os.environ.get("LOOKBACK_HOURS")
+    if lookback:
+        hours = float(lookback)
+        if hours <= 0:
+            raise ValueError(f"LOOKBACK_HOURS must be positive, got {lookback!r}")
+        since = until - timedelta(hours=hours)
+    else:
+        last = last_successful_run_start()
+        since = last if last else until - DEFAULT_LOOKBACK
+    return max(since, until - MAX_LOOKBACK)
+
+
+def last_successful_run_start() -> datetime | None:
+    workflow_ref = os.environ.get("GITHUB_WORKFLOW_REF")
+    if not workflow_ref:
+        return None
+    # GITHUB_WORKFLOW_REF is "<owner>/<repo>/.github/workflows/<file>@<ref>".
+    workflow = workflow_ref.split("@")[0].rsplit("/", 1)[1]
+    branch = urllib.parse.quote(os.environ["GITHUB_REF_NAME"])
+    runs = github_get(
+        f"/repos/{os.environ['GITHUB_REPOSITORY']}/actions/workflows/{workflow}"
+        f"/runs?status=success&branch={branch}&per_page=1"
+    )
+    latest = runs["workflow_runs"][:1]
+    return parse_time(latest[0]["run_started_at"]) if latest else None
+
+
+# --------------------------------------------------------------------------- #
+# GitHub
+# --------------------------------------------------------------------------- #
+
+
+def find_approvals(repo: str, since: datetime, until: datetime) -> list[Approval]:
+    """Every (merged pull request, approving human reviewer) pair in the window, oldest first."""
+    approvals = []
+    for number in merged_pull_numbers(repo, since, until):
+        pr = github_get(f"/repos/{repo}/pulls/{number}")
+        approvals.extend(approvals_of(pr, github_paged(f"/repos/{repo}/pulls/{number}/reviews")))
+    return sorted(approvals, key=lambda a: (a.merged_at, a.pr_number, a.reviewer_login))
+
+
+def merged_pull_numbers(repo: str, since: datetime, until: datetime) -> list[int]:
+    query = (
+        f"repo:{repo} is:pr is:merged merged:{since:%Y-%m-%dT%H:%M:%SZ}..{until:%Y-%m-%dT%H:%M:%SZ}"
+    )
+    numbers, page = [], 1
+    while True:
+        result = github_get(
+            "/search/issues?" + urllib.parse.urlencode({"q": query, "per_page": 100, "page": page})
+        )
+        numbers.extend(item["number"] for item in result["items"])
+        if len(result["items"]) < 100:
+            return numbers
+        page += 1
+
+
+def approvals_of(pr: dict, reviews: list[dict]) -> list[Approval]:
+    """One Approval per human reviewer whose review of ``pr`` is APPROVED, at their first approval.
+
+    A dismissed approval has state DISMISSED and does not count. Bots and the
+    pull request's author are left out.
+    """
+    first_approval: dict[int, dict] = {}
+    for review in reviews:
+        user = review.get("user") or {}
+        if review.get("state") != "APPROVED" or user.get("type") == "Bot":
+            continue
+        if user.get("id") == pr["user"]["id"]:
+            continue
+        current = first_approval.get(user["id"])
+        if current is None or review["submitted_at"] < current["submitted_at"]:
+            first_approval[user["id"]] = review
+    return [
+        Approval(
+            pr_number=pr["number"],
+            pr_title=pr["title"],
+            pr_url=pr["html_url"],
+            pr_author=pr["user"]["login"],
+            base_ref=pr["base"]["ref"],
+            merged_at=pr["merged_at"],
+            additions=pr.get("additions", 0),
+            deletions=pr.get("deletions", 0),
+            changed_files=pr.get("changed_files", 0),
+            reviewer_login=review["user"]["login"],
+            reviewer_github_id=review["user"]["id"],
+            approved_at=review["submitted_at"],
+        )
+        for review in first_approval.values()
+    ]
+
+
+def github_get(path: str):
+    request = urllib.request.Request(
+        GITHUB_API + path,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT) as response:
+        return json.load(response)
+
+
+def github_paged(path: str) -> list:
+    items, page = [], 1
+    separator = "&" if "?" in path else "?"
+    while True:
+        batch = github_get(f"{path}{separator}per_page=100&page={page}")
+        items.extend(batch)
+        if len(batch) < 100:
+            return items
+        page += 1
+
+
+# --------------------------------------------------------------------------- #
+# Linear
+# --------------------------------------------------------------------------- #
+
+
+class Linear:
+    def __init__(self, api_key: str):
+        if not api_key:
+            raise ValueError("LINEAR_API_KEY is empty")
+        self.api_key = api_key
+
+    def query(self, query: str, variables: dict | None = None) -> dict:
+        request = urllib.request.Request(
+            LINEAR_API,
+            data=json.dumps({"query": query, "variables": variables or {}}).encode(),
+            headers={"Content-Type": "application/json", "Authorization": self.api_key},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT) as response:
+                payload = json.load(response)
+        except urllib.error.HTTPError as error:
+            raise RuntimeError(
+                f"Linear API HTTP {error.code}: {error.read().decode(errors='replace')[:500]}"
+            ) from error
+        if payload.get("errors"):
+            raise RuntimeError(f"Linear API error: {json.dumps(payload['errors'])[:500]}")
+        return payload["data"]
+
+    def team(self, key: str) -> dict:
+        """The team with this key, with its completed workflow state."""
+        if not key:
+            raise ValueError("LINEAR_REVIEW_TEAM_KEY is empty")
+        data = self.query(
+            """query($key: String!) {
+                 teams(filter: {key: {eq: $key}}) {
+                   nodes { id key name states { nodes { id name type position } } }
+                 }
+               }""",
+            {"key": key},
+        )
+        teams = data["teams"]["nodes"]
+        if not teams:
+            raise RuntimeError(f"No Linear team with key {key!r}")
+        team = teams[0]
+        completed = sorted(
+            (s for s in team["states"]["nodes"] if s["type"] == "completed"),
+            key=lambda s: s["position"],
+        )
+        if not completed:
+            raise RuntimeError(f"Linear team {key!r} has no completed workflow state")
+        return {"id": team["id"], "key": team["key"], "state_id": completed[0]["id"]}
+
+    def label_id(self, team: dict, name: str) -> str:
+        """The id of the label with this name, in the team or workspace-wide."""
+        data = self.query(
+            """query($name: String!) {
+                 issueLabels(filter: {name: {eqIgnoreCase: $name}}) {
+                   nodes { id name team { id } }
+                 }
+               }""",
+            {"name": name},
+        )
+        usable = [
+            label
+            for label in data["issueLabels"]["nodes"]
+            if label["team"] is None or label["team"]["id"] == team["id"]
+        ]
+        if not usable:
+            raise RuntimeError(
+                f"No Linear label {name!r} in team {team['key']} or workspace-wide; "
+                "create it or unset LINEAR_REVIEW_LABEL"
+            )
+        return usable[0]["id"]
+
+    def users_by_github_id(self) -> dict[str, dict]:
+        """Active, assignable Linear users who connected GitHub, by GitHub user id."""
+        users, after = {}, None
+        while True:
+            data = self.query(
+                """query($after: String) {
+                     users(first: 100, after: $after) {
+                       nodes { id name active gitHubUserId }
+                       pageInfo { hasNextPage endCursor }
+                     }
+                   }""",
+                {"after": after},
+            )
+            for user in data["users"]["nodes"]:
+                if user["active"] and user["gitHubUserId"]:
+                    users[str(user["gitHubUserId"])] = user
+            page = data["users"]["pageInfo"]
+            if not page["hasNextPage"]:
+                return users
+            after = page["endCursor"]
+
+    def issue_exists(self, issue_id: str) -> bool:
+        # Archived (and trashed) tickets count: their id is taken, and creating
+        # it again would fail every later run.
+        data = self.query(
+            """query($id: ID!) {
+                 issues(filter: {id: {eq: $id}}, includeArchived: true) { nodes { id } }
+               }""",
+            {"id": issue_id},
+        )
+        return bool(data["issues"]["nodes"])
+
+    def create_ticket(
+        self,
+        issue_id: str,
+        team: dict,
+        assignee_id: str,
+        label_id: str | None,
+        repo: str,
+        approval: Approval,
+        source_url: str | None,
+    ) -> None:
+        issue = {
+            "id": issue_id,
+            "teamId": team["id"],
+            "assigneeId": assignee_id,
+            "stateId": team["state_id"],
+            "title": ticket_title(repo, approval),
+            "description": ticket_description(approval, source_url),
+        }
+        if label_id:
+            issue["labelIds"] = [label_id]
+        data = self.query(
+            """mutation($input: IssueCreateInput!) {
+                 issueCreate(input: $input) { success issue { id identifier } }
+               }""",
+            {"input": issue},
+        )
+        if not data["issueCreate"]["success"]:
+            raise RuntimeError(f"Linear refused to create the ticket for {approval.pr_url}")
+        attached = self.query(
+            """mutation($input: AttachmentCreateInput!) {
+                 attachmentCreate(input: $input) { success }
+               }""",
+            {
+                "input": {
+                    "issueId": issue_id,
+                    "url": approval.pr_url,
+                    "title": f"#{approval.pr_number} {approval.pr_title}"[:MAX_TITLE],
+                }
+            },
+        )
+        if not attached["attachmentCreate"]["success"]:
+            raise RuntimeError(f"Linear refused to attach {approval.pr_url}")
+        print(
+            f"Created {data['issueCreate']['issue']['identifier']} for "
+            f"{approval.reviewer_login} on #{approval.pr_number}"
+        )
+
+
+# --------------------------------------------------------------------------- #
+# Ticket content
+# --------------------------------------------------------------------------- #
+
+
+def ticket_uuid(repo: str, approval: Approval) -> str:
+    """Deterministic per (repository, pull request, reviewer), shaped as UUID v4 as Linear requires."""
+    digest = uuid.uuid5(
+        TICKET_NAMESPACE, f"{repo}#{approval.pr_number}:{approval.reviewer_github_id}"
+    )
+    return str(uuid.UUID(bytes=digest.bytes, version=4))
+
+
+def ticket_title(repo: str, approval: Approval) -> str:
+    return f"PR review: {repo.split('/')[-1]}#{approval.pr_number} {approval.pr_title}"[:MAX_TITLE]
+
+
+def ticket_description(approval: Approval, source_url: str | None) -> str:
+    lines = [
+        f"Approved pull request [#{approval.pr_number} {approval.pr_title}]({approval.pr_url}).",
+        "",
+        f"- Author: @{approval.pr_author}",
+        f"- Reviewer: @{approval.reviewer_login}",
+        f"- Approved: {approval.approved_at}",
+        f"- Merged into `{approval.base_ref}`: {approval.merged_at}",
+        f"- Size: +{approval.additions} −{approval.deletions} in {approval.changed_files} file(s)",
+    ]
+    if source_url:
+        lines += ["", f"_Created by the [PR review tickets workflow]({source_url})._"]
+    return "\n".join(lines)
+
+
+def run_url() -> str | None:
+    if not os.environ.get("GITHUB_RUN_ID"):
+        return None
+    return (
+        f"{os.environ.get('GITHUB_SERVER_URL', 'https://github.com')}/"
+        f"{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
+    )
+
+
+def write_summary(repo, since, until, dry_run, created, existing, unmatched) -> None:
+    verb = "Would create" if dry_run else "Created"
+    lines = [
+        f"## PR review tickets{' (dry run)' if dry_run else ''}",
+        "",
+        f"Pull requests of `{repo}` merged {since:%Y-%m-%d %H:%M} .. {until:%Y-%m-%d %H:%M} UTC.",
+        "",
+        (
+            f"**{verb} {len(created)} ticket(s)**, {len(existing)} already existed, "
+            f"{len(unmatched)} approval(s) with no Linear user."
+        ),
+        "",
+    ]
+    if created:
+        lines += ["| PR | Reviewer | Linear user |", "|---|---|---|"]
+        lines += [
+            f"| [#{a.pr_number}]({a.pr_url}) {a.pr_title[:60]} | @{a.reviewer_login} | {u['name']} |"
+            for a, u in created
+        ]
+        lines.append("")
+    if unmatched:
+        lines += [
+            "No Linear user has connected these GitHub accounts, so their approvals got no ticket:",
+            "",
+        ]
+        lines += [f"- @{a.reviewer_login} on [#{a.pr_number}]({a.pr_url})" for a in unmatched]
+    text = "\n".join(lines) + "\n"
+    print(text)
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary_path:
+        with open(summary_path, "a", encoding="utf-8") as summary:
+            summary.write(text)
+
+
+def parse_time(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+if __name__ == "__main__":
+    main()
