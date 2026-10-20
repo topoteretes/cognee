@@ -265,3 +265,23 @@ class TestImproveEndpoint:
             "run_in_background": False,
             "dataset_id": "11111111-1111-1111-1111-111111111111",
         }
+
+
+def test_distinct_text_uploads_have_distinct_filenames():
+    """Different text uploads should not reuse a document filename."""
+    filenames = []
+
+    with patch("cognee.cli.api_client.httpx.Client"):
+        client = CogneeApiClient("http://localhost:8000")
+
+        mock_http_client = MagicMock()
+        mock_http_client.post.return_value.json.return_value = {}
+        client._client = mock_http_client
+
+        for text in ["First research note", "Second research note"]:
+            client.add([text])
+
+            files = mock_http_client.post.call_args.kwargs["files"]
+            filenames.append(files[0][1][0])
+
+    assert filenames[0] != filenames[1]
