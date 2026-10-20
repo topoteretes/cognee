@@ -12,9 +12,12 @@ and every memory stays on disk for later re-querying:
    prompt for every question (``qa_prompts/unified.txt``) and the LLM judge —
    ``cognee.eval_framework.locomo.answer``
 
-then aggregates everything into ``<run-dir>/locomo_summary.{json,md}``, reporting the results
-without the questions whose gold answer the audits in ``report_artifacts/gold_exclusions.json``
-mark as corrupted.
+then aggregates everything into ``<run-dir>/locomo_summary.{json,md}``.
+
+Only in-scope questions are answered and judged (``scope.py``): open-domain questions and the
+questions whose gold answer the audits in ``report_artifacts/gold_exclusions.json`` mark as
+corrupted are dropped before retrieval. A run directory that holds answers to out-of-scope
+questions is not aggregated.
 
 Models: the extraction / answering model is ``--answer-model`` (env ``LLM_MODEL`` for the
 children); the judge is ``--judge-model`` (env ``LOCOMO_JUDGE_MODEL``).
@@ -56,12 +59,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from cognee.eval_framework.locomo.scope import DEFAULT_GOLD_EXCLUSIONS, EvaluationScope
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 LOCOMO_DIR = REPO_ROOT / "cognee" / "eval_framework" / "locomo"
 DEFAULT_RUNS_ROOT = REPO_ROOT / "temp" / "locomo_runs"
 DEFAULT_DATA_PATH = REPO_ROOT / "temp" / "locomo_data" / "locomo10.json"
 DEFAULT_CONFIG = LOCOMO_DIR / "configs" / "locomo_hybrid_20_20_20.json"
-DEFAULT_GOLD_EXCLUSIONS = LOCOMO_DIR / "report_artifacts" / "gold_exclusions.json"
 
 DEFAULT_ANSWER_MODEL = "openai/gpt-5-mini"
 DEFAULT_JUDGE_MODEL = "openai/gpt-5.1"
@@ -175,6 +179,8 @@ def answer_args(args: argparse.Namespace, index: int, conv_dir: Path) -> list[st
         str(args.config_json_path),
         "--data-path",
         str(args.data_path),
+        "--gold-exclusions",
+        str(args.scope.gold_exclusions),
         "--num-runs",
         str(args.num_runs),
         "--max-concurrent-questions",
@@ -216,7 +222,7 @@ def write_run_manifest(args: argparse.Namespace, conversations: list[int]) -> No
         "max_questions": args.max_questions,
         "question_types": args.question_types,
         "num_runs": args.num_runs,
-        "gold_exclusions": str(args.gold_exclusions) if args.gold_exclusions else None,
+        "scope": args.scope.metadata(),
         "git_head": _git_head(),
     }
     args.run_dir.mkdir(parents=True, exist_ok=True)
@@ -232,6 +238,28 @@ def _git_head() -> str | None:
         ).strip()
     except (OSError, subprocess.CalledProcessError):
         return None
+
+
+def out_of_scope_metric_files(run_dir: Path, scope: EvaluationScope) -> list[Path]:
+    """The metric files of ``run_dir`` holding an answer to an out-of-scope or unidentified
+    question. Fresh metric rows carry no conversation index; it comes from the file name."""
+    from cognee.eval_framework.locomo.aggregate import find_metric_files
+
+    return [
+        info["path"]
+        for info in find_metric_files(run_dir)
+        if not all(
+            _row_in_scope(row, info["conversation_index"], scope)
+            for row in json.loads(info["path"].read_text(encoding="utf-8"))
+        )
+    ]
+
+
+def _row_in_scope(row: dict[str, Any], conversation_index: int, scope: EvaluationScope) -> bool:
+    question_idx = row.get("question_idx")
+    return isinstance(question_idx, int) and scope.includes(
+        conversation_index, question_idx, row.get("question_type", "unknown")
+    )
 
 
 def run_conversation(args: argparse.Namespace, index: int) -> dict[str, Any]:
@@ -295,7 +323,7 @@ def _parse_args() -> argparse.Namespace:
         "--gold-exclusions",
         type=Path,
         default=DEFAULT_GOLD_EXCLUSIONS,
-        help="questions with a corrupted gold answer, left out of the reported results",
+        help="audit exclusions; these and open-domain questions are not answered",
     )
     parser.add_argument(
         "--answer-model", default=os.getenv("LOCOMO_ANSWER_MODEL", DEFAULT_ANSWER_MODEL)
@@ -360,8 +388,10 @@ def _parse_args() -> argparse.Namespace:
             if not path.is_file():
                 parser.error(f"--{option.replace('_', '-')}: no such file: {path}")
             setattr(args, option, path.resolve())
-    if args.gold_exclusions is not None and not args.gold_exclusions.is_file():
-        parser.error(f"missing gold exclusions file: {args.gold_exclusions}")
+    try:
+        args.scope = EvaluationScope.load(args.gold_exclusions)
+    except (OSError, ValueError) as error:
+        parser.error(f"--gold-exclusions: {error}")
     return args
 
 
@@ -399,8 +429,15 @@ def main() -> None:
     if args.stage in ("all", "answer", "aggregate"):
         from cognee.eval_framework.locomo.aggregate import aggregate_and_write, render_markdown
 
+        out_of_scope = out_of_scope_metric_files(args.run_dir, args.scope)
+        if out_of_scope:
+            raise SystemExit(
+                f"{len(out_of_scope)} metric file(s) hold out-of-scope answers, e.g. "
+                f"{out_of_scope[0]}; aggregate a fresh run directory, or filter old files as "
+                "described in report_artifacts/README.md"
+            )
         try:
-            summary = aggregate_and_write(args.run_dir, args.gold_exclusions)
+            summary = aggregate_and_write(args.run_dir)
             print(render_markdown(summary))
             print_step(f"summary: {args.run_dir / 'locomo_summary.md'}")
         except FileNotFoundError as error:

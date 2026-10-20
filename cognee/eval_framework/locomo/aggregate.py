@@ -18,7 +18,6 @@ the numbers on all questions too.
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import statistics
 from collections import defaultdict
@@ -26,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from cognee.eval_framework.analysis.metrics_calculator import bootstrap_ci
+from cognee.eval_framework.locomo.scope import load_gold_exclusions
 from cognee.eval_framework.reporting.io import read_json, write_json
 
 METRICS = ("llm_judge",)
@@ -54,23 +54,6 @@ def find_metric_files(run_dir: Path) -> list[dict[str, Any]]:
             }
         )
     return found
-
-
-def load_gold_exclusions(path: Path) -> dict[str, set[tuple[int, int]]]:
-    """``{variant: {(conversation_index, question_idx), ...}}`` from a gold-exclusions file.
-
-    The file lists question sets under ``sets.<name>.questions`` and, under ``variants``, which
-    sets each variant removes together.
-    """
-    document = json.loads(path.read_text(encoding="utf-8"))
-    sets = {
-        name: {(int(q["conversation_index"]), int(q["question_idx"])) for q in block["questions"]}
-        for name, block in document["sets"].items()
-    }
-    return {
-        variant: set().union(*(sets[name] for name in names))
-        for variant, names in document["variants"].items()
-    }
 
 
 def _score(entry: dict[str, Any], metric: str) -> float | None:
