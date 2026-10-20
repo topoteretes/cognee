@@ -18,6 +18,7 @@ from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.code_docs.models import CodeDocsBatch
 from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
 from cognee.tasks.summarization.models import TextSummary
 
@@ -77,7 +78,8 @@ async def cognify_code_doc_chunks(
     store writes the whole object graph, exactly how the cognify chain stores
     documents. A batch without chunks is returned unchanged, so an empty run
     still reaches the sweep. Returns what extraction returned for each piece
-    -- summaries, or chunks as themselves -- then the unchanged chunks.
+    -- summaries, or chunks as themselves -- then the unchanged chunks, with
+    the batch's ``read_repos`` carried over (CodeDocsBatch.carry).
     """
     from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 
@@ -104,4 +106,4 @@ async def cognify_code_doc_chunks(
                 pending[start : start + chunks_per_batch], graph_model=graph_model, ctx=ctx
             )
         )
-    return results + unchanged
+    return CodeDocsBatch.carry(data_points, results + unchanged)

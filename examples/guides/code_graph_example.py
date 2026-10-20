@@ -119,10 +119,11 @@ async def main():
     print(json.dumps(insights, indent=2, default=str))
 
     # Docstrings as memory. The last task of the pipeline above stored each
-    # documented symbol's docstring as a DocumentChunk whose text starts with
-    # "file:line" and the signature, linked to its CodeSymbol with a `describes`
-    # edge, so recall / CHUNKS / GRAPH_COMPLETION answer "what does X do" from
-    # the docstring and reach the code in one hop. Embed-only: no LLM call.
+    # documented symbol's docstring (the whole comment enola wrote to its
+    # docs.jsonl) as a DocumentChunk whose text starts with "file:line" and the
+    # symbol's name, linked to its CodeSymbol with a `describes` edge, so
+    # recall / CHUNKS / GRAPH_COMPLETION answer "what does X do" from the
+    # docstring and reach the code in one hop. Embed-only: no LLM call.
     # cognify_code_docs_pipeline(user, dataset=..., extract_entities=True) in
     # cognee.memify_pipelines.cognify_code_docs additionally runs cognify's LLM
     # entity extraction and summaries over the chunks (needs an LLM key).

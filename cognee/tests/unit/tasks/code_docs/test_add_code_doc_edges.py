@@ -1,9 +1,14 @@
-"""add_code_doc_edges: describes edges by id, idempotent re-runs and a scoped sweep."""
+"""add_code_doc_edges: describes edges by id, idempotent re-runs and a scoped sweep.
+
+The sweep leaves alone a repository whose snapshot docs the run could not read;
+those cases run against real snapshot directories (write_enola_snapshot).
+"""
 
 import importlib
 import json
+import threading
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -23,9 +28,18 @@ from cognee.tasks.code_docs import (
     add_code_doc_edges,
     code_document_id,
 )
-from cognee.tasks.code_docs.add_code_doc_edges import link_code_docs
+from cognee.tasks.code_docs.add_code_doc_edges import _sweep_scope, link_code_docs
+from cognee.tasks.code_docs.extract_code_docs import snapshot_docs
+from cognee.tasks.code_docs.models import CodeDocsBatch
+from cognee.tasks.code_graph.enola import EnolaDocsUnavailable
 from cognee.tasks.code_graph.extract_code_graph import fact_node_id
 from cognee.tasks.summarization.models import TextSummary
+from cognee.tests.utils.enola_snapshot import (
+    doc_line,
+    enola_fact_id,
+    sha256_label,
+    write_enola_snapshot,
+)
 
 add_code_doc_edges_module = importlib.import_module("cognee.tasks.code_docs.add_code_doc_edges")
 graph_engine_module = importlib.import_module(
@@ -36,38 +50,48 @@ code_retriever_module = importlib.import_module("cognee.modules.retrieval.code_r
 
 REPO = "demo_repo"
 OTHER_REPO = "other_repo"
+FORGOTTEN_REPO = "forgotten_repo"
 FILE = "app/db.py"
+# A module doc is per package: its ``file`` is the package directory.
+PACKAGE = "app"
 SYMBOL = "app/db.Database"
 SYMBOL_ID = str(fact_node_id(REPO, "symbol", SYMBOL))
-MODULE_ID = str(fact_node_id(REPO, "module", "app"))
+MODULE_ID = str(fact_node_id(REPO, "module", PACKAGE))
+# The fact ids docs.jsonl lines carry, stored as the code nodes' enola_id.
+SYMBOL_ENOLA_ID = enola_fact_id(REPO, "symbol", SYMBOL, FILE)
+MODULE_ENOLA_ID = enola_fact_id(REPO, "module", PACKAGE, PACKAGE)
+# The snapshot the code graph was built from (CodeRepository.last_snapshot_id).
+SNAPSHOT_ID = "snapshot-1"
+DOC_LINE = doc_line(REPO, "symbol", SYMBOL, FILE, "Open the database.", line=12)
 READ_TYPES = [
     "CodeDocument",
     "DocumentChunk",
     "TextSummary",
     "CodeSymbol",
     "CodeModule",
+    # The sweep reads each repository's path and last_snapshot_id.
     "CodeRepository",
 ]
 ENTITY_READ_TYPES = ["DocumentChunk", "Entity", "EntityType"]
 
 CODE_NODES = [
-    (SYMBOL_ID, {"type": "CodeSymbol", "name": SYMBOL, "repo": REPO}),
-    (MODULE_ID, {"type": "CodeModule", "name": "app", "repo": REPO}),
+    (SYMBOL_ID, {"type": "CodeSymbol", "name": SYMBOL, "repo": REPO, "enola_id": SYMBOL_ENOLA_ID}),
+    (MODULE_ID, {"type": "CodeModule", "name": PACKAGE, "repo": REPO, "enola_id": MODULE_ENOLA_ID}),
 ]
 
 
-def _document(file_path=FILE, repo=REPO):
+def _document(file_path=FILE, repo=REPO, symbol_count=1):
     return CodeDocument(
         id=code_document_id(repo, file_path),
         name=file_path,
-        raw_data_location=f"/repos/{repo}/{file_path}",
+        raw_data_location=file_path,
         external_metadata=json.dumps(
             {"code_doc": {"repo": repo, "file": file_path, "language": "python"}}
         ),
         repo=repo,
         file_path=file_path,
         language="python",
-        symbol_count=1,
+        symbol_count=symbol_count,
     )
 
 
@@ -90,7 +114,7 @@ def _chunk(document, text, chunk_index, metadata):
 
 
 def _symbol_chunk(document, docstring="Open the database.", symbol_id=SYMBOL_ID, line=12):
-    text = f"{FILE}:{line}\n{SYMBOL} (class)\nclass Database:\n\n{docstring}"
+    text = f"{FILE}:{line}\n{SYMBOL} (class)\n\n{docstring}"
     metadata = {
         "repo": REPO,
         "file": FILE,
@@ -100,29 +124,59 @@ def _symbol_chunk(document, docstring="Open the database.", symbol_id=SYMBOL_ID,
         "symbol_id": symbol_id,
         "symbol_kind": "class",
         "language": "python",
-        "doc_source": "source",
+        "enola_id": SYMBOL_ENOLA_ID,
     }
     return _chunk(document, text, 1, metadata)
 
 
 def _module_chunk(document, module_id=MODULE_ID):
+    """A module doc in ``document``: no line, the package named, its CodeModule as module_id."""
     metadata = {
         "repo": REPO,
-        "file": FILE,
-        "line": 1,
+        "file": document.file_path,
+        "line": None,
         "end_line": None,
-        "symbol": "app/db",
+        "symbol": PACKAGE,
         "symbol_id": None,
         "symbol_kind": "module",
         "language": "python",
-        "doc_source": "source",
+        "enola_id": MODULE_ENOLA_ID,
         "module_id": module_id,
     }
-    return _chunk(document, f"{FILE}:1\napp/db (module)\n\nDatabase helpers.", 0, metadata)
+    text = f"{document.file_path}\n{PACKAGE} (module)\n\nDatabase helpers."
+    return _chunk(document, text, 0, metadata)
 
 
 def _stored_document(repo, file_path):
     return (str(code_document_id(repo, file_path)), {"type": "CodeDocument", "repo": repo})
+
+
+def _stored_docs(repo, file_path):
+    """A stored CodeDocument of ``repo`` with one chunk: (nodes, edges, [document id, chunk id])."""
+    document_id, properties = _stored_document(repo, file_path)
+    chunk_id = str(uuid4())
+    nodes = [(document_id, properties), (chunk_id, {"type": "DocumentChunk"})]
+    return nodes, [(chunk_id, document_id, "is_part_of", {})], [document_id, chunk_id]
+
+
+def _repository_node(repo, path, snapshot_id=SNAPSHOT_ID):
+    """A stored CodeRepository: where enola wrote its snapshot, and the one its graph holds.
+
+    ``path`` or ``snapshot_id`` None leaves that property out.
+    """
+    properties = {"type": "CodeRepository", "name": repo}
+    if path is not None:
+        properties["path"] = str(path)
+    if snapshot_id is not None:
+        properties["last_snapshot_id"] = snapshot_id
+    return str(fact_node_id(repo, "repository", repo)), properties
+
+
+def _write_snapshot(directory, **overrides):
+    """A snapshot as enola 0.4.32 leaves it: the graph's id, a receipt vouching for docs.jsonl."""
+    return write_enola_snapshot(
+        directory, **{"docs": [DOC_LINE], "snapshot_id": SNAPSHOT_ID, **overrides}
+    )
 
 
 def _mock_engine(monkeypatch, nodes=(), edges=(), entity_graph=None):
@@ -154,6 +208,13 @@ def _deleted(engine):
 
 def _reads(engine):
     return [call.args[0] for call in engine.get_filtered_graph_data.await_args_list]
+
+
+def _kept_warnings(logger):
+    """What each of the sweep's "kept as stored" warnings named."""
+    return [
+        call.args[1] for call in logger.warning.call_args_list if "kept as stored" in call.args[0]
+    ]
 
 
 def _delete_data(node_id, source_ref_keys):
@@ -203,30 +264,47 @@ def invalidations(monkeypatch):
     return calls
 
 
+@pytest.fixture
+def link_logger(monkeypatch):
+    """The link task's logger, recorded."""
+    logger = MagicMock()
+    monkeypatch.setattr(add_code_doc_edges_module, "logger", logger)
+    return logger
+
+
 @pytest.mark.asyncio
 async def test_writes_describes_edges_in_the_code_graph_shape(monkeypatch, invalidations):
     document = _document()
+    package = _document(PACKAGE, symbol_count=0)
     symbol_chunk = _symbol_chunk(document)
-    module_chunk = _module_chunk(document)
+    module_chunk = _module_chunk(package)
     engine = _mock_engine(monkeypatch, CODE_NODES)
 
-    result = await add_code_doc_edges([document, module_chunk, symbol_chunk])
+    result = await add_code_doc_edges([document, package, module_chunk, symbol_chunk])
 
-    assert result == [document, module_chunk, symbol_chunk]
+    assert result == [document, package, module_chunk, symbol_chunk]
     engine.get_filtered_graph_data.assert_awaited_once_with([{"type": READ_TYPES}])
-    # Chunk -> code node, in batch order; a module docstring links to its CodeModule.
+    # Chunk -> code node, in batch order; a module doc links to its CodeModule.
     assert _edge_keys(engine) == [
         (str(module_chunk.id), MODULE_ID, "describes"),
         (str(symbol_chunk.id), SYMBOL_ID, "describes"),
     ]
     properties = engine.add_edges.await_args.args[0][1][3]
+    # The props build_code_graph_edges writes plus the chunk's index, nothing
+    # else: Enola is the only source of a doc, so none is recorded.
+    assert set(properties) == {
+        "chunk_index",
+        "source_node_id",
+        "target_node_id",
+        "relationship_name",
+        "edge_text",
+        "updated_at",
+    }
     assert properties["source_node_id"] == str(symbol_chunk.id)
     assert properties["target_node_id"] == SYMBOL_ID
     assert properties["relationship_name"] == DESCRIBES_RELATIONSHIP == "describes"
     assert properties["edge_text"] == "describes"
-    assert properties["doc_source"] == "source"
     assert properties["chunk_index"] == 1
-    assert "updated_at" in properties
     # An empty graph has nothing stale; the snapshot cache is invalidated regardless.
     engine.delete_nodes.assert_not_awaited()
     engine.get_node_delete_data.assert_not_awaited()
@@ -322,14 +400,17 @@ async def test_sweep_deletes_only_the_stale_docs_and_chunks_in_scope(
 
 @pytest.mark.asyncio
 async def test_sweep_without_a_filter_covers_every_repository_with_documents(
-    monkeypatch, invalidations, vectors
+    monkeypatch, invalidations, vectors, tmp_path
 ):
+    _write_snapshot(tmp_path / ".enola")
     document = _document()
     chunk = _symbol_chunk(document)
     other_document_id, other_props = _stored_document(OTHER_REPO, "lib/x.py")
     other_chunk_id = str(uuid4())
-    # No CodeRepository node for other_repo (forgotten or renamed): its docs remain.
+    # demo_repo's graph holds the snapshot the run read. other_repo has no
+    # CodeRepository node (forgotten or renamed): its docs remain.
     nodes = CODE_NODES + [
+        _repository_node(REPO, tmp_path),
         (str(document.id), {"type": "CodeDocument", "repo": REPO}),
         (str(chunk.id), {"type": "DocumentChunk"}),
         (other_document_id, other_props),
@@ -352,13 +433,16 @@ async def test_sweep_without_a_filter_covers_every_repository_with_documents(
 
 @pytest.mark.asyncio
 async def test_sweep_with_a_filter_covers_that_repository_even_from_an_empty_batch(
-    monkeypatch, invalidations, vectors
+    monkeypatch, invalidations, vectors, tmp_path
 ):
+    # demo_repo's snapshot documents nothing any more: a vouched, empty docs.jsonl.
+    _write_snapshot(tmp_path / ".enola", docs=[])
     document = _document()
     chunk = _symbol_chunk(document)
     other_document_id, other_props = _stored_document(OTHER_REPO, "lib/x.py")
     other_chunk_id = str(uuid4())
     nodes = CODE_NODES + [
+        _repository_node(REPO, tmp_path),
         (str(document.id), {"type": "CodeDocument", "repo": REPO}),
         (str(chunk.id), {"type": "DocumentChunk"}),
         (other_document_id, other_props),
@@ -388,84 +472,252 @@ async def test_sweep_with_a_filter_covers_that_repository_even_from_an_empty_bat
     assert len(invalidations) == 3
 
 
-def _repository_node(repo, path):
-    return (
-        str(fact_node_id(repo, "repository", repo)),
-        {"type": "CodeRepository", "name": repo, "path": str(path)},
+@pytest.mark.asyncio
+async def test_sweep_scope_is_the_filtered_repository_or_every_one_with_documents(
+    tmp_path, link_logger
+):
+    """The scope is read off the stored CodeDocuments, a forgotten repository's
+    included, not off the CodeRepository nodes; a filter is the scope by
+    itself. A repository with a node stays in only while its snapshot docs are
+    available."""
+    _write_snapshot(tmp_path / ".enola")
+    nodes = dict(
+        [
+            _repository_node(REPO, tmp_path),
+            # A node without stored docs: outside an unfiltered scope, never checked.
+            _repository_node(OTHER_REPO, tmp_path / "gone"),
+            _stored_document(REPO, FILE),
+            _stored_document(FORGOTTEN_REPO, "pkg/y.py"),
+            (str(uuid4()), {"type": "CodeDocument", "repo": None}),
+            (str(uuid4()), {"type": "DocumentChunk", "repo": "not_a_document"}),
+        ]
     )
+
+    assert await _sweep_scope(None, nodes) == {REPO, FORGOTTEN_REPO}
+    assert await _sweep_scope(REPO, nodes) == {REPO}
+    assert await _sweep_scope("new_repo", nodes) == {"new_repo"}
+    assert _kept_warnings(link_logger) == []
+
+    # Filtered to the repository whose snapshot is gone: nothing in scope.
+    assert await _sweep_scope(OTHER_REPO, nodes) == set()
+    assert _kept_warnings(link_logger) == [repr(OTHER_REPO)]
 
 
 @pytest.mark.asyncio
-async def test_sweep_keeps_a_repository_whose_source_it_could_not_read(
-    monkeypatch, invalidations, vectors, tmp_path
+async def test_sweep_covers_a_repository_whose_snapshot_docs_are_available(
+    monkeypatch, invalidations, vectors, tmp_path, link_logger
 ):
-    """The extraction leaves out a repository whose directory is not readable
-    when its stored docs were read from source (a lost clone, an earlier run's
-    staging directory), so its absence from the batch says nothing about its
-    docs: the sweep leaves it out by the same rule. A repository whose stored
-    docs are Enola's, or whose CodeRepository node is gone, is swept; the
-    caller's repo_path (the directory a route just indexed) is what makes the
-    filtered repository readable again."""
-    forgotten = "forgotten_repo"
-    kept_document_id = str(code_document_id(REPO, FILE))
-    kept_chunk_id = str(uuid4())
-    enola_document_id = str(code_document_id(OTHER_REPO, "lib/x.py"))
-    enola_chunk_id = str(uuid4())
-    forgotten_document_id = str(code_document_id(forgotten, "pkg/y.py"))
-    forgotten_chunk_id = str(uuid4())
-    nodes = [
-        _repository_node(REPO, tmp_path / "gone"),
-        _repository_node(OTHER_REPO, tmp_path / "also-gone"),
-        (kept_document_id, {"type": "CodeDocument", "repo": REPO, "doc_source": "source"}),
-        (kept_chunk_id, {"type": "DocumentChunk"}),
-        (enola_document_id, {"type": "CodeDocument", "repo": OTHER_REPO, "doc_source": "enola"}),
-        (enola_chunk_id, {"type": "DocumentChunk"}),
-        # No CodeRepository node: nothing to read, swept outright.
-        (
-            forgotten_document_id,
-            {"type": "CodeDocument", "repo": forgotten, "doc_source": "source"},
-        ),
-        (forgotten_chunk_id, {"type": "DocumentChunk"}),
+    """The receipt vouches for docs.jsonl and the snapshot id is the one the
+    code graph holds: the batch is what the run derived from those docs, so
+    the stored docs it lacks are stale."""
+    _write_snapshot(tmp_path / ".enola")
+    document = _document()
+    chunk = _symbol_chunk(document)
+    legacy_nodes, legacy_edges, legacy_ids = _stored_docs(REPO, "app/legacy.py")
+    nodes = CODE_NODES + [
+        _repository_node(REPO, tmp_path),
+        (str(document.id), {"type": "CodeDocument", "repo": REPO}),
+        (str(chunk.id), {"type": "DocumentChunk"}),
+        *legacy_nodes,
     ]
-    edges = [
-        (kept_chunk_id, kept_document_id, "is_part_of", {}),
-        (enola_chunk_id, enola_document_id, "is_part_of", {}),
-        (forgotten_chunk_id, forgotten_document_id, "is_part_of", {}),
-    ]
+    edges = [(str(chunk.id), str(document.id), "is_part_of", {}), *legacy_edges]
 
-    # Unfiltered and empty: of the two repositories without a readable
-    # source, the one holding full docstrings stays and the one holding
-    # Enola's goes; so does the forgotten one.
+    for repo in (REPO, None):
+        engine = _mock_engine(monkeypatch, nodes, edges)
+        await add_code_doc_edges([document, chunk], repo=repo)
+        assert _deleted(engine) == sorted(legacy_ids)
+
+    # A vouched, empty docs.jsonl says the repository documents nothing any
+    # more (not that enola did not run): every stored doc of it goes.
+    _write_snapshot(tmp_path / ".enola", docs=[])
+    engine = _mock_engine(monkeypatch, nodes, edges)
+    await add_code_doc_edges([], repo=REPO)
+    assert _deleted(engine) == sorted([str(document.id), str(chunk.id), *legacy_ids])
+    assert _kept_warnings(link_logger) == []
+
+
+@pytest.mark.parametrize(
+    "snapshot, repository",
+    [
+        # enola before 0.4.32, or a configuration without the docs renderer.
+        pytest.param({"docs": None}, {}, id="no-docs-file"),
+        # A docs.jsonl an earlier run left: this run's receipt does not list it.
+        pytest.param({"vouch_docs": False}, {}, id="not-vouched"),
+        # A later enola run wrote over the snapshot the code graph was built from.
+        pytest.param({"snapshot_id": "snapshot-2"}, {}, id="other-snapshot"),
+        # The node records no snapshot id to match, or no directory to read.
+        pytest.param({}, {"snapshot_id": None}, id="no-stored-snapshot-id"),
+        pytest.param({}, {"path": None}, id="no-path"),
+        # A lost clone, or an earlier run's staging directory.
+        pytest.param(None, {}, id="no-snapshot-directory"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_sweep_keeps_a_repository_whose_snapshot_docs_are_unavailable(
+    monkeypatch, invalidations, vectors, tmp_path, link_logger, snapshot, repository
+):
+    """The extraction derived nothing for a repository whose snapshot docs it
+    could not read, so the batch says nothing about its stored docs: the sweep
+    leaves them alone and names the repository. A forgotten repository (no
+    CodeRepository node, so no snapshot to read) goes in the same run."""
+    if snapshot is not None:
+        _write_snapshot(tmp_path / ".enola", **snapshot)
+    kept_nodes, kept_edges, _ = _stored_docs(REPO, FILE)
+    forgotten_nodes, forgotten_edges, forgotten_ids = _stored_docs(FORGOTTEN_REPO, "pkg/y.py")
+    nodes = [
+        _repository_node(REPO, **{"path": tmp_path, **repository}),
+        *kept_nodes,
+        *forgotten_nodes,
+    ]
+    edges = kept_edges + forgotten_edges
+
     engine = _mock_engine(monkeypatch, nodes, edges)
     await add_code_doc_edges([])
-    assert _deleted(engine) == sorted(
-        [enola_document_id, enola_chunk_id, forgotten_document_id, forgotten_chunk_id]
-    )
+    assert _deleted(engine) == sorted(forgotten_ids)
     assert vectors.deleted == [
-        ("CodeDocument_name", sorted([enola_document_id, forgotten_document_id])),
-        ("DocumentChunk_text", sorted([enola_chunk_id, forgotten_chunk_id])),
+        ("CodeDocument_name", forgotten_ids[:1]),
+        ("DocumentChunk_text", forgotten_ids[1:]),
     ]
 
-    # Filtered to the unreadable repository: nothing.
+    # Filtered to it: nothing is swept at all.
     engine = _mock_engine(monkeypatch, nodes, edges)
     await add_code_doc_edges([], repo=REPO)
     engine.delete_nodes.assert_not_awaited()
+    assert _kept_warnings(link_logger) == [repr(REPO)] * 2
 
-    # The caller's directory is what this run read: the stale docs go.
-    engine = _mock_engine(monkeypatch, nodes, edges)
-    await add_code_doc_edges([], repo=REPO, repo_path=tmp_path)
-    assert _deleted(engine) == sorted([kept_document_id, kept_chunk_id])
 
-    # A document stored before doc_source existed counts as read from source.
-    legacy = [
-        (node_id, {"type": "CodeDocument", "repo": REPO})
-        if node_id == kept_document_id
-        else (node_id, props)
-        for node_id, props in nodes
+@pytest.mark.asyncio
+async def test_sweep_reads_the_callers_snapshot_dir_instead_of_the_stored_path(
+    monkeypatch, invalidations, vectors, tmp_path, link_logger
+):
+    """The routes pass the snapshot they just loaded: once an unchanged
+    snapshot is skipped, a node's path can name an earlier run's staging
+    directory, long gone. The caller's directory then decides for every
+    repository in scope, so one whose graph holds another snapshot is kept --
+    even though its own <path>/.enola would vouch for it."""
+    staged = _write_snapshot(tmp_path / "staging" / ".enola")
+    _write_snapshot(tmp_path / "clone" / ".enola", snapshot_id="snapshot-2")
+    repo_nodes, repo_edges, repo_ids = _stored_docs(REPO, FILE)
+    other_nodes, other_edges, other_ids = _stored_docs(OTHER_REPO, "lib/x.py")
+    nodes = [
+        _repository_node(REPO, tmp_path / "gone"),
+        _repository_node(OTHER_REPO, tmp_path / "clone", snapshot_id="snapshot-2"),
+        *repo_nodes,
+        *other_nodes,
     ]
-    engine = _mock_engine(monkeypatch, legacy, edges)
+    edges = repo_edges + other_edges
+
+    engine = _mock_engine(monkeypatch, nodes, edges)
+    await add_code_doc_edges([], snapshot_dir=staged)
+    assert _deleted(engine) == sorted(repo_ids)
+    assert _kept_warnings(link_logger) == [repr(OTHER_REPO)]
+
+    # Without it, each node's own <path>/.enola decides: the other way round.
+    engine = _mock_engine(monkeypatch, nodes, edges)
+    await add_code_doc_edges([])
+    assert _deleted(engine) == sorted(other_ids)
+    assert _kept_warnings(link_logger)[1:] == [repr(REPO)]
+
+    # link_code_docs takes it the same way, as a string too.
+    engine = _mock_engine(monkeypatch, nodes, edges)
+    counts = await link_code_docs([], repo=REPO, snapshot_dir=str(staged))
+    assert _deleted(engine) == sorted(repo_ids)
+    assert (counts.swept.documents, counts.swept.chunks) == (1, 1)
+
+
+@pytest.mark.asyncio
+async def test_sweep_checks_a_snapshot_off_the_event_loop_without_parsing_it(
+    monkeypatch, invalidations, vectors, tmp_path
+):
+    """The check reads and hashes docs.jsonl -- megabytes on a large
+    repository -- so it runs in a worker thread, and leaves the lines unparsed.
+    A repository without a node has no snapshot to ask about."""
+    _write_snapshot(tmp_path / ".enola")
+    repo_nodes, repo_edges, repo_ids = _stored_docs(REPO, FILE)
+    forgotten_nodes, forgotten_edges, forgotten_ids = _stored_docs(FORGOTTEN_REPO, "pkg/y.py")
+    nodes = [_repository_node(REPO, tmp_path), *repo_nodes, *forgotten_nodes]
+    calls = []
+
+    def recording_snapshot_docs(repository, snapshot_dir=None, **kwargs):
+        calls.append((repository["name"], snapshot_dir, kwargs, threading.get_ident()))
+        return snapshot_docs(repository, snapshot_dir, **kwargs)
+
+    monkeypatch.setattr(add_code_doc_edges_module, "snapshot_docs", recording_snapshot_docs)
+    engine = _mock_engine(monkeypatch, nodes, repo_edges + forgotten_edges)
+
+    await add_code_doc_edges([])
+
+    assert _deleted(engine) == sorted(repo_ids + forgotten_ids)
+    assert [call[:3] for call in calls] == [(REPO, None, {"parse": False})]
+    assert calls[0][3] != threading.get_ident()
+
+
+@pytest.mark.asyncio
+async def test_sweep_keeps_a_repository_whose_vouched_docs_are_not_utf8(
+    monkeypatch, invalidations, vectors, tmp_path
+):
+    """Same rule both ways: a docs.jsonl the extraction cannot decode derives
+    nothing for the repository, even when the receipt lists its bytes, so the
+    sweep must keep the repository's stored docs as well."""
+    directory = _write_snapshot(tmp_path / ".enola")
+    content = json.dumps({**DOC_LINE, "doc": "Open the café."}, ensure_ascii=False)
+    content = content.encode("latin-1") + b"\n"
+    (directory / "docs.jsonl").write_bytes(content)
+    receipt = json.loads((directory / "receipt.json").read_text(encoding="utf-8"))
+    receipt["output_hashes"]["docs.jsonl"] = sha256_label(content)
+    (directory / "receipt.json").write_text(json.dumps(receipt), encoding="utf-8")
+    repository_id, repository = _repository_node(REPO, tmp_path)
+    # What the extraction reads for it: nothing.
+    with pytest.raises(EnolaDocsUnavailable, match="not UTF-8"):
+        snapshot_docs(repository)
+    stored_nodes, stored_edges, _ = _stored_docs(REPO, FILE)
+    engine = _mock_engine(monkeypatch, [(repository_id, repository), *stored_nodes], stored_edges)
+
     await add_code_doc_edges([], repo=REPO)
+
     engine.delete_nodes.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sweep_follows_the_extractions_read_set_not_the_snapshots_on_disk(
+    monkeypatch, invalidations, vectors, tmp_path, link_logger
+):
+    """A batch from extract_code_docs says which repositories the extraction
+    read (CodeDocsBatch.read_repos), and the sweep follows that decision rather
+    than looking at the snapshots again: a repository the extraction left out
+    is kept even though its snapshot has become readable since (another run
+    wrote it while this one was under way), one it read is swept even though
+    its snapshot is gone by now, and a forgotten one goes as before. No
+    snapshot is checked."""
+    _write_snapshot(tmp_path / "late" / ".enola")
+    late_nodes, late_edges, _ = _stored_docs(REPO, FILE)
+    read_nodes, read_edges, read_ids = _stored_docs(OTHER_REPO, "lib/x.py")
+    forgotten_nodes, forgotten_edges, forgotten_ids = _stored_docs(FORGOTTEN_REPO, "pkg/y.py")
+    nodes = [
+        _repository_node(REPO, tmp_path / "late"),
+        _repository_node(OTHER_REPO, tmp_path / "gone"),
+        *late_nodes,
+        *read_nodes,
+        *forgotten_nodes,
+    ]
+    edges = late_edges + read_edges + forgotten_edges
+    checks = []
+    monkeypatch.setattr(
+        add_code_doc_edges_module, "snapshot_docs", lambda *args, **kwargs: checks.append(args)
+    )
+
+    engine = _mock_engine(monkeypatch, nodes, edges)
+    await add_code_doc_edges(CodeDocsBatch.of([], {OTHER_REPO}))
+
+    assert _deleted(engine) == sorted(read_ids + forgotten_ids)
+    assert _kept_warnings(link_logger) == [repr(REPO)]
+    assert checks == []
+
+    # Filtered to a repository the extraction did not read: nothing goes.
+    engine = _mock_engine(monkeypatch, nodes, edges)
+    await add_code_doc_edges(CodeDocsBatch.of([], ()), repo=REPO)
+    engine.delete_nodes.assert_not_awaited()
+    assert checks == []
 
 
 @pytest.mark.asyncio
@@ -553,20 +805,31 @@ async def test_foreign_batch_touches_nothing_while_an_empty_one_sweeps(monkeypat
 @pytest.mark.asyncio
 async def test_chunks_whose_code_node_is_missing_are_not_linked(monkeypatch, invalidations):
     document = _document()
+    package = _document(PACKAGE, symbol_count=0)
     orphan = _symbol_chunk(document, symbol_id=str(fact_node_id(REPO, "symbol", "app/db.Gone")))
-    # extract_code_docs found no CodeModule for the file's directory.
-    module_chunk = _module_chunk(document, module_id=None)
+    module_chunk = _module_chunk(package)
+    # The graph holds neither the symbol the chunk names nor the CodeModule.
     engine = _mock_engine(monkeypatch, CODE_NODES[:1])
 
-    await add_code_doc_edges([document, orphan, module_chunk])
+    counts = await link_code_docs([document, orphan, package, module_chunk])
 
     engine.add_edges.assert_not_awaited()
+    assert (counts.edges, counts.present, counts.unresolved) == (0, 0, 2)
 
-    # With the CodeModule present, the module docstring resolves the way the
-    # code graph names modules: the file's directory within the repo.
+
+@pytest.mark.asyncio
+async def test_a_module_doc_without_its_module_id_is_not_linked(monkeypatch, invalidations):
+    """The target is the node extract_code_docs joined the docs.jsonl line to,
+    never a module derived from a path: a chunk without its module_id stays
+    unlinked although the graph holds the CodeModule of its file's directory."""
+    document = _document("app/__init__.py", symbol_count=0)
+    module_chunk = _module_chunk(document, module_id=None)
     engine = _mock_engine(monkeypatch, CODE_NODES)
-    await add_code_doc_edges([document, module_chunk])
-    assert _edge_keys(engine) == [(str(module_chunk.id), MODULE_ID, "describes")]
+
+    counts = await link_code_docs([document, module_chunk])
+
+    engine.add_edges.assert_not_awaited()
+    assert (counts.edges, counts.unresolved) == (0, 1)
 
 
 @pytest.mark.asyncio

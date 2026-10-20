@@ -1,20 +1,16 @@
-"""Turn the code graph's documented symbols into DocumentChunks.
+"""Turn the docstrings Enola extracted into CodeDocuments and DocumentChunks.
 
-The extraction task of the code docs memify pipeline. It reads the dataset's
-code graph (CodeRepository, CodeSymbol and CodeModule nodes), reads each
-documented symbol's docstring from the repository source on the server
-(Python via ``ast``; Enola's ``doc`` prop when the source cannot be read) and
-emits one ``CodeDocument`` per source file plus one ``DocumentChunk`` per
-documented symbol, its text starting with ``file:line``.
-
-Coverage is what the Python reader finds in the source, plus the Enola
-fallback for symbols whose facts carry a ``doc`` prop: the first paragraph of
-the doc comment, cut at 300 bytes, which enola 0.4.30 (the pinned release)
-emits for Python, Go and TypeScript/JavaScript symbols; snapshots written by
-older releases carry none. On this repository the fallback supplied the
-frontend's TS/JS docstrings and the few Python symbols the source matcher did
-not place. A full docstring for another language needs a reader in
-``docstrings.READERS``.
+The extraction task of the code docs chain (the docs tail of every code route,
+and the memify pipeline). The text comes from Enola alone: ``docs.jsonl`` in
+the snapshot directory (enola >= 0.4.32) holds the whole comment of every
+documented symbol and module -- a Python docstring, a Go doc comment, a JSDoc
+block, Javadoc, KDoc, Rust ``///``, Doxygen, ... -- one line per fact, joined to
+the code graph by the fact's ``id`` (the ``enola_id`` of its CodeSymbol or
+CodeModule). This task reads the dataset's code graph for those nodes, reads the
+docs of the snapshot each repository's graph was built from, and emits one
+``CodeDocument`` per file (for a module doc, per package directory) plus one
+``DocumentChunk`` per documented symbol or module, its text headed
+``file:line`` and ``name (kind)``.
 
 The chunks are plain ``DocumentChunk`` objects on purpose: every existing
 retriever (recall, GRAPH_COMPLETION, HYBRID, CHUNKS) already searches the
@@ -23,40 +19,39 @@ without any retrieval change, and the ``describes`` edge the link task adds
 (``add_code_doc_edges``) carries a hit on to the CodeSymbol -- and from there
 to file, line, callers and flows -- in one hop.
 
-Ids are deterministic. A document's id is a function of (repo, file path)
-and a chunk's of (document, text content), so the same graph over the same
-sources yields identical ids, text and order: re-running the pipeline
-rewrites the same nodes, and the link task can tell a changed docstring (new
-id) from an unchanged one and sweep the old chunk.
+Ids are deterministic. A document's id is a function of (repo, file) and a
+chunk's of (document, text content), so the same docs yield identical ids,
+text and order: the store writes nothing on an unchanged re-run, and the link
+task can tell a changed docstring (new id) from an unchanged one and sweep the
+old chunk.
+
+Docs are read only from the snapshot the code graph holds
+(``snapshot_docs``): its receipt must vouch for ``docs.jsonl`` and its
+snapshot id must equal the repository node's ``last_snapshot_id``. A
+repository whose snapshot docs are not available this run -- a clone or
+staging directory gone from disk, a snapshot from an older enola or without
+the docs renderer, a snapshot another run wrote over -- is left out: the run
+emits nothing for it and the link task's sweep leaves its stored docs alone by
+the same rule, so they are never traded for nothing.
 
 This task never emits a CodeSymbol or CodeModule DataPoint: writing one back
 would overwrite the code graph's node. The link task writes the edges to the
 existing code nodes explicitly, by id.
 
-A repository whose source directory cannot be read this run (the stored
-``CodeRepository.path`` is a clone lost on a restart, a staging directory of
-an earlier per-file run, or a directory on another host) is not re-derived
-from Enola's docs when the dataset already holds documents read from its
-source: the run emits nothing for it and the sweep leaves it alone
-(``keeps_stored_docs``, shared with the link task), since Enola's 300-byte
-docs would otherwise replace the full docstrings and the module docstrings.
-Only a repository whose stored docs are Enola's already, or that has none, is
-derived from Enola's docs.
-
-The per-repository work (realpath checks, file reads, ``ast.parse``, a token
-count per docstring) is synchronous and runs in a worker thread, one
-repository at a time, so the API's event loop keeps serving while a large
-repository is read.
+Reading and joining a repository's docs (a file read, a hash, a JSON parse per
+line, a token count per docstring) is synchronous and runs in a worker thread,
+one repository at a time, so the API's event loop keeps serving while a large
+repository is extracted.
 """
 
 import asyncio
 import json
 import os
-import posixpath
 import re
 from collections import Counter
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
 
@@ -67,22 +62,8 @@ from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.shared.logging_utils import get_logger
-from cognee.tasks.code_docs.docstrings import (
-    STATUS_MISSING,
-    STATUS_PARSE_ERROR,
-    FileDocs,
-    language_of,
-    module_name_of,
-    read_file_docs,
-    symbol_dotted_name,
-)
-from cognee.tasks.code_docs.models import (
-    DOC_SOURCE_ENOLA,
-    DOC_SOURCE_SOURCE,
-    CodeDocument,
-    code_document_id,
-)
-from cognee.tasks.code_graph.extract_code_graph import fact_node_id
+from cognee.tasks.code_docs.models import CodeDocsBatch, CodeDocument, code_document_id
+from cognee.tasks.code_graph.enola import EnolaDocsUnavailable, is_enola_id, read_enola_docs
 
 if TYPE_CHECKING:
     from cognee.modules.pipelines.models import PipelineContext
@@ -95,22 +76,26 @@ CHUNKER_ID = "code_docs"
 # engine configured, as in unit tests).
 FALLBACK_MAX_CHUNK_TOKENS = 1024
 
-_CODE_GRAPH_TYPES = ["CodeRepository", "CodeSymbol", "CodeModule"]
-# The one graph read: the code graph, plus the stored CodeDocuments, which say
-# whether a repository the run cannot read has docs read from source to keep.
-_READ_TYPES = [*_CODE_GRAPH_TYPES, CodeDocument.__name__]
+# The one graph read: the repositories (their snapshot's place and identity)
+# and the code nodes a docs.jsonl line can name.
+_READ_TYPES = ["CodeRepository", "CodeSymbol", "CodeModule"]
+# The node type a docs.jsonl line's kind names.
+_NODE_TYPE_OF_KIND = {"symbol": "CodeSymbol", "module": "CodeModule"}
 _PARAGRAPH_BREAK = re.compile(r"\n[ \t]*\n")
 
 
 @dataclass
 class _Docstring:
-    """One docstring to chunk: its 2-3 line header, the text and the chunk metadata."""
+    """One docstring to chunk: its 2-line header, the text and the chunk metadata."""
 
+    file_path: str
+    sort_key: tuple
     header: str
     text: str
     metadata: dict[str, Any]
     node_set_names: list[str]
-    # Counted on the document; the module docstring is not a symbol.
+    language: str | None
+    # Counted on the document; a module doc is not a symbol.
     is_symbol: bool
 
 
@@ -172,41 +157,12 @@ def _fact_properties(properties: Mapping[str, Any]) -> dict[str, Any]:
     return fact_properties if isinstance(fact_properties, dict) else {}
 
 
-def _enola_doc(properties: Mapping[str, Any]) -> str | None:
-    """Enola's ``doc`` prop: the top-level field newer loads write, else the prop."""
-    for value in (properties.get("doc"), _fact_properties(properties).get("doc")):
-        if isinstance(value, str) and value.strip():
-            return value.strip()
+def _text_field(properties: Mapping[str, Any], key: str) -> str | None:
+    """A node's string field, else the same key of its fact properties (as enola wrote it)."""
+    for value in (properties.get(key), _fact_properties(properties).get(key)):
+        if isinstance(value, str) and value:
+            return value
     return None
-
-
-def readable_source_root(stored_path: Any, repo_path: str | os.PathLike | None) -> str | None:
-    """The directory a run reads a repository from, or None when there is none to read.
-
-    The caller's ``repo_path`` (the directory a code route just indexed) wins
-    over the repository node's stored ``path``, which a skipped snapshot
-    leaves as an earlier run's; either must be a directory on this host.
-    """
-    root = os.fspath(repo_path) if repo_path is not None else stored_path
-    return root if isinstance(root, str) and os.path.isdir(root) else None
-
-
-def keeps_stored_docs(stored_documents: Iterable[Mapping[str, Any]]) -> bool:
-    """Whether a run that cannot read a repository's source leaves its stored docs alone.
-
-    True when a stored CodeDocument of the repository was read from source
-    (``doc_source`` "source", or missing on a document stored before the field
-    existed): what the run could derive now, Enola's 300-byte docs without the
-    module docstrings and signatures, is less than what is stored, so the run
-    emits nothing for the repository and the sweep leaves it out. A repository
-    whose stored docs are Enola's already (no reader for its language, a
-    secondary repository of a multi-repo snapshot) or that has none is derived
-    from Enola's docs and swept as usual. The extraction and the link task's
-    sweep apply the same rule, so the batch and the sweep scope agree.
-    """
-    return any(
-        properties.get("doc_source") in (None, DOC_SOURCE_SOURCE) for properties in stored_documents
-    )
 
 
 def _node_set_names(properties: Mapping[str, Any]) -> list[str]:
@@ -222,6 +178,53 @@ def _node_set_names(properties: Mapping[str, Any]) -> list[str]:
     if not names and isinstance(properties.get("source_node_set"), str):
         names = [part.strip() for part in properties["source_node_set"].split(",") if part.strip()]
     return list(dict.fromkeys(names))
+
+
+# --- the snapshot's docs ----------------------------------------------------
+
+
+def snapshot_docs(
+    repository: Mapping[str, Any],
+    snapshot_dir: str | os.PathLike | None = None,
+    *,
+    parse: bool = True,
+) -> tuple[dict, ...]:
+    """The docs.jsonl lines of the snapshot this repository's code graph was built from.
+
+    ``repository`` is a stored CodeRepository node's properties. The snapshot
+    directory is ``snapshot_dir`` when the caller has one (the code routes pass
+    the snapshot they just loaded), else ``<path>/.enola`` of the repository
+    node, where enola wrote it. The docs are those of the code graph only when
+    the directory's snapshot id equals the node's ``last_snapshot_id``
+    (stamped when the snapshot was loaded): a directory another enola run wrote
+    over since -- a newer commit, another enola release -- describes other
+    facts, and so does one from another repository.
+
+    Raises EnolaDocsUnavailable, naming the reason, when there is no directory
+    to read, when read_enola_docs finds no usable docs.jsonl in it, or when the
+    snapshot ids differ. The extraction leaves such a repository out, and the
+    link task's sweep (``parse=False``: the check without the lines) leaves its
+    stored docs alone.
+    """
+    if snapshot_dir is not None:
+        directory = Path(snapshot_dir)
+    else:
+        path = repository.get("path")
+        if not isinstance(path, str) or not path:
+            raise EnolaDocsUnavailable("the repository node records no source directory")
+        directory = Path(path) / ".enola"
+    docs = read_enola_docs(directory, parse=parse)
+    stored_id = repository.get("last_snapshot_id")
+    if not isinstance(stored_id, str) or not stored_id:
+        raise EnolaDocsUnavailable(
+            f"the repository node records no snapshot id to match '{directory}' against"
+        )
+    if docs.snapshot_id != stored_id:
+        raise EnolaDocsUnavailable(
+            f"the snapshot in '{directory}' is {docs.snapshot_id}, "
+            f"the code graph was built from {stored_id}"
+        )
+    return docs.lines
 
 
 # --- token budget -----------------------------------------------------------
@@ -317,155 +320,109 @@ def _chunk_texts(
     return [prefix + body for body in _pack(parts, room, count_tokens, "\n\n")] or [text]
 
 
-def _header(file_path: str, line: int, name: str, kind: str, signature: str | None) -> str:
-    header = f"{file_path}:{line}\n{name} ({kind})"
-    return f"{header}\n{signature}" if signature else header
+def _header(file_path: str, line: int | None, name: str, kind: str) -> str:
+    """``file:line`` (a module: its directory) over ``name (kind)``."""
+    location = f"{file_path}:{line}" if line is not None else file_path
+    return f"{location}\n{name} ({kind})"
 
 
 # --- extraction -------------------------------------------------------------
 
 
-def _file_docstrings(
-    repo: str,
-    repo_path: str | None,
-    file_path: str,
-    symbols: list[tuple[str, dict[str, Any]]],
-    module_ids: set[str],
-    include_modules: bool,
-    counts: Counter,
-) -> tuple[FileDocs, str | None, list[_Docstring]]:
-    """The docstrings of one source file, module docstring first, symbols in source order."""
-    has_reader = language_of(file_path) is not None
-    if repo_path is None:
-        file_docs = FileDocs(status=STATUS_MISSING, language=language_of(file_path))
-    else:
-        file_docs = read_file_docs(repo_path, file_path)
-    if not has_reader:
-        counts["files_unsupported"] += 1
-    elif file_docs.status == STATUS_PARSE_ERROR:
-        counts["parse_errors"] += 1
-    elif not file_docs.readable:
-        counts["files_unreadable"] += 1
-
-    language = file_docs.language
-    file_set_names: list[str] = []
-    for _node_id, properties in symbols:
-        language = language or _fact_properties(properties).get("language")
-        file_set_names.extend(_node_set_names(properties))
-    file_set_names = list(dict.fromkeys(file_set_names))
-    if not isinstance(language, str) or not language:
-        language = None
-
-    docstrings: list[_Docstring] = []
-    if include_modules and file_docs.module_doc:
-        module_name = module_name_of(file_path)
-        module_node_id = str(fact_node_id(repo, "module", posixpath.dirname(file_path) or "."))
-        docstrings.append(
-            _Docstring(
-                header=_header(file_path, 1, module_name, "module", None),
-                text=file_docs.module_doc,
-                metadata={
-                    "repo": repo,
-                    "file": file_path,
-                    "line": 1,
-                    "end_line": None,
-                    "symbol": module_name,
-                    "symbol_id": None,
-                    "symbol_kind": "module",
-                    "language": language,
-                    "doc_source": DOC_SOURCE_SOURCE,
-                    # The CodeModule of the file's directory, when the graph holds it.
-                    "module_id": module_node_id if module_node_id in module_ids else None,
-                },
-                node_set_names=file_set_names,
-                is_symbol=False,
-            )
+def _docstring(
+    repo: str, line: Mapping[str, Any], node_id: str, properties: Mapping[str, Any]
+) -> _Docstring:
+    """The docstring a docs.jsonl line gives the code node it names."""
+    file_path, name, text = line["file"], line["name"], line["doc"].strip("\n")
+    language = _text_field(properties, "language")
+    if line["kind"] == "module":
+        return _Docstring(
+            file_path=file_path,
+            sort_key=(0, name, text),
+            header=_header(file_path, None, name, "module"),
+            text=text,
+            metadata={
+                "repo": repo,
+                "file": file_path,
+                "line": None,
+                "end_line": None,
+                "symbol": name,
+                "symbol_id": None,
+                "symbol_kind": "module",
+                "language": language,
+                "enola_id": line["id"],
+                "module_id": node_id,
+            },
+            node_set_names=_node_set_names(properties),
+            language=language,
+            is_symbol=False,
         )
-
-    for node_id, properties in symbols:
-        counts["symbols"] += 1
-        name = properties["name"]
-        line = _as_int(properties.get("line"))
-        kind = properties.get("symbol_kind") or _fact_properties(properties).get("symbol_kind")
-        found = (
-            file_docs.find(line, symbol_dotted_name(name, file_path))
-            if file_docs.readable
-            else None
-        )
-        if found is not None and found.docstring:
-            text, doc_source = found.docstring, DOC_SOURCE_SOURCE
-            doc_line, end_line, signature = found.line, found.end_line, found.signature
-            kind = kind or found.kind
-            counts["documented_from_source"] += 1
-        else:
-            text = _enola_doc(properties)
-            if text is None:
-                # Why there is nothing to store, so the summary line does not
-                # report a TypeScript interface or a variable as a def that
-                # lacks a docstring.
-                if not has_reader:
-                    counts["symbols_unsupported_language"] += 1
-                elif not file_docs.readable:
-                    counts["symbols_in_unreadable_files"] += 1
-                elif found is None:
-                    counts["symbols_not_defs"] += 1
-                else:
-                    counts["undocumented"] += 1
-                continue
-            if line is None:
-                counts["symbols_without_line"] += 1
-                continue
-            doc_source = DOC_SOURCE_ENOLA
-            doc_line, end_line, signature = line, _as_int(properties.get("end_line")), None
-            counts["documented_from_enola"] += 1
-        kind = kind if isinstance(kind, str) and kind else "symbol"
-        docstrings.append(
-            _Docstring(
-                header=_header(file_path, doc_line, name, kind, signature),
-                text=text,
-                metadata={
-                    "repo": repo,
-                    "file": file_path,
-                    "line": doc_line,
-                    "end_line": end_line,
-                    "symbol": name,
-                    "symbol_id": node_id,
-                    "symbol_kind": kind,
-                    "language": language,
-                    "doc_source": doc_source,
-                },
-                node_set_names=_node_set_names(properties),
-                is_symbol=True,
-            )
-        )
-    return file_docs, language, docstrings
+    number = line.get("line")
+    kind = _text_field(properties, "symbol_kind") or "symbol"
+    return _Docstring(
+        file_path=file_path,
+        sort_key=(number or 0, name, text),
+        header=_header(file_path, number, name, kind),
+        text=text,
+        metadata={
+            "repo": repo,
+            "file": file_path,
+            "line": number,
+            "end_line": _as_int(properties.get("end_line")),
+            "symbol": name,
+            "symbol_id": node_id,
+            "symbol_kind": kind,
+            "language": language,
+            "enola_id": line["id"],
+        },
+        node_set_names=_node_set_names(properties),
+        language=language,
+        is_symbol=True,
+    )
 
 
 def _extract_repository(
     repo: str,
-    repo_path: str | None,
-    symbols: list[tuple[str, dict[str, Any]]],
-    module_ids: set[str],
+    repository: Mapping[str, Any],
+    snapshot_dir: str | os.PathLike | None,
+    code_nodes: Mapping[str, tuple[str, dict[str, Any]]],
     include_modules: bool,
     budget: int,
     count_tokens: Callable[[str], int],
     known_node_sets: Mapping[str, NodeSet],
 ) -> tuple[list[CodeDocument], list[DocumentChunk], Counter, dict[str, NodeSet]]:
-    """One repository's documents and chunks, files sorted, symbols by (line, name).
+    """One repository's documents and chunks: files sorted, docstrings by (line, name).
 
     Synchronous on purpose: extract_code_docs runs it in a worker thread, so
-    it shares nothing mutable with the caller. ``known_node_sets`` (the NodeSet
-    objects earlier repositories built, by name) is read only; the returned
-    dict is it plus the names this repository added, for the caller to merge.
+    it shares nothing mutable with the caller. ``code_nodes`` maps the
+    repository's code nodes by their enola id. ``known_node_sets`` (the
+    NodeSet objects earlier repositories built, by name) is read only; the
+    returned dict is it plus the names this repository added, for the caller
+    to merge. Raises EnolaDocsUnavailable (from snapshot_docs).
     """
+    lines = snapshot_docs(repository, snapshot_dir)
     counts: Counter = Counter()
-    by_file: dict[str, list[tuple[str, dict[str, Any]]]] = {}
-    for node_id, properties in symbols:
-        file_path = properties.get("file_path")
-        if not isinstance(file_path, str) or not file_path:
-            counts["symbols_without_file"] += 1
+    by_file: dict[str, list[_Docstring]] = {}
+    for line in lines:
+        line_repo = line.get("repo")
+        if line_repo is not None and line_repo != repo:
+            # Another repository of a multi-repo snapshot: every repository's
+            # directory receives every repository's lines.
             continue
-        by_file.setdefault(file_path, []).append((node_id, properties))
+        counts["lines"] += 1
+        if line["kind"] == "module" and not include_modules:
+            counts["modules_skipped"] += 1
+            continue
+        node = code_nodes.get(line["id"])
+        if node is None or node[1].get("type") != _NODE_TYPE_OF_KIND[line["kind"]]:
+            # A fact the code graph does not hold under that id: one the
+            # mapping collapses into a same-named fact of the same kind, or
+            # one it does not map.
+            counts["unmatched"] += 1
+            continue
+        docstring = _docstring(repo, line, *node)
+        counts["modules" if line["kind"] == "module" else "symbols"] += 1
+        by_file.setdefault(docstring.file_path, []).append(docstring)
 
     node_sets = dict(known_node_sets)
 
@@ -481,31 +438,15 @@ def _extract_repository(
     documents: list[CodeDocument] = []
     chunks: list[DocumentChunk] = []
     for file_path in sorted(by_file):
-        counts["files"] += 1
-        file_symbols = sorted(
-            by_file[file_path],
-            key=lambda item: (_as_int(item[1].get("line")) or 0, str(item[1].get("name"))),
-        )
-        file_docs, language, docstrings = _file_docstrings(
-            repo, repo_path, file_path, file_symbols, module_ids, include_modules, counts
-        )
-        if not docstrings:
-            continue
-
+        docstrings = sorted(by_file[file_path], key=lambda doc: doc.sort_key)
         document_set_names = list(
             dict.fromkeys(name for doc in docstrings for name in doc.node_set_names)
         )
-        doc_source = (
-            DOC_SOURCE_SOURCE
-            if any(doc.metadata["doc_source"] == DOC_SOURCE_SOURCE for doc in docstrings)
-            else DOC_SOURCE_ENOLA
-        )
+        language = next((doc.language for doc in docstrings if doc.language), None)
         document = CodeDocument(
             id=code_document_id(repo, file_path),
             name=file_path,
-            raw_data_location=os.path.join(repo_path, file_path)
-            if repo_path is not None and file_docs.readable
-            else file_path,
+            raw_data_location=file_path,
             external_metadata=normalize_external_metadata(
                 {"code_doc": {"repo": repo, "file": file_path, "language": language}}
             ),
@@ -513,7 +454,6 @@ def _extract_repository(
             file_path=file_path,
             language=language,
             symbol_count=sum(1 for doc in docstrings if doc.is_symbol),
-            doc_source=doc_source,
             belongs_to_set=sets_for(document_set_names),
             source_node_set=", ".join(document_set_names) or None,
         )
@@ -524,9 +464,6 @@ def _extract_repository(
         occurrences: dict[str, int] = {}
         chunk_index = 0
         for doc in docstrings:
-            # A module docstring is tagged like its document: the union of the
-            # file's symbols' sets.
-            set_names = doc.node_set_names if doc.is_symbol else document_set_names
             for text in _chunk_texts(doc.header, doc.text, budget, count_tokens):
                 content_hash = chunk_content_hash(text)
                 occurrence = occurrences.get(content_hash, 0)
@@ -547,8 +484,8 @@ def _extract_repository(
                         document_id=str(document.id),
                         document_name=file_path,
                         external_metadata=normalize_external_metadata({"code_doc": doc.metadata}),
-                        belongs_to_set=sets_for(set_names),
-                        source_node_set=", ".join(set_names) or None,
+                        belongs_to_set=sets_for(doc.node_set_names),
+                        source_node_set=", ".join(doc.node_set_names) or None,
                     )
                 )
                 chunk_index += 1
@@ -563,68 +500,57 @@ async def extract_code_docs(
     repo: str | None = None,
     include_modules: bool = True,
     max_chunk_tokens: int | None = None,
-    repo_path: str | os.PathLike | None = None,
+    snapshot_dir: str | os.PathLike | None = None,
 ) -> list[DataPoint]:
-    """Read the dataset's code graph and return its docstrings as documents and chunks.
+    """Read the dataset's code graph and return its Enola docs as documents and chunks.
 
     ``data`` is whatever memify seeds the extraction with (``[{}]`` or a memory
     fragment) and is ignored: the input is the code graph itself, read through
-    the graph engine. ``repo`` limits the run to one Enola repository label
-    (None: every CodeRepository in the dataset); ``include_modules`` adds a
-    chunk per file-level docstring; ``max_chunk_tokens`` overrides cognify's
-    chunk budget.
+    the graph engine, and the snapshot each repository's graph was built from.
+    ``repo`` limits the run to one Enola repository label (None: every
+    CodeRepository in the dataset); ``include_modules`` adds a chunk per module
+    (package) doc; ``max_chunk_tokens`` overrides cognify's chunk budget.
 
-    ``repo_path`` is the source directory of ``repo`` as the caller knows it:
-    the code routes hand over the directory they just indexed, and it is read
-    instead of the stored ``CodeRepository.path``, which can be stale. The
-    per-file route stages each file in a fresh temporary directory, so once an
-    unchanged snapshot is skipped (the repository node is not rewritten) the
-    stored path is an earlier run's, gone from disk; a repository moved and
-    re-added unchanged keeps its old path the same way. Without it the stored
-    path is read. A repository with no readable directory either way is left
-    out of the run when the dataset holds documents read from its source
-    (``keeps_stored_docs``: the link task's sweep leaves it out too), else it
-    falls back to the docs Enola extracted. ``repo_path`` needs ``repo``: one
-    directory names one repository.
+    ``snapshot_dir`` is the snapshot directory the caller just loaded (the
+    code routes pass it); without it each repository's docs are read from
+    ``<CodeRepository.path>/.enola``. Either way a repository is read only when
+    that snapshot is the one its code graph holds (``snapshot_docs``); one
+    whose docs are not available is left out with a warning, and the link
+    task's sweep keeps its stored docs. A multi-repo snapshot has one directory
+    for all its repositories: each reads its own lines from it.
 
     Returns the CodeDocuments first, then their DocumentChunks, in a
-    deterministic order: repositories by name, files by path, symbols by
-    (line, name), the module docstring first in its file.
+    deterministic order: repositories by name, files by path, docstrings by
+    (line, name) -- a module doc first in its document. The result is a
+    CodeDocsBatch whose ``read_repos`` names the repositories whose docs were
+    read (one with no documented fact included): the sweep covers those and
+    keeps every other repository's stored docs.
 
-    The graph is read on the event loop; each repository's source reading and
-    parsing then runs in a worker thread (``asyncio.to_thread``), repositories
-    one after another, so a concurrent request is served while a large
-    repository is extracted.
+    The graph is read on the event loop; each repository's docs are then read
+    and joined in a worker thread (``asyncio.to_thread``), repositories one
+    after another, so a concurrent request is served while a large repository
+    is extracted.
     """
     from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
-
-    if repo_path is not None and repo is None:
-        raise ValueError("extract_code_docs: repo_path is the source of one repository; pass repo.")
 
     graph_engine = await get_graph_engine()
     nodes, _edges = await graph_engine.get_filtered_graph_data([{"type": _READ_TYPES}])
 
     repositories: dict[str, dict[str, Any]] = {}
-    symbols_by_repo: dict[str, list[tuple[str, dict[str, Any]]]] = {}
-    module_ids_by_repo: dict[str, set[str]] = {}
-    stored_documents_by_repo: dict[str, list[dict[str, Any]]] = {}
+    code_nodes_by_repo: dict[str, dict[str, tuple[str, dict[str, Any]]]] = {}
     for item in nodes or []:
         if not isinstance(item, (tuple, list)) or len(item) != 2:
             continue
         raw_id, raw_properties = item
-        node_id = str(raw_id)
         properties = node_properties(raw_properties)
         node_type = properties.get("type")
         if node_type == "CodeRepository":
             if isinstance(properties.get("name"), str) and properties["name"]:
                 repositories[properties["name"]] = properties
-        elif node_type == "CodeSymbol":
-            if isinstance(properties.get("repo"), str) and isinstance(properties.get("name"), str):
-                symbols_by_repo.setdefault(properties["repo"], []).append((node_id, properties))
-        elif node_type == "CodeModule" and isinstance(properties.get("repo"), str):
-            module_ids_by_repo.setdefault(properties["repo"], set()).add(node_id)
-        elif node_type == CodeDocument.__name__ and isinstance(properties.get("repo"), str):
-            stored_documents_by_repo.setdefault(properties["repo"], []).append(properties)
+        elif node_type in ("CodeSymbol", "CodeModule"):
+            node_repo, enola_id = properties.get("repo"), properties.get("enola_id")
+            if isinstance(node_repo, str) and is_enola_id(enola_id):
+                code_nodes_by_repo.setdefault(node_repo, {})[enola_id] = (str(raw_id), properties)
 
     selected = sorted(name for name in repositories if repo is None or name == repo)
     if not selected:
@@ -632,7 +558,7 @@ async def extract_code_docs(
             "No code graph repository%s in the dataset; nothing to document.",
             f" named {repo!r}" if repo is not None else "",
         )
-        return []
+        return CodeDocsBatch.of([], ())
 
     budget = max_chunk_tokens if max_chunk_tokens and max_chunk_tokens > 0 else None
     if budget is None:
@@ -643,68 +569,47 @@ async def extract_code_docs(
 
     documents: list[DataPoint] = []
     chunks: list[DataPoint] = []
+    read: set[str] = set()
     for name in selected:
-        # The caller's directory over the stored path: the stored one may be
-        # an earlier run's staging directory (see the docstring).
-        source_root = readable_source_root(repositories[name].get("path"), repo_path)
-        if source_root is None:
-            given = os.fspath(repo_path) if repo_path is not None else None
-            stored_documents = stored_documents_by_repo.get(name, [])
-            if keeps_stored_docs(stored_documents):
-                # Enola's docs would replace full docstrings read from the
-                # source with their first 300 bytes and drop the module
-                # docstrings; the sweep applies the same rule and skips it.
-                logger.warning(
-                    "Repository %r has no readable source directory at %r; its %d stored "
-                    "document(s) were read from the source and are kept, nothing is derived "
-                    "or swept for it this run.",
-                    name,
-                    given if given is not None else repositories[name].get("path"),
-                    len(stored_documents),
-                )
-                continue
-            logger.warning(
-                "Repository %r has no readable source directory at %r; "
-                "using the docs Enola extracted only.",
+        try:
+            repo_documents, repo_chunks, counts, repo_node_sets = await asyncio.to_thread(
+                _extract_repository,
                 name,
-                given if given is not None else repositories[name].get("path"),
+                repositories[name],
+                snapshot_dir,
+                code_nodes_by_repo.get(name, {}),
+                include_modules,
+                budget,
+                count_tokens,
+                node_sets,
             )
-        repo_documents, repo_chunks, counts, repo_node_sets = await asyncio.to_thread(
-            _extract_repository,
-            name,
-            source_root,
-            symbols_by_repo.get(name, []),
-            module_ids_by_repo.get(name, set()),
-            include_modules,
-            budget,
-            count_tokens,
-            node_sets,
-        )
+        except EnolaDocsUnavailable as reason:
+            logger.warning(
+                "Code docs of repository %r%s are kept as stored, nothing is derived or swept "
+                "for it this run: %s.",
+                name,
+                f" (dataset {dataset!r})" if dataset else "",
+                reason,
+            )
+            continue
         # One NodeSet object per name across the run: the next repository
         # reuses what this one built, and add_data_points stores each once.
         node_sets.update(repo_node_sets)
         documents.extend(repo_documents)
         chunks.extend(repo_chunks)
+        read.add(name)
         logger.info(
-            "Code docs of repository %r%s: %d file(s), %d symbol(s) seen; %d documented from "
-            "source, %d from enola; without a docstring: %d def/class, %d not a def/class in "
-            "the source (variables, stale lines), %d in %d file(s) with no reader for the "
-            "language, %d in %d unreadable file(s) (%d parse error(s)); %d document(s) and "
-            "%d chunk(s) emitted.",
+            "Code docs of repository %r%s: %d docs.jsonl line(s); %d symbol and %d module "
+            "doc(s) joined to the code graph, %d naming a fact the graph does not hold, %d "
+            "module doc(s) left out; %d document(s) and %d chunk(s) emitted.",
             name,
             f" (dataset {dataset!r})" if dataset else "",
-            counts["files"],
+            counts["lines"],
             counts["symbols"],
-            counts["documented_from_source"],
-            counts["documented_from_enola"],
-            counts["undocumented"],
-            counts["symbols_not_defs"],
-            counts["symbols_unsupported_language"],
-            counts["files_unsupported"],
-            counts["symbols_in_unreadable_files"],
-            counts["files_unreadable"] + counts["parse_errors"],
-            counts["parse_errors"],
+            counts["modules"],
+            counts["unmatched"],
+            counts["modules_skipped"],
             len(repo_documents),
             counts["chunks"],
         )
-    return documents + chunks
+    return CodeDocsBatch.of(documents + chunks, read)

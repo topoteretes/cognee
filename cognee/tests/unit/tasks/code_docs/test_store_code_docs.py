@@ -28,7 +28,7 @@ def _document(symbol_count=2, node_set=None):
     return CodeDocument(
         id=code_document_id(REPO, FILE),
         name=FILE,
-        raw_data_location=f"/repos/{REPO}/{FILE}",
+        raw_data_location=FILE,
         external_metadata=json.dumps(
             {"code_doc": {"repo": REPO, "file": FILE, "language": "python"}}
         ),
@@ -41,7 +41,7 @@ def _document(symbol_count=2, node_set=None):
 
 
 def _chunk(document, docstring, index, node_set=None):
-    text = f"{FILE}:{index + 1}\napp/db.f{index} (function)\ndef f{index}():\n\n{docstring}"
+    text = f"{FILE}:{index + 1}\napp/db.f{index} (function)\n\n{docstring}"
     content_hash = chunk_content_hash(text)
     return DocumentChunk(
         id=content_chunk_id(document.id, content_hash, 0),
@@ -165,23 +165,6 @@ async def test_retagged_points_are_rewritten(engine, writes):
 
     assert [write.points for write in writes] == [[document, chunk]]
     assert (counts.documents, counts.chunks, counts.skipped) == (1, 1, 0)
-
-
-@pytest.mark.asyncio
-async def test_document_read_from_source_for_the_first_time_is_rewritten(engine, writes):
-    """Enola's docs stood in while the source was unreadable; now the file was read.
-    (A stored row without doc_source -- stored before the field, or an adapter
-    answering the core columns only -- is not called changed on it: every other
-    test here stores without it.)"""
-    document = _document()
-    chunk = _chunk(document, "Kept.", 0)
-    engine.get_nodes.return_value = [_stored(document, doc_source="enola"), _stored(chunk)]
-
-    counts = await store_new_code_docs([document, chunk])
-
-    assert document.doc_source == "source"
-    assert [write.points for write in writes] == [[document]]
-    assert (counts.documents, counts.chunks, counts.skipped) == (1, 0, 1)
 
 
 @pytest.mark.asyncio

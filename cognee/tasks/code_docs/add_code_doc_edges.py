@@ -2,13 +2,14 @@
 
 The code docs chain (``code_docs_tail`` on the code graph routes, the memify
 pipeline in ``cognee/memify_pipelines/cognify_code_docs.py``) stores a
-repository's docstrings as plain ``DocumentChunk`` nodes -- one per
-documented symbol, text headed ``file:line`` -- under one ``CodeDocument`` per
-source file. Plain chunks on purpose: every retriever that searches
+repository's docstrings -- the docs Enola wrote to ``docs.jsonl`` -- as plain
+``DocumentChunk`` nodes, one per documented symbol or module, text headed
+``file:line``, under one ``CodeDocument`` per file (per package directory for
+a module doc). Plain chunks on purpose: every retriever that searches
 ``DocumentChunk_text`` already finds them, so no retrieval change is needed.
 What a plain chunk lacks is the hop into the code graph, and this task adds it:
-a ``describes`` edge from each chunk to the ``CodeSymbol`` (for a module
-docstring, the ``CodeModule``) its ``external_metadata`` names. Edges are
+a ``describes`` edge from each chunk to the ``CodeSymbol`` (for a module doc,
+the ``CodeModule``) its ``external_metadata`` names. Edges are
 written by id through the graph engine, the way ``add_code_graph_edges`` writes
 typed relations; no code graph node is ever emitted here, so the code graph's
 nodes, hashes and edges stay exactly as its own pipeline left them.
@@ -24,15 +25,15 @@ What hangs off a stale chunk goes with it: its TextSummary, and in entity
 mode the Entity and EntityType nodes it alone owned -- through the shared
 last-owner provenance planner when the chunk carries source refs (stored under
 a pipeline context with a data item, as on the code graph routes), else by
-reading the ownership from the graph. A repository the run could not read
-the source of is left out of the sweep when its stored docs were read from
-source -- the extraction emitted nothing for it, by the same rule
-(``keeps_stored_docs``) -- so a lost clone or a gone staging directory never
-costs the full docstrings.
+reading the ownership from the graph. A repository whose snapshot docs the
+run could not read is left out of the sweep -- the extraction emitted nothing
+for it, by the same rule (``snapshot_docs``) -- so a lost clone, a gone
+staging directory or a snapshot another enola run wrote over never costs the
+stored docs.
 """
 
+import asyncio
 import os
-import posixpath
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
@@ -46,16 +47,12 @@ from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.graph.methods.delete_chunks_incremental import delete_chunks_incremental
 from cognee.shared.logging_utils import get_logger
-from cognee.tasks.code_docs.extract_code_docs import (
-    keeps_stored_docs,
-    node_properties,
-    readable_source_root,
-)
+from cognee.tasks.code_docs.extract_code_docs import node_properties, snapshot_docs
 from cognee.tasks.code_docs.models import DESCRIBES_RELATIONSHIP, CodeDocument
+from cognee.tasks.code_graph.enola import EnolaDocsUnavailable
 from cognee.tasks.code_graph.extract_code_graph import (
     _SWEEP_CHUNK_SIZE,
     _invalidate_code_graph_snapshot,
-    fact_node_id,
 )
 from cognee.tasks.summarization.models import TextSummary
 
@@ -85,9 +82,9 @@ _READ_TYPES = [
     _SUMMARY_TYPE,
     "CodeSymbol",
     "CodeModule",
-    # One node per repository: its stored path says whether the run could read
-    # the source (the sweep leaves a repository it could not read alone when
-    # its docs were read from source).
+    # One node per repository: its stored path and snapshot id say whether the
+    # run could read the docs of the snapshot its graph holds (the sweep
+    # leaves a repository it could not read alone).
     "CodeRepository",
 ]
 # The second read entity mode's sweep needs (chunk -contains-> Entity -is_a->
@@ -133,13 +130,13 @@ async def link_code_docs(
     ctx: Optional["PipelineContext"] = None,
     sweep: bool = True,
     repo: str | None = None,
-    repo_path: str | os.PathLike | None = None,
+    snapshot_dir: str | os.PathLike | None = None,
 ) -> LinkCounts:
     """Write the batch's ``describes`` edges, sweep the stale docstring nodes, return the counts.
 
     The work behind add_code_doc_edges (which passes the batch through) and
     code_docs_tail (which reports these counts). See add_code_doc_edges for the
-    batch, the sweep's scope and ``repo_path``.
+    batch, the sweep's scope and ``snapshot_dir``.
     """
     from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 
@@ -183,7 +180,9 @@ async def link_code_docs(
         if sweep:
             counts.swept = await _sweep_stale_code_docs(
                 graph_engine,
-                _sweep_scope(repo, nodes, repo_path),
+                await _sweep_scope(
+                    repo, nodes, snapshot_dir, getattr(data_points, "read_repos", None)
+                ),
                 set(documents),
                 set(chunks),
                 nodes,
@@ -201,7 +200,7 @@ async def add_code_doc_edges(
     ctx: Optional["PipelineContext"] = None,
     sweep: bool = True,
     repo: str | None = None,
-    repo_path: str | os.PathLike | None = None,
+    snapshot_dir: str | os.PathLike | None = None,
 ) -> list[DataPoint]:
     """Write the batch's ``describes`` edges, then sweep the stale docstring nodes.
 
@@ -223,21 +222,21 @@ async def add_code_doc_edges(
     nodes only deleted chunks held, from the graph and from their vector
     collections; other repositories and non-code documents are never
     considered. An empty batch still sweeps. Left out of the scope is a
-    repository that still has its CodeRepository node but no readable source
-    directory this run -- ``repo_path``, the directory the caller indexed,
-    for the filtered repository, else the node's stored path -- while its
-    stored docs were read from source: the extraction emitted nothing for it
-    by the same rule (``keeps_stored_docs``), and sweeping it would trade the
-    full docstrings for nothing or for Enola's short ones.
+    repository that still has its CodeRepository node but whose snapshot docs
+    the extraction did not read -- the batch's ``read_repos``
+    (CodeDocsBatch), the extraction's own decision; for a plain list, the
+    same check made here (``snapshot_docs``: from ``snapshot_dir``, else the
+    node's ``<path>/.enola``, and only the snapshot its code graph holds).
+    Sweeping such a repository would delete its docs for nothing.
 
     The batch is the whole run: every task of the chain is a coroutine, and
     the pipeline hands a coroutine's result to the next task in one call (a
     generator's output would arrive in ``batch_size`` pieces, and a sweep per
-    piece would delete the run's other pieces). ``repo`` and ``repo_path``
+    piece would delete the run's other pieces). ``repo`` and ``snapshot_dir``
     must therefore match the extraction's. Passthrough: returns data_points
     unchanged.
     """
-    await link_code_docs(data_points, ctx=ctx, sweep=sweep, repo=repo, repo_path=repo_path)
+    await link_code_docs(data_points, ctx=ctx, sweep=sweep, repo=repo, snapshot_dir=snapshot_dir)
     return data_points
 
 
@@ -277,24 +276,16 @@ def _collect_batch(
 def _edge_target(code_doc: dict[str, Any], nodes: dict[str, dict[str, Any]]) -> str | None:
     """Id of the code node a chunk describes, when the graph holds it.
 
-    A symbol docstring names its CodeSymbol (``symbol_id``). A module docstring
-    names the CodeModule of the file's directory when extract_code_docs found
-    one (``module_id``); failing that, the module is derived the way the code
-    graph names it -- enola module facts are directory paths, the repo root is
-    "." -- and used only when that node was read.
+    A symbol doc names its CodeSymbol (``symbol_id``), a module doc its
+    CodeModule (``module_id``): the node extract_code_docs joined the
+    docs.jsonl line to by its enola id.
     """
     for key in ("symbol_id", "module_id"):
         node_id = code_doc.get(key)
         if node_id is not None:
             node_id = str(node_id)
             return node_id if node_id in nodes else None
-    repo, file_path = code_doc.get("repo"), code_doc.get("file")
-    if code_doc.get("symbol_kind") != "module" or not isinstance(repo, str):
-        return None
-    if not isinstance(file_path, str):
-        return None
-    module_id = str(fact_node_id(repo, "module", posixpath.dirname(file_path) or "."))
-    return module_id if nodes.get(module_id, {}).get("type") == "CodeModule" else None
+    return None
 
 
 def _describes_edge(
@@ -306,7 +297,6 @@ def _describes_edge(
         target_id,
         DESCRIBES_RELATIONSHIP,
         {
-            "doc_source": code_doc.get("doc_source"),
             "chunk_index": chunk.chunk_index,
             "source_node_id": chunk_id,
             "target_node_id": target_id,
@@ -350,10 +340,11 @@ async def _register_edges(edges: list[tuple], ctx: Optional["PipelineContext"]) 
     )
 
 
-def _sweep_scope(
+async def _sweep_scope(
     repo: str | None,
     nodes: dict[str, dict[str, Any]],
-    repo_path: str | os.PathLike | None = None,
+    snapshot_dir: str | os.PathLike | None = None,
+    read_repos: frozenset[str] | None = None,
 ) -> set[str]:
     """The repositories whose stored docs the batch accounts for.
 
@@ -365,13 +356,18 @@ def _sweep_scope(
     docs. The scope is read off the CodeDocuments, not the CodeRepository
     nodes, which is why a forgotten repository is still found.
 
-    Out of scope again is a repository the run could not derive: its
-    CodeRepository node is there, but neither ``repo_path`` (the filtered
-    repository's, from the caller) nor the node's stored path is a readable
-    directory, and its stored documents were read from source. The extraction
-    left it out by the same rule, so its absence from the batch says nothing
-    about its docs. A forgotten repository (no node) has no source to read
-    and is swept.
+    Out of scope again is a repository the run did not derive: its
+    CodeRepository node is there, but the extraction did not read its docs.
+    ``read_repos`` (the batch's, see CodeDocsBatch) is that decision, made
+    once by the extraction, so a snapshot directory or a repository node that
+    changed since cannot turn a repository the extraction left out into one
+    swept for nothing. Without it (a plain list from another caller) the
+    check is made here, the way the extraction makes it: the docs of the
+    snapshot the code graph holds, from ``snapshot_dir`` when the caller has
+    one, else from the node's ``<path>/.enola`` (``snapshot_docs`` without
+    parsing the lines, off the event loop). Either way its absence from the
+    batch says nothing about its docs. A forgotten repository (no node) has no
+    snapshot to read and is swept.
     """
     if repo is not None:
         scope = {repo}
@@ -387,26 +383,29 @@ def _sweep_scope(
         for properties in nodes.values()
         if properties.get("type") == "CodeRepository" and isinstance(properties.get("name"), str)
     }
-    kept = {
-        name
-        for name in scope
-        if name in repositories
-        and readable_source_root(
-            repositories[name].get("path"), repo_path if name == repo else None
-        )
-        is None
-        and keeps_stored_docs(
-            properties
-            for properties in nodes.values()
-            if properties.get("type") == _CODE_DOCUMENT_TYPE and properties.get("repo") == name
-        )
-    }
+    if read_repos is not None:
+        kept = {name for name in scope if name in repositories and name not in read_repos}
+    else:
+        kept = set()
+        for name in sorted(scope & repositories.keys()):
+            if not await asyncio.to_thread(_docs_available, repositories[name], snapshot_dir):
+                kept.add(name)
     if kept:
         logger.warning(
-            "Code docs of %s kept as stored: no readable source directory this run.",
+            "Code docs of %s kept as stored: the docs of the snapshot their code graph holds "
+            "were not read this run.",
             ", ".join(repr(name) for name in sorted(kept)),
         )
     return scope - kept
+
+
+def _docs_available(repository: dict[str, Any], snapshot_dir: str | os.PathLike | None) -> bool:
+    """Whether the extraction could read this repository's snapshot docs (snapshot_docs)."""
+    try:
+        snapshot_docs(repository, snapshot_dir, parse=False)
+    except EnolaDocsUnavailable:
+        return False
+    return True
 
 
 async def _sweep_stale_code_docs(

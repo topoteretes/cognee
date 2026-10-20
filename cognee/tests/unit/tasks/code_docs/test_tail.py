@@ -70,29 +70,30 @@ async def test_embed_only_tail_runs_extract_store_link_with_the_context(chain):
 
     assert counts == {"documents": 1, "chunks": 2, "new": 2, "edges": 2, "swept": 4}
     assert chain.calls == [
-        ("extract", (), {"repo": "demo_repo", "ctx": ctx, "repo_path": None}),
+        ("extract", (), {"repo": "demo_repo", "ctx": ctx, "snapshot_dir": None}),
         ("store", (chain.batch,), {"ctx": ctx, "graph_only": False}),
-        ("link", (chain.batch,), {"ctx": ctx, "repo": "demo_repo", "repo_path": None}),
+        ("link", (chain.batch,), {"ctx": ctx, "repo": "demo_repo", "snapshot_dir": None}),
     ]
 
 
 @pytest.mark.asyncio
-async def test_tail_hands_the_source_directory_to_the_extraction_and_the_sweep(chain):
-    """The routes pass the directory they indexed: the extraction reads it, and
-    the link task's sweep learns from it that the repository was readable this
-    run. The store has no use for it."""
-    await code_docs_tail("demo_repo", repo_path="/staging/demo_repo")
+async def test_tail_hands_the_snapshot_to_the_extraction_and_the_sweep(chain):
+    """The routes pass the snapshot they just loaded: the extraction reads its
+    docs.jsonl, and the link task's sweep checks the repository's docs against
+    the same directory, so both agree on whether they were available this run.
+    The store has no use for it."""
+    await code_docs_tail("demo_repo", snapshot_dir="/staging/demo_repo/.enola")
 
     assert chain.calls[0] == (
         "extract",
         (),
-        {"repo": "demo_repo", "ctx": None, "repo_path": "/staging/demo_repo"},
+        {"repo": "demo_repo", "ctx": None, "snapshot_dir": "/staging/demo_repo/.enola"},
     )
-    assert "repo_path" not in chain.calls[1][2]
+    assert "snapshot_dir" not in chain.calls[1][2]
     assert chain.calls[2] == (
         "link",
         (chain.batch,),
-        {"ctx": None, "repo": "demo_repo", "repo_path": "/staging/demo_repo"},
+        {"ctx": None, "repo": "demo_repo", "snapshot_dir": "/staging/demo_repo/.enola"},
     )
 
 
@@ -104,18 +105,18 @@ async def test_entity_mode_tail_hands_the_cognified_batch_on(chain):
     # chunks became summaries.
     assert counts["documents"] == 1 and counts["chunks"] == 2
     assert chain.calls == [
-        ("extract", (), {"repo": None, "ctx": None, "repo_path": None}),
+        ("extract", (), {"repo": None, "ctx": None, "snapshot_dir": None}),
         ("cognify", (chain.batch,), {"ctx": None}),
         ("store", (chain.cognified,), {"ctx": None, "graph_only": True}),
-        ("link", (chain.cognified,), {"ctx": None, "repo": None, "repo_path": None}),
+        ("link", (chain.cognified,), {"ctx": None, "repo": None, "snapshot_dir": None}),
     ]
 
 
 def test_tail_signature_is_the_shared_contract():
     parameters = inspect.signature(code_docs_tail).parameters
-    assert list(parameters) == ["repo", "ctx", "extract_entities", "graph_only", "repo_path"]
+    assert list(parameters) == ["repo", "ctx", "extract_entities", "graph_only", "snapshot_dir"]
     assert parameters["ctx"].default is None
     assert parameters["extract_entities"].kind is inspect.Parameter.KEYWORD_ONLY
     assert parameters["extract_entities"].default is False
-    assert parameters["repo_path"].kind is inspect.Parameter.KEYWORD_ONLY
-    assert parameters["repo_path"].default is None
+    assert parameters["snapshot_dir"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert parameters["snapshot_dir"].default is None

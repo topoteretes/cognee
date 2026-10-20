@@ -4,10 +4,13 @@ SearchType.CODE answers structural questions over the enola code graph, but
 the graph holds no prose beyond the first paragraph of a symbol's ``doc``
 prop, and no completion or chunk retriever reads code nodes. This pipeline
 reads the docstrings of every repository whose code graph is in the dataset
-(``extract_code_docs``: from the source files on the server, enola's ``doc``
-prop as fallback) and stores them as plain ``DocumentChunk`` nodes -- one per
-documented symbol, text headed ``file:line`` and the signature -- under one
-``CodeDocument`` per source file. Plain chunks on purpose: every existing
+(``extract_code_docs``: the whole comments enola wrote to ``docs.jsonl`` in the
+snapshot the repository's graph was built from, ``<CodeRepository.path>/.enola``)
+and stores them as plain ``DocumentChunk`` nodes -- one per documented symbol
+or module, text headed ``file:line`` and ``name (kind)`` -- under one
+``CodeDocument`` per file (per package directory for a module doc). A
+repository whose snapshot is gone, or no longer the one its graph holds, keeps
+its stored docs untouched. Plain chunks on purpose: every existing
 retriever (recall, GRAPH_COMPLETION, HYBRID, CHUNKS) already searches
 ``DocumentChunk_text``, so "what does memify do" is answered from the docstring
 text with no retrieval change. ``add_code_doc_edges`` then links each chunk to
@@ -16,7 +19,7 @@ file, line, callers and flows in one hop, and sweeps the chunks a re-run no
 longer yields, from the graph and from their vector collections.
 
 Ids are deterministic (document: ``code_document_id(repo, file)``; chunk: the
-content hash of its text), so a re-run over unchanged sources yields the same
+content hash of its text), so a re-run over unchanged docs yields the same
 ids: ``store_code_docs`` writes only the points the graph does not hold yet,
 no edge is added, a changed docstring replaces exactly its chunk and the
 sweep removes nothing else. An unchanged re-run writes and embeds nothing.
@@ -61,7 +64,7 @@ def get_code_docs_memify_tasks(
 
     ``repo`` limits the run to one enola repository label (None: every
     CodeRepository in the dataset) and scopes the sweep the same way;
-    ``include_modules`` adds a chunk per file-level docstring. The enrichment
+    ``include_modules`` adds a chunk per module (package) doc. The enrichment
     chain is store_code_docs (the points the graph lacks, through
     add_data_points at cognify's batch size), then add_code_doc_edges, with,
     for ``extract_entities``, cognify_code_doc_chunks in front of it:

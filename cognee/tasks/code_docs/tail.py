@@ -30,7 +30,7 @@ async def code_docs_tail(
     *,
     extract_entities: bool = False,
     graph_only: bool = False,
-    repo_path: str | os.PathLike | None = None,
+    snapshot_dir: str | os.PathLike | None = None,
 ) -> dict[str, int]:
     """Document ``repo`` (None: every repository in the dataset) and return the counts.
 
@@ -41,12 +41,12 @@ async def code_docs_tail(
     removes them with the code graph, and the sweep retires their chunks
     through the provenance planner. ``repo`` scopes both the extraction and
     the sweep. Embed-only unless ``extract_entities``; ``graph_only`` stores
-    the graph nodes without a vector engine. ``repo_path`` is the repository's
-    source directory when the caller knows it: the routes pass the directory
-    they just indexed, read in place of the stored ``CodeRepository.path``
-    (an earlier run's staging directory, once an unchanged snapshot is
-    skipped), see extract_code_docs; the link task gets it too, so its sweep
-    knows the repository's source was readable this run.
+    the graph nodes without a vector engine. ``snapshot_dir`` is the enola
+    snapshot the caller just loaded: the routes pass it, so the docs are read
+    from its ``docs.jsonl`` and not from ``<CodeRepository.path>/.enola``
+    (which, once an unchanged snapshot is skipped, can name an earlier run's
+    staging directory), see extract_code_docs; the link task gets it too, so
+    its sweep knows the repository's docs were readable this run.
 
     Returns ``{"documents", "chunks", "new", "edges", "swept"}``: the
     CodeDocuments and DocumentChunks the run derived, the chunks written to
@@ -54,13 +54,13 @@ async def code_docs_tail(
     describes edges written, and the stale nodes swept (documents, chunks,
     summaries, entities, and what the planner retired with an owned chunk).
     """
-    data_points = await extract_code_docs(repo=repo, ctx=ctx, repo_path=repo_path)
+    data_points = await extract_code_docs(repo=repo, ctx=ctx, snapshot_dir=snapshot_dir)
     documents = sum(1 for point in data_points if isinstance(point, CodeDocument))
     chunks = sum(1 for point in data_points if isinstance(point, DocumentChunk))
     if extract_entities:
         data_points = await cognify_code_doc_chunks(data_points, ctx=ctx)
     stored = await store_new_code_docs(data_points, ctx=ctx, graph_only=graph_only)
-    linked = await link_code_docs(data_points, ctx=ctx, repo=repo, repo_path=repo_path)
+    linked = await link_code_docs(data_points, ctx=ctx, repo=repo, snapshot_dir=snapshot_dir)
     counts = {
         "documents": documents,
         "chunks": chunks,

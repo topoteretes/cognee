@@ -263,8 +263,8 @@ async def cognify(
                  the SUMMARY_METHOD setting ("llm" by default). Raises while
                  connected to a remote instance.
         code_docs: Whether the code routes (code files and code repositories) also
-                 store the source docstrings as DocumentChunks linked to the code
-                 graph by ``describes`` edges, so recall / CHUNKS / GRAPH_COMPLETION
+                 store the docstrings enola extracted (its docs.jsonl) as
+                 DocumentChunks linked to the code graph by ``describes`` edges, so recall / CHUNKS / GRAPH_COMPLETION
                  answer "what does X do" from the docstring and reach the symbol.
                  The code graph itself never calls the LLM; the chunks are embedded
                  (with the local fastembed model when no key is configured). The

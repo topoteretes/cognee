@@ -18,7 +18,7 @@ from cognee.memify_pipelines.cognify_code_docs import (
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.pipelines.tasks.task import pipeline_needs_llm
 from cognee.shared.data_models import KnowledgeGraph
-from cognee.tasks.code_docs.models import CodeDocument
+from cognee.tasks.code_docs.models import CodeDocsBatch, CodeDocument
 from cognee.tasks.summarization.models import TextSummary
 
 graph_engine_module = importlib.import_module(
@@ -235,6 +235,26 @@ async def test_cognify_code_doc_chunks_passes_a_chunkless_batch_through(graph):
         assert await cognify_code_doc_chunks([]) == []
     extract.assert_not_awaited()
     graph.get_filtered_graph_data.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_cognify_code_doc_chunks_carries_the_batchs_read_set(graph):
+    """The extraction's read set (CodeDocsBatch.read_repos) reaches the sweep in
+    entity mode too: the new list of summaries and unchanged chunks carries it.
+    A plain list stays a plain list."""
+    document = _document()
+    batch = CodeDocsBatch.of([document, _chunk(document, 0)], {"demo_repo"})
+
+    async def fake_extract(data_chunks, graph_model, ctx):
+        return [TextSummary(text="summary", made_from=c) for c in data_chunks]
+
+    with patch(EXTRACT_TARGET, new=AsyncMock(side_effect=fake_extract)):
+        result = await cognify_code_doc_chunks(batch)
+        plain = await cognify_code_doc_chunks([document, _chunk(document, 1)])
+
+    assert isinstance(result, CodeDocsBatch) and result is not batch
+    assert result.read_repos == frozenset({"demo_repo"})
+    assert getattr(plain, "read_repos", None) is None
 
 
 def test_registry_runs_the_pipeline_by_name():

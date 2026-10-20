@@ -16,6 +16,7 @@ class InventoryStore:
         return compute_total(self.lines)
 
     def discounted_total(self, percent):
+        """Total of the stored lines, less a discount of ``percent`` percent."""
         return apply_discount(self.lines, percent)
 
     def sync(self, url):

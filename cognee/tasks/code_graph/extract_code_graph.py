@@ -824,49 +824,24 @@ def code_graph_repo_labels(
     repo_path: str | Path | None = None,
     snapshot_dir: str | Path | None = None,
 ) -> list[str]:
-    """The enola repository labels a code graph run covered, sorted (see code_graph_repo_sources)."""
-    return sorted(code_graph_repo_sources(data_points, repo_path, snapshot_dir))
+    """The enola repository labels a code graph run covered, sorted.
 
-
-def code_graph_repo_sources(
-    data_points: list,
-    repo_path: str | Path | None = None,
-    snapshot_dir: str | Path | None = None,
-) -> dict[str, Path | None]:
-    """The enola repository labels a run covered, each with the directory the run read it from.
-
-    The labels are read off the CodeRepository data points the run produced
-    (one per repo in the snapshot, named as enola labels it -- not the
-    directory basename). When extract_code_graph skipped an unchanged snapshot
-    it produced none, so the labels are then resolved from the snapshot exactly
-    as map_facts_to_data_points resolves them, so they name the same nodes.
-
-    The scanned directory ``repo_path`` belongs to the primary repository --
-    the one map_facts_to_data_points stores it on as ``path``, the snapshot's
-    fallback repo -- and the docs tail reads that repository's docstrings
-    from it rather than from the stored path, which a skipped snapshot leaves
-    as an earlier run's (the per-file route stages every run in a new
-    temporary directory). A multi-repo snapshot's other repositories have no
-    directory of their own here (None), and neither has a repository whose
-    data point carries another path.
+    Read off the CodeRepository data points the run produced (one per repo in
+    the snapshot, named as enola labels it -- not the directory basename).
+    When extract_code_graph skipped an unchanged snapshot it produced none, so
+    the labels are then resolved from the snapshot (``snapshot_dir``, else
+    ``<repo_path>/.enola``) exactly as map_facts_to_data_points resolves them,
+    so they name the same nodes. No snapshot to read: no labels.
     """
-    repositories = [point for point in data_points if isinstance(point, CodeRepository)]
+    repositories = {point.name for point in data_points if isinstance(point, CodeRepository)}
     if repositories:
-        scanned = str(repo_path) if repo_path is not None else None
-        return {
-            point.name: Path(scanned) if scanned is not None and point.path == scanned else None
-            for point in repositories
-        }
+        return sorted(repositories)
     if snapshot_dir is None:
         if repo_path is None:
-            return {}
+            return []
         snapshot_dir = Path(repo_path) / ".enola"
     facts, _receipt = parse_enola_snapshot(snapshot_dir)
-    fallback_repo = _resolve_fallback_repo(facts, repo_path)
-    return {
-        repo: Path(repo_path) if repo_path is not None and repo == fallback_repo else None
-        for repo in _snapshot_repos(facts, fallback_repo)
-    }
+    return sorted(_snapshot_repos(facts, _resolve_fallback_repo(facts, repo_path)))
 
 
 def _pipeline_data_id(ctx: Optional["PipelineContext"] = None) -> Any:
@@ -1363,20 +1338,23 @@ async def add_code_graph_docs(
 
     The docs tail of every code route (cognify's CODE and CODE_REPO routes and
     the code graph pipeline): after add_code_graph_edges, ``code_docs_tail``
-    reads each repository's docstrings from its source, stores them as
-    DocumentChunks (embedded -- the only embedding call on these routes; the
-    local fastembed model when no key is configured, unless one of the env vars
-    that disable the preflight -- COGNEE_SKIP_PREFLIGHT,
-    COGNEE_SKIP_CONNECTION_TEST, MOCK_EMBEDDING -- is set, which switches that
-    fallback off and leaves the configured provider in charge) and writes the
-    ``describes`` edges. One call per repository label the run produced (see
-    code_graph_repo_sources), so the sweep stays scoped to those repositories;
-    the primary repository's call gets the scanned ``repo_path``, so its
-    docstrings are read from the directory this run indexed and not from the
-    stored path, which a skipped snapshot leaves stale; and every call gets the
-    route's ``ctx``, so the documents and chunks are attributed to the data
-    item that owns the code graph and forget(data_id) removes them with it.
-    Runs for an unchanged snapshot too: the tail is idempotent, and a
+    reads each repository's docstrings from the ``docs.jsonl`` enola wrote
+    into the snapshot this run loaded (``snapshot_dir``, else
+    ``<repo_path>/.enola``), stores them as DocumentChunks (embedded -- the
+    only embedding call on these routes; the local fastembed model when no key
+    is configured, unless one of the env vars that disable the preflight --
+    COGNEE_SKIP_PREFLIGHT, COGNEE_SKIP_CONNECTION_TEST, MOCK_EMBEDDING -- is
+    set, which switches that fallback off and leaves the configured provider
+    in charge) and writes the ``describes`` edges. One call per repository
+    label the run produced (see code_graph_repo_labels), so the sweep stays
+    scoped to those repositories; every call reads the same snapshot (a
+    multi-repo snapshot covers all its repositories in one directory), not the
+    stored ``CodeRepository.path``, which a skipped snapshot leaves as an
+    earlier run's; and every call gets the route's ``ctx``, so the documents
+    and chunks are attributed to the data item that owns the code graph and
+    forget(data_id) removes them with it. Runs for an unchanged snapshot too:
+    the tail is idempotent (a docstring edit past its first paragraph changes
+    docs.jsonl but not the snapshot id, and is picked up here), and a
     repository indexed before docstrings were stored, or with them switched
     off, gets them on its next sync.
 
@@ -1389,10 +1367,11 @@ async def add_code_graph_docs(
     """
     from cognee.tasks.code_docs import code_docs_tail
 
-    sources = code_graph_repo_sources(data_points, repo_path, snapshot_dir)
-    for repo in sorted(sources):
+    if snapshot_dir is None and repo_path is not None:
+        snapshot_dir = Path(repo_path) / ".enola"
+    for repo in code_graph_repo_labels(data_points, repo_path, snapshot_dir):
         try:
-            counts = await code_docs_tail(repo=repo, ctx=ctx, repo_path=sources[repo])
+            counts = await code_docs_tail(repo=repo, ctx=ctx, snapshot_dir=snapshot_dir)
         except Exception:
             logger.exception(
                 "Code docs of repository '%s' were not stored; its code graph is kept. "

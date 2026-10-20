@@ -17,11 +17,12 @@ Verifies:
 - the code graph holds ONLY the typed enola models (CodeRepository, CodeModule,
   CodeSymbol, ...) — no generic Node / Entity / TextSummary, and no chunks
   other than the docstring layer below
-- with CODE_GRAPH_DOCS on, every ingestion also stores one CodeDocument per
-  documented fixture file and one DocumentChunk per docstring (the fixture has
-  module docstrings only), each linked to its CodeModule by a `describes`
-  edge; an unchanged re-ingestion adds none, and forget(data_id=...) removes
-  them along with the repository's code graph
+- with CODE_GRAPH_DOCS on, every ingestion also stores the docs enola wrote to
+  .enola/docs.jsonl: one CodeDocument per documented file (per directory for
+  a package doc) and one DocumentChunk per documented symbol or package,
+  holding the whole comment, each linked by a `describes` edge to the
+  CodeSymbol or CodeModule it documents; an unchanged re-ingestion adds none,
+  and forget(data_id=...) removes them along with the repository's code graph
 - known files, symbols, modules, dependencies and typed relations
   (calls / imports / declares / part_of) are present, with resolved endpoints
 - SearchType.CODE known-answer queries (query_facts, find_path,
@@ -74,7 +75,7 @@ COGNIFY_DATASET = "code_graph_e2e_cognify"
 
 # --- Known answers, pinned to the fixture + ENOLA_PINNED_VERSION ------------
 # If enola is bumped and these change, update them deliberately. Last
-# re-verified against enola 0.4.30: it emits the README as document/section
+# re-verified against enola 0.4.32: it emits the README as document/section
 # symbols, an `extraction` coverage fact, the pyproject's declared package as
 # `pkg:pypi/requests`, and (since 0.4.14) a module-level `module-edge:` dependency
 # fact per resolved package import. File-level import facts such as
@@ -142,14 +143,28 @@ ALLOWED_NODE_TYPES = set(CODE_NODE_TYPES) | {"CodeRepository"}
 # The docstring layer: cognee/tasks/code_docs, run by the code routes' docs tail.
 CODE_DOCSTRING_CUT_TYPE = "code_docstring"
 
-# The fixture's docstrings are module docstrings only (no function or class has
-# one), so each documented file yields exactly one chunk, headed "<file>:1" and
-# linked to the CodeModule of its directory (the repo root is ".").
+# The docstrings come from the snapshot's docs.jsonl alone: enola writes the
+# whole comment of each documented symbol and of each package (a Python
+# package's is its __init__.py docstring). A per-file module docstring (main.py,
+# pricing.py, store.py) is not an enola doc and yields no chunk. A chunk's text
+# starts with "<file>:<line>" for a symbol and with the directory for a package,
+# and its `describes` edge leads to the code node enola's fact id names:
+# first header line -> (node type, name).
 EXPECTED_DOCSTRING_CHUNKS = {
-    "main.py:1": ".",
-    "inventory/pricing.py:1": "inventory",
-    "inventory/store.py:1": "inventory",
+    "inventory/pricing.py:16": ("CodeSymbol", "inventory/pricing.compute_total"),
+    "inventory/store.py:18": ("CodeSymbol", "inventory/store.InventoryStore.discounted_total"),
+    "inventory": ("CodeModule", "inventory"),
 }
+
+# One CodeDocument per file of a symbol doc, per directory of a package doc.
+EXPECTED_CODE_DOCUMENTS = {"inventory/pricing.py", "inventory/store.py", "inventory"}
+
+# compute_total's docstring has two paragraphs, and facts.jsonl's `doc` keeps
+# only the first: the second one in the chunk shows it holds the whole comment.
+COMPUTE_TOTAL_HEADER = "inventory/pricing.py:16"
+COMPUTE_TOTAL_SECOND_PARAGRAPH = (
+    "Rounded down to whole cents, so the total never exceeds the exact taxed sum."
+)
 
 
 def _code_docs_enabled() -> bool:
@@ -261,35 +276,46 @@ def _assert_code_docs(code_nodes: dict, docs_nodes: dict, docs_edges: list, repo
     # its documents and chunks are gone along with its code graph.
     foreign = sorted({p.get("repo") for p in documents.values()} - {repo_name})
     assert not foreign, f"CodeDocuments of other repositories remain: {foreign}"
-    documented = {p.get("name") for p in documents.values()}
-    assert EXPECTED_FILES <= documented, (
-        f"Documented files without a CodeDocument: {EXPECTED_FILES - documented}"
+    # Sorted lists, not sets: a duplicate (a stale copy left unswept) fails too.
+    documented = sorted(p.get("name") for p in documents.values())
+    assert documented == sorted(EXPECTED_CODE_DOCUMENTS), (
+        f"CodeDocuments {documented}, expected exactly {sorted(EXPECTED_CODE_DOCUMENTS)}"
     )
 
     headers = {node_id: (p.get("text") or "").split("\n", 1)[0] for node_id, p in chunks.items()}
-    missing = set(EXPECTED_DOCSTRING_CHUNKS) - set(headers.values())
-    assert not missing, (
-        f"Docstring chunks missing (chunk text starts with file:line): {sorted(missing)}"
+    assert sorted(headers.values()) == sorted(EXPECTED_DOCSTRING_CHUNKS), (
+        f"Docstring chunks (first header line) {sorted(headers.values())}, "
+        f"expected exactly {sorted(EXPECTED_DOCSTRING_CHUNKS)}"
     )
 
-    module_names = {
-        node_id: p.get("name") for node_id, p in _by_type(code_nodes, "CodeModule").items()
-    }
-    describes = {s: t for s, t, rel, _ in docs_edges if rel == "describes"}
+    described: dict[str, set] = {}
+    for source, target, rel, _ in docs_edges:
+        if rel == "describes":
+            node = code_nodes.get(target, {})
+            described.setdefault(source, set()).add((node.get("type"), node.get("name")))
     is_part_of = {s: t for s, t, rel, _ in docs_edges if rel == "is_part_of"}
     for chunk_id, header in headers.items():
-        assert is_part_of.get(chunk_id) in documents, (
-            f"Docstring chunk {header!r} is not linked to its CodeDocument (is_part_of)"
+        # The header's location is the document's name: "<file>:<line>" or "<dir>".
+        document = documents.get(is_part_of.get(chunk_id), {})
+        assert document.get("name") == header.partition(":")[0], (
+            f"Docstring chunk {header!r} is not linked to the CodeDocument of its file "
+            f"(is_part_of): {document.get('name')!r}"
         )
-        expected_module = EXPECTED_DOCSTRING_CHUNKS.get(header)
-        if expected_module is None:
-            continue
-        target = describes.get(chunk_id)
-        assert target is not None, f"Docstring chunk {header!r} has no 'describes' edge"
-        assert module_names.get(target) == expected_module, (
-            f"Docstring chunk {header!r} describes {module_names.get(target, target)!r}, "
-            f"expected CodeModule {expected_module!r}"
+        expected_node = EXPECTED_DOCSTRING_CHUNKS[header]
+        assert described.get(chunk_id) == {expected_node}, (
+            f"Docstring chunk {header!r} describes {described.get(chunk_id)}, "
+            f"expected {expected_node[0]} {expected_node[1]!r}"
         )
+
+    (compute_total_text,) = [
+        chunks[chunk_id].get("text") or ""
+        for chunk_id, header in headers.items()
+        if header == COMPUTE_TOTAL_HEADER
+    ]
+    assert COMPUTE_TOTAL_SECOND_PARAGRAPH in compute_total_text, (
+        "The compute_total chunk lacks its docstring's second paragraph, so it does not "
+        f"hold the whole comment: {compute_total_text!r}"
+    )
 
 
 def _assert_typed_code_graph(nodes: dict, edges: list, repo_name: str) -> None:

@@ -7,9 +7,9 @@ Classification maps that tag to CodeFileDocument, and cognify routing sends
 such items down the CODE route (modules/cognify/routing.py). The route's task
 list is built here: it stages each stored code file into a temporary per-file
 directory (enola only accepts directories) and runs the deterministic enola
-code graph pipeline on it — no LLM call. The file's docstrings are then stored
-as DocumentChunks linked to its code nodes (``add_code_graph_docs``), the
-route's only embedding call (the local fastembed model when no key is
+code graph pipeline on it — no LLM call. The file's docstrings (enola's
+docs.jsonl of the staged snapshot) are then stored as DocumentChunks linked to
+its code nodes (``add_code_graph_docs``), the route's only embedding call (the local fastembed model when no key is
 configured, unless a COGNEE_SKIP_* / MOCK_EMBEDDING switch keeps the configured
 provider) and best effort: a tail that fails is logged and the file's code
 graph stays. ``CODE_GRAPH_DOCS=false`` or ``cognify(code_docs=False)`` keeps
@@ -113,10 +113,10 @@ async def extract_code_files_graph(
     the file's docstrings follow as DocumentChunks linked to its code nodes
     (add_code_graph_docs) -- the route's only embedding call, the local
     fastembed model when no key is configured -- still inside the staging
-    directory, since the docstrings are read from the staged source: the tail
-    is handed this run's staging directory, because the stored
-    CodeRepository.path is the previous run's, gone from disk, once an
-    unchanged snapshot is skipped. The tail runs with this route's ``ctx``, so
+    directory, since the docstrings are read from the snapshot enola wrote
+    there (its docs.jsonl): the tail is handed this run's snapshot, because
+    the stored CodeRepository.path is the previous run's, gone from disk, once
+    an unchanged snapshot is skipped. The tail runs with this route's ``ctx``, so
     the chunks belong to the file's data item and forget(data_id) removes them
     with the code graph; a tail that fails is logged and the file's code graph
     kept (see add_code_graph_docs).
@@ -150,7 +150,7 @@ async def extract_code_files_graph(
             await add_code_graph_edges(state, repo_path=repo_dir, ctx=ctx)
             if code_docs:
                 # Inside the staging block: the docstrings are read from the
-                # staged source, which is gone once it exits.
+                # snapshot enola wrote there, which is gone once it exits.
                 await add_code_graph_docs(state, ctx=ctx, repo_path=repo_dir)
 
         logger.info(

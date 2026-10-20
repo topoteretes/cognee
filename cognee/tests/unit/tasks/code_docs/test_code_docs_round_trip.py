@@ -6,11 +6,22 @@ over a snapshot of a small Python repository, then ``extract_code_docs``,
 ``store_code_docs(graph_only=True)`` and ``add_code_doc_edges`` -- against a
 real engine and reads the stored graph back, so the stored shapes, the edge
 targets, the idempotent re-run (no write, no edge, no sweep), the sweep of a
-forgotten repository and entity mode's cleanup (with and without stored
-provenance) are checked end to end. The route-shaped tests at the end run the
-code graph tasks and ``code_docs_tail`` under a pipeline context per
-repository, the way the code routes do, and then delete the repository
-through the graph-provenance path ``forget(data_id=...)`` takes.
+forgotten repository, the docs kept while a repository's snapshot docs are not
+available, and entity mode's cleanup (with and without stored provenance) are
+checked end to end.
+
+A repository here is a directory that holds only the snapshot enola 0.4.32
+writes into its ``.enola``: facts.jsonl (a documented fact carries its
+comment's first paragraph), docs.jsonl (the whole comment, under the fact's
+id, which is the ``enola_id`` of its code node) and a receipt that vouches for
+docs.jsonl. The chain reads no source file. It is entered two ways. The
+memify path (``_sync_code_docs``) runs the tasks without a snapshot directory,
+so each repository's docs are read from ``<CodeRepository.path>/.enola``. The
+route path (``_route``) runs the code graph tasks and then ``code_docs_tail``
+per repository label, handed the snapshot just loaded, as add_code_graph_docs
+does; the route-shaped tests at the end run it under a pipeline context per
+repository and then delete the repository through the graph-provenance path
+``forget(data_id=...)`` takes.
 """
 
 import importlib
@@ -32,6 +43,7 @@ from cognee.infrastructure.databases.provenance.markers import mark_graph_proven
 from cognee.infrastructure.databases.unified.capabilities import EngineCapability
 from cognee.infrastructure.databases.unified.unified_store_engine import UnifiedStoreEngine
 from cognee.infrastructure.engine.models.Edge import Edge
+from cognee.modules.chunking.external_metadata import decode_external_metadata
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge as GraphEdge
@@ -53,11 +65,12 @@ from cognee.tasks.code_docs.models import CodeDocument
 from cognee.tasks.code_graph.extract_code_graph import (
     add_code_graph_data_points,
     add_code_graph_edges,
-    code_graph_repo_sources,
+    code_graph_repo_labels,
     extract_code_graph,
     fact_node_id,
 )
 from cognee.tasks.summarization.models import TextSummary
+from cognee.tests.utils.enola_snapshot import doc_line, enola_fact_id, write_enola_snapshot
 
 extract_module = importlib.import_module("cognee.tasks.code_docs.extract_code_docs")
 store_module = importlib.import_module("cognee.tasks.code_docs.store_code_docs")
@@ -79,52 +92,22 @@ SHOP = "shop"
 BILLING = "billing"
 CODE_TYPES = {"CodeRepository", "CodeModule", "CodeSymbol"}
 
-APP_PY = '''"""The shop application."""
-
-
-def main():
-    """Start the shop's HTTP server."""
-    serve()
-
-
-def serve():
-    return None
-'''
-# main's docstring edited: the chunk's text, and so its id, change.
-APP_PY_EDITED = APP_PY.replace(
-    "Start the shop's HTTP server.", "Start the shop's HTTP server and register its routes."
-)
-
-CHECKOUT_PY = '''"""Order checkout."""
-
-
-class Order:
-    """An order."""
-
-    def total(self) -> int:
-        """Sum of the lines."""
-        return 0
-
-
-def place_order(order: Order) -> str:
-    """Place an order."""
-    return "ok"
-'''
-# place_order deleted from the code.
-CHECKOUT_PY_WITHOUT_PLACE_ORDER = CHECKOUT_PY[: CHECKOUT_PY.index("\n\n\ndef place_order")] + "\n"
-
-INVOICES_PY = '''def issue(order_id: str) -> str:
-    """Issue an invoice for an order."""
-    return order_id
-'''
-
 
 def _module(repo, name):
-    return {"kind": "module", "name": name, "file": name, "repo": repo, "props": {}}
+    """A package's module fact: enola names and files it by the package directory."""
+    return {
+        "id": enola_fact_id(repo, "module", name, name),
+        "kind": "module",
+        "name": name,
+        "file": name,
+        "repo": repo,
+        "props": {"language": "python"},
+    }
 
 
 def _symbol(repo, name, file, line, kind="function", calls=()):
     return {
+        "id": enola_fact_id(repo, "symbol", name, file),
         "kind": "symbol",
         "name": name,
         "file": file,
@@ -135,7 +118,9 @@ def _symbol(repo, name, file, line, kind="function", calls=()):
     }
 
 
-# Enola-style facts of the two repositories: def lines as the sources above have them.
+# Enola facts of the two repositories, each with its fact id: the code node's
+# enola_id, the key a docs.jsonl line names. The shop is a root package with
+# app.py, and an orders package with checkout.py.
 SHOP_FACTS = [
     _module(SHOP, "."),
     _module(SHOP, "orders"),
@@ -153,16 +138,44 @@ SHOP_FACTS = [
 ]
 BILLING_FACTS = [_module(BILLING, "."), _symbol(BILLING, "invoices.issue", "invoices.py", 1)]
 
-# Chunk header (its first line) -> the code node its describes edge must reach.
+# The whole comment of each documented fact, by fact name: what docs.jsonl
+# holds (facts.jsonl holds its first paragraph). enola documents a package,
+# not a file, so the shop's two module docs are its __init__.py docstrings, of
+# the root and of orders/; a module docstring of app.py or checkout.py gets no
+# line. app.serve and billing's package are undocumented.
+SHOP_DOCS = {
+    ".": "The shop application.",
+    "orders": "Order checkout.",
+    "app.main": "Start the shop's HTTP server.",
+    "orders/checkout.Order": "An order.",
+    "orders/checkout.Order.total": "Sum of the lines.\n\nTaxes are not included.",
+    "orders/checkout.place_order": "Place an order.",
+}
+BILLING_DOCS = {"invoices.issue": "Issue an invoice for an order."}
+# main's docstring edited in its first paragraph: its chunk's text and id
+# change, and since facts.jsonl changes with it, so does the snapshot id.
+MAIN_EDITED = {**SHOP_DOCS, "app.main": "Start the shop's HTTP server and register its routes."}
+# Order.total's docstring edited past its first paragraph: docs.jsonl and its
+# hash in the receipt change; facts.jsonl and the snapshot id do not.
+TOTAL_EDITED = {
+    **SHOP_DOCS,
+    "orders/checkout.Order.total": "Sum of the lines.\n\nTaxes are included.",
+}
+
+# Chunk header (its first line: file:line, for a module doc the package
+# directory) -> the code node its describes edge must reach.
 EXPECTED_TARGETS = {
-    "app.py:1": (SHOP, "module", "."),
+    ".": (SHOP, "module", "."),
     "app.py:4": (SHOP, "symbol", "app.main"),
-    "orders/checkout.py:1": (SHOP, "module", "orders"),
+    "orders": (SHOP, "module", "orders"),
     "orders/checkout.py:4": (SHOP, "symbol", "orders/checkout.Order"),
     "orders/checkout.py:7": (SHOP, "symbol", "orders/checkout.Order.total"),
     "orders/checkout.py:12": (SHOP, "symbol", "orders/checkout.place_order"),
     "invoices.py:1": (BILLING, "symbol", "invoices.issue"),
 }
+
+# What a docs run that derives, stores, links and sweeps nothing reports.
+NOTHING = {"documents": 0, "chunks": 0, "new": 0, "edges": 0, "swept": 0}
 
 # The entities the fake extractor derives: "shop" from every chunk, one more
 # from main's docstring that changes with its text.
@@ -172,20 +185,39 @@ HTTP_SERVER, ROUTES, SHOP_ENTITY = (
 SERVICE, PROJECT = (str(EntityType.id_for(name)) for name in ("service", "project"))
 
 
-def _write_repo(root, files):
-    for relative, text in files.items():
-        path = root / relative
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
-    return root
+def _snapshot_dir(repo_dir):
+    """Where enola writes a repository's snapshot, and where the memify path reads it."""
+    return repo_dir / ".enola"
 
 
-def _write_snapshot(directory, facts, snapshot_id):
-    directory.mkdir(parents=True, exist_ok=True)
-    (directory / "facts.jsonl").write_text("\n".join(json.dumps(fact) for fact in facts) + "\n")
-    receipt = {"snapshot_id": snapshot_id, "format_version": 1, "fact_count": len(facts)}
-    (directory / "receipt.json").write_text(json.dumps(receipt))
-    return directory
+def _write_snapshot(directory, facts, docs, snapshot_id):
+    """Write the snapshot enola writes for ``facts``, ``docs`` ({fact name: whole comment}) documenting them.
+
+    A documented fact carries its comment's first paragraph as its ``doc``
+    prop in facts.jsonl; docs.jsonl holds the whole comment under the fact's
+    id (a module's line has no ``line``), sorted by id as enola sorts it, and
+    the receipt vouches for it with its hash. A fact the snapshot lacks has
+    no line, whatever ``docs`` says.
+    """
+    documented, lines = [], []
+    for fact in facts:
+        doc = docs.get(fact["name"])
+        if doc is not None:
+            fact = {**fact, "props": {**fact["props"], "doc": doc.split("\n\n", 1)[0]}}
+            lines.append(
+                doc_line(
+                    fact["repo"],
+                    fact["kind"],
+                    fact["name"],
+                    fact["file"],
+                    doc,
+                    line=fact.get("line"),
+                    fact_id=fact["id"],
+                )
+            )
+        documented.append(fact)
+    lines.sort(key=lambda line: (line["id"], line.get("line") or 0, line["doc"]))
+    return write_enola_snapshot(directory, documented, docs=lines, snapshot_id=snapshot_id)
 
 
 class _FakeVectors:
@@ -247,12 +279,8 @@ def writes(monkeypatch):
 
 @pytest.fixture
 def repos(tmp_path):
-    """Two repositories' sources, and where their snapshots go."""
-    return SimpleNamespace(
-        shop=_write_repo(tmp_path / SHOP, {"app.py": APP_PY, "orders/checkout.py": CHECKOUT_PY}),
-        billing=_write_repo(tmp_path / BILLING, {"invoices.py": INVOICES_PY}),
-        snapshots=tmp_path / "snapshots",
-    )
+    """The two repositories' directories; once indexed, each holds its snapshot in .enola."""
+    return SimpleNamespace(shop=tmp_path / SHOP, billing=tmp_path / BILLING)
 
 
 def _entity(name):
@@ -290,22 +318,37 @@ def extractor(monkeypatch):
     return calls
 
 
-async def _sync_code_graph(repo_path, snapshot_dir, ctx=None):
-    """The enola code graph tasks, in get_code_graph_tasks order, under the route's ctx."""
-    data_points = await extract_code_graph(repo_path=str(repo_path), snapshot_dir=snapshot_dir)
+async def _sync_code_graph(repo_dir, ctx=None):
+    """The enola code graph tasks over <repo_dir>/.enola, in get_code_graph_tasks order.
+
+    Returns what they pass on: the mapped data points, none when the graph
+    already holds that snapshot (the load is skipped).
+    """
+    snapshot = _snapshot_dir(repo_dir)
+    data_points = await extract_code_graph(repo_path=str(repo_dir), snapshot_dir=snapshot)
     state = await add_code_graph_data_points(data_points, ctx=ctx)
-    await add_code_graph_edges(state, repo_path=str(repo_path), snapshot_dir=snapshot_dir, ctx=ctx)
-
-
-async def _sync_both_code_graphs(repos):
-    await _sync_code_graph(repos.shop, _write_snapshot(repos.snapshots / "shop", SHOP_FACTS, "s1"))
-    await _sync_code_graph(
-        repos.billing, _write_snapshot(repos.snapshots / "billing", BILLING_FACTS, "b1")
+    return await add_code_graph_edges(
+        state, repo_path=str(repo_dir), snapshot_dir=snapshot, ctx=ctx
     )
 
 
+async def _index(repo_dir, facts, docs, snapshot_id, ctx=None):
+    """Index a repository: enola writes its snapshot into <repo_dir>/.enola, the code graph loads it."""
+    _write_snapshot(_snapshot_dir(repo_dir), facts, docs, snapshot_id)
+    return await _sync_code_graph(repo_dir, ctx=ctx)
+
+
+async def _sync_both_code_graphs(repos):
+    await _index(repos.shop, SHOP_FACTS, SHOP_DOCS, "s1")
+    await _index(repos.billing, BILLING_FACTS, BILLING_DOCS, "b1")
+
+
 async def _sync_code_docs(repo=None, ctx=None, extract_entities=False):
-    """The code docs chain: extract, (cognify,) store what is new (graph only), link and sweep."""
+    """The memify path: extract, (cognify,) store what is new (graph only), link and sweep.
+
+    No snapshot directory, as the memify pipeline runs the tasks: each
+    repository's docs are read from <CodeRepository.path>/.enola.
+    """
     data_points = await extract_code_docs(repo=repo, ctx=ctx)
     if extract_entities:
         data_points = await cognify_code_doc_chunks(data_points, ctx=ctx)
@@ -315,10 +358,40 @@ async def _sync_code_docs(repo=None, ctx=None, extract_entities=False):
     return data_points
 
 
+async def _route(repo_dir, ctx=None, extract_entities=False):
+    """The route path over <repo_dir>/.enola: the code graph tasks, then the docs tail.
+
+    One code_docs_tail per repository label the run covered, handed the
+    snapshot the run loaded: what add_code_graph_docs does (graph only here,
+    as unit tests have no embedding engine). Returns {label: counts}.
+    """
+    snapshot = _snapshot_dir(repo_dir)
+    state = await _sync_code_graph(repo_dir, ctx=ctx)
+    counts = {}
+    for label in code_graph_repo_labels(state, repo_dir, snapshot):
+        counts[label] = await code_docs_tail(
+            label,
+            ctx=ctx,
+            extract_entities=extract_entities,
+            graph_only=True,
+            snapshot_dir=snapshot,
+        )
+    return counts
+
+
 async def _graph(engine):
     """The stored graph: {node id: properties} and (source, target, name, properties) edges."""
     nodes, edges = await engine.get_graph_data()
     return dict(nodes), edges
+
+
+async def _stored(engine):
+    """The stored graph with every node and edge property, in a shape two reads compare by."""
+    nodes, edges = await engine.get_graph_data()
+    return dict(nodes), sorted(
+        (source, target, name, json.dumps(properties, sort_keys=True, default=str))
+        for source, target, name, properties in edges
+    )
 
 
 def _code_graph(nodes, edges):
@@ -441,11 +514,15 @@ async def test_stores_documents_and_chunks_linked_to_their_code_nodes(engine, re
     by_header = _chunks_by_header(data_points)
     assert len(documents) + len(by_header) == len(data_points)
 
-    # One CodeDocument per documented file, repositories by name, files by path.
-    assert [(document.repo, document.name) for document in documents] == [
-        (BILLING, "invoices.py"),
-        (SHOP, "app.py"),
-        (SHOP, "orders/checkout.py"),
+    # One CodeDocument per documented file -- for a module doc, its package
+    # directory -- repositories by name, files by path; a module doc is not a
+    # documented symbol.
+    assert [(document.repo, document.name, document.symbol_count) for document in documents] == [
+        (BILLING, "invoices.py", 1),
+        (SHOP, ".", 0),
+        (SHOP, "app.py", 1),
+        (SHOP, "orders", 0),
+        (SHOP, "orders/checkout.py", 3),
     ]
     for document in documents:
         assert document.id == code_document_id(document.repo, document.name)
@@ -466,17 +543,45 @@ async def test_stores_documents_and_chunks_linked_to_their_code_nodes(engine, re
         stored = nodes[str(chunk.id)]
         assert (stored["type"], stored["text"]) == ("DocumentChunk", chunk.text)
         assert (str(chunk.id), chunk.document_id, "is_part_of") in _edge_keys(edges)
-    assert by_header["app.py:1"].text == "app.py:1\napp (module)\n\nThe shop application."
+    assert by_header["."].text == ".\n. (module)\n\nThe shop application."
+    assert by_header["orders"].text == "orders\norders (module)\n\nOrder checkout."
     assert by_header["app.py:4"].text == (
-        "app.py:4\napp.main (function)\ndef main():\n\nStart the shop's HTTP server."
+        "app.py:4\napp.main (function)\n\nStart the shop's HTTP server."
     )
+    # The whole comment, as docs.jsonl holds it; the code node keeps the first
+    # paragraph facts.jsonl carries.
     assert by_header["orders/checkout.py:7"].text == (
         "orders/checkout.py:7\n"
         "orders/checkout.Order.total (method)\n"
-        "def total(self) -> int:\n"
         "\n"
-        "Sum of the lines."
+        "Sum of the lines.\n"
+        "\n"
+        "Taxes are not included."
     )
+    total_id = str(fact_node_id(SHOP, "symbol", "orders/checkout.Order.total"))
+    assert nodes[total_id]["doc"] == "Sum of the lines."
+    # Within a document the docstrings go by line, whatever order docs.jsonl has.
+    assert {header: chunk.chunk_index for header, chunk in by_header.items()} == {
+        ".": 0,
+        "app.py:4": 0,
+        "orders": 0,
+        "orders/checkout.py:4": 0,
+        "orders/checkout.py:7": 1,
+        "orders/checkout.py:12": 2,
+        "invoices.py:1": 0,
+    }
+
+    # Each chunk was joined to its code node by the docs line's id, which is the
+    # stored node's enola_id, and names that node.
+    fact_ids = {
+        (fact["repo"], fact["kind"], fact["name"]): fact["id"]
+        for fact in SHOP_FACTS + BILLING_FACTS
+    }
+    for header, target in EXPECTED_TARGETS.items():
+        code_doc = decode_external_metadata(by_header[header].external_metadata)["code_doc"]
+        node_id = str(fact_node_id(*target))
+        assert code_doc["enola_id"] == nodes[node_id]["enola_id"] == fact_ids[target]
+        assert code_doc["module_id" if target[1] == "module" else "symbol_id"] == node_id
 
     # Exactly one describes edge per chunk, to the code node with that id.
     describes = [(s, t, props) for s, t, name, props in edges if name == "describes"]
@@ -486,11 +591,8 @@ async def test_stores_documents_and_chunks_linked_to_their_code_nodes(engine, re
         header: str(fact_node_id(*target)) for header, target in EXPECTED_TARGETS.items()
     }
     main_edge = next(props for s, _t, props in describes if s == str(by_header["app.py:4"].id))
-    assert (main_edge["relationship_name"], main_edge["doc_source"], main_edge["chunk_index"]) == (
-        "describes",
-        "source",
-        1,
-    )
+    assert (main_edge["relationship_name"], main_edge["chunk_index"]) == ("describes", 0)
+    assert "doc_source" not in main_edge
 
     # The code graph's own nodes (hashes included) and edges are untouched.
     assert _code_graph(nodes, edges) == code_graph_before
@@ -522,7 +624,7 @@ async def test_resolve_edges_to_text_renders_the_chunk_from_its_file_line_header
 
     assert (
         "__node_content_start__\n"
-        "app.py:4\napp.main (function)\ndef main():\n\nStart the shop's HTTP server.\n"
+        "app.py:4\napp.main (function)\n\nStart the shop's HTTP server.\n"
         "__node_content_end__"
     ) in text
     assert "--[describes]--> app.main" in text
@@ -532,6 +634,8 @@ async def test_resolve_edges_to_text_renders_the_chunk_from_its_file_line_header
 async def test_rerun_change_and_removal_touch_exactly_their_chunks(
     engine, repos, vectors, writes, monkeypatch
 ):
+    """The memify path over a repository indexed again after each edit: enola rewrites
+    its .enola and the code graph tasks load it before the docs run."""
     await _sync_both_code_graphs(repos)
     first = await _sync_code_docs()
     nodes_1, edges_1 = await _graph(engine)
@@ -553,7 +657,8 @@ async def test_rerun_change_and_removal_touch_exactly_their_chunks(
     monkeypatch.setattr(engine, "add_edges", spy_add_edges)
     monkeypatch.setattr(engine, "delete_nodes", spy_delete_nodes)
 
-    # Unchanged sources: the same ids, nothing stored, no new edge, nothing swept.
+    # The snapshot unchanged: the same ids, nothing stored, no new edge,
+    # nothing swept.
     writes.clear()
     second = await _sync_code_docs()
     assert [point.id for point in second] == [point.id for point in first]
@@ -562,20 +667,24 @@ async def test_rerun_change_and_removal_touch_exactly_their_chunks(
     assert set(nodes_2) == set(nodes_1)
     assert _edge_keys(edges_2) == _edge_keys(edges_1)
 
-    # A changed docstring: its chunk is replaced (new id, new text, same
-    # position), the old one swept, every other chunk kept. Only the new chunk
-    # and its document are stored. The run covers the shop only, so billing is
-    # not in the batch and must stay untouched.
-    (repos.shop / "app.py").write_text(APP_PY_EDITED, encoding="utf-8")
+    # A changed docstring: enola rewrites main's docs.jsonl line and the
+    # receipt's hash of it (and, the first paragraph being in facts.jsonl too,
+    # the snapshot id); the code graph loads that snapshot and deletes nothing.
+    # The docs run replaces main's chunk (new id, new text, same position) and
+    # sweeps the old one, every other chunk kept; only the new chunk and its
+    # document are stored. The run covers the shop only, so billing is not in
+    # the batch and must stay untouched.
     old_main = _chunks_by_header(second)["app.py:4"]
     main_id = str(fact_node_id(SHOP, "symbol", "app.main"))
+    await _index(repos.shop, SHOP_FACTS, MAIN_EDITED, "s2")
+    assert deleted == []
 
     third = await _sync_code_docs(repo=SHOP)
 
     new_main = _chunks_by_header(third)["app.py:4"]
     assert new_main.id != old_main.id
     assert new_main.text.endswith("Start the shop's HTTP server and register its routes.")
-    assert new_main.chunk_index == old_main.chunk_index == 1
+    assert new_main.chunk_index == old_main.chunk_index == 0
     assert writes == [{new_main.id, code_document_id(SHOP, "app.py")}]
     assert written == [(str(new_main.id), main_id, "describes")]
     assert deleted == [str(old_main.id)]
@@ -588,18 +697,18 @@ async def test_rerun_change_and_removal_touch_exactly_their_chunks(
         (str(new_main.id), main_id)
     }
 
-    # A symbol deleted from the code: the code graph's own sweep drops its
-    # CodeSymbol (and with it the describes edge), the docs run sweeps its
-    # chunk and rewrites its document (one symbol fewer), nothing else.
+    # A symbol deleted from the code: enola writes neither its fact nor its
+    # docs.jsonl line. The code graph's own sweep drops its CodeSymbol (and
+    # with it the describes edge), the docs run sweeps its chunk and rewrites
+    # its document (one symbol fewer), nothing else.
     writes.clear()
     written.clear()
     deleted.clear()
     vectors.deleted.clear()
-    (repos.shop / "orders/checkout.py").write_text(
-        CHECKOUT_PY_WITHOUT_PLACE_ORDER, encoding="utf-8"
-    )
     facts = [fact for fact in SHOP_FACTS if fact["name"] != "orders/checkout.place_order"]
-    await _sync_code_graph(repos.shop, _write_snapshot(repos.snapshots / "shop-2", facts, "s2"))
+    await _index(repos.shop, facts, MAIN_EDITED, "s3")
+    docs_lines = (_snapshot_dir(repos.shop) / "docs.jsonl").read_text(encoding="utf-8")
+    assert "orders/checkout.place_order" not in docs_lines
     place_order_id = str(fact_node_id(SHOP, "symbol", "orders/checkout.place_order"))
     assert deleted == [place_order_id]
     deleted.clear()
@@ -627,34 +736,90 @@ async def test_rerun_change_and_removal_touch_exactly_their_chunks(
 
 
 @pytest.mark.asyncio
+async def test_doc_edit_past_the_first_paragraph_replaces_exactly_its_chunk(
+    engine, repos, vectors, writes
+):
+    """enola keeps a comment's first paragraph in facts.jsonl and the whole comment
+    in docs.jsonl, so an edit past the first paragraph rewrites docs.jsonl and its
+    hash in the receipt and leaves facts.jsonl and the snapshot id as they were.
+    On the route path the code graph tasks then skip the load (the graph holds
+    that snapshot), and the docs tail, which runs anyway, reads the new docs.jsonl
+    (vouched for, of the graph's snapshot) and replaces exactly that chunk."""
+    snapshot = _write_snapshot(_snapshot_dir(repos.shop), SHOP_FACTS, SHOP_DOCS, "s1")
+    assert await _route(repos.shop) == {
+        SHOP: {"documents": 4, "chunks": 6, "new": 6, "edges": 6, "swept": 0}
+    }
+    nodes_1, edges_1 = await _graph(engine)
+    old_total = _stored_chunk(nodes_1, "orders/checkout.py:7")
+    facts_1 = (snapshot / "facts.jsonl").read_bytes()
+    receipt_1 = json.loads((snapshot / "receipt.json").read_text(encoding="utf-8"))
+
+    _write_snapshot(snapshot, SHOP_FACTS, TOTAL_EDITED, "s1")
+
+    receipt_2 = json.loads((snapshot / "receipt.json").read_text(encoding="utf-8"))
+    assert (snapshot / "facts.jsonl").read_bytes() == facts_1
+    assert receipt_2["snapshot_id"] == receipt_1["snapshot_id"]
+    assert receipt_2["output_hashes"]["docs.jsonl"] != receipt_1["output_hashes"]["docs.jsonl"]
+    writes.clear()
+
+    assert await _route(repos.shop) == {
+        SHOP: {"documents": 4, "chunks": 6, "new": 1, "edges": 1, "swept": 1}
+    }
+
+    nodes_2, edges_2 = await _graph(engine)
+    # The load was skipped: the code graph, its repository node's snapshot
+    # stamp included, is exactly as it was.
+    assert _code_graph(nodes_2, edges_2) == _code_graph(nodes_1, edges_1)
+    new_total = _stored_chunk(nodes_2, "orders/checkout.py:7")
+    assert nodes_2[new_total]["text"] == (
+        "orders/checkout.py:7\n"
+        "orders/checkout.Order.total (method)\n"
+        "\n"
+        "Sum of the lines.\n"
+        "\n"
+        "Taxes are included."
+    )
+    assert nodes_2[new_total]["chunk_index"] == nodes_1[old_total]["chunk_index"] == 1
+    assert set(nodes_2) == (set(nodes_1) - {old_total}) | {new_total}
+    total_id = str(fact_node_id(SHOP, "symbol", "orders/checkout.Order.total"))
+    assert _describes(edges_2) == (_describes(edges_1) - {(old_total, total_id)}) | {
+        (new_total, total_id)
+    }
+    assert writes == [{UUID(new_total), code_document_id(SHOP, "orders/checkout.py")}]
+    assert vectors.deleted == [("DocumentChunk_text", [old_total])]
+
+
+@pytest.mark.asyncio
 async def test_staged_rerun_of_an_unchanged_file_keeps_its_docstrings(
     engine, vectors, writes, tmp_path
 ):
     """The per-file CODE route stages the file in a new temporary directory every
-    run, and enola's snapshot id is content-derived, so the second run of an
-    unchanged item skips the code graph load (extract_code_graph returns [], the
-    repository node is not rewritten) while the stored CodeRepository.path -- the
-    first run's staging directory -- is gone from disk. The tail is handed the
-    current staging directory (code_graph_repo_sources, what add_code_graph_docs
-    passes to code_docs_tail), so the second run derives the same chunks from the
-    source and stores, embeds and sweeps nothing."""
+    run and enola writes its snapshot there; the snapshot id is content-derived,
+    so the second run of an unchanged item skips the code graph load
+    (extract_code_graph returns [], the repository node is not rewritten) while
+    the stored CodeRepository.path -- the first run's staging directory, its
+    snapshot with it -- is gone from disk. The tail is handed the snapshot in the
+    current staging directory (what add_code_graph_docs passes, for the labels
+    code_graph_repo_labels reads off it), so the second run derives the same
+    chunk from its docs.jsonl and stores, embeds and sweeps nothing."""
     label = f"app.py_{uuid4()}"
     facts = [
         _module(label, "."),
         _symbol(label, "app.main", "app.py", 4, calls=["app.serve"]),
         _symbol(label, "app.serve", "app.py", 9),
     ]
+    # A lone staged file is in no package, so it has no module doc.
+    docs = {"app.main": SHOP_DOCS["app.main"]}
     runs = []
     for staging in ("first", "second"):
         staging_root = tmp_path / staging
-        repo_dir = _write_repo(staging_root / label, {"app.py": APP_PY})
-        snapshot = _write_snapshot(repo_dir / ".enola", facts, "sha256:same-content")
+        repo_dir = staging_root / label
+        snapshot = _write_snapshot(_snapshot_dir(repo_dir), facts, docs, "sha256:same-content")
         data_points = await extract_code_graph(repo_path=str(repo_dir), snapshot_dir=snapshot)
         state = await add_code_graph_data_points(data_points, graph_only=True)
         await add_code_graph_edges(state, repo_path=str(repo_dir), snapshot_dir=snapshot)
-        sources = code_graph_repo_sources(state, repo_dir, snapshot)
-        assert sources == {label: repo_dir}
-        counts = await code_docs_tail(label, graph_only=True, repo_path=sources[label])
+        assert code_graph_repo_labels(state, repo_dir, snapshot) == [label]
+        counts = await code_docs_tail(label, graph_only=True, snapshot_dir=snapshot)
         nodes, edges = await _graph(engine)
         runs.append((len(data_points), counts, nodes, edges))
         # The route's TemporaryDirectory is gone once its block exits.
@@ -667,52 +832,75 @@ async def test_staged_rerun_of_an_unchanged_file_keeps_its_docstrings(
     assert mapped_1 > 0 and mapped_2 == 0
     assert nodes_2[repository]["path"] == nodes_1[repository]["path"]
     assert not os.path.isdir(nodes_2[repository]["path"])
-    # Without the route's directory nothing could be read from the source.
+    # Without the route's snapshot (the memify path reads the stored path's)
+    # nothing could be read.
     assert await extract_code_docs(repo=label) == []
 
-    assert counts_1 == {"documents": 1, "chunks": 2, "new": 2, "edges": 2, "swept": 0}
-    assert counts_2 == {"documents": 1, "chunks": 2, "new": 0, "edges": 0, "swept": 0}
+    assert counts_1 == {"documents": 1, "chunks": 1, "new": 1, "edges": 1, "swept": 0}
+    assert counts_2 == {"documents": 1, "chunks": 1, "new": 0, "edges": 0, "swept": 0}
     assert set(nodes_2) == set(nodes_1) and _edge_keys(edges_2) == _edge_keys(edges_1)
     chunks = {props["text"] for props in nodes_2.values() if props["type"] == "DocumentChunk"}
-    assert chunks == {
-        "app.py:1\napp (module)\n\nThe shop application.",
-        "app.py:4\napp.main (function)\ndef main():\n\nStart the shop's HTTP server.",
-    }
+    assert chunks == {"app.py:4\napp.main (function)\n\nStart the shop's HTTP server."}
     assert len(writes) == 1 and vectors.deleted == []
 
 
 @pytest.mark.asyncio
-async def test_run_without_the_source_directory_keeps_the_docs_read_from_it(
-    engine, repos, vectors, writes
-):
-    """The stored CodeRepository.path is gone (a clone lost on a restart, an
-    earlier per-file run's staging directory, another host) and the manual
-    pipeline has no directory of its own to hand over. It must not trade the
-    full docstrings for Enola's 300-byte docs, or for nothing: the shop is left
-    out of the run and of the sweep, billing (still readable) is derived as
-    usual, and a run after the source is back picks the shop up again."""
+async def test_run_without_the_snapshot_docs_keeps_the_stored_docs(engine, repos, vectors, writes):
+    """A repository whose snapshot docs are not available is left out of the run
+    and of the sweep, so its stored docs are never traded for nothing, nor for
+    the docs of other facts: the clone moved away (lost on a restart, on another
+    host), a docs.jsonl its receipt does not vouch for (bytes this enola run did
+    not write), a snapshot other than the one the code graph holds (enola ran
+    again, the graph was not reloaded). Each time every stored node and edge stays
+    as it was, nothing is written and no vector is deleted -- on the memify path,
+    unfiltered and filtered, and on the route path, the tail handed that snapshot
+    directory -- while billing, still readable, is derived as usual. The run after
+    the snapshot is back changes nothing either: the stored docs are the ones it
+    derives."""
     await _sync_both_code_graphs(repos)
     first = await _sync_code_docs()
-    nodes_1, edges_1 = await _graph(engine)
+    stored = await _stored(engine)
     assert len(_chunks_by_header(first)) == len(EXPECTED_TARGETS) and len(writes) == 1
 
-    moved = repos.shop.parent / "shop-moved"
-    shutil.move(repos.shop, moved)
-    assert await extract_code_docs(repo=SHOP) == []
-    for repo in (None, SHOP):
-        run = await _sync_code_docs(repo=repo)
-        nodes, edges = await _graph(engine)
-        documents = [point.repo for point in run if isinstance(point, CodeDocument)]
-        assert documents == ([BILLING] if repo is None else [])
-        assert set(nodes) == set(nodes_1) and _edge_keys(edges) == _edge_keys(edges_1)
-    assert len(writes) == 1 and vectors.deleted == []
+    snapshot = _snapshot_dir(repos.shop)
+    original = shutil.copytree(snapshot, repos.shop.parent / "shop-snapshot")
+    # What a later enola run writes once main's docstring is edited.
+    later = _write_snapshot(repos.shop.parent / "later", SHOP_FACTS, MAIN_EDITED, "s2")
 
-    shutil.move(moved, repos.shop)
-    third = await _sync_code_docs()
-    nodes_3, edges_3 = await _graph(engine)
-    assert _chunks_by_header(third).keys() == _chunks_by_header(first).keys()
-    assert set(nodes_3) == set(nodes_1) and _edge_keys(edges_3) == _edge_keys(edges_1)
-    assert len(writes) == 1 and vectors.deleted == []
+    def move_the_clone_away():
+        shutil.move(repos.shop, repos.shop.parent / "shop-moved")
+
+    def replace_the_docs_the_receipt_vouches_for():
+        # The receipt still hashes the docs.jsonl of snapshot s1.
+        shutil.copyfile(later / "docs.jsonl", snapshot / "docs.jsonl")
+
+    def write_another_snapshot_over_it():
+        # Its receipt vouches for its docs, but the code graph holds s1.
+        shutil.rmtree(snapshot)
+        shutil.copytree(later, snapshot)
+
+    for make_unavailable in (
+        move_the_clone_away,
+        replace_the_docs_the_receipt_vouches_for,
+        write_another_snapshot_over_it,
+    ):
+        case = make_unavailable.__name__
+        make_unavailable()
+        for repo in (None, SHOP):
+            run = await _sync_code_docs(repo=repo)
+            documents = {point.repo for point in run if isinstance(point, CodeDocument)}
+            assert documents == ({BILLING} if repo is None else set()), case
+        assert await code_docs_tail(SHOP, graph_only=True, snapshot_dir=snapshot) == NOTHING, case
+        assert await _stored(engine) == stored, case
+        assert (len(writes), vectors.deleted) == (1, []), case
+
+        # The snapshot back: the run derives the stored docs and changes nothing.
+        shutil.rmtree(snapshot, ignore_errors=True)
+        shutil.copytree(original, snapshot)
+        again = await _sync_code_docs()
+        assert [point.id for point in again] == [point.id for point in first], case
+        assert await _stored(engine) == stored, case
+        assert (len(writes), vectors.deleted) == (1, []), case
 
 
 @pytest.mark.asyncio
@@ -724,7 +912,7 @@ async def test_forgotten_repository_is_swept_by_an_unfiltered_run_only(engine, r
     billing_docs = {billing_document_id, str(invoice.id)}
 
     # Billing is forgotten: its code graph goes (what forget / a dataset
-    # delete does), its docs remain behind.
+    # delete does), its docs remain behind, and so does its snapshot on disk.
     nodes, _edges = await _graph(engine)
     billing_code = [
         node_id
@@ -777,12 +965,12 @@ async def test_entity_mode_sweeps_the_entities_only_the_old_chunk_held(
     assert vectors.deleted == []
     assert set((await _graph(engine))[0]) == set(nodes)
 
-    # main's docstring changes: only the new chunk goes to the LLM. The old
-    # chunk, its summary and the entity only it held go; the entity and the
-    # types shared with other chunks stay.
-    (repos.shop / "app.py").write_text(APP_PY_EDITED, encoding="utf-8")
+    # main's docstring changes and the shop is indexed again: only the new
+    # chunk goes to the LLM. The old chunk, its summary and the entity only it
+    # held go; the entity and the types shared with other chunks stay.
     old_main = _chunks_by_header(first)["app.py:4"]
     old_summary = _summary_of(edges, str(old_main.id))
+    await _index(repos.shop, SHOP_FACTS, MAIN_EDITED, "s2")
 
     third = await _sync_code_docs(repo=SHOP, extract_entities=True)
 
@@ -804,10 +992,10 @@ async def test_entity_mode_sweeps_the_entities_only_the_old_chunk_held(
 async def test_owned_chunks_are_retired_through_the_provenance_planner(
     engine, repos, vectors, extractor, monkeypatch
 ):
-    # The route path: the graph stores its provenance (a fresh graph is marked
-    # on the first write) and the chain runs under a context with a persisted
-    # data item, so add_data_points stamps every chunk, summary and entity
-    # with the chunk's own source ref.
+    # The route path's storage: the graph stores its provenance (a fresh graph
+    # is marked on the first write) and the chain runs under a context with a
+    # persisted data item, so add_data_points stamps every chunk, summary and
+    # entity with the chunk's own source ref.
     assert await mark_graph_provenance_if_empty(engine)
     dataset = SimpleNamespace(id=uuid4())
     ctx = _route_ctx(dataset)
@@ -832,7 +1020,7 @@ async def test_owned_chunks_are_retired_through_the_provenance_planner(
     delete_data = await engine.get_node_delete_data([str(old_main.id), old_summary, HTTP_SERVER])
     assert all(own_ref in data.source_ref_keys for data in delete_data.values())
 
-    (repos.shop / "app.py").write_text(APP_PY_EDITED, encoding="utf-8")
+    await _index(repos.shop, SHOP_FACTS, MAIN_EDITED, "s2")
     third = await _sync_code_docs(repo=SHOP, ctx=ctx, extract_entities=True)
 
     # One planner pass, keyed exactly as the chunk was stored.
@@ -863,22 +1051,25 @@ async def test_owned_chunks_are_retired_through_the_provenance_planner(
 async def test_code_docs_tail_reports_the_run(engine, repos, vectors):
     await _sync_both_code_graphs(repos)
 
+    # Every repository, each read from its stored path (no one snapshot
+    # directory holds both).
     counts = await code_docs_tail(None, graph_only=True)
-    assert counts == {"documents": 3, "chunks": 7, "new": 7, "edges": 7, "swept": 0}
+    assert counts == {"documents": 5, "chunks": 7, "new": 7, "edges": 7, "swept": 0}
 
     # Unchanged: nothing stored, linked or swept.
     assert await code_docs_tail(None, graph_only=True) == {
-        "documents": 3,
+        "documents": 5,
         "chunks": 7,
         "new": 0,
         "edges": 0,
         "swept": 0,
     }
 
-    # One docstring edited, the run scoped to its repository.
-    (repos.shop / "app.py").write_text(APP_PY_EDITED, encoding="utf-8")
-    assert await code_docs_tail(SHOP, graph_only=True) == {
-        "documents": 2,
+    # One docstring edited and its repository indexed again; the run scoped to
+    # it and handed its snapshot, as a route runs it.
+    await _index(repos.shop, SHOP_FACTS, MAIN_EDITED, "s2")
+    assert await code_docs_tail(SHOP, graph_only=True, snapshot_dir=_snapshot_dir(repos.shop)) == {
+        "documents": 4,
         "chunks": 6,
         "new": 1,
         "edges": 1,
@@ -892,37 +1083,24 @@ async def test_route_chain_forget_removes_the_repository_with_its_docs_and_vecto
     engine, repos, vectors, monkeypatch
 ):
     """The code routes' shape, one data item per repository: the enola tasks and then
-    code_docs_tail under the route's ctx. Everything the shop's run stored is
-    attributed to the shop's data item -- the code nodes under the item's doc-scope
-    ref, each chunk under its own chunk-scoped ref -- and the graph-provenance path
-    forget(data_id=...) takes (try_delete_data_by_graph_provenance ->
-    delete_by_document) removes the shop's code graph, documents, chunks and
-    vectors in one pass; billing's stay, with their describes edge."""
+    code_docs_tail, handed the snapshot they loaded, under the route's ctx.
+    Everything the shop's run stored is attributed to the shop's data item -- the
+    code nodes under the item's doc-scope ref, each chunk under its own
+    chunk-scoped ref -- and the graph-provenance path forget(data_id=...) takes
+    (try_delete_data_by_graph_provenance -> delete_by_document) removes the shop's
+    code graph, documents, chunks and vectors in one pass; billing's stay, with
+    their describes edge."""
     _unified(engine, vectors, monkeypatch)
     dataset = SimpleNamespace(id=uuid4())
     shop_ctx, billing_ctx = _route_ctx(dataset), _route_ctx(dataset)
 
-    await _sync_code_graph(
-        repos.shop, _write_snapshot(repos.snapshots / "shop", SHOP_FACTS, "s1"), ctx=shop_ctx
-    )
-    assert await code_docs_tail(SHOP, ctx=shop_ctx, graph_only=True) == {
-        "documents": 2,
-        "chunks": 6,
-        "new": 6,
-        "edges": 6,
-        "swept": 0,
+    _write_snapshot(_snapshot_dir(repos.shop), SHOP_FACTS, SHOP_DOCS, "s1")
+    assert await _route(repos.shop, ctx=shop_ctx) == {
+        SHOP: {"documents": 4, "chunks": 6, "new": 6, "edges": 6, "swept": 0}
     }
-    await _sync_code_graph(
-        repos.billing,
-        _write_snapshot(repos.snapshots / "billing", BILLING_FACTS, "b1"),
-        ctx=billing_ctx,
-    )
-    assert await code_docs_tail(BILLING, ctx=billing_ctx, graph_only=True) == {
-        "documents": 1,
-        "chunks": 1,
-        "new": 1,
-        "edges": 1,
-        "swept": 0,
+    _write_snapshot(_snapshot_dir(repos.billing), BILLING_FACTS, BILLING_DOCS, "b1")
+    assert await _route(repos.billing, ctx=billing_ctx) == {
+        BILLING: {"documents": 1, "chunks": 1, "new": 1, "edges": 1, "swept": 0}
     }
 
     nodes, edges = await _graph(engine)
@@ -931,7 +1109,7 @@ async def test_route_chain_forget_removes_the_repository_with_its_docs_and_vecto
     billing_nodes = set().union(*_repository_nodes(nodes, BILLING))
     assert (len(shop_code), len(shop_documents), len(shop_chunks), len(billing_nodes)) == (
         8,
-        2,
+        4,
         6,
         5,
     )
@@ -963,41 +1141,38 @@ async def test_route_chain_forget_removes_the_repository_with_its_docs_and_vecto
     assert sorted(deleted["CodeDocument_name"]) == sorted(shop_documents)
     assert not set().union(*deleted.values()) & billing_nodes
 
-    # A docs run over the forgotten repository has nothing to document and
-    # nothing left to sweep.
-    assert await code_docs_tail(SHOP, ctx=_route_ctx(dataset), graph_only=True) == {
-        "documents": 0,
-        "chunks": 0,
-        "new": 0,
-        "edges": 0,
-        "swept": 0,
-    }
+    # A docs run over the forgotten repository, its snapshot still on disk, has
+    # nothing to document and nothing left to sweep.
+    assert (
+        await code_docs_tail(
+            SHOP,
+            ctx=_route_ctx(dataset),
+            graph_only=True,
+            snapshot_dir=_snapshot_dir(repos.shop),
+        )
+        == NOTHING
+    )
 
 
 @pytest.mark.asyncio
 async def test_route_chain_entity_mode_change_then_forget_retire_what_the_item_owned(
     engine, repos, vectors, extractor, monkeypatch
 ):
-    """Entity mode under the routes' ctx. A changed docstring sends only its chunk to
-    the LLM and the planner retires the old chunk with its summary and the entity
-    only it held. forget(data_id=...) of the shop then removes its whole output --
-    chunks, summaries, the entity and type only its chunks held -- while the entity
-    and type billing's chunk also holds survive, with the shop's refs stripped."""
+    """Entity mode under the routes' ctx. A changed docstring (the repository indexed
+    again, its snapshot handed to the tail) sends only its chunk to the LLM and the
+    planner retires the old chunk with its summary and the entity only it held.
+    forget(data_id=...) of the shop then removes its whole output -- chunks,
+    summaries, the entity and type only its chunks held -- while the entity and
+    type billing's chunk also holds survive, with the shop's refs stripped."""
     _unified(engine, vectors, monkeypatch)
     dataset = SimpleNamespace(id=uuid4())
     shop_ctx, billing_ctx = _route_ctx(dataset), _route_ctx(dataset)
-    await _sync_code_graph(
-        repos.shop, _write_snapshot(repos.snapshots / "shop", SHOP_FACTS, "s1"), ctx=shop_ctx
-    )
-    await _sync_code_graph(
-        repos.billing,
-        _write_snapshot(repos.snapshots / "billing", BILLING_FACTS, "b1"),
-        ctx=billing_ctx,
-    )
+    _write_snapshot(_snapshot_dir(repos.shop), SHOP_FACTS, SHOP_DOCS, "s1")
+    _write_snapshot(_snapshot_dir(repos.billing), BILLING_FACTS, BILLING_DOCS, "b1")
 
-    first = await code_docs_tail(SHOP, ctx=shop_ctx, extract_entities=True, graph_only=True)
-    await code_docs_tail(BILLING, ctx=billing_ctx, extract_entities=True, graph_only=True)
-    assert first == {"documents": 2, "chunks": 6, "new": 6, "edges": 6, "swept": 0}
+    first = await _route(repos.shop, ctx=shop_ctx, extract_entities=True)
+    await _route(repos.billing, ctx=billing_ctx, extract_entities=True)
+    assert first == {SHOP: {"documents": 4, "chunks": 6, "new": 6, "edges": 6, "swept": 0}}
     assert [sorted(call) for call in extractor] == [
         sorted(header for header in EXPECTED_TARGETS if header != "invoices.py:1"),
         ["invoices.py:1"],
@@ -1012,12 +1187,12 @@ async def test_route_chain_entity_mode_change_then_forget_retire_what_the_item_o
 
     # main's docstring changes: one chunk to the LLM; the old chunk, its summary
     # and "http server" are retired through the planner (3 nodes swept with it).
-    (repos.shop / "app.py").write_text(APP_PY_EDITED, encoding="utf-8")
     old_main = _stored_chunk(nodes, "app.py:4")
     old_summary = _summary_of(edges, old_main)
-    counts = await code_docs_tail(SHOP, ctx=shop_ctx, extract_entities=True, graph_only=True)
+    _write_snapshot(_snapshot_dir(repos.shop), SHOP_FACTS, MAIN_EDITED, "s2")
+    counts = await _route(repos.shop, ctx=shop_ctx, extract_entities=True)
     assert extractor[-1] == ["app.py:4"]
-    assert counts == {"documents": 2, "chunks": 6, "new": 1, "edges": 1, "swept": 3}
+    assert counts == {SHOP: {"documents": 4, "chunks": 6, "new": 1, "edges": 1, "swept": 3}}
     nodes, edges = await _graph(engine)
     new_main = _stored_chunk(nodes, "app.py:4")
     assert new_main != old_main

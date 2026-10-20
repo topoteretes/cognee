@@ -57,19 +57,10 @@ def _text(value: Any) -> str | None:
 
 
 def _document_changed(document: CodeDocument, stored: dict[str, Any]) -> bool:
-    """The stored CodeDocument differs in what the run derives for it.
-
-    Symbol count, node sets, and where the docstrings came from (a file read
-    from source for the first time, after Enola's docs stood in). A stored row
-    without ``doc_source`` (stored before the field existed, or an adapter
-    answering the core columns only) is not called changed on it.
-    """
+    """The stored CodeDocument differs in what the run derives for it: symbol count, node sets."""
     if _as_int(stored.get("symbol_count")) != document.symbol_count:
         return True
-    if _text(stored.get("source_node_set")) != _text(document.source_node_set):
-        return True
-    stored_source = _text(stored.get("doc_source"))
-    return stored_source is not None and stored_source != document.doc_source
+    return _text(stored.get("source_node_set")) != _text(document.source_node_set)
 
 
 def _chunk_changed(chunk: DocumentChunk, stored: dict[str, Any]) -> bool:

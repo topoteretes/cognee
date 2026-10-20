@@ -437,10 +437,11 @@ async def extract_code_repo_graph(
     COGNEE_SKIP_PREFLIGHT / COGNEE_SKIP_CONNECTION_TEST / MOCK_EMBEDDING switch
     keeps the configured provider (a keyless install that sets one names
     EMBEDDING_PROVIDER=fastembed or switches the tail off). The tail reads the
-    docstrings from this directory, runs with this route's ``ctx``, so the
-    chunks belong to the manifest's data item and forget(data_id) removes them
-    with the code graph, and is best effort: when it fails, add_code_graph_docs
-    logs the error and the item completes with its code graph.
+    docstrings from the docs.jsonl enola just wrote into this directory's
+    .enola snapshot, runs with this route's ``ctx``, so the chunks belong to
+    the manifest's data item and forget(data_id) removes them with the code
+    graph, and is best effort: when it fails, add_code_graph_docs logs the
+    error and the item completes with its code graph.
 
     A call-level node_set (add()/remember()'s ``node_set`` argument) reaches
     every document this manifest's repo carries, but not the code nodes

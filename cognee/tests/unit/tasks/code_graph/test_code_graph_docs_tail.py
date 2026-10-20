@@ -1,4 +1,4 @@
-"""The docs tail inside the code routes: on by default, opt-out, label, source and provenance.
+"""The docs tail inside the code routes: on by default, opt-out, label, snapshot and provenance.
 
 Every code route -- cognify's CODE and CODE_REPO routes and the code graph
 pipeline remember(content_type="code") runs -- ends with add_code_graph_docs,
@@ -7,12 +7,14 @@ the route's ctx. The tail and the enola tasks are stubbed here; what is
 checked is the wiring: the tail runs by default and not with
 CODE_GRAPH_DOCS=false or code_docs=False, the label is the one enola gave the
 repository (the CodeRepository the run produced, or the snapshot's when an
-unchanged snapshot was skipped), the primary repository's call carries the
-directory the route indexed (the stored path is stale once a skipped snapshot
-left an earlier run's staging directory on the node), the per-file route
-calls it while the staged source still exists, the ctx handed on is the
-route's own, whose data item owns the code graph, and a tail that fails is
-logged while the route completes with its code graph.
+unchanged snapshot was skipped), every call carries the snapshot the route
+loaded (``snapshot_dir``, else ``<repo_path>/.enola``; one directory for all
+the repositories of a multi-repo run), whose docs.jsonl the tail reads in
+place of the stored CodeRepository.path's (stale once a skipped snapshot left
+an earlier run's staging directory on the node), the per-file route calls it
+while the staged snapshot still exists, the ctx handed on is the route's own,
+whose data item owns the code graph, and a tail that fails is logged while
+the route completes with its code graph.
 """
 
 import importlib
@@ -27,14 +29,16 @@ import pytest
 
 from cognee.tasks.code_graph.code_files import extract_code_files_graph, get_code_file_tasks
 from cognee.tasks.code_graph.code_repo import extract_code_repo_graph, get_code_repo_tasks
+from cognee.tasks.code_graph.enola import DOCS_ARTIFACT
 from cognee.tasks.code_graph.extract_code_graph import (
     add_code_graph_docs,
     code_graph_repo_labels,
-    code_graph_repo_sources,
     fact_node_id,
     get_code_graph_tasks,
+    map_facts_to_data_points,
 )
 from cognee.tasks.code_graph.models import CodeRepository
+from cognee.tests.utils.enola_snapshot import doc_line, enola_fact_id, write_enola_snapshot
 
 code_docs_package = importlib.import_module("cognee.tasks.code_docs")
 code_graph_module = importlib.import_module("cognee.tasks.code_graph.extract_code_graph")
@@ -70,6 +74,29 @@ def tail(monkeypatch):
 
 def _repository(repo=REPO, path="/repos/shop"):
     return CodeRepository(id=fact_node_id(repo, "repository", repo), name=repo, path=path)
+
+
+def _write_snapshot(directory, *repos):
+    """An enola snapshot documenting one function per repository label (None: unlabelled).
+
+    The fact and its docs.jsonl line share the fact id, as enola writes them.
+    """
+    facts, docs = [], []
+    for repo in repos:
+        name, file = "payments.charge", "payments.py"
+        fact = {
+            "id": enola_fact_id(repo, "symbol", name, file),
+            "kind": "symbol",
+            "name": name,
+            "file": file,
+            "line": 4,
+            "props": {"symbol_kind": "function", "doc": "Charge a card."},
+        }
+        if repo is not None:
+            fact["repo"] = repo
+        facts.append(fact)
+        docs.append(doc_line(repo, "symbol", name, file, "Charge a card.\n\nIdempotent.", line=4))
+    return write_enola_snapshot(directory, facts=facts, docs=docs)
 
 
 def _stub_code_graph(monkeypatch, extract):
@@ -131,12 +158,12 @@ async def test_repo_route_stores_docstrings_by_default_with_the_route_ctx(
     await extract_code_repo_graph([item], ctx=ctx)
 
     # The label is the one the run's CodeRepository carries, not the directory
-    # name ("shop"). The directory the route indexed goes with it, read in
-    # place of the stored CodeRepository.path. The ctx is the route's own: its
-    # data item is the manifest row, so add_data_points attributes the
-    # documents and chunks to it and forget(data_id) removes them with the
-    # code graph.
-    tail.assert_awaited_once_with(repo=REPO, ctx=ctx, repo_path=repo_dir)
+    # name ("shop"). The snapshot enola just wrote into the directory goes with
+    # it: the docs are read from its docs.jsonl, not from the snapshot under
+    # the stored CodeRepository.path. The ctx is the route's own: its data
+    # item is the manifest row, so add_data_points attributes the documents
+    # and chunks to it and forget(data_id) removes them with the code graph.
+    tail.assert_awaited_once_with(repo=REPO, ctx=ctx, snapshot_dir=repo_dir / ".enola")
     assert tail.await_args.kwargs["ctx"].data_item is item
 
 
@@ -197,8 +224,9 @@ async def test_repo_route_skips_the_tail_when_switched_off(tmp_path, monkeypatch
 async def test_repo_route_runs_the_tail_for_an_unchanged_snapshot(tmp_path, monkeypatch, tail):
     """extract_code_graph returns [] for an unchanged snapshot. The label then comes
     from the snapshot, resolved as map_facts_to_data_points resolves it, and the
-    tail still runs: it is idempotent, and a repository indexed before docstrings
-    were stored gets them on this sync."""
+    tail still runs: it is idempotent, a docstring edit past its first paragraph
+    changes docs.jsonl but not the snapshot id, and a repository indexed before
+    docstrings were stored gets them on this sync."""
     _stub_code_graph(monkeypatch, AsyncMock(return_value=[]))
     repo_dir, item = _repo_manifest_item(tmp_path)
     shutil.copytree(FIXTURES_DIR, repo_dir / ".enola")
@@ -206,36 +234,47 @@ async def test_repo_route_runs_the_tail_for_an_unchanged_snapshot(tmp_path, monk
 
     await extract_code_repo_graph([item], ctx=ctx)
 
-    # The directory still goes with the call: the skipped snapshot left the
-    # stored CodeRepository.path as whatever the first load wrote, and only
-    # the route knows where the repository is now.
-    tail.assert_awaited_once_with(repo=REPO, ctx=ctx, repo_path=repo_dir)
+    # The snapshot still goes with the call: the skipped snapshot left the
+    # stored CodeRepository.path as whatever the first load wrote, and only the
+    # route knows where this run's snapshot is.
+    tail.assert_awaited_once_with(repo=REPO, ctx=ctx, snapshot_dir=repo_dir / ".enola")
 
 
+@pytest.mark.parametrize("unchanged", [False, True], ids=["new-snapshot", "unchanged-snapshot"])
 @pytest.mark.asyncio
-async def test_file_route_runs_the_tail_inside_the_staging_directory(tmp_path, monkeypatch, tail):
+async def test_file_route_runs_the_tail_inside_the_staging_directory(
+    tmp_path, monkeypatch, tail, unchanged
+):
+    """The tail reads the docs.jsonl enola wrote into the staging directory, so it
+    runs before that directory is removed. The stored CodeRepository.path of a
+    re-run of an unchanged file is the previous run's staging directory, gone:
+    an unchanged snapshot (extract_code_graph returns []) takes its label from
+    the staged snapshot and the tail reads that snapshot all the same."""
     staged = {}
 
     async def extract(repo_path=None, **_kwargs):
+        # What enola leaves in the staged directory: its snapshot, the
+        # repository labelled with the directory's name.
         staged["dir"] = Path(repo_path)
-        return [_repository(repo=staged["dir"].name, path=str(repo_path))]
+        label = staged["dir"].name
+        _write_snapshot(staged["dir"] / ".enola", label)
+        return [] if unchanged else [_repository(repo=label, path=str(repo_path))]
 
-    async def tail_reads_the_staged_source(repo, ctx=None, repo_path=None):
-        # The tail reads the source from the directory it is handed: this
-        # run's staging directory, not the stored CodeRepository.path, which
-        # on a re-run of an unchanged file is the previous run's, gone.
-        staged["source_present"] = (repo_path / "payments.py").is_file()
+    async def tail_reads_the_staged_snapshot(repo, ctx=None, snapshot_dir=None):
+        staged["docs_present"] = (Path(snapshot_dir) / DOCS_ARTIFACT).is_file()
         return {}
 
     _stub_code_graph(monkeypatch, extract)
-    tail.side_effect = tail_reads_the_staged_source
+    tail.side_effect = tail_reads_the_staged_snapshot
     item = _code_file_item(tmp_path)
     ctx = _ctx(item)
 
     await extract_code_files_graph([item], ctx=ctx)
 
-    tail.assert_awaited_once_with(repo=staged["dir"].name, ctx=ctx, repo_path=staged["dir"])
-    assert staged["source_present"] is True, "the tail ran after the staged source was removed"
+    tail.assert_awaited_once_with(
+        repo=staged["dir"].name, ctx=ctx, snapshot_dir=staged["dir"] / ".enola"
+    )
+    assert staged["docs_present"] is True, "the tail ran after the staged snapshot was removed"
     assert not staged["dir"].exists()
 
 
@@ -290,10 +329,12 @@ def test_code_graph_tasks_end_with_the_docs_tail_by_default(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_docs_task_runs_the_tail_once_per_repository_of_the_run(tail):
+async def test_docs_task_runs_the_tail_once_per_repository_with_one_snapshot(tmp_path, tail):
     """A multi-repository snapshot yields one CodeRepository per repo: the tail runs
-    for each, in label order, with the scanned directory on the primary
-    repository's call only, and the data points pass through unchanged."""
+    for each, in label order, and every call reads the one snapshot directory the
+    run loaded -- enola writes every repository's docs into it, each line naming
+    its repository -- whatever path each repository's node carries. The data
+    points pass through unchanged."""
     ctx = _ctx(SimpleNamespace(id=uuid4()))
     run = [
         _repository("zeta/api", path="zeta/api"),
@@ -304,32 +345,71 @@ async def test_docs_task_runs_the_tail_once_per_repository_of_the_run(tail):
     result = await add_code_graph_docs(run, ctx=ctx, repo_path="/tmp/shop")
 
     assert result is run
+    snapshot = Path("/tmp/shop") / ".enola"
     assert [call.kwargs for call in tail.await_args_list] == [
-        {"repo": "acme/shop", "ctx": ctx, "repo_path": Path("/tmp/shop")},
-        {"repo": "zeta/api", "ctx": ctx, "repo_path": None},
+        {"repo": "acme/shop", "ctx": ctx, "snapshot_dir": snapshot},
+        {"repo": "zeta/api", "ctx": ctx, "snapshot_dir": snapshot},
+    ]
+
+    # An unchanged multi-repository snapshot produced no data points: the labels
+    # come from the snapshot, and every call still reads that one directory.
+    tail.reset_mock()
+    repo_dir = tmp_path / "shop"
+    _write_snapshot(repo_dir / ".enola", "zeta/api", "acme/shop")
+
+    assert await add_code_graph_docs([], ctx=ctx, repo_path=repo_dir) == []
+    assert [call.kwargs for call in tail.await_args_list] == [
+        {"repo": "acme/shop", "ctx": ctx, "snapshot_dir": repo_dir / ".enola"},
+        {"repo": "zeta/api", "ctx": ctx, "snapshot_dir": repo_dir / ".enola"},
     ]
 
 
-def test_repo_labels_come_from_the_run_or_else_the_snapshot():
+@pytest.mark.asyncio
+async def test_docs_task_hands_the_tail_the_snapshot_the_run_loaded(tail):
+    """The code graph pipeline's snapshot_dir wins over <repo_path>/.enola, where the
+    routes' enola run writes it. A call naming neither hands the tail none: the
+    extraction then reads <CodeRepository.path>/.enola, as the memify pipeline does."""
+    run = [_repository()]
+
+    await add_code_graph_docs(run, repo_path="/tmp/shop", snapshot_dir=FIXTURES_DIR)
+    await add_code_graph_docs(run, snapshot_dir=FIXTURES_DIR)
+    await add_code_graph_docs(run, repo_path="/tmp/shop")
+    await add_code_graph_docs(run)
+
+    assert [call.kwargs["snapshot_dir"] for call in tail.await_args_list] == [
+        FIXTURES_DIR,
+        FIXTURES_DIR,
+        Path("/tmp/shop") / ".enola",
+        None,
+    ]
+    assert {call.kwargs["repo"] for call in tail.await_args_list} == {REPO}
+
+
+def test_repo_labels_come_from_the_run_or_else_the_snapshot(tmp_path):
     run = [_repository("b/two", path="b/two"), _repository("a/one", path="/tmp/shop")]
-    assert code_graph_repo_labels(run, repo_path="/tmp/shop") == ["a/one", "b/two"]
-    # The scanned directory belongs to the primary repository, the one carrying
-    # it as its path the way map_facts_to_data_points stores it; a multi-repo
-    # snapshot's other repositories have none of their own.
-    assert code_graph_repo_sources(run, repo_path="/tmp/shop") == {
-        "a/one": Path("/tmp/shop"),
-        "b/two": None,
-    }
-    # A CodeRepository carrying some other path hands no directory over: the
-    # tail then reads the stored path, as before.
-    assert code_graph_repo_sources([_repository(path="/repos/shop")], repo_path="/tmp/shop") == {
-        REPO: None
-    }
-    # An unchanged snapshot produced no data points: resolve as
-    # map_facts_to_data_points does, the directory with the snapshot's fallback repo.
+    # The run's CodeRepository points name the labels; no snapshot is read for
+    # them (there is none at this path).
+    assert code_graph_repo_labels(run, repo_path=tmp_path / "missing") == ["a/one", "b/two"]
+
+    # An unchanged snapshot produced no data points: the labels are resolved
+    # from the snapshot -- the pipeline's snapshot_dir, else <repo_path>/.enola --
+    # exactly as map_facts_to_data_points resolves them, so they name the same
+    # CodeRepository nodes.
     assert code_graph_repo_labels([], repo_path="/tmp/shop", snapshot_dir=FIXTURES_DIR) == [REPO]
-    assert code_graph_repo_sources([], repo_path="/tmp/shop", snapshot_dir=FIXTURES_DIR) == {
-        REPO: Path("/tmp/shop")
-    }
+    for labels, directory in ((("zeta/api", "acme/shop"), "multi"), ((None,), "unlabelled")):
+        repo_dir = tmp_path / directory
+        snapshot = _write_snapshot(repo_dir / ".enola", *labels)
+        facts = [json.loads(line) for line in (snapshot / "facts.jsonl").read_text().splitlines()]
+        mapped = sorted(
+            point.name
+            for point in map_facts_to_data_points(facts, repo_path=repo_dir)
+            if isinstance(point, CodeRepository)
+        )
+        assert code_graph_repo_labels([], repo_path=repo_dir) == mapped
+    # The multi-repo snapshot names both of its repositories; the unlabelled
+    # one falls back on the scanned directory's name.
+    assert code_graph_repo_labels([], repo_path=tmp_path / "multi") == ["acme/shop", "zeta/api"]
+    assert code_graph_repo_labels([], repo_path=tmp_path / "unlabelled") == ["unlabelled"]
+
     # Nothing to resolve from: no label, so the tail has nothing to run for.
-    assert code_graph_repo_labels([]) == [] and code_graph_repo_sources([]) == {}
+    assert code_graph_repo_labels([]) == []
