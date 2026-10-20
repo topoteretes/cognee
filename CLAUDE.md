@@ -8,6 +8,19 @@ Cognee is an open-source AI memory platform that transforms raw data into persis
 
 **Requirements**: Python 3.10 - 3.14
 
+## Design Principles
+
+1. **Don't overengineer**: Simple beats complex.
+2. **No fallbacks**: One correct path, no alternatives.
+3. **One way**: One way to do things, not many.
+4. **Throw errors**: Fail fast when the operation's preconditions aren't met. Observability (telemetry, logging) is best-effort and never changes the outcome of the operation.
+5. **No backups**: Trust the primary mechanism.
+6. **Separation of concerns**: Each function has a single responsibility.
+7. **Be concise but informative**: No essays, but the docstrings and comments a reader needs.
+8. **No invented limits**: Never add a cutoff (`max_n`, `[:k]`, "older than X") or an expiry (TTL, cooldown, eviction) the task did not ask for — both are silent data loss. If you believe one is unavoidable, stop and ask, stating what would be dropped and why; never add it first and justify it afterwards. Existing bounds (lock leases, recovery floors, batch caps) are deliberate: removing or changing one is the same question.
+
+**Methodology**: surgical changes only; evidence-based debugging (minimal, targeted logging); fix root causes, not symptoms. Debug like a detective: form the theory of the crime, collect evidence, and change code only once the evidence proves it.
+
 ## Development Commands
 
 ### Setup
@@ -938,6 +951,7 @@ shutdown = visualization_server(port=8080)  # synchronous; returns a shutdown ca
 - Enable debug mode: `ENV="development"` or `ENV="debug"`
 - Disable telemetry: `TELEMETRY_DISABLED=1`
 - Telemetry events use the existing operation-origin context: `sdk`, `cli`, `mcp`, `api`, or `background`. An explicit `TELEMETRY_ORIGIN` (e.g. `cloud`) overrides it.
+- Every event carries `is_agent`, `agent_owner_id` and `agent_plugin`, read off the `User` passed to `send_telemetry` (`cognee/modules/integrations/agent_identity.py`). An agent is a child user with its own API key, such as a provisioned plugin, so its `user_id` is the agent itself; `agent_owner_id` is the owning user and `agent_plugin` a `KNOWN_PLUGINS` key or `"custom"` (an agent's free-text name is never sent). A bare id cannot be told apart from a human's, so emitters pass the model, not `user.id` (a unit test enforces it). API error events take the caller `get_authenticated_user` stores on `request.state.user`; a deployment that overrides `get_authenticated_user` must store it too, or its error events carry no user.
 - `Pipeline Run` events follow the dataset lifecycle in `run_tasks`; completion is emitted only after durable storage and the run record succeed. They carry `pipeline_event_scope=run`. `Pipeline Item` events follow individual items and add their loader, extension, size and token buckets (`data_item_telemetry_properties`). Both carry `pipeline_run_id` and the provider stack from `get_current_settings()`, including structured-output settings and cognify's already-resolved extractor. Historical item-scoped `Pipeline Run` events cannot establish whole-run completion; the aggregate reports keep them separate.
 - Failed `search()`/`recall()` calls emit `ERRORED`. Pipeline, item and task failures use `telemetry_exception_properties` (`cognee/shared/utils.py`): exception class (unwrapping `first_error`), cause chain (at most four links), and the innermost HTTP status, never the message. Model settings that are filesystem paths are reported as `local_path`.
 - Check logs in structured format (uses structlog)

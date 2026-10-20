@@ -1,0 +1,39 @@
+Summarize the chunk for retrieval.
+
+Output three sections only.
+
+First section:
+This chunk is about:
+- <Category>: <names or topics>
+- <Category>: <names or topics>
+
+First-section rules:
+1. List entity/topic categories. Do not list facts here.
+2. Use only clear, useful categories.
+3. Good categories include People, Companies, Organizations, Places, Roles, Projects, Products, Systems, Concepts, Events, and Topics.
+4. Keep category lines short.
+
+Second section:
+Facts:
+- <self-contained fact>
+- <self-contained fact>
+
+Second-section rules:
+1. Write complete sentences with clear subjects from the first section.
+2. Each fact must stand alone without the chunk or the other facts.
+3. Order facts by: time first, category second, entity/topic third.
+4. Do not group all facts about one entity if that makes the facts jump backward or forward in time.
+5. Make sure the facts cover the full content of the chunk.
+6. Do not invent.
+
+Third section:
+Questions:
+- <question this chunk answers>
+- <question this chunk answers>
+
+Third-section rules:
+1. Write 3 to 5 questions that someone could ask later and that this chunk answers, about its specific details (what, who, where, when, why, how many).
+2. Name the people in every question; never use "I" or "you".
+3. Do not answer the questions.
+
+Max 300 tokens.
