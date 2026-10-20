@@ -656,7 +656,7 @@ async def test_fresh_chunks_are_extracted_in_bounded_batches(monkeypatch):
 
     monkeypatch.setattr(incremental, "extract_graph_and_summarize", _extract)
     monkeypatch.setattr(incremental, "add_data_points", AsyncMock())
-    monkeypatch.setattr(incremental, "cache_documents", AsyncMock())
+    monkeypatch.setattr(incremental, "cache_document_text", AsyncMock())
     monkeypatch.setattr(incremental, "_resolve_extraction_config", lambda: None)
     monkeypatch.setattr(incremental, "publish_updated_data", AsyncMock())
     monkeypatch.setattr(incremental, "delete_chunks_incremental", AsyncMock(return_value=[]))
@@ -682,6 +682,7 @@ async def test_fresh_chunks_are_extracted_in_bounded_batches(monkeypatch):
         "stored_chunks": [],
         "plan": ChunkPlan(fresh=fresh, regions=1),
         "data_item": SimpleNamespace(id=uuid4()),
+        "new_text": "",
     }
 
     await incremental._write_and_publish(

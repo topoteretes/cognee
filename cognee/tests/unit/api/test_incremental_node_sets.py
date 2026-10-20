@@ -65,6 +65,7 @@ async def test_fresh_chunks_reach_extraction_with_document_membership(monkeypatc
     monkeypatch.setattr(incremental, "_resolve_extraction_config", lambda: None)
     monkeypatch.setattr(incremental, "extract_graph_and_summarize", extract)
     monkeypatch.setattr(incremental, "add_data_points", AsyncMock())
+    monkeypatch.setattr(incremental, "cache_document_text", AsyncMock())
     monkeypatch.setattr(incremental, "publish_updated_data", publish)
     result = await incremental._write_and_publish(
         {
@@ -72,6 +73,7 @@ async def test_fresh_chunks_reach_extraction_with_document_membership(monkeypatc
             "document": document,
             "stored_chunks": [],
             "plan": ChunkPlan(fresh=fresh),
+            "new_text": "",
         },
         document.id,
         SimpleNamespace(id=uuid4()),

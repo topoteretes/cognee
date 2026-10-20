@@ -116,7 +116,7 @@ from cognee.modules.users.models import User
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
-from cognee.tasks.documents.cache_documents import cache_documents
+from cognee.tasks.documents.cache_documents import cache_document_text
 from cognee.tasks.documents.classify_documents import document_class_for, update_node_set
 from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
 from cognee.tasks.ingestion.data_item import DataItem
@@ -950,6 +950,7 @@ async def _stage_and_plan(
         "data_item": old_data,
         "stored_chunks": stored_chunks,
         "plan": plan,
+        "new_text": new_text,
     }
 
 
@@ -1143,9 +1144,10 @@ async def _write_and_publish(
         await _restore_repositioned_chunks(reused_chunks, context)
 
     # The cached document (keyword search, SDK-397) must say what the new
-    # content says: re-cache it from the staged text. Same deterministic id,
-    # so the node and its lexical rows are replaced, never duplicated.
-    await cache_documents([document], ctx=context)
+    # content says: re-cache it from the new text, already in hand. Same
+    # deterministic id, so the node and its lexical rows are replaced, never
+    # duplicated.
+    await cache_document_text(document, bundle["new_text"], ctx=context)
 
     # -- Delete replaced chunks + summaries + chunk-orphaned entities --------- #
     if plan.deleted_ids:

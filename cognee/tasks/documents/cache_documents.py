@@ -46,6 +46,34 @@ def build_cached_document(document: Document, text: str) -> CachedDocument:
     )
 
 
+def _entry_for(document: Document, text: str) -> CachedDocument | None:
+    """The cache entry for ``text``, or None for a blank one; long texts are cut and logged."""
+    if not text.strip():
+        return None
+    entry = build_cached_document(document, text)
+    if entry.truncated:
+        logger.info(
+            "Cached the first %d of %d characters of %r for keyword search.",
+            CACHED_DOCUMENT_MAX_CHARS,
+            entry.char_count,
+            document.name,
+        )
+    return entry
+
+
+async def cache_document_text(document: Document, text: str, ctx=None) -> CachedDocument | None:
+    """Cache ``document`` from ``text`` already in hand, without reading its file.
+
+    ``update()`` holds the new text when it re-caches an edited document, and
+    reading the file again could only add a way to fail after its chunks
+    were written.
+    """
+    entry = _entry_for(document, text)
+    if entry is not None:
+        await add_data_points([entry], ctx=ctx, index_edges=False)
+    return entry
+
+
 @task_summary("Cached {n} document(s) for keyword search")
 async def cache_documents(documents: list[Document], ctx=None) -> list[CachedDocument]:
     """Store each document's full text so BM25 search answers before chunking.
@@ -71,17 +99,9 @@ async def cache_documents(documents: list[Document], ctx=None) -> list[CachedDoc
                 error,
             )
             continue
-        if not text.strip():
-            continue
-        entry = build_cached_document(document, text)
-        if entry.truncated:
-            logger.info(
-                "Cached the first %d of %d characters of %r for keyword search.",
-                CACHED_DOCUMENT_MAX_CHARS,
-                entry.char_count,
-                document.name,
-            )
-        cached.append(entry)
+        entry = _entry_for(document, text)
+        if entry is not None:
+            cached.append(entry)
 
     if cached:
         await add_data_points(cached, ctx=ctx, index_edges=False)
