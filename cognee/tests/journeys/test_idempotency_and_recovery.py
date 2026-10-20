@@ -91,7 +91,9 @@ async def test_remembering_the_same_content_twice_is_idempotent(clean_env, defau
 
 @pytest.mark.journey
 @pytest.mark.asyncio
-async def test_interrupted_build_is_reported_and_recovers_on_retry(clean_env, default_user):
+async def test_interrupted_build_is_reported_and_recovers_on_retry(
+    clean_env, default_user, monkeypatch
+):
     first = await cognee.remember(DOC_A, dataset_name=DATASET)
     assert first.status == "completed"
     dataset_id = UUID(str(first.dataset_id))
@@ -156,7 +158,23 @@ async def test_interrupted_build_is_reported_and_recovers_on_retry(clean_env, de
         injector.uninstall()
 
     # --- the outage clears; the same call now succeeds ----------------------------
+    # Record what the retry embeds: an upsert of the same ids would leave the
+    # row counts unchanged, so the counts cannot tell a re-embed apart.
+    import importlib
+
+    adp_module = importlib.import_module("cognee.tasks.storage.add_data_points")
+    original_index = adp_module.index_data_points
+    embedded_on_retry: list[str] = []
+
+    async def recording_index(data_points, *args, **kwargs):
+        embedded_on_retry.extend(
+            str(point.id) for point in data_points if type(point).__name__ == "DocumentChunk"
+        )
+        return await original_index(data_points, *args, **kwargs)
+
+    monkeypatch.setattr(adp_module, "index_data_points", recording_index)
     retry = await cognee.remember(DOC_B, dataset_name=DATASET)
+    monkeypatch.setattr(adp_module, "index_data_points", original_index)
     assert retry.status == "completed", f"retry after outage did not complete: {retry!r}"
     assert await _status(dataset_id) == PipelineRunStatus.DATASET_PROCESSING_COMPLETED.value
 
@@ -165,12 +183,14 @@ async def test_interrupted_build_is_reported_and_recovers_on_retry(clean_env, de
     assert after.graph_nodes > before.graph_nodes, (
         f"retry did not add the new document's graph: {after}"
     )
-    # The retry's indexing run skipped the already indexed document, so its
-    # chunks were embedded exactly once across the two attempts.
+    # The failed attempt's indexing run embedded the new document's chunks; the
+    # retry skipped its indexing run and found them in the store, and the first
+    # document was extracted before: the retry embedded no chunk at all.
+    assert embedded_on_retry == [], f"the retry re-embedded chunks: {embedded_on_retry}"
     if during.vector_rows is not None and after.vector_rows is not None:
         assert after.vector_rows.get("DocumentChunk_text") == during.vector_rows.get(
             "DocumentChunk_text"
-        ), f"the retry re-embedded chunks: {during.vector_rows} -> {after.vector_rows}"
+        ), f"the retry changed the chunk rows: {during.vector_rows} -> {after.vector_rows}"
     memory = (await cognee.datasets.get_memory_status([dataset_id]))[str(dataset_id)]
     assert memory.state == "ready", memory
 
