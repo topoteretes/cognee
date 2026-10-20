@@ -136,7 +136,10 @@ class FakeLinear:
 
     def __init__(self, existing_ids=(), labels=None, teams=None):
         self.existing_ids = set(existing_ids)
-        self.labels = labels if labels is not None else []
+        self.labels = (
+            labels if labels is not None else [{"id": "lbl-ws", "name": "PR review", "team": None}]
+        )
+        self.created_labels = []
         self.teams = teams
         self.created = []
         self.attached = []
@@ -219,6 +222,9 @@ class FakeLinear:
             assert "includeArchived: true" in query
             found = variables["id"] in self.existing_ids
             return {"issues": {"nodes": [{"id": variables["id"]}] if found else []}}
+        if "issueLabelCreate" in query:
+            self.created_labels.append(variables["input"])
+            return {"issueLabelCreate": {"success": True, "issueLabel": {"id": "lbl-new"}}}
         if "issueCreate" in query:
             self.created.append(variables["input"])
             return {"issueCreate": {"success": True, "issue": {"id": "x", "identifier": "SDK-1"}}}
@@ -260,7 +266,7 @@ def world(monkeypatch, tmp_path):
     monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
     monkeypatch.setenv("LINEAR_REVIEW_TEAM_KEY", "SDK")
     monkeypatch.setenv("LOOKBACK_HOURS", "24")
-    monkeypatch.delenv("LINEAR_REVIEW_LABEL", raising=False)
+    monkeypatch.setenv("LINEAR_REVIEW_LABEL", "PR review")
     monkeypatch.delenv("GITHUB_RUN_ID", raising=False)
     summary = tmp_path / "summary.md"
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
@@ -290,7 +296,7 @@ def test_creates_one_completed_ticket_per_matched_approver(monkeypatch, world):
     assert ticket["title"] == "PR review: cognee#7 Add a feature"
     assert "https://github.com/topoteretes/cognee/pull/7" in ticket["description"]
     assert "Approved: 2026-10-20T09:00:00Z" in ticket["description"]
-    assert "labelIds" not in ticket
+    assert ticket["labelIds"] == ["lbl-ws"]
     assert uuid.UUID(ticket["id"]).version == 4
     assert [a["url"] for a in fake.attached] == [
         "https://github.com/topoteretes/cognee/pull/7",
@@ -333,7 +339,7 @@ def test_rerun_creates_nothing_for_tickets_that_already_exist(monkeypatch, world
     assert "2 already existed" in world["summary"].read_text()
 
 
-def test_label_is_applied_when_configured(monkeypatch, world):
+def test_an_existing_team_or_workspace_label_is_used_not_another_teams(monkeypatch, world):
     fake = FakeLinear(
         labels=[
             {"id": "lbl-other-team", "name": "PR review", "team": {"id": "team-x"}},
@@ -342,19 +348,42 @@ def test_label_is_applied_when_configured(monkeypatch, world):
     )
     _install(monkeypatch, fake)
     monkeypatch.setenv("DRY_RUN", "false")
-    monkeypatch.setenv("LINEAR_REVIEW_LABEL", "PR review")
 
     lrt.main()
 
     assert {tuple(t["labelIds"]) for t in fake.created} == {("lbl-ws",)}
+    assert fake.created_labels == []
 
 
-def test_a_configured_label_that_does_not_exist_fails_the_run(monkeypatch, world):
-    _install(monkeypatch, FakeLinear(labels=[]))
+def test_a_missing_label_is_created_in_the_review_team(monkeypatch, world):
+    fake = FakeLinear(
+        labels=[{"id": "lbl-other-team", "name": "PR review", "team": {"id": "team-x"}}]
+    )
+    _install(monkeypatch, fake)
     monkeypatch.setenv("DRY_RUN", "false")
-    monkeypatch.setenv("LINEAR_REVIEW_LABEL", "PR review")
 
-    with pytest.raises(RuntimeError, match="No Linear label 'PR review'"):
+    lrt.main()
+
+    assert fake.created_labels == [{"name": "PR review", "teamId": "team-sdk"}]
+    assert {tuple(t["labelIds"]) for t in fake.created} == {("lbl-new",)}
+
+
+def test_a_dry_run_does_not_create_a_missing_label(monkeypatch, world, capsys):
+    fake = FakeLinear(labels=[])
+    _install(monkeypatch, fake)
+    monkeypatch.setenv("DRY_RUN", "true")
+
+    lrt.main()
+
+    assert fake.created_labels == [] and fake.created == []
+    assert "Would create label 'PR review' in team SDK" in capsys.readouterr().out
+
+
+def test_an_empty_label_name_fails_fast(monkeypatch, world):
+    _install(monkeypatch, FakeLinear())
+    monkeypatch.setenv("LINEAR_REVIEW_LABEL", "")
+
+    with pytest.raises(ValueError, match="LINEAR_REVIEW_LABEL"):
         lrt.main()
 
 

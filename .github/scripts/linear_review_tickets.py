@@ -24,7 +24,9 @@ Input (env):
                                              window start (absent: LOOKBACK_HOURS).
   LINEAR_API_KEY                             Linear personal API key.
   LINEAR_REVIEW_TEAM_KEY                     team the tickets go to, e.g. SDK.
-  LINEAR_REVIEW_LABEL                        optional label name put on every ticket.
+  LINEAR_REVIEW_LABEL                        label put on every ticket; created in the
+                                             team when no team or workspace label has
+                                             that name.
   LOOKBACK_HOURS                             optional fixed window instead of the
                                              run history (manual runs, backfills).
   DRY_RUN                                    "true": read everything, write nothing,
@@ -89,8 +91,15 @@ def main() -> None:
 
     linear = Linear(os.environ["LINEAR_API_KEY"])
     team = linear.team(os.environ["LINEAR_REVIEW_TEAM_KEY"])
-    label_name = os.environ.get("LINEAR_REVIEW_LABEL") or None
-    label_id = linear.label_id(team, label_name) if label_name else None
+    label_name = os.environ.get("LINEAR_REVIEW_LABEL", "")
+    if not label_name:
+        raise ValueError("LINEAR_REVIEW_LABEL is empty")
+    label_id = linear.find_label_id(team, label_name)
+    if label_id is None:
+        if dry_run:
+            print(f"Would create label {label_name!r} in team {team['key']}")
+        else:
+            label_id = linear.create_label(team, label_name)
     users = linear.users_by_github_id()
 
     created, existing, unmatched = [], [], []
@@ -284,8 +293,8 @@ class Linear:
             raise RuntimeError(f"Linear team {key!r} has no completed workflow state")
         return {"id": team["id"], "key": team["key"], "state_id": completed[0]["id"]}
 
-    def label_id(self, team: dict, name: str) -> str:
-        """The id of the label with this name, in the team or workspace-wide."""
+    def find_label_id(self, team: dict, name: str) -> str | None:
+        """The id of the label with this name in the team or workspace-wide; None if there is none."""
         data = self.query(
             """query($name: String!) {
                  issueLabels(filter: {name: {eqIgnoreCase: $name}}) {
@@ -299,12 +308,19 @@ class Linear:
             for label in data["issueLabels"]["nodes"]
             if label["team"] is None or label["team"]["id"] == team["id"]
         ]
-        if not usable:
-            raise RuntimeError(
-                f"No Linear label {name!r} in team {team['key']} or workspace-wide; "
-                "create it or unset LINEAR_REVIEW_LABEL"
-            )
-        return usable[0]["id"]
+        return usable[0]["id"] if usable else None
+
+    def create_label(self, team: dict, name: str) -> str:
+        data = self.query(
+            """mutation($input: IssueLabelCreateInput!) {
+                 issueLabelCreate(input: $input) { success issueLabel { id } }
+               }""",
+            {"input": {"name": name, "teamId": team["id"]}},
+        )
+        if not data["issueLabelCreate"]["success"]:
+            raise RuntimeError(f"Linear refused to create label {name!r} in team {team['key']}")
+        print(f"Created label {name!r} in team {team['key']}")
+        return data["issueLabelCreate"]["issueLabel"]["id"]
 
     def users_by_github_id(self) -> dict[str, dict]:
         """Active, assignable Linear users who connected GitHub, by GitHub user id."""
@@ -343,7 +359,7 @@ class Linear:
         issue_id: str,
         team: dict,
         assignee_id: str,
-        label_id: str | None,
+        label_id: str,
         repo: str,
         approval: Approval,
         source_url: str | None,
@@ -355,9 +371,8 @@ class Linear:
             "stateId": team["state_id"],
             "title": ticket_title(repo, approval),
             "description": ticket_description(approval, source_url),
+            "labelIds": [label_id],
         }
-        if label_id:
-            issue["labelIds"] = [label_id]
         data = self.query(
             """mutation($input: IssueCreateInput!) {
                  issueCreate(input: $input) { success issue { id identifier } }

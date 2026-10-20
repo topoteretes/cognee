@@ -7,7 +7,8 @@ name: PR review tickets
 #
 # Required secret:   LINEAR_API_KEY          Linear personal API key.
 # Optional variable: LINEAR_REVIEW_TEAM_KEY  team the tickets go to (default SDK).
-# Optional variable: LINEAR_REVIEW_LABEL     label put on every ticket.
+# Optional variable: LINEAR_REVIEW_LABEL     label put on every ticket (default "PR review";
+#                                            created in the team if it does not exist).
 #
 # Scheduled runs only fire on the default branch (main).
 on:
@@ -51,7 +52,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
           LINEAR_REVIEW_TEAM_KEY: ${{ vars.LINEAR_REVIEW_TEAM_KEY || 'SDK' }}
-          LINEAR_REVIEW_LABEL: ${{ vars.LINEAR_REVIEW_LABEL }}
+          LINEAR_REVIEW_LABEL: ${{ vars.LINEAR_REVIEW_LABEL || 'PR review' }}
           # Scheduled runs write; manual runs follow the input; pull-request runs never write.
           DRY_RUN: ${{ github.event_name == 'schedule' && 'false' || (github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true') || (github.event_name == 'workflow_dispatch' && 'false') || 'true' }}
           # Pull-request dry runs look at the last week, since they have no run history to start from.
