@@ -1,5 +1,6 @@
 """Unit tests for cognee.cli.api_client."""
 
+import hashlib
 import io
 import os
 import tempfile
@@ -188,10 +189,49 @@ class TestAddFileDetection:
 
             call_kwargs = mock_http_client.post.call_args
             files_arg = call_kwargs.kwargs.get("files") or call_kwargs[1].get("files")
-            # First file tuple: ("data", ("text_0.txt", BytesIO, "text/plain"))
+            expected_hash = hashlib.md5(b"hello world").hexdigest()
+            # First file tuple: ("data", (f"text_{expected_hash}.txt", BytesIO, "text/plain"))
             assert files_arg[0][0] == "data"
-            assert files_arg[0][1][0] == "text_0.txt"
+            assert files_arg[0][1][0] == f"text_{expected_hash}.txt"
             assert files_arg[0][1][2] == "text/plain"
+
+    def test_distinct_texts_get_distinct_content_hash_filenames(self):
+        with patch("cognee.cli.api_client._import_httpx"):
+            client = CogneeApiClient("http://x")
+            mock_resp = MagicMock(status_code=200)
+            mock_resp.json.return_value = {"status": "ok"}
+            mock_http_client = MagicMock()
+            mock_http_client.post.return_value = mock_resp
+            client._client = mock_http_client
+
+            client.add(["memory A", "memory B"], "ds")
+
+            call_kwargs = mock_http_client.post.call_args
+            files_arg = call_kwargs.kwargs.get("files") or call_kwargs[1].get("files")
+            hash_a = hashlib.md5(b"memory A").hexdigest()
+            hash_b = hashlib.md5(b"memory B").hexdigest()
+            assert files_arg[0][1][0] == f"text_{hash_a}.txt"
+            assert files_arg[1][1][0] == f"text_{hash_b}.txt"
+            assert files_arg[0][1][0] != files_arg[1][1][0]
+
+    def test_remember_uses_content_hash_filename(self):
+        with patch("cognee.cli.api_client._import_httpx"):
+            client = CogneeApiClient("http://x")
+            mock_resp = MagicMock(status_code=200)
+            mock_resp.json.return_value = {"status": "ok"}
+            mock_http_client = MagicMock()
+            mock_http_client.post.return_value = mock_resp
+            client._client = mock_http_client
+
+            client.remember(["first note", "second note"], "ds")
+
+            call_kwargs = mock_http_client.post.call_args
+            files_arg = call_kwargs.kwargs.get("files") or call_kwargs[1].get("files")
+            hash_1 = hashlib.md5(b"first note").hexdigest()
+            hash_2 = hashlib.md5(b"second note").hexdigest()
+            assert files_arg[0][1][0] == f"text_{hash_1}.txt"
+            assert files_arg[1][1][0] == f"text_{hash_2}.txt"
+            assert files_arg[0][1][0] != files_arg[1][1][0]
 
     def test_real_file_sent_as_upload(self):
         with tempfile.NamedTemporaryFile(suffix=".txt", delete=False, mode="w") as f:
