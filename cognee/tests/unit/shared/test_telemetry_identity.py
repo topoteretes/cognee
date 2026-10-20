@@ -216,3 +216,89 @@ def test_send_telemetry_emits_despite_detached_user(monkeypatch):
 
     assert payloads[0]["properties"]["user_id"] == "unknown-user"
     assert payloads[0]["properties"]["tenant_id"] == "Single User Tenant"
+
+
+def _use_credentials_file(monkeypatch, tmp_path, creds=None):
+    """Point the cloud credentials loader at a temp file, optionally written."""
+    from cognee.api.v1.serve import credentials
+
+    monkeypatch.setattr(credentials, "_CREDENTIALS_FILE", tmp_path / "cloud_credentials.json")
+    if creds is not None:
+        credentials.save_credentials(creds)
+
+
+def test_payload_has_no_cloud_identity_without_cloud_login(monkeypatch, tmp_path):
+    payloads = _capture_telemetry(monkeypatch)
+    _use_credentials_file(monkeypatch, tmp_path)
+
+    send_telemetry("cognee.recall", "sdk")
+
+    for properties in (payloads[0]["properties"], payloads[0]["user_properties"]):
+        assert "cloud_tenant_id" not in properties
+        assert "cloud_management_host" not in properties
+
+
+def test_payload_carries_cloud_tenant_after_cloud_login(monkeypatch, tmp_path):
+    from cognee.api.v1.serve.credentials import CloudCredentials
+
+    payloads = _capture_telemetry(monkeypatch)
+    cloud_tenant_id = str(uuid.uuid4())
+    _use_credentials_file(
+        monkeypatch,
+        tmp_path,
+        CloudCredentials(
+            access_token="at-secret",
+            management_url="https://api.dev.cloud.topoteretes.com",
+            tenant_id=cloud_tenant_id,
+        ),
+    )
+
+    send_telemetry("cognee.recall", "sdk")
+
+    for properties in (payloads[0]["properties"], payloads[0]["user_properties"]):
+        assert properties["cloud_tenant_id"] == cloud_tenant_id
+        assert properties["cloud_management_host"] == "api.dev.cloud.topoteretes.com"
+
+
+def test_direct_connection_without_tenant_adds_no_cloud_identity(monkeypatch, tmp_path):
+    """serve(url=..., api_key=...) saves credentials with no tenant."""
+    from cognee.api.v1.serve.credentials import CloudCredentials
+
+    payloads = _capture_telemetry(monkeypatch)
+    _use_credentials_file(
+        monkeypatch,
+        tmp_path,
+        CloudCredentials(access_token="", service_url="http://localhost:8000", api_key="ck_x"),
+    )
+
+    send_telemetry("cognee.recall", "sdk")
+
+    assert "cloud_tenant_id" not in payloads[0]["properties"]
+
+
+def test_cloud_secrets_never_reach_the_serialized_event(monkeypatch, tmp_path):
+    import json
+
+    from cognee.api.v1.serve.credentials import CloudCredentials
+
+    payloads = _capture_telemetry(monkeypatch)
+    secrets = ["ck_live_raw_api_key_value", "access-token-value", "refresh-token-value"]
+    _use_credentials_file(
+        monkeypatch,
+        tmp_path,
+        CloudCredentials(
+            access_token=secrets[1],
+            refresh_token=secrets[2],
+            service_url="https://tenant.cloud.example",
+            api_key=secrets[0],
+            management_url="https://api.cloud.example",
+            tenant_id=str(uuid.uuid4()),
+            email="person@example.com",
+        ),
+    )
+
+    send_telemetry("cognee.recall", "sdk")
+
+    serialized = json.dumps(payloads[0])
+    for value in [*secrets, "person@example.com", "tenant.cloud.example"]:
+        assert value not in serialized
