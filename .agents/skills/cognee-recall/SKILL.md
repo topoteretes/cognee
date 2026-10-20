@@ -27,11 +27,13 @@ narrow it; that is also faster.
 
 1. An explicit `query_type=SearchType.X` always wins.
 2. Otherwise, with no usable LLM key, `CHUNKS` (plain vector search).
-3. Otherwise the router (`auto_route=True`, the default). It is two regex
+3. Otherwise the router (`auto_route=True`, the default). It is three regex
    rules, first match wins, no LLM call:
    - the whole query is one `"quoted phrase"` → `CHUNKS_LEXICAL`
    - mentions coding rules/standards/conventions or code-review guidelines
      → `CODING_RULES`
+   - an absolute date behind a time preposition (`in 2019`, `before 1900`,
+     `on 7 November 1867`) → `TEMPORAL`
 4. Everything else → `HYBRID_COMPLETION`.
 
 A routed type (never a pinned one) that the backend rejects, or a routed
@@ -56,14 +58,13 @@ type-to-retriever table is `cognee/modules/retrieval/README.md`.
 | `GRAPH_COMPLETION_COT`, `_CONTEXT_EXTENSION`, `_DECOMPOSITION` | yes | Harder multi-hop questions (more LLM calls) |
 | `GRAPH_SUMMARY_COMPLETION` | yes | Summarizes the retrieved graph edges at query time (extra LLM call), then answers |
 | `RAG_COMPLETION` | yes | Classic chunk RAG |
-| `TRIPLET_COMPLETION` | yes | Subject-predicate-object facts (needs triplet embedding) |
-| `TEMPORAL` | yes | Time questions; reads the Timestamp nodes the default pipeline extracts |
+| `TEMPORAL` | yes | Time questions; hybrid retrieval reranked by the dates in the question |
 | `CHUNKS` | no | Raw passages by vector similarity |
 | `CHUNKS_LEXICAL` | no | Keyword / exact-phrase match |
 | `SUMMARIES` | no | Document summaries |
 | `CODE` | no | Code-graph operations via `code_query={...}`; needs `scope="code"` in recall |
 | `SKILLS` | no | Discover skill playbooks; exactly one dataset |
-| `CYPHER` | no | Raw Cypher. On by default; `ALLOW_CYPHER_QUERY=false` disables it. It can write, so only pass user-authored queries deliberately |
+| `CYPHER` | no | Raw Cypher. Off by default; `ALLOW_CYPHER_QUERY=true` enables it. It can write, so only pass user-authored queries deliberately |
 | `NATURAL_LANGUAGE` | yes | LLM writes Cypher, then runs it (same flag) |
 | `GRAPH_REPORT` | partly | Graph insight report: hubs, cross-set links, suggested questions |
 | `FEELING_LUCKY` | yes | An LLM picks the type |

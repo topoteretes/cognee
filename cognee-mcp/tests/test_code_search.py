@@ -61,6 +61,13 @@ async def test_code_search_schema_is_available_in_default_mode():
         "insights",
         "architecture",
         "delta",
+        "capabilities",
+        "search",
+        "neighbors",
+        "subgraph",
+        "flows",
+        "hubs",
+        "ask",
     }
 
 

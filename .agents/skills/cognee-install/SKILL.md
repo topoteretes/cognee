@@ -78,7 +78,7 @@ raise.
 Start with `examples/advanced_guides/remember_recall_improve_example.py`, which walks
 through permanent memory, session memory, and the sync between them.
 
-The `add()` / `cognify()` / `search()` / `memify()` primitives still exist and
+The `add()` / `cognify()` / `search()` primitives still exist and
 are what `remember`/`recall`/`improve` call underneath — reach for them when you
 need to drive a stage in isolation (e.g. custom pipeline tasks), not for
 ordinary ingestion. `cognee.delete` is formally deprecated (since 0.3.9);
