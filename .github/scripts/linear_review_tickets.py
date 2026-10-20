@@ -264,10 +264,10 @@ class Linear:
         return payload["data"]
 
     def team(self, key: str) -> dict:
-        """The team with this key, its completed workflow state, and its ancestor teams.
+        """The team with this key, its completed workflow state and its parent team's id.
 
-        A sub-team (SDK under Engineering) inherits its parents' labels, so the
-        label lookup accepts a label of any team in ``label_team_ids``.
+        The parent id comes with the team itself, so it needs no access to the
+        parent team (a key restricted to the review team cannot read its parent).
         """
         if not key:
             raise ValueError("LINEAR_REVIEW_TEAM_KEY is empty")
@@ -289,26 +289,21 @@ class Linear:
         )
         if not completed:
             raise RuntimeError(f"Linear team {key!r} has no completed workflow state")
-        label_team_ids = [team["id"]]
-        parent = team["parent"]
-        while parent is not None:
-            label_team_ids.append(parent["id"])
-            parent = self.query(
-                """query($id: String!) { team(id: $id) { parent { id } } }""",
-                {"id": parent["id"]},
-            )["team"]["parent"]
         return {
             "id": team["id"],
             "key": team["key"],
             "state_id": completed[0]["id"],
-            "label_team_ids": label_team_ids,
+            "parent_id": team["parent"]["id"] if team["parent"] else None,
         }
 
     def label_id(self, team: dict, name: str) -> str:
         """The id of the label with this name usable in the team.
 
-        Usable: a workspace label, or a label of the team or of a team above it.
-        A same-named label of an unrelated team is not.
+        Usable: a workspace label, or a label of the team or of a team above it
+        (a sub-team inherits its parents' labels). A same-named label of an
+        unrelated team is not. The team and its parent are known from ``team``;
+        higher ancestors are only read when a candidate label belongs to
+        neither, which needs the API key to read those teams.
         """
         data = self.query(
             """query($name: String!) {
@@ -318,18 +313,41 @@ class Linear:
                }""",
             {"name": name},
         )
-        usable = [
-            label
-            for label in data["issueLabels"]["nodes"]
-            if label["team"] is None or label["team"]["id"] in team["label_team_ids"]
-        ]
-        if not usable:
-            raise RuntimeError(
-                f"No Linear label {name!r} usable in team {team['key']}: create it in the "
-                "workspace, in the team or in a team above it, or check that the API key "
-                "can read that team"
-            )
-        return usable[0]["id"]
+        labels = data["issueLabels"]["nodes"]
+        known = {team["id"], team["parent_id"]} - {None}
+        for label in labels:
+            if label["team"] is None or label["team"]["id"] in known:
+                return label["id"]
+        others = {label["team"]["id"]: label["id"] for label in labels}
+        if others and team["parent_id"]:
+            for ancestor_id in self.ancestors_above(team["parent_id"]):
+                if ancestor_id in others:
+                    return others[ancestor_id]
+        raise RuntimeError(
+            f"No Linear label {name!r} usable in team {team['key']}: create it in the "
+            "workspace, in the team or in a team above it, and make sure the API key "
+            "can read the team it is in"
+        )
+
+    def ancestors_above(self, team_id: str) -> list[str]:
+        """The ids of the teams above ``team_id``, nearest first."""
+        ancestors = []
+        while True:
+            try:
+                parent = self.query(
+                    """query($id: String!) { team(id: $id) { parent { id } } }""",
+                    {"id": team_id},
+                )["team"]["parent"]
+            except RuntimeError as error:
+                raise RuntimeError(
+                    f"The Linear API key cannot read team {team_id}, needed to tell whether "
+                    "a same-named label is inherited: give the key access to that team, "
+                    "or put the label in the review team, its parent or the workspace"
+                ) from error
+            if parent is None:
+                return ancestors
+            ancestors.append(parent["id"])
+            team_id = parent["id"]
 
     def users_by_github_id(self) -> dict[str, dict]:
         """Active, assignable Linear users who connected GitHub, by GitHub user id."""

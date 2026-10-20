@@ -131,7 +131,10 @@ class FakeLinear:
     # SDK sits under Engineering, which sits under Company (as in the Linear workspace).
     PARENTS = {"team-sdk": "team-eng", "team-eng": "team-company", "team-company": None}
 
-    def __init__(self, existing_ids=(), labels=None, teams=None):
+    def __init__(self, existing_ids=(), labels=None, teams=None, readable_teams=None):
+        # None: every team readable. A set: only those (a key restricted to some teams).
+        self.readable_teams = readable_teams
+        self.team_reads = []
         self.existing_ids = set(existing_ids)
         self.labels = (
             labels if labels is not None else [{"id": "lbl-ws", "name": "PR review", "team": None}]
@@ -180,6 +183,9 @@ class FakeLinear:
             )
             return {"teams": {"nodes": nodes}}
         if "team(id:" in query:
+            self.team_reads.append(variables["id"])
+            if self.readable_teams is not None and variables["id"] not in self.readable_teams:
+                raise RuntimeError('Linear API error: [{"message": "Entity not found: Team"}]')
             parent = self.PARENTS[variables["id"]]
             return {"team": {"parent": {"id": parent} if parent else None}}
         if "issueLabels(" in query:
@@ -366,6 +372,35 @@ def test_a_label_inherited_from_a_parent_team_is_used(monkeypatch, world):
     lrt.main()
 
     assert {tuple(t["labelIds"]) for t in fake.created} == {("lbl-company",)}
+
+
+def test_a_parent_team_label_needs_no_access_to_the_parent_team(monkeypatch, world):
+    """The real setup: the label is in Engineering, the key can read SDK only."""
+    fake = FakeLinear(
+        labels=[{"id": "lbl-eng", "name": "PR review", "team": {"id": "team-eng"}}],
+        readable_teams={"team-sdk"},
+    )
+    _install(monkeypatch, fake)
+    monkeypatch.setenv("DRY_RUN", "false")
+
+    lrt.main()
+
+    assert {tuple(t["labelIds"]) for t in fake.created} == {("lbl-eng",)}
+    assert fake.team_reads == []  # the parent id came with SDK's own record
+
+
+def test_an_unreadable_ancestor_fails_with_the_fix(monkeypatch, world):
+    """A same-named label two levels up, and a key that cannot read the parent."""
+    fake = FakeLinear(
+        labels=[{"id": "lbl-company", "name": "PR review", "team": {"id": "team-company"}}],
+        readable_teams={"team-sdk"},
+    )
+    _install(monkeypatch, fake)
+    monkeypatch.setenv("DRY_RUN", "true")
+
+    with pytest.raises(RuntimeError, match="cannot read team team-eng"):
+        lrt.main()
+    assert fake.created == []
 
 
 @pytest.mark.parametrize("dry_run", ["false", "true"])
