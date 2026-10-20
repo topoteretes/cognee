@@ -17,6 +17,7 @@ from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.code_graph.enola import (
+    EnolaSnapshotError,
     is_enola_id,
     normalize_relation,
     parse_enola_snapshot,
@@ -1373,7 +1374,18 @@ async def add_code_graph_docs(
 
     if snapshot_dir is None and repo_path is not None:
         snapshot_dir = Path(repo_path) / ".enola"
-    for repo in code_graph_repo_labels(data_points, repo_path, snapshot_dir):
+    try:
+        repositories = code_graph_repo_labels(data_points, repo_path, snapshot_dir)
+    except (EnolaSnapshotError, OSError, UnicodeError):
+        # An unchanged graph emits no data points, so resolving its labels
+        # reopens the snapshot. A lost/unreadable snapshot is a docs-tail
+        # failure too; it must not trigger rollback of the existing graph.
+        logger.warning(
+            "Code docs snapshot unavailable while resolving repositories; "
+            "the code graph is kept. Re-run ingestion to retry the docstrings."
+        )
+        return data_points
+    for repo in repositories:
         try:
             counts = await code_docs_tail(repo=repo, ctx=ctx, snapshot_dir=snapshot_dir)
         except Exception:

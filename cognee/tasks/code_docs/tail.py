@@ -70,9 +70,8 @@ async def code_docs_tail(
         "swept": linked.swept.total,
     }
     logger.info(
-        "Code docs of %s: %d document(s) and %d chunk(s) derived; %d chunk(s) stored, "
+        "Code docs: %d document(s) and %d chunk(s) derived; %d chunk(s) stored, "
         "%d describes edge(s) written, %d stale node(s) swept.",
-        f"repository {repo!r}" if repo is not None else "every repository",
         counts["documents"],
         counts["chunks"],
         counts["new"],

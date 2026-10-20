@@ -3,6 +3,7 @@
 import importlib
 import inspect
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -127,3 +128,15 @@ def test_tail_signature_is_the_shared_contract():
     assert parameters["extract_entities"].default is False
     assert parameters["snapshot_dir"].kind is inspect.Parameter.KEYWORD_ONLY
     assert parameters["snapshot_dir"].default is None
+
+
+@pytest.mark.asyncio
+async def test_tail_logs_counts_without_the_private_repository_label(chain, monkeypatch):
+    logger = MagicMock()
+    monkeypatch.setattr(tail_module, "logger", logger)
+    repo = "private-org/confidential-project"
+
+    await code_docs_tail(repo)
+
+    assert repo not in str(logger.mock_calls)
+    logger.info.assert_called_once()

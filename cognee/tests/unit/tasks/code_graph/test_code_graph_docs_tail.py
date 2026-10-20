@@ -204,6 +204,14 @@ async def test_failing_tail_is_logged_and_the_route_keeps_its_code_graph(
 
 
 @pytest.mark.asyncio
+async def test_missing_snapshot_during_label_lookup_keeps_the_existing_graph(tmp_path, tail):
+    """An unchanged graph yields no points; its snapshot may disappear before the tail."""
+    run = []
+    assert await add_code_graph_docs(run, repo_path=tmp_path / "gone") is run
+    tail.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_repo_route_skips_the_tail_when_switched_off(tmp_path, monkeypatch, tail):
     _stub_code_graph(monkeypatch, AsyncMock(return_value=[_repository()]))
     _repo_dir, item = _repo_manifest_item(tmp_path)
