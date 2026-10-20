@@ -27,6 +27,7 @@ REASON_SESSION_MANAGER_UNAVAILABLE = "session_manager_unavailable"
 REASON_AUTO_FEEDBACK_DISABLED = "auto_feedback_disabled"
 REASON_PERSONALIZATION_DISABLED = "personalization_disabled"
 REASON_OPT_IN_DISABLED = "opt_in_disabled"
+REASON_NO_WRITES_SINCE_LAST_IMPROVE = "no_writes_since_last_improve"
 REASON_NO_NEW_SESSION_ENTRIES = "no_new_entries"
 REASON_NO_NEW_TRACE_STEPS = "no_new_trace_steps"
 REASON_EDGE_EVIDENCE_DISABLED = "edge_evidence_disabled"
@@ -653,26 +654,55 @@ class LegacyCustomTasksStage(BaseStage):
 
 
 class GlobalContextIndexStage(BaseStage):
-    """Stage 9: build retrieval-ready bucket and root summaries (opt-in)."""
+    """Stage 9: build retrieval-ready bucket and root summaries (opt-in).
+
+    The pipeline's default method counts entities instead of prompting, so this
+    stage runs on the keyless path too. ``already_completed`` when only reads
+    ran on the dataset since its last build, read from ``pipeline_runs``: a
+    build reads the whole dataset.
+    """
 
     name = "global_context_index"
 
     def gate(self, inputs: ImproveRunInputs) -> str | None:
         if not inputs.build_global_context_index:
             return REASON_OPT_IN_DISABLED
-        if not llm_available():
-            return REASON_NO_LLM_CONFIGURED
         return None
 
     async def run(self, inputs: ImproveRunInputs) -> StageResult:
+        from datetime import datetime, timezone
+
+        from cognee.context_global_variables import backend_access_control_enabled
         from cognee.memify_pipelines.global_context_index import global_context_index_pipeline
 
-        result = await global_context_index_pipeline(
-            user=inputs.user,
-            dataset=inputs.dataset_id,
-            run_in_background=False,
-            bucketing_strategy="graph",
-            max_bucket_size=4,
+        from .graph_changes import (
+            GLOBAL_CONTEXT_WATERMARK_KEY,
+            has_dataset_changed_since_last_improve,
+            watermark_stamp,
         )
-        logger.info("improve: global context index updated")
-        return StageResult.from_pipeline_run(self.name, result)
+
+        # Captured before the change check and the build, so a write racing
+        # this run stays visible to the next run's check.
+        started_at = datetime.now(timezone.utc)
+        if await has_dataset_changed_since_last_improve(
+            inputs.dataset_id,
+            GLOBAL_CONTEXT_WATERMARK_KEY,
+            exclude_operation_id=inputs.improve_operation_id,
+            # Without access control datasets share one graph, and relation and
+            # type lines read edges that any of them may write.
+            any_dataset=not backend_access_control_enabled(),
+        ):
+            run_result = await global_context_index_pipeline(
+                user=inputs.user,
+                dataset=inputs.dataset_id,
+                run_in_background=False,
+            )
+            logger.info("improve: global context index updated")
+            result = StageResult.from_pipeline_run(self.name, run_result)
+        else:
+            result = _already_completed(self.name, REASON_NO_WRITES_SINCE_LAST_IMPROVE)
+        if result.status in ("completed", "already_completed"):
+            result._run_info_stamp = watermark_stamp(
+                GLOBAL_CONTEXT_WATERMARK_KEY, result.status, started_at
+            )
+        return result
