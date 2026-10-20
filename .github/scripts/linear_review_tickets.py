@@ -1,9 +1,8 @@
 """Create a Linear ticket for every approval on a merged pull request.
 
-Once a day this finds the pull requests of this repository merged since the
-start of the workflow's last successful scheduled run (or LOOKBACK_HOURS back,
-when set or when there is no earlier one; manual runs never move this start),
-and for every reviewer who approved one of them
+Once a day this finds the pull requests of this repository merged in the last
+72 hours (LOOKBACK_HOURS overrides it), and for every reviewer who approved one
+of them
 creates a ticket assigned to that reviewer in the review team, already in a
 completed state, so time spent on reviews shows up in Linear.
 
@@ -14,22 +13,22 @@ Linear user (external contributors, or members who never connected GitHub in
 Linear), get no ticket; they are listed in the run summary.
 
 Every ticket's id is derived from (repository, pull request, reviewer), so a
-pull request is ticketed once per reviewer however often it is seen: windows of
-consecutive runs may overlap, a failed run's pull requests are picked up by the
-next one, and re-running a day is harmless.
+pull request is ticketed once per reviewer however often it is seen. That is
+what lets the window be a plain 72 hours for a daily run: consecutive windows
+overlap by two days, which absorbs GitHub's varying start time for scheduled
+runs and up to two failed or skipped days, and every pull request seen again is
+skipped. A longer outage needs one manual run with a larger LOOKBACK_HOURS.
 
 Input (env):
   GITHUB_TOKEN, GITHUB_REPOSITORY            the repository and a token to read it.
-  GITHUB_RUN_ID, GITHUB_WORKFLOW_REF,
-  GITHUB_REF_NAME                            this workflow's run history, for the
-                                             window start (absent: LOOKBACK_HOURS).
+  GITHUB_RUN_ID                              this run, linked from every ticket.
   LINEAR_API_KEY                             Linear personal API key.
   LINEAR_REVIEW_TEAM_KEY                     team the tickets go to, e.g. SDK.
   LINEAR_REVIEW_LABEL                        label put on every ticket. It must exist
                                              in the workspace, the team or a team above
                                              it (the run fails otherwise).
-  LOOKBACK_HOURS                             optional fixed window instead of the
-                                             run history (manual runs, backfills).
+  LOOKBACK_HOURS                             optional window in hours instead of 72
+                                             (manual runs, backfills); at most 336.
   DRY_RUN                                    "true": read everything, write nothing,
                                              print the tickets that would be created.
   GITHUB_STEP_SUMMARY                        where the run summary is appended.
@@ -47,9 +46,9 @@ from datetime import datetime, timedelta, timezone
 GITHUB_API = "https://api.github.com"
 LINEAR_API = "https://api.linear.app/graphql"
 HTTP_TIMEOUT = 30  # seconds
-DEFAULT_LOOKBACK = timedelta(hours=24)
-# A window never reaches further back than this, however long ago the last
-# successful run was: GitHub search caps results at 1000 per query.
+DEFAULT_LOOKBACK = timedelta(hours=72)
+# A window never reaches further back than this: GitHub search caps results at
+# 1000 per query.
 MAX_LOOKBACK = timedelta(days=14)
 # Namespace for the deterministic ticket ids. NEVER CHANGE IT: every ticket id
 # is derived from it, so a new value gives every past review a new id and the
@@ -121,7 +120,7 @@ def main() -> None:
 
 
 def window_start(until: datetime) -> datetime:
-    """LOOKBACK_HOURS when set; else the last successful scheduled run's start; else 24 h back."""
+    """LOOKBACK_HOURS back when set, else 72 h back; never more than MAX_LOOKBACK."""
     lookback = os.environ.get("LOOKBACK_HOURS")
     if lookback:
         hours = float(lookback)
@@ -129,31 +128,8 @@ def window_start(until: datetime) -> datetime:
             raise ValueError(f"LOOKBACK_HOURS must be positive, got {lookback!r}")
         since = until - timedelta(hours=hours)
     else:
-        last = last_successful_run_start()
-        since = last if last else until - DEFAULT_LOOKBACK
+        since = until - DEFAULT_LOOKBACK
     return max(since, until - MAX_LOOKBACK)
-
-
-def last_successful_run_start() -> datetime | None:
-    """Start of this workflow's last successful *scheduled* run on this branch, or None.
-
-    Only scheduled runs count: they are never dry runs and always start where
-    the previous one did. A manual run (a dry run, or a real run with a short
-    LOOKBACK_HOURS) must not move the window, or the pull requests merged
-    between the last scheduled run and it would never get tickets.
-    """
-    workflow_ref = os.environ.get("GITHUB_WORKFLOW_REF")
-    if not workflow_ref:
-        return None
-    # GITHUB_WORKFLOW_REF is "<owner>/<repo>/.github/workflows/<file>@<ref>".
-    workflow = workflow_ref.split("@")[0].rsplit("/", 1)[1]
-    branch = urllib.parse.quote(os.environ["GITHUB_REF_NAME"])
-    runs = github_get(
-        f"/repos/{os.environ['GITHUB_REPOSITORY']}/actions/workflows/{workflow}"
-        f"/runs?status=success&event=schedule&branch={branch}&per_page=1"
-    )
-    latest = runs["workflow_runs"][:1]
-    return parse_time(latest[0]["run_started_at"]) if latest else None
 
 
 # --------------------------------------------------------------------------- #
@@ -492,10 +468,6 @@ def write_summary(repo, since, until, dry_run, created, existing, unmatched) -> 
     if summary_path:
         with open(summary_path, "a", encoding="utf-8") as summary:
             summary.write(text)
-
-
-def parse_time(value: str) -> datetime:
-    return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
 if __name__ == "__main__":

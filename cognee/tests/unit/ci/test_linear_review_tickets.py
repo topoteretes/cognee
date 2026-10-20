@@ -110,49 +110,13 @@ def test_window_rejects_a_non_positive_lookback(monkeypatch, value):
         lrt.window_start(NOW)
 
 
-def test_window_starts_at_the_last_successful_run(monkeypatch):
+def test_window_defaults_to_72_hours(monkeypatch):
     monkeypatch.delenv("LOOKBACK_HOURS", raising=False)
-    last = NOW - timedelta(hours=30)
-    monkeypatch.setattr(lrt, "last_successful_run_start", lambda: last)
-    assert lrt.window_start(NOW) == last
+    assert lrt.window_start(NOW) == NOW - timedelta(hours=72)
 
 
-def test_only_successful_scheduled_runs_set_the_window_start(monkeypatch):
-    """Manual runs (dry runs, short backfills) must not move the window."""
-    monkeypatch.setenv("GITHUB_REPOSITORY", REPO)
-    monkeypatch.setenv(
-        "GITHUB_WORKFLOW_REF",
-        f"{REPO}/.github/workflows/linear_review_tickets.yml@refs/heads/main",
-    )
-    monkeypatch.setenv("GITHUB_REF_NAME", "main")
-    asked = []
-
-    def github_get(path):
-        asked.append(path)
-        return {"workflow_runs": [{"run_started_at": "2026-10-19T07:00:05Z"}]}
-
-    monkeypatch.setattr(lrt, "github_get", github_get)
-
-    assert lrt.last_successful_run_start() == datetime(2026, 10, 19, 7, 0, 5, tzinfo=timezone.utc)
-    (path,) = asked
-    assert path.startswith(f"/repos/{REPO}/actions/workflows/linear_review_tickets.yml/runs?")
-    assert "status=success" in path and "event=schedule" in path and "branch=main" in path
-
-
-def test_no_scheduled_run_yet_means_no_history(monkeypatch):
-    monkeypatch.setenv("GITHUB_REPOSITORY", REPO)
-    monkeypatch.setenv("GITHUB_WORKFLOW_REF", f"{REPO}/.github/workflows/x.yml@refs/heads/main")
-    monkeypatch.setenv("GITHUB_REF_NAME", "main")
-    monkeypatch.setattr(lrt, "github_get", lambda path: {"workflow_runs": []})
-    assert lrt.last_successful_run_start() is None
-
-
-def test_window_defaults_to_a_day_and_is_capped(monkeypatch):
-    monkeypatch.delenv("LOOKBACK_HOURS", raising=False)
-    monkeypatch.setattr(lrt, "last_successful_run_start", lambda: None)
-    assert lrt.window_start(NOW) == NOW - timedelta(hours=24)
-
-    monkeypatch.setattr(lrt, "last_successful_run_start", lambda: NOW - timedelta(days=90))
+def test_window_is_capped(monkeypatch):
+    monkeypatch.setenv("LOOKBACK_HOURS", "10000")
     assert lrt.window_start(NOW) == NOW - lrt.MAX_LOOKBACK
 
 
