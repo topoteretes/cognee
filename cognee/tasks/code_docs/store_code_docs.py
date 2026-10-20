@@ -13,6 +13,12 @@ A chunk's id is derived from its text (see extract_code_docs), so a stored id
 means an unchanged docstring. A document's id is (repo, file), so its stored
 node is compared on what the run derives for it (symbol count, node sets)
 before it is left alone.
+
+Stored means searchable: unless the run is graph-only, a point the graph holds
+counts as stored only when its vector collection holds it too. add_data_points
+writes the graph nodes before it embeds them, so an embedding that failed (no
+usable provider) leaves nodes without vectors; this run writes them again
+rather than treating them as done for good.
 """
 
 from dataclasses import dataclass
@@ -155,6 +161,37 @@ def select_new_code_docs(
     return document_points + to_write, counts
 
 
+async def _unindexed(stored: dict[str, dict[str, Any]]) -> set[str]:
+    """The stored documents and chunks whose vector their collection does not hold.
+
+    One id lookup per collection (in pieces), on the collections add_data_points
+    indexes a CodeDocument and a DocumentChunk into. A collection that does not
+    exist holds none of them.
+    """
+    from cognee.infrastructure.databases.vector import get_vector_engine_async
+
+    by_collection: dict[str, list[str]] = {}
+    for node_id, properties in stored.items():
+        if properties.get("type") == CodeDocument.__name__:
+            by_collection.setdefault(CodeDocument.vector_collection("name"), []).append(node_id)
+        elif properties.get("type") == DocumentChunk.__name__:
+            by_collection.setdefault(DocumentChunk.vector_collection("text"), []).append(node_id)
+    if not by_collection:
+        return set()
+    vector_engine = await get_vector_engine_async()
+    missing: set[str] = set()
+    for collection, ids in by_collection.items():
+        if not await vector_engine.has_collection(collection):
+            missing.update(ids)
+            continue
+        found: set[str] = set()
+        for start in range(0, len(ids), _SWEEP_CHUNK_SIZE):
+            rows = await vector_engine.retrieve(collection, ids[start : start + _SWEEP_CHUNK_SIZE])
+            found.update(str(getattr(row, "id", None)) for row in rows or ())
+        missing.update(node_id for node_id in ids if node_id not in found)
+    return missing
+
+
 async def _stored_nodes(graph_engine, node_ids: list[str]) -> dict[str, dict[str, Any]]:
     """The stored nodes among ``node_ids``, by id: an id lookup, no graph read."""
     stored: dict[str, dict[str, Any]] = {}
@@ -183,6 +220,15 @@ async def store_new_code_docs(
         return StoreCounts()
     ids = lookup_ids(data_points)
     stored = await _stored_nodes(await get_graph_engine(), ids) if ids else {}
+    if stored and not graph_only:
+        unindexed = await _unindexed(stored)
+        if unindexed:
+            logger.warning(
+                "Code docs store: %d stored point(s) have no vector (an earlier embedding "
+                "failed); writing them again.",
+                len(unindexed),
+            )
+            stored = {key: value for key, value in stored.items() if key not in unindexed}
     to_write, counts = select_new_code_docs(data_points, stored)
     if to_write:
         await add_data_points(to_write, ctx=ctx, graph_only=graph_only)

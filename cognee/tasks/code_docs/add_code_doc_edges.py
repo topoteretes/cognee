@@ -25,15 +25,17 @@ What hangs off a stale chunk goes with it: its TextSummary, and in entity
 mode the Entity and EntityType nodes it alone owned -- through the shared
 last-owner provenance planner when the chunk carries source refs (stored under
 a pipeline context with a data item, as on the code graph routes), else by
-reading the ownership from the graph. A repository whose snapshot docs the
-run could not read is left out of the sweep -- the extraction emitted nothing
-for it, by the same rule (``snapshot_docs``) -- so a lost clone, a gone
-staging directory or a snapshot another enola run wrote over never costs the
-stored docs.
+reading the ownership from the graph.
+
+Only the extraction's own batch (CodeDocsBatch) is swept against: it records
+which repositories were read, from which snapshot. A repository the extraction
+did not read -- a lost clone, a gone staging directory, a snapshot another
+enola run wrote over -- keeps its stored docs, and so does one whose graph has
+moved to another snapshot since the extraction read it. A plain list from any
+other caller is linked and never swept against.
 """
 
-import asyncio
-import os
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
@@ -47,9 +49,8 @@ from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.graph.methods.delete_chunks_incremental import delete_chunks_incremental
 from cognee.shared.logging_utils import get_logger
-from cognee.tasks.code_docs.extract_code_docs import node_properties, snapshot_docs
+from cognee.tasks.code_docs.extract_code_docs import node_properties
 from cognee.tasks.code_docs.models import DESCRIBES_RELATIONSHIP, CodeDocument
-from cognee.tasks.code_graph.enola import EnolaDocsUnavailable
 from cognee.tasks.code_graph.extract_code_graph import (
     _SWEEP_CHUNK_SIZE,
     _invalidate_code_graph_snapshot,
@@ -82,9 +83,8 @@ _READ_TYPES = [
     _SUMMARY_TYPE,
     "CodeSymbol",
     "CodeModule",
-    # One node per repository: its stored path and snapshot id say whether the
-    # run could read the docs of the snapshot its graph holds (the sweep
-    # leaves a repository it could not read alone).
+    # One node per repository: whether it still exists, and which snapshot its
+    # graph holds now (the sweep keeps a repository whose graph moved on).
     "CodeRepository",
 ]
 # The second read entity mode's sweep needs (chunk -contains-> Entity -is_a->
@@ -117,11 +117,14 @@ class SweepCounts:
 
 @dataclass
 class LinkCounts:
-    """What one link-and-sweep pass did: describes edges written, kept, unresolved; the sweep."""
+    """What one link-and-sweep pass did: describes edges written, kept, not written; the sweep."""
 
     edges: int = 0
     present: int = 0
+    # Chunks whose code node the graph does not hold.
     unresolved: int = 0
+    # Chunks the graph does not hold themselves (the batch was not stored).
+    unstored: int = 0
     swept: SweepCounts = field(default_factory=SweepCounts)
 
 
@@ -130,22 +133,23 @@ async def link_code_docs(
     ctx: Optional["PipelineContext"] = None,
     sweep: bool = True,
     repo: str | None = None,
-    snapshot_dir: str | os.PathLike | None = None,
 ) -> LinkCounts:
     """Write the batch's ``describes`` edges, sweep the stale docstring nodes, return the counts.
 
     The work behind add_code_doc_edges (which passes the batch through) and
     code_docs_tail (which reports these counts). See add_code_doc_edges for the
-    batch, the sweep's scope and ``snapshot_dir``.
+    batch and the sweep's scope.
     """
     from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 
     counts = LinkCounts()
     chunks, documents = _collect_batch(data_points)
-    if data_points and not chunks and not documents:
-        # Composed into a pipeline whose batch holds no code docs: nothing of
-        # ours to touch, so no graph read either. An EMPTY batch is a code
-        # docs run that derived nothing, and still sweeps below.
+    read_snapshots = getattr(data_points, "read_snapshots", None)
+    if not chunks and not documents and (data_points or read_snapshots is None):
+        # Nothing of ours to link, and no extraction record to sweep against:
+        # a pipeline whose batch holds no code docs, or an empty plain list.
+        # No graph read either. An empty CodeDocsBatch is a code docs run that
+        # derived nothing, and still sweeps below.
         return counts
 
     try:
@@ -157,13 +161,16 @@ async def link_code_docs(
 
         new_edges = []
         for chunk_id, (chunk, code_doc) in chunks.items():
+            if chunk_id not in nodes:
+                counts.unstored += 1
+                continue
             target_id = _edge_target(code_doc, nodes)
             if target_id is None:
                 counts.unresolved += 1
             elif (chunk_id, target_id, DESCRIBES_RELATIONSHIP) in existing_edge_keys:
                 counts.present += 1
             else:
-                new_edges.append(_describes_edge(chunk_id, target_id, chunk, code_doc))
+                new_edges.append(_describes_edge(chunk_id, target_id, chunk))
         counts.edges = len(new_edges)
         logger.info(
             "Code doc edge delta: %d new, %d already present.", counts.edges, counts.present
@@ -173,21 +180,27 @@ async def link_code_docs(
                 "%d docstring chunk(s) name a code node the graph does not hold; not linked.",
                 counts.unresolved,
             )
+        if counts.unstored:
+            logger.warning(
+                "%d docstring chunk(s) of the batch are not in the graph (store_code_docs runs "
+                "before this task); not linked.",
+                counts.unstored,
+            )
         if new_edges:
             await graph_engine.add_edges(new_edges)
             await _register_edges(new_edges, ctx)
 
-        if sweep:
+        if sweep and read_snapshots is not None:
             counts.swept = await _sweep_stale_code_docs(
                 graph_engine,
-                await _sweep_scope(
-                    repo, nodes, snapshot_dir, getattr(data_points, "read_repos", None)
-                ),
+                _sweep_scope(repo, nodes, read_snapshots, _batch_ids_by_repo(chunks, documents)),
                 set(documents),
                 set(chunks),
                 nodes,
                 edges,
             )
+        elif sweep:
+            logger.debug("Code docs linked, not swept: the batch carries no extraction record.")
     finally:
         # Edges on code nodes changed, or may have on a partial failure: the
         # code retriever's parsed snapshot must not outlive them.
@@ -200,7 +213,6 @@ async def add_code_doc_edges(
     ctx: Optional["PipelineContext"] = None,
     sweep: bool = True,
     repo: str | None = None,
-    snapshot_dir: str | os.PathLike | None = None,
 ) -> list[DataPoint]:
     """Write the batch's ``describes`` edges, then sweep the stale docstring nodes.
 
@@ -221,22 +233,25 @@ async def add_code_doc_edges(
     TextSummaries made from deleted chunks only, and the Entity/EntityType
     nodes only deleted chunks held, from the graph and from their vector
     collections; other repositories and non-code documents are never
-    considered. An empty batch still sweeps. Left out of the scope is a
-    repository that still has its CodeRepository node but whose snapshot docs
-    the extraction did not read -- the batch's ``read_repos``
-    (CodeDocsBatch), the extraction's own decision; for a plain list, the
-    same check made here (``snapshot_docs``: from ``snapshot_dir``, else the
-    node's ``<path>/.enola``, and only the snapshot its code graph holds).
-    Sweeping such a repository would delete its docs for nothing.
+    considered. An empty batch still sweeps.
+
+    The sweep runs only against the extraction's own batch: a CodeDocsBatch
+    records the repositories extract_code_docs read and the snapshot each was
+    read from. Left out of the scope, with their stored docs kept, are a
+    repository that still has its CodeRepository node but was not read (its
+    snapshot docs were unavailable), one whose graph holds another snapshot by
+    now (another run loaded it meanwhile), and one whose docs from this batch
+    are not all in the graph (the batch was not stored first). A plain list
+    from another caller is linked and never swept against.
 
     The batch is the whole run: every task of the chain is a coroutine, and
-    the pipeline hands a coroutine's result to the next task in one call (a
-    generator's output would arrive in ``batch_size`` pieces, and a sweep per
-    piece would delete the run's other pieces). ``repo`` and ``snapshot_dir``
-    must therefore match the extraction's. Passthrough: returns data_points
+    the pipeline hands a coroutine's result to the next task in one call, the
+    same object (a generator's output would arrive in ``batch_size`` pieces,
+    and a sweep per piece would delete the run's other pieces). ``repo`` must
+    therefore match the extraction's. Passthrough: returns data_points
     unchanged.
     """
-    await link_code_docs(data_points, ctx=ctx, sweep=sweep, repo=repo, snapshot_dir=snapshot_dir)
+    await link_code_docs(data_points, ctx=ctx, sweep=sweep, repo=repo)
     return data_points
 
 
@@ -289,9 +304,9 @@ def _edge_target(code_doc: dict[str, Any], nodes: dict[str, dict[str, Any]]) -> 
 
 
 def _describes_edge(
-    chunk_id: str, target_id: str, chunk: DocumentChunk, code_doc: dict[str, Any]
+    chunk_id: str, target_id: str, chunk: DocumentChunk
 ) -> tuple[str, str, str, dict[str, Any]]:
-    """One edge tuple in the shape build_code_graph_edges writes, plus the doc provenance."""
+    """One edge tuple in the shape build_code_graph_edges writes, plus the chunk's index."""
     return (
         chunk_id,
         target_id,
@@ -340,11 +355,25 @@ async def _register_edges(edges: list[tuple], ctx: Optional["PipelineContext"]) 
     )
 
 
-async def _sweep_scope(
+def _batch_ids_by_repo(
+    chunks: Mapping[str, tuple[DocumentChunk, dict[str, Any]]],
+    documents: Mapping[str, CodeDocument],
+) -> dict[str, set[str]]:
+    """The batch's document and chunk ids, by the repository they belong to."""
+    ids: dict[str, set[str]] = {}
+    for document_id, document in documents.items():
+        ids.setdefault(document.repo, set()).add(document_id)
+    for chunk_id, (_chunk, code_doc) in chunks.items():
+        if isinstance(code_doc.get("repo"), str):
+            ids.setdefault(code_doc["repo"], set()).add(chunk_id)
+    return ids
+
+
+def _sweep_scope(
     repo: str | None,
     nodes: dict[str, dict[str, Any]],
-    snapshot_dir: str | os.PathLike | None = None,
-    read_repos: frozenset[str] | None = None,
+    read_snapshots: Mapping[str, str | None],
+    batch_ids: Mapping[str, set[str]],
 ) -> set[str]:
     """The repositories whose stored docs the batch accounts for.
 
@@ -354,20 +383,20 @@ async def _sweep_scope(
     CodeRepository node is gone (forgotten or renamed), one whose docstrings
     all vanished: a repository absent from the whole-run batch has no current
     docs. The scope is read off the CodeDocuments, not the CodeRepository
-    nodes, which is why a forgotten repository is still found.
+    nodes, which is why a forgotten repository is still found and swept.
 
-    Out of scope again is a repository the run did not derive: its
-    CodeRepository node is there, but the extraction did not read its docs.
-    ``read_repos`` (the batch's, see CodeDocsBatch) is that decision, made
-    once by the extraction, so a snapshot directory or a repository node that
-    changed since cannot turn a repository the extraction left out into one
-    swept for nothing. Without it (a plain list from another caller) the
-    check is made here, the way the extraction makes it: the docs of the
-    snapshot the code graph holds, from ``snapshot_dir`` when the caller has
-    one, else from the node's ``<path>/.enola`` (``snapshot_docs`` without
-    parsing the lines, off the event loop). Either way its absence from the
-    batch says nothing about its docs. A forgotten repository (no node) has no
-    snapshot to read and is swept.
+    Out of scope again, with its stored docs kept, is a repository that still
+    has its CodeRepository node and:
+
+    - was not read by the extraction (``read_snapshots``, its own record:
+      the snapshot docs were unavailable), whatever its snapshot directory
+      looks like by now;
+    - holds another snapshot by now than the one its docs were read from
+      (another run loaded it in the meantime and stored that snapshot's
+      docs, which this batch would sweep);
+    - has docs in this batch that the graph read does not hold (the batch
+      was not stored before it was linked), which this batch would replace
+      with nothing.
     """
     if repo is not None:
         scope = {repo}
@@ -383,29 +412,26 @@ async def _sweep_scope(
         for properties in nodes.values()
         if properties.get("type") == "CodeRepository" and isinstance(properties.get("name"), str)
     }
-    if read_repos is not None:
-        kept = {name for name in scope if name in repositories and name not in read_repos}
-    else:
-        kept = set()
-        for name in sorted(scope & repositories.keys()):
-            if not await asyncio.to_thread(_docs_available, repositories[name], snapshot_dir):
-                kept.add(name)
-    if kept:
-        logger.warning(
-            "Code docs of %s kept as stored: the docs of the snapshot their code graph holds "
-            "were not read this run.",
-            ", ".join(repr(name) for name in sorted(kept)),
-        )
-    return scope - kept
-
-
-def _docs_available(repository: dict[str, Any], snapshot_dir: str | os.PathLike | None) -> bool:
-    """Whether the extraction could read this repository's snapshot docs (snapshot_docs)."""
-    try:
-        snapshot_docs(repository, snapshot_dir, parse=False)
-    except EnolaDocsUnavailable:
-        return False
-    return True
+    not_read, moved, unstored = set(), set(), set()
+    for name in scope & repositories.keys():
+        if name not in read_snapshots:
+            not_read.add(name)
+        elif repositories[name].get("last_snapshot_id") != read_snapshots[name]:
+            moved.add(name)
+        elif any(node_id not in nodes for node_id in batch_ids.get(name, ())):
+            unstored.add(name)
+    for names, why in (
+        (not_read, "the extraction did not read the docs of the snapshot their code graph holds"),
+        (moved, "their code graph moved to another snapshot after the extraction read it"),
+        (unstored, "the run's docs of them are not in the graph (they were not stored first)"),
+    ):
+        if names:
+            logger.warning(
+                "Code docs of %s kept as stored: %s.",
+                ", ".join(repr(name) for name in sorted(names)),
+                why,
+            )
+    return scope - not_read - moved - unstored
 
 
 async def _sweep_stale_code_docs(
@@ -471,24 +497,30 @@ async def _sweep_stale_code_docs(
     counts.summaries = len(stale_summaries)
     counts.entities = len(stale_entities) + len(stale_types)
 
-    stale = (
-        sorted(stale_documents)
-        + sorted(unowned_chunks)
-        + sorted(stale_summaries)
-        + sorted(stale_entities)
-        + sorted(stale_types)
-    )
-    for start in range(0, len(stale), _SWEEP_CHUNK_SIZE):
-        await graph_engine.delete_nodes(stale[start : start + _SWEEP_CHUNK_SIZE])
+    # Vectors first, then the graph nodes in the order the next sweep finds
+    # them back: what hangs off a chunk (summaries through made_from, entity
+    # types and entities through is_a and contains) before the chunks, the
+    # chunks before the documents they are found through. A run that fails
+    # part of the way leaves stale nodes the next sweep finds again, never a
+    # vector without a node that only retrieval still sees.
     await _delete_vectors(
         {
-            CodeDocument.vector_collection("name"): sorted(stale_documents),
             DocumentChunk.vector_collection("text"): sorted(unowned_chunks),
             TextSummary.vector_collection("text"): sorted(stale_summaries),
             Entity.vector_collection("name"): sorted(stale_entities),
             EntityType.vector_collection("name"): sorted(stale_types),
+            CodeDocument.vector_collection("name"): sorted(stale_documents),
         }
     )
+    stale = (
+        sorted(stale_summaries)
+        + sorted(stale_types)
+        + sorted(stale_entities)
+        + sorted(unowned_chunks)
+        + sorted(stale_documents)
+    )
+    for start in range(0, len(stale), _SWEEP_CHUNK_SIZE):
+        await graph_engine.delete_nodes(stale[start : start + _SWEEP_CHUNK_SIZE])
     logger.info(
         "Swept %d stale code document(s), %d chunk(s) (%d through the provenance planner, "
         "with %d node(s) they owned), %d summary(ies) and %d entity node(s).",
@@ -623,11 +655,11 @@ async def _delete_vectors(stale_by_collection: dict[str, list[str]]) -> None:
     Deleting the graph node alone would leave its vector behind, and the chunk
     retrievers (CHUNKS, RAG_COMPLETION) read ``DocumentChunk_text`` payloads
     without consulting the graph, so a replaced docstring would keep being
-    returned next to its replacement. Graph first, then vectors, the order
-    cognee's own deletion uses (delete_from_graph_and_vector): a node left
-    without its vector is still found through the graph, a vector left without
-    its node is served forever. A collection that was never written (a
-    graph_only run) is skipped.
+    returned next to its replacement. The sweep deletes the vectors before the
+    graph nodes: if it fails in between, a node left without its vector is
+    found and swept again by the next run through the graph, while a vector
+    left without its node would be served forever. A collection that was never
+    written (a graph_only run) is skipped.
     """
     from cognee.infrastructure.databases.vector import get_vector_engine_async
 

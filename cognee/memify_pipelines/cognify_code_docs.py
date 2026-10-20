@@ -1,8 +1,8 @@
 """Memify pipeline: a repository's docstrings as knowledge-graph chunks linked to its code graph.
 
 SearchType.CODE answers structural questions over the enola code graph, but
-the graph holds no prose beyond the first paragraph of a symbol's ``doc``
-prop, and no completion or chunk retriever reads code nodes. This pipeline
+the graph holds no prose beyond the first paragraph of a symbol's or module's
+``doc`` prop, and no completion or chunk retriever reads code nodes. This pipeline
 reads the docstrings of every repository whose code graph is in the dataset
 (``extract_code_docs``: the whole comments enola wrote to ``docs.jsonl`` in the
 snapshot the repository's graph was built from, ``<CodeRepository.path>/.enola``)

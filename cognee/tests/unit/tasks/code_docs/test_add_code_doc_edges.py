@@ -1,12 +1,14 @@
 """add_code_doc_edges: describes edges by id, idempotent re-runs and a scoped sweep.
 
-The sweep leaves alone a repository whose snapshot docs the run could not read;
-those cases run against real snapshot directories (write_enola_snapshot).
+Only the extraction's own batch (CodeDocsBatch, which records the snapshot each
+repository's docs were read from) is swept against; a plain list is linked and
+never swept. The sweep reads no snapshot: whether a repository's docs could be
+read is the extraction's decision (test_extract_code_docs), so the graph and
+vector engines are all these tests need, and both are mocked.
 """
 
 import importlib
 import json
-import threading
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
@@ -29,17 +31,10 @@ from cognee.tasks.code_docs import (
     code_document_id,
 )
 from cognee.tasks.code_docs.add_code_doc_edges import _sweep_scope, link_code_docs
-from cognee.tasks.code_docs.extract_code_docs import snapshot_docs
 from cognee.tasks.code_docs.models import CodeDocsBatch
-from cognee.tasks.code_graph.enola import EnolaDocsUnavailable
 from cognee.tasks.code_graph.extract_code_graph import fact_node_id
 from cognee.tasks.summarization.models import TextSummary
-from cognee.tests.utils.enola_snapshot import (
-    doc_line,
-    enola_fact_id,
-    sha256_label,
-    write_enola_snapshot,
-)
+from cognee.tests.utils.enola_snapshot import enola_fact_id
 
 add_code_doc_edges_module = importlib.import_module("cognee.tasks.code_docs.add_code_doc_edges")
 graph_engine_module = importlib.import_module(
@@ -60,16 +55,16 @@ MODULE_ID = str(fact_node_id(REPO, "module", PACKAGE))
 # The fact ids docs.jsonl lines carry, stored as the code nodes' enola_id.
 SYMBOL_ENOLA_ID = enola_fact_id(REPO, "symbol", SYMBOL, FILE)
 MODULE_ENOLA_ID = enola_fact_id(REPO, "module", PACKAGE, PACKAGE)
-# The snapshot the code graph was built from (CodeRepository.last_snapshot_id).
+# The snapshot the code graph was built from (CodeRepository.last_snapshot_id):
+# what extract_code_docs records for a repository whose docs it read.
 SNAPSHOT_ID = "snapshot-1"
-DOC_LINE = doc_line(REPO, "symbol", SYMBOL, FILE, "Open the database.", line=12)
 READ_TYPES = [
     "CodeDocument",
     "DocumentChunk",
     "TextSummary",
     "CodeSymbol",
     "CodeModule",
-    # The sweep reads each repository's path and last_snapshot_id.
+    # Whether each repository still has its node, and which snapshot its graph holds.
     "CodeRepository",
 ]
 ENTITY_READ_TYPES = ["DocumentChunk", "Entity", "EntityType"]
@@ -159,24 +154,18 @@ def _stored_docs(repo, file_path):
     return nodes, [(chunk_id, document_id, "is_part_of", {})], [document_id, chunk_id]
 
 
-def _repository_node(repo, path, snapshot_id=SNAPSHOT_ID):
-    """A stored CodeRepository: where enola wrote its snapshot, and the one its graph holds.
+def _as_stored(document, *chunks):
+    """The graph rows of a batch's document and chunks once the store wrote them: (nodes, edges)."""
+    nodes = [(str(document.id), {"type": "CodeDocument", "repo": document.repo})]
+    nodes += [(str(chunk.id), {"type": "DocumentChunk"}) for chunk in chunks]
+    edges = [(str(chunk.id), str(document.id), "is_part_of", {}) for chunk in chunks]
+    return nodes, edges
 
-    ``path`` or ``snapshot_id`` None leaves that property out.
-    """
-    properties = {"type": "CodeRepository", "name": repo}
-    if path is not None:
-        properties["path"] = str(path)
-    if snapshot_id is not None:
-        properties["last_snapshot_id"] = snapshot_id
+
+def _repository_node(repo, snapshot_id=SNAPSHOT_ID):
+    """A stored CodeRepository whose code graph holds ``snapshot_id`` (its last_snapshot_id)."""
+    properties = {"type": "CodeRepository", "name": repo, "last_snapshot_id": snapshot_id}
     return str(fact_node_id(repo, "repository", repo)), properties
-
-
-def _write_snapshot(directory, **overrides):
-    """A snapshot as enola 0.4.32 leaves it: the graph's id, a receipt vouching for docs.jsonl."""
-    return write_enola_snapshot(
-        directory, **{"docs": [DOC_LINE], "snapshot_id": SNAPSHOT_ID, **overrides}
-    )
 
 
 def _mock_engine(monkeypatch, nodes=(), edges=(), entity_graph=None):
@@ -211,9 +200,11 @@ def _reads(engine):
 
 
 def _kept_warnings(logger):
-    """What each of the sweep's "kept as stored" warnings named."""
+    """The sweep's "kept as stored" warnings: (the repositories named, the reason given)."""
     return [
-        call.args[1] for call in logger.warning.call_args_list if "kept as stored" in call.args[0]
+        (call.args[1], call.args[2])
+        for call in logger.warning.call_args_list
+        if "kept as stored" in call.args[0]
     ]
 
 
@@ -278,7 +269,11 @@ async def test_writes_describes_edges_in_the_code_graph_shape(monkeypatch, inval
     package = _document(PACKAGE, symbol_count=0)
     symbol_chunk = _symbol_chunk(document)
     module_chunk = _module_chunk(package)
-    engine = _mock_engine(monkeypatch, CODE_NODES)
+    stored_nodes, stored_edges = _as_stored(document, symbol_chunk)
+    package_nodes, package_edges = _as_stored(package, module_chunk)
+    engine = _mock_engine(
+        monkeypatch, CODE_NODES + stored_nodes + package_nodes, stored_edges + package_edges
+    )
 
     result = await add_code_doc_edges([document, package, module_chunk, symbol_chunk])
 
@@ -305,31 +300,71 @@ async def test_writes_describes_edges_in_the_code_graph_shape(monkeypatch, inval
     assert properties["relationship_name"] == DESCRIBES_RELATIONSHIP == "describes"
     assert properties["edge_text"] == "describes"
     assert properties["chunk_index"] == 1
-    # An empty graph has nothing stale; the snapshot cache is invalidated regardless.
+    # A plain list is linked, never swept; the snapshot cache is invalidated regardless.
     engine.delete_nodes.assert_not_awaited()
     engine.get_node_delete_data.assert_not_awaited()
     assert invalidations == [{}]
 
 
 @pytest.mark.asyncio
-async def test_rerun_adds_no_duplicate_edges(monkeypatch, invalidations, vectors):
+async def test_rerun_adds_no_duplicate_edges(monkeypatch, invalidations, vectors, link_logger):
+    """An unchanged re-run yields the ids the graph holds: the edge diff adds
+    nothing and the sweep, which runs against the extraction's batch, finds
+    nothing stale."""
     document = _document()
     chunk = _symbol_chunk(document)
-    nodes = CODE_NODES + [
-        (str(document.id), {"type": "CodeDocument", "repo": REPO, "name": FILE}),
-        (str(chunk.id), {"type": "DocumentChunk"}),
-    ]
-    edges = [
-        (str(chunk.id), SYMBOL_ID, "describes", {}),
-        (str(chunk.id), str(document.id), "is_part_of", {}),
-    ]
+    stored_nodes, stored_edges = _as_stored(document, chunk)
+    nodes = CODE_NODES + [_repository_node(REPO), *stored_nodes]
+    edges = [(str(chunk.id), SYMBOL_ID, "describes", {}), *stored_edges]
     engine = _mock_engine(monkeypatch, nodes, edges)
 
-    await add_code_doc_edges([document, chunk])
+    await add_code_doc_edges(CodeDocsBatch.of([document, chunk], {REPO: SNAPSHOT_ID}))
 
     engine.add_edges.assert_not_awaited()
     engine.delete_nodes.assert_not_awaited()
     assert vectors.deleted == []
+    assert _kept_warnings(link_logger) == []
+
+
+@pytest.mark.asyncio
+async def test_a_plain_list_is_linked_and_never_swept(
+    monkeypatch, invalidations, vectors, link_logger
+):
+    """A plain list from any caller but the extraction carries no record of
+    what was read, so it says nothing about the docs it lacks: its describes
+    edges are written and nothing is deleted, filtered or not -- not even a
+    forgotten repository's docs, which an unfiltered extraction batch sweeps.
+    An empty one has nothing to link and does not even read the graph."""
+    document = _document()
+    chunk = _symbol_chunk(document)
+    stored_nodes, stored_edges = _as_stored(document, chunk)
+    legacy_nodes, legacy_edges, legacy_ids = _stored_docs(REPO, "app/legacy.py")
+    forgotten_nodes, forgotten_edges, forgotten_ids = _stored_docs(FORGOTTEN_REPO, "pkg/y.py")
+    nodes = CODE_NODES + [_repository_node(REPO), *stored_nodes, *legacy_nodes, *forgotten_nodes]
+    edges = stored_edges + legacy_edges + forgotten_edges
+
+    for repo in (None, REPO):
+        engine = _mock_engine(monkeypatch, nodes, edges)
+        counts = await link_code_docs([document, chunk], repo=repo)
+        assert _edge_keys(engine) == [(str(chunk.id), SYMBOL_ID, "describes")]
+        assert (counts.edges, counts.swept.total) == (1, 0)
+        engine.get_node_delete_data.assert_not_awaited()
+        engine.delete_nodes.assert_not_awaited()
+
+    for repo in (None, REPO):
+        engine = _mock_engine(monkeypatch, nodes, edges)
+        assert await add_code_doc_edges([], repo=repo) == []
+        engine.get_filtered_graph_data.assert_not_awaited()
+        engine.delete_nodes.assert_not_awaited()
+    # Nothing was read or written for the empty lists, so nothing was invalidated.
+    assert invalidations == [{}, {}]
+    assert vectors.deleted == []
+    assert _kept_warnings(link_logger) == []
+
+    # The same points as the extraction's batch: the legacy and forgotten docs go.
+    engine = _mock_engine(monkeypatch, nodes, edges)
+    await add_code_doc_edges(CodeDocsBatch.of([document, chunk], {REPO: SNAPSHOT_ID}))
+    assert _deleted(engine) == sorted(legacy_ids + forgotten_ids)
 
 
 @pytest.mark.asyncio
@@ -348,6 +383,7 @@ async def test_sweep_deletes_only_the_stale_docs_and_chunks_in_scope(
     stale_summary_id, kept_summary_id, mixed_summary_id = (str(uuid4()) for _ in range(3))
 
     nodes = CODE_NODES + [
+        _repository_node(REPO),
         (str(document.id), {"type": "CodeDocument", "repo": REPO, "name": FILE}),
         (str(kept_chunk.id), {"type": "DocumentChunk"}),
         # Properties nested as JSON text, the way some adapters answer.
@@ -377,7 +413,9 @@ async def test_sweep_deletes_only_the_stale_docs_and_chunks_in_scope(
     engine = _mock_engine(monkeypatch, nodes, edges)
 
     # The run was filtered to this repository, so the sweep is too.
-    await add_code_doc_edges([document, kept_chunk], repo=REPO)
+    await add_code_doc_edges(
+        CodeDocsBatch.of([document, kept_chunk], {REPO: SNAPSHOT_ID}), repo=REPO
+    )
 
     engine.add_edges.assert_not_awaited()
     # The document the batch no longer produces goes with its chunk and its
@@ -390,334 +428,316 @@ async def test_sweep_deletes_only_the_stale_docs_and_chunks_in_scope(
     # The same ids leave the collections add_data_points embedded them into,
     # so CHUNKS and RAG_COMPLETION stop returning the replaced text.
     assert vectors.deleted == [
-        ("CodeDocument_name", [stale_document_id]),
         ("DocumentChunk_text", sorted([stale_chunk_id, changed_chunk_id])),
         ("TextSummary_text", [stale_summary_id]),
+        ("CodeDocument_name", [stale_document_id]),
     ]
     # The stale chunks' provenance was consulted before anything was deleted.
     engine.get_node_delete_data.assert_awaited_once_with(sorted([changed_chunk_id, stale_chunk_id]))
 
 
 @pytest.mark.asyncio
-async def test_sweep_without_a_filter_covers_every_repository_with_documents(
-    monkeypatch, invalidations, vectors, tmp_path
+async def test_sweep_covers_a_repository_read_from_the_snapshot_its_graph_holds(
+    monkeypatch, invalidations, vectors, link_logger
 ):
-    _write_snapshot(tmp_path / ".enola")
+    """The extraction read the repository's docs from the snapshot its code
+    graph still holds, and the store wrote them: the batch is what the run
+    derived, so the stored docs it lacks are stale, with a filter or without."""
     document = _document()
     chunk = _symbol_chunk(document)
-    other_document_id, other_props = _stored_document(OTHER_REPO, "lib/x.py")
-    other_chunk_id = str(uuid4())
-    # demo_repo's graph holds the snapshot the run read. other_repo has no
-    # CodeRepository node (forgotten or renamed): its docs remain.
-    nodes = CODE_NODES + [
-        _repository_node(REPO, tmp_path),
-        (str(document.id), {"type": "CodeDocument", "repo": REPO}),
-        (str(chunk.id), {"type": "DocumentChunk"}),
-        (other_document_id, other_props),
-        (other_chunk_id, {"type": "DocumentChunk"}),
-    ]
-    edges = [
-        (str(chunk.id), str(document.id), "is_part_of", {}),
-        (other_chunk_id, other_document_id, "is_part_of", {}),
-    ]
+    stored_nodes, stored_edges = _as_stored(document, chunk)
+    legacy_nodes, legacy_edges, legacy_ids = _stored_docs(REPO, "app/legacy.py")
+    nodes = CODE_NODES + [_repository_node(REPO), *stored_nodes, *legacy_nodes]
+    edges = stored_edges + legacy_edges
+    batch = CodeDocsBatch.of([document, chunk], {REPO: SNAPSHOT_ID})
+
+    for repo in (REPO, None):
+        engine = _mock_engine(monkeypatch, nodes, edges)
+        await add_code_doc_edges(batch, repo=repo)
+        assert _deleted(engine) == sorted(legacy_ids)
+    assert _kept_warnings(link_logger) == []
+
+
+@pytest.mark.asyncio
+async def test_a_forgotten_repository_is_swept_unless_the_run_is_filtered_to_another(
+    monkeypatch, invalidations, vectors, link_logger
+):
+    """A repository whose CodeRepository node is gone (forgotten, or renamed)
+    has no snapshot left to read and no current docs. An unfiltered run covers
+    every repository with stored docs, so its docs go, from the graph and the
+    vectors; a run filtered to another repository covers that one alone."""
+    document = _document()
+    chunk = _symbol_chunk(document)
+    stored_nodes, stored_edges = _as_stored(document, chunk)
+    forgotten_nodes, forgotten_edges, forgotten_ids = _stored_docs(FORGOTTEN_REPO, "pkg/y.py")
+    nodes = CODE_NODES + [_repository_node(REPO), *stored_nodes, *forgotten_nodes]
+    edges = stored_edges + forgotten_edges
+    batch = CodeDocsBatch.of([document, chunk], {REPO: SNAPSHOT_ID})
+
     engine = _mock_engine(monkeypatch, nodes, edges)
+    await add_code_doc_edges(batch)
+    assert _deleted(engine) == sorted(forgotten_ids)
 
-    await add_code_doc_edges([document, chunk])
+    engine = _mock_engine(monkeypatch, nodes, edges)
+    await add_code_doc_edges(batch, repo=REPO)
+    engine.delete_nodes.assert_not_awaited()
 
-    assert _deleted(engine) == sorted([other_document_id, other_chunk_id])
     assert vectors.deleted == [
-        ("CodeDocument_name", [other_document_id]),
-        ("DocumentChunk_text", [other_chunk_id]),
+        ("DocumentChunk_text", forgotten_ids[1:]),
+        ("CodeDocument_name", forgotten_ids[:1]),
     ]
+    assert _kept_warnings(link_logger) == []
 
 
 @pytest.mark.asyncio
 async def test_sweep_with_a_filter_covers_that_repository_even_from_an_empty_batch(
-    monkeypatch, invalidations, vectors, tmp_path
+    monkeypatch, invalidations, vectors
 ):
-    # demo_repo's snapshot documents nothing any more: a vouched, empty docs.jsonl.
-    _write_snapshot(tmp_path / ".enola", docs=[])
-    document = _document()
-    chunk = _symbol_chunk(document)
-    other_document_id, other_props = _stored_document(OTHER_REPO, "lib/x.py")
-    other_chunk_id = str(uuid4())
-    nodes = CODE_NODES + [
-        _repository_node(REPO, tmp_path),
-        (str(document.id), {"type": "CodeDocument", "repo": REPO}),
-        (str(chunk.id), {"type": "DocumentChunk"}),
-        (other_document_id, other_props),
-        (other_chunk_id, {"type": "DocumentChunk"}),
-    ]
-    edges = [
-        (str(chunk.id), str(document.id), "is_part_of", {}),
-        (other_chunk_id, other_document_id, "is_part_of", {}),
-    ]
+    repo_nodes, repo_edges, repo_ids = _stored_docs(REPO, FILE)
+    other_nodes, other_edges, other_ids = _stored_docs(OTHER_REPO, "lib/x.py")
+    # demo_repo's graph holds the snapshot the runs read; other_repo has no
+    # CodeRepository node (forgotten, or renamed).
+    nodes = [_repository_node(REPO), *repo_nodes, *other_nodes]
+    edges = repo_edges + other_edges
 
-    # The filtered repository derived nothing (forgotten, or its docstrings
-    # vanished): its docs go, the other repository's stay.
+    # Filtered to other_repo, the extraction found no repository of that name
+    # to read: its docs go, demo_repo's stay.
     engine = _mock_engine(monkeypatch, nodes, edges)
-    await add_code_doc_edges([], repo=OTHER_REPO)
-    assert _deleted(engine) == sorted([other_document_id, other_chunk_id])
+    await add_code_doc_edges(CodeDocsBatch.of([], {}), repo=OTHER_REPO)
+    assert _deleted(engine) == sorted(other_ids)
 
+    # Filtered to demo_repo, whose snapshot documents nothing any more (a
+    # vouched, empty docs.jsonl, read): its docs go, the other's stay.
     engine = _mock_engine(monkeypatch, nodes, edges)
-    await add_code_doc_edges([], repo=REPO)
-    assert _deleted(engine) == sorted([str(document.id), str(chunk.id)])
+    await add_code_doc_edges(CodeDocsBatch.of([], {REPO: SNAPSHOT_ID}), repo=REPO)
+    assert _deleted(engine) == sorted(repo_ids)
 
     # Unfiltered and empty: no repository has current docs.
     engine = _mock_engine(monkeypatch, nodes, edges)
-    await add_code_doc_edges([])
-    assert _deleted(engine) == sorted(
-        [str(document.id), str(chunk.id), other_document_id, other_chunk_id]
-    )
+    await add_code_doc_edges(CodeDocsBatch.of([], {REPO: SNAPSHOT_ID}))
+    assert _deleted(engine) == sorted(repo_ids + other_ids)
     assert len(invalidations) == 3
 
 
-@pytest.mark.asyncio
-async def test_sweep_scope_is_the_filtered_repository_or_every_one_with_documents(
-    tmp_path, link_logger
-):
+def test_sweep_scope_is_the_filtered_repository_or_every_one_with_documents(link_logger):
     """The scope is read off the stored CodeDocuments, a forgotten repository's
     included, not off the CodeRepository nodes; a filter is the scope by
-    itself. A repository with a node stays in only while its snapshot docs are
-    available."""
-    _write_snapshot(tmp_path / ".enola")
+    itself."""
     nodes = dict(
         [
-            _repository_node(REPO, tmp_path),
-            # A node without stored docs: outside an unfiltered scope, never checked.
-            _repository_node(OTHER_REPO, tmp_path / "gone"),
+            _repository_node(REPO),
+            # A node without stored docs: outside an unfiltered scope.
+            _repository_node(OTHER_REPO),
             _stored_document(REPO, FILE),
             _stored_document(FORGOTTEN_REPO, "pkg/y.py"),
             (str(uuid4()), {"type": "CodeDocument", "repo": None}),
             (str(uuid4()), {"type": "DocumentChunk", "repo": "not_a_document"}),
         ]
     )
+    read_snapshots = {REPO: SNAPSHOT_ID, OTHER_REPO: SNAPSHOT_ID}
 
-    assert await _sweep_scope(None, nodes) == {REPO, FORGOTTEN_REPO}
-    assert await _sweep_scope(REPO, nodes) == {REPO}
-    assert await _sweep_scope("new_repo", nodes) == {"new_repo"}
-    assert _kept_warnings(link_logger) == []
-
-    # Filtered to the repository whose snapshot is gone: nothing in scope.
-    assert await _sweep_scope(OTHER_REPO, nodes) == set()
-    assert _kept_warnings(link_logger) == [repr(OTHER_REPO)]
-
-
-@pytest.mark.asyncio
-async def test_sweep_covers_a_repository_whose_snapshot_docs_are_available(
-    monkeypatch, invalidations, vectors, tmp_path, link_logger
-):
-    """The receipt vouches for docs.jsonl and the snapshot id is the one the
-    code graph holds: the batch is what the run derived from those docs, so
-    the stored docs it lacks are stale."""
-    _write_snapshot(tmp_path / ".enola")
-    document = _document()
-    chunk = _symbol_chunk(document)
-    legacy_nodes, legacy_edges, legacy_ids = _stored_docs(REPO, "app/legacy.py")
-    nodes = CODE_NODES + [
-        _repository_node(REPO, tmp_path),
-        (str(document.id), {"type": "CodeDocument", "repo": REPO}),
-        (str(chunk.id), {"type": "DocumentChunk"}),
-        *legacy_nodes,
-    ]
-    edges = [(str(chunk.id), str(document.id), "is_part_of", {}), *legacy_edges]
-
-    for repo in (REPO, None):
-        engine = _mock_engine(monkeypatch, nodes, edges)
-        await add_code_doc_edges([document, chunk], repo=repo)
-        assert _deleted(engine) == sorted(legacy_ids)
-
-    # A vouched, empty docs.jsonl says the repository documents nothing any
-    # more (not that enola did not run): every stored doc of it goes.
-    _write_snapshot(tmp_path / ".enola", docs=[])
-    engine = _mock_engine(monkeypatch, nodes, edges)
-    await add_code_doc_edges([], repo=REPO)
-    assert _deleted(engine) == sorted([str(document.id), str(chunk.id), *legacy_ids])
+    assert _sweep_scope(None, nodes, read_snapshots, {}) == {REPO, FORGOTTEN_REPO}
+    assert _sweep_scope(REPO, nodes, read_snapshots, {}) == {REPO}
+    assert _sweep_scope(OTHER_REPO, nodes, read_snapshots, {}) == {OTHER_REPO}
+    assert _sweep_scope("new_repo", nodes, read_snapshots, {}) == {"new_repo"}
     assert _kept_warnings(link_logger) == []
 
 
-@pytest.mark.parametrize(
-    "snapshot, repository",
-    [
-        # enola before 0.4.32, or a configuration without the docs renderer.
-        pytest.param({"docs": None}, {}, id="no-docs-file"),
-        # A docs.jsonl an earlier run left: this run's receipt does not list it.
-        pytest.param({"vouch_docs": False}, {}, id="not-vouched"),
-        # A later enola run wrote over the snapshot the code graph was built from.
-        pytest.param({"snapshot_id": "snapshot-2"}, {}, id="other-snapshot"),
-        # The node records no snapshot id to match, or no directory to read.
-        pytest.param({}, {"snapshot_id": None}, id="no-stored-snapshot-id"),
-        pytest.param({}, {"path": None}, id="no-path"),
-        # A lost clone, or an earlier run's staging directory.
-        pytest.param(None, {}, id="no-snapshot-directory"),
-    ],
-)
+def test_sweep_scope_keeps_each_repository_the_batch_does_not_account_for(link_logger):
+    """Of the repositories in scope that still have their CodeRepository node,
+    kept out are one the extraction did not read, one whose graph holds
+    another snapshot than the one read, and one with batch ids the graph read
+    lacks, each kind named in a warning of its own. A repository without a
+    node has no snapshot to compare and stays in."""
+    stored_chunk_id, unstored_chunk_id = str(uuid4()), str(uuid4())
+    names = ("read", "not_read", "moved", "unstored")
+    nodes = dict(
+        [
+            _repository_node("read"),
+            _repository_node("not_read"),
+            _repository_node("moved", snapshot_id="snapshot-2"),
+            _repository_node("unstored"),
+            *(_stored_document(name, FILE) for name in (*names, FORGOTTEN_REPO)),
+            (stored_chunk_id, {"type": "DocumentChunk"}),
+        ]
+    )
+    read_snapshots = {name: SNAPSHOT_ID for name in ("read", "moved", "unstored")}
+    batch_ids = {"read": {stored_chunk_id}, "unstored": {unstored_chunk_id}}
+
+    assert _sweep_scope(None, nodes, read_snapshots, batch_ids) == {"read", FORGOTTEN_REPO}
+    reasons = dict(_kept_warnings(link_logger))
+    assert set(reasons) == {"'not_read'", "'moved'", "'unstored'"}
+    assert "did not read" in reasons["'not_read'"]
+    assert "moved to another snapshot" in reasons["'moved'"]
+    assert "not stored" in reasons["'unstored'"]
+
+
 @pytest.mark.asyncio
-async def test_sweep_keeps_a_repository_whose_snapshot_docs_are_unavailable(
-    monkeypatch, invalidations, vectors, tmp_path, link_logger, snapshot, repository
+async def test_sweep_keeps_a_repository_the_extraction_did_not_read(
+    monkeypatch, invalidations, vectors, link_logger
 ):
-    """The extraction derived nothing for a repository whose snapshot docs it
-    could not read, so the batch says nothing about its stored docs: the sweep
-    leaves them alone and names the repository. A forgotten repository (no
-    CodeRepository node, so no snapshot to read) goes in the same run."""
-    if snapshot is not None:
-        _write_snapshot(tmp_path / ".enola", **snapshot)
+    """The extraction derives nothing for a repository whose snapshot docs it
+    cannot read (a lost clone, a gone staging directory, a snapshot another
+    enola run wrote over) and leaves it out of its record, so the batch says
+    nothing about its stored docs: they are kept, and a warning names the
+    repository. In the same run a repository it read loses the docs it no
+    longer has, and a forgotten one (no CodeRepository node) goes."""
     kept_nodes, kept_edges, _ = _stored_docs(REPO, FILE)
-    forgotten_nodes, forgotten_edges, forgotten_ids = _stored_docs(FORGOTTEN_REPO, "pkg/y.py")
-    nodes = [
-        _repository_node(REPO, **{"path": tmp_path, **repository}),
-        *kept_nodes,
-        *forgotten_nodes,
-    ]
-    edges = kept_edges + forgotten_edges
-
-    engine = _mock_engine(monkeypatch, nodes, edges)
-    await add_code_doc_edges([])
-    assert _deleted(engine) == sorted(forgotten_ids)
-    assert vectors.deleted == [
-        ("CodeDocument_name", forgotten_ids[:1]),
-        ("DocumentChunk_text", forgotten_ids[1:]),
-    ]
-
-    # Filtered to it: nothing is swept at all.
-    engine = _mock_engine(monkeypatch, nodes, edges)
-    await add_code_doc_edges([], repo=REPO)
-    engine.delete_nodes.assert_not_awaited()
-    assert _kept_warnings(link_logger) == [repr(REPO)] * 2
-
-
-@pytest.mark.asyncio
-async def test_sweep_reads_the_callers_snapshot_dir_instead_of_the_stored_path(
-    monkeypatch, invalidations, vectors, tmp_path, link_logger
-):
-    """The routes pass the snapshot they just loaded: once an unchanged
-    snapshot is skipped, a node's path can name an earlier run's staging
-    directory, long gone. The caller's directory then decides for every
-    repository in scope, so one whose graph holds another snapshot is kept --
-    even though its own <path>/.enola would vouch for it."""
-    staged = _write_snapshot(tmp_path / "staging" / ".enola")
-    _write_snapshot(tmp_path / "clone" / ".enola", snapshot_id="snapshot-2")
-    repo_nodes, repo_edges, repo_ids = _stored_docs(REPO, FILE)
-    other_nodes, other_edges, other_ids = _stored_docs(OTHER_REPO, "lib/x.py")
-    nodes = [
-        _repository_node(REPO, tmp_path / "gone"),
-        _repository_node(OTHER_REPO, tmp_path / "clone", snapshot_id="snapshot-2"),
-        *repo_nodes,
-        *other_nodes,
-    ]
-    edges = repo_edges + other_edges
-
-    engine = _mock_engine(monkeypatch, nodes, edges)
-    await add_code_doc_edges([], snapshot_dir=staged)
-    assert _deleted(engine) == sorted(repo_ids)
-    assert _kept_warnings(link_logger) == [repr(OTHER_REPO)]
-
-    # Without it, each node's own <path>/.enola decides: the other way round.
-    engine = _mock_engine(monkeypatch, nodes, edges)
-    await add_code_doc_edges([])
-    assert _deleted(engine) == sorted(other_ids)
-    assert _kept_warnings(link_logger)[1:] == [repr(REPO)]
-
-    # link_code_docs takes it the same way, as a string too.
-    engine = _mock_engine(monkeypatch, nodes, edges)
-    counts = await link_code_docs([], repo=REPO, snapshot_dir=str(staged))
-    assert _deleted(engine) == sorted(repo_ids)
-    assert (counts.swept.documents, counts.swept.chunks) == (1, 1)
-
-
-@pytest.mark.asyncio
-async def test_sweep_checks_a_snapshot_off_the_event_loop_without_parsing_it(
-    monkeypatch, invalidations, vectors, tmp_path
-):
-    """The check reads and hashes docs.jsonl -- megabytes on a large
-    repository -- so it runs in a worker thread, and leaves the lines unparsed.
-    A repository without a node has no snapshot to ask about."""
-    _write_snapshot(tmp_path / ".enola")
-    repo_nodes, repo_edges, repo_ids = _stored_docs(REPO, FILE)
-    forgotten_nodes, forgotten_edges, forgotten_ids = _stored_docs(FORGOTTEN_REPO, "pkg/y.py")
-    nodes = [_repository_node(REPO, tmp_path), *repo_nodes, *forgotten_nodes]
-    calls = []
-
-    def recording_snapshot_docs(repository, snapshot_dir=None, **kwargs):
-        calls.append((repository["name"], snapshot_dir, kwargs, threading.get_ident()))
-        return snapshot_docs(repository, snapshot_dir, **kwargs)
-
-    monkeypatch.setattr(add_code_doc_edges_module, "snapshot_docs", recording_snapshot_docs)
-    engine = _mock_engine(monkeypatch, nodes, repo_edges + forgotten_edges)
-
-    await add_code_doc_edges([])
-
-    assert _deleted(engine) == sorted(repo_ids + forgotten_ids)
-    assert [call[:3] for call in calls] == [(REPO, None, {"parse": False})]
-    assert calls[0][3] != threading.get_ident()
-
-
-@pytest.mark.asyncio
-async def test_sweep_keeps_a_repository_whose_vouched_docs_are_not_utf8(
-    monkeypatch, invalidations, vectors, tmp_path
-):
-    """Same rule both ways: a docs.jsonl the extraction cannot decode derives
-    nothing for the repository, even when the receipt lists its bytes, so the
-    sweep must keep the repository's stored docs as well."""
-    directory = _write_snapshot(tmp_path / ".enola")
-    content = json.dumps({**DOC_LINE, "doc": "Open the café."}, ensure_ascii=False)
-    content = content.encode("latin-1") + b"\n"
-    (directory / "docs.jsonl").write_bytes(content)
-    receipt = json.loads((directory / "receipt.json").read_text(encoding="utf-8"))
-    receipt["output_hashes"]["docs.jsonl"] = sha256_label(content)
-    (directory / "receipt.json").write_text(json.dumps(receipt), encoding="utf-8")
-    repository_id, repository = _repository_node(REPO, tmp_path)
-    # What the extraction reads for it: nothing.
-    with pytest.raises(EnolaDocsUnavailable, match="not UTF-8"):
-        snapshot_docs(repository)
-    stored_nodes, stored_edges, _ = _stored_docs(REPO, FILE)
-    engine = _mock_engine(monkeypatch, [(repository_id, repository), *stored_nodes], stored_edges)
-
-    await add_code_doc_edges([], repo=REPO)
-
-    engine.delete_nodes.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_sweep_follows_the_extractions_read_set_not_the_snapshots_on_disk(
-    monkeypatch, invalidations, vectors, tmp_path, link_logger
-):
-    """A batch from extract_code_docs says which repositories the extraction
-    read (CodeDocsBatch.read_repos), and the sweep follows that decision rather
-    than looking at the snapshots again: a repository the extraction left out
-    is kept even though its snapshot has become readable since (another run
-    wrote it while this one was under way), one it read is swept even though
-    its snapshot is gone by now, and a forgotten one goes as before. No
-    snapshot is checked."""
-    _write_snapshot(tmp_path / "late" / ".enola")
-    late_nodes, late_edges, _ = _stored_docs(REPO, FILE)
     read_nodes, read_edges, read_ids = _stored_docs(OTHER_REPO, "lib/x.py")
     forgotten_nodes, forgotten_edges, forgotten_ids = _stored_docs(FORGOTTEN_REPO, "pkg/y.py")
     nodes = [
-        _repository_node(REPO, tmp_path / "late"),
-        _repository_node(OTHER_REPO, tmp_path / "gone"),
-        *late_nodes,
+        _repository_node(REPO),
+        _repository_node(OTHER_REPO),
+        *kept_nodes,
         *read_nodes,
         *forgotten_nodes,
     ]
-    edges = late_edges + read_edges + forgotten_edges
-    checks = []
-    monkeypatch.setattr(
-        add_code_doc_edges_module, "snapshot_docs", lambda *args, **kwargs: checks.append(args)
-    )
+    edges = kept_edges + read_edges + forgotten_edges
 
+    # other_repo was read (it documents nothing any more); demo_repo was not.
     engine = _mock_engine(monkeypatch, nodes, edges)
-    await add_code_doc_edges(CodeDocsBatch.of([], {OTHER_REPO}))
-
+    await add_code_doc_edges(CodeDocsBatch.of([], {OTHER_REPO: SNAPSHOT_ID}))
     assert _deleted(engine) == sorted(read_ids + forgotten_ids)
-    assert _kept_warnings(link_logger) == [repr(REPO)]
-    assert checks == []
 
-    # Filtered to a repository the extraction did not read: nothing goes.
+    # Filtered to it: nothing is swept at all.
     engine = _mock_engine(monkeypatch, nodes, edges)
-    await add_code_doc_edges(CodeDocsBatch.of([], ()), repo=REPO)
+    await add_code_doc_edges(CodeDocsBatch.of([], {}), repo=REPO)
     engine.delete_nodes.assert_not_awaited()
-    assert checks == []
+
+    assert vectors.deleted == [
+        ("DocumentChunk_text", sorted([read_ids[1], forgotten_ids[1]])),
+        ("CodeDocument_name", sorted([read_ids[0], forgotten_ids[0]])),
+    ]
+    warnings = _kept_warnings(link_logger)
+    assert [named for named, _why in warnings] == [repr(REPO)] * 2
+    assert all("did not read" in why for _named, why in warnings)
+
+
+@pytest.mark.asyncio
+async def test_sweep_keeps_a_repository_whose_graph_moved_to_another_snapshot(
+    monkeypatch, invalidations, vectors, link_logger
+):
+    """Another run loaded a newer snapshot of the repository after this run's
+    extraction read the older one, and stored the newer snapshot's docs, which
+    this batch lacks. Sweeping against the batch would delete them: the
+    stored docs are kept, with a warning, until a run reads the snapshot the
+    graph holds."""
+    document = _document()
+    chunk = _symbol_chunk(document)
+    stored_nodes, stored_edges = _as_stored(document, chunk)
+    newer_nodes, newer_edges, newer_ids = _stored_docs(REPO, "app/newer.py")
+    nodes = CODE_NODES + [*stored_nodes, *newer_nodes]
+    edges = stored_edges + newer_edges
+    batch = CodeDocsBatch.of([document, chunk], {REPO: SNAPSHOT_ID})
+
+    engine = _mock_engine(monkeypatch, [_repository_node(REPO, "snapshot-2"), *nodes], edges)
+    await add_code_doc_edges(batch, repo=REPO)
+    engine.delete_nodes.assert_not_awaited()
+    assert vectors.deleted == []
+    warnings = _kept_warnings(link_logger)
+    assert [named for named, _why in warnings] == [repr(REPO)]
+    assert "moved to another snapshot" in warnings[0][1]
+
+    # Against a graph that still holds the snapshot read, the same batch sweeps them.
+    engine = _mock_engine(monkeypatch, [_repository_node(REPO), *nodes], edges)
+    await add_code_doc_edges(batch, repo=REPO)
+    assert _deleted(engine) == sorted(newer_ids)
+
+
+@pytest.mark.asyncio
+async def test_sweep_keeps_a_repository_whose_batch_the_graph_does_not_hold(
+    monkeypatch, invalidations, vectors, link_logger
+):
+    """The link task runs after the store. A batch whose docs the graph read
+    does not hold (linked without being stored, or after a store that failed
+    part of the way) would have the sweep replace the stored docs with
+    nothing: they are kept, with a warning, until the batch is stored."""
+    document = _document()
+    chunk = _symbol_chunk(document)
+    stored_nodes, stored_edges = _as_stored(document, chunk)
+    legacy_nodes, legacy_edges, legacy_ids = _stored_docs(REPO, "app/legacy.py")
+    batch = CodeDocsBatch.of([document, chunk], {REPO: SNAPSHOT_ID})
+
+    # The batch's document is in the graph, its chunk is not.
+    nodes = CODE_NODES + [_repository_node(REPO), stored_nodes[0], *legacy_nodes]
+    engine = _mock_engine(monkeypatch, nodes, legacy_edges)
+    await add_code_doc_edges(batch)
+    engine.delete_nodes.assert_not_awaited()
+    assert vectors.deleted == []
+    warnings = _kept_warnings(link_logger)
+    assert [named for named, _why in warnings] == [repr(REPO)]
+    assert "not stored" in warnings[0][1]
+
+    # Once the chunk is stored, the same batch sweeps the legacy docs.
+    nodes = CODE_NODES + [_repository_node(REPO), *stored_nodes, *legacy_nodes]
+    engine = _mock_engine(monkeypatch, nodes, stored_edges + legacy_edges)
+    await add_code_doc_edges(batch)
+    assert _deleted(engine) == sorted(legacy_ids)
+
+
+@pytest.mark.asyncio
+async def test_sweep_deletes_the_vectors_first_and_the_documents_last(
+    monkeypatch, invalidations, vectors
+):
+    """Vectors first: a sweep that fails part of the way leaves graph nodes
+    without vectors rather than vectors without their nodes, which retrieval
+    would keep serving. In the graph, each node goes before the node the next
+    sweep finds it through: a summary (found through made_from) before its
+    chunk, chunks before their documents (found through is_part_of), and the
+    documents last."""
+    monkeypatch.setattr(add_code_doc_edges_module, "_SWEEP_CHUNK_SIZE", 2)
+    document = _document()
+    kept = _symbol_chunk(document)
+    changed_id, summary_id = str(uuid4()), str(uuid4())
+    stored_nodes, stored_edges = _as_stored(document, kept)
+    first_nodes, first_edges, first_ids = _stored_docs(REPO, "app/first.py")
+    second_nodes, second_edges, second_ids = _stored_docs(REPO, "app/second.py")
+    nodes = CODE_NODES + [
+        _repository_node(REPO),
+        *stored_nodes,
+        (changed_id, {"type": "DocumentChunk"}),
+        (summary_id, {"type": "TextSummary"}),
+        *first_nodes,
+        *second_nodes,
+    ]
+    edges = [
+        *stored_edges,
+        (changed_id, str(document.id), "is_part_of", {}),
+        (summary_id, changed_id, "made_from", {}),
+        *first_edges,
+        *second_edges,
+    ]
+    events = []
+
+    async def delete_vectors(collection, ids):
+        events.append((collection, list(ids)))
+
+    monkeypatch.setattr(vectors, "delete_data_points", delete_vectors)
+    engine = _mock_engine(monkeypatch, nodes, edges)
+    engine.delete_nodes.side_effect = lambda ids: events.append(("graph", list(ids)))
+
+    await add_code_doc_edges(CodeDocsBatch.of([document, kept], {REPO: SNAPSHOT_ID}))
+
+    # Three stale chunks, a summary and two stale documents, two ids a call:
+    # every vector delete comes before the first graph delete.
+    assert [target for target, _ids in events] == [
+        "DocumentChunk_text",
+        "DocumentChunk_text",
+        "TextSummary_text",
+        "CodeDocument_name",
+        "graph",
+        "graph",
+        "graph",
+    ]
+    stale_documents = sorted([first_ids[0], second_ids[0]])
+    assert events[-1] == ("graph", stale_documents)
+    graph_order = [node_id for _target, ids in events[4:] for node_id in ids]
+    assert sorted(graph_order) == sorted(
+        [changed_id, first_ids[1], second_ids[1], summary_id, *stale_documents]
+    )
+    # The summary goes first, before the chunk it was made from.
+    assert graph_order[0] == summary_id
+    assert graph_order.index(summary_id) < graph_order.index(changed_id)
 
 
 @pytest.mark.asyncio
@@ -725,13 +745,13 @@ async def test_sweep_deletes_in_chunks(monkeypatch, invalidations, vectors):
     monkeypatch.setattr(add_code_doc_edges_module, "_SWEEP_CHUNK_SIZE", 2)
     document = _document()
     chunk = _symbol_chunk(document)
+    stored_nodes, stored_edges = _as_stored(document, chunk)
     stale_ids = [str(code_document_id(REPO, f"app/old_{index}.py")) for index in range(3)]
-    nodes = CODE_NODES + [
-        (node_id, {"type": "CodeDocument", "repo": REPO}) for node_id in stale_ids
-    ]
-    engine = _mock_engine(monkeypatch, nodes)
+    nodes = CODE_NODES + [_repository_node(REPO), *stored_nodes]
+    nodes += [(node_id, {"type": "CodeDocument", "repo": REPO}) for node_id in stale_ids]
+    engine = _mock_engine(monkeypatch, nodes, stored_edges)
 
-    await add_code_doc_edges([document, chunk])
+    await add_code_doc_edges(CodeDocsBatch.of([document, chunk], {REPO: SNAPSHOT_ID}))
 
     assert [len(call.args[0]) for call in engine.delete_nodes.await_args_list] == [2, 1]
     assert _deleted(engine) == sorted(stale_ids)
@@ -750,11 +770,16 @@ async def test_sweep_skips_vector_collections_that_were_never_written(
     vectors.collections = set()
     document = _document()
     chunk = _symbol_chunk(document)
+    stored_nodes, stored_edges = _as_stored(document, chunk)
     stale_document_id = str(code_document_id(REPO, "app/legacy.py"))
-    nodes = CODE_NODES + [(stale_document_id, {"type": "CodeDocument", "repo": REPO})]
-    engine = _mock_engine(monkeypatch, nodes)
+    nodes = CODE_NODES + [
+        _repository_node(REPO),
+        *stored_nodes,
+        (stale_document_id, {"type": "CodeDocument", "repo": REPO}),
+    ]
+    engine = _mock_engine(monkeypatch, nodes, stored_edges)
 
-    await add_code_doc_edges([document, chunk])
+    await add_code_doc_edges(CodeDocsBatch.of([document, chunk], {REPO: SNAPSHOT_ID}))
 
     assert _deleted(engine) == [stale_document_id]
     assert vectors.deleted == []
@@ -764,19 +789,32 @@ async def test_sweep_skips_vector_collections_that_were_never_written(
 async def test_sweep_can_be_disabled(monkeypatch, invalidations, vectors):
     document = _document()
     chunk = _symbol_chunk(document)
+    stored_nodes, stored_edges = _as_stored(document, chunk)
     stale_document_id = str(code_document_id(REPO, "app/legacy.py"))
-    nodes = CODE_NODES + [(stale_document_id, {"type": "CodeDocument", "repo": REPO})]
-    engine = _mock_engine(monkeypatch, nodes)
+    nodes = CODE_NODES + [
+        _repository_node(REPO),
+        *stored_nodes,
+        (stale_document_id, {"type": "CodeDocument", "repo": REPO}),
+    ]
+    batch = CodeDocsBatch.of([document, chunk], {REPO: SNAPSHOT_ID})
+    engine = _mock_engine(monkeypatch, nodes, stored_edges)
 
-    await add_code_doc_edges([document, chunk], sweep=False)
+    await add_code_doc_edges(batch, sweep=False)
 
     engine.add_edges.assert_awaited_once()
     engine.delete_nodes.assert_not_awaited()
     assert vectors.deleted == []
 
+    # The same batch with the sweep on removes the stale document.
+    engine = _mock_engine(monkeypatch, nodes, stored_edges)
+    await add_code_doc_edges(batch)
+    assert _deleted(engine) == [stale_document_id]
+
 
 @pytest.mark.asyncio
-async def test_foreign_batch_touches_nothing_while_an_empty_one_sweeps(monkeypatch, invalidations):
+async def test_foreign_batch_touches_nothing_while_an_empty_extraction_batch_sweeps(
+    monkeypatch, invalidations
+):
     engine = _mock_engine(monkeypatch, CODE_NODES)
     plain_document = TextDocument(name="notes.txt", raw_data_location="/x", external_metadata=None)
     plain_chunk = DocumentChunk(
@@ -786,9 +824,12 @@ async def test_foreign_batch_touches_nothing_while_an_empty_one_sweeps(monkeypat
         cut_type="paragraph_end",
         is_part_of=plain_document,
     )
+    foreign = [plain_document, plain_chunk]
 
-    # Composed into another pipeline: no code docs in the batch, no read.
-    assert await add_code_doc_edges([plain_document, plain_chunk]) == [plain_document, plain_chunk]
+    # Composed into another pipeline: no code docs in the batch, no read,
+    # whether or not the batch carries an extraction record.
+    assert await add_code_doc_edges(foreign) == foreign
+    assert await add_code_doc_edges(CodeDocsBatch.of(foreign, {REPO: SNAPSHOT_ID})) == foreign
     engine.get_filtered_graph_data.assert_not_awaited()
     engine.add_edges.assert_not_awaited()
     engine.delete_nodes.assert_not_awaited()
@@ -796,7 +837,8 @@ async def test_foreign_batch_touches_nothing_while_an_empty_one_sweeps(monkeypat
 
     # A code docs run that derived nothing still reads and sweeps (nothing
     # stale here) and invalidates the snapshot.
-    assert await add_code_doc_edges([]) == []
+    empty = CodeDocsBatch.of([], {REPO: SNAPSHOT_ID})
+    assert await add_code_doc_edges(empty) is empty
     engine.get_filtered_graph_data.assert_awaited_once_with([{"type": READ_TYPES}])
     engine.delete_nodes.assert_not_awaited()
     assert invalidations == [{}]
@@ -808,13 +850,33 @@ async def test_chunks_whose_code_node_is_missing_are_not_linked(monkeypatch, inv
     package = _document(PACKAGE, symbol_count=0)
     orphan = _symbol_chunk(document, symbol_id=str(fact_node_id(REPO, "symbol", "app/db.Gone")))
     module_chunk = _module_chunk(package)
+    stored_nodes, _ = _as_stored(document, orphan)
+    package_nodes, _ = _as_stored(package, module_chunk)
     # The graph holds neither the symbol the chunk names nor the CodeModule.
-    engine = _mock_engine(monkeypatch, CODE_NODES[:1])
+    engine = _mock_engine(monkeypatch, CODE_NODES[:1] + stored_nodes + package_nodes)
 
     counts = await link_code_docs([document, orphan, package, module_chunk])
 
     engine.add_edges.assert_not_awaited()
-    assert (counts.edges, counts.present, counts.unresolved) == (0, 0, 2)
+    assert (counts.edges, counts.present, counts.unresolved, counts.unstored) == (0, 0, 2, 0)
+
+
+@pytest.mark.asyncio
+async def test_chunks_the_graph_does_not_hold_are_not_linked(monkeypatch, invalidations):
+    """A chunk is linked only once it is stored: an edge from a chunk the graph
+    lacks would be dropped by the engine and still counted as written. Such a
+    chunk is counted as unstored and named in a warning instead."""
+    document = _document()
+    chunk = _symbol_chunk(document)
+    engine = _mock_engine(monkeypatch, CODE_NODES)
+    logger = MagicMock()
+    monkeypatch.setattr(add_code_doc_edges_module, "logger", logger)
+
+    counts = await link_code_docs([document, chunk])
+
+    engine.add_edges.assert_not_awaited()
+    assert (counts.edges, counts.present, counts.unresolved, counts.unstored) == (0, 0, 0, 1)
+    assert any("not in the graph" in call.args[0] for call in logger.warning.call_args_list)
 
 
 @pytest.mark.asyncio
@@ -824,7 +886,8 @@ async def test_a_module_doc_without_its_module_id_is_not_linked(monkeypatch, inv
     unlinked although the graph holds the CodeModule of its file's directory."""
     document = _document("app/__init__.py", symbol_count=0)
     module_chunk = _module_chunk(document, module_id=None)
-    engine = _mock_engine(monkeypatch, CODE_NODES)
+    stored_nodes, stored_edges = _as_stored(document, module_chunk)
+    engine = _mock_engine(monkeypatch, CODE_NODES + stored_nodes, stored_edges)
 
     counts = await link_code_docs([document, module_chunk])
 
@@ -837,11 +900,16 @@ async def test_summaries_carry_the_chunks_in_entity_mode(monkeypatch, invalidati
     document = _document()
     chunk = _symbol_chunk(document)
     summary = TextSummary(text="Opens the database.", made_from=chunk)
+    stored_nodes, stored_edges = _as_stored(document, chunk)
     stale_document_id = str(code_document_id(REPO, "app/legacy.py"))
-    nodes = CODE_NODES + [(stale_document_id, {"type": "CodeDocument", "repo": REPO})]
-    engine = _mock_engine(monkeypatch, nodes)
+    nodes = CODE_NODES + [
+        _repository_node(REPO),
+        *stored_nodes,
+        (stale_document_id, {"type": "CodeDocument", "repo": REPO}),
+    ]
+    engine = _mock_engine(monkeypatch, nodes, stored_edges)
 
-    await add_code_doc_edges([summary])
+    await add_code_doc_edges(CodeDocsBatch.of([summary], {REPO: SNAPSHOT_ID}))
 
     assert _edge_keys(engine) == [(str(chunk.id), SYMBOL_ID, "describes")]
     # The document under the chunk counts as produced; the other one is swept.
@@ -868,6 +936,7 @@ async def test_entity_sweep_removes_the_entities_only_stale_chunks_held(
     shared, old, old_too = (str(uuid4()) for _ in range(3))  # Entity nodes
     shared_type, old_type = str(uuid4()), str(uuid4())  # EntityType nodes
     nodes = CODE_NODES + [
+        _repository_node(REPO),
         (str(document.id), {"type": "CodeDocument", "repo": REPO}),
         (str(kept.id), {"type": "DocumentChunk"}),
         (stale_id, {"type": "DocumentChunk"}),
@@ -900,7 +969,7 @@ async def test_entity_sweep_removes_the_entities_only_stale_chunks_held(
         ),
     ]
 
-    counts = await link_code_docs([document, kept])
+    counts = await link_code_docs(CodeDocsBatch.of([document, kept], {REPO: SNAPSHOT_ID}))
 
     # The stale chunk was asked for its neighbours; an entity among them paid
     # the entity read.
@@ -927,6 +996,7 @@ async def test_entity_sweep_skips_the_entity_read_without_entity_neighbours(
     kept = _symbol_chunk(document)
     stale_id = str(uuid4())
     nodes = CODE_NODES + [
+        _repository_node(REPO),
         (str(document.id), {"type": "CodeDocument", "repo": REPO}),
         (str(kept.id), {"type": "DocumentChunk"}),
         (stale_id, {"type": "DocumentChunk"}),
@@ -942,7 +1012,7 @@ async def test_entity_sweep_skips_the_entity_read_without_entity_neighbours(
         ({"id": stale_id, "type": "DocumentChunk"}, {"relationship_name": "describes"}, {}),
     ]
 
-    await add_code_doc_edges([document, kept])
+    await add_code_doc_edges(CodeDocsBatch.of([document, kept], {REPO: SNAPSHOT_ID}))
 
     assert _reads(engine) == [[{"type": READ_TYPES}]]
     assert _deleted(engine) == [stale_id]
@@ -958,6 +1028,7 @@ async def test_entity_sweep_reads_the_graph_directly_above_the_lookup_limit(
     kept = _symbol_chunk(document)
     stale_id, old, old_type = (str(uuid4()) for _ in range(3))
     nodes = CODE_NODES + [
+        _repository_node(REPO),
         (str(document.id), {"type": "CodeDocument", "repo": REPO}),
         (str(kept.id), {"type": "DocumentChunk"}),
         (stale_id, {"type": "DocumentChunk"}),
@@ -971,7 +1042,7 @@ async def test_entity_sweep_reads_the_graph_directly_above_the_lookup_limit(
     )
     engine = _mock_engine(monkeypatch, nodes, edges, entity_graph)
 
-    await add_code_doc_edges([document, kept])
+    await add_code_doc_edges(CodeDocsBatch.of([document, kept], {REPO: SNAPSHOT_ID}))
 
     engine.get_connections.assert_not_awaited()
     assert _reads(engine) == [[{"type": READ_TYPES}], [{"type": ENTITY_READ_TYPES}]]
@@ -988,6 +1059,7 @@ async def test_owned_stale_chunks_are_retired_through_the_provenance_planner(
     owned_id, unowned_id = str(uuid4()), str(uuid4())
     owned_summary_id, unowned_summary_id, owned_entity_id = (str(uuid4()) for _ in range(3))
     nodes = CODE_NODES + [
+        _repository_node(REPO),
         (str(document.id), {"type": "CodeDocument", "repo": REPO}),
         (str(kept.id), {"type": "DocumentChunk"}),
         (owned_id, {"type": "DocumentChunk"}),
@@ -1021,7 +1093,7 @@ async def test_owned_stale_chunks_are_retired_through_the_provenance_planner(
     )
     monkeypatch.setattr(add_code_doc_edges_module, "delete_chunks_incremental", planner)
 
-    counts = await link_code_docs([document, kept])
+    counts = await link_code_docs(CodeDocsBatch.of([document, kept], {REPO: SNAPSHOT_ID}))
 
     # One planner pass per (dataset, data item), keyed the way the chunk was stored.
     planner.assert_awaited_once_with([owned_id], str(dataset_id), str(data_id))
@@ -1044,6 +1116,7 @@ async def test_sweep_falls_back_to_the_manual_path_without_usable_provenance(
     kept = _symbol_chunk(document)
     stale_id = str(uuid4())
     nodes = CODE_NODES + [
+        _repository_node(REPO),
         (str(document.id), {"type": "CodeDocument", "repo": REPO}),
         (str(kept.id), {"type": "DocumentChunk"}),
         (stale_id, {"type": "DocumentChunk"}),
@@ -1052,13 +1125,14 @@ async def test_sweep_falls_back_to_the_manual_path_without_usable_provenance(
         (str(kept.id), str(document.id), "is_part_of", {}),
         (stale_id, str(document.id), "is_part_of", {}),
     ]
+    batch = CodeDocsBatch.of([document, kept], {REPO: SNAPSHOT_ID})
     planner = AsyncMock()
     monkeypatch.setattr(add_code_doc_edges_module, "delete_chunks_incremental", planner)
 
     # A backend without graph provenance.
     engine = _mock_engine(monkeypatch, nodes, edges)
     engine.get_node_delete_data.side_effect = UnsupportedProvenanceCapability()
-    await add_code_doc_edges([document, kept])
+    await add_code_doc_edges(batch)
     assert _deleted(engine) == [stale_id]
 
     # A document-scoped ref only, or another chunk's ref: not this chunk's own.
@@ -1073,7 +1147,7 @@ async def test_sweep_falls_back_to_the_manual_path_without_usable_provenance(
             ],
         )
     }
-    await add_code_doc_edges([document, kept])
+    await add_code_doc_edges(batch)
     assert _deleted(engine) == [stale_id]
 
     planner.assert_not_awaited()
@@ -1086,7 +1160,8 @@ async def test_invalidates_the_dataset_snapshot_even_when_the_write_fails(
 ):
     document = _document()
     chunk = _symbol_chunk(document)
-    engine = _mock_engine(monkeypatch, CODE_NODES)
+    stored_nodes, stored_edges = _as_stored(document, chunk)
+    engine = _mock_engine(monkeypatch, CODE_NODES + stored_nodes, stored_edges)
     engine.add_edges.side_effect = RuntimeError("graph down")
     ctx = SimpleNamespace(dataset=SimpleNamespace(id="ds-1"), user=None, data_item={})
 
@@ -1104,16 +1179,17 @@ async def test_rollback_ledger_rows_only_for_a_persisted_data_item(monkeypatch, 
     monkeypatch.setattr("cognee.modules.graph.methods.upsert_edges", upsert_edges)
     user = SimpleNamespace(id="u1", tenant_id=None)
     dataset = SimpleNamespace(id="ds-1")
+    stored_nodes, stored_edges = _as_stored(document, chunk)
 
     # A memify run: its data item is the `{}` seed, which has no ledger row.
-    _mock_engine(monkeypatch, CODE_NODES)
+    _mock_engine(monkeypatch, CODE_NODES + stored_nodes, stored_edges)
     await add_code_doc_edges(
         [document, chunk],
         ctx=SimpleNamespace(user=user, dataset=dataset, data_item={}, pipeline_run_id="run-1"),
     )
     upsert_edges.assert_not_awaited()
 
-    _mock_engine(monkeypatch, CODE_NODES)
+    _mock_engine(monkeypatch, CODE_NODES + stored_nodes, stored_edges)
     await add_code_doc_edges(
         [document, chunk],
         ctx=SimpleNamespace(

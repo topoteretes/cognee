@@ -1361,9 +1361,13 @@ async def add_code_graph_docs(
     Best effort: a tail that fails (no usable embedding provider, say) is
     logged with the switches that address it, and the route goes on with the
     code graph it just built -- the item completes and the run is not rolled
-    back, which would remove that graph too. The docstrings are stored on the
-    next sync, or by cognify_code_docs_pipeline. Passthrough: returns
-    data_points unchanged.
+    back, which would remove that graph too. The docstrings are stored the
+    next time this route runs for the repository or file (store_code_docs
+    writes again what the failed run left without vectors). A repository
+    indexed in place can also be documented by cognify_code_docs_pipeline,
+    which reads ``<CodeRepository.path>/.enola``; a code file's snapshot is
+    gone with its staging directory. Passthrough: returns data_points
+    unchanged.
     """
     from cognee.tasks.code_docs import code_docs_tail
 
@@ -1378,8 +1382,10 @@ async def add_code_graph_docs(
                 "CODE_GRAPH_DOCS=false builds code graphs without docstrings; otherwise name "
                 "an embedding provider (EMBEDDING_PROVIDER=fastembed runs locally without a "
                 "key -- the keyless fallback to it is off while COGNEE_SKIP_PREFLIGHT, "
-                "COGNEE_SKIP_CONNECTION_TEST or MOCK_EMBEDDING is set). "
-                "cognify_code_docs_pipeline stores the docstrings once that is fixed.",
+                "COGNEE_SKIP_CONNECTION_TEST or MOCK_EMBEDDING is set). Once that is fixed, "
+                "the docstrings are stored the next time this route runs for the repository "
+                "or file; for a repository indexed in place, cognify_code_docs_pipeline "
+                "stores them too.",
                 repo,
             )
             continue

@@ -1,9 +1,10 @@
-"""store_code_docs: writes what the graph lacks, passes the whole batch on."""
+"""store_code_docs: writes what the graph lacks or holds without a vector, passes the whole batch on."""
 
 import importlib
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
+from uuid import UUID
 
 import pytest
 
@@ -19,9 +20,13 @@ store_module = importlib.import_module("cognee.tasks.code_docs.store_code_docs")
 graph_engine_module = importlib.import_module(
     "cognee.infrastructure.databases.graph.get_graph_engine"
 )
+vector_module = importlib.import_module("cognee.infrastructure.databases.vector")
 
 REPO = "demo_repo"
 FILE = "app/db.py"
+# The collections add_data_points embeds a CodeDocument and a DocumentChunk into.
+DOCUMENT_VECTORS = "CodeDocument_name"
+CHUNK_VECTORS = "DocumentChunk_text"
 
 
 def _document(symbol_count=2, node_set=None):
@@ -75,6 +80,42 @@ def _stored(point, **overrides):
     }
 
 
+def _unindexed_warnings(logger):
+    """How many stored points each "no vector" warning counted."""
+    return [call.args[1] for call in logger.warning.call_args_list if "no vector" in call.args[0]]
+
+
+class _FakeVectorEngine:
+    """Both collections exist and hold every id, unless a test takes a collection or an id out."""
+
+    def __init__(self):
+        self.collections = {DOCUMENT_VECTORS, CHUNK_VECTORS}
+        # Per collection, the ids whose embedding failed.
+        self.missing = {DOCUMENT_VECTORS: set(), CHUNK_VECTORS: set()}
+        # Per collection, the ids of each retrieve call, in call order.
+        self.lookups = {}
+
+    async def has_collection(self, name):
+        return name in self.collections
+
+    async def retrieve(self, collection, ids):
+        self.lookups.setdefault(collection, []).append(list(ids))
+        # The rows the collection holds, their ids UUIDs as the adapters return them.
+        return [
+            SimpleNamespace(id=UUID(node_id))
+            for node_id in ids
+            if node_id not in self.missing[collection]
+        ]
+
+
+@pytest.fixture(autouse=True)
+def vectors(monkeypatch):
+    """The vector engine stored points are checked against (no LanceDB in unit tests)."""
+    fake = _FakeVectorEngine()
+    monkeypatch.setattr(vector_module, "get_vector_engine_async", AsyncMock(return_value=fake))
+    return fake
+
+
 @pytest.fixture
 def engine(monkeypatch):
     """The graph engine; ``get_nodes`` answers what a test says is stored (nothing by default)."""
@@ -97,6 +138,14 @@ def writes(monkeypatch):
     return written
 
 
+@pytest.fixture
+def store_logger(monkeypatch):
+    """The store's logger, recorded."""
+    logger = MagicMock()
+    monkeypatch.setattr(store_module, "logger", logger)
+    return logger
+
+
 @pytest.mark.asyncio
 async def test_first_run_writes_every_point_documents_first(engine, writes):
     document = _document()
@@ -109,10 +158,13 @@ async def test_first_run_writes_every_point_documents_first(engine, writes):
     engine.get_nodes.assert_awaited_once_with([str(first.id), str(document.id), str(second.id)])
     assert [write.points for write in writes] == [[document, first, second]]
     assert writes[0].ctx is None and writes[0].graph_only is False
+    # Nothing is stored, so there is no vector to look for.
+    vector_module.get_vector_engine_async.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_unchanged_rerun_writes_nothing(engine, writes):
+async def test_unchanged_rerun_writes_nothing(engine, writes, vectors):
+    """Every point is in the graph and its vector in its collection: nothing to write."""
     document = _document()
     chunks = [_chunk(document, "First.", 0), _chunk(document, "Second.", 1)]
     engine.get_nodes.return_value = [_stored(document)] + [_stored(chunk) for chunk in chunks]
@@ -122,8 +174,85 @@ async def test_unchanged_rerun_writes_nothing(engine, writes):
     assert writes == []
     assert (counts.documents, counts.chunks, counts.extractions, counts.skipped) == (0, 0, 0, 3)
     assert counts.written == 0
+    # Each stored point was looked up in the collection its stored type is embedded into.
+    assert vectors.lookups == {
+        DOCUMENT_VECTORS: [[str(document.id)]],
+        CHUNK_VECTORS: [[str(chunk.id) for chunk in chunks]],
+    }
     # The task form passes the batch through all the same.
     assert await store_code_docs([document, *chunks]) == [document, *chunks]
+
+
+@pytest.mark.asyncio
+async def test_stored_chunk_without_a_vector_is_written_again_with_its_document(
+    engine, writes, vectors, store_logger
+):
+    """add_data_points writes the graph nodes before it embeds them, so a failed
+    embedding left this chunk in the graph and out of DocumentChunk_text, where no
+    retriever finds it: it is written again, its document with it."""
+    document = _document()
+    first, second = _chunk(document, "First.", 0), _chunk(document, "Second.", 1)
+    engine.get_nodes.return_value = [_stored(document), _stored(first), _stored(second)]
+    vectors.missing[CHUNK_VECTORS].add(str(second.id))
+
+    counts = await store_new_code_docs([document, first, second])
+
+    assert [write.points for write in writes] == [[document, second]]
+    assert (counts.documents, counts.chunks, counts.skipped) == (1, 1, 1)
+    assert _unindexed_warnings(store_logger) == [1]
+
+
+@pytest.mark.asyncio
+async def test_stored_document_without_a_vector_is_written_again(
+    engine, writes, vectors, store_logger
+):
+    document = _document()
+    chunk = _chunk(document, "Kept.", 0)
+    engine.get_nodes.return_value = [_stored(document), _stored(chunk)]
+    vectors.missing[DOCUMENT_VECTORS].add(str(document.id))
+
+    counts = await store_new_code_docs([document, chunk])
+
+    # The chunk has its vector and stays as stored.
+    assert [write.points for write in writes] == [[document]]
+    assert (counts.documents, counts.chunks, counts.skipped) == (1, 0, 1)
+    assert _unindexed_warnings(store_logger) == [1]
+
+
+@pytest.mark.asyncio
+async def test_missing_collection_holds_none_of_the_stored_points(
+    engine, writes, vectors, store_logger
+):
+    """No DocumentChunk_text collection at all (no chunk was ever embedded): each
+    stored chunk is written again, and nothing is looked up in the missing collection."""
+    document = _document()
+    chunks = [_chunk(document, "First.", 0), _chunk(document, "Second.", 1)]
+    engine.get_nodes.return_value = [_stored(document)] + [_stored(chunk) for chunk in chunks]
+    vectors.collections.discard(CHUNK_VECTORS)
+
+    counts = await store_new_code_docs([document, *chunks])
+
+    assert [write.points for write in writes] == [[document, *chunks]]
+    assert (counts.documents, counts.chunks, counts.skipped) == (1, 2, 0)
+    assert vectors.lookups == {DOCUMENT_VECTORS: [[str(document.id)]]}
+    assert _unindexed_warnings(store_logger) == [2]
+
+
+@pytest.mark.asyncio
+async def test_graph_only_run_makes_no_vector_lookup(engine, writes, vectors):
+    """A graph-only run writes no vectors and has no vector engine to ask: a point
+    the graph holds is stored."""
+    document = _document()
+    chunk = _chunk(document, "Kept.", 0)
+    engine.get_nodes.return_value = [_stored(document), _stored(chunk)]
+    # A lookup would find nothing and have both points written again.
+    vectors.collections.clear()
+
+    counts = await store_new_code_docs([document, chunk], graph_only=True)
+
+    vector_module.get_vector_engine_async.assert_not_awaited()
+    assert writes == []
+    assert counts.skipped == 2
 
 
 @pytest.mark.asyncio
@@ -237,6 +366,24 @@ async def test_id_lookups_are_batched(engine, writes, monkeypatch):
     await store_code_docs([document, *chunks])
 
     assert [len(call.args[0]) for call in engine.get_nodes.await_args_list] == [2, 1]
+
+
+@pytest.mark.asyncio
+async def test_vector_lookups_are_batched_per_collection(engine, writes, vectors, monkeypatch):
+    monkeypatch.setattr(store_module, "_SWEEP_CHUNK_SIZE", 2)
+    document = _document(symbol_count=3)
+    chunks = [_chunk(document, f"Text {index}.", index) for index in range(3)]
+    engine.get_nodes.return_value = [_stored(document)] + [_stored(chunk) for chunk in chunks]
+
+    await store_code_docs([document, *chunks])
+
+    assert {
+        collection: [len(ids) for ids in calls] for collection, calls in vectors.lookups.items()
+    } == {DOCUMENT_VECTORS: [1], CHUNK_VECTORS: [2, 1]}
+    assert [node_id for ids in vectors.lookups[CHUNK_VECTORS] for node_id in ids] == [
+        str(chunk.id) for chunk in chunks
+    ]
+    assert writes == []
 
 
 @pytest.mark.asyncio

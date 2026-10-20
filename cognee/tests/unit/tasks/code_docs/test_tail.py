@@ -9,9 +9,13 @@ import pytest
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.tasks.code_docs import CodeDocument, code_docs_tail
 from cognee.tasks.code_docs.add_code_doc_edges import LinkCounts, SweepCounts
+from cognee.tasks.code_docs.models import CodeDocsBatch
 from cognee.tasks.code_docs.store_code_docs import StoreCounts
 
 tail_module = importlib.import_module("cognee.tasks.code_docs.tail")
+
+# The extraction's record: the repository it read, with the snapshot its graph holds.
+READ_SNAPSHOTS = {"demo_repo": "snapshot-1"}
 
 
 def _batch():
@@ -33,14 +37,16 @@ def _batch():
         )
         for index in range(2)
     ]
-    return [document, *chunks]
+    return CodeDocsBatch.of([document, *chunks], READ_SNAPSHOTS)
 
 
 @pytest.fixture
 def chain(monkeypatch):
     """The four steps as recorders: what each was called with, in order."""
     batch = _batch()
-    steps = SimpleNamespace(batch=batch, cognified=["summaries"], calls=[])
+    steps = SimpleNamespace(
+        batch=batch, cognified=CodeDocsBatch.carry(batch, ["summaries"]), calls=[]
+    )
 
     def step(name, result):
         async def run(*args, **kwargs):
@@ -72,16 +78,18 @@ async def test_embed_only_tail_runs_extract_store_link_with_the_context(chain):
     assert chain.calls == [
         ("extract", (), {"repo": "demo_repo", "ctx": ctx, "snapshot_dir": None}),
         ("store", (chain.batch,), {"ctx": ctx, "graph_only": False}),
-        ("link", (chain.batch,), {"ctx": ctx, "repo": "demo_repo", "snapshot_dir": None}),
+        ("link", (chain.batch,), {"ctx": ctx, "repo": "demo_repo"}),
     ]
+    # The link task is handed the extraction's own batch, its record with it.
+    assert chain.calls[2][1][0] is chain.batch
 
 
 @pytest.mark.asyncio
-async def test_tail_hands_the_snapshot_to_the_extraction_and_the_sweep(chain):
-    """The routes pass the snapshot they just loaded: the extraction reads its
-    docs.jsonl, and the link task's sweep checks the repository's docs against
-    the same directory, so both agree on whether they were available this run.
-    The store has no use for it."""
+async def test_tail_hands_the_snapshot_to_the_extraction_alone(chain):
+    """The routes pass the snapshot they just loaded, and the extraction reads its
+    docs.jsonl. The link task's sweep follows the batch's extraction record (which
+    repositories were read, from which snapshot), not the directory; the store has
+    no use for it either."""
     await code_docs_tail("demo_repo", snapshot_dir="/staging/demo_repo/.enola")
 
     assert chain.calls[0] == (
@@ -90,11 +98,8 @@ async def test_tail_hands_the_snapshot_to_the_extraction_and_the_sweep(chain):
         {"repo": "demo_repo", "ctx": None, "snapshot_dir": "/staging/demo_repo/.enola"},
     )
     assert "snapshot_dir" not in chain.calls[1][2]
-    assert chain.calls[2] == (
-        "link",
-        (chain.batch,),
-        {"ctx": None, "repo": "demo_repo", "snapshot_dir": "/staging/demo_repo/.enola"},
-    )
+    assert chain.calls[2] == ("link", (chain.batch,), {"ctx": None, "repo": "demo_repo"})
+    assert chain.calls[2][1][0].read_snapshots == READ_SNAPSHOTS
 
 
 @pytest.mark.asyncio
@@ -108,8 +113,10 @@ async def test_entity_mode_tail_hands_the_cognified_batch_on(chain):
         ("extract", (), {"repo": None, "ctx": None, "snapshot_dir": None}),
         ("cognify", (chain.batch,), {"ctx": None}),
         ("store", (chain.cognified,), {"ctx": None, "graph_only": True}),
-        ("link", (chain.cognified,), {"ctx": None, "repo": None, "snapshot_dir": None}),
+        ("link", (chain.cognified,), {"ctx": None, "repo": None}),
     ]
+    # What cognify returned, the extraction's record carried over, reaches the link task.
+    assert chain.calls[3][1][0] is chain.cognified
 
 
 def test_tail_signature_is_the_shared_contract():

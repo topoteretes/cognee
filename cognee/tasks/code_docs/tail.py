@@ -45,8 +45,9 @@ async def code_docs_tail(
     snapshot the caller just loaded: the routes pass it, so the docs are read
     from its ``docs.jsonl`` and not from ``<CodeRepository.path>/.enola``
     (which, once an unchanged snapshot is skipped, can name an earlier run's
-    staging directory), see extract_code_docs; the link task gets it too, so
-    its sweep knows the repository's docs were readable this run.
+    staging directory), see extract_code_docs. The link task's sweep follows
+    the extraction's record of what it read (CodeDocsBatch), handed on with
+    the batch.
 
     Returns ``{"documents", "chunks", "new", "edges", "swept"}``: the
     CodeDocuments and DocumentChunks the run derived, the chunks written to
@@ -60,7 +61,7 @@ async def code_docs_tail(
     if extract_entities:
         data_points = await cognify_code_doc_chunks(data_points, ctx=ctx)
     stored = await store_new_code_docs(data_points, ctx=ctx, graph_only=graph_only)
-    linked = await link_code_docs(data_points, ctx=ctx, repo=repo, snapshot_dir=snapshot_dir)
+    linked = await link_code_docs(data_points, ctx=ctx, repo=repo)
     counts = {
         "documents": documents,
         "chunks": chunks,

@@ -3,17 +3,23 @@
 The graph engine is mocked: its one filtered read returns the CodeRepository,
 CodeSymbol and CodeModule nodes a test builds. The docs come from snapshot
 directories written by write_enola_snapshot -- docs.jsonl and the
-receipt.json that vouches for it -- in ``<path>/.enola`` of the repository
-node, or wherever ``snapshot_dir`` points. Covered: chunk text, fields, ids
-and order; chunk metadata and CodeDocument fields; node sets; how a
-docs.jsonl line joins the graph (by id, kind and repository); which snapshot
-is read, and every case in which a repository's snapshot docs are
-unavailable; splitting a long doc; the per-repository worker thread.
+receipt.json that vouches for it, and facts.jsonl where a test needs its
+``doc`` props -- in ``<path>/.enola`` of the repository node, or wherever
+``snapshot_dir`` points. Covered: chunk text, fields, ids and order; chunk
+metadata and CodeDocument fields, the package at the repository root
+included; node sets; how a docs.jsonl line joins the graph (by id, kind and
+repository); declarations that share a fact id, checked against facts.jsonl;
+which snapshot is read, and every case in which a repository's snapshot docs
+are unavailable; the batch's record of the snapshots read; splitting a long
+doc; the per-repository worker thread; and one run of the real enola binary
+on a property whose getter and setter share a fact id.
 """
 
 import asyncio
 import importlib
 import json
+import re
+import textwrap
 import threading
 from unittest.mock import AsyncMock, MagicMock
 
@@ -26,8 +32,15 @@ from cognee.modules.engine.models.node_set import NodeSet
 from cognee.tasks.code_docs import code_document_id, extract_code_docs
 from cognee.tasks.code_docs.extract_code_docs import _chunk_texts
 from cognee.tasks.code_docs.models import CodeDocsBatch, CodeDocument
-from cognee.tasks.code_graph.enola import DOCS_ARTIFACT
-from cognee.tasks.code_graph.extract_code_graph import fact_node_id
+from cognee.tasks.code_graph.enola import (
+    DOCS_ARTIFACT,
+    EnolaNotInstalledError,
+    find_enola_binary,
+    parse_enola_snapshot,
+    read_enola_fact_docs,
+    run_enola_generate,
+)
+from cognee.tasks.code_graph.extract_code_graph import fact_node_id, map_facts_to_data_points
 from cognee.tasks.documents.classify_documents import update_node_set
 from cognee.tests.utils.enola_snapshot import (
     doc_line,
@@ -545,6 +558,37 @@ async def test_code_documents_are_enola_files_counting_symbol_docs_only(shop, mo
 
 
 @pytest.mark.asyncio
+async def test_the_package_at_the_repository_root_is_named_after_its_repository(
+    tmp_path, monkeypatch
+):
+    """enola calls the package at the repository root, and its directory, ".":
+    its chunk is headed and its document named ``<repo>/`` instead, while the
+    document's file and id keep ".", as every other document keeps its file."""
+    root = tmp_path / REPO
+    root_doc = "The shop.\n\nEverything a customer buys goes through here."
+    _snapshot(
+        root,
+        [
+            doc_line(REPO, "module", ".", ".", root_doc),
+            doc_line(REPO, "symbol", "app.main", "app.py", "Start the shop.", line=1),
+        ],
+    )
+    _mock_engine(
+        monkeypatch, [_repository(root), _module(".", "."), _symbol("app.main", "app.py", 1)]
+    )
+
+    (package, app), (package_chunk, app_chunk) = _split(await extract_code_docs())
+
+    assert package_chunk.text == f"{REPO}/\n{REPO} (module)\n\n{root_doc}"
+    assert package_chunk.document_name == package.name == f"{REPO}/"
+    assert package_chunk.is_part_of is package
+    assert package.id == code_document_id(REPO, ".")
+    assert package.file_path == package.raw_data_location == _metadata(package_chunk)["file"] == "."
+    # Every other document is named by its file.
+    assert (app.name, app_chunk.document_name) == ("app.py", "app.py")
+
+
+@pytest.mark.asyncio
 async def test_language_comes_from_the_nodes_fact_properties(tmp_path, monkeypatch):
     root = tmp_path / REPO
     _snapshot(
@@ -875,6 +919,183 @@ async def test_a_multi_repo_snapshot_gives_each_repository_only_its_own_lines(
     assert "2 docs.jsonl line(s)" in _summary(log, OTHER)
 
 
+# --- declarations that share a fact id ----------------------------------------
+
+SIZE = "storage/blob.Blob.size"
+BLOB = "storage/blob.py"
+GETTER_DOC = "The size in bytes.\n\nCounted after compression, so it is what the disk holds."
+SETTER_DOC = "Set the size."
+
+
+def _fact(line, doc, name=SIZE, file_path=BLOB):
+    """A facts.jsonl symbol fact: doc_line's id for the same name and file, ``doc`` its doc prop."""
+    return {
+        "id": enola_fact_id(REPO, "symbol", name, file_path),
+        "repo": REPO,
+        "kind": "symbol",
+        "name": name,
+        "file": file_path,
+        "line": line,
+        "props": {"doc": doc},
+    }
+
+
+def _getter_and_setter(root, facts, getter_doc=GETTER_DOC, setter_doc=GETTER_DOC):
+    """The size property's getter (line 3) and setter (line 11): one fact id, two docs.jsonl lines.
+
+    By default both lines carry the getter's docstring, as enola 0.4.32 writes
+    them; ``facts`` is the snapshot's facts.jsonl. Returns the graph nodes.
+    """
+    write_enola_snapshot(
+        root / ".enola",
+        facts=facts,
+        docs=[
+            doc_line(REPO, "symbol", SIZE, BLOB, getter_doc, line=3),
+            doc_line(REPO, "symbol", SIZE, BLOB, setter_doc, line=11),
+        ],
+        snapshot_id=SNAPSHOT_ID,
+    )
+    return [_repository(root), _symbol(SIZE, BLOB, 3, kind="method")]
+
+
+@pytest.mark.asyncio
+async def test_a_declaration_carrying_another_declarations_doc_gets_its_own_first_paragraph(
+    tmp_path, monkeypatch, log
+):
+    """A property's getter and setter share a fact id, and enola 0.4.32 keys whole
+    comments by the id alone, so the setter's docs.jsonl line carries the
+    getter's docstring. facts.jsonl still holds each declaration's own first
+    paragraph: the setter's chunk says that, the getter's keeps its whole doc."""
+    nodes = _getter_and_setter(
+        tmp_path / REPO, facts=[_fact(3, "The size in bytes."), _fact(11, SETTER_DOC)]
+    )
+    _mock_engine(monkeypatch, nodes)
+
+    _, chunks = _split(await extract_code_docs())
+
+    assert [(_metadata(chunk)["line"], chunk.text) for chunk in chunks] == [
+        (3, f"{BLOB}:3\n{SIZE} (method)\n\n{GETTER_DOC}"),
+        (11, f"{BLOB}:11\n{SIZE} (method)\n\n{SETTER_DOC}"),
+    ]
+    assert "1 declaration(s) given their own first paragraph" in _summary(log, REPO)
+
+
+@pytest.mark.asyncio
+async def test_lines_sharing_an_id_that_carry_their_own_docs_are_left_whole(
+    tmp_path, monkeypatch, log
+):
+    """A line whose text starts with its own first paragraph is its own, and is
+    kept whole. The paragraph is compared on one line, as enola's doc prop
+    holds it, so one wrapped over two lines matches."""
+    getter_doc = "The size in bytes,\ncounted after compression.\n\nSo it is what the disk holds."
+    nodes = _getter_and_setter(
+        tmp_path / REPO,
+        facts=[_fact(3, "The size in bytes, counted after compression."), _fact(11, SETTER_DOC)],
+        getter_doc=getter_doc,
+        setter_doc=SETTER_DOC,
+    )
+    _mock_engine(monkeypatch, nodes)
+
+    _, chunks = _split(await extract_code_docs())
+
+    assert [chunk.text.split("\n\n", 1)[1] for chunk in chunks] == [getter_doc, SETTER_DOC]
+    assert "0 declaration(s) given their own first paragraph" in _summary(log, REPO)
+
+
+@pytest.mark.asyncio
+async def test_a_facts_doc_cut_at_300_bytes_is_matched_where_enola_cuts(tmp_path, monkeypatch, log):
+    """enola's doc prop cuts a first paragraph longer than 300 bytes at a word and
+    ends it with "...", and the line's text summarizes to exactly that cut (30
+    words take 299 bytes, 31 would take 309): the getter's line is its own and
+    stays whole; only the setter's is replaced."""
+    # 40 words of 9 bytes: a 399-byte first paragraph, wrapped ten words a line.
+    words = [f"word{index:05d}" for index in range(40)]
+    first_paragraph = "\n".join(" ".join(words[start : start + 10]) for start in range(0, 40, 10))
+    getter_doc = f"{first_paragraph}\n\nThe second paragraph."
+    nodes = _getter_and_setter(
+        tmp_path / REPO,
+        facts=[_fact(3, " ".join(words[:30]) + "..."), _fact(11, SETTER_DOC)],
+        getter_doc=getter_doc,
+    )
+    _mock_engine(monkeypatch, nodes)
+
+    _, chunks = _split(await extract_code_docs())
+
+    assert [chunk.text.split("\n\n", 1)[1] for chunk in chunks] == [getter_doc, SETTER_DOC]
+    assert "1 declaration(s) given their own first paragraph" in _summary(log, REPO)
+
+
+@pytest.mark.asyncio
+async def test_an_own_doc_ending_in_an_ellipsis_is_not_taken_for_a_cut(tmp_path, monkeypatch, log):
+    """A short first paragraph that really ends in "..." is compared as it is: the
+    setter's own "Wait for it..." does not match the getter's "Wait for it to
+    finish." that docs.jsonl gave its line, so the setter gets its own text."""
+    getter_doc = "Wait for it to finish.\n\nBlocks until the job is done."
+    nodes = _getter_and_setter(
+        tmp_path / REPO,
+        facts=[_fact(3, "Wait for it to finish."), _fact(11, "Wait for it...")],
+        getter_doc=getter_doc,
+        setter_doc=getter_doc,
+    )
+    _mock_engine(monkeypatch, nodes)
+
+    _, chunks = _split(await extract_code_docs())
+
+    assert [chunk.text.split("\n\n", 1)[1] for chunk in chunks] == [getter_doc, "Wait for it..."]
+    assert "1 declaration(s) given their own first paragraph" in _summary(log, REPO)
+
+
+@pytest.mark.asyncio
+async def test_without_facts_jsonl_lines_sharing_an_id_keep_their_docs(tmp_path, monkeypatch, log):
+    """Nothing to check the lines against: each keeps the text docs.jsonl gives it."""
+    root = tmp_path / REPO
+    nodes = _getter_and_setter(root, facts=[])
+    (root / ".enola" / "facts.jsonl").unlink()
+    _mock_engine(monkeypatch, nodes)
+
+    _, chunks = _split(await extract_code_docs())
+
+    assert [chunk.text.split("\n\n", 1)[1] for chunk in chunks] == [GETTER_DOC, GETTER_DOC]
+    assert "0 declaration(s) given their own first paragraph" in _summary(log, REPO)
+
+
+@pytest.mark.asyncio
+async def test_facts_jsonl_is_read_only_for_ids_that_several_lines_share(
+    shop, tmp_path, monkeypatch
+):
+    """The check costs a read of facts.jsonl: it is made only when docs.jsonl
+    repeats an id, and only for such ids."""
+    read_fact_docs = MagicMock(side_effect=read_enola_fact_docs)
+    monkeypatch.setattr(extract_module, "read_enola_fact_docs", read_fact_docs)
+
+    # Every id of the shop's docs.jsonl is on one line.
+    _mock_engine(monkeypatch, _shop_nodes(shop))
+    assert _split(await extract_code_docs())[1]
+    read_fact_docs.assert_not_called()
+
+    # The class's id is on one line, the size property's on two.
+    root = tmp_path / "blob"
+    directory = write_enola_snapshot(
+        root / ".enola",
+        docs=[
+            doc_line(REPO, "symbol", "storage/blob.Blob", BLOB, "A stored blob.", line=1),
+            doc_line(REPO, "symbol", SIZE, BLOB, GETTER_DOC, line=3),
+            doc_line(REPO, "symbol", SIZE, BLOB, GETTER_DOC, line=11),
+        ],
+        snapshot_id=SNAPSHOT_ID,
+    )
+    _mock_engine(
+        monkeypatch,
+        [
+            _repository(root),
+            _symbol("storage/blob.Blob", BLOB, 1, kind="class"),
+            _symbol(SIZE, BLOB, 3, kind="method"),
+        ],
+    )
+    assert len(_split(await extract_code_docs())[1]) == 3
+    read_fact_docs.assert_called_once_with(directory, {enola_fact_id(REPO, "symbol", SIZE, BLOB)})
+
+
 # --- which snapshot is read ---------------------------------------------------
 
 
@@ -924,6 +1145,11 @@ async def test_a_snapshot_without_a_receipt_is_matched_by_its_facts_hash(tmp_pat
     (chunk,) = _split(await extract_code_docs())[1]
 
     assert chunk.text == "app.py:4\napp.main (function)\n\nMain."
+
+
+def _snapshot_directory_gone(root):
+    """A lost clone, or a code file's staging directory removed after its run."""
+    return _repository(root, OTHER)
 
 
 def _no_docs_file(root):
@@ -976,6 +1202,7 @@ def _repository_without_a_path(root):
 @pytest.mark.parametrize(
     ("other_repository", "reason"),
     [
+        pytest.param(_snapshot_directory_gone, "does not exist", id="no-snapshot-directory"),
         pytest.param(_no_docs_file, "no docs.jsonl in", id="no-docs-file"),
         pytest.param(
             _docs_file_changed_after_the_receipt,
@@ -1138,26 +1365,37 @@ async def test_no_repository_in_the_graph_yields_nothing(shop, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_the_batch_names_the_repositories_whose_docs_were_read(shop, tmp_path, monkeypatch):
-    """The result is a CodeDocsBatch whose read_repos is the extraction's own
-    decision, the one the link task's sweep follows: a repository read with
-    documented facts, one read with none (a vouched, empty docs.jsonl), and not
-    one whose snapshot docs were unavailable. Nothing selected: nothing read."""
+async def test_the_batch_records_each_repository_read_with_its_snapshot_id(
+    shop, tmp_path, monkeypatch
+):
+    """The result is a CodeDocsBatch whose read_snapshots is the extraction's own
+    decision, the one the link task's sweep follows: every repository whose
+    docs were read -- with documented facts, or with none (a vouched, empty
+    docs.jsonl) -- with its node's last_snapshot_id, the snapshot read; not
+    one whose snapshot docs were unavailable. read_repos is its key set.
+    Nothing selected: nothing read."""
     empty = tmp_path / "empty"
-    write_enola_snapshot(empty / ".enola", docs=[], snapshot_id=SNAPSHOT_ID)
-    nodes = [*_shop_nodes(shop), _repository(empty, "empty"), _repository(tmp_path / "gone", OTHER)]
+    write_enola_snapshot(empty / ".enola", docs=[], snapshot_id="snapshot-7")
+    nodes = [
+        *_shop_nodes(shop),
+        _repository(empty, "empty", snapshot_id="snapshot-7"),
+        _repository(tmp_path / "gone", OTHER),
+    ]
     _mock_engine(monkeypatch, nodes)
 
     result = await extract_code_docs()
 
     assert isinstance(result, CodeDocsBatch)
+    assert result.read_snapshots == {REPO: SNAPSHOT_ID, "empty": "snapshot-7"}
     assert result.read_repos == frozenset({REPO, "empty"})
     assert {point.repo for point in result if isinstance(point, CodeDocument)} == {REPO}
 
-    _mock_engine(monkeypatch, nodes)
-    assert (await extract_code_docs(repo=OTHER)).read_repos == frozenset()
+    # Only a repository whose docs are unavailable selected, then none at all.
+    unavailable = await extract_code_docs(repo=OTHER)
     _mock_engine(monkeypatch, [])
-    assert (await extract_code_docs()).read_repos == frozenset()
+    nothing = await extract_code_docs()
+    for result in (unavailable, nothing):
+        assert (result.read_snapshots, result.read_repos) == ({}, frozenset())
 
 
 @pytest.mark.asyncio
@@ -1281,3 +1519,96 @@ async def test_json_in_string_and_nested_properties_shapes_are_read(shop, monkey
     assert _metadata(orders)["module_id"] == str(module_id)
     assert _metadata(orders)["language"] == "python"
     assert [node_set.name for node_set in orders.belongs_to_set] == ["code", "docs"]
+
+
+# --- the real enola binary ----------------------------------------------------
+
+# The first enola release that writes docs.jsonl.
+DOCS_RELEASE = (0, 4, 32)
+
+
+def _enola_available() -> bool:
+    try:
+        find_enola_binary()
+        return True
+    except EnolaNotInstalledError:
+        return False
+
+
+def _release(version) -> tuple[int, ...] | None:
+    """(major, minor, patch) of an enola version string, None when it has none."""
+    match = re.match(r"(\d+)\.(\d+)\.(\d+)", version) if isinstance(version, str) else None
+    return tuple(int(part) for part in match.groups()) if match else None
+
+
+def _graph_read(data_points, snapshot_id):
+    """The filtered graph read of a loaded snapshot's data points, as node rows.
+
+    Fields that hold data points are edges in the graph, not row properties.
+    The CodeRepository carries ``snapshot_id`` as its ``last_snapshot_id``, the
+    way add_code_graph_edges stamps it when it loads the snapshot.
+    """
+    rows = []
+    for point in data_points:
+        if point.type not in ("CodeRepository", "CodeSymbol", "CodeModule"):
+            continue
+        properties = point.model_dump(exclude={"part_of", "belongs_to_set"})
+        if point.type == "CodeRepository":
+            properties["last_snapshot_id"] = snapshot_id
+        rows.append((str(point.id), properties))
+    return rows
+
+
+@pytest.mark.skipif(not _enola_available(), reason="enola binary is not installed")
+@pytest.mark.asyncio
+async def test_real_enola_property_getter_and_setter_each_keep_their_own_docstring(
+    tmp_path, monkeypatch
+):
+    """enola on a property whose getter and setter, one fact id, each have a
+    docstring: the setter's chunk says its own line, the getter's its own two
+    paragraphs, whichever text docs.jsonl gives each declaration."""
+    # enola writes its state under ~/.enola on every run.
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    repo_path = tmp_path / REPO
+    package = repo_path / "storage"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "blob.py").write_text(
+        textwrap.dedent(
+            '''\
+            class Blob:
+                @property
+                def size(self):
+                    """The size in bytes.
+
+                    Counted after compression, so it is what the disk holds.
+                    """
+                    return self._size
+
+                @size.setter
+                def size(self, value):
+                    """Set the size."""
+                    self._size = value
+            '''
+        ),
+        encoding="utf-8",
+    )
+
+    snapshot_dir = await run_enola_generate(repo_path)
+    facts, receipt = parse_enola_snapshot(snapshot_dir)
+    version = (receipt or {}).get("enola_version")
+    release = _release(version)
+    if release is not None and release < DOCS_RELEASE:
+        pytest.skip(f"enola {version} predates docs.jsonl (0.4.32)")
+    data_points = map_facts_to_data_points(facts, repo_path=str(repo_path))
+    _mock_engine(monkeypatch, _graph_read(data_points, receipt["snapshot_id"]))
+
+    _, chunks = _split(await extract_code_docs(snapshot_dir=snapshot_dir))
+
+    assert [chunk.text for chunk in chunks] == [
+        f"{BLOB}:3\n{SIZE} (method)\n\n{GETTER_DOC}",
+        f"{BLOB}:11\n{SIZE} (method)\n\n{SETTER_DOC}",
+    ]

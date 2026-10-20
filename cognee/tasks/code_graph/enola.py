@@ -17,6 +17,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import shutil
 import sysconfig
 from dataclasses import dataclass
@@ -66,6 +67,8 @@ _SUBPROCESS_ENV_OVERRIDES = {"ENOLA_NO_UPDATE_CHECK": "1", "ENOLA_NO_PROMPTS": "
 DOCS_ARTIFACT = "docs.jsonl"
 _DOCS_RENDERER = "docs"
 _DOC_KINDS = frozenset({"symbol", "module"})
+# A fact id as it appears in a facts.jsonl line: 32 lowercase hex characters in quotes.
+_QUOTED_FACT_ID = re.compile(r'"([0-9a-f]{32})"')
 
 
 class EnolaNotInstalledError(CogneeConfigurationError):
@@ -100,7 +103,7 @@ class EnolaDocs:
     add_code_graph_edges stamps as ``last_snapshot_id`` on the repository nodes
     of a snapshot it loads, so a reader can tell whether these docs belong to
     the code graph it holds. ``lines`` are the well-formed lines, in file order
-    (none when read with ``parse=False``, or when nothing is documented).
+    (none when nothing is documented).
     """
 
     snapshot_id: str | None
@@ -282,7 +285,7 @@ def _read_receipt(snapshot_dir: Path) -> dict | None:
     return loaded if isinstance(loaded, dict) else None
 
 
-def read_enola_docs(snapshot_dir: str | Path, *, parse: bool = True) -> EnolaDocs:
+def read_enola_docs(snapshot_dir: str | Path) -> EnolaDocs:
     """A snapshot's docs.jsonl: the whole comment of every documented symbol and module.
 
     facts.jsonl holds a fact's ``doc``, the first paragraph of its comment cut
@@ -300,21 +303,30 @@ def read_enola_docs(snapshot_dir: str | Path, *, parse: bool = True) -> EnolaDoc
     sit next to facts it does not describe. An empty file the receipt vouches
     for is valid: the snapshot documents nothing.
 
-    Raises EnolaDocsUnavailable, its message the reason, when the file is
-    missing (a snapshot from an enola before 0.4.32, or a configuration without
-    the docs renderer), unreadable, not vouched for, or not UTF-8. A line that
-    is not a well-formed doc line (32-hex ``id``, ``kind`` symbol or module,
-    non-empty ``name``/``file``, non-blank ``doc``, integer ``line`` or none,
-    string ``repo`` or none) is skipped and counted in one warning. ``parse``
-    False makes every one of those checks and returns no lines, for a caller
-    that only asks whether the snapshot's docs are usable: both forms raise
-    for exactly the same files.
+    Raises EnolaDocsUnavailable, its message the reason, when the snapshot
+    directory is gone (a lost clone, a code file's staging directory removed
+    after its run), when docs.jsonl is missing from it (a snapshot from an
+    enola before 0.4.32, or a configuration without the docs renderer), or is
+    unreadable, not vouched for, or not UTF-8. A line that is not a
+    well-formed doc line (32-hex ``id``, ``kind`` symbol or module, non-empty
+    ``name``/``file``, non-blank ``doc``, integer ``line`` or none, string
+    ``repo`` or none) is skipped and counted in one warning; no line makes the
+    read fail.
 
     Lines are split on ``\\n`` alone, the byte enola ends each line with: a doc
     may hold U+0085, U+2028 or U+2029, which ``str.splitlines`` would also
     break a line at.
     """
     snapshot_dir = Path(snapshot_dir)
+    try:
+        is_directory = snapshot_dir.is_dir()
+    except OSError as error:
+        raise EnolaDocsUnavailable(f"could not read '{snapshot_dir}': {error}") from None
+    if not is_directory:
+        raise EnolaDocsUnavailable(
+            f"the snapshot directory '{snapshot_dir}' does not exist (a lost clone, or a code "
+            "file's staging directory, removed after its run)"
+        )
     docs_path = snapshot_dir / DOCS_ARTIFACT
     try:
         content = docs_path.read_bytes()
@@ -336,9 +348,6 @@ def read_enola_docs(snapshot_dir: str | Path, *, parse: bool = True) -> EnolaDoc
         text = content.decode("utf-8")
     except UnicodeDecodeError:
         raise EnolaDocsUnavailable(f"'{docs_path}' is not UTF-8") from None
-    snapshot_id = snapshot_identity(snapshot_dir, receipt)
-    if not parse:
-        return EnolaDocs(snapshot_id=snapshot_id, lines=())
 
     lines = []
     malformed = 0
@@ -348,7 +357,7 @@ def read_enola_docs(snapshot_dir: str | Path, *, parse: bool = True) -> EnolaDoc
             continue
         try:
             line = json.loads(raw_line)
-        except json.JSONDecodeError:
+        except (ValueError, RecursionError):
             malformed += 1
             continue
         if _is_doc_line(line):
@@ -357,7 +366,50 @@ def read_enola_docs(snapshot_dir: str | Path, *, parse: bool = True) -> EnolaDoc
             malformed += 1
     if malformed:
         logger.warning("Skipped %d malformed line(s) in %s", malformed, docs_path)
-    return EnolaDocs(snapshot_id=snapshot_id, lines=tuple(lines))
+    return EnolaDocs(snapshot_id=snapshot_identity(snapshot_dir, receipt), lines=tuple(lines))
+
+
+def read_enola_fact_docs(
+    snapshot_dir: str | Path, fact_ids: set[str]
+) -> dict[tuple[str, int | None], str]:
+    """The ``doc`` prop of each fact with one of ``fact_ids`` in facts.jsonl, by (id, line).
+
+    Declarations that share a fact id -- overloads, a property getter and its
+    setter -- are separate facts at their own lines, each with its own ``doc``
+    (its first paragraph). docs.jsonl, though, takes their whole comments from
+    a table keyed without the line (enola 0.4.32), so every one of them can
+    carry the same text, one declaration's. This is what a reader checks such
+    lines against. A line is parsed only when one of the quoted 32-hex strings
+    in it is one of the ids (a set lookup, whatever their number), so a large
+    facts.jsonl costs one read; an unreadable or missing file gives nothing to
+    check against, and a malformed line is skipped.
+    """
+    found: dict[tuple[str, int | None], str] = {}
+    if not fact_ids:
+        return found
+    fact_ids = frozenset(fact_ids)
+    try:
+        with open(Path(snapshot_dir) / "facts.jsonl", "r", encoding="utf-8") as facts_file:
+            for raw_line in facts_file:
+                if fact_ids.isdisjoint(_QUOTED_FACT_ID.findall(raw_line)):
+                    continue
+                try:
+                    fact = json.loads(raw_line)
+                except (ValueError, RecursionError):
+                    continue
+                if not isinstance(fact, dict):
+                    continue
+                fact_id = fact.get("id")
+                if not isinstance(fact_id, str) or fact_id not in fact_ids:
+                    continue
+                props = fact.get("props")
+                doc = props.get("doc") if isinstance(props, dict) else None
+                line = fact.get("line")
+                if isinstance(doc, str) and doc and (line is None or type(line) is int):
+                    found.setdefault((fact["id"], line), doc)
+    except (OSError, UnicodeDecodeError):
+        return {}
+    return found
 
 
 def _is_doc_line(line: Any) -> bool:

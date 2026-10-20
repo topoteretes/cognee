@@ -1,13 +1,14 @@
 """The code docs chain against a real Ladybug graph: store, link, re-run, change, remove.
 
 The mocked tests next to this one assert the calls each task makes. This one
-runs what the pipeline and the route tail run -- the enola code graph tasks
-over a snapshot of a small Python repository, then ``extract_code_docs``,
-``store_code_docs(graph_only=True)`` and ``add_code_doc_edges`` -- against a
-real engine and reads the stored graph back, so the stored shapes, the edge
-targets, the idempotent re-run (no write, no edge, no sweep), the sweep of a
-forgotten repository, the docs kept while a repository's snapshot docs are not
-available, and entity mode's cleanup (with and without stored provenance) are
+runs the enola code graph tasks over a snapshot of a small Python repository
+and then the code docs chain -- extract, store (graph only), link and sweep --
+against a real engine, and reads the stored graph back, so the stored shapes,
+the edge targets, the idempotent re-run (no write, no edge, no sweep), the
+sweep of a forgotten repository, the docs kept while a repository's snapshot
+docs are not available or while the batch a sweep runs against is not the
+graph's (another run loaded a newer snapshot first, or the batch was never
+stored), and entity mode's cleanup (with and without stored provenance) are
 checked end to end.
 
 A repository here is a directory that holds only the snapshot enola 0.4.32
@@ -15,13 +16,20 @@ writes into its ``.enola``: facts.jsonl (a documented fact carries its
 comment's first paragraph), docs.jsonl (the whole comment, under the fact's
 id, which is the ``enola_id`` of its code node) and a receipt that vouches for
 docs.jsonl. The chain reads no source file. It is entered two ways. The
-memify path (``_sync_code_docs``) runs the tasks without a snapshot directory,
-so each repository's docs are read from ``<CodeRepository.path>/.enola``. The
-route path (``_route``) runs the code graph tasks and then ``code_docs_tail``
-per repository label, handed the snapshot just loaded, as add_code_graph_docs
-does; the route-shaped tests at the end run it under a pipeline context per
-repository and then delete the repository through the graph-provenance path
-``forget(data_id=...)`` takes.
+memify path (``_sync_code_docs``) calls the tasks directly, in the pipeline's
+order -- ``extract_code_docs``, ``cognify_code_doc_chunks`` in entity mode,
+``store_code_docs``, ``add_code_doc_edges`` -- each handed the batch the one
+before returned, and without a snapshot directory, so each repository's docs
+are read from ``<CodeRepository.path>/.enola``. The route path goes through
+``code_docs_tail``: ``_route`` runs the code graph tasks and then the tail per
+repository label, handed the snapshot just loaded, as add_code_graph_docs
+does, and a few tests call the tail directly, as a route or a staged code
+file runs it. The route-shaped tests at the end run it under a pipeline
+context per repository and then delete the repository through the
+graph-provenance path ``forget(data_id=...)`` takes. Two tests call the tasks
+directly out of the pipeline's order: a memify run that stores and sweeps
+after a route run loaded a newer snapshot, and a batch linked without being
+stored.
 """
 
 import importlib
@@ -162,10 +170,11 @@ TOTAL_EDITED = {
     "orders/checkout.Order.total": "Sum of the lines.\n\nTaxes are included.",
 }
 
-# Chunk header (its first line: file:line, for a module doc the package
-# directory) -> the code node its describes edge must reach.
+# Chunk header (its first line: file:line; for a module doc the package
+# directory, "<repo>/" for the package at the repository root, which enola
+# names ".") -> the code node its describes edge must reach.
 EXPECTED_TARGETS = {
-    ".": (SHOP, "module", "."),
+    "shop/": (SHOP, "module", "."),
     "app.py:4": (SHOP, "symbol", "app.main"),
     "orders": (SHOP, "module", "orders"),
     "orders/checkout.py:4": (SHOP, "symbol", "orders/checkout.Order"),
@@ -347,7 +356,9 @@ async def _sync_code_docs(repo=None, ctx=None, extract_entities=False):
     """The memify path: extract, (cognify,) store what is new (graph only), link and sweep.
 
     No snapshot directory, as the memify pipeline runs the tasks: each
-    repository's docs are read from <CodeRepository.path>/.enola.
+    repository's docs are read from <CodeRepository.path>/.enola. Each task
+    is handed what the one before returned, as the pipeline hands it on, so
+    the extraction's record of what it read (CodeDocsBatch) reaches the sweep.
     """
     data_points = await extract_code_docs(repo=repo, ctx=ctx)
     if extract_entities:
@@ -516,22 +527,28 @@ async def test_stores_documents_and_chunks_linked_to_their_code_nodes(engine, re
 
     # One CodeDocument per documented file -- for a module doc, its package
     # directory -- repositories by name, files by path; a module doc is not a
-    # documented symbol.
-    assert [(document.repo, document.name, document.symbol_count) for document in documents] == [
-        (BILLING, "invoices.py", 1),
-        (SHOP, ".", 0),
-        (SHOP, "app.py", 1),
-        (SHOP, "orders", 0),
-        (SHOP, "orders/checkout.py", 3),
+    # documented symbol. The package at the repository root keeps enola's "."
+    # as its file, and so its id, but is named after its repository.
+    assert [
+        (document.repo, document.file_path, document.name, document.symbol_count)
+        for document in documents
+    ] == [
+        (BILLING, "invoices.py", "invoices.py", 1),
+        (SHOP, ".", "shop/", 0),
+        (SHOP, "app.py", "app.py", 1),
+        (SHOP, "orders", "orders", 0),
+        (SHOP, "orders/checkout.py", "orders/checkout.py", 3),
     ]
     for document in documents:
-        assert document.id == code_document_id(document.repo, document.name)
+        assert document.id == code_document_id(document.repo, document.file_path)
         stored = nodes[str(document.id)]
-        assert (stored["type"], stored["name"], stored["repo"]) == (
-            "CodeDocument",
-            document.name,
-            document.repo,
-        )
+        assert (
+            stored["type"],
+            stored["name"],
+            stored["repo"],
+            stored["file_path"],
+            stored["raw_data_location"],
+        ) == ("CodeDocument", document.name, document.repo, document.file_path, document.file_path)
 
     # Plain DocumentChunks: their type names the collection every retriever
     # searches; each is stored with its text under its content-derived id and
@@ -543,7 +560,8 @@ async def test_stores_documents_and_chunks_linked_to_their_code_nodes(engine, re
         stored = nodes[str(chunk.id)]
         assert (stored["type"], stored["text"]) == ("DocumentChunk", chunk.text)
         assert (str(chunk.id), chunk.document_id, "is_part_of") in _edge_keys(edges)
-    assert by_header["."].text == ".\n. (module)\n\nThe shop application."
+    assert by_header["shop/"].text == "shop/\nshop (module)\n\nThe shop application."
+    assert by_header["shop/"].document_name == "shop/"
     assert by_header["orders"].text == "orders\norders (module)\n\nOrder checkout."
     assert by_header["app.py:4"].text == (
         "app.py:4\napp.main (function)\n\nStart the shop's HTTP server."
@@ -562,7 +580,7 @@ async def test_stores_documents_and_chunks_linked_to_their_code_nodes(engine, re
     assert nodes[total_id]["doc"] == "Sum of the lines."
     # Within a document the docstrings go by line, whatever order docs.jsonl has.
     assert {header: chunk.chunk_index for header, chunk in by_header.items()} == {
-        ".": 0,
+        "shop/": 0,
         "app.py:4": 0,
         "orders": 0,
         "orders/checkout.py:4": 0,
@@ -834,7 +852,8 @@ async def test_staged_rerun_of_an_unchanged_file_keeps_its_docstrings(
     assert not os.path.isdir(nodes_2[repository]["path"])
     # Without the route's snapshot (the memify path reads the stored path's)
     # nothing could be read.
-    assert await extract_code_docs(repo=label) == []
+    unread = await extract_code_docs(repo=label)
+    assert unread == [] and unread.read_snapshots == {}
 
     assert counts_1 == {"documents": 1, "chunks": 1, "new": 1, "edges": 1, "swept": 0}
     assert counts_2 == {"documents": 1, "chunks": 1, "new": 0, "edges": 0, "swept": 0}
@@ -890,6 +909,8 @@ async def test_run_without_the_snapshot_docs_keeps_the_stored_docs(engine, repos
             run = await _sync_code_docs(repo=repo)
             documents = {point.repo for point in run if isinstance(point, CodeDocument)}
             assert documents == ({BILLING} if repo is None else set()), case
+            # The run's record leaves the shop out, so its sweep keeps the shop's docs.
+            assert run.read_snapshots == ({BILLING: "b1"} if repo is None else {}), case
         assert await code_docs_tail(SHOP, graph_only=True, snapshot_dir=snapshot) == NOTHING, case
         assert await _stored(engine) == stored, case
         assert (len(writes), vectors.deleted) == (1, []), case
@@ -904,7 +925,98 @@ async def test_run_without_the_snapshot_docs_keeps_the_stored_docs(engine, repos
 
 
 @pytest.mark.asyncio
-async def test_forgotten_repository_is_swept_by_an_unfiltered_run_only(engine, repos, vectors):
+async def test_run_overtaken_by_a_newer_snapshot_keeps_that_snapshots_docs(
+    engine, repos, vectors, writes
+):
+    """A memify run reads the shop's docs of s1; before it stores and sweeps, a
+    route run loads s2 (main's docstring edited), stores s2's docs and sweeps s1's
+    main chunk. The memify run's batch is s1's: its store writes s1's main chunk
+    back (that id is no longer stored), and a sweep against it would delete s2's
+    main chunk, leaving the docs of a snapshot the code graph no longer holds.
+    Its sweep keeps the shop instead -- read, every doc of it stored, but its
+    graph moved on from the snapshot read -- and the next run over s2 sweeps what
+    it wrote back, leaving exactly s2's docs."""
+    _write_snapshot(_snapshot_dir(repos.shop), SHOP_FACTS, SHOP_DOCS, "s1")
+    await _route(repos.shop)
+    old_main = _stored_chunk((await _graph(engine))[0], "app.py:4")
+    main_id = str(fact_node_id(SHOP, "symbol", "app.main"))
+
+    # The memify run reads s1's docs from the stored path...
+    overtaken = await extract_code_docs()
+    assert overtaken.read_snapshots == {SHOP: "s1"}
+
+    # ...a route run loads s2, stores its docs and sweeps s1's main chunk...
+    _write_snapshot(_snapshot_dir(repos.shop), SHOP_FACTS, MAIN_EDITED, "s2")
+    assert await _route(repos.shop) == {
+        SHOP: {"documents": 4, "chunks": 6, "new": 1, "edges": 1, "swept": 1}
+    }
+    nodes_2, edges_2 = await _graph(engine)
+    new_main = _stored_chunk(nodes_2, "app.py:4")
+    assert nodes_2[new_main]["text"].endswith("and register its routes.")
+    assert old_main not in nodes_2
+    writes.clear()
+    vectors.deleted.clear()
+
+    # ...and only then does the memify run store, and then link and sweep. Its
+    # docs are all stored and the shop was read: what keeps the shop out of its
+    # sweep is the snapshot the shop's graph holds by now.
+    await store_code_docs(overtaken, graph_only=True)
+    assert writes == [{UUID(old_main), code_document_id(SHOP, "app.py")}]
+    nodes, _edges = await _graph(engine)
+    assert {str(point.id) for point in overtaken} <= set(nodes)
+    assert nodes[str(fact_node_id(SHOP, "repository", SHOP))]["last_snapshot_id"] == "s2"
+
+    await add_code_doc_edges(overtaken)
+
+    # Linked, not swept: s2's docs all stay, next to the chunk written back.
+    nodes, edges = await _graph(engine)
+    assert set(nodes) == set(nodes_2) | {old_main}
+    assert _describes(edges) == _describes(edges_2) | {(old_main, main_id)}
+    assert vectors.deleted == []
+
+    # The next run over s2 (the code graph load skipped, the tail run anyway).
+    assert await _route(repos.shop) == {
+        SHOP: {"documents": 4, "chunks": 6, "new": 0, "edges": 0, "swept": 1}
+    }
+    nodes, edges = await _graph(engine)
+    assert set(nodes) == set(nodes_2) and _edge_keys(edges) == _edge_keys(edges_2)
+    assert vectors.deleted == [("DocumentChunk_text", [old_main])]
+
+
+@pytest.mark.asyncio
+async def test_batch_linked_without_being_stored_deletes_nothing(engine, repos, vectors):
+    """A task list that hands extract_code_docs' batch straight to add_code_doc_edges,
+    store_code_docs left out, after main's docstring changed: the batch's new chunk
+    is not in the graph, so a sweep against the batch would delete main's stored
+    chunk and put nothing in its place. The sweep keeps the shop -- read, its graph
+    still at the snapshot read, but its docs from this batch not stored -- so the
+    stored graph stays exactly as it was and no vector is deleted. The chain with
+    its store then replaces the chunk as usual."""
+    await _sync_both_code_graphs(repos)
+    old_main = _chunks_by_header(await _sync_code_docs())["app.py:4"]
+    await _index(repos.shop, SHOP_FACTS, MAIN_EDITED, "s2")
+    stored = await _stored(engine)
+
+    unstored = await extract_code_docs()
+    new_main = _chunks_by_header(unstored)["app.py:4"]
+    assert unstored.read_snapshots == {BILLING: "b1", SHOP: "s2"}
+    assert str(new_main.id) not in stored[0]
+
+    assert await add_code_doc_edges(unstored) is unstored
+
+    assert await _stored(engine) == stored
+    assert vectors.deleted == []
+
+    await _sync_code_docs()
+    nodes, _edges = await _graph(engine)
+    assert str(new_main.id) in nodes and str(old_main.id) not in nodes
+    assert vectors.deleted == [("DocumentChunk_text", [str(old_main.id)])]
+
+
+@pytest.mark.asyncio
+async def test_forgotten_repository_is_swept_by_an_unfiltered_run_only(
+    engine, repos, vectors, monkeypatch
+):
     await _sync_both_code_graphs(repos)
     first = await _sync_code_docs()
     invoice = _chunks_by_header(first)["invoices.py:1"]
@@ -929,13 +1041,29 @@ async def test_forgotten_repository_is_swept_by_an_unfiltered_run_only(engine, r
     assert vectors.deleted == []
 
     # ...an unfiltered run covers every repository that has docs: billing's go,
-    # from the graph and from their collections, and the shop's stay.
+    # from their collections and then from the graph, the document last each
+    # time (a sweep cut short leaves nodes the next one finds again, never a
+    # vector without its node), and the shop's stay.
+    deletes = []
+    real_delete_nodes, real_delete_data_points = engine.delete_nodes, vectors.delete_data_points
+
+    async def delete_nodes(node_ids):
+        deletes.append(("graph", list(node_ids)))
+        await real_delete_nodes(node_ids)
+
+    async def delete_data_points(collection, ids):
+        deletes.append((collection, list(ids)))
+        await real_delete_data_points(collection, ids)
+
+    monkeypatch.setattr(engine, "delete_nodes", delete_nodes)
+    monkeypatch.setattr(vectors, "delete_data_points", delete_data_points)
     await _sync_code_docs()
     nodes, edges = await _graph(engine)
     assert not billing_docs & set(nodes)
-    assert vectors.deleted == [
-        ("CodeDocument_name", [billing_document_id]),
+    assert deletes == [
         ("DocumentChunk_text", [str(invoice.id)]),
+        ("CodeDocument_name", [billing_document_id]),
+        ("graph", [str(invoice.id), billing_document_id]),
     ]
     assert {str(point.id) for point in first} - billing_docs <= set(nodes)
     assert len(_describes(edges)) == len(EXPECTED_TARGETS) - 1
