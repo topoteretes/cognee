@@ -30,12 +30,6 @@ on:
         description: "Handle this one merged pull request only, ignoring the window"
         type: string
         default: ""
-  # TEMPORARY, remove before merging: dry-runs this branch against the real
-  # repository and Linear workspace on every push to the pull request.
-  pull_request:
-    paths:
-      - .github/workflows/linear_review_tickets.yml
-      - .github/scripts/linear_review_tickets.py
 
 permissions:
   contents: read
@@ -58,10 +52,8 @@ jobs:
           LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
           LINEAR_REVIEW_TEAM_KEY: ${{ vars.LINEAR_REVIEW_TEAM_KEY || 'SDK' }}
           LINEAR_REVIEW_LABEL: ${{ vars.LINEAR_REVIEW_LABEL || 'PR review' }}
-          # Scheduled runs write; manual runs follow the input; pull-request runs never write.
-          # Scheduled runs write; manual runs follow the input; pull-request runs never write.
-          DRY_RUN: ${{ github.event_name == 'schedule' && 'false' || (github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true') || (github.event_name == 'workflow_dispatch' && 'false') || 'true' }}
-          # Pull-request dry runs look at the last week.
-          LOOKBACK_HOURS: ${{ github.event_name == 'pull_request' && '168' || inputs.lookback_hours }}
+          # Scheduled runs write; manual runs follow the dry_run input (default on).
+          DRY_RUN: ${{ github.event_name == 'schedule' && 'false' || (inputs.dry_run && 'true') || 'false' }}
+          LOOKBACK_HOURS: ${{ inputs.lookback_hours }}
           PR_NUMBER: ${{ inputs.pr_number }}
         run: python3 .github/scripts/linear_review_tickets.py
