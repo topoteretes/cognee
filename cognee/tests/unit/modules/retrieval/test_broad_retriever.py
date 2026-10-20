@@ -256,3 +256,52 @@ async def test_a_dataset_over_store_mb_is_represented_by_its_most_similar_parts(
     assert found.route == "sql" and found.rows == [(3, "b")]  # only b's three lines were loaded
     assert "1 parts of the dataset most similar" in found.coverage
     assert "over the 1 parts of the dataset most similar" in found.note
+
+
+def test_merged_interleaves_unequal_length_ranked_lists():
+    c0 = SimpleNamespace(id="c0")
+    c1 = SimpleNamespace(id="c1")
+    c2 = SimpleNamespace(id="c2")
+    c3 = SimpleNamespace(id="c3")
+
+    # Unequal lengths: list A has 3 items, list B has 1 item
+    ranked = [[c0, c2, c3], [c1]]
+    result = broad_retriever._merged(ranked)
+    assert [r.id for r in result] == ["c0", "c1", "c2", "c3"]
+
+
+def test_merged_handles_empty_phrasing_results():
+    c0 = SimpleNamespace(id="c0")
+    c1 = SimpleNamespace(id="c1")
+
+    # List B is empty (e.g. phrasing matched 0 chunks)
+    ranked = [[c0, c1], []]
+    result = broad_retriever._merged(ranked)
+    assert [r.id for r in result] == ["c0", "c1"]
+
+
+@pytest.mark.asyncio
+async def test_reading_handles_phrasings_with_empty_or_varying_results(monkeypatch):
+    class PartialVector:
+        async def search(self, collection, query_text, query_vector=None, limit=None, **kw):
+            if query_text == "first query":
+                return [
+                    SimpleNamespace(id="c0", payload={"text": "passage 0 text"}),
+                    SimpleNamespace(id="c1", payload={"text": "passage 1 text"}),
+                ]
+            return []
+
+    vector = PartialVector()
+    _use(monkeypatch, {"story": "word " * 5_000}, vector=vector)
+    _llm(
+        monkeypatch,
+        [DecisionLarge(needs_reading=True, search_queries=["first query", "empty query"])],
+    )
+
+    found = await BroadRetriever(context_tokens=100, reading_tokens=100).get_retrieved_objects(
+        "first query"
+    )
+
+    assert found.route == "reading"
+    assert "passage 0 text" in found.text
+    assert "passage 1 text" in found.text
