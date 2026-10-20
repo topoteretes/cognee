@@ -1,8 +1,16 @@
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator, Iterable
 from typing import Any
 from uuid import UUID
 
 from cognee.infrastructure.databases.exceptions import UnsupportedProvenanceCapability
+from cognee.infrastructure.databases.graph.bounded_neighborhood import (
+    DEFAULT_NEIGHBORHOOD_CHUNK_SIZE,
+    chunk_members,
+    order_members,
+    unique_node_ids,
+    validate_bounded_neighborhood_args,
+)
 from cognee.infrastructure.databases.provenance import (
     EdgeDeleteData,
     EdgeIdentity,
@@ -22,6 +30,66 @@ Node = tuple[str, NodeData]  # (node_id, properties)
 
 
 _warned_degree_fallbacks: set[type] = set()
+_warned_neighborhood_fallbacks: set[type] = set()
+_warned_graph_counts_fallbacks: set[type] = set()
+
+
+def timestamp_overlaps(node: dict, start: int | None, end: int | None) -> bool:
+    """Whether a Timestamp node's period ``[time_at, time_until)`` meets ``[start, end)``.
+
+    ``time_until`` defaults to one second after ``time_at`` for nodes written
+    before the field existed.
+    """
+    try:
+        time_at = int(node["time_at"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    time_until = node.get("time_until")
+    time_until = int(time_until) if time_until not in (None, "") else time_at + 1000
+    return (end is None or time_at < end) and (start is None or time_until > start)
+
+
+def empty_temporal_anchors() -> dict:
+    return {
+        "timestamp_ids": set(),
+        "chunk_ids": set(),
+        "entity_ids": set(),
+        "chunk_timestamps": {},
+    }
+
+
+def temporal_anchors_from_rows(
+    direct_rows: Iterable[tuple[str, str]],
+    via_rows: Iterable[tuple[str, str, str]],
+    chunk_ids: Iterable[str],
+) -> dict[str, set[str]]:
+    """Assemble ``get_temporal_anchors``' result from the two row shapes the
+    adapters produce: ``(candidate_id, timestamp_id)`` for an edge straight into a
+    matching timestamp, and ``(chunk_id, entity_id, timestamp_id)`` for a candidate
+    chunk that ``contains`` an entity with such an edge. A directly anchored
+    candidate is a chunk when the caller passed it as one (``chunk_ids``), not by
+    its node type: DLT rows are chunks of their own graph type (``DltRow``).
+
+    ``chunk_timestamps`` maps each anchored chunk to the matching timestamp ids
+    it reached, directly or through an entity. The retriever ranks anchored
+    chunks by how tightly the best of those timestamps fits the window: a chunk
+    dated "1965-03-18" is about that day, a chunk that says "1965" merely
+    overlaps it."""
+    chunk_set = {str(node_id) for node_id in chunk_ids}
+    anchors = empty_temporal_anchors()
+    for candidate_id, timestamp_id in direct_rows:
+        anchors["timestamp_ids"].add(str(timestamp_id))
+        if str(candidate_id) in chunk_set:
+            anchors["chunk_ids"].add(str(candidate_id))
+            anchors["chunk_timestamps"].setdefault(str(candidate_id), set()).add(str(timestamp_id))
+        else:
+            anchors["entity_ids"].add(str(candidate_id))
+    for chunk_id, entity_id, timestamp_id in via_rows:
+        anchors["timestamp_ids"].add(str(timestamp_id))
+        anchors["chunk_ids"].add(str(chunk_id))
+        anchors["chunk_timestamps"].setdefault(str(chunk_id), set()).add(str(timestamp_id))
+        anchors["entity_ids"].add(str(entity_id))
+    return anchors
 
 
 class GraphDBInterface(ABC):
@@ -182,8 +250,9 @@ class GraphDBInterface(ABC):
         membership in one dataset without disturbing unrelated nodes that
         legitimately still carry the tag.
 
-        Default no-op; only Neo4j overrides this today. Other
-        list-property-storing adapters are free to implement it later.
+        Default no-op; Ladybug, postgres_demo, Neo4j, and Turso override this
+        today. Other list-property-storing adapters are free to implement it
+        later.
         """
         return
 
@@ -622,6 +691,104 @@ class GraphDBInterface(ABC):
         ranked = sorted(degree.items(), key=lambda item: item[1], reverse=True)
         return [node_id for node_id, _ in ranked[:top_k]]
 
+    async def iter_bounded_neighborhood(
+        self,
+        node_ids: list[str],
+        depth: int,
+        max_nodes: int,
+        chunk_size: int = DEFAULT_NEIGHBORHOOD_CHUNK_SIZE,
+        property_keys: list[str] | None = None,
+    ) -> AsyncIterator[tuple[list[Node], list[EdgeData]]]:
+        """The neighbourhood of ``node_ids``, capped at ``max_nodes``, in chunks.
+
+        This is what a graph view reads. ``get_neighborhood`` returns everything
+        within ``depth`` hops, and the default view seeds from the
+        highest-degree nodes: two hops from a hub reach almost the whole graph.
+        On a 13959-node / 33488-edge dataset that meant reading every node with
+        its full properties to draw 1000, and at 20k nodes a single response is
+        over 100 MB.
+
+        **Membership.** At most ``max_nodes`` nodes: the seeds in the given
+        order, then nodes by hop distance. Which nodes of the last admitted hop
+        are kept is the adapter's choice. Native adapters share the budget
+        round robin over the frontier, so one hub cannot take all of it. A seed
+        that is not in the graph takes no slot.
+
+        **Chunks.** Nodes arrive in membership order, at most ``chunk_size`` per
+        chunk. Every edge between two members is yielded exactly once, in the
+        chunk holding its later endpoint, so no chunk refers to a node the
+        caller has not received yet.
+
+        **Consistency.** Membership is decided once, before the first chunk.
+        Content is read per chunk: a node deleted in between is skipped along
+        with its edges, and a node created in between is not included.
+
+        **Properties.** ``property_keys=None`` returns every property. A list
+        returns only those keys, plus ``name`` and ``type``.
+
+        ``depth``, ``max_nodes`` and ``chunk_size`` must be positive and are
+        checked before anything is read.
+
+        Deliberately NOT abstract, for the same reason as
+        ``get_top_degree_node_ids``: a community adapter keeps working. The
+        default honours the whole contract except the bound on the read. It
+        calls ``get_neighborhood``, so the store still returns the full
+        ``depth``-hop neighbourhood, and the cap is applied in Python.
+        Overriding adapters should stop the traversal once they hold
+        ``max_nodes`` ids and read node content one chunk at a time.
+        """
+        validate_bounded_neighborhood_args(depth, max_nodes, chunk_size)
+        seed_ids = unique_node_ids(node_ids)
+        if not seed_ids:
+            return
+
+        adapter_type = type(self)
+        if adapter_type not in _warned_neighborhood_fallbacks:
+            _warned_neighborhood_fallbacks.add(adapter_type)
+            logger.warning(
+                "%s has no native iter_bounded_neighborhood; reading the whole %d-hop "
+                "neighbourhood to keep %d nodes. This is O(neighbourhood) in memory.",
+                adapter_type.__name__,
+                depth,
+                max_nodes,
+            )
+        nodes, edges = await self.get_neighborhood(node_ids=seed_ids, depth=depth)
+        members = order_members(nodes, edges, seed_ids, max_nodes)
+        for chunk in chunk_members(members, edges, chunk_size, property_keys):
+            yield chunk
+
+    async def get_entity_type_names(self, entity_ids: list[str]) -> dict[str, str]:
+        """The EntityType name each of ``entity_ids`` points to through ``is_a``.
+
+        Keyed by entity id; an entity with no ``is_a`` edge is left out. A graph
+        view uses this to label entities whose EntityType node is outside a
+        bounded read, so it reads one hop, never from a type node outward.
+
+        Deliberately NOT abstract, like ``get_top_degree_node_ids``. The default
+        goes through ``get_neighborhood``, which hydrates the entities with all
+        their properties and returns every edge among the returned nodes;
+        overriding adapters should read just the ``is_a`` edges and the target
+        names.
+        """
+        if not entity_ids:
+            return {}
+        nodes, edges = await self.get_neighborhood(
+            node_ids=entity_ids, depth=1, edge_types=["is_a"]
+        )
+        type_names = {
+            str(node_id): properties.get("name")
+            for node_id, properties in nodes
+            if properties.get("type") == "EntityType"
+        }
+        members = {str(entity_id) for entity_id in entity_ids}
+        # get_neighborhood returns every edge among the returned nodes, not only
+        # the traversed ones, so relation and direction are checked here.
+        return {
+            str(edge[0]): type_names[str(edge[1])]
+            for edge in edges
+            if edge[2] == "is_a" and str(edge[0]) in members and type_names.get(str(edge[1]))
+        }
+
     @abstractmethod
     async def get_graph_metrics(self, include_optional: bool = False) -> dict[str, Any]:
         """
@@ -634,6 +801,26 @@ class GraphDBInterface(ABC):
               not. (default False)
         """
         raise NotImplementedError
+
+    async def get_graph_counts(self) -> tuple[int, int]:
+        """
+        Return ``(num_nodes, num_edges)`` and nothing else.
+
+        For callers that only need the two counts (the graph-summary endpoints), so they
+        do not pay for the component and density work ``get_graph_metrics`` also does.
+        In-tree adapters override this with two count queries. This default derives the
+        counts from ``get_graph_metrics`` so adapters that predate the method keep working.
+        """
+        adapter_type = type(self)
+        if adapter_type not in _warned_graph_counts_fallbacks:
+            _warned_graph_counts_fallbacks.add(adapter_type)
+            logger.warning(
+                "%s has no native get_graph_counts; falling back to get_graph_metrics, "
+                "which also computes connected components.",
+                adapter_type.__name__,
+            )
+        metrics = await self.get_graph_metrics(include_optional=False) or {}
+        return metrics.get("num_nodes") or 0, metrics.get("num_edges") or 0
 
     @abstractmethod
     async def has_edge(self, source_id: str, target_id: str, relationship_name: str) -> bool:
@@ -715,6 +902,107 @@ class GraphDBInterface(ABC):
         """
         raise NotImplementedError
 
+    async def get_timestamps_in_range(self, start: int | None, end: int | None) -> list[NodeData]:
+        """
+        Return the ``Timestamp`` nodes whose period overlaps the half-open window
+        ``[start, end)``, both in milliseconds since the epoch (UTC); ``None``
+        leaves that side open. A timestamp's period is ``[time_at, time_until)``
+        (see ``cognee.modules.engine.models.Timestamp``), so the test is
+        ``time_at < end`` and ``time_until > start``. Each result carries at
+        least ``id``, ``timestamp_str``, ``time_at`` and ``time_until``.
+
+        This default scans ``get_graph_data``; adapters with a native query
+        override it (Ladybug, Neo4j, Postgres demo).
+
+        Parameters:
+        -----------
+
+            - start (Optional[int]): Inclusive window start in ms, or None.
+            - end (Optional[int]): Exclusive window end in ms, or None.
+        """
+        nodes, _edges = await self.get_graph_data()
+        matches: list[NodeData] = []
+        for node_id, properties in nodes:
+            if (properties or {}).get("type") != "Timestamp":
+                continue
+            node = {**properties, "id": str(node_id)}
+            if timestamp_overlaps(node, start, end):
+                matches.append(node)
+        return matches
+
+    async def get_temporal_anchors(
+        self,
+        chunk_ids: Iterable[str],
+        entity_ids: Iterable[str],
+        start: int | None,
+        end: int | None,
+    ) -> dict[str, set[str]]:
+        """
+        Which of the given candidates are attached to a ``Timestamp`` inside the
+        half-open window ``[start, end)`` (ms since the epoch, UTC; ``None`` leaves
+        a side open).
+
+        A chunk is anchored when it ``contains`` a matching timestamp, or
+        ``contains`` an entity that has any edge into one — an entity anchored to
+        a time carries it into every chunk that mentions it. An entity is anchored
+        when any of its edges points at a matching timestamp; the relationship
+        name is not inspected. Returns ``{"timestamp_ids", "chunk_ids",
+        "entity_ids", "chunk_timestamps"}``: the matched timestamps, the anchored
+        candidate chunks, the anchored entities (candidates and the ones reached
+        through chunks), and per anchored chunk the matched timestamp ids it
+        reached.
+
+        Reading from the candidate side keeps the cost proportional to the
+        candidate count whatever the window matches — the retriever's reason for
+        asking this instead of listing every timestamp in the window. This
+        default walks ``get_neighborhood`` and filters in Python; adapters with a
+        native query override it (Ladybug, Neo4j, Postgres demo).
+        """
+        chunk_set = {str(node_id) for node_id in chunk_ids}
+        entity_set = {str(node_id) for node_id in entity_ids}
+        if not chunk_set and not entity_set:
+            return empty_temporal_anchors()
+
+        nodes, edges = await self.get_neighborhood(sorted(chunk_set | entity_set), depth=1)
+        properties_by_id = {str(node_id): dict(props or {}) for node_id, props in nodes}
+
+        def _in_window(node_id: str) -> bool:
+            props = properties_by_id.get(node_id)
+            return (
+                props is not None
+                and props.get("type") == "Timestamp"
+                and timestamp_overlaps({**props, "id": node_id}, start, end)
+            )
+
+        direct_rows: list[tuple[str, str]] = []
+        contained: dict[str, set[str]] = {}  # candidate chunk -> entities it contains
+        for source, target, relationship, _props in edges:
+            source_id, target_id = str(source), str(target)
+            if (
+                source_id in chunk_set
+                and relationship == "contains"
+                and properties_by_id.get(target_id, {}).get("type") == "Entity"
+            ):
+                contained.setdefault(source_id, set()).add(target_id)
+            if _in_window(target_id) and (source_id in chunk_set or source_id in entity_set):
+                direct_rows.append((source_id, target_id))
+
+        via_rows: list[tuple[str, str, str]] = []
+        reached = set().union(*contained.values()) if contained else set()
+        if reached:
+            via_nodes, via_edges = await self.get_neighborhood(sorted(reached), depth=1)
+            via_properties = {str(node_id): dict(props or {}) for node_id, props in via_nodes}
+            for source, target, _relationship, _props in via_edges:
+                source_id, target_id = str(source), str(target)
+                props = via_properties.get(target_id)
+                if source_id not in reached or props is None or props.get("type") != "Timestamp":
+                    continue
+                if timestamp_overlaps({**props, "id": target_id}, start, end):
+                    for chunk_id, entities in contained.items():
+                        if source_id in entities:
+                            via_rows.append((chunk_id, source_id, target_id))
+        return temporal_anchors_from_rows(direct_rows, via_rows, chunk_set)
+
     @abstractmethod
     async def get_neighborhood(
         self,
@@ -789,8 +1077,8 @@ class GraphDBInterface(ABC):
     async def update_node(self, node_id: str, values: dict[str, Any]) -> bool:
         """
         Merge *values* into an existing node's properties, leaving every field not
-        named in *values* untouched. Used to patch a single scalar (e.g. stamping
-        ``valid_to`` when a fact is superseded) without rewriting the whole node.
+        named in *values* untouched. Used to patch user preferences without
+        rewriting the whole node.
 
         Optional extension — implemented by LadybugAdapter (the default backend).
         Other adapters may not support partial node updates yet and raise here.

@@ -205,7 +205,7 @@ jobs:
       # This job runs repo scripts (the Slack block renderer, the MotherDuck
       # ETL), so it needs a working tree.
       - name: Checkout repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Determine status
         id: status
@@ -318,7 +318,7 @@ jobs:
         # Posts on scheduled and manual (workflow_dispatch) runs. There is no
         # longer a pull_request trigger, so a workflow edit surfaces its reports
         # by being dispatched on the branch rather than by opening a PR.
-        uses: slackapi/slack-github-action@b0fa283ad8fea605de13dc3f449259339835fc52  # v2.1.0
+        uses: slackapi/slack-github-action@dcb1066f776dd043e64d0e8ba94ca15cc7e1875d  # v4.0.0
         with:
           method: chat.postMessage
           token: ${{ secrets.SLACK_NIGHTLY_BOT_TOKEN }}

@@ -1,4 +1,10 @@
-"""Unit tests for SqlCacheAdapter CRUD operations (run on sqlite+aiosqlite, no server)."""
+"""Unit tests for SqlCacheAdapter CRUD operations (no server needed).
+
+The ``adapter`` fixture runs every test on both SQLite-family engines: stock SQLite
+through aiosqlite and the Turso rewrite engine through cognee's ``cognee_turso``
+dialect (skipped when pyturso is not installed). Tests that build their own adapter
+via ``_make_adapter`` stay on aiosqlite.
+"""
 
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -27,14 +33,25 @@ from cognee.tasks.memify.feedback_weights_constants import (
     MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY,
 )
 
-
-def _make_adapter(tmp_path, **kwargs) -> SqlCacheAdapter:
-    return SqlCacheAdapter(f"sqlite+aiosqlite:///{tmp_path}/cache.db", **kwargs)
+CACHE_BACKENDS = ["sqlite", "turso"]
 
 
-@pytest_asyncio.fixture
-async def adapter(tmp_path):
-    inst = _make_adapter(tmp_path)
+def _cache_url(tmp_path, backend: str = "sqlite") -> str:
+    if backend == "turso":
+        pytest.importorskip("turso", reason="pyturso not installed")
+        from cognee.infrastructure.databases.turso import turso_url
+
+        return turso_url(f"{tmp_path}/cache.db")
+    return f"sqlite+aiosqlite:///{tmp_path}/cache.db"
+
+
+def _make_adapter(tmp_path, backend: str = "sqlite", **kwargs) -> SqlCacheAdapter:
+    return SqlCacheAdapter(_cache_url(tmp_path, backend), **kwargs)
+
+
+@pytest_asyncio.fixture(params=CACHE_BACKENDS)
+async def adapter(request, tmp_path):
+    inst = _make_adapter(tmp_path, request.param)
     yield inst
     await inst.close()
 
@@ -748,6 +765,37 @@ async def test_add_qa_backward_compat(adapter):
     assert len(entries) == 1
     assert entries[0].qa_id is not None
     assert entries[0].question == "Q" and entries[0].answer == "A"
+
+
+@pytest.mark.asyncio
+async def test_get_qa_entries_since_reads_only_from_the_bound(adapter):
+    """created_at is set from the payload's own time, so the column filter is exact."""
+    for index in range(4):
+        await adapter.create_qa_entry("u1", "s1", f"Q{index}", "C", "A", qa_id=f"id{index}")
+    await adapter.create_qa_entry("u1", "other", "Q-other", "C", "A", qa_id="other")
+    stored = await adapter.get_all_qa_entries("u1", "s1")
+    since = datetime.fromisoformat(stored[2].time)
+
+    assert [e.qa_id for e in await adapter.get_qa_entries_since("u1", "s1", since)] == [
+        "id2",
+        "id3",
+    ]
+    assert [e.qa_id for e in await adapter.get_qa_entries_since("u1", "s1", since, lead_in=1)] == [
+        "id1",
+        "id2",
+        "id3",
+    ]
+    assert [e.qa_id for e in await adapter.get_qa_entries_since("u1", "s1", since, lead_in=5)] == [
+        "id0",
+        "id1",
+        "id2",
+        "id3",
+    ]
+    far_future = datetime.now(timezone.utc) + timedelta(days=1)
+    assert [
+        e.qa_id for e in await adapter.get_qa_entries_since("u1", "s1", far_future, lead_in=1)
+    ] == ["id3"]
+    assert await adapter.get_qa_entries_since("u1", "s1", far_future) == []
 
 
 @pytest.mark.asyncio

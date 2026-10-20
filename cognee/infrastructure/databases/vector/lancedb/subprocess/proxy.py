@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import multiprocessing as mp
+from datetime import timedelta
 from typing import Any
 
 import pyarrow as pa
@@ -25,11 +26,13 @@ from cognee_db_workers.lancedb_protocol import (
     OP_DROP_TABLE,
     OP_OPEN_TABLE,
     OP_TABLE_ADD,
+    OP_TABLE_COMPACT_FRAGMENTS,
     OP_TABLE_COUNT_ROWS,
     OP_TABLE_DELETE,
     OP_TABLE_MERGE_INSERT_EXECUTE,
     OP_TABLE_NAMES,
     OP_TABLE_OPTIMIZE,
+    OP_TABLE_PRUNE_VERSIONS,
     OP_TABLE_QUERY_EXECUTE,
     OP_TABLE_RELEASE,
     OP_TABLE_SCHEMA,
@@ -293,15 +296,64 @@ class RemoteLanceDBTable:
             Request(op=OP_TABLE_DELETE, handle_id=self.handle_id, args=(where_expr,))
         )
 
-    async def optimize(self) -> None:
-        """Compact the table (mirrors ``lancedb.AsyncTable.optimize``).
+    async def optimize(
+        self,
+        *,
+        cleanup_older_than: timedelta | None = None,
+        delete_unverified: bool = False,
+        retrain: bool = False,
+    ) -> None:
+        """Mirrors ``lancedb.AsyncTable.optimize`` (same keyword arguments).
 
-        Materializes deletion vectors into clean fragments — lance 0.32 reads
-        and merge_inserts can panic on tables carrying fresh deletion vectors,
-        so callers that bulk-delete (e.g. id migrations) compact afterwards."""
+        Materializes deletion vectors into clean fragments, which callers that
+        bulk-delete (e.g. id migrations) rely on. LanceDB's stats object is not
+        returned across the process boundary; nothing reads it."""
         await self._session.call_async(
-            Request(op=OP_TABLE_OPTIMIZE, handle_id=self.handle_id, args=())
+            Request(
+                op=OP_TABLE_OPTIMIZE,
+                handle_id=self.handle_id,
+                kwargs={
+                    "cleanup_older_than": cleanup_older_than,
+                    "delete_unverified": delete_unverified,
+                    "retrain": retrain,
+                },
+            )
         )
+
+    # The two halves of cognee's bounded compaction
+    # (``cognee_db_workers.lancedb_compaction``). Not lancedb methods: in local
+    # mode the adapter calls the helpers on ``to_lance()`` directly. Both are
+    # sent without a deadline: the work is bounded by ``max_tasks`` /
+    # ``max_versions``, and neither is safe to re-issue on a timeout while the
+    # first attempt is still running in the worker.
+
+    async def compact_fragments(self, *, target_rows_per_fragment: int, max_tasks: int) -> dict:
+        resp = await self._session.call_async(
+            Request(
+                op=OP_TABLE_COMPACT_FRAGMENTS,
+                handle_id=self.handle_id,
+                kwargs={
+                    "target_rows_per_fragment": target_rows_per_fragment,
+                    "max_tasks": max_tasks,
+                },
+            ),
+            timeout=None,
+        )
+        return resp.result
+
+    async def prune_versions(self, *, retention_seconds: int, max_versions: int) -> dict:
+        resp = await self._session.call_async(
+            Request(
+                op=OP_TABLE_PRUNE_VERSIONS,
+                handle_id=self.handle_id,
+                kwargs={
+                    "retention_seconds": retention_seconds,
+                    "max_versions": max_versions,
+                },
+            ),
+            timeout=None,
+        )
+        return resp.result
 
     def query(self) -> RemoteQuery:
         return RemoteQuery(self._session, self.handle_id, OP_TABLE_QUERY_EXECUTE, ())

@@ -42,22 +42,39 @@ else
     echo "No optional dependencies specified"
 fi
 
-ARGS=("$@") #forward any args passed to the container at runtime
+# ── Runtime args (docker run ...) are appended LAST so they win: argparse
+# keeps the last occurrence of a flag, and the env-derived defaults used to
+# be appended after them, silently replacing any --transport the user passed
+# (#5145).
+USER_ARGS=("$@")
 
+# ── Env-derived defaults ──
 # Set default transport mode if not specified
 TRANSPORT_MODE=${TRANSPORT_MODE:-"stdio"}
 echo "Transport mode: $TRANSPORT_MODE"
 
-# Set default ports if not specified
+# ── Effective transport: a runtime --transport overrides the env default ──
+EFFECTIVE_TRANSPORT="$TRANSPORT_MODE"
+prev=""
+if [ ${#USER_ARGS[@]} -gt 0 ]; then
+    for a in "${USER_ARGS[@]}"; do
+        if [ "$prev" = "--transport" ]; then
+            EFFECTIVE_TRANSPORT="$a"
+        fi
+        prev="$a"
+    done
+fi
 
-if [ "$TRANSPORT_MODE" != "stdio" ]; then
+ARGS=(--transport "$EFFECTIVE_TRANSPORT")
+
+# Bind-arg defaults follow the effective transport (stdio has no HTTP server)
+if [ "$EFFECTIVE_TRANSPORT" != "stdio" ]; then
     HTTP_PORT=${HTTP_PORT:-8000}
     echo "HTTP port: $HTTP_PORT"
     ARGS+=("--host" "0.0.0.0" "--port" "$HTTP_PORT")
 fi
 
-echo "Starting Cognee MCP Server with transport mode: $TRANSPORT_MODE"
-ARGS+=("--transport" "$TRANSPORT_MODE")
+echo "Starting Cognee MCP Server with transport mode: $EFFECTIVE_TRANSPORT"
 
 # Add startup delay to ensure DB is ready
 sleep 2
@@ -126,6 +143,13 @@ if [ -n "$API_URL" ]; then
     fi
 else
     echo "Direct mode: Using local cognee instance"
+fi
+
+# ── Runtime args last: argparse keeps the last occurrence, so anything the
+# user passed on `docker run ...` overrides the env-derived defaults above
+# (#5145).
+if [ ${#USER_ARGS[@]} -gt 0 ]; then
+    ARGS+=("${USER_ARGS[@]}")
 fi
 
 # Echo the launch command with the API token redacted: the container log is

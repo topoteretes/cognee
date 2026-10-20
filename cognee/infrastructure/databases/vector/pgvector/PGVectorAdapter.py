@@ -23,8 +23,8 @@ from cognee.shared.logging_utils import get_logger
 
 from ...relational.ModelBase import Base
 from ...relational.sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
-from ..embeddings.EmbeddingEngine import EmbeddingEngine
-from ..exceptions import CollectionNotFoundError
+from ..embeddings.EmbeddingGateway import EmbeddingGateway
+from ..exceptions import CollectionNotFoundError, SharedDatabasePruneError
 from ..models.ScoredResult import ScoredResult
 from ..stored_vector_size import choose_stored_vector_size
 from ..vector_db_interface import VectorDBInterface
@@ -76,7 +76,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         self,
         connection_string: str,
         api_key: str | None,
-        embedding_engine: EmbeddingEngine,
+        embedding_engine: EmbeddingGateway,
         schema: str = "",
     ):
         """Initialize the adapter and, when possible, reuse the relational engine.
@@ -151,8 +151,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 pool_args=effective_pool_args,
             )
             self._owns_engine = True
-        elif backend_access_control_enabled() and (db_name1 != db_name2):
-            # If backend access control create new instances of engine and sessionmaker
+        elif db_name1 != db_name2:
+            # A different database name is sufficient isolation regardless of access-control
+            # mode, so honor VECTOR_DB_NAME instead of borrowing the relational engine.
             super().__init__(
                 connection_string=self.db_uri,
                 connect_args=effective_connect_args,
@@ -160,7 +161,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             )
             self._owns_engine = True
         elif relational_db.engine.dialect.name == "postgresql":
-            # If postgreSQL is used and not backend access control we must use the same engine and sessionmaker
+            # Same PostgreSQL database as the relational engine: reuse its engine and sessionmaker
             self.engine = relational_db.engine
             self.sessionmaker = relational_db.sessionmaker
         else:
@@ -668,11 +669,14 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         # NOTE: This needs to be initialized in case search doesn't return a value
         closest_items = []
 
-        # Note: Exclude payload from returned columns if not needed to optimize performance
+        # Never select the vector column: results carry only id, payload and distance,
+        # and the distance is computed in the database. Fetching vectors made a
+        # limit=None search (node-set filtered retrieval reads whole collections)
+        # decode every stored embedding in Python - several GB for ~25k 3072-dim rows.
         select_columns = (
-            [PGVectorDataPoint]
+            [PGVectorDataPoint.c.id, PGVectorDataPoint.c.payload]
             if include_payload
-            else [PGVectorDataPoint.c.id, PGVectorDataPoint.c.vector]
+            else [PGVectorDataPoint.c.id]
         )
         # Use async session to connect to the database
         async with self.get_async_session() as session:
@@ -921,6 +925,14 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
     async def prune(self):
         """Drop all vector collection tables and reset cached reflection metadata."""
+        if not self._owns_engine:
+            raise SharedDatabasePruneError(
+                "PGVector cannot be pruned independently while it shares the relational "
+                "PostgreSQL database. Use prune_system(metadata=True) to delete the shared "
+                "database (this also deletes users, datasets and permissions), or set "
+                "VECTOR_DB_NAME to a different, dedicated database."
+            )
+
         self._metadata.clear()
         await self.delete_database()
 

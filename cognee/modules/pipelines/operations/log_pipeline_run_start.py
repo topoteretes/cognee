@@ -16,6 +16,7 @@ async def log_pipeline_run_start(
     data: Any,
     *,
     user: User | None = None,
+    recovery_token: str | None = None,
 ):
     data_info = summarize_run_info_data(data)
 
@@ -29,6 +30,7 @@ async def log_pipeline_run_start(
         dataset_id=dataset_id,
         run_info={
             "data": data_info,
+            **({"recovery_lock": recovery_token} if recovery_token else {}),
         },
         user_id=user.id if user else None,
         tenant_id=getattr(user, "tenant_id", None) if user else None,

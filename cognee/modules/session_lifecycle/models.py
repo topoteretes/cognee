@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import UUID, Column, DateTime, Float, Integer, String, Text
+from sqlalchemy import Column, DateTime, Float, Integer, String, Text, Uuid
 
 from cognee.infrastructure.databases.relational import Base
 
@@ -29,9 +29,9 @@ class SessionRecord(Base):
     # from the Claude Code plugin). Scoped per user — same string from
     # two users is two different sessions.
     session_id = Column(String, primary_key=True)
-    user_id = Column(UUID, primary_key=True, index=True)
+    user_id = Column(Uuid, primary_key=True, index=True)
 
-    dataset_id = Column(UUID, nullable=True, index=True)
+    dataset_id = Column(Uuid, nullable=True, index=True)
 
     # Agent-connection id (registry string like "my-agent-ab12cd34ef56",
     # not a UUID) — attributes the session to the agent that drove it.
@@ -61,6 +61,10 @@ class SessionRecord(Base):
     tokens_in = Column(Integer, nullable=False, default=0)
     tokens_out = Column(Integer, nullable=False, default=0)
     cost_usd = Column(Float, nullable=False, default=0.0)
+    # Embedding usage, accumulated by EmbeddingGateway, kept apart from
+    # the LLM counters above.
+    embedding_tokens = Column(Integer, nullable=False, default=0)
+    embedding_cost_usd = Column(Float, nullable=False, default=0.0)
 
     # Cheap per-session counters useful for the dashboard without
     # scanning the cache.
@@ -88,6 +92,8 @@ class SessionRecord(Base):
             "tokens_in": self.tokens_in,
             "tokens_out": self.tokens_out,
             "cost_usd": self.cost_usd,
+            "embedding_tokens": self.embedding_tokens,
+            "embedding_cost_usd": self.embedding_cost_usd,
             "error_count": self.error_count,
             "last_model": self.last_model,
         }
@@ -106,8 +112,10 @@ class SessionModelUsage(Base):
     __tablename__ = "session_model_usage"
 
     session_id = Column(String, primary_key=True)
-    user_id = Column(UUID, primary_key=True, index=True)
+    user_id = Column(Uuid, primary_key=True, index=True)
     model = Column(Text, primary_key=True)
+    # metrics.UsageKind value: "llm" or "embedding".
+    kind = Column(String, nullable=False, default="llm")
 
     tokens_in = Column(Integer, nullable=False, default=0)
     tokens_out = Column(Integer, nullable=False, default=0)
@@ -126,6 +134,7 @@ class SessionModelUsage(Base):
             "session_id": self.session_id,
             "user_id": str(self.user_id),
             "model": self.model,
+            "kind": self.kind,
             "tokens_in": self.tokens_in,
             "tokens_out": self.tokens_out,
             "cost_usd": self.cost_usd,

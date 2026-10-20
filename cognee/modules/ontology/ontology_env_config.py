@@ -52,7 +52,7 @@ class OntologyEnvConfig(BaseSettings):
     ontology_file_path: str = ""
     ontology_mode: str = DEFAULT_ONTOLOGY_MODE
 
-    model_config = SettingsConfigDict(env_file=".env", extra="allow", populate_by_name=True)
+    model_config = SettingsConfigDict(extra="allow", populate_by_name=True)
 
     @field_validator("ontology_mode", mode="before")
     @classmethod
