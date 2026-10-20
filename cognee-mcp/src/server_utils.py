@@ -256,6 +256,19 @@ def recall_marker_state(results: Any) -> RecallState | None:
     return None
 
 
+# Preparation runs of cognify's staged build (SDK-397) and the runs that build
+# the graph. A preparation run that failed is no build failure once a build
+# completed for that dataset: the graph answers anyway.
+_PREPARATION_PIPELINES = ("caching_pipeline", "indexing_pipeline")
+_GRAPH_BUILD_PIPELINES = ("cognify_pipeline", "code_graph_pipeline")
+
+
+def _run_status(run: dict) -> Any:
+    """A run's status as its string value: the API sends strings, direct mode enums."""
+    status = run.get("status")
+    return getattr(status, "value", status)
+
+
 def classify_recall_state(progress: dict) -> RecallState:
     """Classify authorized datasets from an existing pipeline-status response.
 
@@ -270,29 +283,34 @@ def classify_recall_state(progress: dict) -> RecallState:
     distinction was unreliable anyway: a zero count from an unavailable graph
     store is not proof of emptiness, so several branches fell back to
     ``unknown`` regardless.
+
+    A legacy ``DATASET_PROCESSING_INITIATED`` row is not a run in progress (it
+    is no longer written), and an errored caching or indexing run does not
+    make a dataset whose graph build completed ``build_failed``.
     """
-    runs = []
-    for value in progress.values():
+    runs: list[tuple[str, str | None, dict]] = []
+    for dataset, value in progress.items():
         if "status" in value:
-            runs.append(value)
+            runs.append((dataset, None, value))
         else:
-            runs.extend(value.values())
-    active = [
-        run
-        for run in runs
-        if run.get("status")
-        in (
-            "DATASET_PROCESSING_STARTED",
-            "DATASET_PROCESSING_INITIATED",
-        )
-    ]
+            runs.extend((dataset, pipeline, run) for pipeline, run in value.items())
+    active = [run for _, _, run in runs if _run_status(run) == "DATASET_PROCESSING_STARTED"]
     if active:
         tick = (active[0].get("progress") or {}) if len(active) == 1 else {}
         completed, total = tick.get("completed_items"), tick.get("total_items")
         if type(completed) is int and type(total) is int and 0 <= completed <= total and total > 0:
             return RecallState("indexing", completed, total)
         return RecallState("indexing")
-    if any(run.get("status") == "DATASET_PROCESSING_ERRORED" for run in runs):
+    built = {
+        dataset
+        for dataset, pipeline, run in runs
+        if pipeline in _GRAPH_BUILD_PIPELINES and _run_status(run) == "DATASET_PROCESSING_COMPLETED"
+    }
+    if any(
+        _run_status(run) == "DATASET_PROCESSING_ERRORED"
+        and not (pipeline in _PREPARATION_PIPELINES and dataset in built)
+        for dataset, pipeline, run in runs
+    ):
         return RecallState("build_failed")
     return RecallState("none")
 

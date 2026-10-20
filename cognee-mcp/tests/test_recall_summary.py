@@ -343,3 +343,43 @@ def test_a_partial_marker_alone_says_the_graph_is_still_being_built():
     assert format_recall_results([_marker("memory_cached")]).startswith(
         "no matching memories yet — the graph is still being built"
     )
+
+
+def test_a_failed_preparation_run_of_a_built_dataset_is_not_a_failed_build():
+    """The staged build (SDK-397) lets extraction complete after caching failed."""
+    progress = {
+        "ds": {
+            "caching_pipeline": {"status": "DATASET_PROCESSING_ERRORED"},
+            "indexing_pipeline": {"status": "DATASET_PROCESSING_COMPLETED"},
+            "cognify_pipeline": {"status": "DATASET_PROCESSING_COMPLETED"},
+        }
+    }
+    assert classify_recall_state(progress) == RecallState("none")
+
+    progress["ds"]["cognify_pipeline"] = {"status": "DATASET_PROCESSING_ERRORED"}
+    assert classify_recall_state(progress) == RecallState("build_failed")
+
+    # Another dataset's completed build does not excuse this one's failure.
+    assert classify_recall_state(
+        {
+            "a": {"caching_pipeline": {"status": "DATASET_PROCESSING_ERRORED"}},
+            "b": {"cognify_pipeline": {"status": "DATASET_PROCESSING_COMPLETED"}},
+        }
+    ) == RecallState("build_failed")
+
+
+def test_direct_mode_enum_statuses_classify_like_the_api_strings():
+    from cognee.modules.pipelines.models.PipelineRun import PipelineRunStatus
+
+    assert classify_recall_state(
+        {"ds": {"cognify_pipeline": {"status": PipelineRunStatus.DATASET_PROCESSING_STARTED}}}
+    ) == RecallState("indexing")
+    assert classify_recall_state(
+        {"ds": {"cognify_pipeline": {"status": PipelineRunStatus.DATASET_PROCESSING_ERRORED}}}
+    ) == RecallState("build_failed")
+
+
+def test_a_legacy_initiated_row_is_not_indexing_forever():
+    assert classify_recall_state(
+        {"ds": {"cognify_pipeline": {"status": "DATASET_PROCESSING_INITIATED"}}}
+    ) == RecallState("none")
