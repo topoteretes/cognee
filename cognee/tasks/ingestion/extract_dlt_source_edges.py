@@ -76,15 +76,17 @@ async def extract_dlt_source_edges(
         manifest = await load_dlt_manifest(doc.raw_data_location)
 
         # Emit a doc's schema nodes only once per data item's run. A table's key
-        # and size come from its rows, which every manifest carries.
+        # and size come from its rows, which every manifest carries. Table nodes
+        # are scoped to their source document: another source's table of the same
+        # name is a different table.
         if doc_id not in emitted_schema_docs:
             rows_of: dict[str, list[dict]] = {}
             for row in manifest.get("rows", []):
                 rows_of.setdefault(row["table_name"], []).append(row)
             for table_name, table_meta in manifest.get("tables", {}).items():
-                if table_name in tables:
-                    continue
-                tables[table_name] = {
+                tables[f"{doc_id}:{table_name}"] = {
+                    "name": table_name,
+                    "scope": doc_id,
                     "schema_info": table_meta.get("schema_info"),
                     "foreign_keys": table_meta.get("foreign_keys", []),
                     "primary_key": rows_of[table_name][0]["primary_key_column"],
@@ -105,6 +107,7 @@ async def extract_dlt_source_edges(
                     {
                         "source_id": row_node_id,
                         "table_name": row.get("table_name", ""),
+                        "scope": doc_id,
                         "fk_references": [
                             ref for ref in fk_references if ref["target_node_id"] in rows_in_graph
                         ],
@@ -121,6 +124,7 @@ async def extract_dlt_source_edges(
                         {
                             "source_id": row_node_id,
                             "table_name": row.get("table_name", ""),
+                            "scope": doc_id,
                             "fk_references": arrived_targets,
                             "fk_only": True,
                         }

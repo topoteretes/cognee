@@ -132,7 +132,7 @@ async def ingest_dlt_source(
             raise DLTIngestionError(
                 message=f"DLT pipeline execution failed for dataset '{original_dataset_name}': {e}"
             ) from e
-        key_hints = _dlt_key_hints(_loaded_schema(pipeline, dlt_source))
+        key_hints = _dlt_key_hints(_source_tables(pipeline, dlt_source))
 
         # An incremental source can emit no rows (or only update its cursor),
         # so its load package need not contain a table job. Its previously
@@ -280,27 +280,78 @@ def _loaded_schema(pipeline, dlt_source):
     return pipeline.default_schema
 
 
-def _dlt_key_hints(schema) -> dict[str, dict]:
-    """Each data table's primary and foreign keys, as dlt's schema records them.
+def _source_tables(pipeline, dlt_source) -> list:
+    """The table hints of the resources this run loaded, named as dlt staged them.
+
+    Read from the resources, never from the pipeline's schema: unscoped sources
+    share one pipeline, and dlt merges each run's tables into its schema without
+    ever removing a reference, so that schema still holds the keys of every source
+    an earlier run staged under the same table name.
+
+    Resource hints carry the source's own spelling; the loaded schema's naming
+    convention gives the names the staging tables and columns were created with.
+    A resource whose table name depends on its items has no static hints.
+    """
+    from dlt.common.schema.utils import normalize_table_identifiers
+    from dlt.extract.source import DltSource
+
+    if isinstance(dlt_source, DltSource):
+        resources = list(dlt_source.resources.selected.values())
+    else:
+        resources = [dlt_source]
+    naming = _loaded_schema(pipeline, dlt_source).naming
+
+    tables = []
+    for resource in resources:
+        try:
+            table = resource.compute_table_schema()
+        except Exception:
+            logger.debug("No static table hints for resource %r", resource.name, exc_info=True)
+            continue
+        if table.get("name"):
+            tables.append(normalize_table_identifiers(table, naming))
+    return tables
+
+
+def _dlt_key_hints(tables) -> dict[str, dict]:
+    """Each table's primary and foreign keys, as dlt's table hints record them.
 
     dlt creates its staging tables without key constraints, so reflecting them finds
-    none; the source's keys survive only as schema hints. ``references`` holds one
-    entry per referenced table, merging every foreign key to it into two aligned
-    column lists, which are paired back into one entry per column.
+    none; the source's keys survive only as hints. ``references`` holds one entry
+    per referenced table, merging every foreign key to it into two aligned column
+    lists, which are paired back into one entry per column, in order. A composite
+    key's columns stay next to each other; ``_resolve_fk_references`` groups them.
     """
     return {
         table["name"]: {
             "primary_key": [
-                name for name, column in table["columns"].items() if column.get("primary_key")
+                name
+                for name, column in table.get("columns", {}).items()
+                if column.get("primary_key")
             ],
             "foreign_keys": [
                 {"column": column, "ref_table": ref["referenced_table"], "ref_column": ref_column}
-                for ref in table.get("references", [])
+                for ref in table.get("references") or []
+                if _aligned_reference(table["name"], ref)
                 for column, ref_column in zip(ref["columns"], ref["referenced_columns"])
             ],
         }
-        for table in schema.data_tables()
+        for table in tables
     }
+
+
+def _aligned_reference(table_name: str, ref: dict) -> bool:
+    """Whether a reference pairs each of its columns with one referenced column."""
+    if len(ref["columns"]) == len(ref["referenced_columns"]):
+        return True
+    logger.warning(
+        "Foreign key hint %s(%s) -> %s(%s) is skipped: its column lists differ in length.",
+        table_name,
+        ", ".join(ref["columns"]),
+        ref["referenced_table"],
+        ", ".join(ref["referenced_columns"]),
+    )
+    return False
 
 
 def _apply_key_hints(schema: dict, key_hints: dict[str, dict]) -> None:
@@ -309,13 +360,10 @@ def _apply_key_hints(schema: dict, key_hints: dict[str, dict]) -> None:
     Postgres names tables "<dataset>.<table>", so a foreign key's target gets the
     same prefix to match the row lookup.
 
-    A foreign key is dropped when no row could resolve it correctly:
-    - its table was not loaded this run (a single-table ``query``);
-    - it does not reference its table's single-column primary key. Rows are found
-      by their whole primary key, so one column of a composite key, or a unique
-      non-primary column, would match an unrelated row. dlt merges a composite key
-      and separate keys to one table alike, so this check is also what keeps a
-      composite key's columns from becoming independent edges.
+    A foreign key to a table this run did not load (a single-table ``query``) is
+    dropped: neither its rows nor its table node exist. Every other foreign key is
+    kept, so the table describes all its keys; which of them can find a row is
+    decided per row by ``_resolve_fk_references``.
 
     A table without a hint keeps its reflected keys: a missing hint must never fail
     the add.
@@ -337,20 +385,6 @@ def _apply_key_hints(schema: dict, key_hints: dict[str, dict]) -> None:
                     qualified_name,
                     fk["column"],
                     ref_table,
-                )
-                continue
-            ref_primary_key = key_hints.get(fk["ref_table"], {}).get("primary_key")
-            if ref_primary_key != [fk["ref_column"]]:
-                logger.warning(
-                    "Foreign key %s.%s -> %s.%s creates no edges: rows are found by their "
-                    "whole primary key, and %s's is %s (one column of a composite key, or "
-                    "a key to a non-primary column).",
-                    qualified_name,
-                    fk["column"],
-                    ref_table,
-                    fk["ref_column"],
-                    ref_table,
-                    ref_primary_key or "not declared",
                 )
                 continue
             foreign_keys.append({**fk, "ref_table": ref_table})

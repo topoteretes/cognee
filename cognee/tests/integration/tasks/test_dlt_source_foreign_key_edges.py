@@ -3,7 +3,7 @@
 dlt stages a database source in tables without key constraints, so the keys come
 from dlt's schema hints. Covers the shapes that hints merge or rename: two foreign
 keys to one table, a self reference, a primary key that is neither ``id`` nor the
-first column, and a composite key. Rows reach cognify in table order, two per batch, so one edge
+first column, a composite key, and keys that only the rows' own keys can resolve. Rows reach cognify in table order, two per batch, so one edge
 has both rows in one batch, and the others have the target row written after or
 before its source.
 
@@ -191,15 +191,15 @@ async def test_sql_source_keys_survive_an_earlier_csv_in_the_same_pipeline(clean
     assert await _row_edges() == EXPECTED_ROW_EDGES
 
 
-UNRESOLVABLE_KEYS_SQL = """
+KEY_SHAPES_SQL = """
 CREATE TABLE order_lines (
     order_id INTEGER, line_no INTEGER, product TEXT, PRIMARY KEY (order_id, line_no)
 );
 CREATE TABLE shipments (
     id INTEGER PRIMARY KEY,
-    order_id INTEGER,
-    line_no INTEGER,
-    FOREIGN KEY (order_id, line_no) REFERENCES order_lines (order_id, line_no)
+    ship_line INTEGER,
+    ship_order INTEGER,
+    FOREIGN KEY (ship_line, ship_order) REFERENCES order_lines (line_no, order_id)
 );
 CREATE TABLE people (id INTEGER PRIMARY KEY, employee_no INTEGER UNIQUE, name TEXT);
 CREATE TABLE badges (
@@ -207,24 +207,98 @@ CREATE TABLE badges (
     employee_no INTEGER REFERENCES people (employee_no),
     owner_id INTEGER REFERENCES people (id)
 );
+CREATE TABLE teams (id INTEGER UNIQUE, name TEXT);
+CREATE TABLE codes (code TEXT UNIQUE, label TEXT);
+CREATE TABLE members (
+    id INTEGER PRIMARY KEY,
+    team_id INTEGER REFERENCES teams (id),
+    code TEXT REFERENCES codes (code)
+);
 INSERT INTO order_lines VALUES (1, 1, 'pen'), (1, 2, 'ink'), (2, 1, 'paper');
-INSERT INTO shipments VALUES (10, 1, 2);
+INSERT INTO shipments VALUES (10, 2, 1);
 INSERT INTO people VALUES (1, 2, 'Ann'), (2, 7, 'Bob');
 INSERT INTO badges VALUES (100, 2, 1);
+INSERT INTO teams VALUES (1, 'red'), (2, 'blue');
+INSERT INTO codes VALUES ('a', 'alpha'), ('b', 'beta');
+INSERT INTO members VALUES (5, 2, 'b');
 """
+KEY_SHAPES_TABLES = frozenset(
+    {"order_lines", "shipments", "people", "badges", "teams", "codes", "members"}
+)
+
+
+async def _table_foreign_keys() -> dict[str, list[dict]]:
+    import json
+
+    from cognee.infrastructure.databases.graph import get_graph_engine
+
+    nodes, _ = await (await get_graph_engine()).get_graph_data()
+    return {
+        props["name"]: json.loads(props["foreign_keys"])
+        for _, props in nodes
+        if props.get("type") == "SchemaTable" and props["name"] in KEY_SHAPES_TABLES
+    }
 
 
 @pytest.mark.asyncio
-async def test_keys_no_row_can_resolve_create_no_edges(clean_env):
-    """Rows are found by their whole primary key. A composite foreign key is split
-    per column, and a key to a unique non-primary column would match unrelated rows
-    (badge 100 to Bob), so they create no edges; the badge's key to people.id
-    still does."""
-    source_db = _write_source_db(clean_env / "keys.sqlite", UNRESOLVABLE_KEYS_SQL)
+async def test_each_foreign_key_finds_its_row_by_the_key_rows_are_keyed_on(clean_env):
+    """A composite foreign key finds its row by all its columns, whatever their
+    declared order. A table without a declared primary key is keyed on ``id`` or its
+    first column, and a foreign key to that column finds its row. A key to a unique
+    non-primary column would match an unrelated row (badge 100 to Bob), so it
+    creates no edge, but its table still describes it."""
+    source_db = _write_source_db(clean_env / "keys.sqlite", KEY_SHAPES_SQL)
 
     await cognee.add(f"sqlite:///{source_db}", dataset_name="shop")
     await cognee.cognify(datasets=["shop"])
 
-    assert await _row_edges(frozenset({"order_lines", "shipments", "people", "badges"})) == {
+    assert await _row_edges(KEY_SHAPES_TABLES) == {
+        ("shipments:10", "ship_order_ship_line_references_order_lines", "order_lines:1:2"),
         ("badges:100", "owner_id_references_people", "people:1"),
+        ("members:5", "team_id_references_teams", "teams:2"),
+        ("members:5", "code_references_codes", "codes:b"),
     }
+    table_foreign_keys = await _table_foreign_keys()
+    assert {fk["column"] for fk in table_foreign_keys["shipments"]} == {"ship_line", "ship_order"}
+    assert {fk["column"] for fk in table_foreign_keys["badges"]} == {"employee_no", "owner_id"}
+
+
+LINKED_SQL = """
+CREATE TABLE users (id INTEGER PRIMARY KEY);
+CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES users (id));
+INSERT INTO users VALUES (1);
+INSERT INTO orders VALUES (1, 1);
+"""
+UNLINKED_SQL = """
+CREATE TABLE users (id INTEGER PRIMARY KEY);
+CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER);
+INSERT INTO users VALUES (1);
+INSERT INTO orders VALUES (1, 1);
+"""
+
+
+@pytest.mark.asyncio
+async def test_a_source_does_not_inherit_the_keys_of_an_earlier_source(clean_env):
+    """Unscoped sources share one dlt pipeline whose schema never forgets a
+    reference. A database without foreign keys, staged after one with them under the
+    same table names, must not pick theirs up."""
+    from cognee.tasks.ingestion.create_dlt_source import create_dlt_source_from_connection_string
+    from cognee.tasks.ingestion.ingest_dlt_source import ingest_dlt_source
+
+    linked = _write_source_db(clean_env / "linked.sqlite", LINKED_SQL)
+    unlinked = _write_source_db(clean_env / "unlinked.sqlite", UNLINKED_SQL)
+
+    linked_rows = await ingest_dlt_source(
+        create_dlt_source_from_connection_string(f"sqlite:///{linked}"), "shop"
+    )
+    unlinked_rows = await ingest_dlt_source(
+        create_dlt_source_from_connection_string(f"sqlite:///{unlinked}"), "shop"
+    )
+
+    def orders_keys(rows):
+        return [row.foreign_keys for row in rows if row.table_name == "orders"]
+
+    assert orders_keys(linked_rows) == [
+        [{"column": "user_id", "ref_table": "users", "ref_column": "id"}]
+    ]
+    assert orders_keys(unlinked_rows) == [[]]

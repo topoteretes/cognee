@@ -435,8 +435,8 @@ async def _build_source_manifest_item(
     # (source_table, fk_column, ref_table, fk_value) for FKs whose target row
     # was not loaded — collected here and reported once after the loop.
     missing_fk_targets: list[tuple[str, str, str, str]] = []
-    # (source_table, fk_column, ref_table, ref_column, key_columns) for FKs that
-    # reference a column their target's rows are not keyed on.
+    # (source_table, fk_columns, ref_table, ref_columns, key_columns) for FKs that
+    # form no key their target's rows are keyed on.
     unkeyed_fks: set[tuple[str, str, str, str, str]] = set()
     for key, row in unique_rows.items():
         if row.table_name not in tables:
@@ -894,52 +894,47 @@ def _resolve_fk_references(
     the caller can report the dropped edges instead of silently losing them.
 
     ``row_id_lookup`` finds a row by the whole key its table is keyed on, given per
-    table in ``key_columns``. An FK that references any other column, or one column
-    of a composite key, would match an unrelated row (an explicit ``primary_key``
-    keys every table on one column), so it creates no edge and is recorded in
-    ``unkeyed_fks`` as ``(source_table, column, ref_table, ref_column, key_columns)``
-    with the key columns joined by ", ".
+    table in ``key_columns``, so the row's per-column FKs are first grouped into the
+    keys they form (``_fk_keys``): a composite FK finds its row by all its columns,
+    in the target's key order. An FK that references any other column would match
+    an unrelated row, so it creates no edge and is recorded in ``unkeyed_fks`` as
+    ``(source_table, columns, ref_table, ref_columns, key_columns)``, each joined
+    by ", ".
     """
     references = []
-    for fk in dlt_row.foreign_keys:
-        fk_column = fk.get("column", "")
-        ref_table = fk.get("ref_table", "")
-        ref_column = fk.get("ref_column", "")
-
-        if not fk_column or not ref_table:
-            continue
-
-        target_key_columns = (key_columns or {}).get(ref_table)
-        if target_key_columns is not None and ref_column and target_key_columns != [ref_column]:
+    key_columns = key_columns or {}
+    for ref_table, pairs, target_key_columns in _fk_keys(dlt_row.foreign_keys, key_columns):
+        if target_key_columns is None:
             if unkeyed_fks is not None:
                 unkeyed_fks.add(
                     (
                         dlt_row.table_name,
-                        fk_column,
+                        ", ".join(column for column, _ in pairs),
                         ref_table,
-                        ref_column,
-                        ", ".join(target_key_columns),
+                        ", ".join(ref_column for _, ref_column in pairs),
+                        ", ".join(key_columns[ref_table]),
                     )
                 )
             continue
 
-        # Get the FK value from the row data
-        fk_value = dlt_row.row_data.get(fk_column)
-        if fk_value is None:
+        fk_columns = [column for column, _ in pairs]
+        fk_values = [dlt_row.row_data.get(column) for column in fk_columns]
+        if any(value is None for value in fk_values):
             continue
 
-        fk_value_str = str(fk_value)
-        target_key = (ref_table, fk_value_str)
-        target_node_id = row_id_lookup.get(target_key)
+        # Joined like the target's primary_key_value (see _key_value).
+        fk_value_str = ":".join(str(value) for value in fk_values)
+        target_node_id = row_id_lookup.get((ref_table, fk_value_str))
+        fk_column = ", ".join(fk_columns)
 
         if target_node_id is not None:
             # The bare table name, so Postgres' "<dataset>.<table>" names the edge as SQLite does.
-            relationship_name = f"{fk_column}_references_{ref_table.split('.')[-1]}"
+            relationship_name = f"{'_'.join(fk_columns)}_references_{ref_table.split('.')[-1]}"
             references.append(
                 {
                     "column": fk_column,
                     "target_table": ref_table,
-                    "target_column": ref_column,
+                    "target_column": ", ".join(target_key_columns),
                     "target_pk_value": fk_value_str,
                     "target_node_id": str(target_node_id),
                     "relationship_name": relationship_name,
@@ -949,6 +944,54 @@ def _resolve_fk_references(
             missing_targets.append((dlt_row.table_name, fk_column, ref_table, fk_value_str))
 
     return references
+
+
+def _fk_keys(foreign_keys: list, key_columns: dict[str, list[str]]):
+    """Group per-column FKs into the keys they form against their target's key.
+
+    dlt lists every FK to one table as aligned column pairs, a composite FK's
+    columns next to each other, so consecutive pairs to one table that together
+    cover the target's key columns are one FK. Yields
+    ``(ref_table, [(column, ref_column), ...], target_key_columns)`` with the pairs
+    in the target's key order. ``target_key_columns`` is None for pairs that form
+    no key of the target (a non-key column, or part of a composite key); they
+    cannot find a row. A target with no loaded rows has no known key, and its
+    pairs are taken one column each, to be reported as unresolved.
+    """
+    open_keys: dict[str, list[tuple[str, str]]] = {}
+
+    def close(ref_table):
+        pairs = open_keys.pop(ref_table, None)
+        if pairs:
+            yield ref_table, pairs, None
+
+    for fk in foreign_keys:
+        column = fk.get("column", "")
+        ref_table = fk.get("ref_table", "")
+        if not column or not ref_table:
+            continue
+        key = key_columns.get(ref_table)
+        if key is None:
+            yield ref_table, [(column, fk.get("ref_column", ""))], [fk.get("ref_column", "")]
+            continue
+        # A reflected FK without a referenced column names its table's single key.
+        ref_column = fk.get("ref_column") or (key[0] if len(key) == 1 else "")
+        if ref_column not in key:
+            yield from close(ref_table)
+            yield ref_table, [(column, ref_column)], None
+            continue
+        pairs = open_keys.setdefault(ref_table, [])
+        if any(ref_column == taken for _, taken in pairs):
+            yield from close(ref_table)
+            pairs = open_keys.setdefault(ref_table, [])
+        pairs.append((column, ref_column))
+        if len(pairs) == len(key):
+            open_keys.pop(ref_table)
+            by_key_column = {taken: column for column, taken in pairs}
+            yield ref_table, [(by_key_column[k], k) for k in key], key
+
+    for ref_table in list(open_keys):
+        yield from close(ref_table)
 
 
 async def _delete_dlt_orphans(

@@ -6,11 +6,8 @@ from cognee.tasks.ingestion.ingest_dlt_source import (
     _apply_key_hints,
     _dlt_key_hints,
     _loaded_schema,
+    _source_tables,
 )
-
-
-def _schema(*tables):
-    return SimpleNamespace(data_tables=lambda: list(tables))
 
 
 def test_merged_references_split_into_one_foreign_key_per_column():
@@ -31,7 +28,7 @@ def test_merged_references_split_into_one_foreign_key_per_column():
         "columns": {"order_id": {"primary_key": True}, "n": {"primary_key": True}},
     }
 
-    hints = _dlt_key_hints(_schema(orders, line))
+    hints = _dlt_key_hints([orders, line])
 
     assert hints["orders"] == {
         "primary_key": ["id"],
@@ -82,12 +79,12 @@ def test_a_composite_key_resolves_to_all_its_columns():
     assert _key_value({"order_id": 7, "n": 2, "qty": 5}, ["order_id", "n"]) == "7:2"
 
 
-def test_foreign_keys_no_row_can_resolve_are_dropped():
-    # One reference entry for the composite key shipment (order_id, line_no) ->
-    # order_lines; a key to a unique column that is not the primary key; and a key
-    # to a table this run did not load.
+def test_only_keys_to_unloaded_tables_are_dropped():
+    # A composite key, a key to a unique non-primary column, and a key to a table
+    # this run did not load. The table describes the first two; which rows they
+    # find is decided at resolve time. The third has no table to point at.
     hints = _dlt_key_hints(
-        _schema(
+        [
             {
                 "name": "shipment",
                 "columns": {"id": {"primary_key": True}},
@@ -109,12 +106,7 @@ def test_foreign_keys_no_row_can_resolve_are_dropped():
                     },
                 ],
             },
-            {
-                "name": "order_lines",
-                "columns": {"order_id": {"primary_key": True}, "line_no": {"primary_key": True}},
-            },
-            {"name": "users", "columns": {"id": {"primary_key": True}, "employee_no": {}}},
-        )
+        ]
     )
     schema = {
         "shipment": {"primary_key": None, "foreign_keys": []},
@@ -124,7 +116,70 @@ def test_foreign_keys_no_row_can_resolve_are_dropped():
 
     _apply_key_hints(schema, hints)
 
-    assert schema["shipment"]["foreign_keys"] == []
+    assert schema["shipment"]["foreign_keys"] == [
+        {"column": "order_id", "ref_table": "order_lines", "ref_column": "order_id"},
+        {"column": "line_no", "ref_table": "order_lines", "ref_column": "line_no"},
+        {"column": "employee_no", "ref_table": "users", "ref_column": "employee_no"},
+    ]
+
+
+def test_a_reference_with_unaligned_column_lists_is_skipped():
+    hints = _dlt_key_hints(
+        [
+            {
+                "name": "orders",
+                "columns": {},
+                "references": [
+                    {
+                        "referenced_table": "users",
+                        "columns": ["a", "b"],
+                        "referenced_columns": ["id"],
+                    },
+                    {
+                        "referenced_table": "shops",
+                        "columns": ["shop"],
+                        "referenced_columns": ["id"],
+                    },
+                ],
+            }
+        ]
+    )
+
+    assert hints["orders"]["foreign_keys"] == [
+        {"column": "shop", "ref_table": "shops", "ref_column": "id"}
+    ]
+
+
+def test_hints_come_from_this_runs_resources_not_the_shared_schema():
+    """The shared pipeline's schema keeps every reference an earlier source staged
+    under a table name; only the resources say what this source declares. Names
+    are normalized the way dlt names the staging tables."""
+    import dlt
+    from dlt.common.schema import Schema
+
+    @dlt.source(name="sql_database")
+    def shop():
+        yield dlt.resource([{"Id": 1}], name="Users", primary_key="Id")
+        yield dlt.resource([{"Id": 1, "UserId": 1}], name="Orders", primary_key="Id")
+
+    stale = Schema("sql_database")
+    stale.update_table(
+        {
+            "name": "orders",
+            "columns": {"user_id": {"name": "user_id", "data_type": "bigint"}},
+            "references": [
+                {"referenced_table": "users", "columns": ["user_id"], "referenced_columns": ["id"]}
+            ],
+        }
+    )
+    pipeline = SimpleNamespace(default_schema=stale, schemas={"sql_database": stale})
+
+    hints = _dlt_key_hints(_source_tables(pipeline, shop()))
+
+    assert hints == {
+        "users": {"primary_key": ["id"], "foreign_keys": []},
+        "orders": {"primary_key": ["id"], "foreign_keys": []},
+    }
 
 
 def test_a_table_without_a_hint_keeps_its_reflected_keys():
