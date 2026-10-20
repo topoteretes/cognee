@@ -4,7 +4,7 @@ Check that a docstring-pilot target is one of the ten selected files.
 
 RES-28 deliberately scopes the docstring automation to a fixed list of files
 chosen by a human. The list lives in the markdown table of
-``.claude/skills/docstring-author/pilot_files.md`` — the same file the
+``.agents/skills/docstring-author/pilot_files.md`` — the same file the
 ``docstring-author`` skill reads — so the workflow's allowlist and the agent's
 instructions cannot drift apart. Any backticked path in a table row counts as selected.
 
@@ -33,7 +33,7 @@ import re
 import sys
 from pathlib import PurePosixPath
 
-DEFAULT_ALLOWLIST = ".claude/skills/docstring-author/pilot_files.md"
+DEFAULT_ALLOWLIST = ".agents/skills/docstring-author/pilot_files.md"
 
 # Only rows of a markdown table count, so the prose above the tables can mention
 # paths (CLAUDE.md, the workflow itself) without silently widening the allowlist.

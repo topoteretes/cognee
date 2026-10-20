@@ -1,7 +1,7 @@
 name: automation | Docstring Pilot
 
 # Runs the evidence-led docstring pilot on the files selected in
-# .claude/skills/docstring-author/pilot_files.md — one file, or all ten as a
+# .agents/skills/docstring-author/pilot_files.md — one file, or all ten as a
 # matrix (`path: all`) — and opens one draft PR per changed file against dev
 # for review (RES-28). A prepare job validates once and emits the target list;
 # each matrix job then runs the full author -> critic -> guards chain for its
@@ -16,9 +16,9 @@ name: automation | Docstring Pilot
 #
 # Two skills, one invocation each:
 #
-#   Pass 1  .claude/skills/docstring-author  reads the target and its surrounding
+#   Pass 1  .agents/skills/docstring-author  reads the target and its surrounding
 #           code, writes docstrings, writes no ledger.
-#   Pass 2  .claude/skills/docstring-critic  runs in fresh context with the
+#   Pass 2  .agents/skills/docstring-critic  runs in fresh context with the
 #           author's diff as a patch, re-locates the evidence for every favorable
 #           claim, cuts what it cannot support, and writes the ledger.
 #
@@ -133,9 +133,9 @@ jobs:
         run: |
           missing=""
           for path in \
-            automation-src/.claude/skills/docstring-author/SKILL.md \
-            automation-src/.claude/skills/docstring-author/pilot_files.md \
-            automation-src/.claude/skills/docstring-critic/SKILL.md \
+            automation-src/.agents/skills/docstring-author/SKILL.md \
+            automation-src/.agents/skills/docstring-author/pilot_files.md \
+            automation-src/.agents/skills/docstring-critic/SKILL.md \
             automation-src/tools/check_docstring_pilot_path.py \
             automation-src/tools/check_docstring_pilot_diff.py; do
             [ -f "${path}" ] || missing="${missing} ${path#automation-src/}"
@@ -155,7 +155,7 @@ jobs:
           extract() {
             sed -n '/<!-- shared-rules:start -->/,/<!-- shared-rules:end -->/p' "$1"
           }
-          SKILLS=automation-src/.claude/skills
+          SKILLS=automation-src/.agents/skills
           # Into RUNNER_TEMP, not the workspace: the diff guard rejects untracked
           # non-markdown files, and these are scratch, not something an agent wrote.
           author_shared="${RUNNER_TEMP}/author_shared.txt"
@@ -213,12 +213,12 @@ jobs:
           if [ "${TARGET_SPEC}" = "all" ]; then
             python3 automation-src/tools/check_docstring_pilot_path.py \
               --print-list \
-              --allowlist automation-src/.claude/skills/docstring-author/pilot_files.md \
+              --allowlist automation-src/.agents/skills/docstring-author/pilot_files.md \
               --repo-root .
           else
             python3 automation-src/tools/check_docstring_pilot_path.py \
               --path "${TARGET_SPEC}" \
-              --allowlist automation-src/.claude/skills/docstring-author/pilot_files.md \
+              --allowlist automation-src/.agents/skills/docstring-author/pilot_files.md \
               --repo-root .
             # `target` was written by the guard; wrap it as a one-element matrix.
             echo "targets=[\"$(sed -n 's/^target=//p' "$GITHUB_OUTPUT" | tail -1)\"]" >> "$GITHUB_OUTPUT"
@@ -265,7 +265,7 @@ jobs:
         run: |
           python3 automation-src/tools/check_docstring_pilot_path.py \
             --path "${TARGET_PATH}" \
-            --allowlist automation-src/.claude/skills/docstring-author/pilot_files.md \
+            --allowlist automation-src/.agents/skills/docstring-author/pilot_files.md \
             --repo-root .
         env:
           TARGET_PATH: ${{ matrix.path }}
@@ -295,8 +295,8 @@ jobs:
           prompt: |
             Read and follow your skill:
 
-            - `automation-src/.claude/skills/docstring-author/SKILL.md` (your skill)
-            - `automation-src/.claude/skills/docstring-author/pilot_files.md` (why your
+            - `automation-src/.agents/skills/docstring-author/SKILL.md` (your skill)
+            - `automation-src/.agents/skills/docstring-author/pilot_files.md` (why your
               target was selected)
 
             - You are **pass 1, the author**.
@@ -332,10 +332,10 @@ jobs:
           prompt: |
             Read and follow your skill:
 
-            - `automation-src/.claude/skills/docstring-critic/SKILL.md` (your skill)
+            - `automation-src/.agents/skills/docstring-critic/SKILL.md` (your skill)
 
             Do **not** read anything under
-            `automation-src/.claude/skills/docstring-author/`. What the author was told
+            `automation-src/.agents/skills/docstring-author/`. What the author was told
             to do is not evidence for whether its claims are true, and its
             `pilot_files.md` says what each file was picked to demonstrate — which is
             the expected answer. Reading either tilts you toward grading to the test
