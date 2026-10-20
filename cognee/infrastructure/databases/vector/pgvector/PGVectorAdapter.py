@@ -565,7 +565,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         rebuilds the index with the new one. Tables without a record (none
         written by a release) use the configured language.
         """
-        cached = self._lexical_languages.get(collection_name)
+        languages = self.__dict__.setdefault("_lexical_languages", {})
+        cached = languages.get(collection_name)
         if cached is not None:
             return cached
         configured = self._lexical_language()
@@ -581,7 +582,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 recorded,
                 configured,
             )
-        self._lexical_languages[collection_name] = recorded
+        languages[collection_name] = recorded
         return recorded
 
     async def _has_lexical_tables(self, collection_name: str) -> bool:
@@ -604,7 +605,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             table = self._metadata.tables.get(table_name)
             if table is not None:
                 self._metadata.remove(table)
-        self._lexical_languages.pop(collection_name, None)
+        self.__dict__.get("_lexical_languages", {}).pop(collection_name, None)
 
     @retry(
         retry=retry_if_exception_type(
@@ -1167,7 +1168,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             )
 
         self._metadata.clear()
-        self._lexical_languages.clear()
+        self._lexical_languages = {}
         await self.delete_database()
 
     async def run_migrations(self):
