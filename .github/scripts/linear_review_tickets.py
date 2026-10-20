@@ -1,8 +1,9 @@
 """Create a Linear ticket for every approval on a merged pull request.
 
 Once a day this finds the pull requests of this repository merged since the
-start of the workflow's last successful run (or LOOKBACK_HOURS back, when set or
-when there is no earlier run), and for every reviewer who approved one of them
+start of the workflow's last successful scheduled run (or LOOKBACK_HOURS back,
+when set or when there is no earlier one; manual runs never move this start),
+and for every reviewer who approved one of them
 creates a ticket assigned to that reviewer in the review team, already in a
 completed state, so time spent on reviews shows up in Linear.
 
@@ -120,7 +121,7 @@ def main() -> None:
 
 
 def window_start(until: datetime) -> datetime:
-    """LOOKBACK_HOURS when set; else the start of the last successful run; else 24 h back."""
+    """LOOKBACK_HOURS when set; else the last successful scheduled run's start; else 24 h back."""
     lookback = os.environ.get("LOOKBACK_HOURS")
     if lookback:
         hours = float(lookback)
@@ -134,6 +135,13 @@ def window_start(until: datetime) -> datetime:
 
 
 def last_successful_run_start() -> datetime | None:
+    """Start of this workflow's last successful *scheduled* run on this branch, or None.
+
+    Only scheduled runs count: they are never dry runs and always start where
+    the previous one did. A manual run (a dry run, or a real run with a short
+    LOOKBACK_HOURS) must not move the window, or the pull requests merged
+    between the last scheduled run and it would never get tickets.
+    """
     workflow_ref = os.environ.get("GITHUB_WORKFLOW_REF")
     if not workflow_ref:
         return None
@@ -142,7 +150,7 @@ def last_successful_run_start() -> datetime | None:
     branch = urllib.parse.quote(os.environ["GITHUB_REF_NAME"])
     runs = github_get(
         f"/repos/{os.environ['GITHUB_REPOSITORY']}/actions/workflows/{workflow}"
-        f"/runs?status=success&branch={branch}&per_page=1"
+        f"/runs?status=success&event=schedule&branch={branch}&per_page=1"
     )
     latest = runs["workflow_runs"][:1]
     return parse_time(latest[0]["run_started_at"]) if latest else None
