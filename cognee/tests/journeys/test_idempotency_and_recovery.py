@@ -29,6 +29,16 @@ DOC_B = (
 )
 
 
+async def _entity_names(dataset_id: UUID, user) -> list[str]:
+    """Lower-cased names of the dataset's Entity nodes (chunk text is not an entity)."""
+    from cognee.context_global_variables import set_database_global_context_variables
+    from cognee.infrastructure.databases.graph import get_graph_engine
+
+    async with set_database_global_context_variables(dataset_id, user.id):
+        nodes, _ = await (await get_graph_engine()).get_filtered_graph_data([{"type": ["Entity"]}])
+    return [str(props.get("name", "")).lower() for _, props in nodes]
+
+
 async def _status(dataset_id: UUID) -> str:
     statuses = await cognee.datasets.get_status([dataset_id], ["cognify_pipeline"])
     value = statuses.get(str(dataset_id)) or statuses.get(dataset_id)
@@ -106,20 +116,18 @@ async def test_interrupted_build_is_reported_and_recovers_on_retry(clean_env, de
         )
 
         during = await _support.snapshot_dataset(dataset_id, default_user)
-        assert (
-            during.graph_nodes == before.graph_nodes and during.graph_edges == before.graph_edges
-        ), f"failed build left partial graph writes behind: {before} -> {during}"
-        names = await _support.graph_node_names(dataset_id, default_user)
-        assert not any("obuya" in n for n in names), (
-            "entities from the failed document reached the graph"
+        # The extraction's own writes are rolled back: no entity of the failed
+        # document reaches the graph. The caching and indexing runs completed
+        # before it (SDK-397), so the document's text and chunks STAY: the
+        # dataset answers chunk-level searches for it, and the memory state
+        # says extraction failed while the chunks still answer.
+        entity_names = await _entity_names(dataset_id, default_user)
+        assert not any("obuya" in n for n in entity_names), (
+            f"entities from the failed document reached the graph: {entity_names}"
         )
-        # The chunks are written before extraction (index_chunks_for_search), so
-        # a failed build must roll those back too: no vector rows and no chunk
-        # search hit may survive from the failed document.
-        if before.vector_rows is not None:
-            assert during.vector_rows == before.vector_rows, (
-                f"failed build left vector rows behind: {before.vector_rows} -> {during.vector_rows}"
-            )
+        memory = (await cognee.datasets.get_memory_status([dataset_id]))[str(dataset_id)]
+        assert memory.state == "extraction_failed", memory
+        assert memory.search_level == "graph", memory  # the first document's graph still answers
         failed_text = _support.content_text(
             await cognee.search(
                 query_text="Who is the Cormorant Rowing Club captain?",
@@ -127,7 +135,12 @@ async def test_interrupted_build_is_reported_and_recovers_on_retry(clean_env, de
                 datasets=[DATASET],
             )
         )
-        assert "obuya" not in failed_text, "chunks of the failed document are still searchable"
+        assert "obuya" in failed_text, "the failed document's chunks should stay searchable"
+        if before.vector_rows is not None and during.vector_rows is not None:
+            chunk_rows_during = during.vector_rows.get("DocumentChunk_text", 0)
+            assert chunk_rows_during > before.vector_rows.get("DocumentChunk_text", 0), (
+                "the indexing run should have stored the failed document's chunks"
+            )
 
         # The failed run does not raise for reads: the existing knowledge is still served.
         text = _support.content_text(
@@ -152,6 +165,14 @@ async def test_interrupted_build_is_reported_and_recovers_on_retry(clean_env, de
     assert after.graph_nodes > before.graph_nodes, (
         f"retry did not add the new document's graph: {after}"
     )
+    # The retry's indexing run skipped the already indexed document, so its
+    # chunks were embedded exactly once across the two attempts.
+    if during.vector_rows is not None and after.vector_rows is not None:
+        assert after.vector_rows.get("DocumentChunk_text") == during.vector_rows.get(
+            "DocumentChunk_text"
+        ), f"the retry re-embedded chunks: {during.vector_rows} -> {after.vector_rows}"
+    memory = (await cognee.datasets.get_memory_status([dataset_id]))[str(dataset_id)]
+    assert memory.state == "ready", memory
 
     text = _support.content_text(
         await cognee.search(

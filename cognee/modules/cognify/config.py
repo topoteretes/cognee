@@ -21,11 +21,19 @@ class CognifyConfig(BaseSettings):
     # the chunk's relation texts, one per line, no LLM call.
     summary_method: Literal["llm", "from_extraction"] = "llm"
     chunks_per_batch: int | None = None
-    # Write chunks (and their documents) to the graph and vector stores right
-    # after chunking, before the LLM extraction (env: EARLY_CHUNK_INDEXING).
-    # On (default): chunk-based searches answer while entities are still being
-    # extracted; the final write skips re-embedding those chunks. Off: the
-    # dataset becomes searchable only when the whole pipeline has finished.
+    # cognify() builds memory in three runs per dataset: caching, indexing,
+    # cognify (cognee/modules/cognify/memory_pipelines.py). The first two have
+    # a switch each; off, the cognify run alone does the work and the dataset
+    # becomes searchable only when it finishes.
+    #
+    # Run the caching pipeline first (env: DOCUMENT_CACHING): each document's
+    # text is stored so keyword (DOCUMENTS_LEXICAL, BM25) searches answer at
+    # once -- no chunking, no embedding, no LLM call.
+    document_caching: bool = True
+    # Run the indexing pipeline before extraction (env: EARLY_CHUNK_INDEXING):
+    # the chunks are stored and embedded so chunk-based searches answer while
+    # entities are still being extracted; the cognify run finds those chunks
+    # in the vector store and does not embed them again.
     early_chunk_indexing: bool = True
     # Opt-in audit-grade provenance ledger (env: PROVENANCE_TRACKING). Default
     # OFF so the standard cognify pipeline is unchanged.
@@ -55,6 +63,7 @@ class CognifyConfig(BaseSettings):
             "classification_model": self.classification_model,
             "summarization_model": self.summarization_model,
             "chunks_per_batch": self.chunks_per_batch,
+            "document_caching": self.document_caching,
             "early_chunk_indexing": self.early_chunk_indexing,
             "provenance_tracking": self.provenance_tracking,
             "graph_extractor": self.graph_extractor,

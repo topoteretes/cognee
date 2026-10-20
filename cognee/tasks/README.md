@@ -8,13 +8,20 @@ task's output, `enriches`, `ctx` injection, `Drop`) are documented in
 
 ## The default pipelines
 
-`cognify()` (`cognee/api/v1/cognify/cognify.py`, `get_default_tasks`):
+`cognify()` runs three pipelines per dataset, in order (`cognee/modules/cognify/memory_pipelines.py`). The first two make the data searchable before extraction:
+
+| Pipeline | Tasks | Answers afterwards |
+|---|---|---|
+| `caching_pipeline` (`get_caching_tasks`) | `documents.classify_documents` → `documents.cache_documents` (one `CachedDocument` per document: full text, no chunking, no embedding, no LLM) | `DOCUMENTS_LEXICAL` (BM25); memory state `cached` |
+| `indexing_pipeline` (`get_indexing_tasks`) | `documents.classify_documents` → `documents.extract_chunks_from_documents` → `storage.index_chunks_for_search` (chunk + document nodes written, chunk text embedded) | `CHUNKS`, `CHUNKS_LEXICAL`, `RAG_COMPLETION`, the chunk lane of `HYBRID_COMPLETION`; memory state `indexed` |
+
+Then the cognify pipeline itself (`cognee/api/v1/cognify/cognify.py`, `get_default_tasks`):
 
 | Step | Task | In → out |
 |---|---|---|
 | 1 | `documents.classify_documents` | `Data` rows → typed `Document`s (`TextDocument`, `PdfDocument`, …) |
 | 2 | `documents.extract_chunks_from_documents` | `Document` → `DocumentChunk`s (uses `cognee.modules.chunking`) |
-| 3 | `storage.index_chunks_for_search` | chunks → chunk + document nodes written and chunk text embedded now, so chunk-based searches answer while step 4 runs; the ids go to `ctx.extras` and step 6 skips re-embedding them. Both extractors; `EARLY_CHUNK_INDEXING=false` or `cognify(early_chunk_indexing=False)` drops the step |
+| 3 | `storage.find_indexed_chunks` | chunks → the same chunks; asks the vector store which chunk ids the indexing pipeline already embedded and records them on `ctx.extras`, so step 6 upserts them without embedding them again. Both extractors; `EARLY_CHUNK_INDEXING=false` or `cognify(early_chunk_indexing=False)` drops the step together with the indexing run |
 | 4 | `graph.extract_graph_from_data` | chunks → chunks with `Entity`/`EntityType` nodes and edges attached (LLM, or GLiNER with `extractor="gliner_demo"`) |
 | 5 | `summarization.summarize_text` | chunks → `TextSummary` nodes (LLM) |
 | 6 | `storage.add_data_points` | data points → written to graph + vector DB (+ edge evidence) |
@@ -36,7 +43,7 @@ After each dataset's run, `cognify()` reconciles the structure document sources 
 | `code_graph/` | Build the deterministic code graph with the bundled enola CLI (no LLM): `CodeSymbol`/`CodeModule` nodes, `calls`/`imports` edges | `extract_code_graph`, `extract_code_files_graph` |
 | `codingagents/` | Distil coding-agent traces into reusable coding rules (`CODING_RULES` search) | see its `README.md` |
 | `completion/` | Exceptions shared by completion-style tasks | — |
-| `documents/` | Classify `Data` rows into `Document` types and chunk them | `classify_documents`, `extract_chunks_from_documents` |
+| `documents/` | Classify `Data` rows into `Document` types, cache their text, chunk them | `classify_documents`, `cache_documents`, `extract_chunks_from_documents` |
 | `entity_completion/` | Pluggable entity extractors (`entity_extractors/`: LLM-based and regex-based) | `LLMEntityExtractor`, `RegexEntityExtractor` |
 | `graph/` | Extract entities/relations into the graph; the GLiNER (`graph/gliner_demo/`) and code (`extract_graph_from_code`) variants | `extract_graph_from_data`, `extract_graph_from_code` |
 | `ingestion/` | Ingest and normalise inputs for `add()`: resolve paths/directories, save to storage, dedup, dlt sources, relational-DB migration | `ingest_data`, `resolve_data_directories`, `save_data_item_to_storage`, `resolve_dlt_sources`, `migrate_relational_database`, `reconcile_document_structure` |
@@ -44,7 +51,7 @@ After each dataset's run, `cognify()` reconciles the structure document sources 
 | `presort/` | Pre-organise a folder before ingestion (`remember(dry_run="presort")`): classify, hash, dedup, version and PII detection, proposed groupings | `build_report`, `classify_files`, `detect_duplicates`, `detect_pii`, `group_files`, `apply_presort_graph` |
 | `provenance/` | Write audit-ledger provenance entries for a pipeline run | `record_provenance` |
 | `schema/` | Ingest a relational database schema as graph nodes | `ingest_database_schema` |
-| `storage/` | Persist data points: graph + vector writes, index rebuilds, the early chunk write | `add_data_points`, `index_chunks_for_search`, `index_data_points`, `index_graph_edges` |
+| `storage/` | Persist data points: graph + vector writes, index rebuilds, the indexing pipeline's chunk write and the cognify run's lookup of already indexed chunks | `add_data_points`, `index_chunks_for_search`, `find_indexed_chunks`, `index_data_points`, `index_graph_edges` |
 | `summarization/` | Chunk summaries (LLM, or relations plus entity types) and code summaries | `summarize_text`, `build_summary_from_extraction`, `summarize_code` |
 | `translation/` | Translate chunk content before extraction (provider-pluggable) | `TranslationConfig`, `TranslatedContent` |
 | `web_scraper/` | Fetch and crawl web pages for URL ingestion | `fetch_page_content`, `DefaultUrlCrawler` |

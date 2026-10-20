@@ -377,7 +377,7 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: str | UUID, user: Any)
     - Vector DB (embeddings for this data item): yes
     - Session cache: targeted — session entries whose answers used the
       deleted graph elements are removed (non-fatal, best-effort)
-    - Pipeline status (for this data item): reset for cognify only
+    - Pipeline status (for this data item): reset for the caching, indexing and cognify pipelines
     - Relational DB (data record): preserved
     - Raw file: preserved
     """
@@ -439,14 +439,17 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: str | UUID, user: Any)
             if data_record and data_record.pipeline_status:
                 dataset_id_str = str(dataset_id)
                 updated = False
-                # Memory-only forget removes cognify artifacts (graph/vector), so only
-                # cognify_pipeline status should be reset. Keep add status intact.
-                if (
-                    "cognify_pipeline" in data_record.pipeline_status
-                    and dataset_id_str in data_record.pipeline_status["cognify_pipeline"]
-                ):
-                    del data_record.pipeline_status["cognify_pipeline"][dataset_id_str]
-                    updated = True
+                # Memory-only forget removes the graph/vector artifacts, which the
+                # caching run (document text), the indexing run (chunks) and the
+                # cognify run (entities) wrote, so all three stamps are reset.
+                # Keep add status intact.
+                for pipeline_name in ("caching_pipeline", "indexing_pipeline", "cognify_pipeline"):
+                    if (
+                        pipeline_name in data_record.pipeline_status
+                        and dataset_id_str in data_record.pipeline_status[pipeline_name]
+                    ):
+                        del data_record.pipeline_status[pipeline_name][dataset_id_str]
+                        updated = True
                 if updated:
                     orm_attributes.flag_modified(data_record, "pipeline_status")
                 await session.commit()

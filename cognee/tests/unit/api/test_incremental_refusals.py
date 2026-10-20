@@ -360,6 +360,7 @@ async def test_a_document_built_by_another_chunker_is_refused_by_name(monkeypatc
     monkeypatch.setattr(incremental, "_read_processed_text", _read)
     monkeypatch.setattr(incremental, "_get_stored_chunks", _stored_chunks)
     monkeypatch.setattr(incremental, "_require_chunk_scoped_ownership", AsyncMock(return_value={}))
+    monkeypatch.setattr(incremental, "is_data_processed", AsyncMock(return_value=True))
     monkeypatch.setattr(incremental, "_stage_new_content", _stage)
     monkeypatch.setattr(incremental, "_build_document", lambda *a, **k: SimpleNamespace(id=uuid4()))
 
@@ -417,6 +418,7 @@ async def test_changed_content_with_changed_metadata_refuses_before_planning(mon
         AsyncMock(return_value=[{"id": str(uuid4()), "text": "old content"}]),
     )
     monkeypatch.setattr(incremental, "_require_chunk_scoped_ownership", AsyncMock(return_value={}))
+    monkeypatch.setattr(incremental, "is_data_processed", AsyncMock(return_value=True))
     monkeypatch.setattr(incremental, "_stage_new_content", AsyncMock(return_value=staged))
 
     with pytest.raises(IncrementalUpdateNotPossible) as raised:
@@ -432,6 +434,27 @@ async def test_changed_content_with_changed_metadata_refuses_before_planning(mon
         )
 
     assert raised.value.reason is RefusalReason.UNSUPPORTED_METADATA
+
+
+@pytest.mark.asyncio
+async def test_a_document_without_the_cognify_stamp_is_refused(monkeypatch):
+    """Indexed but not extracted (SDK-397): the chunks tile the text and carry v2
+    ownership, yet no entity exists. Only the cognify stamp proves extraction ran,
+    so without it the incremental path refuses and the full flow rebuilds."""
+    from cognee.api.v1.update import incremental
+
+    data_id, dataset_id = uuid4(), uuid4()
+    monkeypatch.setattr(incremental, "is_data_processed", AsyncMock(return_value=False))
+
+    with pytest.raises(IncrementalUpdateNotPossible) as raised:
+        await incremental._require_extraction_completed(data_id, dataset_id)
+
+    assert raised.value.reason is RefusalReason.NO_BASELINE
+    assert "not been extracted" in str(raised.value)
+    incremental.is_data_processed.assert_awaited_once_with(data_id, dataset_id)
+
+    monkeypatch.setattr(incremental, "is_data_processed", AsyncMock(return_value=True))
+    await incremental._require_extraction_completed(data_id, dataset_id)
 
 
 @pytest.mark.asyncio
@@ -633,6 +656,7 @@ async def test_fresh_chunks_are_extracted_in_bounded_batches(monkeypatch):
 
     monkeypatch.setattr(incremental, "extract_graph_and_summarize", _extract)
     monkeypatch.setattr(incremental, "add_data_points", AsyncMock())
+    monkeypatch.setattr(incremental, "cache_documents", AsyncMock())
     monkeypatch.setattr(incremental, "_resolve_extraction_config", lambda: None)
     monkeypatch.setattr(incremental, "publish_updated_data", AsyncMock())
     monkeypatch.setattr(incremental, "delete_chunks_incremental", AsyncMock(return_value=[]))

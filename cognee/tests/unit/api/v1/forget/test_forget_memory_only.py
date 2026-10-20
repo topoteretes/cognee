@@ -225,6 +225,8 @@ async def test_forget_data_memory_clears_graph_and_resets_pipeline(monkeypatch):
     other_dataset_id = str(uuid4())
     pipeline_status = {
         "add_pipeline": {str(DATASET_ID): "COMPLETE"},
+        "caching_pipeline": {str(DATASET_ID): "COMPLETE"},
+        "indexing_pipeline": {str(DATASET_ID): "COMPLETE", other_dataset_id: "COMPLETE"},
         "cognify_pipeline": {str(DATASET_ID): "COMPLETE", other_dataset_id: "COMPLETE"},
     }
     data_record = _make_data_record(DATA_ID_A, pipeline_status)
@@ -266,10 +268,13 @@ async def test_forget_data_memory_clears_graph_and_resets_pipeline(monkeypatch):
 
     mock_delete.assert_awaited_once_with(DATASET_ID, DATA_ID_A, USER.id)
 
-    # only cognify status should be reset for this dataset
+    # the memory-building stamps are reset for this dataset: caching, indexing, cognify
     assert str(DATASET_ID) not in data_record.pipeline_status["cognify_pipeline"]
-    # other cognify dataset entries should remain
+    assert str(DATASET_ID) not in data_record.pipeline_status["indexing_pipeline"]
+    assert str(DATASET_ID) not in data_record.pipeline_status["caching_pipeline"]
+    # other dataset entries should remain
     assert other_dataset_id in data_record.pipeline_status["cognify_pipeline"]
+    assert other_dataset_id in data_record.pipeline_status["indexing_pipeline"]
     # add pipeline status should remain untouched
     assert str(DATASET_ID) in data_record.pipeline_status["add_pipeline"]
     assert session.committed

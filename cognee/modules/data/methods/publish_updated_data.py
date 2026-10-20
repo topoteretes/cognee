@@ -20,8 +20,18 @@ from cognee.modules.data.models import Data
 
 # The cognify pipeline's status key: an incremental update produces the same
 # graph state cognify would, so it stamps the same slot — that is what stops a
-# later cognify() redoing the document.
-COGNIFY_PIPELINE_NAME = "cognify_pipeline"
+# later cognify() redoing the document. The caching and indexing pipelines'
+# slots are stamped alongside: the update leaves the document's text cached and
+# its chunks stored and embedded, which is all those runs would do. Re-exported
+# from the leaf module the pipeline layer reads too (this package cannot import
+# that layer at module scope).
+from cognee.shared.pipeline_names import (
+    CACHING_PIPELINE_NAME,
+    COGNIFY_PIPELINE_NAME,
+    INDEXING_PIPELINE_NAME,
+)
+
+UPDATE_STAMPED_PIPELINES = (COGNIFY_PIPELINE_NAME, INDEXING_PIPELINE_NAME, CACHING_PIPELINE_NAME)
 
 
 def _completed_status():
@@ -113,8 +123,9 @@ async def publish_updated_data(
             data_point.node_set = json.dumps(node_set)
             data_point.external_metadata = merged_external_metadata(data_point, node_set)
 
-        status_for_pipeline = data_point.pipeline_status.setdefault(COGNIFY_PIPELINE_NAME, {})
-        status_for_pipeline[str(dataset_id)] = _completed_status()
+        for pipeline_name in UPDATE_STAMPED_PIPELINES:
+            status_for_pipeline = data_point.pipeline_status.setdefault(pipeline_name, {})
+            status_for_pipeline[str(dataset_id)] = _completed_status()
 
         await session.merge(data_point)
         await session.commit()
@@ -123,13 +134,14 @@ async def publish_updated_data(
 async def mark_data_processed(
     data_id: UUID,
     dataset_id: UUID,
-    pipeline_names: tuple[str, ...] = (COGNIFY_PIPELINE_NAME,),
+    pipeline_names: tuple[str, ...] = UPDATE_STAMPED_PIPELINES,
 ) -> None:
-    """Stamp cognify completion so a later cognify() doesn't redo the document.
+    """Stamp completion so a later cognify() doesn't redo the document.
 
-    ``pipeline_names`` adds the stamp for pipelines that built the same graph
-    state under their own name (the code graph pipeline), so per-pipeline
-    item status reports them as done too.
+    By default all three of cognify()'s pipelines are stamped (caching,
+    indexing and cognify); ``pipeline_names`` names the pipelines that built
+    the same graph state under their own name (the code graph pipeline), so
+    per-pipeline item status reports them as done too.
     """
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
@@ -171,8 +183,10 @@ async def reset_data_pipeline_status(
         await session.commit()
 
 
-async def is_data_processed(data_id: UUID, dataset_id: UUID) -> bool:
-    """Whether the cognify-completion stamp is already on the row."""
+async def is_data_processed(
+    data_id: UUID, dataset_id: UUID, pipeline_name: str = COGNIFY_PIPELINE_NAME
+) -> bool:
+    """Whether ``pipeline_name``'s completion stamp (cognify's by default) is on the row."""
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
         data_point = (
@@ -183,5 +197,5 @@ async def is_data_processed(data_id: UUID, dataset_id: UUID) -> bool:
         # Same deferred import as _completed_status, same cycle reason.
         from cognee.modules.pipelines.models.DataItemStatus import is_data_item_completed
 
-        status = (data_point.pipeline_status or {}).get(COGNIFY_PIPELINE_NAME) or {}
+        status = (data_point.pipeline_status or {}).get(pipeline_name) or {}
         return is_data_item_completed(status.get(str(dataset_id)))

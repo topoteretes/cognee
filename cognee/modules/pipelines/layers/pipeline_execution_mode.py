@@ -94,7 +94,7 @@ async def run_pipeline_as_background_process(
     pipeline_run_started_info = {}
 
     async def close_runs(pipeline_list):
-        for pipeline_run in pipeline_list:
+        for pipeline_run, _ in pipeline_list:
             close = getattr(pipeline_run, "aclose", None)
             if close is not None:
                 try:
@@ -104,13 +104,24 @@ async def run_pipeline_as_background_process(
 
     async def handle_rest_of_the_run(pipeline_list):
         try:
-            for pipeline_run in pipeline_list:
+            for pipeline_run, started_run_id in pipeline_list:
                 async for pipeline_run_info in pipeline_run:
                     push_to_queue(pipeline_run_info.pipeline_run_id, pipeline_run_info)
+                    if (
+                        started_run_id is not None
+                        and pipeline_run_info.pipeline_run_id != started_run_id
+                    ):
+                        # A chained pipeline (cognify's caching run, then its
+                        # indexing and cognify runs) moved on to a later run.
+                        # The caller only holds the id this function handed
+                        # back, so its subscriber keeps receiving every event
+                        # of the chain.
+                        push_to_queue(started_run_id, pipeline_run_info)
         finally:
             await close_runs(pipeline_list)
 
-    # Every primed generator owns a run and must be closed if a later setup fails.
+    # Every primed generator owns a run and must be closed if a later setup
+    # fails. Each entry is (generator, id of the run its first event reported).
     pipeline_list = []
     try:
         for dataset in datasets:
@@ -118,8 +129,9 @@ async def run_pipeline_as_background_process(
             if "datasets" in call_params:
                 call_params["datasets"] = dataset
             pipeline_run = pipeline(**call_params) if callable(pipeline) else pipeline
-            pipeline_list.append(pipeline_run)
+            pipeline_list.append((pipeline_run, None))
             run_info = await anext(pipeline_run)
+            pipeline_list[-1] = (pipeline_run, getattr(run_info, "pipeline_run_id", None))
             pipeline_run_started_info[run_info.dataset_id] = run_info
             if run_info.payload:
                 run_info.payload = []

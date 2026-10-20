@@ -759,7 +759,7 @@ async def test_get_gliner_demo_tasks_shape():
         "classify_documents",
         "prepare_gliner_schema",
         "extract_chunks_from_documents",
-        "index_chunks_for_search",
+        "find_indexed_chunks",
         "extract_graph_and_summarize_with_gliner",
         "add_data_points",
     ]
@@ -881,7 +881,7 @@ async def test_cognify_extractor_argument_selects_the_gliner_task_list():
         "classify_documents",
         "prepare_gliner_schema",
         "extract_chunks_from_documents",
-        "index_chunks_for_search",
+        "find_indexed_chunks",
         "extract_graph_and_summarize_with_gliner",
         "add_data_points",
     ]

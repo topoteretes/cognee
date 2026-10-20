@@ -116,6 +116,7 @@ from cognee.modules.users.models import User
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
+from cognee.tasks.documents.cache_documents import cache_documents
 from cognee.tasks.documents.classify_documents import document_class_for, update_node_set
 from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
 from cognee.tasks.ingestion.data_item import DataItem
@@ -242,18 +243,35 @@ async def _require_chunk_scoped_ownership(
     return delete_data
 
 
+async def _require_extraction_completed(data_id: UUID, dataset_id: UUID) -> None:
+    """Refuse a baseline whose entities were never extracted.
+
+    The indexing pipeline stores a document's chunks before the cognify
+    pipeline extracts its entities (SDK-397); between the two -- or after an
+    extraction that failed and was rolled back -- the chunks tile the text and
+    carry v2 ownership but have no entities. Treating them as a baseline would
+    re-extract only the edited regions and stamp the document complete, so the
+    untouched chunks would never get their entities. The chunks themselves
+    only ever carry the indexing run's id, so the cognify completion stamp is
+    the one proof extraction ran; without it the full flow rebuilds the
+    document.
+    """
+    if not await is_data_processed(data_id, dataset_id):
+        raise IncrementalUpdateNotPossible(
+            "the document's entities have not been extracted yet (no completed cognify "
+            "run has stamped it)",
+            RefusalReason.NO_BASELINE,
+        )
+
+
 async def _require_chunk_writers_completed(delete_data: dict) -> None:
     """Refuse a baseline whose chunks were written by a run that never finished.
 
-    ``index_chunks_for_search`` stores a document's chunks before its entities
-    are extracted (SDK-397). A cognify killed between those two writes leaves
-    a chunk set that tiles the text and carries v2 ownership but has no
-    entities. Treating it as a baseline would re-extract only the edited
-    regions and stamp the document complete, so the untouched chunks would
-    never get their entities. A run that ended in an error is swept by
-    rollback; a run with no terminal row is the case this guards. Chunks that
-    carry no run ids (older graphs, adapters without run stamping) keep the
-    previous behaviour.
+    The indexing pipeline stores a document's chunks in a run of its own
+    (SDK-397). A run killed mid-way leaves a partial chunk set; one that ended
+    in an error is swept by rollback, so a run with no terminal row is the case
+    this guards. Chunks that carry no run ids (older graphs, adapters without
+    run stamping) keep the previous behaviour.
     """
     run_ids: set[str] = set()
     for snapshot in delete_data.values():
@@ -862,6 +880,7 @@ async def _stage_and_plan(
     delete_data = await _require_chunk_scoped_ownership(stored_chunks, dataset_id, data_id)
     _require_stored_chunks_tile(stored_chunks, old_text)
     await _require_chunk_writers_completed(delete_data)
+    await _require_extraction_completed(data_id, dataset_id)
 
     # Stage the new content through ingestion's own loader machinery. The Data
     # row is NOT written: readers keep resolving the old version until publish.
@@ -879,18 +898,13 @@ async def _stage_and_plan(
     document = _build_document(old_data, staged, node_set)
 
     if content_unchanged:
-        # Same content re-submitted. Two things can still be stale, and both
-        # are reported rather than repaired here: chunk indexes left behind by
-        # a crash between an earlier delete and its renumbering, and a missing
-        # cognify-completion stamp (without which a later cognify would redo
-        # the whole document). A missing stamp counts as a repair so the
-        # self-heal keeps its reach — it is a write either way, and every write
-        # belongs under a run.
+        # Same content re-submitted. One thing can still be stale, and it is
+        # reported rather than repaired here: chunk indexes left behind by a
+        # crash between an earlier delete and its renumbering (a write, so it
+        # belongs under a run). The cognify stamp is proven present by the
+        # guard above; the caching and indexing stamps are re-set with it.
         shifted = _misindexed_chunks(document, stored_chunks)
-        needs_stamp = not await is_data_processed(data_id, dataset_id)
         repairs = ["indexes"] if shifted else []
-        if needs_stamp:
-            repairs.append("stamp")
         return {
             "status": "unchanged",
             "repairs": repairs,
@@ -1127,6 +1141,11 @@ async def _write_and_publish(
         await add_data_points(summaries, ctx=context)
     if reused_chunks:
         await _restore_repositioned_chunks(reused_chunks, context)
+
+    # The cached document (keyword search, SDK-397) must say what the new
+    # content says: re-cache it from the staged text. Same deterministic id,
+    # so the node and its lexical rows are replaced, never duplicated.
+    await cache_documents([document], ctx=context)
 
     # -- Delete replaced chunks + summaries + chunk-orphaned entities --------- #
     if plan.deleted_ids:

@@ -6,6 +6,7 @@ from .PipelineRunInfo import (
     PipelineRunYield,
     PipelineRunCompleted,
     PipelineRunAlreadyCompleted,
+    PipelineRunStageCompleted,
     PipelineRunErrored,
     PipelineRunProgress,
 )

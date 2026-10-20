@@ -1,3 +1,4 @@
+from .CachedDocument import CACHED_DOCUMENT_MAX_CHARS, CachedDocument, cached_document_id
 from .Entity import Entity
 from .EntityType import EntityType
 from .FactConflict import FactConflict

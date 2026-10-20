@@ -18,6 +18,7 @@ from cognee.modules.cognify.config import (
     resolve_extractor,
     resolve_summary_method,
 )
+from cognee.modules.cognify.memory_pipelines import run_memory_pipelines
 from cognee.modules.cognify.rollback import cognify_rollback_handler
 from cognee.modules.cognify.routing import CognifyRoute, cognify_route_for
 from cognee.modules.observability import (
@@ -42,16 +43,18 @@ from cognee.modules.pipelines.tasks.task import Task, pipeline_needs_llm
 from cognee.modules.users.models import User
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.pipeline_names import COGNIFY_PIPELINE_NAME
 from cognee.tasks.code_graph.code_files import get_code_file_tasks
 from cognee.tasks.code_graph.code_repo import get_code_repo_tasks
 from cognee.tasks.documents import (
+    cache_documents,
     classify_documents,
     extract_chunks_from_documents,
 )
 from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
 from cognee.tasks.ingestion.document_structure import reconcile_document_structure
 from cognee.tasks.provenance import record_provenance
-from cognee.tasks.storage import add_data_points, index_chunks_for_search
+from cognee.tasks.storage import add_data_points, find_indexed_chunks, index_chunks_for_search
 
 logger = get_logger("cognify")
 
@@ -155,6 +158,7 @@ async def cognify(
     ontology_file_path: str | None = None,
     summary_method: Literal["llm", "from_extraction"] | None = None,
     early_chunk_indexing: bool | None = None,
+    document_caching: bool | None = None,
     **kwargs,
 ):
     """
@@ -182,12 +186,30 @@ async def cognify(
             * Mixed multimedia content (with text extraction)
 
     Processing Pipeline:
+        Three pipeline runs per dataset, in order, so the data is searchable as early
+        as possible and the answers improve at each step (``document_caching`` and
+        ``early_chunk_indexing`` switch the first two off):
+
+        ``caching_pipeline`` — keyword search at once (memory state ``cached``)
         1. **Document Classification**: Identifies document types and structures
-        2. **Text Chunking**: Breaks content into semantically meaningful segments
-        3. **Entity Extraction**: Identifies key concepts, people, places, organizations
-        4. **Relationship Detection**: Discovers connections between entities
-        5. **Graph Construction**: Builds semantic knowledge graph with embeddings
-        6. **Content Summarization**: Creates text summaries for navigation
+        2. **Document Caching**: Stores each document's text; ``DOCUMENTS_LEXICAL``
+           (BM25) answers. No chunking, no embedding, no LLM call.
+
+        ``indexing_pipeline`` — vector search (memory state ``indexed``)
+        3. **Text Chunking**: Breaks content into semantically meaningful segments
+        4. **Chunk Indexing**: Stores and embeds the chunks; ``CHUNKS``,
+           ``RAG_COMPLETION`` and ``HYBRID_COMPLETION`` answer.
+
+        ``cognify_pipeline`` — the knowledge graph (memory state ``ready``)
+        5. **Entity Extraction**: Identifies key concepts, people, places, organizations
+        6. **Relationship Detection**: Discovers connections between entities
+        7. **Graph Construction**: Builds semantic knowledge graph with embeddings
+        8. **Content Summarization**: Creates text summaries for navigation
+
+        Each milestone is logged; ``cognee.datasets.get_memory_status()``,
+        ``GET /api/v1/datasets/status/memory`` and the MCP ``cognify_status`` tool report
+        the memory state, and ``recall()`` routes to the best search the state allows
+        and appends a ``source="system"`` marker until the graph is built.
 
     Graph Model Customization:
         The `graph_model` parameter allows custom knowledge structures:
@@ -261,12 +283,21 @@ async def cognify(
                  with no relations gets no summary. The explicit argument wins over
                  the SUMMARY_METHOD setting ("llm" by default). Raises while
                  connected to a remote instance.
-        early_chunk_indexing: Whether to store the chunks (and embed their text)
-                 right after chunking, before extraction, so chunk-based searches
-                 answer while entities are still being extracted; the final write
-                 does not embed them again. The explicit argument wins over the
-                 EARLY_CHUNK_INDEXING setting (on by default). Raises while
-                 connected to a remote instance.
+        early_chunk_indexing: Whether to run the indexing pipeline before the cognify
+                 pipeline: a separate ``indexing_pipeline`` run per dataset that
+                 chunks the documents and stores + embeds the chunks (no LLM call),
+                 so chunk-based searches answer while entities are still being
+                 extracted. The cognify run then finds those chunks in the vector
+                 store and does not embed them again. False skips that run, and the
+                 chunks become searchable only when extraction finishes. The explicit
+                 argument wins over the EARLY_CHUNK_INDEXING setting (on by default).
+                 Raises while connected to a remote instance.
+        document_caching: Whether to run the caching pipeline first: a separate
+                 ``caching_pipeline`` run per dataset that stores each document's
+                 text (no chunking, no embedding, no LLM call), so keyword searches
+                 (``DOCUMENTS_LEXICAL``, BM25) answer seconds after the data was
+                 added. The explicit argument wins over the DOCUMENT_CACHING setting
+                 (on by default). Raises while connected to a remote instance.
 
     Returns:
         Union[dict, list[PipelineRunInfo], DryRunEstimate]:
@@ -275,9 +306,12 @@ async def cognify(
                 * Extracted entity and relationship counts
                 * Processing duration and resource usage
                 * Error details if any failures occurred
-            - **Background mode**: List of PipelineRunInfo objects for tracking progress
-                * Use pipeline_run_id to monitor status
-                * Check completion via pipeline monitoring APIs
+            - **Background mode**: Dictionary mapping dataset_id -> the started run's info
+                * That is the first run of the chain (caching, then indexing, then
+                  cognify); a subscriber of the returned pipeline_run_id receives the
+                  events of every run, with ``PipelineRunStageCompleted`` marking each
+                  hand-over and the cognify run's ``PipelineRunCompleted`` closing it
+                * Check the memory state via the dataset status APIs
 
     Next Steps:
         After successful cognify processing, use search functions to query the knowledge:
@@ -414,6 +448,11 @@ async def cognify(
                 "early_chunk_indexing is not supported while connected to a remote Cognee "
                 "instance. Call cognee.disconnect() to choose it locally."
             )
+        if document_caching is not None:
+            raise ValueError(
+                "document_caching is not supported while connected to a remote Cognee "
+                "instance. Call cognee.disconnect() to choose it locally."
+            )
         return await client.cognify(
             datasets,
             chunk_size=chunk_size,
@@ -509,6 +548,45 @@ async def cognify(
         # By calling get pipeline executor we get a function that will have the run_pipeline run in the background or a function that we will need to wait for
         pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)
 
+        # The caching and indexing pipelines run first, each as its own run per
+        # dataset, when their settings are on. Only standard-routed items go
+        # through them: DLT manifests write their row chunks in one LLM-free
+        # pass anyway and the code routes produce no text chunks, so those
+        # items pass through the earlier runs untouched (an empty task list)
+        # and are merely stamped.
+        use_caching = (
+            document_caching if document_caching is not None else cognify_config.document_caching
+        )
+        use_indexing = (
+            early_chunk_indexing
+            if early_chunk_indexing is not None
+            else cognify_config.early_chunk_indexing
+        )
+        passthrough = {
+            CognifyRoute.DLT_SOURCE: [],
+            CognifyRoute.CODE: [],
+            CognifyRoute.CODE_REPO: [],
+        }
+        caching_tasks_by_route = (
+            {CognifyRoute.STANDARD: get_caching_tasks(), **passthrough} if use_caching else None
+        )
+        indexing_tasks_by_route = (
+            {
+                CognifyRoute.STANDARD: await get_indexing_tasks(
+                    chunker=chunker, chunk_size=chunk_size, chunks_per_batch=chunks_per_batch
+                ),
+                **passthrough,
+            }
+            if use_indexing
+            else None
+        )
+
+        def resolve_caching_tasks(data_item):
+            return caching_tasks_by_route[cognify_route_for(data_item)]
+
+        def resolve_indexing_tasks(data_item):
+            return indexing_tasks_by_route[cognify_route_for(data_item)]
+
         # Per-item routing: each data item resolves to the task list its kind
         # requires — DLT-source manifests run the deterministic DLT list, code
         # files run the enola code graph list, everything else runs the
@@ -542,11 +620,17 @@ async def cognify(
         )
 
         try:
+            # One executor call drives every run: the chained runner yields the
+            # caching run's events, then the indexing run's, then the cognify
+            # run's (see cognee.modules.cognify.memory_pipelines), so blocking
+            # mode still returns the cognify run's final info per dataset.
             result = await pipeline_executor_func(
-                pipeline=run_pipeline,
+                pipeline=run_memory_pipelines,
+                caching_tasks=resolve_caching_tasks if use_caching else None,
+                indexing_tasks=resolve_indexing_tasks if use_indexing else None,
                 datasets=datasets,
                 tasks=resolve_cognify_tasks,
-                pipeline_name="cognify_pipeline",
+                pipeline_name=COGNIFY_PIPELINE_NAME,
                 user=user,
                 vector_db_config=vector_db_config,
                 graph_db_config=graph_db_config,
@@ -644,12 +728,13 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
         ),
     ]
     if early_chunk_indexing:
-        # LOAD (early): store the chunks and their documents now, so chunk-based
-        # searches answer while the LLM extraction below is still running; the
-        # final add_data_points skips re-embedding them (SDK-397).
+        # The indexing pipeline (get_indexing_tasks) stored and embedded these
+        # very chunks before this run; find them in the vector store so the
+        # final add_data_points upserts them without embedding them again
+        # (SDK-397).
         tasks.append(
             Task(
-                index_chunks_for_search,
+                find_indexed_chunks,
                 task_config={"batch_size": chunks_per_batch},
                 needs_llm=False,
             )
@@ -681,6 +766,59 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
         )
 
     return tasks
+
+
+def get_caching_tasks() -> list[Task]:
+    """The caching pipeline's task list: classify, then store each document's text.
+
+    Run as ``caching_pipeline`` first (SDK-397), it makes a dataset answer keyword
+    (``DOCUMENTS_LEXICAL``, BM25) searches before anything is chunked or embedded.
+    No task calls the LLM or the embedding model.
+    """
+    return [
+        Task(classify_documents, needs_llm=False),
+        # LOAD: one CachedDocument per document. From here on the dataset is
+        # searchable by keyword (memory state "cached").
+        Task(cache_documents, needs_llm=False),
+    ]
+
+
+async def get_indexing_tasks(
+    chunker=TextChunker,
+    chunk_size: int | None = None,
+    chunks_per_batch: int | None = None,
+) -> list[Task]:
+    """The indexing pipeline's task list: classify, chunk, store + embed the chunks.
+
+    Run as ``indexing_pipeline`` before the cognify pipeline (SDK-397), it makes
+    a dataset answer chunk-based searches before any entity is extracted. No
+    task calls the LLM. It must cut exactly the chunks the cognify list cuts —
+    same ``chunker``, same ``chunk_size`` — because chunk ids are content-derived
+    and the cognify run skips re-embedding only the ids it finds in the store.
+    """
+    cognify_config = get_cognify_config()
+    if chunks_per_batch is None:
+        chunks_per_batch = (
+            cognify_config.chunks_per_batch if cognify_config.chunks_per_batch is not None else 2000
+        )
+
+    return [
+        Task(classify_documents, needs_llm=False),
+        Task(
+            extract_chunks_from_documents,
+            max_chunk_size=await resolve_chunk_size(chunk_size),
+            chunker=chunker,
+            needs_llm=False,
+        ),
+        # LOAD: chunk and document nodes to the graph, chunk text to the vector
+        # store. From here on the dataset is searchable at chunk level (memory
+        # state "indexed").
+        Task(
+            index_chunks_for_search,
+            task_config={"batch_size": chunks_per_batch},
+            needs_llm=False,
+        ),
+    ]
 
 
 async def get_dlt_tasks(

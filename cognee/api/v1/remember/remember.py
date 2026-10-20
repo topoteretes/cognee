@@ -158,6 +158,7 @@ _COGNIFY_ONLY = frozenset(
         "extractor",
         "summary_method",
         "early_chunk_indexing",
+        "document_caching",
         "chunks_per_batch",
         "config",
     }
@@ -767,6 +768,12 @@ class RememberResult:
             short machine-readable reason such as ``"insufficient_credits"``.
             The data was stored as usual and ``improve`` stays ``None``; a
             later improve covers what this one would have. ``None`` otherwise.
+        memory_state: The dataset's memory state once the pipeline run that
+            this result reports finished (``"ready"`` after a completed
+            cognify, ``"extraction_failed"`` after a failed one, the
+            preparation states while a background run is still going); the
+            vocabulary of ``cognee.datasets.get_memory_status``. ``None`` for
+            session-only and typed-entry results.
 
     Example::
 
@@ -817,6 +824,8 @@ class RememberResult:
         self.improve_error: str | None = None
         # The reason a host admission check gave for not starting it at all.
         self.improve_skipped: str | None = None
+        # The memory state the reported run left the dataset in (SDK-397).
+        self.memory_state: str | None = None
         self._task: asyncio.Task | None = None
         self._started_at: float = time.monotonic()
 
@@ -852,6 +861,8 @@ class RememberResult:
             parts.append(f"improve_error={self.improve_error!r}")
         if self.improve_skipped:
             parts.append(f"improve_skipped={self.improve_skipped!r}")
+        if self.memory_state:
+            parts.append(f"memory_state={self.memory_state!r}")
         return f"RememberResult({', '.join(parts)})"
 
     def __str__(self):
@@ -886,6 +897,8 @@ class RememberResult:
             d["improve_error"] = self.improve_error
         if self.improve_skipped:
             d["improve_skipped"] = self.improve_skipped
+        if self.memory_state:
+            d["memory_state"] = self.memory_state
         return d
 
     def _attach_improve_payload(self, payload: dict) -> None:
@@ -905,6 +918,8 @@ class RememberResult:
             self.improve_error = str(payload["improve_error"])
         if payload.get("improve_skipped"):
             self.improve_skipped = str(payload["improve_skipped"])
+        if payload.get("memory_state"):
+            self.memory_state = str(payload["memory_state"])
 
     def __bool__(self):
         """True if status is completed or session_stored."""
@@ -964,6 +979,10 @@ class RememberResult:
             self.status = "errored" if "Errored" in run_info.status else "completed"
             if hasattr(run_info, "pipeline_run_id"):
                 self.pipeline_run_id = str(run_info.pipeline_run_id)
+            # Stamped by cognify()'s chained runner on its milestone events.
+            memory_state = getattr(run_info, "memory_state", None)
+            if memory_state:
+                self.memory_state = str(memory_state)
         else:
             self.status = "completed"
 

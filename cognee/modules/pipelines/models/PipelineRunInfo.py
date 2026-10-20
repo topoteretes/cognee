@@ -14,6 +14,12 @@ class PipelineRunInfo(BaseModel):
     # Data must be mentioned in typing to allow custom encoders for Data to be activated
     payload: Any | list[Data] | None = None
     data_ingestion_info: list | None = None
+    # The dataset's memory state once this event has happened, set on the
+    # milestones of cognify()'s chained runs (see
+    # cognee.modules.cognify.memory_pipelines): "cached", "caching_failed",
+    # "indexed", "indexing_failed", "ready" or "extraction_failed". None on
+    # every other event.
+    memory_state: str | None = None
 
     model_config = {
         "arbitrary_types_allowed": True,
@@ -37,6 +43,21 @@ class PipelineRunCompleted(PipelineRunInfo):
 
 class PipelineRunAlreadyCompleted(PipelineRunInfo):
     status: str = "PipelineRunAlreadyCompleted"
+
+
+class PipelineRunStageCompleted(PipelineRunInfo):
+    """A preparation run of cognify() completed; the dataset's memory moved up a state.
+
+    cognify() builds memory in three runs (caching, indexing, cognify). Its
+    chained runner yields this in place of the caching and indexing runs'
+    PipelineRunCompleted, so a consumer that stops at "completed" (the
+    /cognify/subscribe websocket) keeps following into the run that comes
+    next. ``pipeline_name`` names the run that completed, ``memory_state`` the
+    state reached ("cached", "indexed"); ``data_ingestion_info`` is that run's.
+    """
+
+    status: str = "PipelineRunStageCompleted"
+    pipeline_name: str | None = None
 
 
 class PipelineRunErrored(PipelineRunInfo):

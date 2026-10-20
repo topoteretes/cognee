@@ -1,27 +1,24 @@
-"""Make a dataset searchable before its entities are extracted (SDK-397).
+"""The index pipeline's write: make chunks searchable before extraction (SDK-397).
 
-Entity extraction is the slow step of ``cognify()``: an LLM (or GLiNER) pass
-per chunk batch. Until it finishes, every search on the dataset finds nothing,
-although the chunk texts themselves were ready the moment chunking ended. This
-task closes that gap by writing the chunks (and the documents they belong to)
-to the graph and vector stores right after chunking, so the chunk-based
-searches (``CHUNKS``, ``CHUNKS_LEXICAL``, ``RAG_COMPLETION`` and the chunk lane
-of ``HYBRID_COMPLETION``) answer while extraction is still running. The
-entity-aware searches catch up when ``add_data_points`` runs at the end of the
-pipeline. Both extractor routes of ``cognify()`` run it; ``update()``'s
-incremental path does not (it re-extracts only edited regions).
+``cognify()`` runs two pipelines per dataset. The first, ``index_pipeline``
+(``classify_documents`` → ``extract_chunks_from_documents`` → this task), writes
+every document's chunks to the graph and vector stores as soon as they are cut,
+so the chunk-based searches (``CHUNKS``, ``CHUNKS_LEXICAL``, ``RAG_COMPLETION``
+and the chunk lane of ``HYBRID_COMPLETION``) answer while the second pipeline,
+``cognify_pipeline``, is still extracting entities. That second pipeline
+re-chunks the same text (chunk ids are content-derived, so it cuts the very
+same chunks), asks the vector store which of them already have an embedding
+(``find_indexed_chunks``) and upserts those without embedding them again.
 
-The final ``add_data_points`` receives the same chunks again, now carrying
-their entities and summaries. Their graph rows are upserted a second time
-(idempotent, and that pass is what attaches the entities), but the chunk text
-is not embedded twice: the ids embedded here are recorded on
-``ctx.extras[SEARCH_INDEXED_IDS]`` and ``add_data_points`` skips them. The
-structural edges written here (``is_part_of``, ``belongs_to_set``) are not
-indexed either; the final write indexes them as it always did.
+The structural edges written here (``is_part_of``, ``belongs_to_set``) are not
+indexed; the cognify pipeline's final write indexes them as it always did. The
+vector written here is the one that stays, so a task that rewrites chunk text
+(translation, redaction) belongs in both pipelines, before this task.
 
-That skip is by id, so the vector written here is the one that stays: a task
-that rewrites chunk text (translation, redaction) must run BEFORE this task,
-or its chunks would stay searchable under the original text.
+The ids embedded here are also recorded on ``ctx.extras[SEARCH_INDEXED_IDS]``,
+which only matters when this task and ``add_data_points`` share one run (a
+custom pipeline that chains them): the later write then skips them without
+asking the store.
 """
 
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
@@ -34,18 +31,17 @@ from .add_data_points import SEARCH_INDEXED_IDS, add_data_points
 async def index_chunks_for_search(
     data_chunks: list[DocumentChunk], ctx=None
 ) -> list[DocumentChunk]:
-    """Store chunks in the graph and vector DBs ahead of entity extraction.
+    """Store chunks (and the documents they belong to) in the graph and vector DBs.
 
     Args:
         data_chunks: The chunks one upstream batch produced. Each carries its
             document in ``is_part_of``; nothing else is attached yet.
-        ctx: Pipeline runtime context. When present, the ids of every node
-            embedded here are recorded on ``ctx.extras[SEARCH_INDEXED_IDS]`` so
-            the final ``add_data_points`` does not embed them again. Without a
-            context the write still happens; the later pass then re-embeds.
+        ctx: Pipeline runtime context, passed through to ``add_data_points``
+            for provenance stamping. When present, the ids embedded here are
+            recorded on ``ctx.extras[SEARCH_INDEXED_IDS]``.
 
     Returns:
-        The same chunk objects, unchanged, for the extraction task that follows.
+        The same chunk objects, unchanged.
     """
     if not data_chunks:
         return data_chunks
