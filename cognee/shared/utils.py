@@ -539,6 +539,38 @@ def _get_api_key_fingerprint() -> str:
     return _get_api_key_tracking_id()
 
 
+def _get_cloud_identity() -> dict[str, str]:
+    """Return the Cognee Cloud tenant this install has connected to, if any.
+
+    Read from the credentials ``cognee.serve()`` saves after a cloud login. The
+    tenant id is the control-plane ``tenants.id``, so analytics can join an
+    install's ``persistent_id`` to its cloud tenant (CLO-804). It is the tenant
+    selected at login; a user in several workspaces can switch later.
+
+    Empty when the install never logged in to the cloud, or connected directly
+    with ``serve(url=..., api_key=...)``, which saves no tenant. Only the tenant
+    id and the management API host are read — never the API key or tokens.
+    """
+    try:
+        from urllib.parse import urlparse
+
+        from cognee.api.v1.serve.credentials import load_credentials
+
+        creds = load_credentials()
+    except Exception:
+        logger.debug("Ignoring exception in _get_cloud_identity", exc_info=True)
+        return {}
+    if not creds or not creds.tenant_id:
+        return {}
+    identity = {"cloud_tenant_id": str(creds.tenant_id)}
+    # dev and prod control planes have separate tenant tables; the host says
+    # which one the id belongs to.
+    host = urlparse(creds.management_url).hostname if creds.management_url else None
+    if host:
+        identity["cloud_management_host"] = host
+    return identity
+
+
 def _resolve_identity(user) -> tuple[str, str | None]:
     """Resolve a telemetry caller into ``(user_id, tenant_id)`` strings.
 
@@ -606,6 +638,9 @@ def send_telemetry(
     - **api_key_tracking_id**: Stable pseudonymous ID derived from the full
       LLM API key when configured. Use this to group activity by key without
       sending the key or visible key fragments.
+    - **cloud_tenant_id** / **cloud_management_host**: Only when the install
+      has logged in to Cognee Cloud via ``serve()``: the cloud tenant id and
+      the management API host it belongs to. Absent otherwise.
     """
     if additional_properties is None:
         additional_properties = {}
@@ -624,6 +659,7 @@ def send_telemetry(
     anonymous_id = str(get_anonymous_id())
     persistent_id = str(get_persistent_id())
     api_key_tracking_id = _get_api_key_tracking_id()
+    cloud_identity = _get_cloud_identity()
     # Where this telemetry event originates. Defaults to "sdk"; deployments such
     # as the managed cloud set TELEMETRY_ORIGIN (e.g. "cloud") so events can be
     # segmented by origin.
@@ -638,6 +674,7 @@ def send_telemetry(
             "persistent_id": persistent_id,
             "api_key_tracking_id": api_key_tracking_id,
             "api_key_hash": api_key_tracking_id,
+            **cloud_identity,
         },
         "properties": {
             "time": current_time.strftime("%m/%d/%Y"),
@@ -648,6 +685,7 @@ def send_telemetry(
             "api_key_tracking_id": api_key_tracking_id,
             "api_key_hash": api_key_tracking_id,
             "telemetry_origin": origin,
+            **cloud_identity,
             **additional_properties,
         },
     }
