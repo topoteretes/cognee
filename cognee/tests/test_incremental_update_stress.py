@@ -328,6 +328,9 @@ def _label(props: dict, node_id: str, doc_ids: set) -> str:
         return f"entity:{props.get('name')}"
     if kind == "EntityType":
         return f"type:{props.get('name')}"
+    if kind == "CachedDocument":
+        # The document's text for keyword search (SDK-397), one per document.
+        return f"cache:{props.get('document_id')}"
     return f"{kind}:{node_id}"
 
 
@@ -336,6 +339,7 @@ def _expected_structure(chunks_by_doc: dict):
     nodes, edges = set(), set()
     for doc_id, chunks in chunks_by_doc.items():
         nodes.add(f"doc:{doc_id}")
+        nodes.add(f"cache:{doc_id}")
         for chunk_id, text in chunks:
             nodes.add(f"chunk:{chunk_id}")
             nodes.add(f"summary:{chunk_id}")
@@ -393,6 +397,7 @@ async def _verify(
     from cognee.modules.data.models import Data
 
     doc_ids = {str(doc_id) for doc_id in doc_texts}
+    doc_texts_by_id = {str(doc_id): text for doc_id, text in doc_texts.items()}
 
     # -- Data rows: same ids, published text is byte-identical --------------- #
     engine = get_relational_engine()
@@ -548,9 +553,9 @@ async def _verify(
                 assert str(parsed.chunk_id) in all_chunk_ids, (
                     f"{label}: {lab} carries a v2 ref to dead chunk {parsed.chunk_id}"
                 )
-        if lab.startswith("doc:"):
+        if lab.startswith(("doc:", "cache:")):
             assert all(parse_source_ref_key(r).version == 1 for r in refs), (
-                f"{label}: document node must carry v1 refs only"
+                f"{label}: {lab} is document-level and must carry v1 refs only"
             )
         elif lab.startswith("chunk:"):
             assert node_id in v2_owners(refs), f"{label}: chunk {node_id} must own itself"
@@ -586,10 +591,20 @@ async def _verify(
         "TextSummary_text": {n for n, lab in labels.items() if lab.startswith("summary:")},
         "Entity_name": {n for n, lab in labels.items() if lab.startswith("entity:")},
         "EntityType_name": {n for n, lab in labels.items() if lab.startswith("type:")},
+        "CachedDocument_text": {n for n, lab in labels.items() if lab.startswith("cache:")},
     }
     for collection, ids in live_ids.items():
         found = await _rows_present(vector, collection, ids)
         assert found == ids, f"{label}: {collection}: {len(ids - found)} live row(s) missing"
+    # Keyword search answers from the cached text: it must be the live text.
+    cache_ids = list(live_ids["CachedDocument_text"])
+    for row in await vector.retrieve("CachedDocument_text", cache_ids) if cache_ids else []:
+        payload = getattr(row, "payload", None) or {}
+        row_id = str(getattr(row, "id", payload.get("id")))
+        document_id = node_props[row_id].get("document_id")
+        assert payload.get("text") == doc_texts_by_id[document_id], (
+            f"{label}: the cached text of {document_id} is not its live text"
+        )
     if prev is not None:
         for collection, ids in prev["live_ids"].items():
             dead = ids - live_ids[collection]
