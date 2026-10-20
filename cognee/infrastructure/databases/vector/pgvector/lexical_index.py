@@ -63,6 +63,12 @@ PASSAGE_BATCH_SIZE = 500
 # Rows per owned-rows upsert statement.
 ROW_BATCH_SIZE = 1000
 
+# A passage longer than this many characters is cut into pieces of at most
+# this length. split_passages caps passages by words, and one whitespace-free
+# run (an inline base64 image, minified JSON) can be megabytes long; Postgres
+# refuses a tsvector over 1 MB, and at this length one cannot reach it.
+MAX_PASSAGE_CHARS = 65_536
+
 # Postgres truncates identifiers longer than this (NAMEDATALEN - 1) silently.
 _MAX_IDENTIFIER_BYTES = 63
 
@@ -136,6 +142,26 @@ def passage_doc_id(row_id: str, passage_index: int) -> str:
     return f"{row_id}:{passage_index}"
 
 
+def clean_text(value: str) -> str:
+    """``value`` without NUL characters, which Postgres text values cannot hold."""
+    return value.replace("\x00", "")
+
+
+def cut_passage(passage: str, max_chars: int = MAX_PASSAGE_CHARS) -> list[str]:
+    """``passage`` in pieces of at most ``max_chars`` characters, cut at whitespace when it can."""
+    pieces: list[str] = []
+    rest = passage
+    while len(rest) > max_chars:
+        cut = rest.rfind(" ", max_chars // 2, max_chars)
+        if cut <= 0:
+            cut = max_chars
+        pieces.append(rest[:cut])
+        rest = rest[cut:].lstrip()
+    if rest:
+        pieces.append(rest)
+    return pieces
+
+
 def build_passage_rows(
     data_points: Iterable[Any], field_name: str, max_tokens: int = DEFAULT_PASSAGE_TOKENS
 ) -> list[PassageRow]:
@@ -150,7 +176,12 @@ def build_passage_rows(
         if value is None:
             continue
         row_id = str(data_point.id)
-        for passage_index, passage in enumerate(split_passages(str(value), max_tokens)):
+        pieces = [
+            piece
+            for passage in split_passages(clean_text(str(value)), max_tokens)
+            for piece in cut_passage(passage)
+        ]
+        for passage_index, passage in enumerate(pieces):
             rows.append(
                 PassageRow(
                     doc_id=passage_doc_id(row_id, passage_index),
@@ -378,15 +409,35 @@ async def replace_postings(
 # --- search -------------------------------------------------------------------
 
 
-def search_statement(collection_name: str) -> TextClause:
-    """Rank the collection's rows by BM25 relevance to a query, best first.
+def query_terms_statement() -> TextClause:
+    """Tokenize a query as the passages were: the distinct lexemes left after the stop words.
 
-    Binds: ``config``, ``query``, ``stop_words`` (as for indexing), ``k1``,
+    Binds ``config``, ``query`` and ``stop_words``. Run on its own, so the
+    search statement gets the terms as a bound array: the planner cannot
+    estimate an inline ``to_tsvector`` and would scan every posting.
+    """
+    return text(
+        """
+        SELECT DISTINCT v.lexeme
+        FROM unnest(
+            to_tsvector(CAST(CAST(:config AS text) AS regconfig), CAST(:query AS text))
+        ) AS v(lexeme, positions, weights)
+        WHERE v.lexeme <> ALL(CAST(:stop_words AS text[]))
+        ORDER BY v.lexeme
+        """
+    )
+
+
+def search_statement(collection_name: str) -> TextClause:
+    """Rank the collection's rows by BM25 relevance to the query terms, best first.
+
+    Binds: ``terms`` (text[], from :func:`query_terms_statement`), ``k1``,
     ``b`` (double precision) and ``limit`` (integer; NULL for no limit). The
-    query is tokenized with the same ``to_tsvector`` + stop-word rule as the
-    passages; ``N`` and ``avgdl`` come from the docs table, ``df`` from the
-    terms table, each passage sums the distinct query terms it contains, and a
-    row keeps its best passage. Rows are joined to the collection table for the
+    terms table's ``(term, doc_id)`` key finds the postings of the query
+    terms only; ``N`` and ``avgdl`` come from the docs table, ``df`` from the
+    terms table (both computed once: ``MATERIALIZED``, since an inlined CTE is
+    re-evaluated per posting), each passage sums the distinct query terms it
+    contains, and a row keeps its best passage. Rows are joined to the collection table for the
     payload. Ties break on ``row_id`` so the order is deterministic.
     """
     docs_table, terms_table = lexical_table_names(collection_name)
@@ -397,23 +448,16 @@ def search_statement(collection_name: str) -> TextClause:
     )
     return text(
         f"""
-        WITH query_terms AS (
-            SELECT DISTINCT v.lexeme AS term
-            FROM unnest(
-                to_tsvector(CAST(CAST(:config AS text) AS regconfig), CAST(:query AS text))
-            ) AS v(lexeme, positions, weights)
-            WHERE v.lexeme <> ALL(CAST(:stop_words AS text[]))
-        ),
-        corpus AS (
+        WITH corpus AS MATERIALIZED (
             SELECT
                 CAST(count(*) AS double precision) AS n,
                 CAST(COALESCE(avg(doc_len), 0) AS double precision) AS avgdl
             FROM {docs}
         ),
-        term_df AS (
+        term_df AS MATERIALIZED (
             SELECT t.term, CAST(count(*) AS double precision) AS df
             FROM {terms} t
-            JOIN query_terms q ON q.term = t.term
+            WHERE t.term = ANY(CAST(:terms AS text[]))
             GROUP BY t.term
         ),
         passage_scores AS (
@@ -435,6 +479,7 @@ def search_statement(collection_name: str) -> TextClause:
             JOIN term_df f ON f.term = t.term
             JOIN {docs} d ON d.doc_id = t.doc_id
             CROSS JOIN corpus c
+            WHERE t.term = ANY(CAST(:terms AS text[]))
             GROUP BY d.doc_id, d.row_id
         ),
         row_scores AS (
@@ -457,18 +502,19 @@ async def search_postings(
     *,
     language: str,
 ) -> list[tuple[Any, float, dict[str, Any] | None]]:
-    """Run :func:`search_statement`; ``(row_id, score, payload)`` tuples, best first."""
+    """Tokenize the query, then run :func:`search_statement`; ``(row_id, score, payload)``
+    tuples, best first. A query with no term left after tokenizing has no hit."""
     config, stop_words = tokenizer_settings(language)
+    terms_result = await session.execute(
+        query_terms_statement(),
+        {"config": config, "query": clean_text(query_text), "stop_words": stop_words},
+    )
+    terms = [term for (term,) in terms_result.all()]
+    if not terms:
+        return []
     result = await session.execute(
         search_statement(collection_name),
-        {
-            "config": config,
-            "query": query_text,
-            "stop_words": stop_words,
-            "k1": BM25_K1,
-            "b": BM25_B,
-            "limit": limit,
-        },
+        {"terms": terms, "k1": BM25_K1, "b": BM25_B, "limit": limit},
     )
     rows = []
     for row_id, score, payload in result.all():

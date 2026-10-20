@@ -25,12 +25,15 @@ from cognee.infrastructure.databases.vector.lexical import (
 from cognee.infrastructure.databases.vector.pgvector.lexical_index import (
     BM25_B,
     BM25_K1,
+    MAX_PASSAGE_CHARS,
     PASSAGE_BATCH_SIZE,
     PassageRow,
     bm25_scores,
     bm25_term_score,
     build_passage_rows,
+    clean_text,
     create_lexical_tables_statements,
+    cut_passage,
     dedupe_owned_rows,
     delete_postings_statement,
     fit_identifier,
@@ -38,6 +41,7 @@ from cognee.infrastructure.databases.vector.pgvector.lexical_index import (
     is_lexical_table_name,
     lexical_table_names,
     passage_doc_id,
+    query_terms_statement,
     quote_identifier,
     search_statement,
     tokenizer_settings,
@@ -128,6 +132,31 @@ def test_build_passage_rows_skips_missing_and_blank_text():
     assert [row.row_id for row in rows] == [str(kept.id)]
 
 
+def test_nul_characters_are_dropped_from_indexed_text():
+    """Postgres text cannot hold NUL; pypdf output and binary-ish files carry it."""
+    point = SimpleNamespace(id=uuid4(), text="alpha\x00beta gamma")
+    (row,) = build_passage_rows([point], "text")
+    assert row.text == "alphabeta gamma"
+    assert clean_text("q\x00uery") == "query"
+
+
+def test_a_whitespace_free_run_is_cut_below_the_tsvector_limit():
+    """An inline base64 image is one word to split_passages but megabytes long."""
+    blob = "A" * (MAX_PASSAGE_CHARS * 2 + 10)
+    point = SimpleNamespace(id=uuid4(), text=f"Intro text.\n\n![img](data:image/png;base64,{blob})")
+    rows = build_passage_rows([point], "text")
+    assert all(len(row.text) <= MAX_PASSAGE_CHARS for row in rows)
+    assert [row.passage_index for row in rows] == list(range(len(rows)))
+    assert "".join(row.text for row in rows).replace(" ", "").count("A") == len(blob)
+
+
+def test_cut_passage_prefers_whitespace_and_keeps_short_passages_whole():
+    assert cut_passage("short passage", max_chars=100) == ["short passage"]
+    pieces = cut_passage("aaaa bbbb cccc dddd", max_chars=10)
+    assert pieces == ["aaaa bbbb", "cccc dddd"]
+    assert all(len(piece) <= 10 for piece in cut_passage("x" * 25, max_chars=10))
+
+
 def test_dedupe_owned_rows_last_wins_and_unites_tags():
     row_id = str(uuid4())
     rows = [
@@ -197,11 +226,17 @@ def test_statements_bind_user_text_instead_of_formatting_it():
     assert "vector =" not in upsert.split("ON CONFLICT")[1], "a stored vector is never touched"
     assert "'{belongs_to_set}'" in upsert
 
+    query_terms = str(query_terms_statement())
+    for bind in (":config", ":query", ":stop_words"):
+        assert bind in query_terms
+    assert "SELECT DISTINCT v.lexeme" in query_terms, "one contribution per query term"
+
     search = str(search_statement("Doc_text"))
-    for bind in (":config", ":query", ":stop_words", ":k1", ":b", ":limit"):
+    for bind in (":terms", ":k1", ":b", ":limit"):
         assert bind in search
+    assert "to_tsvector" not in search, "the terms arrive bound, so the term key drives the plan"
+    assert search.count("t.term = ANY(CAST(:terms AS text[]))") == 2
     assert "ln(1 + (c.n - f.df + 0.5) / (f.df + 0.5))" in search
-    assert "SELECT DISTINCT v.lexeme AS term" in search, "one contribution per query term"
     assert "max(score)" in search, "a row keeps its best passage"
     assert 'JOIN "Doc_text" c ON c.id = r.row_id' in search
     assert search.rstrip().endswith(
