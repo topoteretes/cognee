@@ -109,8 +109,13 @@ async def _serve_direct(service_url: str, api_key: str = "") -> CloudClient:
             name="ServeAuthenticationError",
         )
 
-    # Save so subsequent serve() calls reconnect without args
-    save_credentials(CloudCredentials(service_url=service_url, api_key=api_key))
+    # Save so subsequent serve() calls reconnect without args. The workspace id
+    # links this install's telemetry to its Cloud tenant (CLO-804); it is
+    # empty for self-hosted servers.
+    tenant_id = await client._get_workspace_id()
+    save_credentials(
+        CloudCredentials(service_url=service_url, api_key=api_key, tenant_id=tenant_id)
+    )
 
     set_remote_client(client)
     mode = "local" if "localhost" in service_url or "127.0.0.1" in service_url else "remote"
@@ -132,6 +137,14 @@ async def _serve_saved(creds: CloudCredentials) -> CloudClient:
         # "connect" and fail on the first operation.
         if await client._health_check() and await client._auth_check() not in (401, 403):
             logger.info("Using saved connection to %s", creds.service_url)
+            if not creds.tenant_id:
+                # Connections saved before the workspace id was recorded.
+                tenant_id = await client._get_workspace_id()
+                if tenant_id:
+                    from cognee.api.v1.serve.credentials import save_credentials
+
+                    creds.tenant_id = tenant_id
+                    save_credentials(creds)
             set_remote_client(client)
             print(f"  Connected to Cognee at {creds.service_url}")
             return client
