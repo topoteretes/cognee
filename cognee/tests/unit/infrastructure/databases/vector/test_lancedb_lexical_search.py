@@ -216,6 +216,21 @@ async def test_reindexing_replaces_the_row_and_merges_its_tags(tmp_path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("mode", MODES)
+async def test_blank_replacement_removes_the_previous_keyword_hits(mode, tmp_path):
+    async with _adapter(mode, tmp_path) as (adapter, _):
+        original = _cached("doc", "pelican confidential draft")
+        await _index_cached(adapter, [original])
+        assert await adapter.lexical_search("Cached_text", "confidential")
+
+        await _index_cached(adapter, [_cached("doc", "  \n")])
+
+        assert await adapter.lexical_search("Cached_text", "confidential") == []
+        [row] = await adapter.retrieve("Cached_text", [str(original.id)])
+        assert not row.payload["text"].strip()
+
+
+@pytest.mark.asyncio
 async def test_a_duplicate_id_in_one_batch_keeps_the_last_text_and_both_tags(tmp_path):
     async with _adapter("local", tmp_path) as (adapter, _):
         await _index_cached(

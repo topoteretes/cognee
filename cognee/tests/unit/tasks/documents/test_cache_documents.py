@@ -71,7 +71,7 @@ async def test_writes_one_entry_per_readable_document(mock_add):
     with patch.object(cache_module, "read_document_text", side_effect=read):
         cached = await cache_documents([readable, unreadable, empty], ctx=ctx)
 
-    assert [entry.name for entry in cached] == ["a.txt"]
+    assert [entry.name for entry in cached] == ["a.txt", "c.txt"]
     assert isinstance(cached[0], CachedDocument)
     mock_add.assert_awaited_once()
     written, kwargs = mock_add.await_args.args[0], mock_add.await_args.kwargs
@@ -104,11 +104,14 @@ async def test_an_io_error_fails_the_item_so_the_next_run_caches_it(mock_add):
 async def test_update_caches_the_new_text_without_reading_the_file(mock_add):
     """update() holds the edited text; a read could only fail after its chunks were written."""
     read = AsyncMock(side_effect=AssertionError("the file must not be read"))
+    document = _document()
     with patch.object(cache_module, "read_document_text", read):
-        entry = await cache_module.cache_document_text(_document(), "the edited text")
-        blank = await cache_module.cache_document_text(_document(), "  \n")
+        entry = await cache_module.cache_document_text(document, "the edited text")
+        blank = await cache_module.cache_document_text(document, "  \n")
 
     assert entry.text == "the edited text"
-    assert blank is None
-    mock_add.assert_awaited_once()
-    assert mock_add.await_args.args[0] == [entry]
+    assert blank.id == entry.id
+    assert not blank.text.strip()
+    assert mock_add.await_count == 2
+    assert mock_add.await_args_list[0].args[0] == [entry]
+    assert mock_add.await_args_list[1].args[0] == [blank], "clear the previous searchable text"

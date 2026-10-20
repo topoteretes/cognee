@@ -46,10 +46,12 @@ def build_cached_document(document: Document, text: str) -> CachedDocument:
     )
 
 
-def _entry_for(document: Document, text: str) -> CachedDocument | None:
-    """The cache entry for ``text``, or None for a blank one; long texts are cut and logged."""
-    if not text.strip():
-        return None
+def _entry_for(document: Document, text: str) -> CachedDocument:
+    """The cache entry for ``text``; long texts are cut and logged.
+
+    Blank text must replace a previous entry too. Skipping its write would
+    leave the old graph text and lexical postings searchable after an edit.
+    """
     entry = build_cached_document(document, text)
     if entry.truncated:
         logger.info(
@@ -61,7 +63,7 @@ def _entry_for(document: Document, text: str) -> CachedDocument | None:
     return entry
 
 
-async def cache_document_text(document: Document, text: str, ctx=None) -> CachedDocument | None:
+async def cache_document_text(document: Document, text: str, ctx=None) -> CachedDocument:
     """Cache ``document`` from ``text`` already in hand, without reading its file.
 
     ``update()`` holds the new text when it re-caches an edited document, and
@@ -69,8 +71,7 @@ async def cache_document_text(document: Document, text: str, ctx=None) -> Cached
     were written.
     """
     entry = _entry_for(document, text)
-    if entry is not None:
-        await add_data_points([entry], ctx=ctx, index_edges=False)
+    await add_data_points([entry], ctx=ctx, index_edges=False)
     return entry
 
 
@@ -100,8 +101,7 @@ async def cache_documents(documents: list[Document], ctx=None) -> list[CachedDoc
             )
             continue
         entry = _entry_for(document, text)
-        if entry is not None:
-            cached.append(entry)
+        cached.append(entry)
 
     if cached:
         await add_data_points(cached, ctx=ctx, index_edges=False)
