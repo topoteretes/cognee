@@ -4,6 +4,11 @@
   "conversations": 10,
   "questions": 1986,
   "runs": 1,
+  "publication": {
+    "source_commit": "012e8a039b5116bc30325a9c10192d9c9336e399",
+    "eligible_questions": 1762,
+    "scored_questions": 1762
+  },
   "configuration": "B: deeper retrieval (20/20/20) with standard ingestion; second run of answers and judge",
   "ingestion": {
     "date": "2026-10-07",

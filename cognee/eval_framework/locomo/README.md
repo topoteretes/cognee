@@ -1,27 +1,18 @@
 # LoCoMo on cognee
 
-Runs the [LoCoMo](https://github.com/snap-research/locomo) long-term conversational memory
-benchmark on cognee: dated 6-turn windows through `remember()`, hybrid retrieval, one answer
-prompt for every question, and an LLM judge.
+Runs the [LoCoMo](https://github.com/snap-research/locomo) long-term conversational memory benchmark on cognee: dated 6-turn windows through `remember()`, hybrid retrieval, one answer prompt for every question, and an LLM judge.
 
-| Configuration | Accuracy |
-| --- | ---: |
-| Default retrieval depth (5/5/5), adapted ingestion prompts, global context index | **89.7%** |
-| Deeper retrieval (20/20/20), standard ingestion | **91.3%** |
+Cognee answered about **91%** of 1,762 evaluated questions correctly according to `gpt-5.1`, with answers by `gpt-5-mini` from hybrid retrieval 20/20/20 over memories built with Cognee's standard ingestion prompts. For transparency, we report two runs on the same memories, which scored 90.7% and 91.3%. The evaluated questions leave out open-domain questions and 143 questions whose gold answer an audit flags; [`report_artifacts/README.md`](report_artifacts/README.md#evaluation-scope) gives the rule and the counts.
 
-Share of 1,762 questions answered correctly according to `gpt-5.1`, with answers by
-`gpt-5-mini`; open-domain questions and 143 questions with a corrupted gold answer are left
-out. The method, the two configurations and the full analysis are in the technical report,
-available soon. Answers, verdicts and run configurations are in
-[`report_artifacts/`](report_artifacts/).
+The [technical report](REPORT.md) describes the method, the scope and the grading rules, and an additional configuration: the hybrid retriever's default depth (5/5/5) with adapted ingestion and the global context index, 89.7% in one run. Answers, verdicts, summaries and run configurations of the 91.3% run and of the additional configuration are in [`report_artifacts/`](report_artifacts/).
 
 ## Running
 
 ```bash
-# deeper retrieval, standard ingestion
+# main configuration: hybrid retrieval 20/20/20, standard ingestion
 uv run python -m cognee.eval_framework.locomo.run_locomo_eval --conversations 0-9
 
-# default retrieval depth, adapted ingestion prompts
+# additional configuration: default retrieval depth 5/5/5 with the global context index, adapted ingestion
 uv run python -m cognee.eval_framework.locomo.run_locomo_eval --conversations 0-9 \
     --resolve-dates \
     --extraction-prompt cognee/eval_framework/locomo/prompts/graph_extraction_conversations.txt \
@@ -30,11 +21,15 @@ uv run python -m cognee.eval_framework.locomo.run_locomo_eval --conversations 0-
     --config-json-path cognee/eval_framework/locomo/configs/locomo_hybrid_5_5_5_gci.json
 ```
 
+Each command writes a fresh run directory (`temp/locomo_runs/<timestamp>` unless `--run-dir` is given) and summarises it into `locomo_summary.json` and `locomo_summary.md` there. The dataset is downloaded to `temp/locomo_data/locomo10.json` when missing; compare its SHA-256 with `dataset_sha256` in the run configurations of `report_artifacts/`. Values in a `.env` file take precedence over the settings the driver passes to its child processes, such as `LLM_MODEL` and the database locations, so keep the file consistent with the driver's options.
+
+Only evaluated questions are answered and judged: `answer.py` drops the excluded ones before retrieval, following [`scope.py`](scope.py) and `--gold-exclusions` (default `report_artifacts/gold_exclusions.json`). The driver refuses to aggregate a run directory that holds answers to excluded questions; [`report_artifacts/README.md`](report_artifacts/README.md#filtering-existing-run-records) shows how to filter such records.
+
 ## Layout
 
 - `run_locomo_eval.py` — the driver: one command for the whole benchmark
-- `ingest.py`, `answer.py` — one conversation each, started by the driver: ingestion, then
-  answers and judge; the four ingestion options are documented in `ingest.py`
+- `ingest.py`, `answer.py` — one conversation each, started by the driver: ingestion, then answers and judge; the four ingestion options are documented in `ingest.py`
+- `scope.py` — which questions are evaluated
 - `preprocess.py` — the dated 6-turn windows and the overview document
 - `dates.py` — relative dates resolved before ingestion (`--resolve-dates`)
 - `aggregate.py` — the summary tables of a run
@@ -42,6 +37,5 @@ uv run python -m cognee.eval_framework.locomo.run_locomo_eval --conversations 0-
 - `prompts/` — the judge prompt, the date-resolution prompt and the two adapted ingestion prompts
 - `qa_prompts/unified.txt` — the answer prompt
 - `configs/` — retrieval settings: 20/20/20, and 5/5/5 with the global context index
-- `report_artifacts/` — per-question answers and verdicts, summaries, ingestion reports, run
-  configurations and gold exclusions: the first 20/20/20 run at the top level, the 5/5/5 run in
-  `topk5_adapted_prompts/`, a second 20/20/20 run in `topk20_run2/`
+- `report_artifacts/` — per-question answers and verdicts of one run of each configuration (evaluated questions only), their summaries, ingestion reports and run configurations, and the gold exclusions
+- `REPORT.md` — the technical report

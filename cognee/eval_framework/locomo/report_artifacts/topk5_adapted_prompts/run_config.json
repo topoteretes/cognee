@@ -4,6 +4,11 @@
   "conversations": 10,
   "questions": 1986,
   "runs": 1,
+  "publication": {
+    "source_commit": "012e8a039b5116bc30325a9c10192d9c9336e399",
+    "eligible_questions": 1762,
+    "scored_questions": 1761
+  },
   "configuration": "A: default retrieval depth (5/5/5) with adapted ingestion prompts and a global context index",
   "ingestion": {
     "date": "2026-10-12",

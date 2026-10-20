@@ -34,22 +34,6 @@
   {
     "conversation_index": 5,
     "conversation_id": "conv-44",
-    "question_idx": 2,
-    "question_type": "multi_hop",
-    "category": 1,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "discovering new places to eat, playing board games, visiting cozy cafes, wine tasting",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response correctly includes two of the four listed activities (playing board games and wine tasting) without contradicting the others, satisfying the requirement to match at least half."
-      }
-    }
-  },
-  {
-    "conversation_index": 5,
-    "conversation_id": "conv-44",
     "question_idx": 3,
     "question_type": "multi_hop",
     "category": 1,
@@ -60,38 +44,6 @@
       "llm_judge": {
         "score": 0.0,
         "reason": "[openai/gpt-5.1] WRONG: The response only mentions places to eat and omits most of the types of places in the gold answer, providing far fewer than half of the listed items."
-      }
-    }
-  },
-  {
-    "conversation_index": 5,
-    "conversation_id": "conv-44",
-    "question_idx": 4,
-    "question_type": "temporal",
-    "category": 2,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "the week before 16 April, 2023",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response refers to the week before April 16, 2023 (around April 9–15), which does not match the gold answer’s week of April 3–9."
-      }
-    }
-  },
-  {
-    "conversation_index": 5,
-    "conversation_id": "conv-44",
-    "question_idx": 5,
-    "question_type": "temporal",
-    "category": 2,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "the week before 3 May, 2023",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response places the event in the week before 3 May 2023 (late April), which contradicts the gold answer of the first week of May 2023."
       }
     }
   },
@@ -194,22 +146,6 @@
   {
     "conversation_index": 5,
     "conversation_id": "conv-44",
-    "question_idx": 12,
-    "question_type": "multi_hop",
-    "category": 1,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Rock climbing, walks",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response only includes one of the three correct activities (rock climbing) and misses fishing and camping."
-      }
-    }
-  },
-  {
-    "conversation_index": 5,
-    "conversation_id": "conv-44",
     "question_idx": 13,
     "question_type": "temporal",
     "category": 2,
@@ -284,54 +220,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response correctly matches the gold answer's quantity using a numeric form."
-      }
-    }
-  },
-  {
-    "conversation_index": 5,
-    "conversation_id": "conv-44",
-    "question_idx": 18,
-    "question_type": "multi_hop",
-    "category": 1,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Adopted",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response says Pixie was adopted, which contradicts the gold answer that she came from a breeder."
-      }
-    }
-  },
-  {
-    "conversation_index": 5,
-    "conversation_id": "conv-44",
-    "question_idx": 19,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Puzzles",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response suggests doing puzzles, which does not match the gold answer of cooking dog treats as an indoor activity Andrew would enjoy while making his dog happy."
-      }
-    }
-  },
-  {
-    "conversation_index": 5,
-    "conversation_id": "conv-44",
-    "question_idx": 20,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Chicken",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning and content."
       }
     }
   },
@@ -530,22 +418,6 @@
   {
     "conversation_index": 5,
     "conversation_id": "conv-44",
-    "question_idx": 33,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "go hiking, spend time in nature, go for walks (e.g. lunch walks), grab a coffee for self-care, go on bike rides to parks, join a dog‑owners group, exercise dogs daily, socialize dogs, provide mental stimulation and indoor toys/games, use pet‑friendly housing websites with filters, contact landlords and check neighborhoods, look for a place near a park or woods, choose a smaller dog suitable for an apartment, slowly introduce a new pup to existing dogs, create a safe space for a new pup, groom dogs slowly and gently, use positive‑reinforcement training, follow a behaviorist's routine‑change recommendations",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response lists general stress-relief and dog-care strategies but does not mention changing to a hybrid/remote job or moving away from the city to the suburbs, which is the core of the gold answer."
-      }
-    }
-  },
-  {
-    "conversation_index": 5,
-    "conversation_id": "conv-44",
     "question_idx": 34,
     "question_type": "temporal",
     "category": 2,
@@ -588,22 +460,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response includes chicken pot pie, roasted chicken (chicken roast), and sushi, covering at least half of the gold items without contradiction."
-      }
-    }
-  },
-  {
-    "conversation_index": 5,
-    "conversation_id": "conv-44",
-    "question_idx": 37,
-    "question_type": "temporal",
-    "category": 2,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "17 October, 2023 to 23 October, 2023",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response gives a different date range (17–23 October) that does not match the gold range (19–24 October) and includes days outside it."
       }
     }
   },
@@ -658,22 +514,6 @@
   {
     "conversation_index": 5,
     "conversation_id": "conv-44",
-    "question_idx": 41,
-    "question_type": "multi_hop",
-    "category": 1,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Jack Russell mixes, Chihuahua mixes, Labrador mixes",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response lists incorrect and mismatched breeds (including Jack Russell mixes) that contradict the specified mongrel-Lab and mongrel-Chihuahua mixes for the named dogs."
-      }
-    }
-  },
-  {
-    "conversation_index": 5,
-    "conversation_id": "conv-44",
     "question_idx": 42,
     "question_type": "multi_hop",
     "category": 1,
@@ -684,38 +524,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning."
-      }
-    }
-  },
-  {
-    "conversation_index": 5,
-    "conversation_id": "conv-44",
-    "question_idx": 43,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Not mentioned in the conversation",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The conversation does contain the state (Minnesota), so saying it is not mentioned is incorrect."
-      }
-    }
-  },
-  {
-    "conversation_index": 5,
-    "conversation_id": "conv-44",
-    "question_idx": 44,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Not mentioned in the conversation",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The gold answer specifies Voyageurs National Park, but the response incorrectly claims the park is not mentioned."
       }
     }
   },
@@ -834,38 +642,6 @@
   {
     "conversation_index": 5,
     "conversation_id": "conv-44",
-    "question_idx": 52,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Go to nearby parks",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response suggests going to nearby parks, which does not match the gold answer about installing a bird feeder to watch birds from home."
-      }
-    }
-  },
-  {
-    "conversation_index": 5,
-    "conversation_id": "conv-44",
-    "question_idx": 53,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Wildlife biologist",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response suggests a different career (wildlife biologist) rather than park ranger or a similar National Park Service role, so it does not match the gold answer."
-      }
-    }
-  },
-  {
-    "conversation_index": 5,
-    "conversation_id": "conv-44",
     "question_idx": 54,
     "question_type": "multi_hop",
     "category": 1,
@@ -908,22 +684,6 @@
       "llm_judge": {
         "score": 0.0,
         "reason": "[openai/gpt-5.1] WRONG: The response claims the information is not mentioned, but the gold answer explicitly states the fact that Andrew has not moved, so it should give a concrete 'No' answer."
-      }
-    }
-  },
-  {
-    "conversation_index": 5,
-    "conversation_id": "conv-44",
-    "question_idx": 57,
-    "question_type": "temporal",
-    "category": 2,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "A few days before 22 November, 2023",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response specifies a few days before 22 November 2023, which is mid-November and not consistent with the gold answer of a few days before November 2023 (late October)."
       }
     }
   },

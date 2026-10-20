@@ -18,22 +18,6 @@
   {
     "conversation_index": 9,
     "conversation_id": "conv-50",
-    "question_idx": 1,
-    "question_type": "multi_hop",
-    "category": 1,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "new mansion, red sports car",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response correctly identifies that Calvin bought a mansion and a sports car, capturing both items from the gold answer without contradiction, despite missing specific details like Japan and the Ferrari model."
-      }
-    }
-  },
-  {
-    "conversation_index": 9,
-    "conversation_id": "conv-50",
     "question_idx": 2,
     "question_type": "temporal",
     "category": 2,
@@ -66,22 +50,6 @@
   {
     "conversation_index": 9,
     "conversation_id": "conv-50",
-    "question_idx": 4,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "United States",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer, identifying the same country."
-      }
-    }
-  },
-  {
-    "conversation_index": 9,
-    "conversation_id": "conv-50",
     "question_idx": 5,
     "question_type": "multi_hop",
     "category": 1,
@@ -108,38 +76,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response correctly identifies that Dave likes classic cars, which is equivalent in meaning to classic vintage cars."
-      }
-    }
-  },
-  {
-    "conversation_index": 9,
-    "conversation_id": "conv-50",
-    "question_idx": 7,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Not mentioned in the conversation",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response claims the information is not mentioned, contradicting the gold answer that Dave's shop does employ a lot of people."
-      }
-    }
-  },
-  {
-    "conversation_index": 9,
-    "conversation_id": "conv-50",
-    "question_idx": 8,
-    "question_type": "temporal",
-    "category": 2,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "1 May, 2023",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response gives the exact same date as the gold answer in an equivalent format."
       }
     }
   },
@@ -204,22 +140,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: Describing it as the week before 31 May 2023 is temporally equivalent to the last week of May 2023."
-      }
-    }
-  },
-  {
-    "conversation_index": 9,
-    "conversation_id": "conv-50",
-    "question_idx": 13,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Likely yes",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response affirms that Calvin would enjoy performing at the Hollywood Bowl, matching the gold answer’s core yes/no meaning even without the detailed reason."
       }
     }
   },
@@ -306,22 +226,6 @@
   {
     "conversation_index": 9,
     "conversation_id": "conv-50",
-    "question_idx": 19,
-    "question_type": "multi_hop",
-    "category": 1,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Shibuya Crossing, Shinjuku, music festival in Tokyo, concert in Tokyo",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response correctly lists Shibuya Crossing, Shinjuku, and a music festival in Tokyo (3 of the 4 gold items) and adds a non-contradictory extra detail."
-      }
-    }
-  },
-  {
-    "conversation_index": 9,
-    "conversation_id": "conv-50",
     "question_idx": 20,
     "question_type": "multi_hop",
     "category": 1,
@@ -332,22 +236,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response includes 'Dave's dad,' which matches the gold answer, and the added 'neighbor' does not contradict it."
-      }
-    }
-  },
-  {
-    "conversation_index": 9,
-    "conversation_id": "conv-50",
-    "question_idx": 21,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Yes",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response directly matches the gold answer's yes/no meaning that Calvin wants to become more popular."
       }
     }
   },
@@ -466,22 +354,6 @@
   {
     "conversation_index": 9,
     "conversation_id": "conv-50",
-    "question_idx": 29,
-    "question_type": "multi_hop",
-    "category": 1,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Photography, Listening to classic rock and vinyl, Playing cards, Attending concerts, Going for strolls, Note-taking",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response correctly lists walking, listening to albums, attending concerts, and photography, matching most of the gold hobbies without contradiction."
-      }
-    }
-  },
-  {
-    "conversation_index": 9,
-    "conversation_id": "conv-50",
     "question_idx": 30,
     "question_type": "multi_hop",
     "category": 1,
@@ -594,22 +466,6 @@
   {
     "conversation_index": 9,
     "conversation_id": "conv-50",
-    "question_idx": 37,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Yes",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response directly matches the gold answer that Calvin does love music tours."
-      }
-    }
-  },
-  {
-    "conversation_index": 9,
-    "conversation_id": "conv-50",
     "question_idx": 38,
     "question_type": "temporal",
     "category": 2,
@@ -620,22 +476,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response gives the same specific date as the gold answer in a different but equivalent format."
-      }
-    }
-  },
-  {
-    "conversation_index": 9,
-    "conversation_id": "conv-50",
-    "question_idx": 39,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Likely Dodge Charger",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response selects Dodge Charger, which matches the gold answer despite the hedging."
       }
     }
   },
@@ -668,22 +508,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response correctly identifies that both Calvin and Dave have nostalgic memories about their dads, matching the gold answer."
-      }
-    }
-  },
-  {
-    "conversation_index": 9,
-    "conversation_id": "conv-50",
-    "question_idx": 42,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "No",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response matches the gold answer exactly in meaning ('No')."
       }
     }
   },
@@ -754,22 +578,6 @@
   {
     "conversation_index": 9,
     "conversation_id": "conv-50",
-    "question_idx": 47,
-    "question_type": "multi_hop",
-    "category": 1,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "4",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response says Dave attended four car shows, which contradicts the gold answer of two."
-      }
-    }
-  },
-  {
-    "conversation_index": 9,
-    "conversation_id": "conv-50",
     "question_idx": 48,
     "question_type": "temporal",
     "category": 2,
@@ -796,22 +604,6 @@
       "llm_judge": {
         "score": 0.0,
         "reason": "[openai/gpt-5.1] WRONG: The response only mentions restoring a car and omits tinkering with engines and refurbishing cars, covering fewer than half of the gold answer’s elements."
-      }
-    }
-  },
-  {
-    "conversation_index": 9,
-    "conversation_id": "conv-50",
-    "question_idx": 50,
-    "question_type": "temporal",
-    "category": 2,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "8–14 October, 2023",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response places the purchase in the second week of October 2023, which conflicts with the gold answer specifying the first week of October 2023."
       }
     }
   },
@@ -962,70 +754,6 @@
   {
     "conversation_index": 9,
     "conversation_id": "conv-50",
-    "question_idx": 60,
-    "question_type": "multi_hop",
-    "category": 1,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Necklace, custom guitar with an octopus design",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response correctly captures both gifts—a necklace matching the gold chain and a custom guitar with an octopus design—without contradicting the gold answer."
-      }
-    }
-  },
-  {
-    "conversation_index": 9,
-    "conversation_id": "conv-50",
-    "question_idx": 61,
-    "question_type": "temporal",
-    "category": 2,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Not mentioned in the conversation",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response claims the duration was not mentioned, but the gold specifies it was nearly two months, so the response contradicts available information."
-      }
-    }
-  },
-  {
-    "conversation_index": 9,
-    "conversation_id": "conv-50",
-    "question_idx": 62,
-    "question_type": "temporal",
-    "category": 2,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Not mentioned in the conversation",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response claims the information is not mentioned, but the correct duration is explicitly two weeks."
-      }
-    }
-  },
-  {
-    "conversation_index": 9,
-    "conversation_id": "conv-50",
-    "question_idx": 63,
-    "question_type": "multi_hop",
-    "category": 1,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Custom-made guitars",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response only says 'custom-made guitars', which is too vague and does not capture at least one of the specific styles ('custom-made yellow guitar with an octopus on it' or 'shiny purple guitar')."
-      }
-    }
-  },
-  {
-    "conversation_index": 9,
-    "conversation_id": "conv-50",
     "question_idx": 64,
     "question_type": "multi_hop",
     "category": 1,
@@ -1148,22 +876,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning and wording."
-      }
-    }
-  },
-  {
-    "conversation_index": 9,
-    "conversation_id": "conv-50",
-    "question_idx": 72,
-    "question_type": "single_hop",
-    "category": 4,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Not mentioned in the conversation",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response incorrectly claims the information is not mentioned, but the gold specifies the answer is Aerosmith."
       }
     }
   },
@@ -1404,22 +1116,6 @@
       "llm_judge": {
         "score": 0.0,
         "reason": "[openai/gpt-5.1] WRONG: The response talks about working on music collaborations, which is unrelated to Calvin being excited to get back on the road after fixing his car."
-      }
-    }
-  },
-  {
-    "conversation_index": 9,
-    "conversation_id": "conv-50",
-    "question_idx": 88,
-    "question_type": "single_hop",
-    "category": 4,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Not mentioned in the conversation",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response claims the information is not mentioned, but the gold specifies they arranged regular walks together."
       }
     }
   },
@@ -2178,38 +1874,6 @@
   {
     "conversation_index": 9,
     "conversation_id": "conv-50",
-    "question_idx": 136,
-    "question_type": "single_hop",
-    "category": 4,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "2022",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response gives a specific year (2022) that is not entailed by or necessarily consistent with the relative time expression 'last year' in the gold answer."
-      }
-    }
-  },
-  {
-    "conversation_index": 9,
-    "conversation_id": "conv-50",
-    "question_idx": 137,
-    "question_type": "single_hop",
-    "category": 4,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Not mentioned in the conversation",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response claims the information is not mentioned, but the correct answer is that Calvin became interested in cars at an early age."
-      }
-    }
-  },
-  {
-    "conversation_index": 9,
-    "conversation_id": "conv-50",
     "question_idx": 138,
     "question_type": "single_hop",
     "category": 4,
@@ -2354,22 +2018,6 @@
   {
     "conversation_index": 9,
     "conversation_id": "conv-50",
-    "question_idx": 147,
-    "question_type": "single_hop",
-    "category": 4,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Watching music videos, concerts and documentaries, a gifted necklace, collaborating with others, positive company, staying informed on world events, long drives/seeing his car, performing live, a custom octopus-design guitar",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response lists various motivational tools but does not mention writing lyrics or notes, which are the key elements in the gold answer."
-      }
-    }
-  },
-  {
-    "conversation_index": 9,
-    "conversation_id": "conv-50",
     "question_idx": 148,
     "question_type": "single_hop",
     "category": 4,
@@ -2412,22 +2060,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response matches the gold answer in meaning, identifying the invitee as an old high school buddy."
-      }
-    }
-  },
-  {
-    "conversation_index": 9,
-    "conversation_id": "conv-50",
-    "question_idx": 151,
-    "question_type": "single_hop",
-    "category": 4,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Hiking",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response 'Hiking' names a different hobby than the gold answer 'Photography'."
       }
     }
   },

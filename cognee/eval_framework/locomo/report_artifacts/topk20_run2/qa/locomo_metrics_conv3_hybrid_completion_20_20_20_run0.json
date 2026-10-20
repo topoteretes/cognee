@@ -2,22 +2,6 @@
   {
     "conversation_index": 3,
     "conversation_id": "conv-42",
-    "question_idx": 0,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "Likely yes",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response correctly conveys that it is likely Nate has other friends, matching the gold answer's core 'yes' judgment."
-      }
-    }
-  },
-  {
-    "conversation_index": 3,
-    "conversation_id": "conv-42",
     "question_idx": 1,
     "question_type": "multi_hop",
     "category": 1,
@@ -60,38 +44,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the temporal information in the gold answer with equivalent wording."
-      }
-    }
-  },
-  {
-    "conversation_index": 3,
-    "conversation_id": "conv-42",
-    "question_idx": 4,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "Tilly",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response 'Tilly' does not mention hairless cats or pigs and does not answer which pets would not cause Joanna discomfort."
-      }
-    }
-  },
-  {
-    "conversation_index": 3,
-    "conversation_id": "conv-42",
-    "question_idx": 5,
-    "question_type": "multi_hop",
-    "category": 1,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "Writing, reading, watching movies, exploring nature, hiking, DIYs, cooking, baking, hanging with friends, acting",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response includes all four of Joanna's hobbies from the gold answer, with only additional non-contradictory hobbies added."
       }
     }
   },
@@ -194,22 +146,6 @@
   {
     "conversation_index": 3,
     "conversation_id": "conv-42",
-    "question_idx": 12,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "Atopy",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response names atopy, which is a broader allergic predisposition and not equivalent to the specific condition asthma given in the gold answer."
-      }
-    }
-  },
-  {
-    "conversation_index": 3,
-    "conversation_id": "conv-42",
     "question_idx": 13,
     "question_type": "temporal",
     "category": 2,
@@ -220,22 +156,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response gives exactly the same specific date as the gold answer."
-      }
-    }
-  },
-  {
-    "conversation_index": 3,
-    "conversation_id": "conv-42",
-    "question_idx": 14,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "Not mentioned in the conversation",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response incorrectly claims the nickname is not mentioned, while the correct concrete nickname is provided in the gold answer."
       }
     }
   },
@@ -348,54 +268,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer."
-      }
-    }
-  },
-  {
-    "conversation_index": 3,
-    "conversation_id": "conv-42",
-    "question_idx": 22,
-    "question_type": "temporal",
-    "category": 2,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "25 February, 2022",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response gives a specific date in February 2022, which contradicts the gold answer of May 2022."
-      }
-    }
-  },
-  {
-    "conversation_index": 3,
-    "conversation_id": "conv-42",
-    "question_idx": 23,
-    "question_type": "multi_hop",
-    "category": 1,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "Joanna's recent screenplay",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response mentions only a single recent screenplay and does not identify the first and third screenplays specified in the gold answer, so it does not capture the required items."
-      }
-    }
-  },
-  {
-    "conversation_index": 3,
-    "conversation_id": "conv-42",
-    "question_idx": 24,
-    "question_type": "temporal",
-    "category": 2,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "Weekend of 18 June, 2022",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response specifies a different weekend (18 June 2022) than the weekend immediately after 3 June 2022 (4–5 June 2022), so it conflicts with the gold answer."
       }
     }
   },
@@ -546,38 +418,6 @@
   {
     "conversation_index": 3,
     "conversation_id": "conv-42",
-    "question_idx": 34,
-    "question_type": "multi_hop",
-    "category": 1,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "Little Women, a fantasy book series",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response correctly includes one of the two recommended books, 'Little Women', which satisfies the requirement to contain at least half of the gold items without contradiction."
-      }
-    }
-  },
-  {
-    "conversation_index": 3,
-    "conversation_id": "conv-42",
-    "question_idx": 35,
-    "question_type": "temporal",
-    "category": 2,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "27–28 August, 2022",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response specifies the exact weekend dates (27–28 August, 2022) that correspond to the weekend of 22 August, 2022, making it a more precise but consistent answer."
-      }
-    }
-  },
-  {
-    "conversation_index": 3,
-    "conversation_id": "conv-42",
     "question_idx": 36,
     "question_type": "temporal",
     "category": 2,
@@ -684,22 +524,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response correctly includes both shared movies, with 'The Lord of the Rings Trilogy' being a consistent, more specific form of 'Lord of the Rings'."
-      }
-    }
-  },
-  {
-    "conversation_index": 3,
-    "conversation_id": "conv-42",
-    "question_idx": 43,
-    "question_type": "temporal",
-    "category": 2,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "About three months.",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response gives a different duration ('about three months') than the gold answer ('four months')."
       }
     }
   },
@@ -834,38 +658,6 @@
   {
     "conversation_index": 3,
     "conversation_id": "conv-42",
-    "question_idx": 52,
-    "question_type": "multi_hop",
-    "category": 1,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "Three",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response says three works made it to the big screen, which contradicts the gold answer of two."
-      }
-    }
-  },
-  {
-    "conversation_index": 3,
-    "conversation_id": "conv-42",
-    "question_idx": 53,
-    "question_type": "multi_hop",
-    "category": 1,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "1",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response says Nate took his turtles on a walk once, but the correct number is twice."
-      }
-    }
-  },
-  {
-    "conversation_index": 3,
-    "conversation_id": "conv-42",
     "question_idx": 54,
     "question_type": "temporal",
     "category": 2,
@@ -930,22 +722,6 @@
   {
     "conversation_index": 3,
     "conversation_id": "conv-42",
-    "question_idx": 58,
-    "question_type": "multi_hop",
-    "category": 1,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "this series, dairy-free margarine, coconut oil, The Lord of the Rings Trilogy",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response correctly lists four of the eight recommended items, meeting the at-least-half requirement without contradicting the gold answer."
-      }
-    }
-  },
-  {
-    "conversation_index": 3,
-    "conversation_id": "conv-42",
     "question_idx": 59,
     "question_type": "multi_hop",
     "category": 1,
@@ -956,38 +732,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response includes both main methods from the gold answer—writing memories down in journals/notebooks and using a corkboard—without contradicting them."
-      }
-    }
-  },
-  {
-    "conversation_index": 3,
-    "conversation_id": "conv-42",
-    "question_idx": 60,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "Xbox",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response names a different console (Xbox) than the one in the gold answer (Nintendo Switch)."
-      }
-    }
-  },
-  {
-    "conversation_index": 3,
-    "conversation_id": "conv-42",
-    "question_idx": 61,
-    "question_type": "multi_hop",
-    "category": 1,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "computer, Nintendo, Xbox controller, Catan, Chess, online",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response correctly includes computer (PC) and Nintendo (a reasonable stand-in for Gamecube), covering at least two of the three listed mediums without contradiction."
       }
     }
   },
@@ -1058,22 +802,6 @@
   {
     "conversation_index": 3,
     "conversation_id": "conv-42",
-    "question_idx": 66,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "Writing",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response 'Writing' does not match the gold answer about Nate considering work as an animal keeper at a zoo with turtles."
-      }
-    }
-  },
-  {
-    "conversation_index": 3,
-    "conversation_id": "conv-42",
     "question_idx": 67,
     "question_type": "multi_hop",
     "category": 1,
@@ -1084,22 +812,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response correctly includes turtles (and implicitly a dog via Max) as Nate’s pets, covering at least half of the gold items without contradiction; the extra fish does not conflict."
-      }
-    }
-  },
-  {
-    "conversation_index": 3,
-    "conversation_id": "conv-42",
-    "question_idx": 68,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "4",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response gives the same number of hikes as the gold answer using a numeric format."
       }
     }
   },
@@ -1164,54 +876,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer date and level of specificity."
-      }
-    }
-  },
-  {
-    "conversation_index": 3,
-    "conversation_id": "conv-42",
-    "question_idx": 73,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "Not mentioned in the conversation",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The conversation did mention the specific state (Indiana), but the response incorrectly claimed it was not mentioned."
-      }
-    }
-  },
-  {
-    "conversation_index": 3,
-    "conversation_id": "conv-42",
-    "question_idx": 74,
-    "question_type": "multi_hop",
-    "category": 1,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "Little Women, a large fluffy couch, a weighted blanket, dimmable lights, a fantasy book series, start a cork board, read lots, try different genres, build a solid understanding of literature, write and share your work, practice and gather feedback, have faith in yourself, continue following your writing dreams",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response includes multiple correct recommendations—Little Women, cork board, cozy living room setup, and a fantasy book series—covering more than half of the gold items without contradiction."
-      }
-    }
-  },
-  {
-    "conversation_index": 3,
-    "conversation_id": "conv-42",
-    "question_idx": 75,
-    "question_type": "multi_hop",
-    "category": 1,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "Coconut milk ice cream, dairy-free chocolate mousse",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response correctly includes 2 of the 4 listed favorite desserts, meeting the requirement of at least half with no contradictions."
       }
     }
   },
@@ -1298,22 +962,6 @@
   {
     "conversation_index": 3,
     "conversation_id": "conv-42",
-    "question_idx": 81,
-    "question_type": "multi_hop",
-    "category": 1,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "dairy-free chocolate cake with raspberries, chocolate raspberry tart, blueberry dessert with coconut milk and a gluten-free crust, dairy-free chocolate coconut cupcakes with raspberry frosting, dairy-free vanilla cake with strawberry filling and coconut cream frosting, dessert with almond milk, cake with strawberries and chocolate, cookie with chocolate drizzle and almonds, cookies, pies, cakes",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response correctly includes at least five of the seven specific recipes from the gold answer (vanilla strawberry coconut cream cake, strawberry chocolate cake, chocolate coconut cupcakes, chocolate raspberry tart, and chocolate cake with raspberries) and contradicts none of them."
-      }
-    }
-  },
-  {
-    "conversation_index": 3,
-    "conversation_id": "conv-42",
     "question_idx": 82,
     "question_type": "multi_hop",
     "category": 1,
@@ -1346,38 +994,6 @@
   {
     "conversation_index": 3,
     "conversation_id": "conv-42",
-    "question_idx": 84,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "Not mentioned in the conversation",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The gold gives a definite answer ('No'), but the response claims the information is not mentioned, contradicting the gold."
-      }
-    }
-  },
-  {
-    "conversation_index": 3,
-    "conversation_id": "conv-42",
-    "question_idx": 85,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "Filmmaker",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning and wording."
-      }
-    }
-  },
-  {
-    "conversation_index": 3,
-    "conversation_id": "conv-42",
     "question_idx": 86,
     "question_type": "temporal",
     "category": 2,
@@ -1388,22 +1004,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer date."
-      }
-    }
-  },
-  {
-    "conversation_index": 3,
-    "conversation_id": "conv-42",
-    "question_idx": 87,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "Florida",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer ('Florida')."
       }
     }
   },
@@ -1452,38 +1052,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning, identifying 'The Lord of the Rings' as Nate's favorite movie trilogy."
-      }
-    }
-  },
-  {
-    "conversation_index": 3,
-    "conversation_id": "conv-42",
-    "question_idx": 91,
-    "question_type": "single_hop",
-    "category": 4,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "adventures, magic, great characters",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response does not mention or imply dragons, which is the key element of what the book series is about."
-      }
-    }
-  },
-  {
-    "conversation_index": 3,
-    "conversation_id": "conv-42",
-    "question_idx": 92,
-    "question_type": "single_hop",
-    "category": 4,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "Not mentioned in the conversation",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response incorrectly claims the information is not mentioned, while the gold answer specifies red and purple lighting."
       }
     }
   },
@@ -1900,22 +1468,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response correctly identifies the frosting as coconut cream, matching the gold answer in meaning."
-      }
-    }
-  },
-  {
-    "conversation_index": 3,
-    "conversation_id": "conv-42",
-    "question_idx": 119,
-    "question_type": "single_hop",
-    "category": 4,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "Get deep in thought and think about Nate's life or new recipes.",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response does not match the gold answer that Nate feels he could write a whole movie."
       }
     }
   },

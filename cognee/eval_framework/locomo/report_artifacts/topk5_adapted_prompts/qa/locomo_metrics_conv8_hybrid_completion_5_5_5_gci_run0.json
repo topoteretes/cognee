@@ -66,38 +66,6 @@
   {
     "conversation_index": 8,
     "conversation_id": "conv-49",
-    "question_idx": 4,
-    "question_type": "temporal",
-    "category": 2,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Not mentioned in the conversation",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response claims the information is not mentioned, but the gold answer specifies the hobby was painting."
-      }
-    }
-  },
-  {
-    "conversation_index": 8,
-    "conversation_id": "conv-49",
-    "question_idx": 5,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Canada",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer ('Canada')."
-      }
-    }
-  },
-  {
-    "conversation_index": 8,
-    "conversation_id": "conv-49",
     "question_idx": 6,
     "question_type": "multi_hop",
     "category": 1,
@@ -156,22 +124,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response matches the gold answer exactly in meaning, specifying the same weekend before May 24, 2023."
-      }
-    }
-  },
-  {
-    "conversation_index": 8,
-    "conversation_id": "conv-49",
-    "question_idx": 10,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Camping trip",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response correctly identifies that Evan would prefer a camping trip, matching the gold answer's meaning."
       }
     }
   },
@@ -290,54 +242,6 @@
   {
     "conversation_index": 8,
     "conversation_id": "conv-49",
-    "question_idx": 18,
-    "question_type": "multi_hop",
-    "category": 1,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Cut sugary snacks, eat more vegetables and fruit, fruit as a low‑calorie snack, energy balls, balanced diet",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response only captures three of the seven specific healthy food suggestions (veggies, fruit as a snack, and energy balls), which is less than half of the listed items."
-      }
-    }
-  },
-  {
-    "conversation_index": 8,
-    "conversation_id": "conv-49",
-    "question_idx": 19,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Take it one day at a time, Celebrate small victories, Take small steps, Don't put too much pressure on yourself, Have fun, Make small changes, Surround yourself with people who care, Focus on progress, not perfection, It's okay to feel overwhelmed, Know you are not alone, Step out of your comfort zone, Try something new, Ask a doctor for guidance, Appreciate something each day, Use nature and small moments to rejuvenate",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response captures the core advice of making small, gradual changes, seeking rejuvenation in nature/pleasant activities, and relying on supportive relationships, matching all key elements of the gold answer without contradiction."
-      }
-    }
-  },
-  {
-    "conversation_index": 8,
-    "conversation_id": "conv-49",
-    "question_idx": 20,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Fitness smartwatch",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response suggests a fitness smartwatch, which does not match any of the gold answer options (healthy cookbook or healthy meal delivery subscription)."
-      }
-    }
-  },
-  {
-    "conversation_index": 8,
-    "conversation_id": "conv-49",
     "question_idx": 21,
     "question_type": "multi_hop",
     "category": 1,
@@ -386,22 +290,6 @@
   {
     "conversation_index": 8,
     "conversation_id": "conv-49",
-    "question_idx": 24,
-    "question_type": "temporal",
-    "category": 2,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Sam started a new diet and exercise routine",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response describes a different life event than the one in the gold answer and does not mention falling in love with a Canadian woman."
-      }
-    }
-  },
-  {
-    "conversation_index": 8,
-    "conversation_id": "conv-49",
     "question_idx": 25,
     "question_type": "temporal",
     "category": 2,
@@ -428,22 +316,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response correctly includes two of the three gold motivations (family and a fitness tracker) and adds non-contradictory extras."
-      }
-    }
-  },
-  {
-    "conversation_index": 8,
-    "conversation_id": "conv-49",
-    "question_idx": 27,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Fitness watch",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: A fitness watch is a type of fitness tracker and matches the intended meaning."
       }
     }
   },
@@ -498,22 +370,6 @@
   {
     "conversation_index": 8,
     "conversation_id": "conv-49",
-    "question_idx": 31,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Evan: painting and nature, gradual diet/exercise, one-step-at-a-time and support, Sam: diet/exercise and painting, country drives to relax, one-step-at-a-time and support",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response describes their healthier habits and specific coping strategies, aligning with a proactive, health-focused way of handling stress and challenges, which matches the core of the gold answer."
-      }
-    }
-  },
-  {
-    "conversation_index": 8,
-    "conversation_id": "conv-49",
     "question_idx": 32,
     "question_type": "multi_hop",
     "category": 1,
@@ -524,22 +380,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response accurately paraphrases the gold answer, capturing that Evan repeatedly loses his keys on a weekly basis."
-      }
-    }
-  },
-  {
-    "conversation_index": 8,
-    "conversation_id": "conv-49",
-    "question_idx": 33,
-    "question_type": "multi_hop",
-    "category": 1,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Flying over skyscrapers",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response describes flying over skyscrapers, which is effectively the same scenario as flying over a cityscape."
       }
     }
   },
@@ -572,54 +412,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response gives the exact calendar date corresponding to the described Saturday before August 15, 2023."
-      }
-    }
-  },
-  {
-    "conversation_index": 8,
-    "conversation_id": "conv-49",
-    "question_idx": 36,
-    "question_type": "multi_hop",
-    "category": 1,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Roasted-vegetable recipe, grilled chicken and veggie stir-fry recipe, grilled salmon and vegetables, spinach–avocado bowl",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response correctly includes the grilled chicken and veggie stir-fry but misses grilled vegetables (using roasted instead) and omits poutine, so it contains only 1 of the 3 required items."
-      }
-    }
-  },
-  {
-    "conversation_index": 8,
-    "conversation_id": "conv-49",
-    "question_idx": 37,
-    "question_type": "multi_hop",
-    "category": 1,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "a bowl of fruit",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response mentions only a fruit bowl, which is far fewer than half of the listed healthy meals and omits most items from the gold answer."
-      }
-    }
-  },
-  {
-    "conversation_index": 8,
-    "conversation_id": "conv-49",
-    "question_idx": 38,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Calms and rejuvenates them, helping them relax, find peace, and reset.",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response accurately conveys that nature and the outdoors have a calming, restorative, and mentally beneficial role, matching the gold answer’s idea of stress relief and positive impact on well-being."
       }
     }
   },
@@ -690,22 +482,6 @@
   {
     "conversation_index": 8,
     "conversation_id": "conv-49",
-    "question_idx": 43,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "the few days before 24 May, 2023, 2 October, 2023",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response lists specific dates instead of the frequency of every three months, and does not convey the recurring three‑month interval."
-      }
-    }
-  },
-  {
-    "conversation_index": 8,
-    "conversation_id": "conv-49",
     "question_idx": 44,
     "question_type": "multi_hop",
     "category": 1,
@@ -732,22 +508,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches both locations in Canada given in the gold answer."
-      }
-    }
-  },
-  {
-    "conversation_index": 8,
-    "conversation_id": "conv-49",
-    "question_idx": 46,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Evan: painting, photography; Sam: writing, drawing, painting",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response correctly identifies the creative outlets (painting and writing, plus additional consistent activities) used by Evan and Sam, aligning with the gold answer’s core idea."
       }
     }
   },
@@ -818,22 +578,6 @@
   {
     "conversation_index": 8,
     "conversation_id": "conv-49",
-    "question_idx": 51,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "friends mocked Sam's weight — Sam committed to start exercising, doctor warned Sam her weight was a serious health risk — Sam sought a trainer/started eating healthier and began a meal plan and workout schedule and planned to ask a doctor about a balanced diet and low‑impact exercises, cravings for sugary drinks and snacks triggered by stress/boredom — Sam started eating healthier (fruit bowls, energy‑ball recipes) and used yoga to manage stress, had not found a low‑impact exercise she liked/movement limited — Sam tried yoga, considered swimming/kayaking and planned to ask a doctor for low‑impact options and took country car rides to relax, low motivation/struggling to keep up routines — Sam used painting and hobbies for stress relief and followed Evan's one‑day‑at‑a‑time support, severe stomachache/ER visit (gastritis) — Sam sought emergency care and diagnosis",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response correctly identifies Sam’s struggles with motivation and dietary change and explains that he addresses them by improving his eating habits and leaning on Evan’s support, matching most of the gold answer’s key points without contradiction."
-      }
-    }
-  },
-  {
-    "conversation_index": 8,
-    "conversation_id": "conv-49",
     "question_idx": 52,
     "question_type": "temporal",
     "category": 2,
@@ -866,22 +610,6 @@
   {
     "conversation_index": 8,
     "conversation_id": "conv-49",
-    "question_idx": 54,
-    "question_type": "multi_hop",
-    "category": 1,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "heart palpitation, twisted knee, knee injury playing basketball, leg cast and physical therapy, hospital scare from a suspicious check-up",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response only correctly mentions heart palpitations and incorrectly replaces the twisted ankles with knee injuries, providing just 1 of 3 required incidents and contradicting the gold."
-      }
-    }
-  },
-  {
-    "conversation_index": 8,
-    "conversation_id": "conv-49",
     "question_idx": 55,
     "question_type": "multi_hop",
     "category": 1,
@@ -908,22 +636,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response correctly identifies that the persistent problem is the malfunctioning navigation app on his phone."
-      }
-    }
-  },
-  {
-    "conversation_index": 8,
-    "conversation_id": "conv-49",
-    "question_idx": 57,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "California",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer ('California')."
       }
     }
   },
@@ -1042,22 +754,6 @@
   {
     "conversation_index": 8,
     "conversation_id": "conv-49",
-    "question_idx": 65,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "A beach",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response correctly states that Evan lives close to a beach, matching the gold answer in meaning."
-      }
-    }
-  },
-  {
-    "conversation_index": 8,
-    "conversation_id": "conv-49",
     "question_idx": 66,
     "question_type": "temporal",
     "category": 2,
@@ -1138,22 +834,6 @@
   {
     "conversation_index": 8,
     "conversation_id": "conv-49",
-    "question_idx": 71,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Christmas",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer, identifying Christmas as the holiday season."
-      }
-    }
-  },
-  {
-    "conversation_index": 8,
-    "conversation_id": "conv-49",
     "question_idx": 72,
     "question_type": "multi_hop",
     "category": 1,
@@ -1180,22 +860,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response matches the gold answer in meaning and precision, giving the same time frame of Summer 2024."
-      }
-    }
-  },
-  {
-    "conversation_index": 8,
-    "conversation_id": "conv-49",
-    "question_idx": 74,
-    "question_type": "temporal",
-    "category": 2,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "12 December, 2023",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response gives a specific date (12 December 2023) that does not match the gold answer’s specific date (Thursday before December 17, 2023, i.e., December 14, 2023)."
       }
     }
   },
@@ -1276,22 +940,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response matches the gold answer exactly in month and year and with equal precision."
-      }
-    }
-  },
-  {
-    "conversation_index": 8,
-    "conversation_id": "conv-49",
-    "question_idx": 80,
-    "question_type": "temporal",
-    "category": 2,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "9 January, 2024",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response gives the correct day and month but the wrong year (2024 instead of 2023), so it does not match the gold answer."
       }
     }
   },
@@ -1634,38 +1282,6 @@
   {
     "conversation_index": 8,
     "conversation_id": "conv-49",
-    "question_idx": 102,
-    "question_type": "single_hop",
-    "category": 4,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Not mentioned in the conversation",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response claims the information is not mentioned, but the gold answer provides a specific dish, so it is incorrect."
-      }
-    }
-  },
-  {
-    "conversation_index": 8,
-    "conversation_id": "conv-49",
-    "question_idx": 103,
-    "question_type": "single_hop",
-    "category": 4,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Grilled chicken and veggie stir-fry",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response gives a specific dish rather than the requested type of recipe (recipes with more vegetables)."
-      }
-    }
-  },
-  {
-    "conversation_index": 8,
-    "conversation_id": "conv-49",
     "question_idx": 104,
     "question_type": "single_hop",
     "category": 4,
@@ -1698,22 +1314,6 @@
   {
     "conversation_index": 8,
     "conversation_id": "conv-49",
-    "question_idx": 106,
-    "question_type": "single_hop",
-    "category": 4,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "watercolor paintings",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response describes the medium of the artwork rather than the specific subject 'forest scene' given in the gold answer."
-      }
-    }
-  },
-  {
-    "conversation_index": 8,
-    "conversation_id": "conv-49",
     "question_idx": 107,
     "question_type": "single_hop",
     "category": 4,
@@ -1724,22 +1324,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response conveys the same idea as the gold answer, differing only in pronoun choice without changing the meaning."
-      }
-    }
-  },
-  {
-    "conversation_index": 8,
-    "conversation_id": "conv-49",
-    "question_idx": 108,
-    "question_type": "single_hop",
-    "category": 4,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Landscapes",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response is more general and less specific than the gold answer, omitting the key detail that Evan loves painting sunsets over the ocean."
       }
     }
   },
@@ -2300,22 +1884,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning and wording."
-      }
-    }
-  },
-  {
-    "conversation_index": 8,
-    "conversation_id": "conv-49",
-    "question_idx": 144,
-    "question_type": "single_hop",
-    "category": 4,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "a lake-with-mountains photo",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response describes a different photo (lake with mountains) than the gold answer (man on a rock overlooking a valley)."
       }
     }
   },

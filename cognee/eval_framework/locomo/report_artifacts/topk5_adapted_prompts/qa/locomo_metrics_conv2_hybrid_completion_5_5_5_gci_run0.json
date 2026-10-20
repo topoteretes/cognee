@@ -130,22 +130,6 @@
   {
     "conversation_index": 2,
     "conversation_id": "conv-41",
-    "question_idx": 8,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Likely struggling financially",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response claims John is likely struggling financially, which directly contradicts the gold answer that he is middle-class or wealthy."
-      }
-    }
-  },
-  {
-    "conversation_index": 2,
-    "conversation_id": "conv-41",
     "question_idx": 9,
     "question_type": "multi_hop",
     "category": 1,
@@ -226,22 +210,6 @@
   {
     "conversation_index": 2,
     "conversation_id": "conv-41",
-    "question_idx": 14,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Likely yes",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response affirms that John would be considered patriotic, matching the gold answer's 'Yes' despite mild hedging."
-      }
-    }
-  },
-  {
-    "conversation_index": 2,
-    "conversation_id": "conv-41",
     "question_idx": 15,
     "question_type": "multi_hop",
     "category": 1,
@@ -268,22 +236,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response matches the gold answer in meaning and temporal precision."
-      }
-    }
-  },
-  {
-    "conversation_index": 2,
-    "conversation_id": "conv-41",
-    "question_idx": 17,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Public policy",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response gives 'Public policy,' which is not one of the listed possible degrees and does not cover at least half of the gold items."
       }
     }
   },
@@ -626,22 +578,6 @@
   {
     "conversation_index": 2,
     "conversation_id": "conv-41",
-    "question_idx": 39,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Independence Day",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning and wording."
-      }
-    }
-  },
-  {
-    "conversation_index": 2,
-    "conversation_id": "conv-41",
     "question_idx": 40,
     "question_type": "multi_hop",
     "category": 1,
@@ -652,22 +588,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches both names of John's children given in the gold answer."
-      }
-    }
-  },
-  {
-    "conversation_index": 2,
-    "conversation_id": "conv-41",
-    "question_idx": 41,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Not mentioned in the conversation",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response claims the information is not mentioned, but the gold answer specifies that John lives close to the beach."
       }
     }
   },
@@ -722,22 +642,6 @@
   {
     "conversation_index": 2,
     "conversation_id": "conv-41",
-    "question_idx": 45,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Likely no",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response conveys that John is probably not open to moving, which aligns in meaning with the gold answer’s clear 'no.'"
-      }
-    }
-  },
-  {
-    "conversation_index": 2,
-    "conversation_id": "conv-41",
     "question_idx": 46,
     "question_type": "temporal",
     "category": 2,
@@ -754,38 +658,6 @@
   {
     "conversation_index": 2,
     "conversation_id": "conv-41",
-    "question_idx": 47,
-    "question_type": "multi_hop",
-    "category": 1,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "yoga, weight training, boot camps",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response correctly includes two of the four exercise types (yoga and weight training), meeting the requirement of at least half without contradiction."
-      }
-    }
-  },
-  {
-    "conversation_index": 2,
-    "conversation_id": "conv-41",
-    "question_idx": 48,
-    "question_type": "temporal",
-    "category": 2,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "30 July, 2023",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response gives a different and incompatible date than the Sunday before 3 July 2023."
-      }
-    }
-  },
-  {
-    "conversation_index": 2,
-    "conversation_id": "conv-41",
     "question_idx": 49,
     "question_type": "multi_hop",
     "category": 1,
@@ -796,22 +668,6 @@
       "llm_judge": {
         "score": 0.0,
         "reason": "[openai/gpt-5.1] WRONG: The response is more general and does not specifically identify cakes, which is the required item."
-      }
-    }
-  },
-  {
-    "conversation_index": 2,
-    "conversation_id": "conv-41",
-    "question_idx": 50,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Resilient, resourceful, grateful, optimistic, community-minded, caring, team-oriented, ex-military, passionate, mechanically skilled",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response only matches one of the four gold attributes ('passionate') and does not provide at least half of them."
       }
     }
   },
@@ -994,54 +850,6 @@
   {
     "conversation_index": 2,
     "conversation_id": "conv-41",
-    "question_idx": 62,
-    "question_type": "multi_hop",
-    "category": 1,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Two",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response matches the gold answer in meaning and number."
-      }
-    }
-  },
-  {
-    "conversation_index": 2,
-    "conversation_id": "conv-41",
-    "question_idx": 63,
-    "question_type": "temporal",
-    "category": 2,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "About two weeks",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response gives the same duration as the gold answer, with only minor acceptable hedging ('about two weeks')."
-      }
-    }
-  },
-  {
-    "conversation_index": 2,
-    "conversation_id": "conv-41",
-    "question_idx": 64,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Shelter worker",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: “Shelter worker” is a reasonable paraphrase of the future role at a shelter (shelter coordinator) and does not contradict the gold answer."
-      }
-    }
-  },
-  {
-    "conversation_index": 2,
-    "conversation_id": "conv-41",
     "question_idx": 65,
     "question_type": "single_hop",
     "category": 4,
@@ -1084,38 +892,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response restates that the extra funding enabled repairs and renovations which made the learning environment safer and more modern, matching the gold answer in full meaning."
-      }
-    }
-  },
-  {
-    "conversation_index": 2,
-    "conversation_id": "conv-41",
-    "question_idx": 68,
-    "question_type": "single_hop",
-    "category": 4,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Aerial yoga",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning and wording."
-      }
-    }
-  },
-  {
-    "conversation_index": 2,
-    "conversation_id": "conv-41",
-    "question_idx": 69,
-    "question_type": "single_hop",
-    "category": 4,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "her old car",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response conveys the same item as the gold answer, specifying that Maria donated her old car."
       }
     }
   },
@@ -2060,22 +1836,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response includes 'Hike', which correctly matches the gold answer 'hiking', and the extra detail 'picnic' does not contradict it."
-      }
-    }
-  },
-  {
-    "conversation_index": 2,
-    "conversation_id": "conv-41",
-    "question_idx": 129,
-    "question_type": "single_hop",
-    "category": 4,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "A great way to push yourself and mix things up.",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response conveys the same positive view that trying new classes is a good way to change up the routine, matching the gold answer in meaning."
       }
     }
   },

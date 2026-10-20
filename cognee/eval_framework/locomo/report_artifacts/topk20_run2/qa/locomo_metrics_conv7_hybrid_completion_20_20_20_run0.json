@@ -2,22 +2,6 @@
   {
     "conversation_index": 7,
     "conversation_id": "conv-48",
-    "question_idx": 0,
-    "question_type": "temporal",
-    "category": 2,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "Not mentioned in the conversation",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response claims the information is not mentioned even though the gold specifies she was working on an electricity engineering project."
-      }
-    }
-  },
-  {
-    "conversation_index": 7,
-    "conversation_id": "conv-48",
     "question_idx": 1,
     "question_type": "multi_hop",
     "category": 1,
@@ -76,22 +60,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response gives the same year as the gold answer with equal precision."
-      }
-    }
-  },
-  {
-    "conversation_index": 7,
-    "conversation_id": "conv-48",
-    "question_idx": 5,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "France",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the country given in the gold answer."
       }
     }
   },
@@ -172,22 +140,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response gives the same year as the gold answer with equal precision."
-      }
-    }
-  },
-  {
-    "conversation_index": 7,
-    "conversation_id": "conv-48",
-    "question_idx": 11,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "Yes",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response affirms that Deborah is married, which matches the gold answer."
       }
     }
   },
@@ -290,54 +242,6 @@
   {
     "conversation_index": 7,
     "conversation_id": "conv-48",
-    "question_idx": 18,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "France",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response correctly identifies the same country as in the gold answer."
-      }
-    }
-  },
-  {
-    "conversation_index": 7,
-    "conversation_id": "conv-48",
-    "question_idx": 19,
-    "question_type": "multi_hop",
-    "category": 1,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "2",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response '2' matches the gold answer 'two times' in meaning and numerical value."
-      }
-    }
-  },
-  {
-    "conversation_index": 7,
-    "conversation_id": "conv-48",
-    "question_idx": 20,
-    "question_type": "multi_hop",
-    "category": 1,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "Overcooked 2, Detroit, It takes two",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response correctly lists three of the five games in the gold answer, meeting the at-least-half requirement without contradiction."
-      }
-    }
-  },
-  {
-    "conversation_index": 7,
-    "conversation_id": "conv-48",
     "question_idx": 21,
     "question_type": "temporal",
     "category": 2,
@@ -364,22 +268,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer date."
-      }
-    }
-  },
-  {
-    "conversation_index": 7,
-    "conversation_id": "conv-48",
-    "question_idx": 23,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "A busy schedule",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response cites a busy schedule, which does not match the gold reason that she delayed yoga because she preferred playing video games."
       }
     }
   },
@@ -444,22 +332,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in temporal meaning and precision."
-      }
-    }
-  },
-  {
-    "conversation_index": 7,
-    "conversation_id": "conv-48",
-    "question_idx": 28,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "Colombia",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold country, Colombia."
       }
     }
   },
@@ -578,22 +450,6 @@
   {
     "conversation_index": 7,
     "conversation_id": "conv-48",
-    "question_idx": 36,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "Not mentioned in the conversation",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response claims the age is not mentioned, but the gold answer provides an inferred age range (no more than 30), so it fails to match the expected information."
-      }
-    }
-  },
-  {
-    "conversation_index": 7,
-    "conversation_id": "conv-48",
     "question_idx": 37,
     "question_type": "temporal",
     "category": 2,
@@ -636,22 +492,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response includes all four techniques from the gold answer (Pomodoro 25/5, scheduler/to-do list, Eisenhower Matrix, bullet journal) without contradiction, even though it adds extra non-conflicting details."
-      }
-    }
-  },
-  {
-    "conversation_index": 7,
-    "conversation_id": "conv-48",
-    "question_idx": 40,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "the beach",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning, indicating Deborah lives near the beach."
       }
     }
   },
@@ -738,22 +578,6 @@
   {
     "conversation_index": 7,
     "conversation_id": "conv-48",
-    "question_idx": 46,
-    "question_type": "temporal",
-    "category": 2,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "About three months",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response gives a different duration ('about three months') than the correct one ('four months'), so it contradicts the gold answer."
-      }
-    }
-  },
-  {
-    "conversation_index": 7,
-    "conversation_id": "conv-48",
     "question_idx": 47,
     "question_type": "temporal",
     "category": 2,
@@ -764,22 +588,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response gives the exact same date as the gold answer, with equivalent precision and no contradictions."
-      }
-    }
-  },
-  {
-    "conversation_index": 7,
-    "conversation_id": "conv-48",
-    "question_idx": 48,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "Not mentioned in the conversation",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The conversation did mention the state (Alaska), but the response incorrectly claimed it was not mentioned."
       }
     }
   },
@@ -1122,38 +930,6 @@
   {
     "conversation_index": 7,
     "conversation_id": "conv-48",
-    "question_idx": 70,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "Yes",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response affirms that the friend is no longer alive, matching the gold answer's stance."
-      }
-    }
-  },
-  {
-    "conversation_index": 7,
-    "conversation_id": "conv-48",
-    "question_idx": 71,
-    "question_type": "temporal",
-    "category": 2,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "1 September, 2023",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response gives a specific date (1 September 2023) that does not fall within the last week of August 2023, so it is temporally inconsistent with the gold answer."
-      }
-    }
-  },
-  {
-    "conversation_index": 7,
-    "conversation_id": "conv-48",
     "question_idx": 72,
     "question_type": "single_hop",
     "category": 4,
@@ -1202,22 +978,6 @@
   {
     "conversation_index": 7,
     "conversation_id": "conv-48",
-    "question_idx": 75,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "Unidentified card game about cats",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response does not identify the specific game 'Exploding Kittens' and instead leaves it unspecified."
-      }
-    }
-  },
-  {
-    "conversation_index": 7,
-    "conversation_id": "conv-48",
     "question_idx": 76,
     "question_type": "temporal",
     "category": 2,
@@ -1228,22 +988,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response specifies 15 September 2023, which is exactly the Friday before 17 September 2023 and thus semantically matches the gold answer."
-      }
-    }
-  },
-  {
-    "conversation_index": 7,
-    "conversation_id": "conv-48",
-    "question_idx": 77,
-    "question_type": "multi_hop",
-    "category": 1,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "Not mentioned in the conversation",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The conversation did mention the location (Phuket), so claiming it was not mentioned contradicts the gold answer."
       }
     }
   },
@@ -1388,22 +1132,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response correctly includes a bouquet of flowers and a letter, matching 2 of the 3 listed gifts without contradicting the gold answer, which satisfies the 'at least half' rule."
-      }
-    }
-  },
-  {
-    "conversation_index": 7,
-    "conversation_id": "conv-48",
-    "question_idx": 87,
-    "question_type": "multi_hop",
-    "category": 1,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "Indonesia, Brazil",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response correctly includes Brazil, which is half of the two gold countries and the extra country Indonesia does not contradict the gold."
       }
     }
   },
@@ -1842,38 +1570,6 @@
   {
     "conversation_index": 7,
     "conversation_id": "conv-48",
-    "question_idx": 115,
-    "question_type": "single_hop",
-    "category": 4,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "Morning jog",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response describes the morning jog itself, not the subsequent activity of spending time with loved ones."
-      }
-    }
-  },
-  {
-    "conversation_index": 7,
-    "conversation_id": "conv-48",
-    "question_idx": 116,
-    "question_type": "single_hop",
-    "category": 4,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "calm, calmer, clearer, gain perspective, more alert, motivated, centered, balanced, grounded, peaceful, recharged, chill out",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response lists emotional and mental effects of exercise but does not capture the idea of feeling connected to her body."
-      }
-    }
-  },
-  {
-    "conversation_index": 7,
-    "conversation_id": "conv-48",
     "question_idx": 117,
     "question_type": "single_hop",
     "category": 4,
@@ -1964,22 +1660,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response matches the gold answer exactly in meaning, naming the Eisenhower Matrix."
-      }
-    }
-  },
-  {
-    "conversation_index": 7,
-    "conversation_id": "conv-48",
-    "question_idx": 123,
-    "question_type": "single_hop",
-    "category": 4,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "Not mentioned in the conversation",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response claims the information is not in the conversation, contradicting the concrete fact given in the gold answer."
       }
     }
   },
@@ -2482,22 +2162,6 @@
   {
     "conversation_index": 7,
     "conversation_id": "conv-48",
-    "question_idx": 155,
-    "question_type": "single_hop",
-    "category": 4,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "Yoga, meditation, mindful/deep breathing, using essential oils/soothing scents, playing soft soothing music, lighting candles/creating a serene space, taking breaks, bullet journaling, keeping a routine/schedule, attending meditation retreats, savasana",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response includes yoga, meditation, and mindfulness (mindful/deep breathing), covering at least half of the listed habits without contradiction."
-      }
-    }
-  },
-  {
-    "conversation_index": 7,
-    "conversation_id": "conv-48",
     "question_idx": 156,
     "question_type": "single_hop",
     "category": 4,
@@ -2786,22 +2450,6 @@
   {
     "conversation_index": 7,
     "conversation_id": "conv-48",
-    "question_idx": 174,
-    "question_type": "single_hop",
-    "category": 4,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "Deborah already had plans that day.",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response incorrectly says Deborah had plans, contradicting the gold answer that Jolene had plans."
-      }
-    }
-  },
-  {
-    "conversation_index": 7,
-    "conversation_id": "conv-48",
     "question_idx": 175,
     "question_type": "single_hop",
     "category": 4,
@@ -2860,22 +2508,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response explicitly includes 'found inner peace,' matching the gold answer's positive change."
-      }
-    }
-  },
-  {
-    "conversation_index": 7,
-    "conversation_id": "conv-48",
-    "question_idx": 179,
-    "question_type": "single_hop",
-    "category": 4,
-    "retriever_name": "hybrid_completion_20_20_20",
-    "run_idx": 0,
-    "answer": "Detroit",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response 'Detroit' does not match the gold answer about Jolene playing a card game about cats."
       }
     }
   },

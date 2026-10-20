@@ -338,22 +338,6 @@
   {
     "conversation_index": 1,
     "conversation_id": "conv-30",
-    "question_idx": 21,
-    "question_type": "temporal",
-    "category": 2,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "27 May, 2023",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response gives a more specific date within the same month and year as the gold answer, which is allowed."
-      }
-    }
-  },
-  {
-    "conversation_index": 1,
-    "conversation_id": "conv-30",
     "question_idx": 22,
     "question_type": "temporal",
     "category": 2,
@@ -492,22 +476,6 @@
       "llm_judge": {
         "score": 0.0,
         "reason": "[openai/gpt-5.1] WRONG: The response lists two different dates, only one of which matches the gold answer, so it presents multiple alternatives and is therefore incorrect."
-      }
-    }
-  },
-  {
-    "conversation_index": 1,
-    "conversation_id": "conv-30",
-    "question_idx": 31,
-    "question_type": "multi_hop",
-    "category": 1,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "5 months and 3 days",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response gives a different, more specific duration that does not match the gold answer of six months."
       }
     }
   },
@@ -674,22 +642,6 @@
   {
     "conversation_index": 1,
     "conversation_id": "conv-30",
-    "question_idx": 42,
-    "question_type": "single_hop",
-    "category": 4,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Not mentioned in the conversation",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The conversation did contain the specific title 'Finding Freedom', so saying it was not mentioned is incorrect."
-      }
-    }
-  },
-  {
-    "conversation_index": 1,
-    "conversation_id": "conv-30",
     "question_idx": 43,
     "question_type": "single_hop",
     "category": 4,
@@ -748,38 +700,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning and wording."
-      }
-    }
-  },
-  {
-    "conversation_index": 1,
-    "conversation_id": "conv-30",
-    "question_idx": 47,
-    "question_type": "single_hop",
-    "category": 4,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "an affirmative reply from a wholesaler",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response mentions an affirmative reply from a wholesaler, which does not match the gold answer that she found the perfect spot for her store."
-      }
-    }
-  },
-  {
-    "conversation_index": 1,
-    "conversation_id": "conv-30",
-    "question_idx": 48,
-    "question_type": "single_hop",
-    "category": 4,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "the space",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response only mentions the space and omits furniture and decor, giving just 1 of 3 required elements."
       }
     }
   },
@@ -914,22 +834,6 @@
   {
     "conversation_index": 1,
     "conversation_id": "conv-30",
-    "question_idx": 57,
-    "question_type": "single_hop",
-    "category": 4,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Stay passionate, stay focused, stay resilient, believe in yourself, stay open to learning and improving, take risks, offer something different, see setbacks as opportunities for comebacks, have a support system, remind yourself of successes and progress, focus on why you started, stay positive, use Instagram and TikTok",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response only captures the advice to stay positive and misses the parts about building customer relationships and creating a strong brand image, so it includes only one of the three required elements."
-      }
-    }
-  },
-  {
-    "conversation_index": 1,
-    "conversation_id": "conv-30",
     "question_idx": 58,
     "question_type": "single_hop",
     "category": 4,
@@ -1004,22 +908,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response includes all three key elements from the gold answer: reminding herself of successes and progress, having a support system, and focusing on why she started."
-      }
-    }
-  },
-  {
-    "conversation_index": 1,
-    "conversation_id": "conv-30",
-    "question_idx": 63,
-    "question_type": "single_hop",
-    "category": 4,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Not mentioned in the conversation",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The conversation does contain this information (she was accepted for a fashion internship), so claiming it is not mentioned is incorrect."
       }
     }
   },

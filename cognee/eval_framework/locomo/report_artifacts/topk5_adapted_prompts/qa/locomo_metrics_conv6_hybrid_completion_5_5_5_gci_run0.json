@@ -2,22 +2,6 @@
   {
     "conversation_index": 6,
     "conversation_id": "conv-47",
-    "question_idx": 0,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Not mentioned in the conversation",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response claims the information is not mentioned, but the gold answer specifies obesity as John's suspected health problem."
-      }
-    }
-  },
-  {
-    "conversation_index": 6,
-    "conversation_id": "conv-47",
     "question_idx": 1,
     "question_type": "temporal",
     "category": 2,
@@ -28,22 +12,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer in meaning and wording."
-      }
-    }
-  },
-  {
-    "conversation_index": 6,
-    "conversation_id": "conv-47",
-    "question_idx": 2,
-    "question_type": "multi_hop",
-    "category": 1,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Starbucks, McGee's Pub, a country in 2023",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response only correctly includes McGee's (as McGee's Pub) and misses the VR Club and the baseball game, so it contains fewer than half of the required items."
       }
     }
   },
@@ -98,38 +66,6 @@
   {
     "conversation_index": 6,
     "conversation_id": "conv-47",
-    "question_idx": 6,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Not mentioned in the conversation",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response claims the information is not mentioned, while the gold answer indicates it is likely that James does live in Connecticut."
-      }
-    }
-  },
-  {
-    "conversation_index": 6,
-    "conversation_id": "conv-47",
-    "question_idx": 7,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Connecticut",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer 'Connecticut'."
-      }
-    }
-  },
-  {
-    "conversation_index": 6,
-    "conversation_id": "conv-47",
     "question_idx": 8,
     "question_type": "multi_hop",
     "category": 1,
@@ -172,38 +108,6 @@
       "llm_judge": {
         "score": 0.0,
         "reason": "[openai/gpt-5.1] WRONG: The response gives a date range (5–11 April 2022) that extends beyond the first week of April 2022 (approximately 1–7 April), so it is not consistent with the gold answer."
-      }
-    }
-  },
-  {
-    "conversation_index": 6,
-    "conversation_id": "conv-47",
-    "question_idx": 11,
-    "question_type": "temporal",
-    "category": 2,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Not mentioned in the conversation",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response claims the information is not mentioned, but the gold answer gives a specific state ('seeking solitude'), so it fails to provide the correct concrete answer."
-      }
-    }
-  },
-  {
-    "conversation_index": 6,
-    "conversation_id": "conv-47",
-    "question_idx": 12,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "No",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response directly matches the gold answer’s implication that James did not have a girlfriend in April 2022."
       }
     }
   },
@@ -258,38 +162,6 @@
   {
     "conversation_index": 6,
     "conversation_id": "conv-47",
-    "question_idx": 16,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Uno",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response 'Uno' matches the gold answer 'UNO' in meaning despite different capitalization."
-      }
-    }
-  },
-  {
-    "conversation_index": 6,
-    "conversation_id": "conv-47",
-    "question_idx": 17,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Impostor deduction game (unnamed)",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response gives only a generic description and does not identify the specific game 'Mafia' mentioned in the gold answer."
-      }
-    }
-  },
-  {
-    "conversation_index": 6,
-    "conversation_id": "conv-47",
     "question_idx": 18,
     "question_type": "multi_hop",
     "category": 1,
@@ -300,22 +172,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response lists all four recommended books with only minor wording differences that retain the same meaning."
-      }
-    }
-  },
-  {
-    "conversation_index": 6,
-    "conversation_id": "conv-47",
-    "question_idx": 19,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Not mentioned in the conversation",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response claims the information is not mentioned, contradicting the gold answer that he was most likely feeling lonely."
       }
     }
   },
@@ -402,22 +258,6 @@
   {
     "conversation_index": 6,
     "conversation_id": "conv-47",
-    "question_idx": 25,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "No",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response correctly states that John and James are not fans of the same team, matching the gold answer’s core meaning."
-      }
-    }
-  },
-  {
-    "conversation_index": 6,
-    "conversation_id": "conv-47",
     "question_idx": 26,
     "question_type": "multi_hop",
     "category": 1,
@@ -482,38 +322,6 @@
   {
     "conversation_index": 6,
     "conversation_id": "conv-47",
-    "question_idx": 30,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Canada",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer 'Canada'."
-      }
-    }
-  },
-  {
-    "conversation_index": 6,
-    "conversation_id": "conv-47",
-    "question_idx": 31,
-    "question_type": "temporal",
-    "category": 2,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "9 days",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response gives a different trip duration (9 days) than the correct one (19 days)."
-      }
-    }
-  },
-  {
-    "conversation_index": 6,
-    "conversation_id": "conv-47",
     "question_idx": 32,
     "question_type": "temporal",
     "category": 2,
@@ -530,22 +338,6 @@
   {
     "conversation_index": 6,
     "conversation_id": "conv-47",
-    "question_idx": 33,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Not mentioned in the conversation",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response claims the information is not mentioned, contradicting the gold answer that they did study together."
-      }
-    }
-  },
-  {
-    "conversation_index": 6,
-    "conversation_id": "conv-47",
     "question_idx": 34,
     "question_type": "multi_hop",
     "category": 1,
@@ -556,54 +348,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches both countries listed in the gold answer."
-      }
-    }
-  },
-  {
-    "conversation_index": 6,
-    "conversation_id": "conv-47",
-    "question_idx": 35,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Greenland",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer 'Greenland'."
-      }
-    }
-  },
-  {
-    "conversation_index": 6,
-    "conversation_id": "conv-47",
-    "question_idx": 36,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "A person mentioned by John",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response only notes that Jill is a person mentioned by John and omits her likely role as John's partner, which is the key information in the gold answer."
-      }
-    }
-  },
-  {
-    "conversation_index": 6,
-    "conversation_id": "conv-47",
-    "question_idx": 37,
-    "question_type": "temporal",
-    "category": 2,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Not mentioned in the conversation",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The conversation did mention a specific date (July 21, 2022), but the response incorrectly claimed it was not mentioned."
       }
     }
   },
@@ -700,22 +444,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response matches the gold answer exactly in date and precision."
-      }
-    }
-  },
-  {
-    "conversation_index": 6,
-    "conversation_id": "conv-47",
-    "question_idx": 44,
-    "question_type": "open_domain",
-    "category": 3,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "He preferred beer.",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response correctly captures the gold answer’s core reason that John didn’t want to go to Starbucks because he preferred beer."
       }
     }
   },
@@ -850,22 +578,6 @@
   {
     "conversation_index": 6,
     "conversation_id": "conv-47",
-    "question_idx": 53,
-    "question_type": "temporal",
-    "category": 2,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "4 months, 18 days",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response gives a different, more specific duration (4 months, 18 days) that does not match the gold answer of six months."
-      }
-    }
-  },
-  {
-    "conversation_index": 6,
-    "conversation_id": "conv-47",
     "question_idx": 54,
     "question_type": "multi_hop",
     "category": 1,
@@ -978,38 +690,6 @@
   {
     "conversation_index": 6,
     "conversation_id": "conv-47",
-    "question_idx": 61,
-    "question_type": "temporal",
-    "category": 2,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "Not mentioned in the conversation",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The system claimed the information was not mentioned even though the gold answer provides a specific event, so it contradicts a known concrete fact."
-      }
-    }
-  },
-  {
-    "conversation_index": 6,
-    "conversation_id": "conv-47",
-    "question_idx": 62,
-    "question_type": "temporal",
-    "category": 2,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "58 days",
-    "metrics": {
-      "llm_judge": {
-        "score": 0.0,
-        "reason": "[openai/gpt-5.1] WRONG: The response of 58 days (less than two months) is not equivalent to or a reasonable rounding of 'nearly three months.'"
-      }
-    }
-  },
-  {
-    "conversation_index": 6,
-    "conversation_id": "conv-47",
     "question_idx": 63,
     "question_type": "temporal",
     "category": 2,
@@ -1036,22 +716,6 @@
       "llm_judge": {
         "score": 0.0,
         "reason": "[openai/gpt-5.1] WRONG: The response gives a more specific duration (3 months and 10 days) that is not equivalent in length to 'nearly four months,' so the temporal spans do not match."
-      }
-    }
-  },
-  {
-    "conversation_index": 6,
-    "conversation_id": "conv-47",
-    "question_idx": 65,
-    "question_type": "temporal",
-    "category": 2,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "7 November, 2022",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response states the same specific date as the gold answer in a different but equivalent format."
       }
     }
   },
@@ -1404,22 +1068,6 @@
       "llm_judge": {
         "score": 1.0,
         "reason": "[openai/gpt-5.1] CORRECT: The response exactly matches the gold answer ('Hawaiian')."
-      }
-    }
-  },
-  {
-    "conversation_index": 6,
-    "conversation_id": "conv-47",
-    "question_idx": 88,
-    "question_type": "single_hop",
-    "category": 4,
-    "retriever_name": "hybrid_completion_5_5_5_gci",
-    "run_idx": 0,
-    "answer": "CS:GO tournament",
-    "metrics": {
-      "llm_judge": {
-        "score": 1.0,
-        "reason": "[openai/gpt-5.1] CORRECT: The response restates the gold answer with equivalent wording and identical meaning."
       }
     }
   },
