@@ -14,12 +14,26 @@ the index run, or ``forget(memory_only=True)`` the stamp and the store disagree,
 and the store is right. One id lookup per few hundred chunks; a store that
 cannot answer counts as holding nothing, because embedding a chunk twice costs
 tokens while skipping one that is not there would leave it unsearchable.
+
+A chunk-size change is also why none of the chunks may be found: an earlier
+indexing run cut the document differently and its extraction failed, and the
+retry cuts it anew. Those earlier chunks would stay next to the new ones as a
+second, entity-less copy of the text, so they are deleted
+(``retire_chunks_cut_differently``).
 """
 
+from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.provenance.markers import stores_provenance_in_graph
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
+from cognee.modules.graph.methods.delete_chunks_incremental import (
+    delete_chunks_incremental,
+    edge_endpoints,
+)
+from cognee.modules.pipelines.models.DataItemStatus import is_data_item_completed
 from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.pipeline_names import COGNIFY_PIPELINE_NAME, INDEXING_PIPELINE_NAME
 
 from .add_data_points import SEARCH_INDEXED_IDS
 
@@ -54,6 +68,94 @@ async def _ids_in_store(vector_engine, collection_name: str, ids: list[str]) -> 
     return found
 
 
+# ctx.extras key: the item's document was checked for chunks cut differently.
+STALE_CHUNKS_CHECKED = "stale_chunks_checked"
+
+
+def _stamped(data_item, pipeline_name: str, dataset_id) -> bool:
+    status = (getattr(data_item, "pipeline_status", None) or {}).get(pipeline_name) or {}
+    return is_data_item_completed(status.get(str(dataset_id)))
+
+
+def _cut_differently(node: dict, chunk: DocumentChunk) -> bool:
+    """Whether a stored chunk was cut with other settings than ``chunk``.
+
+    Only recorded settings count: a chunk without them (written before they
+    were recorded) is never taken for a stale one.
+    """
+    stored_tokens = node.get("max_chunk_tokens")
+    stored_chunker = node.get("chunker_id")
+    if (
+        stored_tokens is not None
+        and chunk.max_chunk_tokens is not None
+        and int(stored_tokens) != int(chunk.max_chunk_tokens)
+    ):
+        return True
+    return bool(stored_chunker and chunk.chunker_id and stored_chunker != chunk.chunker_id)
+
+
+async def retire_chunks_cut_differently(data_chunks: list[DocumentChunk], ctx) -> list[str]:
+    """Delete the document's chunks an earlier indexing run cut with other settings.
+
+    Runs once per item, and only for an item an earlier indexing run stamped
+    whose extraction never completed: its stored chunks came from that run
+    alone, and the extraction they waited for is this one. Chunk-scoped
+    deletion needs ownership kept in the graph; elsewhere nothing is deleted.
+    Best effort: a failure is logged and never fails the run, since the cost
+    is a duplicate passage, not lost data.
+    """
+    data_item = getattr(ctx, "data_item", None)
+    dataset = getattr(ctx, "dataset", None)
+    document = getattr(data_chunks[0], "is_part_of", None)
+    if data_item is None or dataset is None or document is None:
+        return []
+    checked = ctx.extras.setdefault(STALE_CHUNKS_CHECKED, set())
+    if str(document.id) in checked:
+        return []
+    checked.add(str(document.id))
+    if not _stamped(data_item, INDEXING_PIPELINE_NAME, dataset.id) or _stamped(
+        data_item, COGNIFY_PIPELINE_NAME, dataset.id
+    ):
+        return []
+    try:
+        graph_engine = await get_graph_engine()
+        if not await stores_provenance_in_graph(graph_engine):
+            return []
+        chunk_ids = []
+        for source, edge, target in await graph_engine.get_connections(str(document.id)):
+            if "is_part_of" not in str(edge.get("relationship_name", "")):
+                continue
+            source_id, target_id = edge_endpoints(source, edge, target)
+            if target_id == str(document.id) and source_id != str(document.id):
+                chunk_ids.append(source_id)
+        nodes = await graph_engine.get_nodes(chunk_ids) if chunk_ids else []
+        stale = [
+            str(node["id"])
+            for node in nodes
+            if node.get("type") == type(data_chunks[0]).__name__
+            and _cut_differently(node, data_chunks[0])
+        ]
+        if stale:
+            await delete_chunks_incremental(stale, dataset.id, data_item.id)
+            logger.info(
+                "Deleted %d chunk(s) of %r that an earlier indexing run cut with other "
+                "chunking settings; the document is indexed anew.",
+                len(stale),
+                getattr(document, "name", str(document.id)),
+            )
+        return stale
+    except Exception as error:
+        logger.warning(
+            "Could not check %r for chunks cut with other settings (%s: %s); "
+            "any such chunks stay searchable next to the new ones.",
+            getattr(document, "name", str(document.id)),
+            type(error).__name__,
+            error,
+            exc_info=True,
+        )
+        return []
+
+
 @task_summary("Checked {n} chunk(s) for an existing index")
 async def find_indexed_chunks(data_chunks: list[DocumentChunk], ctx=None) -> list[DocumentChunk]:
     """Record on ``ctx`` which of ``data_chunks`` the vector store already holds.
@@ -79,6 +181,9 @@ async def find_indexed_chunks(data_chunks: list[DocumentChunk], ctx=None) -> lis
         found_ids |= await _ids_in_store(vector_engine, collection_name, ids)
 
     if not found_ids:
+        # Nothing of this cut is stored: if an earlier indexing run stored the
+        # document cut another way, those chunks go.
+        await retire_chunks_cut_differently(data_chunks, ctx)
         return data_chunks
 
     indexed = ctx.extras.setdefault(SEARCH_INDEXED_IDS, set())

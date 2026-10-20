@@ -3,12 +3,14 @@
 import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 import pytest
 
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.data.processing.document_types import TextDocument
 from cognee.modules.pipelines.models import PipelineContext
+from cognee.modules.pipelines.models.DataItemStatus import DataItemStatus
 from cognee.tasks.storage.add_data_points import SEARCH_INDEXED_IDS
 from cognee.tasks.storage.find_indexed_chunks import LOOKUP_BATCH_SIZE, find_indexed_chunks
 
@@ -83,3 +85,122 @@ async def test_ids_are_looked_up_in_bounded_batches():
     with patch.object(module, "get_vector_engine_async", AsyncMock(return_value=engine)):
         await find_indexed_chunks(chunks, ctx=PipelineContext())
     assert engine.retrieve.await_count == 2
+
+
+# --- chunks an earlier indexing run cut with other settings -------------------
+
+
+def _item_ctx(dataset_id, stamped):
+    data_item = SimpleNamespace(
+        id=uuid4(),
+        pipeline_status={
+            name: {str(dataset_id): DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED}
+            for name in stamped
+        },
+    )
+    return PipelineContext(data_item=data_item, dataset=SimpleNamespace(id=dataset_id))
+
+
+def _graph(document_id, stored_nodes):
+    connections = [
+        ({"id": node["id"]}, {"relationship_name": "is_part_of"}, {"id": str(document_id)})
+        for node in stored_nodes
+    ]
+    return SimpleNamespace(
+        get_connections=AsyncMock(return_value=connections),
+        get_nodes=AsyncMock(return_value=stored_nodes),
+    )
+
+
+def _cut(chunks, tokens):
+    for chunk in chunks:
+        chunk.max_chunk_tokens = tokens
+        chunk.chunker_id = "text"
+    return chunks
+
+
+async def _run(chunks, ctx, graph, found_ids=()):
+    deleted = AsyncMock()
+    with (
+        patch.object(
+            module, "get_vector_engine_async", AsyncMock(return_value=_engine(set(found_ids)))
+        ),
+        patch.object(module, "get_graph_engine", AsyncMock(return_value=graph)),
+        patch.object(module, "stores_provenance_in_graph", AsyncMock(return_value=True)),
+        patch.object(module, "delete_chunks_incremental", deleted),
+    ):
+        await find_indexed_chunks(chunks, ctx=ctx)
+    return deleted
+
+
+def _stored(tokens, count=2):
+    return [
+        {
+            "id": str(uuid4()),
+            "type": "DocumentChunk",
+            "max_chunk_tokens": tokens,
+            "chunker_id": "text",
+        }
+        for _ in range(count)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_retry_with_another_chunk_size_deletes_the_earlier_cut():
+    chunks = _cut(_chunks(2), tokens=256)
+    dataset_id = uuid4()
+    ctx = _item_ctx(dataset_id, stamped=["indexing_pipeline"])
+    stale = _stored(tokens=64)
+
+    deleted = await _run(chunks, ctx, _graph(chunks[0].is_part_of.id, stale))
+
+    deleted.assert_awaited_once()
+    ids, called_dataset, called_item = deleted.await_args.args
+    assert sorted(ids) == sorted(node["id"] for node in stale)
+    assert (called_dataset, called_item) == (dataset_id, ctx.data_item.id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("stamped", "found", "stored_tokens"),
+    [
+        (["indexing_pipeline", "cognify_pipeline"], False, 64),  # extracted before: not ours
+        ([], False, 64),  # no earlier indexing run: nothing of it is stored
+        (["indexing_pipeline"], True, 64),  # the store holds this cut: the same chunking
+        (["indexing_pipeline"], False, 256),  # same settings: never stale
+        (["indexing_pipeline"], False, None),  # settings unrecorded: never taken for stale
+    ],
+)
+async def test_nothing_else_is_deleted(stamped, found, stored_tokens):
+    chunks = _cut(_chunks(2), tokens=256)
+    ctx = _item_ctx(uuid4(), stamped=stamped)
+    found_ids = {str(chunks[0].id)} if found else set()
+
+    deleted = await _run(
+        chunks, ctx, _graph(chunks[0].is_part_of.id, _stored(stored_tokens)), found_ids
+    )
+
+    deleted.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_the_document_is_checked_once_per_item():
+    chunks = _cut(_chunks(2), tokens=256)
+    ctx = _item_ctx(uuid4(), stamped=["indexing_pipeline"])
+    graph = _graph(chunks[0].is_part_of.id, _stored(tokens=64))
+
+    await _run(chunks[:1], ctx, graph)
+    await _run(chunks[1:], ctx, graph)
+
+    graph.get_connections.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_failed_check_never_fails_the_run():
+    chunks = _cut(_chunks(1), tokens=256)
+    ctx = _item_ctx(uuid4(), stamped=["indexing_pipeline"])
+    graph = SimpleNamespace(get_connections=AsyncMock(side_effect=RuntimeError("graph down")))
+
+    deleted = await _run(chunks, ctx, graph)
+
+    deleted.assert_not_awaited()

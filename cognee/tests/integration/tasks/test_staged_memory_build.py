@@ -8,6 +8,7 @@ after the indexing run the chunks answer ``CHUNKS_LEXICAL`` while
 ``cached`` -> ``indexed`` -> ``ready``, and no chunk is embedded twice.
 """
 
+import asyncio
 import importlib
 import json
 import re
@@ -25,6 +26,14 @@ TEXT = (
     "Paragraph beta ENTBETA. The Queen of Hearts ruled the garden at the bottom "
     "of the well, and the Cheshire Cat grinned from a tree."
 )
+
+
+@pytest.fixture(scope="module")
+def event_loop():
+    """One loop for the module: the engines its tests share hold locks bound to it."""
+    loop = asyncio.new_event_loop()
+    yield loop
+    loop.close()
 
 
 @pytest.fixture(scope="module")
@@ -158,6 +167,8 @@ async def test_memory_answers_more_at_each_stage_and_embeds_once(staged_env, mon
         if "state" not in before_extraction:
             before_extraction["state"] = await _memory_state()
             before_extraction["chunks"] = await _search(SearchType.CHUNKS_LEXICAL)
+            # What the indexing run embedded: the cognify run must add nothing.
+            before_extraction["embedded"] = sorted(embedded_chunk_ids)
         return await original_extract(data_chunks, *args, **kwargs)
 
     embedded_chunk_ids: list[str] = []
@@ -207,6 +218,19 @@ async def test_memory_answers_more_at_each_stage_and_embeds_once(staged_env, mon
     assert len(embedded_chunk_ids) == len(set(embedded_chunk_ids)), (
         f"a chunk was embedded twice: {embedded_chunk_ids}"
     )
+    # Every chunk was embedded by the indexing run, before extraction started:
+    # chunk search answered while the graph was still being built.
+    assert before_extraction["embedded"] == sorted(embedded_chunk_ids), (
+        "the cognify run embedded chunks the indexing run should have"
+    )
+    from cognee.infrastructure.databases.vector import get_vector_engine_async
+
+    chunk_nodes, _ = await (await get_graph_engine()).get_filtered_graph_data(
+        [{"type": ["DocumentChunk"]}]
+    )
+    chunk_ids = [str(node_id) for node_id, _ in chunk_nodes]
+    rows = await (await get_vector_engine_async()).retrieve("DocumentChunk_text", chunk_ids)
+    assert sorted(str(row.id) for row in rows) == sorted(chunk_ids), "a chunk has no vector row"
 
     # Every stage left its run record and its stamp.
     dataset_id = await _dataset_id()
@@ -226,3 +250,45 @@ async def test_memory_answers_more_at_each_stage_and_embeds_once(staged_env, mon
     await cognee.cognify(datasets=[DATASET])
     assert len(embedded_chunk_ids) == before, "a re-run re-embedded chunks"
     assert await _memory_state() == ("ready", "graph")
+
+
+@pytest.mark.asyncio
+async def test_a_retry_with_another_chunk_size_leaves_one_set_of_chunks(staged_env, monkeypatch):
+    """The indexing run's chunks outlive a failed extraction; a retry that cuts
+    the document differently must not keep them as a second copy of the text."""
+    import cognee
+    from cognee.infrastructure.databases.graph import get_graph_engine
+
+    cognify_module = importlib.import_module("cognee.api.v1.cognify.cognify")
+    dataset = "staged_retry_chunk_size"
+    text = " ".join(f"Sentence {i} about the retry harbour lighthouse." for i in range(60))
+
+    async def chunk_tokens():
+        nodes, _ = await (await get_graph_engine()).get_filtered_graph_data(
+            [{"type": ["DocumentChunk"]}]
+        )
+        # The graph is shared with the other test's dataset: this document's chunks only.
+        ours = [props for _, props in nodes if "retry harbour" in (props.get("text") or "")]
+        return sorted({props.get("max_chunk_tokens") for props in ours}), len(ours)
+
+    await cognee.add(text, dataset_name=dataset)
+
+    original_extract = cognify_module.extract_graph_and_summarize
+
+    async def failing_extract(*args, **kwargs):
+        raise RuntimeError("injected extraction outage")
+
+    monkeypatch.setattr(cognify_module, "extract_graph_and_summarize", failing_extract)
+    with pytest.raises(Exception, match="injected extraction outage"):
+        await cognee.cognify(datasets=[dataset], chunk_size=64)
+    small_tokens, small_count = await chunk_tokens()
+    assert small_count > 0, "the indexing run should have stored the first cut"
+
+    monkeypatch.setattr(cognify_module, "extract_graph_and_summarize", original_extract)
+    await cognee.cognify(datasets=[dataset], chunk_size=256)
+
+    tokens, count = await chunk_tokens()
+    assert len(tokens) == 1 and tokens != small_tokens, (
+        f"chunks of both cuts are stored: {tokens} (first cut {small_tokens})"
+    )
+    assert count < small_count
