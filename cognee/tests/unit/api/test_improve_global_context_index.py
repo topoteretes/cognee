@@ -36,6 +36,7 @@ async def test_global_context_index_pipeline_calls_memify(monkeypatch):
     result = await pipeline_module.global_context_index_pipeline(
         user=user,
         dataset="docs",
+        method="llm",
         max_bucket_size=7,
         placement_distance_threshold=0.8,
         rebuild=True,
@@ -55,6 +56,22 @@ async def test_global_context_index_pipeline_calls_memify(monkeypatch):
     task_kwargs = call_kwargs["enrichment_tasks"][0].default_params["kwargs"]
     assert task_kwargs["bucketing_strategy"] == "graph"
     assert task_kwargs["min_overlap"] == 0.2
+
+
+def test_default_method_builds_the_deterministic_task_pair():
+    from cognee.memify_pipelines.global_context_index import (
+        get_global_context_index_memify_tasks,
+    )
+
+    extraction_tasks, enrichment_tasks = get_global_context_index_memify_tasks()
+
+    assert [task.executable.__name__ for task in extraction_tasks] == ["load_dataset_content"]
+    assert [task.executable.__name__ for task in enrichment_tasks] == ["build_document_index"]
+    # No LLM task, so the run skips the first-run LLM connection probe.
+    assert not any(task.needs_llm for task in extraction_tasks + enrichment_tasks)
+
+    with pytest.raises(ValueError, match="from_entities"):
+        get_global_context_index_memify_tasks(method="hierarchical")
 
 
 def _stub_orchestrator(monkeypatch, resolved):
@@ -116,8 +133,6 @@ async def test_improve_global_context_index_opt_in(monkeypatch, build_global_con
             user=user,
             dataset=resolved.id,
             run_in_background=False,
-            bucketing_strategy="graph",
-            max_bucket_size=4,
         )
         assert stage.status == "completed"
     else:
