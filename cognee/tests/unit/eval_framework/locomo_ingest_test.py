@@ -180,8 +180,8 @@ def test_ingest_args_passes_the_ingestion_options():
     )
     cli = ingest_args(settings, 3, Path("run/conv_03"))
     assert "--resolve-dates" in cli and "--global-context-index" in cli
-    assert cli[cli.index("--extraction-prompt") + 1] == "/p/extract.txt"
-    assert cli[cli.index("--summary-prompt") + 1] == "/p/summary.txt"
+    assert cli[cli.index("--extraction-prompt") + 1] == str(Path("/p/extract.txt"))
+    assert cli[cli.index("--summary-prompt") + 1] == str(Path("/p/summary.txt"))
 
     plain = SimpleNamespace(
         **common,
