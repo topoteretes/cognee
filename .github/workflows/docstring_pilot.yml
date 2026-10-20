@@ -68,7 +68,7 @@ on:
   workflow_dispatch:
     inputs:
       path:
-        description: "Pilot file to work on (e.g. cognee/api/v1/search/search.py), or `all` for the full ten-file matrix"
+        description: "Pilot file to work on (e.g. cognee/shared/data_models.py), or `all` for the full ten-file matrix"
         required: true
       dry_run:
         description: "Show the diff and ledger in the run summary instead of opening a PR."
