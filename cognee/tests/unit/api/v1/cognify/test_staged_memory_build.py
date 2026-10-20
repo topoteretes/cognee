@@ -228,3 +228,16 @@ async def test_cognify_rejects_the_arguments_in_remote_mode(monkeypatch, argumen
 def test_remember_routes_both_arguments_to_cognify():
     assert "early_chunk_indexing" in remember_module._COGNIFY_ONLY
     assert "document_caching" in remember_module._COGNIFY_ONLY
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("argument", ["early_chunk_indexing", "document_caching"])
+async def test_remember_rejects_the_arguments_in_remote_mode(monkeypatch, argument):
+    """client.remember() would drop them, so the remote's own settings would win silently."""
+    client = MagicMock()
+    client.remember = AsyncMock()
+    monkeypatch.setattr(serve_state_module, "get_remote_client", lambda: client)
+
+    with pytest.raises(ValueError, match=f"{argument} is not supported"):
+        await remember_module.remember("some text", **{argument: False})
+    client.remember.assert_not_awaited()

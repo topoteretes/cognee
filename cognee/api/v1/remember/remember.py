@@ -1565,6 +1565,14 @@ async def _remember_inner(
                 "branch is not supported while connected to a remote Cognee instance. "
                 "Call cognee.disconnect() to clone the branch locally."
             )
+        for option in ("document_caching", "early_chunk_indexing"):
+            if kwargs.get(option) is not None:
+                # Same as extractor: the remote runs its own setting, and
+                # client.remember() would drop this one, as cognify() refuses it.
+                raise ValueError(
+                    f"{option} is not supported while connected to a remote Cognee "
+                    "instance. Call cognee.disconnect() to choose it locally."
+                )
         if session_ids:
             # Same discipline as extractor: POST /remember carries no
             # session_ids field, so forwarding would silently drop them.
