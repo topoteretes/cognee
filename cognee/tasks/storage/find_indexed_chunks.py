@@ -35,15 +35,19 @@ async def _ids_in_store(vector_engine, collection_name: str, ids: list[str]) -> 
         batch = ids[start : start + LOOKUP_BATCH_SIZE]
         try:
             rows = await vector_engine.retrieve(collection_name, batch)
-        except Exception as error:  # noqa: BLE001 - an unreadable store means re-embedding, not failing
-            # Includes the collection not existing yet (first run of a fresh
-            # store): nothing is indexed, the final write embeds everything.
-            logger.info(
+        except Exception as error:
+            # The adapters answer a missing collection (first run of a fresh
+            # store) with no rows, so this is a store that cannot answer at
+            # all. Embedding a chunk twice costs tokens; skipping one that is
+            # not there would leave it unsearchable, so the final write embeds
+            # this batch.
+            logger.warning(
                 "Could not read %s for already indexed chunks (%s: %s); "
                 "the final write embeds this batch.",
                 collection_name,
                 type(error).__name__,
                 error,
+                exc_info=True,
             )
             return found
         found.update(str(row.id) for row in rows)

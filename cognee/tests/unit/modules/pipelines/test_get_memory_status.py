@@ -25,6 +25,7 @@ from cognee.modules.pipelines.operations.get_memory_status import (
 from cognee.shared.pipeline_names import (
     ADD_PIPELINE_NAME,
     CACHING_PIPELINE_NAME,
+    CODE_GRAPH_PIPELINE_NAME,
     COGNIFY_PIPELINE_NAME,
     INDEXING_PIPELINE_NAME,
 )
@@ -32,6 +33,7 @@ from cognee.shared.pipeline_names import (
 STARTED = PipelineRunStatus.DATASET_PROCESSING_STARTED
 COMPLETED = PipelineRunStatus.DATASET_PROCESSING_COMPLETED
 ERRORED = PipelineRunStatus.DATASET_PROCESSING_ERRORED
+INITIATED = PipelineRunStatus.DATASET_PROCESSING_INITIATED
 BASE = datetime(2026, 10, 20, tzinfo=timezone.utc)
 
 
@@ -174,3 +176,69 @@ def test_to_dict_carries_every_field():
         "error_class": None,
         "error_message": None,
     }
+
+
+def test_the_chain_reads_right_while_the_cognify_run_is_open_from_the_start():
+    """cognify() opens its extraction run first, then runs caching and indexing."""
+    runs = {ADD_PIPELINE_NAME: _run(COMPLETED, 0), COGNIFY_PIPELINE_NAME: _run(STARTED, 1)}
+    runs[CACHING_PIPELINE_NAME] = _run(STARTED, 2)
+    assert derive_memory_status(runs).state == MEMORY_CACHING
+
+    runs[CACHING_PIPELINE_NAME] = _run(COMPLETED, 3)
+    runs[INDEXING_PIPELINE_NAME] = _run(STARTED, 4)
+    indexing = derive_memory_status(runs)
+    assert (indexing.state, indexing.search_level) == (MEMORY_INDEXING, SEARCH_LEVEL_DOCUMENTS)
+
+    runs[INDEXING_PIPELINE_NAME] = _run(COMPLETED, 5)
+    extracting = derive_memory_status(runs)
+    assert (extracting.state, extracting.search_level) == (MEMORY_EXTRACTING, SEARCH_LEVEL_CHUNKS)
+
+    runs[COGNIFY_PIPELINE_NAME] = _run(COMPLETED, 6)
+    assert derive_memory_status(runs).state == MEMORY_READY
+
+
+def test_a_caching_run_for_new_data_reads_as_caching_until_indexing_takes_over():
+    runs = {
+        COGNIFY_PIPELINE_NAME: _run(STARTED, 1),
+        CACHING_PIPELINE_NAME: _run(STARTED, 2),
+        INDEXING_PIPELINE_NAME: _run(STARTED, 3),
+    }
+    assert derive_memory_status(runs).state == MEMORY_INDEXING
+
+
+def test_legacy_initiated_rows_are_not_runs_in_progress():
+    status = derive_memory_status({COGNIFY_PIPELINE_NAME: _run(INITIATED, 1)})
+    assert status.state == MEMORY_EMPTY
+
+    status = derive_memory_status(
+        {CACHING_PIPELINE_NAME: _run(COMPLETED, 1), COGNIFY_PIPELINE_NAME: _run(INITIATED, 2)}
+    )
+    assert status.state == MEMORY_CACHED
+
+
+def test_a_failed_enrichment_after_a_build_keeps_the_memory_ready():
+    """improve() and memify write the graph too, but they do not build it."""
+    runs = {
+        COGNIFY_PIPELINE_NAME: _run(COMPLETED, 1),
+        "memify_pipeline": _run(ERRORED, 2, "RuntimeError", "enrichment failed"),
+    }
+    status = derive_memory_status(runs)
+    assert (status.state, status.graph_ready, status.error_class) == (MEMORY_READY, True, None)
+
+
+def test_the_code_graph_pipeline_builds_a_graph():
+    status = derive_memory_status({CODE_GRAPH_PIPELINE_NAME: _run(ERRORED, 1, "EnolaError")})
+    assert status.state == MEMORY_EXTRACTION_FAILED
+    assert status.error_class == "EnolaError"
+
+
+def test_naive_and_aware_timestamps_order_together():
+    """SQLite returns naive UTC datetimes; nothing may compare them with aware ones and raise."""
+    naive = SimpleNamespace(
+        status=COMPLETED,
+        created_at=BASE.replace(tzinfo=None) + timedelta(seconds=5),
+        error_class=None,
+        error_message=None,
+    )
+    runs = {COGNIFY_PIPELINE_NAME: _run(COMPLETED, 1), CACHING_PIPELINE_NAME: naive}
+    assert derive_memory_status(runs).state == MEMORY_CACHED

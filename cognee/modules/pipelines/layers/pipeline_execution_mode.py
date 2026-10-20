@@ -106,15 +106,17 @@ async def run_pipeline_as_background_process(
         try:
             for pipeline_run in pipeline_list:
                 async for pipeline_run_info in pipeline_run:
-                    push_to_queue(pipeline_run_info.pipeline_run_id, pipeline_run_info)
-                    # A chained pipeline (cognify's caching run, then its
-                    # indexing and cognify runs) marks the events of its later
-                    # runs with the id the chain started under, which is the
-                    # id this function handed back; its subscriber keeps
-                    # receiving every event of the chain.
+                    # A chained pipeline (cognify's staged build: the cognify
+                    # run starts, its caching and indexing runs go, the cognify
+                    # run finishes) marks the events of its other runs with the
+                    # id the chain started under, the id this function handed
+                    # back. They go to that run's queue only: its subscriber
+                    # follows the whole chain, and no caller holds the other
+                    # runs' ids, so a queue under them would never be read.
                     chain_run_id = getattr(pipeline_run_info, "chain_run_id", None)
-                    if chain_run_id and chain_run_id != pipeline_run_info.pipeline_run_id:
-                        push_to_queue(chain_run_id, pipeline_run_info)
+                    push_to_queue(
+                        chain_run_id or pipeline_run_info.pipeline_run_id, pipeline_run_info
+                    )
         finally:
             await close_runs(pipeline_list)
 

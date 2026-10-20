@@ -17,7 +17,7 @@ nor indexing is a graph build, which keeps custom graph-building pipelines
 """
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
@@ -28,11 +28,20 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.shared.pipeline_names import (
     ADD_PIPELINE_NAME,
     CACHING_PIPELINE_NAME,
+    CODE_GRAPH_PIPELINE_NAME,
+    COGNIFY_PIPELINE_NAME,
     INDEXING_PIPELINE_NAME,
     NON_GRAPH_PIPELINE_NAMES,
 )
 
 from ..models import PipelineRun, PipelineRunStatus
+
+# The runs that build a dataset's graph from its data. Other graph-writing
+# pipelines (memify, improve's stages, custom pipelines) enrich a graph: they
+# count for "the graph exists", but their failures do not make the dataset's
+# extraction failed, and they decide the state only for a dataset no build
+# run ever touched (a graph built by a custom pipeline).
+_GRAPH_BUILD_PIPELINE_NAMES = (COGNIFY_PIPELINE_NAME, CODE_GRAPH_PIPELINE_NAME)
 
 # The states, from nothing to everything.
 MEMORY_EMPTY = "empty"  # no pipeline has touched the dataset
@@ -53,10 +62,10 @@ SEARCH_LEVEL_DOCUMENTS = "documents"  # DOCUMENTS_LEXICAL over the cached text
 SEARCH_LEVEL_CHUNKS = "chunks"  # CHUNKS, CHUNKS_LEXICAL, RAG_COMPLETION, HYBRID_COMPLETION
 SEARCH_LEVEL_GRAPH = "graph"  # everything, graph lanes included
 
-_ACTIVE = (
-    PipelineRunStatus.DATASET_PROCESSING_STARTED,
-    PipelineRunStatus.DATASET_PROCESSING_INITIATED,
-)
+# INITIATED is no longer written; a row that still carries it is a legacy
+# leftover, not a run in progress, and is left out of the state.
+_ACTIVE = (PipelineRunStatus.DATASET_PROCESSING_STARTED,)
+_LEGACY = PipelineRunStatus.DATASET_PROCESSING_INITIATED
 _COMPLETED = PipelineRunStatus.DATASET_PROCESSING_COMPLETED
 _ERRORED = PipelineRunStatus.DATASET_PROCESSING_ERRORED
 
@@ -117,10 +126,12 @@ def _is(run, *statuses) -> bool:
     return run is not None and run.status in statuses
 
 
-def _created_at(run) -> float:
-    """A sortable key for a run's newest row; rows of one table are all naive or all aware."""
+def _created_at(run) -> datetime:
+    """A sortable key for a run's newest row. SQLite returns naive UTC datetimes."""
     value: datetime | None = getattr(run, "created_at", None)
-    return value.timestamp() if value is not None else 0.0
+    if value is None:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
 
 
 def _failure_suffix(run) -> str:
@@ -216,10 +227,20 @@ def derive_memory_status(
     earlier run built.
     """
     completed = set(completed_pipelines or ())
+    latest_runs = {
+        name: run for name, run in latest_runs.items() if getattr(run, "status", None) != _LEGACY
+    }
     caching = latest_runs.get(CACHING_PIPELINE_NAME)
     indexing = latest_runs.get(INDEXING_PIPELINE_NAME)
     add = latest_runs.get(ADD_PIPELINE_NAME)
-    graph_runs = [run for name, run in latest_runs.items() if name not in NON_GRAPH_PIPELINE_NAMES]
+    build_runs = [run for name, run in latest_runs.items() if name in _GRAPH_BUILD_PIPELINE_NAMES]
+    other_graph_runs = [
+        run
+        for name, run in latest_runs.items()
+        if name not in NON_GRAPH_PIPELINE_NAMES and name not in _GRAPH_BUILD_PIPELINE_NAMES
+    ]
+    # The state follows the build runs; enrichment runs only where no build ran.
+    graph_runs = build_runs or other_graph_runs
     graph = max(graph_runs, key=_created_at) if graph_runs else None
 
     graph_ready = _is(graph, _COMPLETED) or any(
@@ -237,12 +258,18 @@ def derive_memory_status(
         level = SEARCH_LEVEL_NONE
 
     failed_run = None
-    if _is(graph, *_ACTIVE):
-        state = MEMORY_EXTRACTING
+    # cognify() opens its extraction run before the caching and indexing runs
+    # (it anchors the chain), so an active preparation run says where the chain
+    # is; an open extraction run means "extracting" only once no preparation
+    # run is active.
+    if _is(caching, *_ACTIVE) and not (
+        _is(indexing, *_ACTIVE) and _created_at(indexing) > _created_at(caching)
+    ):
+        state = MEMORY_CACHING
     elif _is(indexing, *_ACTIVE):
         state = MEMORY_INDEXING
-    elif _is(caching, *_ACTIVE):
-        state = MEMORY_CACHING
+    elif _is(graph, *_ACTIVE):
+        state = MEMORY_EXTRACTING
     else:
         terminal = [run for run in (caching, indexing, graph) if run is not None]
         newest = max(terminal, key=_created_at) if terminal else None

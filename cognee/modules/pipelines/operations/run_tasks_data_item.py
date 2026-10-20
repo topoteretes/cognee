@@ -70,11 +70,16 @@ def _push_stage_progress(
     stage_index = len(ctx.task_sequence) if ctx else None
     if progress_state is not None:
         progress_state["current_stage"] = current_stage
-    # pipeline_run_id is sourced from the function's own parameter (the queue
-    # key), not yielded.pipeline_run_id, so the event body can never disagree
-    # with the subscription it's delivered under.
+    # A run inside a chain (the caching and indexing runs of cognify's staged
+    # build) reports to the run the chain was handed back under, as the
+    # background executor does with the chain's other events; see
+    # cognee.modules.cognify.memory_pipelines.
+    chain_run_id = (ctx.extras or {}).get("chain_run_id") if ctx else None
+    # pipeline_run_id is sourced from the function's own parameter, not
+    # yielded.pipeline_run_id, so the event body can never disagree with the
+    # run it reports on; chain_run_id names the subscription it is delivered under.
     push_to_queue(
-        pipeline_run_id,
+        chain_run_id or pipeline_run_id,
         PipelineRunProgress(
             pipeline_run_id=pipeline_run_id,
             dataset_id=yielded.dataset_id,
@@ -82,6 +87,7 @@ def _push_stage_progress(
             current_stage=current_stage,
             stage_index=stage_index,
             stage_total=len(tasks),
+            chain_run_id=chain_run_id,
         ),
     )
 

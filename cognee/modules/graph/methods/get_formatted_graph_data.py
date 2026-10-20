@@ -6,6 +6,9 @@ from cognee.modules.data.exceptions.exceptions import DatasetNotFoundError
 from cognee.modules.data.methods import get_authorized_dataset
 from cognee.modules.users.models import User
 
+# Node types kept out of the graph shown to users.
+HIDDEN_NODE_TYPES = frozenset({"CachedDocument"})
+
 
 async def get_formatted_graph_data(dataset_id: UUID, user: User):
     dataset = await get_authorized_dataset(user, dataset_id)
@@ -15,6 +18,18 @@ async def get_formatted_graph_data(dataset_id: UUID, user: User):
     async with set_database_global_context_variables(dataset_id, dataset.owner_id):
         graph_client = await get_graph_engine()
         (nodes, edges) = await graph_client.get_graph_data()
+
+    # Cached documents (the caching pipeline's keyword-search records, SDK-397)
+    # anchor deletion and rollback in the graph but are not knowledge: on a
+    # backend without a lexical index they also carry the document's full text.
+    hidden_ids = {str(node[0]) for node in nodes if node[1].get("type") in HIDDEN_NODE_TYPES}
+    if hidden_ids:
+        nodes = [node for node in nodes if str(node[0]) not in hidden_ids]
+        edges = [
+            edge
+            for edge in edges
+            if str(edge[0]) not in hidden_ids and str(edge[1]) not in hidden_ids
+        ]
 
     return {
         "nodes": [
