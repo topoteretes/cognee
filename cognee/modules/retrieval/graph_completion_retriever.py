@@ -288,6 +288,21 @@ class GraphCompletionRetriever(BaseRetriever):
             return [triplets]
         return await self.get_triplets(query_batch=queries)
 
+    async def _format_single_context(self, query: str | None, edges: list[Edge] | None) -> str:
+        graph_context = await self.resolve_edges_to_text(edges) if edges else ""
+
+        if not self.include_global_context_index:
+            return graph_context
+
+        prelude = await self._build_global_context_prelude(query)
+        if not prelude and not graph_context:
+            return ""
+        if not prelude:
+            return graph_context
+        if not graph_context:
+            return prelude
+        return f"{prelude}\n\n{graph_context}"
+
     async def get_context_from_objects(
         self,
         query: str | None = None,
@@ -314,32 +329,25 @@ class GraphCompletionRetriever(BaseRetriever):
         triplets = retrieved_objects
 
         if query_batch:
-            # Check if all triplets are empty, in case of batch queries
-            if not triplets or all(len(batched_triplets) == 0 for batched_triplets in triplets):
-                logger.warning("Empty context was provided to the completion")
-                return ["" for _ in query_batch]
-
-            return await asyncio.gather(
-                *[self.resolve_edges_to_text(batched_triplets) for batched_triplets in triplets]
-            )
-
-        graph_context = await self.resolve_edges_to_text(triplets) if triplets else ""
-
-        if not self.include_global_context_index:
             if not triplets:
-                logger.warning("Empty context was provided to the completion")
-                return ""
-            return graph_context
+                batch_triplets = [[] for _ in query_batch]
+            else:
+                batch_triplets = triplets
 
-        prelude = await self._build_global_context_prelude(query)
-        if not prelude and not graph_context:
+            contexts = await asyncio.gather(
+                *[
+                    self._format_single_context(q, batched)
+                    for q, batched in zip(query_batch, batch_triplets)
+                ]
+            )
+            if all(not c for c in contexts):
+                logger.warning("Empty context was provided to the completion")
+            return contexts
+
+        context = await self._format_single_context(query, triplets)
+        if not context:
             logger.warning("Empty context was provided to the completion")
-            return ""
-        if not prelude:
-            return graph_context
-        if not graph_context:
-            return prelude
-        return f"{prelude}\n\n{graph_context}"
+        return context
 
     async def _build_global_context_prelude(self, query: str | None) -> str:
         if not query:
@@ -456,6 +464,7 @@ class GraphCompletionRetriever(BaseRetriever):
             # a phantom "no context provided" deflection that callers cannot
             # distinguish from a real answer (SDK-270 / gh #3728). An empty
             # result also lets recall()'s on_empty fallback actually fire.
+            # Batch queries keep their per-query arity contract and are not skipped (ad04883).
             logger.warning("Empty context: skipping LLM completion, returning no results")
             return []
 
