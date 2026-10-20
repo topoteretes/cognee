@@ -44,7 +44,8 @@ BACKTICKED_RE = re.compile(r"`([^`]+)`")
 def read_allowlist(allowlist_path: str) -> list[str]:
     """Selected files, in the order they appear in the allowlist's tables."""
     try:
-        text = open(allowlist_path, encoding="utf-8").read()
+        with open(allowlist_path, encoding="utf-8") as allowlist:
+            text = allowlist.read()
     except OSError as error:
         print(f"Could not read the allowlist at {allowlist_path}: {error}", file=sys.stderr)
         raise SystemExit(2)
