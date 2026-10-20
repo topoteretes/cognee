@@ -82,6 +82,9 @@ class LexicalRetriever(BaseRetriever):
                 raise NoDataError("Graph engine initialization failed") from e
 
             chunk_count = 0
+            # Nodes _keeps turned away: a filter that leaves nothing is an
+            # empty result, not missing data.
+            filtered_count = 0
             for node in nodes:
                 try:
                     chunk_id, document = node
@@ -90,6 +93,9 @@ class LexicalRetriever(BaseRetriever):
                     continue
 
                 if document.get("type") == self.node_type and document.get("text"):
+                    if not self._keeps(document):
+                        filtered_count += 1
+                        continue
                     try:
                         tokens = self.tokenizer(document["text"])
                         if not tokens:
@@ -104,12 +110,20 @@ class LexicalRetriever(BaseRetriever):
                     except Exception:
                         logger.exception("Tokenizer failed for chunk %s", chunk_id)
 
-            if chunk_count == 0:
+            if chunk_count == 0 and filtered_count == 0:
                 logger.error("Initialization completed but no valid chunks were loaded.")
                 raise NoDataError("No valid chunks loaded during initialization.")
 
             self._initialized = True
             logger.info("Initialized with %d document chunks", len(self.chunks))
+
+    def _keeps(self, payload: dict) -> bool:
+        """Whether a node or row may be a hit at all; every one by default."""
+        return True
+
+    def _native_limit(self) -> int:
+        """How many rows to ask the backend index for."""
+        return self.top_k
 
     async def _native_hits(self, query: str) -> list[tuple[dict, float]] | None:
         """BM25 hits from the vector store's lexical index, or None when there is none.
@@ -128,8 +142,13 @@ class LexicalRetriever(BaseRetriever):
         if getattr(vector_engine, "supports_lexical_search", False) is not True:
             return None
         try:
+            # A collection without an index (rows stored before it had one, a
+            # type with no lexical_fields) would rank only part of its rows:
+            # score in memory instead.
+            if not await vector_engine.has_lexical_index(self.collection_name):
+                return None
             results = await vector_engine.lexical_search(
-                self.collection_name, query, limit=self.top_k
+                self.collection_name, query, limit=self._native_limit()
             )
         except LexicalSearchNotSupportedError:
             return None

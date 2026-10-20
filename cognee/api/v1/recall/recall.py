@@ -28,11 +28,13 @@ from cognee.modules.observability import (
 )
 from cognee.modules.operations import get_current_operation, record_operation
 from cognee.modules.pipelines.operations.get_memory_status import (
+    MEMORY_CACHING,
     SEARCH_LEVEL_CHUNKS,
     SEARCH_LEVEL_DOCUMENTS,
+    SEARCH_LEVEL_NONE,
 )
 from cognee.modules.preflight import llm_available
-from cognee.modules.recall.methods.graph_warmup import STATE_PARTIAL
+from cognee.modules.recall.methods.graph_warmup import STATE_BUILD_FAILED, STATE_PARTIAL
 from cognee.modules.recall.types.RecallResponse import (
     RecallResponse,
     ResponseAgentTraceEntry,
@@ -46,6 +48,7 @@ from cognee.modules.recall.types.RecallResponse import (
 )
 from cognee.modules.recall.types.SearchResultItem import SearchResultItem
 from cognee.modules.retrieval.exceptions import SearchTypeNotSupported
+from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.search.exceptions import UnsupportedSearchTypeError
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.types import SearchResult, SearchType
@@ -66,25 +69,83 @@ _MIN_WORD_LEN = 2
 _RETRY_ON_EMPTY = frozenset({SearchType.CHUNKS_LEXICAL, SearchType.CODING_RULES})
 
 
-def _partial_memory_marker(probe, recall_config) -> ResponseMarkerEntry:
+# The searches that answer from chunks alone, before the graph exists.
+_CHUNK_LEVEL_TYPES = frozenset(
+    {
+        SearchType.CHUNKS,
+        SearchType.CHUNKS_LEXICAL,
+        SearchType.RAG_COMPLETION,
+        SearchType.HYBRID_COMPLETION,
+    }
+)
+
+
+def _answers_from_documents(probe, retriever_specific_config) -> bool:
+    """Whether recall's own choice of search is the keyword search over the cached documents.
+
+    True when the cached documents are all the memory has, or all it is about
+    to have (the caching run is storing them), and the caller did not ask for
+    a structured completion, which a document search cannot give.
+    """
+    if (retriever_specific_config or {}).get("response_model") is not None:
+        return False
+    if probe.search_level == SEARCH_LEVEL_DOCUMENTS:
+        return True
+    return probe.search_level == SEARCH_LEVEL_NONE and probe.memory_state == MEMORY_CACHING
+
+
+def _partial_memory_marker(probe, recall_config, answered_by: SearchType) -> ResponseMarkerEntry:
     """The ``source="system"`` item recall appends while the graph is not built yet.
 
     ``status`` is ``memory_<state>`` with the state vocabulary of
     ``get_memory_status`` (``memory_cached``, ``memory_indexed``,
     ``memory_extracting``, ``memory_indexing_failed``, ...); ``text`` says what
-    answered and what improves next.
+    answered (``answered_by``, the search that ran) and what improves next.
     """
-    answered = {
-        SEARCH_LEVEL_DOCUMENTS: (
-            "These results come from keyword (BM25) search over the cached documents."
-        ),
-        SEARCH_LEVEL_CHUNKS: "These results come from chunk-level search; the graph is not built yet.",
-    }.get(probe.search_level, "")
+    if answered_by is SearchType.DOCUMENTS_LEXICAL:
+        answered = "These results come from keyword (BM25) search over the cached documents."
+    elif answered_by in _CHUNK_LEVEL_TYPES and probe.search_level == SEARCH_LEVEL_CHUNKS:
+        answered = "These results come from chunk-level search; the graph is not built yet."
+    else:
+        answered = ""
     detail = probe.message or "Memory is still being built."
     text = f"{answered} {detail}".strip()
     return ResponseMarkerEntry(
         source="system",
         status=f"memory_{probe.memory_state or 'partial'}",
+        text=text,
+        datapoint_count=probe.datapoint_count,
+        threshold=recall_config.recall_warmup_threshold,
+        error_class=probe.error_class,
+        error_message=probe.error_message,
+    )
+
+
+def _cold_memory_marker(probe, recall_config) -> ResponseMarkerEntry:
+    """The ``source="system"`` item recall returns instead of searching a memory with no graph.
+
+    ``build_failed`` names the failure of the last build; otherwise the memory
+    is still warming up.
+    """
+    if probe.error_class or probe.state == STATE_BUILD_FAILED:
+        failure_desc = probe.error_class or "unknown error"
+        if probe.error_message:
+            failure_desc = f"{failure_desc}: {probe.error_message}"
+        status = "build_failed"
+        text = (
+            "Memory build failed: the last ingestion for the requested "
+            f"datasets ended in an error ({failure_desc}). Fix the cause "
+            "and re-run remember() or cognify()."
+        )
+    else:
+        status = "memory_warming_up"
+        text = (
+            "Memory is still warming up: no knowledge graph data "
+            "exists yet for the requested datasets."
+        )
+    return ResponseMarkerEntry(
+        source="system",
+        status=status,
         text=text,
         datapoint_count=probe.datapoint_count,
         threshold=recall_config.recall_warmup_threshold,
@@ -774,23 +835,25 @@ async def recall(
                         guard_active = False
 
                 # Set while the memory is searchable but its graph is not built
-                # yet: the search runs at the level the memory allows and this
-                # marker is appended to say what answered and what improves next.
-                partial_marker = None
+                # yet: the search runs at the level the memory allows, and a
+                # marker saying what answered and what improves next is appended.
+                partial_probe = None
                 if guard_active:
                     from cognee.modules.recall.methods.graph_warmup import (
-                        STATE_BUILD_FAILED,
                         assess_memory_readiness,
                     )
 
                     probe = await assess_memory_readiness(user, probe_dataset_ids)
                     if probe.state == STATE_PARTIAL:
+                        partial_probe = probe
                         span.set_attribute("cognee.recall.warmup_state", probe.state)
                         span.set_attribute("cognee.recall.memory_state", probe.memory_state or "")
-                        if query_type is None and probe.search_level == SEARCH_LEVEL_DOCUMENTS:
-                            # Only the cached documents exist: the chunk and graph
-                            # lanes have nothing, so the keyword search over the
-                            # documents is the one that answers.
+                        if query_type is None and _answers_from_documents(
+                            probe, retriever_specific_config
+                        ):
+                            # Only the cached documents exist (or are being
+                            # stored): the chunk and graph lanes have nothing,
+                            # so the keyword search over the documents answers.
                             local_query_type = SearchType.DOCUMENTS_LEXICAL
                             routed_rule = None
                             span.set_attribute(COGNEE_SEARCH_TYPE, local_query_type.value)
@@ -801,7 +864,6 @@ async def recall(
                             probe.search_level,
                             local_query_type.value,
                         )
-                        partial_marker = _partial_memory_marker(probe, recall_config)
                     elif not probe.is_warm:
                         logger.info(
                             "Recall warm-up short-circuit: graph readiness is '%s' "
@@ -818,33 +880,7 @@ async def recall(
                             # merged result is empty — behave exactly as if
                             # the graph lane returned no results.
                             return []
-                        if probe.state == STATE_BUILD_FAILED:
-                            failure_desc = probe.error_class or "unknown error"
-                            if probe.error_message:
-                                failure_desc = f"{failure_desc}: {probe.error_message}"
-                            status = "build_failed"
-                            text = (
-                                "Memory build failed: the last ingestion for the requested "
-                                f"datasets ended in an error ({failure_desc}). Fix the cause "
-                                "and re-run remember() or cognify()."
-                            )
-                        else:
-                            status = "memory_warming_up"
-                            text = (
-                                "Memory is still warming up: no knowledge graph data "
-                                "exists yet for the requested datasets."
-                            )
-                        return [
-                            ResponseMarkerEntry(
-                                source="system",
-                                status=status,
-                                text=text,
-                                datapoint_count=probe.datapoint_count,
-                                threshold=recall_config.recall_warmup_threshold,
-                                error_class=probe.error_class,
-                                error_message=probe.error_message,
-                            )
-                        ]
+                        return [_cold_memory_marker(probe, recall_config)]
 
                 async def _search(search_type: SearchType):
                     return await authorized_search(
@@ -878,31 +914,51 @@ async def recall(
                 )
 
                 try:
-                    graph_results = await _search(local_query_type)
-                except (UnsupportedSearchTypeError, SearchTypeNotSupported) as error:
-                    if not routed_guess:
-                        raise
-                    # The backend rejected a routed guess — a deployment-level
-                    # choice, not the caller's; the default always substitutes.
-                    logger.info(
-                        "Rule %s routed to %s, which the backend rejected (%s); retrying as %s.",
-                        routed_rule,
-                        local_query_type.value,
-                        error,
-                        ROUTER_FALLBACK_TYPE.value,
-                    )
-                    local_query_type = ROUTER_FALLBACK_TYPE
-                    graph_results = await _search(local_query_type)
+                    try:
+                        graph_results = await _search(local_query_type)
+                    except (UnsupportedSearchTypeError, SearchTypeNotSupported) as error:
+                        if not routed_guess:
+                            raise
+                        # The backend rejected a routed guess — a deployment-level
+                        # choice, not the caller's; the default always substitutes.
+                        logger.info(
+                            "Rule %s routed to %s, which the backend rejected (%s); "
+                            "retrying as %s.",
+                            routed_rule,
+                            local_query_type.value,
+                            error,
+                            ROUTER_FALLBACK_TYPE.value,
+                        )
+                        local_query_type = ROUTER_FALLBACK_TYPE
+                        graph_results = await _search(local_query_type)
 
-                if routed_guess and not graph_results and local_query_type in _RETRY_ON_EMPTY:
+                    if routed_guess and not graph_results and local_query_type in _RETRY_ON_EMPTY:
+                        logger.info(
+                            "Rule %s routed to %s, which returned nothing; retrying as %s.",
+                            routed_rule,
+                            local_query_type.value,
+                            ROUTER_FALLBACK_TYPE.value,
+                        )
+                        local_query_type = ROUTER_FALLBACK_TYPE
+                        graph_results = await _search(local_query_type)
+                except NoDataError:
+                    if partial_probe is None:
+                        raise
+                    # The memory's state promised a search level the store does
+                    # not have for this search (nothing stored yet, or the pinned
+                    # type needs the graph): answer with what state it is in,
+                    # as the cold path does, instead of raising.
                     logger.info(
-                        "Rule %s routed to %s, which returned nothing; retrying as %s.",
-                        routed_rule,
+                        "%s found nothing to read on partially built memory (state '%s'); "
+                        "returning the memory status marker.",
                         local_query_type.value,
-                        ROUTER_FALLBACK_TYPE.value,
+                        partial_probe.memory_state,
                     )
-                    local_query_type = ROUTER_FALLBACK_TYPE
-                    graph_results = await _search(local_query_type)
+                    if sources != ["graph"]:
+                        return []
+                    if partial_probe.error_class:
+                        return [_cold_memory_marker(partial_probe, recall_config)]
+                    return [_partial_memory_marker(partial_probe, recall_config, local_query_type)]
 
                 # A fallback above may have changed the type that answered; the
                 # span recorded the routed one before the search ran.
@@ -924,8 +980,10 @@ async def recall(
                 # multi-source recall only when this lane answered, so the
                 # tools "on_empty" fallback (which fires on an empty merge)
                 # keeps firing.
-                if partial_marker is not None and (sources == ["graph"] or tagged):
-                    tagged.append(partial_marker)
+                if partial_probe is not None and (sources == ["graph"] or tagged):
+                    tagged.append(
+                        _partial_memory_marker(partial_probe, recall_config, local_query_type)
+                    )
                 return tagged
 
             async def _run_tools() -> list[RecallResponse]:

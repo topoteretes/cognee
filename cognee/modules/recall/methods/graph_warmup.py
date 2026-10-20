@@ -21,8 +21,10 @@ of four readiness states:
 * ``never_built`` — no pipeline has ever touched the datasets (or none has
   finished or failed yet).
 
-Only ``warm`` is cached (see ``assess_memory_readiness``); every other state
-is re-probed so the first recall after a stage completes sees the fresh truth.
+Only a ``warm`` verdict backed by a built graph is cached (see
+``assess_memory_readiness``); every other verdict, the staged/extracting
+fail-safe included, is re-probed so the first recall after a stage completes
+sees the fresh truth.
 
 Explicitly passed ``dataset_ids`` are intersected with the datasets the user
 can read before the probe runs, so this module can never act as a
@@ -30,7 +32,7 @@ cross-tenant oracle for other tenants' processing state.
 """
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from uuid import UUID
 
 from cognee.shared.logging_utils import get_logger
@@ -71,6 +73,10 @@ class WarmupProbe:
     search_level: str = "none"
     memory_state: str | None = None
     message: str | None = None
+    # False for a verdict not backed by a built graph (the staged/extracting
+    # fail-safe): caching it would keep recall off the search the memory
+    # answers once a stage completes, for the whole TTL.
+    cacheable: bool = field(default=True, compare=False)
 
     @property
     def is_warm(self) -> bool:
@@ -169,8 +175,11 @@ def aggregate_memory_statuses(statuses) -> WarmupProbe:
     # staged-but-not-cognified data, a custom pipeline that builds graphs
     # without logging stages, or an extraction about to finish. Fail-safe
     # -> warm: a normal search on an empty graph is the pre-feature behavior.
+    # Never cached: the next stage to complete changes the answer.
     if any(status.state in (MEMORY_STAGED, MEMORY_EXTRACTING) for status in statuses):
-        return WarmupProbe(STATE_WARM, _WARM_COUNT, search_level=SEARCH_LEVEL_GRAPH)
+        return WarmupProbe(
+            STATE_WARM, _WARM_COUNT, search_level=SEARCH_LEVEL_GRAPH, cacheable=False
+        )
     return WarmupProbe(STATE_NEVER_BUILT, 0)
 
 
@@ -206,11 +215,11 @@ async def get_graph_datapoint_count(user, dataset_ids: list[UUID] | None) -> int
 async def assess_memory_readiness(user, dataset_ids: list[UUID] | None) -> WarmupProbe:
     """Return the cached-when-warm readiness verdict for recall's guard.
 
-    Only *warm* verdicts are cached (for RECALL_WARMUP_CACHE_TTL): warm is
-    effectively monotone — a later forget() merely falls through to a normal
-    search on an empty graph — while a cached cold or partial verdict would
-    keep short-circuiting or down-routing recalls after a stage completed.
-    Those states therefore always re-run the probe.
+    Only *warm* verdicts backed by a built graph are cached (for
+    RECALL_WARMUP_CACHE_TTL): warm is effectively monotone — a later forget()
+    merely falls through to a normal search on an empty graph — while a cached
+    cold, partial or fail-safe verdict would keep short-circuiting, down-routing
+    or mis-routing recalls after a stage completed. Those always re-run the probe.
 
     Fails open: any probe or config error reports warm, so a broken probe can
     never block a real search.
@@ -238,7 +247,7 @@ async def assess_memory_readiness(user, dataset_ids: list[UUID] | None) -> Warmu
         ):
             probe = WarmupProbe(STATE_NEVER_BUILT, probe.datapoint_count)
 
-        if probe.is_warm:
+        if probe.is_warm and probe.cacheable:
             if len(_warmup_cache) >= _CACHE_MAX_ENTRIES:
                 _evict_expired()
             _warmup_cache[key] = (probe, time.monotonic() + config.recall_warmup_cache_ttl)

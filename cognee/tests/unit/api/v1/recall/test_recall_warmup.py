@@ -743,3 +743,202 @@ async def test_partial_verdicts_are_never_cached(monkeypatch, graph_warmup_mod, 
 
     assert first.state == second.state == graph_warmup_mod.STATE_PARTIAL
     assert len(calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_documents_being_cached_route_to_documents_lexical(
+    monkeypatch,
+    api_recall_mod,
+    graph_warmup_mod,
+    recall_config_mod,
+    no_remote_client,
+    stub_dataset_auth,
+    stubbed_graph_lane,
+):
+    """The first caching run stores documents one by one; they answer by keyword at once."""
+    _use_config(monkeypatch, recall_config_mod)
+    _stub_probe(monkeypatch, graph_warmup_mod, _partial_probe(graph_warmup_mod, "none", "caching"))
+    graph_warmup_mod.clear_warmup_cache()
+
+    out = await api_recall_mod.recall(
+        query_text="q", dataset_ids=[uuid4()], auto_route=False, user=_make_user()
+    )
+
+    assert stubbed_graph_lane[0]["query_type"] == SearchType.DOCUMENTS_LEXICAL
+    assert out[-1].status == "memory_caching"
+
+
+@pytest.mark.asyncio
+async def test_a_structured_completion_is_not_answered_with_documents(
+    monkeypatch,
+    api_recall_mod,
+    graph_warmup_mod,
+    recall_config_mod,
+    no_remote_client,
+    stub_dataset_auth,
+    stubbed_graph_lane,
+):
+    from pydantic import BaseModel
+
+    class Answer(BaseModel):
+        text: str
+
+    _use_config(monkeypatch, recall_config_mod)
+    _stub_probe(
+        monkeypatch, graph_warmup_mod, _partial_probe(graph_warmup_mod, "documents", "cached")
+    )
+    graph_warmup_mod.clear_warmup_cache()
+
+    out = await api_recall_mod.recall(
+        query_text="q",
+        dataset_ids=[uuid4()],
+        auto_route=False,
+        response_model=Answer,
+        user=_make_user(),
+    )
+
+    assert stubbed_graph_lane[0]["query_type"] == SearchType.HYBRID_COMPLETION
+    # The marker never claims the keyword search answered.
+    assert "keyword (BM25)" not in out[-1].text
+
+
+@pytest.mark.asyncio
+async def test_the_marker_names_the_search_that_ran(
+    monkeypatch,
+    api_recall_mod,
+    graph_warmup_mod,
+    recall_config_mod,
+    no_remote_client,
+    stub_dataset_auth,
+    stubbed_graph_lane,
+):
+    _use_config(monkeypatch, recall_config_mod)
+    _stub_probe(
+        monkeypatch, graph_warmup_mod, _partial_probe(graph_warmup_mod, "documents", "cached")
+    )
+    graph_warmup_mod.clear_warmup_cache()
+
+    out = await api_recall_mod.recall(
+        query_text="q",
+        query_type=SearchType.GRAPH_REPORT,
+        dataset_ids=[uuid4()],
+        auto_route=False,
+        user=_make_user(),
+    )
+
+    marker = out[-1]
+    assert marker.status == "memory_cached"
+    assert "keyword (BM25)" not in marker.text and "chunk-level" not in marker.text
+    assert "Memory is cached." in marker.text
+
+
+def _raising_graph_lane(monkeypatch, api_recall_mod, error):
+    search_methods = importlib.import_module("cognee.modules.search.methods.search")
+    search_operations = importlib.import_module("cognee.modules.search.operations")
+
+    async def raising_authorized_search(**kwargs):
+        raise error
+
+    async def noop(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(search_methods, "authorized_search", raising_authorized_search)
+    monkeypatch.setattr(search_operations, "log_search_history", noop)
+    monkeypatch.setattr(api_recall_mod, "set_session_user_context_variable", noop)
+
+
+@pytest.mark.asyncio
+async def test_partial_memory_with_nothing_to_read_answers_with_its_state(
+    monkeypatch,
+    api_recall_mod,
+    graph_warmup_mod,
+    recall_config_mod,
+    no_remote_client,
+    stub_dataset_auth,
+):
+    from cognee.modules.retrieval.exceptions.exceptions import NoDataError
+
+    _use_config(monkeypatch, recall_config_mod)
+    _raising_graph_lane(monkeypatch, api_recall_mod, NoDataError("The knowledge graph is empty."))
+    _stub_probe(monkeypatch, graph_warmup_mod, _partial_probe(graph_warmup_mod, "none", "indexing"))
+    graph_warmup_mod.clear_warmup_cache()
+
+    out = await api_recall_mod.recall(
+        query_text="q", dataset_ids=[uuid4()], auto_route=False, user=_make_user()
+    )
+    assert [entry.status for entry in out] == ["memory_indexing"]
+
+    multi_source = await api_recall_mod.recall(
+        query_text="q",
+        query_type=SearchType.GRAPH_COMPLETION,
+        dataset_ids=[uuid4()],
+        auto_route=False,
+        scope=["session", "graph"],
+        user=_make_user(),
+    )
+    assert multi_source == []
+
+
+@pytest.mark.asyncio
+async def test_a_failed_build_with_nothing_to_read_reports_the_failure(
+    monkeypatch,
+    api_recall_mod,
+    graph_warmup_mod,
+    recall_config_mod,
+    no_remote_client,
+    stub_dataset_auth,
+):
+    from cognee.modules.retrieval.exceptions.exceptions import NoDataError
+
+    _use_config(monkeypatch, recall_config_mod)
+    _raising_graph_lane(monkeypatch, api_recall_mod, NoDataError("The knowledge graph is empty."))
+    _stub_probe(
+        monkeypatch,
+        graph_warmup_mod,
+        _partial_probe(
+            graph_warmup_mod,
+            "chunks",
+            "extraction_failed",
+            error_class="EnolaNotInstalledError",
+            error_message="enola is missing",
+        ),
+    )
+    graph_warmup_mod.clear_warmup_cache()
+
+    out = await api_recall_mod.recall(
+        query_text="q", dataset_ids=[uuid4()], auto_route=False, user=_make_user()
+    )
+
+    (marker,) = out
+    assert marker.status == "build_failed"
+    assert "EnolaNotInstalledError: enola is missing" in marker.text
+
+
+@pytest.mark.asyncio
+async def test_the_staged_fail_safe_is_not_cached(monkeypatch, graph_warmup_mod, recall_config_mod):
+    """Warm while only staged data exists, but the caching run may finish any moment."""
+    from cognee.modules.pipelines.models.PipelineRun import PipelineRunStatus
+    from cognee.modules.pipelines.operations.get_memory_status import derive_memory_status
+
+    _use_config(monkeypatch, recall_config_mod)
+    staged = derive_memory_status(
+        {
+            "add_pipeline": types.SimpleNamespace(
+                status=PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
+                created_at=None,
+                error_class=None,
+                error_message=None,
+            )
+        }
+    )
+    calls = _stub_probe(
+        monkeypatch, graph_warmup_mod, graph_warmup_mod.aggregate_memory_statuses([staged])
+    )
+    graph_warmup_mod.clear_warmup_cache()
+    user = _make_user()
+
+    first = await graph_warmup_mod.assess_memory_readiness(user, None)
+    second = await graph_warmup_mod.assess_memory_readiness(user, None)
+
+    assert first.is_warm and second.is_warm
+    assert len(calls) == 2

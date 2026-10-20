@@ -13,13 +13,21 @@ from typing import Any
 
 from cognee.infrastructure.databases.vector.lexical import split_passages, tokenize_words
 from cognee.modules.retrieval.bm25_retriever import BM25ChunksRetriever
+from cognee.modules.retrieval.hybrid.results import payload_matches_node_filter
 from cognee.modules.retrieval.utils.conflict_context import public_chunk_payload
 
 # The snippet window: about a paragraph and a half.
 SNIPPET_TOKENS = 220
 
-# Payload keys a document hit keeps; ``text`` is replaced by the snippet.
-_DOCUMENT_KEYS = ("id", "name", "document_id", "mime_type", "char_count", "truncated")
+# Keys a document hit carries, whatever the backend: the vector stores keep
+# different payloads (LanceDB the index schema, pgvector the whole point, the
+# in-memory path the graph node), so a hit is built from what they all have.
+_DOCUMENT_KEYS = ("id", "document_id", "belongs_to_set")
+
+# With a node-set filter the backend index ranks the whole collection and the
+# filter runs on what it returns, so it is asked for more rows than top_k.
+_FILTERED_FETCH_FACTOR = 10
+_FILTERED_FETCH_MAX = 1000
 
 
 def best_passage(text: str, query_tokens: list[str], max_tokens: int = SNIPPET_TOKENS) -> str:
@@ -39,25 +47,61 @@ def best_passage(text: str, query_tokens: list[str], max_tokens: int = SNIPPET_T
 
 
 class BM25DocumentsRetriever(BM25ChunksRetriever):
-    """Rank cached documents with BM25 and return the best passage of each."""
+    """Rank cached documents with BM25 and return the best passage of each.
+
+    ``node_name`` keeps the documents of those node sets only
+    (``node_name_filter_operator`` "OR": any of them, "AND": all of them), as
+    the graph searches do. On a backend index the filter runs on the best
+    ``top_k * 10`` rows (at most 1000) of the whole collection, so a set whose
+    documents all rank below that returns fewer hits than ``top_k``.
+    """
 
     node_type = "CachedDocument"
     collection_name = "CachedDocument_text"
     # Conflicts hang off chunks, not off the cached documents.
     attaches_conflicts = False
 
+    def __init__(
+        self,
+        top_k: int = 15,
+        with_scores: bool = False,
+        node_name: list[str] | None = None,
+        node_name_filter_operator: str = "OR",
+        **kwargs: Any,
+    ):
+        super().__init__(top_k=top_k, with_scores=with_scores, **kwargs)
+        self.node_name = list(node_name) if node_name else None
+        self.node_name_filter_operator = node_name_filter_operator
+
+    def _keeps(self, payload: dict) -> bool:
+        return payload_matches_node_filter(payload, self.node_name, self.node_name_filter_operator)
+
+    def _native_limit(self) -> int:
+        if not self.node_name:
+            return self.top_k
+        return min(max(self.top_k * _FILTERED_FETCH_FACTOR, self.top_k), _FILTERED_FETCH_MAX)
+
     async def _collect_hits(self, query: str) -> list[tuple[dict, float]]:
         hits = await super()._collect_hits(query)
         query_tokens = self._tokenizer(query)
         documents: list[tuple[dict, float]] = []
         for payload, score in hits:
+            # A document that shares no term with the query is no hit: the
+            # backend indexes never return one, the in-memory scorer ranks it 0.
+            if score <= 0 or not self._keeps(payload):
+                continue
             text = payload.get("text") or ""
-            document = {key: payload.get(key) for key in _DOCUMENT_KEYS if key in payload}
+            document = {key: payload[key] for key in _DOCUMENT_KEYS if key in payload}
+            # The graph node and pgvector's payload call it name; LanceDB's
+            # index rows carry it as document_name.
+            document["name"] = payload.get("name") or payload.get("document_name")
             document["text"] = best_passage(text, query_tokens)
             document["passage_count"] = len(
                 split_passages(text, max_tokens=SNIPPET_TOKENS, pack=False)
             )
             documents.append((document, score))
+            if len(documents) == self.top_k:
+                break
         return documents
 
     async def get_completion_from_context(

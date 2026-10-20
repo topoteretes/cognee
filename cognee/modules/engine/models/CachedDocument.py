@@ -39,3 +39,8 @@ class CachedDocument(DataPoint):
         "lexical_fields": ["text"],
         "vector_only_fields": ["text"],
     }
+
+    @property
+    def document_name(self) -> str:
+        """The name under which vector stores' index rows carry a document's name."""
+        return self.name
