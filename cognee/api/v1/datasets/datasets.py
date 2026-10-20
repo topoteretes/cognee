@@ -196,7 +196,12 @@ class datasets:
         # on this dataset and exclude concurrent deletes.
         async with (
             dataset_lock(dataset.id),
-            set_database_global_context_variables(dataset.id, dataset.owner_id),
+            set_database_global_context_variables(
+                dataset.id,
+                dataset.owner_id,
+                permission_type="delete",
+                enforce_embedding_model=False,
+            ),
         ):
             deleted_elements = await delete_dataset_nodes_and_edges(dataset_id, user.id)
 
@@ -258,7 +263,12 @@ class datasets:
 
                 if not data:
                     # If data is not found in the system, user is using a custom graph model.
-                    async with set_database_global_context_variables(dataset_id, dataset.owner_id):
+                    async with set_database_global_context_variables(
+                        dataset_id,
+                        dataset.owner_id,
+                        permission_type="delete",
+                        enforce_embedding_model=False,
+                    ):
                         deleted_elements = await delete_data_nodes_and_edges(
                             dataset_id, data_id, user.id
                         )
@@ -275,7 +285,12 @@ class datasets:
                 if str(data.dataset_id) != str(dataset_id):
                     raise UnauthorizedDataAccessError(f"Data {data_id} not accessible.")
 
-                async with set_database_global_context_variables(dataset_id, dataset.owner_id):
+                async with set_database_global_context_variables(
+                    dataset_id,
+                    dataset.owner_id,
+                    permission_type="delete",
+                    enforce_embedding_model=False,
+                ):
                     # Delete mode is exclusive: ledger rows imply the relational-ledger
                     # path; only ledger-free data probes the graph marker to distinguish
                     # graph-provenance data from legacy data without graph ownership.

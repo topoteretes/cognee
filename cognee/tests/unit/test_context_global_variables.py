@@ -13,6 +13,7 @@ from cognee.context_global_variables import (
 )
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
+from cognee.infrastructure.databases.vector.exceptions import EmbeddingDimensionMismatchError
 from cognee.infrastructure.files.storage.config import file_storage_config
 from cognee.infrastructure.llm.config import LLMConfig
 
@@ -535,3 +536,88 @@ async def test_successful_enter_keeps_the_slot_until_exit(monkeypatch):
 
     assert _RecordingDatasetQueue.acquired == [dataset_id]
     assert _RecordingDatasetQueue.released == [dataset_id]
+
+
+@pytest.mark.asyncio
+async def test_delete_permission_skips_embedding_model_guard(monkeypatch):
+    """Delete and forget operations must bypass ensure_embedding_model_matches so mismatched datasets can be removed."""
+    _arrange_access_control(monkeypatch)
+    dataset_id = uuid4()
+    user_id = uuid4()
+
+    async def fake_get_user(_user_id):
+        return SimpleNamespace(id=user_id, tenant_id=None)
+
+    async def fake_owner(_dataset_id):
+        return user_id
+
+    async def fake_get_or_create(_dataset, _user):
+        return SimpleNamespace(
+            vector_database_provider="lancedb",
+            vector_database_url="",
+            vector_database_key="",
+            vector_database_name="test_vector_db",
+            vector_database_connection_info={},
+            graph_database_provider="ladybug",
+            graph_database_url="",
+            graph_database_key="",
+            graph_database_name="test_graph_db",
+            graph_database_connection_info={},
+            graph_dataset_database_handler="ladybug",
+        )
+
+    async def fake_resolve(dataset_database):
+        return dataset_database
+
+    async def fake_verify_access(_user_id, _dataset_id, _perm):
+        return None
+
+    guard_called = []
+
+    async def failing_ensure_embedding_model_matches(_dataset_database):
+        guard_called.append(True)
+        raise EmbeddingDimensionMismatchError(
+            dataset_id=dataset_id,
+            stored_model="openai/text-embedding-3-large",
+            stored_dimensions=3072,
+            configured_model="BAAI/bge-small-en-v1.5",
+            configured_dimensions=384,
+        )
+
+    monkeypatch.setattr("cognee.context_global_variables.get_user", fake_get_user)
+    monkeypatch.setattr("cognee.context_global_variables._get_dataset_owner_id", fake_owner)
+    monkeypatch.setattr(
+        "cognee.context_global_variables.get_or_create_dataset_database", fake_get_or_create
+    )
+    monkeypatch.setattr(
+        "cognee.context_global_variables.ensure_embedding_model_matches",
+        failing_ensure_embedding_model_matches,
+    )
+    monkeypatch.setattr(
+        "cognee.context_global_variables.resolve_dataset_database_connection_info", fake_resolve
+    )
+    monkeypatch.setattr(
+        "cognee.context_global_variables._verify_dataset_access", fake_verify_access
+    )
+
+    # 1. Normal context entrance raises EmbeddingDimensionMismatchError
+    with pytest.raises(EmbeddingDimensionMismatchError):
+        async with set_database_global_context_variables(dataset_id, user_id):
+            pass
+    assert len(guard_called) == 1
+
+    # 2. permission_type="delete" bypasses the guard without raising
+    entered = False
+    async with set_database_global_context_variables(dataset_id, user_id, permission_type="delete"):
+        entered = True
+    assert entered is True
+    assert len(guard_called) == 1  # guard was NOT called again
+
+    # 3. enforce_embedding_model=False bypasses the guard without raising
+    entered_without_enforcement = False
+    async with set_database_global_context_variables(
+        dataset_id, user_id, enforce_embedding_model=False
+    ):
+        entered_without_enforcement = True
+    assert entered_without_enforcement is True
+    assert len(guard_called) == 1  # guard was NOT called again
