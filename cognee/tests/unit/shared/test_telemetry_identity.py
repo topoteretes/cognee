@@ -10,6 +10,8 @@ import uuid
 from collections.abc import Coroutine
 from typing import Any
 
+import pytest
+
 from cognee.shared import utils
 from cognee.shared.utils import _resolve_identity, send_telemetry
 
@@ -229,55 +231,65 @@ def _use_credentials_file(monkeypatch, tmp_path, creds=None):
     return path
 
 
-def _cloud_fields(payload):
+def _connected_fields(payload):
     return [
-        {k: v for k, v in props.items() if k.startswith("cloud_")}
+        {k: v for k, v in props.items() if k.startswith("connected_")}
         for props in (payload["properties"], payload["user_properties"])
     ]
 
 
-def test_payload_has_no_cloud_identity_without_a_saved_connection(monkeypatch, tmp_path):
+TENANT_ID = "f7974d52-a58b-4497-8c9c-5369fa413d41"
+
+
+def test_payload_has_no_tenant_without_a_saved_connection(monkeypatch, tmp_path):
     payloads = _capture_telemetry(monkeypatch)
     _use_credentials_file(monkeypatch, tmp_path)
 
     send_telemetry("cognee.recall", "sdk")
 
-    assert _cloud_fields(payloads[0]) == [{}, {}]
+    assert _connected_fields(payloads[0]) == [{}, {}]
 
 
-def test_payload_carries_cloud_tenant_for_a_cloud_connection(monkeypatch, tmp_path):
-    from cognee.api.v1.serve.credentials import CloudCredentials
-
-    payloads = _capture_telemetry(monkeypatch)
-    tenant_id = str(uuid.uuid4())
-    _use_credentials_file(
-        monkeypatch,
-        tmp_path,
-        CloudCredentials(
-            service_url="https://acme.aws.cognee.ai", api_key="ck_x", tenant_id=tenant_id
-        ),
-    )
-
-    send_telemetry("cognee.recall", "sdk")
-
-    expected = {"cloud_tenant_id": tenant_id, "cloud_service_host": "acme.aws.cognee.ai"}
-    assert _cloud_fields(payloads[0]) == [expected, expected]
-
-
-def test_self_hosted_connection_adds_no_cloud_identity(monkeypatch, tmp_path):
-    """A self-hosted server reports no workspace, so serve() saves no tenant."""
+def test_payload_has_no_tenant_when_none_was_saved(monkeypatch, tmp_path):
     from cognee.api.v1.serve.credentials import CloudCredentials
 
     payloads = _capture_telemetry(monkeypatch)
     _use_credentials_file(
-        monkeypatch,
-        tmp_path,
-        CloudCredentials(service_url="http://localhost:8000", api_key="ck_x"),
+        monkeypatch, tmp_path, CloudCredentials(service_url="http://localhost:8000")
     )
 
     send_telemetry("cognee.recall", "sdk")
 
-    assert _cloud_fields(payloads[0]) == [{}, {}]
+    assert _connected_fields(payloads[0]) == [{}, {}]
+
+
+@pytest.mark.parametrize(
+    ("service_url", "expected_host"),
+    [
+        (f"https://tenant-{TENANT_ID}.aws.cognee.ai", f"tenant-{TENANT_ID}.aws.cognee.ai"),
+        ("http://localhost:8000", "localhost"),
+        ("http://127.0.0.1:8000", "localhost"),
+        ("https://cognee.internal.acme.corp", "self_hosted"),
+        ("http://10.0.4.12:8000", "self_hosted"),
+        ("https://cognee.ai.acme.corp", "self_hosted"),
+    ],
+)
+def test_payload_carries_the_saved_tenant_and_host(
+    monkeypatch, tmp_path, service_url, expected_host
+):
+    from cognee.api.v1.serve.credentials import CloudCredentials
+
+    payloads = _capture_telemetry(monkeypatch)
+    _use_credentials_file(
+        monkeypatch,
+        tmp_path,
+        CloudCredentials(service_url=service_url, api_key="ck_x", tenant_id=TENANT_ID),
+    )
+
+    send_telemetry("cognee.recall", "sdk")
+
+    expected = {"connected_tenant_id": TENANT_ID, "connected_host": expected_host}
+    assert _connected_fields(payloads[0]) == [expected, expected]
 
 
 def test_unparseable_saved_url_never_breaks_telemetry(monkeypatch, tmp_path):
@@ -286,14 +298,15 @@ def test_unparseable_saved_url_never_breaks_telemetry(monkeypatch, tmp_path):
 
     payloads = _capture_telemetry(monkeypatch)
     path = _use_credentials_file(monkeypatch, tmp_path)
-    path.write_text(json.dumps({"service_url": "https://[bad", "tenant_id": str(uuid.uuid4())}))
+    path.write_text(json.dumps({"service_url": "https://[bad", "tenant_id": TENANT_ID}))
 
     send_telemetry("cognee.recall", "sdk")
 
     assert len(payloads) == 1
+    assert _connected_fields(payloads[0]) == [{}, {}]
 
 
-def test_api_key_never_reaches_the_serialized_event(monkeypatch, tmp_path):
+def test_api_key_and_self_hosted_url_never_reach_the_serialized_event(monkeypatch, tmp_path):
     import json
 
     from cognee.api.v1.serve.credentials import CloudCredentials
@@ -303,14 +316,14 @@ def test_api_key_never_reaches_the_serialized_event(monkeypatch, tmp_path):
         monkeypatch,
         tmp_path,
         CloudCredentials(
-            service_url="https://acme.aws.cognee.ai/some/path",
+            service_url="https://cognee.internal.acme.corp/some/path",
             api_key="ck_live_raw_api_key_value",
-            tenant_id=str(uuid.uuid4()),
+            tenant_id=TENANT_ID,
         ),
     )
 
     send_telemetry("cognee.recall", "sdk")
 
     serialized = json.dumps(payloads[0])
-    assert "ck_live_raw_api_key_value" not in serialized
-    assert "/some/path" not in serialized
+    for value in ["ck_live_raw_api_key_value", "acme", "/some/path"]:
+        assert value not in serialized
