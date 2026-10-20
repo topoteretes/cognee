@@ -48,7 +48,9 @@ DEFAULT_LOOKBACK = timedelta(hours=24)
 # A window never reaches further back than this, however long ago the last
 # successful run was: GitHub search caps results at 1000 per query.
 MAX_LOOKBACK = timedelta(days=14)
-# Namespace for the deterministic ticket ids.
+# Namespace for the deterministic ticket ids. NEVER CHANGE IT: every ticket id
+# is derived from it, so a new value gives every past review a new id and the
+# next run over an already-ticketed period creates a duplicate for each one.
 TICKET_NAMESPACE = uuid.UUID("6f1c2b7e-2d4a-4e0b-9a51-8c3f6f0d5a11")
 MAX_TITLE = 200
 
