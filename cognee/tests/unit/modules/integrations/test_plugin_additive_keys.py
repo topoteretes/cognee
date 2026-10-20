@@ -1,9 +1,10 @@
-"""Plugin agent keys: provisioning only ever adds one, and prunes stale ones first.
+"""Plugin agent keys: provisioning only ever adds one, pruning stale ones only when full.
 
 ``POST /plugins/{plugin_key}/provision`` must never revoke another machine's
-key. It adds a key to the plugin's agent, after deleting that agent's keys that
-went unused for ``plugin_key_idle_days`` or were never used within
-``plugin_key_unused_hours``; a full agent is a 409, never an eviction. Runs
+key while the agent has room. Only when the new key would not fit does it delete
+that agent's keys that went unused for ``plugin_key_idle_days`` or were never
+used within ``plugin_key_unused_hours`` — just enough, least recently used
+first; a full agent with no stale keys is a 409, never an eviction. Runs
 against a real database through the real router, because the claims are about
 rows and races: which keys still authenticate, how many rows remain, and what
 two concurrent transactions leave behind.
@@ -210,12 +211,30 @@ async def test_concurrent_first_create_recovery_adds_a_key_and_never_rotates():
 
 
 # ---------------------------------------------------------------------------
-# pruning
+# pruning (only when the agent is full)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_a_key_idle_past_the_threshold_is_pruned_and_a_recent_one_survives():
+async def test_below_the_cap_stale_keys_are_never_pruned():
+    async with _client(await _parent()) as client:
+        idle = await _provision(client)
+        orphan = await _provision(client)
+        await _age_key(
+            idle["keyId"], created_ago=timedelta(days=400), last_used_ago=timedelta(days=365)
+        )
+        await _age_key(orphan["keyId"], created_ago=timedelta(days=30), never_used=True)
+        new = await _provision(client)
+
+    assert await _key_ids(new["agentId"]) == {idle["keyId"], orphan["keyId"], new["keyId"]}
+    assert await _resolve(idle["apiKey"]) is not None
+
+
+@pytest.mark.asyncio
+async def test_at_the_cap_a_key_idle_past_the_threshold_is_pruned_and_a_recent_one_survives(
+    key_settings,
+):
+    key_settings(max_user_api_keys=2)
     async with _client(await _parent()) as client:
         stale = await _provision(client)
         recent = await _provision(client)
@@ -232,7 +251,10 @@ async def test_a_key_idle_past_the_threshold_is_pruned_and_a_recent_one_survives
 
 
 @pytest.mark.asyncio
-async def test_a_never_used_key_past_the_threshold_is_pruned_and_a_younger_one_survives():
+async def test_at_the_cap_a_never_used_key_past_the_threshold_is_pruned_and_a_younger_one_survives(
+    key_settings,
+):
+    key_settings(max_user_api_keys=2)
     async with _client(await _parent()) as client:
         orphan = await _provision(client)
         young = await _provision(client)
@@ -244,19 +266,42 @@ async def test_a_never_used_key_past_the_threshold_is_pruned_and_a_younger_one_s
 
 
 @pytest.mark.asyncio
-async def test_a_key_that_was_used_is_never_treated_as_never_used():
+async def test_at_the_cap_only_as_many_keys_as_needed_go_least_recently_used_first(key_settings):
+    key_settings(max_user_api_keys=3)
+    async with _client(await _parent()) as client:
+        oldest = await _provision(client)
+        orphan = await _provision(client)
+        idle = await _provision(client)
+        await _age_key(
+            oldest["keyId"], created_ago=timedelta(days=90), last_used_ago=timedelta(days=60)
+        )
+        # Never used: ranked by when it was created.
+        await _age_key(orphan["keyId"], created_ago=timedelta(days=45), never_used=True)
+        await _age_key(
+            idle["keyId"], created_ago=timedelta(days=90), last_used_ago=timedelta(days=31)
+        )
+        new = await _provision(client)
+
+    assert await _key_ids(new["agentId"]) == {orphan["keyId"], idle["keyId"], new["keyId"]}
+
+
+@pytest.mark.asyncio
+async def test_a_key_that_was_used_is_never_treated_as_never_used(key_settings):
+    key_settings(max_user_api_keys=1)
     async with _client(await _parent()) as client:
         old_but_used = await _provision(client)
         await _age_key(
             old_but_used["keyId"], created_ago=timedelta(days=40), last_used_ago=timedelta(days=29)
         )
-        new = await _provision(client)
+        full = await client.post(PROVISION)
 
-    assert old_but_used["keyId"] in await _key_ids(new["agentId"])
+    assert full.status_code == 409
+    assert await _key_ids(old_but_used["agentId"]) == {old_but_used["keyId"]}
 
 
 @pytest.mark.asyncio
-async def test_a_legacy_key_with_no_timestamps_is_kept():
+async def test_a_legacy_key_with_no_timestamps_is_kept(key_settings):
+    key_settings(max_user_api_keys=1)
     async with _client(await _parent()) as client:
         legacy = await _provision(client)
         from sqlalchemy import update
@@ -271,31 +316,15 @@ async def test_a_legacy_key_with_no_timestamps_is_kept():
                 .values(created_at=None, last_used_at=None)
             )
             await session.commit()
-        new = await _provision(client)
+        full = await client.post(PROVISION)
 
-    assert legacy["keyId"] in await _key_ids(new["agentId"])
-
-
-@pytest.mark.asyncio
-async def test_pruning_runs_before_the_cap_so_a_full_agent_with_stale_keys_provisions(
-    key_settings,
-):
-    key_settings(max_user_api_keys=2)
-    async with _client(await _parent()) as client:
-        stale = await _provision(client)
-        orphan = await _provision(client)
-        await _age_key(
-            stale["keyId"], created_ago=timedelta(days=60), last_used_ago=timedelta(days=31)
-        )
-        await _age_key(orphan["keyId"], created_ago=timedelta(hours=25), never_used=True)
-        new = await _provision(client)
-
-    assert await _key_ids(new["agentId"]) == {new["keyId"]}
+    assert full.status_code == 409
+    assert await _key_ids(legacy["agentId"]) == {legacy["keyId"]}
 
 
 @pytest.mark.asyncio
 async def test_a_zero_threshold_disables_its_rule(key_settings):
-    key_settings(plugin_key_idle_days=0, plugin_key_unused_hours=0)
+    key_settings(max_user_api_keys=2, plugin_key_idle_days=0, plugin_key_unused_hours=0)
     async with _client(await _parent()) as client:
         stale = await _provision(client)
         orphan = await _provision(client)
@@ -303,26 +332,33 @@ async def test_a_zero_threshold_disables_its_rule(key_settings):
             stale["keyId"], created_ago=timedelta(days=400), last_used_ago=timedelta(days=365)
         )
         await _age_key(orphan["keyId"], created_ago=timedelta(days=30), never_used=True)
-        new = await _provision(client)
+        full = await client.post(PROVISION)
 
-    assert await _key_ids(new["agentId"]) == {stale["keyId"], orphan["keyId"], new["keyId"]}
+    assert full.status_code == 409
+    assert await _key_ids(stale["agentId"]) == {stale["keyId"], orphan["keyId"]}
 
 
 @pytest.mark.asyncio
-async def test_pruning_never_touches_another_agents_or_the_parents_keys():
+async def test_pruning_never_touches_another_agents_or_the_parents_keys(key_settings):
     from cognee.modules.users.api_key.create_api_key import create_api_key
 
     parent = await _parent()
     parent_key = await create_api_key(parent, "laptop")
     await _age_key(parent_key.id, created_ago=timedelta(days=60), never_used=True)
 
+    key_settings(max_user_api_keys=1)
     async with _client(parent) as client:
         codex = await _provision(client, "/api/v1/integrations/plugins/codex/provision")
         await _age_key(
             codex["keyId"], created_ago=timedelta(days=60), last_used_ago=timedelta(days=31)
         )
-        await _provision(client)
+        stale = await _provision(client)
+        await _age_key(
+            stale["keyId"], created_ago=timedelta(days=60), last_used_ago=timedelta(days=31)
+        )
+        new = await _provision(client)
 
+    assert await _key_ids(new["agentId"]) == {new["keyId"]}
     assert str(parent_key.id) in await _key_ids(parent.id)
     assert codex["keyId"] in await _key_ids(codex["agentId"])
 
@@ -377,12 +413,13 @@ async def test_two_provisions_racing_at_the_cap_never_exceed_it(key_settings):
 
 
 @pytest.mark.asyncio
-async def test_a_failed_insert_rolls_back_the_prune():
+async def test_a_failed_insert_rolls_back_the_prune(key_settings):
     from sqlalchemy.exc import IntegrityError
 
     from cognee.modules.integrations import plugin_keys
     from cognee.modules.users.api_key.create_api_key import build_api_key_row
 
+    key_settings(max_user_api_keys=1)  # full, so the prune actually runs
     async with _client(await _parent()) as client:
         stale = await _provision(client)
     await _age_key(stale["keyId"], created_ago=timedelta(days=60), last_used_ago=timedelta(days=31))

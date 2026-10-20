@@ -18,9 +18,9 @@ logger = get_logger(__name__)
 
 class ApiKeySettings(BaseSettings):
     max_user_api_keys: int = 10
-    # Plugin agent keys are pruned when that plugin provisions again (see
-    # cognee.modules.integrations.plugin_keys): a key last used more than
-    # plugin_key_idle_days ago, or never used and older than
+    # When a plugin agent is full, provisioning prunes just enough of its stale
+    # keys (see cognee.modules.integrations.plugin_keys): a key last used more
+    # than plugin_key_idle_days ago, or never used and older than
     # plugin_key_unused_hours. 0 disables the rule.
     plugin_key_idle_days: int = Field(default=30, ge=0)
     plugin_key_unused_hours: int = Field(default=24, ge=0)

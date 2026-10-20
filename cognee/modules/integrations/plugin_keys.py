@@ -1,14 +1,15 @@
 """API keys for plugin agents: provisioning only ever adds one.
 
 A plugin keeps one agent sub-user per ``(user, plugin_key)``, and every machine
-the plugin runs on provisions its own key for that agent. Provisioning never
-revokes a key, so a new machine never logs out another one. Keys clean
-themselves up instead: each provision first prunes the agent's stale keys
-(unused for ``plugin_key_idle_days``, or never used and older than
-``plugin_key_unused_hours``), so the per-agent cap is rarely reached.
+the plugin runs on provisions its own key for that agent. Below the per-agent
+cap, provisioning never deletes a key, so a new machine never logs out another
+one. Only when the new key would not fit are stale keys pruned (unused for
+``plugin_key_idle_days``, or never used and older than
+``plugin_key_unused_hours``): just enough of them, least recently used first.
+An agent that is full of keys in use answers with a limit error instead.
 
-Prune, cap check and insert are one transaction under a lock on the agent's
-user row: a failure anywhere rolls the prune back too, and two concurrent
+Count, prune and insert are one transaction under a lock on the agent's user
+row: a failure anywhere rolls the prune back too, and two concurrent
 provisions serialize instead of racing past the cap.
 """
 
@@ -65,14 +66,15 @@ def _stale_key_condition(now: datetime):
 
 
 async def add_plugin_agent_key(agent_user_id: UUID, plugin_key: str) -> UserApiKey:
-    """Prune the agent's stale keys and add a new one, atomically.
+    """Add a key to the agent, pruning stale keys only if it is full, atomically.
 
-    Only ``agent_user_id``'s keys are touched. Returns the new row with the raw
-    key on ``api_key`` (shown once).
+    Only ``agent_user_id``'s keys are touched, and only as many as the new key
+    needs room for. Returns the new row with the raw key on ``api_key`` (shown
+    once).
 
     Raises:
-        PluginAgentKeyLimitError: the agent is still full after pruning; nothing
-        was deleted or added.
+        PluginAgentKeyLimitError: the agent is full and not enough of its keys
+        are stale; nothing was deleted or added.
     """
     # Built before the transaction: with HASH_API_KEY on, hashing is a slow
     # PBKDF2 run that must not hold the agent's row lock (or SQLite's write
@@ -84,14 +86,7 @@ async def add_plugin_agent_key(agent_user_id: UUID, plugin_key: str) -> UserApiK
         async with session.begin():
             await _lock_agent_row(session, agent_user_id)
 
-            await session.execute(
-                delete(UserApiKey).where(
-                    UserApiKey.user_id == agent_user_id,
-                    _stale_key_condition(datetime.now(timezone.utc)),
-                )
-            )
-
-            remaining = (
+            held = (
                 await session.execute(
                     select(func.count())
                     .select_from(UserApiKey)
@@ -99,8 +94,26 @@ async def add_plugin_agent_key(agent_user_id: UUID, plugin_key: str) -> UserApiK
                 )
             ).scalar_one()
             limit = apiKeySettings.max_user_api_keys
-            if remaining + 1 > limit:
-                raise PluginAgentKeyLimitError(limit)
+            overflow = held + 1 - limit
+            if overflow > 0:
+                prunable = (
+                    (
+                        await session.execute(
+                            select(UserApiKey.id)
+                            .where(
+                                UserApiKey.user_id == agent_user_id,
+                                _stale_key_condition(datetime.now(timezone.utc)),
+                            )
+                            .order_by(func.coalesce(UserApiKey.last_used_at, UserApiKey.created_at))
+                            .limit(overflow)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                if len(prunable) < overflow:
+                    raise PluginAgentKeyLimitError(limit)
+                await session.execute(delete(UserApiKey).where(UserApiKey.id.in_(prunable)))
 
             session.add(user_api_key)
 

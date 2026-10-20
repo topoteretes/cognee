@@ -581,14 +581,13 @@ def get_integrations_router():
         holds its own key. The returned key is shown once and never
         retrievable again.
 
-        Before adding, stale keys of that agent are pruned: keys last used more
-        than ``PLUGIN_KEY_IDLE_DAYS`` ago (default 30), and never-used keys older
-        than ``PLUGIN_KEY_UNUSED_HOURS`` (default 24); 0 disables a rule. An
-        agent still holding the maximum number of keys after pruning answers
-        409 and nothing changes — revoke an old key through
-        ``DELETE /plugins/{plugin_key}/keys/{key_id}``. ``/integrations/status``
-        may report a plugin as connected while only stale keys remain, until
-        the next provision prunes them.
+        Below the per-agent cap nothing is deleted. Only when the new key would
+        not fit are stale keys of that agent pruned, just enough of them, least
+        recently used first: keys last used more than ``PLUGIN_KEY_IDLE_DAYS``
+        ago (default 30), and never-used keys older than
+        ``PLUGIN_KEY_UNUSED_HOURS`` (default 24); 0 disables a rule. A full
+        agent without enough stale keys answers 409 and nothing changes —
+        revoke an old key through ``DELETE /plugins/{plugin_key}/keys/{key_id}``.
 
         ## Path Parameters
         - **plugin_key** (str): Key of a known plugin (see GET /api/v1/integrations/status).
