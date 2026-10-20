@@ -26,6 +26,10 @@ on:
         description: "Window in hours instead of the default 72 (at most 336)"
         type: string
         default: ""
+      pr_number:
+        description: "Handle this one merged pull request only, ignoring the window"
+        type: string
+        default: ""
   # TEMPORARY, remove before merging: dry-runs this branch against the real
   # repository and Linear workspace on every push to the pull request.
   pull_request:
@@ -58,4 +62,5 @@ jobs:
           DRY_RUN: ${{ github.event_name == 'schedule' && 'false' || (github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true') || (github.event_name == 'workflow_dispatch' && 'false') || 'true' }}
           # Pull-request dry runs look at the last week.
           LOOKBACK_HOURS: ${{ github.event_name == 'pull_request' && '168' || inputs.lookback_hours }}
+          PR_NUMBER: ${{ inputs.pr_number }}
         run: python3 .github/scripts/linear_review_tickets.py

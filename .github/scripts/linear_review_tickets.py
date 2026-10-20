@@ -29,6 +29,8 @@ Input (env):
                                              it (the run fails otherwise).
   LOOKBACK_HOURS                             optional window in hours instead of 72
                                              (manual runs, backfills); at most 336.
+  PR_NUMBER                                  optional: handle this one merged pull
+                                             request only, ignoring the window (tests).
   DRY_RUN                                    "true": read everything, write nothing,
                                              print the tickets that would be created.
   GITHUB_STEP_SUMMARY                        where the run summary is appended.
@@ -81,13 +83,19 @@ class Approval:
 def main() -> None:
     repo = os.environ["GITHUB_REPOSITORY"]
     dry_run = os.environ.get("DRY_RUN", "false").lower() == "true"
-    until = datetime.now(timezone.utc)
-    since = window_start(until)
-    approvals = find_approvals(repo, since, until)
-    print(
-        f"{len(approvals)} approval(s) on pull requests merged "
-        f"{since:%Y-%m-%d %H:%M} .. {until:%Y-%m-%d %H:%M} UTC"
-    )
+    pr_number = os.environ.get("PR_NUMBER")
+    if pr_number:
+        approvals = pull_approvals(repo, int(pr_number))
+        scope = f"Pull request #{pr_number} of `{repo}` only."
+    else:
+        until = datetime.now(timezone.utc)
+        since = window_start(until)
+        approvals = find_approvals(repo, since, until)
+        scope = (
+            f"Pull requests of `{repo}` merged "
+            f"{since:%Y-%m-%d %H:%M} .. {until:%Y-%m-%d %H:%M} UTC."
+        )
+    print(f"{len(approvals)} approval(s). {scope}")
 
     linear = Linear(os.environ["LINEAR_API_KEY"])
     team = linear.team(os.environ["LINEAR_REVIEW_TEAM_KEY"])
@@ -111,7 +119,7 @@ def main() -> None:
             linear.create_ticket(ticket_id, team, user["id"], label_id, repo, approval, run_url())
         created.append((approval, user))
 
-    write_summary(repo, since, until, dry_run, created, existing, unmatched)
+    write_summary(scope, dry_run, created, existing, unmatched)
 
 
 # --------------------------------------------------------------------------- #
@@ -141,9 +149,16 @@ def find_approvals(repo: str, since: datetime, until: datetime) -> list[Approval
     """Every (merged pull request, approving human reviewer) pair in the window, oldest first."""
     approvals = []
     for number in merged_pull_numbers(repo, since, until):
-        pr = github_get(f"/repos/{repo}/pulls/{number}")
-        approvals.extend(approvals_of(pr, github_paged(f"/repos/{repo}/pulls/{number}/reviews")))
+        approvals.extend(pull_approvals(repo, number))
     return sorted(approvals, key=lambda a: (a.merged_at, a.pr_number, a.reviewer_login))
+
+
+def pull_approvals(repo: str, number: int) -> list[Approval]:
+    """The approvals of one merged pull request; an unmerged one is an error."""
+    pr = github_get(f"/repos/{repo}/pulls/{number}")
+    if not pr.get("merged_at"):
+        raise ValueError(f"Pull request #{number} of {repo} is not merged")
+    return approvals_of(pr, github_paged(f"/repos/{repo}/pulls/{number}/reviews"))
 
 
 def merged_pull_numbers(repo: str, since: datetime, until: datetime) -> list[int]:
@@ -436,12 +451,12 @@ def run_url() -> str | None:
     )
 
 
-def write_summary(repo, since, until, dry_run, created, existing, unmatched) -> None:
+def write_summary(scope, dry_run, created, existing, unmatched) -> None:
     verb = "Would create" if dry_run else "Created"
     lines = [
         f"## PR review tickets{' (dry run)' if dry_run else ''}",
         "",
-        f"Pull requests of `{repo}` merged {since:%Y-%m-%d %H:%M} .. {until:%Y-%m-%d %H:%M} UTC.",
+        scope,
         "",
         (
             f"**{verb} {len(created)} ticket(s)**, {len(existing)} already existed, "

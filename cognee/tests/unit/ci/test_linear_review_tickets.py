@@ -266,9 +266,10 @@ def world(monkeypatch, tmp_path):
     monkeypatch.setenv("LOOKBACK_HOURS", "24")
     monkeypatch.setenv("LINEAR_REVIEW_LABEL", "PR review")
     monkeypatch.delenv("GITHUB_RUN_ID", raising=False)
+    monkeypatch.delenv("PR_NUMBER", raising=False)
     summary = tmp_path / "summary.md"
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
-    return {"summary": summary, "searches": searches}
+    return {"summary": summary, "searches": searches, "prs": prs}
 
 
 def _install(monkeypatch, fake):
@@ -392,6 +393,42 @@ def test_an_unknown_team_fails_the_run(monkeypatch, world):
     monkeypatch.setenv("DRY_RUN", "true")
 
     with pytest.raises(RuntimeError, match="No Linear team with key 'SDK'"):
+        lrt.main()
+
+
+def test_pr_number_handles_that_pull_request_only(monkeypatch, world):
+    fake = FakeLinear()
+    _install(monkeypatch, fake)
+    monkeypatch.setenv("DRY_RUN", "false")
+    monkeypatch.setenv("PR_NUMBER", "8")
+
+    lrt.main()
+
+    assert world["searches"] == []  # no window search at all
+    assert fake.created == []  # #8 was approved by an outsider and a bot only
+    summary = world["summary"].read_text()
+    assert "Pull request #8 of `topoteretes/cognee` only." in summary
+    assert "@outsider" in summary and "#7" not in summary
+
+
+def test_pr_number_creates_one_ticket_per_approver_of_that_pull_request(monkeypatch, world):
+    fake = FakeLinear()
+    _install(monkeypatch, fake)
+    monkeypatch.setenv("DRY_RUN", "false")
+    monkeypatch.setenv("PR_NUMBER", "7")
+
+    lrt.main()
+
+    assert [t["title"] for t in fake.created] == ["PR review: cognee#7 Add a feature"] * 2
+    assert world["searches"] == []
+
+
+def test_pr_number_of_an_unmerged_pull_request_fails(monkeypatch, world):
+    _install(monkeypatch, FakeLinear())
+    world["prs"][7]["merged_at"] = None
+    monkeypatch.setenv("PR_NUMBER", "7")
+
+    with pytest.raises(ValueError, match="#7 of topoteretes/cognee is not merged"):
         lrt.main()
 
 
