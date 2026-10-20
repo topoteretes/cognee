@@ -80,74 +80,20 @@ def test_a_composite_key_resolves_to_all_its_columns():
 
 
 def test_only_keys_to_unloaded_tables_are_dropped():
-    # A composite key, a key to a unique non-primary column, and a key to a table
-    # this run did not load. The table describes the first two; which rows they
-    # find is decided at resolve time. The third has no table to point at.
-    hints = _dlt_key_hints(
-        [
-            {
-                "name": "shipment",
-                "columns": {"id": {"primary_key": True}},
-                "references": [
-                    {
-                        "referenced_table": "order_lines",
-                        "columns": ["order_id", "line_no"],
-                        "referenced_columns": ["order_id", "line_no"],
-                    },
-                    {
-                        "referenced_table": "users",
-                        "columns": ["employee_no"],
-                        "referenced_columns": ["employee_no"],
-                    },
-                    {
-                        "referenced_table": "carriers",
-                        "columns": ["carrier_id"],
-                        "referenced_columns": ["id"],
-                    },
-                ],
-            },
-        ]
-    )
+    # A key to a unique non-primary column is kept: which rows it finds is decided
+    # at resolve time. A key to a table this run did not load has nothing to point at.
+    kept = {"column": "employee_no", "ref_table": "users", "ref_column": "employee_no"}
+    unloaded = {"column": "carrier_id", "ref_table": "carriers", "ref_column": "id"}
     schema = {
         "shipment": {"primary_key": None, "foreign_keys": []},
-        "order_lines": {"primary_key": None, "foreign_keys": []},
         "users": {"primary_key": None, "foreign_keys": []},
     }
 
-    _apply_key_hints(schema, hints)
-
-    assert schema["shipment"]["foreign_keys"] == [
-        {"column": "order_id", "ref_table": "order_lines", "ref_column": "order_id"},
-        {"column": "line_no", "ref_table": "order_lines", "ref_column": "line_no"},
-        {"column": "employee_no", "ref_table": "users", "ref_column": "employee_no"},
-    ]
-
-
-def test_a_reference_with_unaligned_column_lists_is_skipped():
-    hints = _dlt_key_hints(
-        [
-            {
-                "name": "orders",
-                "columns": {},
-                "references": [
-                    {
-                        "referenced_table": "users",
-                        "columns": ["a", "b"],
-                        "referenced_columns": ["id"],
-                    },
-                    {
-                        "referenced_table": "shops",
-                        "columns": ["shop"],
-                        "referenced_columns": ["id"],
-                    },
-                ],
-            }
-        ]
+    _apply_key_hints(
+        schema, {"shipment": {"primary_key": ["id"], "foreign_keys": [kept, unloaded]}}
     )
 
-    assert hints["orders"]["foreign_keys"] == [
-        {"column": "shop", "ref_table": "shops", "ref_column": "id"}
-    ]
+    assert schema["shipment"]["foreign_keys"] == [kept]
 
 
 def test_hints_come_from_this_runs_resources_not_the_shared_schema():

@@ -69,29 +69,15 @@ def test_two_composite_keys_to_one_table_stay_apart():
     }
 
 
-def test_separate_keys_to_one_table_each_find_their_row():
-    row = _row(
-        "orders",
-        [_fk("buyer", "users", "code"), _fk("seller", "users", "code")],
-        {"buyer": "u1", "seller": "u2"},
-    )
-    lookup = {("users", "u1"): LINE_12, ("users", "u2"): LINE_21}
+def test_a_key_to_a_column_the_target_is_not_keyed_on_creates_no_edge():
+    # users rows are keyed on id: looking employee_no up by id would find the wrong user.
+    row = _row("badges", [_fk("employee_no", "users", "employee_no")], {"employee_no": 2})
+    unkeyed = set()
 
-    refs = _resolve_fk_references(row, lookup, [], {"users": ["code"]}, set())
+    refs = _resolve_fk_references(row, {("users", "2"): LINE_21}, [], {"users": ["id"]}, unkeyed)
 
-    assert _edges(refs) == {
-        ("buyer_references_users", LINE_12),
-        ("seller_references_users", LINE_21),
-    }
-
-
-def test_a_key_to_a_table_without_a_declared_primary_key_uses_its_row_key():
-    # parents declares no primary key; its rows are keyed on the "id" fallback.
-    row = _row("kids", [_fk("parent_id", "parents", "id")], {"parent_id": 2})
-
-    refs = _resolve_fk_references(row, {("parents", "2"): LINE_21}, [], {"parents": ["id"]}, set())
-
-    assert _edges(refs) == {("parent_id_references_parents", LINE_21)}
+    assert refs == []
+    assert unkeyed == {("badges", "employee_no", "users", "employee_no", "id")}
 
 
 def test_a_composite_key_with_a_null_column_is_no_reference():

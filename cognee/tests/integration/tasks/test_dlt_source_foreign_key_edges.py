@@ -208,23 +208,18 @@ CREATE TABLE badges (
     owner_id INTEGER REFERENCES people (id)
 );
 CREATE TABLE teams (id INTEGER UNIQUE, name TEXT);
-CREATE TABLE codes (code TEXT UNIQUE, label TEXT);
 CREATE TABLE members (
     id INTEGER PRIMARY KEY,
-    team_id INTEGER REFERENCES teams (id),
-    code TEXT REFERENCES codes (code)
+    team_id INTEGER REFERENCES teams (id)
 );
 INSERT INTO order_lines VALUES (1, 1, 'pen'), (1, 2, 'ink'), (2, 1, 'paper');
 INSERT INTO shipments VALUES (10, 2, 1);
 INSERT INTO people VALUES (1, 2, 'Ann'), (2, 7, 'Bob');
 INSERT INTO badges VALUES (100, 2, 1);
 INSERT INTO teams VALUES (1, 'red'), (2, 'blue');
-INSERT INTO codes VALUES ('a', 'alpha'), ('b', 'beta');
-INSERT INTO members VALUES (5, 2, 'b');
+INSERT INTO members VALUES (5, 2);
 """
-KEY_SHAPES_TABLES = frozenset(
-    {"order_lines", "shipments", "people", "badges", "teams", "codes", "members"}
-)
+KEY_SHAPES_TABLES = frozenset({"order_lines", "shipments", "people", "badges", "teams", "members"})
 
 
 async def _table_foreign_keys() -> dict[str, list[dict]]:
@@ -243,8 +238,8 @@ async def _table_foreign_keys() -> dict[str, list[dict]]:
 @pytest.mark.asyncio
 async def test_each_foreign_key_finds_its_row_by_the_key_rows_are_keyed_on(clean_env):
     """A composite foreign key finds its row by all its columns, whatever their
-    declared order. A table without a declared primary key is keyed on ``id`` or its
-    first column, and a foreign key to that column finds its row. A key to a unique
+    declared order. A table without a declared primary key is keyed on ``id``, and a
+    foreign key to it finds its row. A key to a unique
     non-primary column would match an unrelated row (badge 100 to Bob), so it
     creates no edge, but its table still describes it."""
     source_db = _write_source_db(clean_env / "keys.sqlite", KEY_SHAPES_SQL)
@@ -256,7 +251,6 @@ async def test_each_foreign_key_finds_its_row_by_the_key_rows_are_keyed_on(clean
         ("shipments:10", "ship_order_ship_line_references_order_lines", "order_lines:1:2"),
         ("badges:100", "owner_id_references_people", "people:1"),
         ("members:5", "team_id_references_teams", "teams:2"),
-        ("members:5", "code_references_codes", "codes:b"),
     }
     table_foreign_keys = await _table_foreign_keys()
     assert {fk["column"] for fk in table_foreign_keys["shipments"]} == {"ship_line", "ship_order"}

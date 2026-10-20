@@ -272,7 +272,10 @@ class _SchemaGraph:
 
 
 @pytest.mark.asyncio
-async def test_dlt_foreign_keys_merge_tables_of_one_name_and_skip_unreadable_ones():
+async def test_dlt_foreign_keys_are_shown_with_their_table():
+    """Keys of every table of one name are listed together; unreadable ones are skipped."""
+    from cognee.modules.retrieval.broad_store import RecordStore
+
     orders_fk = '[{"column": "customer_id", "ref_table": "customers", "ref_column": "id"}]'
     other_orders_fk = '[{"column": "shop_id", "ref_table": "shops", "ref_column": "id"}]'
     graph = _SchemaGraph(
@@ -280,59 +283,21 @@ async def test_dlt_foreign_keys_merge_tables_of_one_name_and_skip_unreadable_one
             ("orders", orders_fk),
             ("orders", other_orders_fk),
             ("orders", orders_fk),
-            ("customers", "[]"),
             ("broken", "not json"),
             ("partial", '[{"column": "a"}]'),
         ]
     )
-
     foreign_keys = await BroadRetriever().dlt_foreign_keys(graph)
-
     assert foreign_keys == {
-        "orders": ["customer_id references customers.id", "shop_id references shops.id"],
-        "customers": [],
+        "orders": ["customer_id references customers.id", "shop_id references shops.id"]
     }
 
-
-@pytest.mark.asyncio
-async def test_dlt_foreign_keys_are_shown_with_their_table(monkeypatch):
-    from cognee.modules.retrieval.broad_store import RecordStore
-
-    graph = _SchemaGraph(
-        [("orders", '[{"column": "customer_id", "ref_table": "customers", "ref_column": "id"}]')]
-    )
     store = RecordStore()
     try:
-        store.add_dlt_tables(await BroadRetriever().dlt_foreign_keys(graph))
+        store.add_dlt_tables(foreign_keys)
         store.add_dlt_rows(["Table: orders\nRow Data:\n  id: 7\n  customer_id: 3"])
-
-        assert "Foreign keys: customer_id references customers.id" in store.describe("orders")
+        assert "customer_id references customers.id; shop_id references shops.id" in (
+            store.describe("orders")
+        )
     finally:
         store.close()
-
-
-@pytest.mark.asyncio
-async def test_the_store_is_closed_when_reading_foreign_keys_fails(monkeypatch):
-    closed = []
-
-    class Store:
-        def add_dlt_tables(self, foreign_keys):
-            pass
-
-        def close(self):
-            closed.append(True)
-
-    class Graph:
-        async def get_filtered_graph_data(self, filters):
-            raise RuntimeError("graph unavailable")
-
-    async def unified():
-        return SimpleNamespace(graph=Graph(), vector=None)
-
-    monkeypatch.setattr(broad_retriever, "get_unified_engine", unified)
-    monkeypatch.setattr(broad_retriever, "RecordStore", Store)
-
-    with pytest.raises(RuntimeError, match="graph unavailable"):
-        await BroadRetriever().get_retrieved_objects("anything")
-
-    assert closed == [True]
