@@ -20,6 +20,11 @@ class PipelineRunInfo(BaseModel):
     # "indexed", "indexing_failed", "ready" or "extraction_failed". None on
     # every other event.
     memory_state: str | None = None
+    # Set by a chained execution (cognify()'s caching, indexing and cognify
+    # runs) on the events of its later runs: the id of the run the chain
+    # started with, which is the id a caller was handed. The background
+    # executor delivers such an event to that run's subscribers as well.
+    chain_run_id: UUID | None = None
 
     model_config = {
         "arbitrary_types_allowed": True,

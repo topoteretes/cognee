@@ -245,11 +245,21 @@ async def run_memory_pipelines(
     if indexing_tasks is not None:
         stages.append(MemoryStage(**{**INDEXING_STAGE.__dict__, "tasks": indexing_tasks}))
 
+    # The run each dataset's chain started with: a caller that was handed that
+    # run id (background mode) keeps receiving the later runs' events under it.
+    first_run_ids: dict[UUID, UUID] = {}
+
+    def _mark_chain(run_info: PipelineRunInfo) -> PipelineRunInfo:
+        first = first_run_ids.setdefault(run_info.dataset_id, run_info.pipeline_run_id)
+        if first != run_info.pipeline_run_id:
+            run_info.chain_run_id = first
+        return run_info
+
     # The best state each dataset reached before extraction, for the failure line.
     reached: dict[UUID, str] = {}
     for stage in stages:
         async for run_info in _run_stage(stage, run_params, reached):
-            yield run_info
+            yield _mark_chain(run_info)
 
     pipeline_name = cognify_params.get("pipeline_name", COGNIFY_PIPELINE_NAME)
     cognify_run = run_pipeline(**cognify_params)
@@ -286,4 +296,4 @@ async def run_memory_pipelines(
                     MEMORY_EXTRACTION_FAILED,
                     still,
                 )
-            yield run_info
+            yield _mark_chain(run_info)

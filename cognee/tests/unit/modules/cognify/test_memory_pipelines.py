@@ -128,6 +128,11 @@ async def test_runs_the_three_pipelines_in_order_with_their_own_parameters(monke
     assert (indexed.pipeline_name, indexed.memory_state) == (INDEXING_PIPELINE_NAME, "indexed")
     assert ready.memory_state == "ready"
     assert cached.status == "PipelineRunStageCompleted"
+    # The later runs' events carry the id the chain started with, so a
+    # background subscriber of that id keeps receiving them.
+    first_run_id = events[0].pipeline_run_id
+    assert all(event.chain_run_id is None for event in events[:3])
+    assert all(event.chain_run_id == first_run_id for event in events[3:])
 
 
 @pytest.mark.asyncio
