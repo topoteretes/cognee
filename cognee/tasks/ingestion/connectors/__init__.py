@@ -23,3 +23,5 @@ __all__ = [
     "linear_source",
     "notion_source",
 ]
+from .intercom import intercom_source
+__all__.append("intercom_source")
