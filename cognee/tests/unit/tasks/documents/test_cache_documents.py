@@ -83,6 +83,17 @@ async def test_writes_one_entry_per_readable_document(mock_add):
 @pytest.mark.asyncio
 @patch.object(cache_module, "add_data_points", new_callable=AsyncMock)
 async def test_nothing_readable_writes_nothing(mock_add):
-    with patch.object(cache_module, "read_document_text", AsyncMock(side_effect=OSError("gone"))):
+    not_utf8 = UnicodeDecodeError("utf-8", b"", 0, 1, "binary")
+    with patch.object(cache_module, "read_document_text", AsyncMock(side_effect=not_utf8)):
         assert await cache_documents([_document()]) == []
+    mock_add.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@patch.object(cache_module, "add_data_points", new_callable=AsyncMock)
+async def test_an_io_error_fails_the_item_so_the_next_run_caches_it(mock_add):
+    """Skipping would stamp the item cached, and nothing would ever cache it again."""
+    io_error = AsyncMock(side_effect=OSError(5, "EIO"))
+    with patch.object(cache_module, "read_document_text", io_error), pytest.raises(OSError):
+        await cache_documents([_document()])
     mock_add.assert_not_awaited()

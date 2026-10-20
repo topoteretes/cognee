@@ -6,8 +6,10 @@ the file ingestion stored, already extracted from PDFs and the like — and
 stores it as one ``CachedDocument``. No chunker, no embedding, no LLM: the
 dataset answers ``DOCUMENTS_LEXICAL`` (BM25) searches as soon as this run
 completes, and the Indexing and Cognify runs add vector and graph search on
-top. A document whose stored text cannot be read is skipped with a warning
-rather than failing the run; the later runs still process it.
+top. A document whose stored text is not UTF-8 is skipped with a warning
+(reading it again cannot succeed); any other read error fails the item, so it
+is not stamped and the next ``cognify()`` caches it. Either way the later
+runs still process it.
 """
 
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
@@ -60,11 +62,12 @@ async def cache_documents(documents: list[Document], ctx=None) -> list[CachedDoc
     for document in documents:
         try:
             text = await read_document_text(document)
-        except (UnicodeDecodeError, OSError) as error:
+        except UnicodeDecodeError as error:
+            # Deterministic, unlike an I/O error, which fails the item so the
+            # document is cached on the next run instead of stamped as done.
             logger.warning(
-                "Not caching %r for keyword search: its stored text could not be read (%s: %s).",
+                "Not caching %r for keyword search: its stored text is not UTF-8 (%s).",
                 document.name,
-                type(error).__name__,
                 error,
             )
             continue
