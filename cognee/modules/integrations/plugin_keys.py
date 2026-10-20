@@ -106,15 +106,3 @@ async def add_plugin_agent_key(agent_user_id: UUID, plugin_key: str) -> UserApiK
 
         user_api_key.api_key = raw_key  # return raw key so caller can show it once
         return user_api_key
-
-
-async def revoke_agent_api_key(agent_user_id: UUID, key_id: UUID) -> bool:
-    """Delete one of the agent's keys. False when the agent holds no such key."""
-    db_engine = get_relational_engine()
-    async with db_engine.get_async_session() as session, session.begin():
-        revoked = await session.execute(
-            delete(UserApiKey)
-            .where(UserApiKey.id == key_id, UserApiKey.user_id == agent_user_id)
-            .returning(UserApiKey.id)
-        )
-        return revoked.scalar_one_or_none() is not None

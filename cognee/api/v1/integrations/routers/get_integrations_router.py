@@ -80,7 +80,6 @@ from cognee.modules.integrations.oauth_flow import (
 from cognee.modules.integrations.plugin_keys import (
     PluginAgentKeyLimitError,
     add_plugin_agent_key,
-    revoke_agent_api_key,
 )
 from cognee.modules.integrations.plugin_status import (
     PluginStatusRow,
@@ -96,6 +95,7 @@ from cognee.modules.integrations.registry import get_integration, supported_inte
 from cognee.modules.observability import new_span
 from cognee.modules.session_lifecycle.visibility import visible_user_ids
 from cognee.modules.users.api_key.delete_api_key import delete_api_key
+from cognee.modules.users.api_key.exceptions import ApiKeyNotFoundError
 from cognee.modules.users.api_key.get_api_keys import get_api_keys
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.methods.get_principal_configuration import (
@@ -695,7 +695,11 @@ def get_integrations_router():
             span.set_attribute("cognee.integrations.plugin", plugin_key)
             _plugin_or_404(plugin_key)
             agent_user = await _find_plugin_agent(user, plugin_key)
-            if agent_user is None or not await revoke_agent_api_key(agent_user.id, key_id):
+            if agent_user is None:
+                raise HTTPException(status_code=404, detail="API key not found")
+            try:
+                await delete_api_key(agent_user, key_id)
+            except ApiKeyNotFoundError:
                 raise HTTPException(status_code=404, detail="API key not found")
             return PluginKeyRevokeResultDTO(revoked=True)
 

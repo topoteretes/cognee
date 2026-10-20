@@ -494,3 +494,21 @@ async def test_disconnect_still_revokes_every_key():
     assert await _resolve(a["apiKey"]) is None
     assert await _resolve(b["apiKey"]) is None
     assert await _key_ids(a["agentId"]) == set()
+
+
+@pytest.mark.asyncio
+async def test_delete_api_key_tells_not_found_apart_from_failures():
+    """Revoke maps only not-found to 404; a real failure must not look like one."""
+    from cognee.modules.users.api_key import delete_api_key as delete_module
+    from cognee.modules.users.api_key.exceptions import ApiKeyDeletionError, ApiKeyNotFoundError
+
+    parent = await _parent()
+    with pytest.raises(ApiKeyNotFoundError):
+        await delete_module.delete_api_key(parent, uuid4())
+
+    with (
+        patch.object(delete_module, "select", side_effect=RuntimeError("db down")),
+        pytest.raises(ApiKeyDeletionError) as failure,
+    ):
+        await delete_module.delete_api_key(parent, uuid4())
+    assert not isinstance(failure.value, ApiKeyNotFoundError)
