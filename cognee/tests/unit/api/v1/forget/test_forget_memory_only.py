@@ -435,3 +435,52 @@ async def test_forget_telemetry_target_labels(monkeypatch):
         await forget_module.forget(dataset="ds", data_id=DATA_ID_A, memory_only=True)
 
     assert captured_targets == ["dataset_memory_only", "data_item_memory_only"]
+
+
+@pytest.mark.asyncio
+async def test_forget_passes_delete_permission_and_bypasses_embedding_enforcement(monkeypatch):
+    """forget_dataset_memory and forget_data_memory must configure database context with permission_type='delete' and enforce_embedding_model=False."""
+    context_calls = []
+
+    def fake_context(dataset_id, user_id, **kwargs):
+        context_calls.append({"dataset_id": dataset_id, "user_id": user_id, **kwargs})
+        return _NoOpAsyncContext()
+
+    monkeypatch.setattr(forget_module, "_resolve_dataset_id", AsyncMock(return_value=DATASET_ID))
+    monkeypatch.setattr(forget_module, "set_database_global_context_variables", fake_context)
+    monkeypatch.setattr(
+        delete_dataset_nodes_and_edges_module,
+        "delete_dataset_nodes_and_edges",
+        AsyncMock(return_value=DeletedGraphElements()),
+    )
+    monkeypatch.setattr(
+        delete_data_nodes_and_edges_module,
+        "delete_data_nodes_and_edges",
+        AsyncMock(return_value=DeletedGraphElements()),
+    )
+
+    data_a = _make_data_record(DATA_ID_A, {})
+    session = _FakeSession([data_a])
+    engine = _FakeEngine(session)
+
+    with (
+        patch(
+            "cognee.infrastructure.databases.relational.get_relational_engine",
+            return_value=engine,
+        ),
+        patch(
+            "cognee.modules.session_lifecycle.invalidate_sessions.invalidate_sessions_for_dataset",
+            AsyncMock(),
+        ),
+        patch(
+            "cognee.modules.session_lifecycle.invalidate_sessions.invalidate_sessions_for_deleted_data",
+            AsyncMock(),
+        ),
+    ):
+        await forget_module._forget_dataset_memory(DATASET_ID, USER)
+        await forget_module._forget_data_memory(DATA_ID_A, DATASET_ID, USER)
+
+    assert len(context_calls) == 2
+    for call in context_calls:
+        assert call["permission_type"] == "delete"
+        assert call["enforce_embedding_model"] is False

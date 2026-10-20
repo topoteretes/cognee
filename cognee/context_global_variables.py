@@ -150,6 +150,7 @@ class DatabaseContextManager:
         "_dataset_token",
         "_embedding_config",
         "_embedding_token",
+        "_enforce_embedding_model",
         "_llm_config",
         "_llm_token",
         "_permission_type",
@@ -163,12 +164,14 @@ class DatabaseContextManager:
         llm_config: LLMConfig | None = None,
         embedding_config: EmbeddingConfig | None = None,
         permission_type: str | None = None,
+        enforce_embedding_model: bool = True,
     ) -> None:
         self._dataset = dataset
         self._user_id = user_id
         self._llm_config = llm_config
         self._embedding_config = embedding_config
         self._permission_type = permission_type
+        self._enforce_embedding_model = enforce_embedding_model
         self._applied = False
         self._dataset_token = None
         self._llm_token = None
@@ -349,7 +352,10 @@ class DatabaseContextManager:
 
         # With this dataset's vector store bound: refuse a configured embedding
         # model whose width differs from the one that built the dataset.
-        await ensure_embedding_model_matches(dataset_database)
+        # Skip this check for delete / forget operations where existing vectors
+        # are being purged without embedding new data.
+        if self._enforce_embedding_model and self._permission_type != "delete":
+            await ensure_embedding_model_matches(dataset_database)
 
     async def _apply(self) -> None:
         if self._applied:
@@ -406,6 +412,7 @@ def set_database_global_context_variables(
     llm_config: LLMConfig | None = None,
     embedding_config: EmbeddingConfig | None = None,
     permission_type: str | None = None,
+    enforce_embedding_model: bool = True,
 ) -> "DatabaseContextManager":
     """Returns a dual-mode helper that is both awaitable and an async context manager.
 
@@ -451,9 +458,21 @@ def set_database_global_context_variables(
             to verify for ``user_id`` on the dataset before entering. When
             omitted, no permission check is performed here — callers are
             expected to have authorized at the API layer.
+        enforce_embedding_model: Optional boolean flag (defaults to True). When False
+            or when ``permission_type="delete"``, the embedding model dimension
+            compatibility check (``ensure_embedding_model_matches``) is skipped,
+            enabling deletion and forget operations on datasets built with different
+            or legacy embedding models without raising EmbeddingDimensionMismatchError.
 
     Returns:
         A :class:`DatabaseContextManager` that can be awaited or used as an
         async context manager.
     """
-    return DatabaseContextManager(dataset, user_id, llm_config, embedding_config, permission_type)
+    return DatabaseContextManager(
+        dataset,
+        user_id,
+        llm_config,
+        embedding_config,
+        permission_type,
+        enforce_embedding_model,
+    )

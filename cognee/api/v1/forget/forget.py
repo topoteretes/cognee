@@ -296,7 +296,9 @@ async def _forget_dataset_memory(dataset_ref: str | UUID, user: Any) -> dict:
     # AFTER the lock — canonical order (dataset lock -> queue slot), SDK-483.
     async with (
         dataset_lock(dataset_id),
-        set_database_global_context_variables(dataset_id, user.id),
+        set_database_global_context_variables(
+            dataset_id, user.id, permission_type="delete", enforce_embedding_model=False
+        ),
     ):
         # 1. Delete graph nodes/edges and vector embeddings
         deleted_elements = await delete_dataset_nodes_and_edges(dataset_id, user.id)
@@ -397,7 +399,9 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: str | UUID, user: Any)
     # AFTER the lock — canonical order (dataset lock -> queue slot), SDK-483.
     async with (
         dataset_lock(dataset_id),
-        set_database_global_context_variables(dataset_id, user.id),
+        set_database_global_context_variables(
+            dataset_id, user.id, permission_type="delete", enforce_embedding_model=False
+        ),
     ):
         # 1. Delete graph nodes/edges and vector embeddings for this data item
         deleted_elements = await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
