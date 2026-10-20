@@ -426,12 +426,18 @@ async def _build_source_manifest_item(
             table_name,
             count,
         )
+    # The columns each table's rows are keyed on: an FK finds its target row only
+    # through that whole key.
+    key_columns = {row.table_name: row.primary_key_columns for row in unique_rows.values()}
 
     tables: dict[str, dict] = {}
     manifest_rows: list[dict] = []
     # (source_table, fk_column, ref_table, fk_value) for FKs whose target row
     # was not loaded — collected here and reported once after the loop.
     missing_fk_targets: list[tuple[str, str, str, str]] = []
+    # (source_table, fk_column, ref_table, ref_column, key_columns) for FKs that
+    # reference a column their target's rows are not keyed on.
+    unkeyed_fks: set[tuple[str, str, str, str, str]] = set()
     for key, row in unique_rows.items():
         if row.table_name not in tables:
             tables[row.table_name] = {
@@ -447,7 +453,9 @@ async def _build_source_manifest_item(
             "primary_key_value": row.primary_key_value,
             "content_hash": row.content_hash,
             "text": _build_schema_context_text(row),
-            "fk_references": _resolve_fk_references(row, fk_lookup, missing_fk_targets),
+            "fk_references": _resolve_fk_references(
+                row, fk_lookup, missing_fk_targets, key_columns, unkeyed_fks
+            ),
         }
         column_values = _selected_column_values(row, column_value_columns)
         if column_values:
@@ -468,6 +476,18 @@ async def _build_source_manifest_item(
             "Sample (source_table.column -> ref_table:value): %s",
             len(missing_fk_targets),
             sample,
+        )
+    for src, col, ref, ref_col, key_col in sorted(unkeyed_fks):
+        logger.warning(
+            "Foreign key %s.%s -> %s.%s creates no edges: rows of '%s' are keyed on "
+            "'%s', not '%s'.",
+            src,
+            col,
+            ref,
+            ref_col,
+            ref,
+            key_col,
+            ref_col,
         )
 
     # Deterministic ordering so the manifest content hash is stable across
@@ -860,6 +880,8 @@ def _resolve_fk_references(
     dlt_row: DltRowData,
     row_id_lookup: dict,
     missing_targets: list | None = None,
+    key_columns: dict[str, list[str]] | None = None,
+    unkeyed_fks: set | None = None,
 ) -> list:
     """Resolve foreign key columns to target row node ids for graph edge creation.
 
@@ -870,6 +892,13 @@ def _resolve_fk_references(
     When ``missing_targets`` is provided, FK references whose target row was not
     loaded are appended to it as ``(source_table, column, ref_table, value)`` so
     the caller can report the dropped edges instead of silently losing them.
+
+    ``row_id_lookup`` finds a row by the whole key its table is keyed on, given per
+    table in ``key_columns``. An FK that references any other column, or one column
+    of a composite key, would match an unrelated row (an explicit ``primary_key``
+    keys every table on one column), so it creates no edge and is recorded in
+    ``unkeyed_fks`` as ``(source_table, column, ref_table, ref_column, key_columns)``
+    with the key columns joined by ", ".
     """
     references = []
     for fk in dlt_row.foreign_keys:
@@ -878,6 +907,20 @@ def _resolve_fk_references(
         ref_column = fk.get("ref_column", "")
 
         if not fk_column or not ref_table:
+            continue
+
+        target_key_columns = (key_columns or {}).get(ref_table)
+        if target_key_columns is not None and ref_column and target_key_columns != [ref_column]:
+            if unkeyed_fks is not None:
+                unkeyed_fks.add(
+                    (
+                        dlt_row.table_name,
+                        fk_column,
+                        ref_table,
+                        ref_column,
+                        ", ".join(target_key_columns),
+                    )
+                )
             continue
 
         # Get the FK value from the row data

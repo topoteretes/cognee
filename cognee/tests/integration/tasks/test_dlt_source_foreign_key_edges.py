@@ -78,7 +78,11 @@ async def clean_env(tmp_path, monkeypatch):
         create_relational_engine,
     )
     from cognee.infrastructure.databases.vector.create_vector_engine import _create_vector_engine
+    from cognee.tasks.ingestion.get_dlt_destination import get_dlt_destination
 
+    # Cached per staging database name: a dataset name reused across tests would
+    # otherwise stage into the earlier test's files.
+    get_dlt_destination.cache_clear()
     _create_graph_engine.cache_clear()
     _create_vector_engine.cache_clear()
     create_relational_engine.cache_clear()
@@ -102,6 +106,8 @@ async def clean_env(tmp_path, monkeypatch):
         await cognee.prune.prune_system(metadata=True)
     except Exception:
         logger.debug("Ignoring exception in clean_env", exc_info=True)
+    finally:
+        get_dlt_destination.cache_clear()
 
 
 EXPECTED_ROW_EDGES = {
@@ -118,17 +124,17 @@ EXPECTED_ROW_EDGES = {
 }
 
 
-SOURCE_TABLES = set(EXPECTED_TABLE_KEYS)
+SOURCE_TABLES = frozenset(EXPECTED_TABLE_KEYS)
 
 
-def _write_source_db(path: pathlib.Path) -> pathlib.Path:
+def _write_source_db(path: pathlib.Path, sql: str = SOURCE_SQL) -> pathlib.Path:
     connection = sqlite3.connect(path)
-    connection.executescript(SOURCE_SQL)
+    connection.executescript(sql)
     connection.close()
     return path
 
 
-async def _row_edges() -> set[tuple[str, str, str]]:
+async def _row_edges(tables: frozenset[str] = SOURCE_TABLES) -> set[tuple[str, str, str]]:
     """Edges between the SQL source's rows, by the rows' names (``table:pk``).
     Rows of other sources in the dataset (a CSV's) are left out."""
     from cognee.infrastructure.databases.graph import get_graph_engine
@@ -137,7 +143,7 @@ async def _row_edges() -> set[tuple[str, str, str]]:
     rows = {
         str(node_id): props["name"]
         for node_id, props in nodes
-        if props.get("type") == "DltRow" and props["name"].split(":")[0] in SOURCE_TABLES
+        if props.get("type") == "DltRow" and props["name"].split(":")[0] in tables
     }
     return {
         (rows[str(source)], relation, rows[str(target)])
@@ -178,10 +184,47 @@ async def test_sql_source_keys_survive_an_earlier_csv_in_the_same_pipeline(clean
     csv_path.write_text("id,kind,unit\n1,thermometer,C\n2,hygrometer,%\n3,anemometer,m/s\n")
     source_db = _write_source_db(clean_env / "source.sqlite")
 
-    # Not "shop": get_dlt_destination is cached per staging database name, so a
-    # dataset name reused across tests would stage into the earlier test's files.
-    await cognee.add(str(csv_path), dataset_name="shop_after_csv")
-    await cognee.add(f"sqlite:///{source_db}", dataset_name="shop_after_csv")
-    await cognee.cognify(datasets=["shop_after_csv"])
+    await cognee.add(str(csv_path), dataset_name="shop")
+    await cognee.add(f"sqlite:///{source_db}", dataset_name="shop")
+    await cognee.cognify(datasets=["shop"])
 
     assert await _row_edges() == EXPECTED_ROW_EDGES
+
+
+UNRESOLVABLE_KEYS_SQL = """
+CREATE TABLE order_lines (
+    order_id INTEGER, line_no INTEGER, product TEXT, PRIMARY KEY (order_id, line_no)
+);
+CREATE TABLE shipments (
+    id INTEGER PRIMARY KEY,
+    order_id INTEGER,
+    line_no INTEGER,
+    FOREIGN KEY (order_id, line_no) REFERENCES order_lines (order_id, line_no)
+);
+CREATE TABLE people (id INTEGER PRIMARY KEY, employee_no INTEGER UNIQUE, name TEXT);
+CREATE TABLE badges (
+    id INTEGER PRIMARY KEY,
+    employee_no INTEGER REFERENCES people (employee_no),
+    owner_id INTEGER REFERENCES people (id)
+);
+INSERT INTO order_lines VALUES (1, 1, 'pen'), (1, 2, 'ink'), (2, 1, 'paper');
+INSERT INTO shipments VALUES (10, 1, 2);
+INSERT INTO people VALUES (1, 2, 'Ann'), (2, 7, 'Bob');
+INSERT INTO badges VALUES (100, 2, 1);
+"""
+
+
+@pytest.mark.asyncio
+async def test_keys_no_row_can_resolve_create_no_edges(clean_env):
+    """Rows are found by their whole primary key. A composite foreign key is split
+    per column, and a key to a unique non-primary column would match unrelated rows
+    (badge 100 to Bob), so they create no edges; the badge's key to people.id
+    still does."""
+    source_db = _write_source_db(clean_env / "keys.sqlite", UNRESOLVABLE_KEYS_SQL)
+
+    await cognee.add(f"sqlite:///{source_db}", dataset_name="shop")
+    await cognee.cognify(datasets=["shop"])
+
+    assert await _row_edges(frozenset({"order_lines", "shipments", "people", "badges"})) == {
+        ("badges:100", "owner_id_references_people", "people:1"),
+    }

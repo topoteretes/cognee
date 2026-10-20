@@ -307,8 +307,18 @@ def _apply_key_hints(schema: dict, key_hints: dict[str, dict]) -> None:
     """Set each reflected table's keys from dlt's hints.
 
     Postgres names tables "<dataset>.<table>", so a foreign key's target gets the
-    same prefix to match the row lookup. A table without a hint keeps its reflected
-    keys: a missing hint must never fail the add.
+    same prefix to match the row lookup.
+
+    A foreign key is dropped when no row could resolve it correctly:
+    - its table was not loaded this run (a single-table ``query``);
+    - it does not reference its table's single-column primary key. Rows are found
+      by their whole primary key, so one column of a composite key, or a unique
+      non-primary column, would match an unrelated row. dlt merges a composite key
+      and separate keys to one table alike, so this check is also what keeps a
+      composite key's columns from becoming independent edges.
+
+    A table without a hint keeps its reflected keys: a missing hint must never fail
+    the add.
     """
     for qualified_name, table_info in schema.items():
         table_name = qualified_name.split(".")[-1]
@@ -318,9 +328,33 @@ def _apply_key_hints(schema: dict, key_hints: dict[str, dict]) -> None:
             continue
         if hints["primary_key"]:
             table_info["primary_key"] = hints["primary_key"]
-        table_info["foreign_keys"] = [
-            {**fk, "ref_table": prefix + fk["ref_table"]} for fk in hints["foreign_keys"]
-        ]
+        foreign_keys = []
+        for fk in hints["foreign_keys"]:
+            ref_table = prefix + fk["ref_table"]
+            if ref_table not in schema:
+                logger.info(
+                    "Foreign key %s.%s -> %s is skipped: that table was not loaded.",
+                    qualified_name,
+                    fk["column"],
+                    ref_table,
+                )
+                continue
+            ref_primary_key = key_hints.get(fk["ref_table"], {}).get("primary_key")
+            if ref_primary_key != [fk["ref_column"]]:
+                logger.warning(
+                    "Foreign key %s.%s -> %s.%s creates no edges: rows are found by their "
+                    "whole primary key, and %s's is %s (one column of a composite key, or "
+                    "a key to a non-primary column).",
+                    qualified_name,
+                    fk["column"],
+                    ref_table,
+                    fk["ref_column"],
+                    ref_table,
+                    ref_primary_key or "not declared",
+                )
+                continue
+            foreign_keys.append({**fk, "ref_table": ref_table})
+        table_info["foreign_keys"] = foreign_keys
 
 
 def _is_dlt_column(name: str) -> bool:

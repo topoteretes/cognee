@@ -73,3 +73,41 @@ def test_null_fk_value_is_skipped_without_being_recorded():
     assert _resolve_fk_references(row, {}, missing) == []
     # A NULL FK column is a legitimate absence, not a dropped edge.
     assert missing == []
+
+
+def test_fk_to_a_column_the_target_is_not_keyed_on_creates_no_edge():
+    # badges.employee_no references users.employee_no, but users rows are keyed on
+    # id: looking the value up by id would link badge 100 to the wrong user.
+    row = _row(
+        "badges",
+        [{"column": "employee_no", "ref_table": "users", "ref_column": "employee_no"}],
+        {"employee_no": 2},
+    )
+    fk_lookup = {("users", "2"): "11111111-1111-1111-1111-111111111111"}
+    missing, unkeyed = [], set()
+
+    refs = _resolve_fk_references(row, fk_lookup, missing, {"users": ["id"]}, unkeyed)
+
+    assert refs == []
+    assert missing == []
+    assert unkeyed == {("badges", "employee_no", "users", "employee_no", "id")}
+
+
+def test_fk_to_one_column_of_a_composite_key_creates_no_edge():
+    # order_lines rows are keyed on "order_id:line_no"; a key to order_id alone
+    # cannot name one line, and its value could match a line of another order.
+    row = _row(
+        "shipments",
+        [{"column": "order_id", "ref_table": "order_lines", "ref_column": "order_id"}],
+        {"order_id": 1},
+    )
+    fk_lookup = {("order_lines", "1"): "11111111-1111-1111-1111-111111111111"}
+    missing, unkeyed = [], set()
+
+    refs = _resolve_fk_references(
+        row, fk_lookup, missing, {"order_lines": ["order_id", "line_no"]}, unkeyed
+    )
+
+    assert refs == []
+    assert missing == []
+    assert unkeyed == {("shipments", "order_id", "order_lines", "order_id", "order_id, line_no")}

@@ -49,11 +49,13 @@ def test_keys_follow_the_reflected_table_names():
             "primary_key": ["id"],
             "foreign_keys": [{"column": "buyer", "ref_table": "users", "ref_column": "code"}],
         },
+        "users": {"primary_key": ["code"], "foreign_keys": []},
         "line": {"primary_key": ["order_id", "n"], "foreign_keys": []},
     }
     # Postgres reflects "<dataset>.<table>"; SQLite reflects bare names.
     schema = {
         "shop.orders": {"primary_key": None, "foreign_keys": []},
+        "shop.users": {"primary_key": None, "foreign_keys": []},
         "shop.line": {"primary_key": None, "foreign_keys": []},
     }
 
@@ -78,6 +80,51 @@ def test_a_composite_key_resolves_to_all_its_columns():
     assert _resolve_primary_key(None, {"primary_key": "order_id"}, columns) == ["order_id"]
     assert _resolve_primary_key(None, {"primary_key": None}, columns) == ["order_id"]
     assert _key_value({"order_id": 7, "n": 2, "qty": 5}, ["order_id", "n"]) == "7:2"
+
+
+def test_foreign_keys_no_row_can_resolve_are_dropped():
+    # One reference entry for the composite key shipment (order_id, line_no) ->
+    # order_lines; a key to a unique column that is not the primary key; and a key
+    # to a table this run did not load.
+    hints = _dlt_key_hints(
+        _schema(
+            {
+                "name": "shipment",
+                "columns": {"id": {"primary_key": True}},
+                "references": [
+                    {
+                        "referenced_table": "order_lines",
+                        "columns": ["order_id", "line_no"],
+                        "referenced_columns": ["order_id", "line_no"],
+                    },
+                    {
+                        "referenced_table": "users",
+                        "columns": ["employee_no"],
+                        "referenced_columns": ["employee_no"],
+                    },
+                    {
+                        "referenced_table": "carriers",
+                        "columns": ["carrier_id"],
+                        "referenced_columns": ["id"],
+                    },
+                ],
+            },
+            {
+                "name": "order_lines",
+                "columns": {"order_id": {"primary_key": True}, "line_no": {"primary_key": True}},
+            },
+            {"name": "users", "columns": {"id": {"primary_key": True}, "employee_no": {}}},
+        )
+    )
+    schema = {
+        "shipment": {"primary_key": None, "foreign_keys": []},
+        "order_lines": {"primary_key": None, "foreign_keys": []},
+        "users": {"primary_key": None, "foreign_keys": []},
+    }
+
+    _apply_key_hints(schema, hints)
+
+    assert schema["shipment"]["foreign_keys"] == []
 
 
 def test_a_table_without_a_hint_keeps_its_reflected_keys():
