@@ -22,6 +22,8 @@ class MetaData(TypedDict):
     index_fields: list[str]
     identity_fields: NotRequired[list[str]]
     transparent: NotRequired[bool]
+    lexical_fields: NotRequired[list[str]]
+    vector_only_fields: NotRequired[list[str]]
 
 
 # Updated DataPoint model with versioning and new fields
@@ -45,6 +47,16 @@ class DataPoint(BaseModel):
       required for ``Edge[...]`` endpoints and ``FromIdentity`` references.
     * ``transparent`` (optional): the node is unwrapped when written -- its edges attach
       to its children instead (see ``modules.graph.utils.unwrap_transparent_nodes``).
+    * ``lexical_fields`` (optional): field names kept in the vector store's keyword
+      (BM25) index, in the same ``<TypeName>_<field>`` collection as the embedding when
+      the field is also in ``index_fields``, or as rows without a vector when it is not.
+      Only backends with ``supports_lexical_search`` keep the index; the lexical
+      retrievers fall back to scoring the graph nodes elsewhere.
+    * ``vector_only_fields`` (optional): fields left off the graph node (stored as
+      ``None`` there) when the vector backend keeps a lexical index, because their text
+      is served from that index. A document's full text is the use: the vector row and
+      the keyword index hold it, the graph node keeps the rest. Without a lexical
+      backend the field stays on the node, so the in-memory fallback can read it.
 
     Declaring ``metadata`` explicitly on a subclass disables the ``Annotated``
     derivation for that class. ``type`` is set from the class name automatically;

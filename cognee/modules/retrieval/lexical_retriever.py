@@ -1,10 +1,13 @@
 import asyncio
-import re
 from collections.abc import Callable
 from heapq import nlargest
 from typing import Any
 
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
+from cognee.infrastructure.databases.vector.exceptions.exceptions import (
+    LexicalSearchNotSupportedError,
+)
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.utils.conflict_context import (
@@ -17,15 +20,11 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("LexicalRetriever")
 
 
-def tokenize_words(text: str, stop_words: set[str] | None = None) -> list[str]:
-    """Lowercase, split on word characters, and drop any stop words.
+# The tokenizer moved next to the backend lexical indexes so every engine
+# produces the same tokens; the name stays importable from here.
+from cognee.infrastructure.databases.vector.lexical import tokenize_words  # noqa: E402
 
-    Shared by the lexical retrievers so tokenization stays consistent across scorers.
-    """
-    tokens = re.findall(r"\w+", text.lower())
-    if not stop_words:
-        return tokens
-    return [token for token in tokens if token not in stop_words]
+__all__ = ["LexicalRetriever", "tokenize_words"]
 
 
 class LexicalRetriever(BaseRetriever):
@@ -34,6 +33,16 @@ class LexicalRetriever(BaseRetriever):
     # sub-second, deterministic path. Opt out, like the other non-generative retrievers.
     # Inherited by BM25ChunksRetriever and JaccardChunksRetriever.
     supports_session_turn_preparation = False
+
+    # The graph node type scored in memory, and the vector-store collection
+    # whose lexical (BM25) index answers instead on backends that keep one
+    # (``VectorDBInterface.supports_lexical_search``). None, the default,
+    # keeps scoring in memory: a custom scorer has no backend equivalent, so
+    # only the BM25 subclasses name a collection.
+    node_type = "DocumentChunk"
+    collection_name: str | None = None
+    # Whether hits are chunks whose conflicts (contradiction edges) are attached.
+    attaches_conflicts = True
 
     def __init__(
         self, tokenizer: Callable, scorer: Callable, top_k: int = 15, with_scores: bool = False
@@ -55,16 +64,19 @@ class LexicalRetriever(BaseRetriever):
         self._init_lock = asyncio.Lock()
 
     async def initialize(self):
-        """Initialize retriever by reading all DocumentChunks from graph_engine."""
+        """Initialize retriever by reading all nodes of ``node_type`` from graph_engine."""
         async with self._init_lock:
             if self._initialized:
                 return
 
-            logger.info("Initializing LexicalRetriever by loading DocumentChunks from graph engine")
+            logger.info(
+                "Initializing LexicalRetriever by loading %s nodes from graph engine",
+                self.node_type,
+            )
 
             try:
                 graph_engine = await get_graph_engine()
-                nodes, _ = await graph_engine.get_filtered_graph_data([{"type": ["DocumentChunk"]}])
+                nodes, _ = await graph_engine.get_filtered_graph_data([{"type": [self.node_type]}])
             except Exception as e:
                 logger.error("Graph engine initialization failed")
                 raise NoDataError("Graph engine initialization failed") from e
@@ -77,7 +89,7 @@ class LexicalRetriever(BaseRetriever):
                     logger.warning("Skipping node with unexpected shape: %r", node, exc_info=True)
                     continue
 
-                if document.get("type") == "DocumentChunk" and document.get("text"):
+                if document.get("type") == self.node_type and document.get("text"):
                     try:
                         tokens = self.tokenizer(document["text"])
                         if not tokens:
@@ -99,8 +111,38 @@ class LexicalRetriever(BaseRetriever):
             self._initialized = True
             logger.info("Initialized with %d document chunks", len(self.chunks))
 
-    async def get_retrieved_objects(self, query: str) -> Any:
-        """Retrieves relevant chunks for the given query."""
+    async def _native_hits(self, query: str) -> list[tuple[dict, float]] | None:
+        """BM25 hits from the vector store's lexical index, or None when there is none.
+
+        The backend tokenizes the query itself (the same way it tokenized the
+        rows), scores every row of the collection and returns the best
+        ``top_k``; nothing is loaded into this process.
+        """
+        if not self.collection_name:
+            return None
+        try:
+            vector_engine = await get_vector_engine_async()
+        except Exception:
+            logger.warning("Vector engine unavailable; scoring in memory", exc_info=True)
+            return None
+        if getattr(vector_engine, "supports_lexical_search", False) is not True:
+            return None
+        try:
+            results = await vector_engine.lexical_search(
+                self.collection_name, query, limit=self.top_k
+            )
+        except LexicalSearchNotSupportedError:
+            return None
+        hits: list[tuple[dict, float]] = []
+        for result in results:
+            payload = dict(result.payload or {})
+            payload.setdefault("id", str(result.id))
+            hits.append((payload, float(result.score)))
+        logger.info("Retrieved %d hits from the %s lexical index", len(hits), self.collection_name)
+        return hits
+
+    async def _memory_hits(self, query: str) -> list[tuple[dict, float]]:
+        """Score every loaded node in this process; the path without a backend index."""
         if not self._initialized:
             await self.initialize()
 
@@ -140,8 +182,20 @@ class LexicalRetriever(BaseRetriever):
 
         # Copy: these payload dicts are this retriever's cache, shared across
         # queries, and conflict annotation writes into the hits it is handed.
-        scored_hits = [(dict(self.payloads[chunk_id]), score) for chunk_id, score in top_results]
-        await attach_chunk_conflicts(scored_hits)
+        return [(dict(self.payloads[chunk_id]), score) for chunk_id, score in top_results]
+
+    async def _collect_hits(self, query: str) -> list[tuple[dict, float]]:
+        """The scored hits for ``query``: the backend index when there is one, else memory."""
+        native = await self._native_hits(query)
+        if native is not None:
+            return native
+        return await self._memory_hits(query)
+
+    async def get_retrieved_objects(self, query: str) -> Any:
+        """Retrieves relevant chunks for the given query."""
+        scored_hits = await self._collect_hits(query)
+        if self.attaches_conflicts and scored_hits:
+            await attach_chunk_conflicts(scored_hits)
         if self.with_scores:
             return scored_hits
         return [hit_payload for hit_payload, _ in scored_hits]

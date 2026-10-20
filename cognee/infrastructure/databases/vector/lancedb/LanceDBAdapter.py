@@ -17,11 +17,13 @@ from typing import (  # noqa: UP035 - typing.List is a distinct origin key, not 
 from uuid import UUID
 
 import lancedb
+from lancedb.index import FTS
 from lancedb.pydantic import LanceModel, Vector
 from pydantic import BaseModel
 
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.infrastructure.databases.vector.lexical import DEFAULT_STOP_WORDS, tokenize_words
 from cognee.infrastructure.databases.vector.pgvector.serialize_data import serialize_data
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
@@ -35,6 +37,7 @@ from cognee.modules.observability.tracing import (
 from cognee.modules.storage.utils import copy_model
 from cognee.shared.logging_utils import get_logger
 from cognee_db_workers.lancedb_compaction import (
+    DEFAULT_MAX_INDEX_SEGMENTS,
     DEFAULT_MAX_TASKS_PER_RUN,
     DEFAULT_MAX_VERSIONS_PER_RUN,
     DEFAULT_RETENTION_SECONDS,
@@ -44,6 +47,7 @@ from cognee_db_workers.lancedb_compaction import (
     lance_core_mismatch,
     open_as_lance,
     prune_superseded_versions,
+    refresh_inverted_indices,
 )
 
 from ..embeddings.EmbeddingGateway import EmbeddingGateway
@@ -53,6 +57,10 @@ from ..vector_db_interface import VectorDBInterface
 
 logger = get_logger("LanceDBAdapter")
 _NO_DEFAULT = object()
+# Every index collection stores its text in ``IndexSchema.text``, whatever the
+# data point field was, so the column the lexical (full-text) index covers is
+# the same nested column in every collection.
+LEXICAL_TEXT_COLUMN = "payload.text"
 _SIMPLE_TYPE_DEFAULTS = {
     str: "",
     int: 0,
@@ -704,6 +712,7 @@ class LanceDBAdapter(VectorDBInterface):
             "retention_seconds": DEFAULT_RETENTION_SECONDS,
             "max_tasks": DEFAULT_MAX_TASKS_PER_RUN,
             "max_versions": DEFAULT_MAX_VERSIONS_PER_RUN,
+            "max_index_segments": DEFAULT_MAX_INDEX_SEGMENTS,
         }
 
     def _compaction_order(self, names: list[str]) -> list[str]:
@@ -780,11 +789,18 @@ class LanceDBAdapter(VectorDBInterface):
         them. Nothing prunes in the background, so no prune can outlive the
         adapter or run while it closes.
 
-        Only the fragment rewrite runs under ``VECTOR_DB_LOCK``: its commit is a
-        Lance "rewrite" transaction that conflicts with a concurrent upsert or
-        delete on the same fragments. Version pruning commits nothing and runs
-        outside the lock, so writers are never blocked behind it. Concurrent
-        passes on one adapter do not queue: the second one returns at once.
+        A table with a lexical (full-text) index gets a third step between the
+        two: the rows written since the last pass are folded into the index
+        (``refresh_inverted_indices``), bounded by what was written, plus one
+        merge of the index's delta segments every ``DEFAULT_MAX_INDEX_SEGMENTS``
+        passes. Until a pass runs, a keyword query scans the unindexed rows.
+
+        Only the fragment rewrite and the index refresh run under
+        ``VECTOR_DB_LOCK``: their commits are Lance "rewrite" / "create index"
+        transactions that conflict with a concurrent upsert or delete on the
+        same fragments. Version pruning commits nothing and runs outside the
+        lock, so writers are never blocked behind it. Concurrent passes on one
+        adapter do not queue: the second one returns at once.
 
         Skipped for remote stores (``s3://`` and friends), where every rewrite
         is network transfer and cleanup is thousands of object deletes, and
@@ -875,10 +891,26 @@ class LanceDBAdapter(VectorDBInterface):
                 )
                 await collection.checkout_latest()
 
+        refreshed = await self._refresh_lexical_indices(collection, options["max_index_segments"])
         pruned = await self._prune_collection(
             collection, options["retention_seconds"], max_versions
         )
-        return {**(stats or {}), **(pruned or {})}
+        return {**(stats or {}), **(refreshed or {}), **(pruned or {})}
+
+    async def _refresh_lexical_indices(self, collection, max_segments: int) -> dict:
+        """Fold the rows written since the last pass into the table's full-text
+        indexes; a no-op on a table without one. Takes the write lock, the
+        commit being a Lance index transaction (see ``compact``)."""
+        async with self.VECTOR_DB_LOCK:
+            if self._subprocess_mode:
+                return await collection.refresh_inverted_indices(max_segments=max_segments)
+            await collection.checkout_latest()
+            dataset = await open_as_lance(collection)
+            stats = await asyncio.to_thread(
+                refresh_inverted_indices, dataset, max_segments=max_segments
+            )
+            await collection.checkout_latest()
+            return stats
 
     async def _prune_collection(self, collection, retention_seconds: int, max_versions: int):
         if self._subprocess_mode:
@@ -1488,19 +1520,31 @@ class LanceDBAdapter(VectorDBInterface):
             rows = await collection.query().where(where_clause).to_list()
             if not rows:
                 return
-            records = []
+            records, vectorless = [], []
             for row in rows:
                 payload = dict(row.get("payload") or {})
                 payload.update(payload_updates[str(row["id"])])
-                records.append({"id": row["id"], "vector": list(row["vector"]), "payload": payload})
+                vector = row.get("vector")
+                record = {
+                    "id": row["id"],
+                    "vector": list(vector) if vector is not None else None,
+                    "payload": payload,
+                }
+                (records if vector is not None else vectorless).append(record)
             # Build against the table's OWN arrow schema: plain dicts make
             # merge_insert re-infer types and choke on the fixed-size-list
             # vector column.
             import pyarrow
 
-            arrow_records = pyarrow.Table.from_pylist(records, schema=schema)
             self._mark_written(collection_name)
-            await collection.merge_insert("id").when_matched_update_all().execute(arrow_records)
+            if records:
+                arrow_records = pyarrow.Table.from_pylist(records, schema=schema)
+                await collection.merge_insert("id").when_matched_update_all().execute(arrow_records)
+            if vectorless:
+                # Rows the lexical index owns carry no embedding, and lancedb's
+                # merge_insert rejects a NULL vector; they are replaced instead.
+                await collection.delete(self._ids_predicate([row["id"] for row in vectorless]))
+                await collection.add(pyarrow.Table.from_pylist(vectorless, schema=schema))
 
     # Ids per `IN (...)` delete predicate. Each `collection.delete` is a
     # LanceDB commit that appends a table version, and manifest listing slows
@@ -1697,29 +1741,266 @@ class LanceDBAdapter(VectorDBInterface):
             f"{index_name}_{index_property_name}", payload_schema=IndexSchema
         )
 
+    @staticmethod
+    def _to_index_point(data_point: DataPoint, text: str) -> IndexSchema:
+        """The ``IndexSchema`` row of ``data_point`` for the given indexed text."""
+        return IndexSchema(
+            id=str(data_point.id),
+            text=text,
+            # Reference scalars for search "Evidence". Pulled via getattr
+            # so non-chunk data points (which lack these fields) simply
+            # fall back to None instead of raising.
+            document_id=getattr(data_point, "document_id", None),
+            document_name=getattr(data_point, "document_name", None),
+            chunk_index=getattr(data_point, "chunk_index", None),
+            source_chunk_id=getattr(data_point, "source_chunk_id", None),
+            importance_weight=getattr(data_point, "importance_weight", None),
+            external_metadata=getattr(data_point, "external_metadata", None),
+            belongs_to_set=(data_point.belongs_to_set or []),
+        )
+
+    @staticmethod
+    def _ids_predicate(ids) -> str:
+        """``id = '...'`` or ``id IN (...)`` for the given ids, single quotes
+        escaped: ids may be UUIDs or graph-computed strings, and LanceDB
+        parses double quotes as column names."""
+        escaped = [str(id_).replace("'", "''") for id_ in ids]
+        if len(escaped) == 1:
+            return f"id = '{escaped[0]}'"
+        return "id IN (" + ", ".join(f"'{id_}'" for id_ in escaped) + ")"
+
     async def index_data_points(
         self, index_name: str, index_property_name: str, data_points: list[DataPoint]
     ):
         await self.create_data_points(
             f"{index_name}_{index_property_name}",
             [
-                IndexSchema(
-                    id=str(data_point.id),
-                    text=getattr(data_point, data_point.metadata["index_fields"][0]),
-                    # Reference scalars for search "Evidence". Pulled via getattr
-                    # so non-chunk data points (which lack these fields) simply
-                    # fall back to None instead of raising.
-                    document_id=getattr(data_point, "document_id", None),
-                    document_name=getattr(data_point, "document_name", None),
-                    chunk_index=getattr(data_point, "chunk_index", None),
-                    source_chunk_id=getattr(data_point, "source_chunk_id", None),
-                    importance_weight=getattr(data_point, "importance_weight", None),
-                    external_metadata=getattr(data_point, "external_metadata", None),
-                    belongs_to_set=(data_point.belongs_to_set or []),
+                self._to_index_point(
+                    data_point, getattr(data_point, data_point.metadata["index_fields"][0])
                 )
                 for data_point in data_points
             ],
         )
+
+    # ------------------------------------------------------------------
+    # Lexical (BM25) index: LanceDB's full-text index on the text column
+    # ------------------------------------------------------------------
+
+    supports_lexical_search = True
+
+    def _lexical_language(self) -> str:
+        from ..config import get_vectordb_config
+
+        return get_vectordb_config().lexical_search_language
+
+    def _lexical_index_config(self) -> FTS:
+        """The full-text index configuration for ``LEXICAL_SEARCH_LANGUAGE``.
+
+        ``simple`` reproduces ``tokenize_words``: lower-cased words, no
+        stemming, the shared stop-word list, so every backend ranks alike.
+        ``english`` adds stemming and LanceDB's English stop words. Positions
+        are not stored (no phrase queries), which keeps the index small.
+        """
+        if self._lexical_language() == "english":
+            return FTS(
+                stem=True,
+                language="English",
+                remove_stop_words=True,
+                lower_case=True,
+                ascii_folding=True,
+                with_position=False,
+            )
+        return FTS(
+            stem=False,
+            lower_case=True,
+            remove_stop_words=True,
+            custom_stop_words=sorted(DEFAULT_STOP_WORDS),
+            ascii_folding=True,
+            with_position=False,
+        )
+
+    @staticmethod
+    def _has_lexical_index(indices) -> bool:
+        return any(
+            str(getattr(index, "index_type", "")).upper() == "FTS"
+            and list(getattr(index, "columns", None) or []) == [LEXICAL_TEXT_COLUMN]
+            for index in indices
+        )
+
+    async def _ensure_lexical_index(self, collection_name: str, collection) -> None:
+        """Create the full-text index on the text column unless the table has one.
+
+        Runs on every lexical write, not only from ``create_lexical_index``: a
+        table the schema migration rebuilt has lost its indexes. One index
+        listing per call; the creation itself is a Lance index commit and takes
+        the write lock like the other commits here.
+        """
+        if self._has_lexical_index(await collection.list_indices()):
+            return
+        async with self.VECTOR_DB_LOCK:
+            if self._has_lexical_index(await collection.list_indices()):
+                return
+            await collection.create_index(LEXICAL_TEXT_COLUMN, config=self._lexical_index_config())
+        self._mark_written(collection_name)
+
+    @staticmethod
+    def _lexical_collection_name(index_name: str, field_name: str) -> str:
+        """``index_data_points`` passes the data point type and its field, the
+        pair ``create_vector_index`` takes; the collection is ``<type>_<field>``
+        like every index collection. ``lexical_search`` takes that name."""
+        return f"{index_name}_{field_name}"
+
+    async def create_lexical_index(self, collection_name: str, field_name: str) -> None:
+        """Make the collection's text searchable by keyword (``VectorDBInterface``).
+
+        Creates the ``<collection_name>_<field_name>`` collection with the
+        ``IndexSchema`` payload when it does not exist -- for a field in
+        ``lexical_fields`` only, nothing else does -- and the full-text index
+        on its text column unless one is there already. ``field_name`` is the
+        data point's field; its value always lands in ``IndexSchema.text``, so
+        the indexed column does not depend on it.
+        """
+        collection_name = self._lexical_collection_name(collection_name, field_name)
+        await self.create_collection(collection_name, payload_schema=IndexSchema)
+        collection = await self.get_collection(collection_name)
+        await self._ensure_lexical_index(collection_name, collection)
+
+    async def index_lexical_data_points(
+        self,
+        collection_name: str,
+        field_name: str,
+        data_points: list[DataPoint],
+        *,
+        owns_rows: bool,
+    ) -> None:
+        """Index ``field_name`` of ``data_points`` by keyword (``VectorDBInterface``).
+
+        LanceDB indexes the table's rows themselves, so with ``owns_rows=False``
+        (the embedding path wrote the rows in this same call) there is nothing
+        to write. With ``owns_rows=True`` the rows are written here with a NULL
+        vector, each replacing the row with the same id (whose
+        ``belongs_to_set`` is merged in, as ``create_data_points`` does). Either
+        way the rows are searchable when this returns: a query scans the rows
+        added since the index was built, until the next compaction pass folds
+        them in (``compact``).
+        """
+        if not data_points:
+            return
+        collection_name = self._lexical_collection_name(collection_name, field_name)
+        await self.create_collection(collection_name, payload_schema=IndexSchema)
+        collection = await self.get_collection(collection_name)
+        if owns_rows:
+            await self._write_lexical_rows(collection_name, collection, field_name, data_points)
+        await self._ensure_lexical_index(collection_name, collection)
+
+    async def _write_lexical_rows(
+        self, collection_name: str, collection, field_name: str, data_points: list[DataPoint]
+    ) -> None:
+        import pyarrow
+
+        payload_model = self.get_data_point_schema(IndexSchema)
+        rows: dict[str, dict] = {}
+        for data_point in data_points:
+            point = self._to_index_point(data_point, getattr(data_point, field_name))
+            # The payload exactly as create_data_points builds it.
+            properties = payload_model.model_validate(
+                serialize_data(point.model_dump())
+            ).model_dump()
+            earlier = rows.get(point.id)
+            if earlier is not None:
+                # Duplicate id within the batch: union the tags, as the
+                # embedding path does.
+                properties["belongs_to_set"] = list(
+                    dict.fromkeys(
+                        list(earlier["payload"].get("belongs_to_set") or [])
+                        + list(properties.get("belongs_to_set") or [])
+                    )
+                )
+            rows[point.id] = {"id": point.id, "vector": None, "payload": properties}
+
+        predicate = self._ids_predicate(list(rows))
+        self._mark_written(collection_name)
+        # Read, merge and write in one lock section, like create_data_points:
+        # an upsert in between would otherwise lose tags this read never saw.
+        async with self.VECTOR_DB_LOCK:
+            try:
+                existing_rows = await collection.query().where(predicate).to_list()
+            except Exception as e:
+                # Best-effort, as in create_data_points: without the prior tags
+                # the rows are still replaced.
+                logger.debug(
+                    "belongs_to_set merge lookup failed for '%s': %s",
+                    collection_name,
+                    e,
+                    exc_info=True,
+                )
+                existing_rows = []
+            for existing in existing_rows:
+                prior = (existing.get("payload") or {}).get("belongs_to_set") or []
+                row = rows.get(existing["id"])
+                if prior and row is not None:
+                    row["payload"]["belongs_to_set"] = list(
+                        dict.fromkeys(
+                            list(prior) + list(row["payload"].get("belongs_to_set") or [])
+                        )
+                    )
+            # lancedb's merge_insert rejects a NULL vector, so the rows are
+            # replaced: delete, then add built against the table's own schema
+            # (nullable vector column in both modes; plain dicts would make
+            # lancedb re-infer the fixed-size-list type).
+            schema = await collection.schema()
+            await collection.delete(predicate)
+            await collection.add(pyarrow.Table.from_pylist(list(rows.values()), schema=schema))
+
+    async def lexical_search(
+        self, collection_name: str, query_text: str, limit: int = 15
+    ) -> list[ScoredResult]:
+        """Rank the collection's rows by BM25 relevance (``VectorDBInterface``).
+
+        One ``nearest_to_text`` query on the text column; LanceDB returns the
+        rows best first with the BM25 score in ``_score`` (higher is better).
+        A missing collection, a query with no tokens and a non-positive limit
+        return ``[]`` without a query. Rows without a vector come back like
+        any other.
+        """
+        with new_span("cognee.db.vector.lexical_search") as otel_span:
+            otel_span.set_attribute(COGNEE_DB_SYSTEM, "lancedb")
+            otel_span.set_attribute(COGNEE_VECTOR_COLLECTION, collection_name)
+            otel_span.set_attribute(COGNEE_VECTOR_RESULT_COUNT, 0)
+
+            if limit is not None and limit <= 0:
+                return []
+            # The index drops these tokens itself; the check only saves the
+            # round trip. "english" leaves stop words to LanceDB's own list.
+            stop_words = DEFAULT_STOP_WORDS if self._lexical_language() == "simple" else None
+            if not tokenize_words(query_text or "", stop_words):
+                return []
+            try:
+                collection = await self.get_collection(collection_name)
+            except CollectionNotFoundError:
+                return []
+            if limit is None:
+                limit = await collection.count_rows()
+                if limit <= 0:
+                    return []
+
+            rows = await (
+                collection.query()
+                .nearest_to_text(query_text, columns=[LEXICAL_TEXT_COLUMN])
+                .select(["id", "payload", "_score"])
+                .limit(limit)
+                .to_list()
+            )
+            results = [
+                ScoredResult(
+                    id=parse_id(row["id"]),
+                    score=float(row["_score"]),
+                    payload=row["payload"],
+                )
+                for row in rows
+            ]
+            otel_span.set_attribute(COGNEE_VECTOR_RESULT_COUNT, len(results))
+            return results
 
     async def prune(self):
         # A compaction pass (whose version cleanup runs outside VECTOR_DB_LOCK)

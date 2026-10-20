@@ -9,7 +9,7 @@ disk writes a day. Lance's lower-level compaction API takes a fragment target.
 With a 20k-row target (~250 MB at 3072 dims) only the small, recently written
 fragments are merged and the large cold ones are left alone.
 
-A pass has two halves, run separately because only the first one conflicts
+A pass has three parts, run separately because only the first one conflicts
 with writers:
 
 * ``compact_fragments`` rewrites small fragments into larger ones. Its commit
@@ -19,8 +19,12 @@ with writers:
   reference. It commits nothing, so it can run beside writers: the files of an
   in-progress write are referenced by no manifest yet, and Lance keeps such
   "unverified" files for 7 days (``delete_unverified`` is never set).
+* ``refresh_inverted_indices`` folds the rows written since the last pass into
+  the table's full-text (BM25) indexes, which Lance never does on its own; a
+  query scans the unindexed rows until then. Bounded by what the run wrote,
+  plus one merge of an index's delta segments every ``max_segments`` passes.
 
-Both halves take a count bound -- ``max_tasks`` compaction tasks,
+The first two take a count bound -- ``max_tasks`` compaction tasks,
 ``max_versions`` deleted versions -- and leave the rest for the next pass. A
 store that already carries a large backlog (tens of thousands of fragments and
 versions, see issue #4684) is drained over several cognify runs instead of
@@ -54,6 +58,9 @@ DEFAULT_TARGET_ROWS_PER_FRAGMENT = 20_000
 DEFAULT_RETENTION_SECONDS = 300
 DEFAULT_MAX_TASKS_PER_RUN = 4
 DEFAULT_MAX_VERSIONS_PER_RUN = 1_000
+#: Delta segments a full-text index may accumulate before a pass merges them
+#: into one (``refresh_inverted_indices``).
+DEFAULT_MAX_INDEX_SEGMENTS = 8
 #: Fragments with at least this share of deleted rows are rewritten even when
 #: already at target size, so the dead rows that re-upserts leave in cold data
 #: are reclaimed once they reach a fifth of a fragment.
@@ -215,4 +222,45 @@ def prune_superseded_versions(
         )
         stats["old_versions_removed"] = int(cleanup.old_versions)
         stats["bytes_removed"] = int(cleanup.bytes_removed)
+    return stats
+
+
+def refresh_inverted_indices(
+    dataset, *, max_segments: int = DEFAULT_MAX_INDEX_SEGMENTS
+) -> dict[str, Any]:
+    """Fold the rows written since the last pass into the inverted (full-text) indexes.
+
+    Lance never adds new rows to an existing index: a full-text query scans
+    them, tokenizing every unindexed row on every query -- about 100x the
+    indexed cost once the tail holds a few thousand chunks or a few hundred
+    cached documents. ``optimize_indices`` with ``num_indices_to_merge=0``
+    appends one delta segment holding exactly the unindexed rows (bounded by
+    what the run wrote; a no-op that commits nothing when there are none).
+    Query cost grows with the segment count, so once an index has
+    ``max_segments`` of them the pass merges them all into one: the rewrite of
+    the whole index is paid once per ``max_segments`` passes. Vector indexes
+    (cognee builds none) and every other index type are left alone.
+
+    Synchronous and I/O-bound like ``compact_fragments``: callers run it in a
+    worker thread. Returns plain ints.
+    """
+    segments_by_index: dict[str, int] = {}
+    for entry in dataset.list_indices():
+        if entry.get("type") != "Inverted":
+            continue
+        name = entry["name"]
+        segments_by_index[name] = segments_by_index.get(name, 0) + 1
+
+    stats: dict[str, Any] = {
+        "inverted_indices": len(segments_by_index),
+        "inverted_indices_merged": 0,
+    }
+    merge_at = max(1, int(max_segments))
+    for name, segments in segments_by_index.items():
+        merge_all = segments >= merge_at
+        dataset.optimize.optimize_indices(
+            num_indices_to_merge=segments if merge_all else 0, index_names=[name]
+        )
+        if merge_all:
+            stats["inverted_indices_merged"] += 1
     return stats

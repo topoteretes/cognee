@@ -28,10 +28,32 @@ from ..exceptions import CollectionNotFoundError, SharedDatabasePruneError
 from ..models.ScoredResult import ScoredResult
 from ..stored_vector_size import choose_stored_vector_size
 from ..vector_db_interface import VectorDBInterface
+from .lexical_index import (
+    build_passage_rows,
+    create_lexical_tables,
+    is_lexical_table_name,
+    lexical_table_names,
+    replace_postings,
+    search_postings,
+    upsert_owned_rows,
+)
 from .serialize_data import serialize_data
 
 logger = get_logger("PGVectorAdapter")
 QUERY_BATCH_SIZE = 1000
+
+# SQLSTATE of Postgres's undefined_table error.
+_UNDEFINED_TABLE = "42P01"
+
+
+def _is_undefined_table_error(error: DBAPIError) -> bool:
+    """True when the driver error says a table the statement names does not exist."""
+    orig = getattr(error, "orig", None)
+    return _UNDEFINED_TABLE in (
+        getattr(orig, "pgcode", None),
+        getattr(orig, "sqlstate", None),
+    )
+
 
 # Default pool sizing for per-dataset PGVector engines when ENABLE_BACKEND_ACCESS_CONTROL=True.
 # Lean pool_size limits connection fan-out across datasets (only pool_size connections are
@@ -515,6 +537,165 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             ],
         )
 
+    # --- Lexical (BM25) index ---------------------------------------------------
+    #
+    # Two posting tables next to each collection table, written and scored in
+    # SQL (lexical_index.py). The two indexing methods take the index name and
+    # the field the way create_vector_index / index_data_points do, so they work
+    # on the table "<collection_name>_<field_name>" -- the collection the
+    # embedding path writes the same field to, which is what lets
+    # owns_rows=False find those rows. lexical_search takes that full name.
+
+    supports_lexical_search = True
+
+    def _lexical_language(self) -> str:
+        """The tokenizer language of the lexical indexes (``LEXICAL_SEARCH_LANGUAGE``)."""
+        return get_vectordb_config().lexical_search_language
+
+    async def _has_lexical_tables(self, collection_name: str) -> bool:
+        docs_table, terms_table = lexical_table_names(collection_name)
+        return await self.has_collection(docs_table) and await self.has_collection(terms_table)
+
+    def _forget_lexical_tables(self, collection_name: str) -> None:
+        """Drop the posting tables of ``collection_name`` from the reflection cache."""
+        for table_name in lexical_table_names(collection_name):
+            table = self._metadata.tables.get(table_name)
+            if table is not None:
+                self._metadata.remove(table)
+
+    @retry(
+        retry=retry_if_exception_type(
+            (DuplicateTableError, UniqueViolationError, ProgrammingError)
+        ),
+        stop=stop_after_attempt(5),
+        wait=wait_exponential(multiplier=2, min=1, max=6),
+    )
+    async def create_lexical_index(self, collection_name: str, field_name: str) -> None:
+        """Create the posting tables of ``"<collection_name>_<field_name>"`` if missing.
+
+        The collection table is created first (the docs table references its
+        ``id`` with ``ON DELETE CASCADE``), then the two posting tables with
+        ``CREATE ... IF NOT EXISTS`` under ``VECTOR_DB_LOCK``. Both are kept in
+        the reflection cache, so the call ``index_data_points`` makes before
+        every batch costs nothing once the tables exist.
+        """
+        collection = f"{collection_name}_{field_name}"
+        docs_table, terms_table = lexical_table_names(collection)
+        if docs_table in self._metadata.tables and terms_table in self._metadata.tables:
+            return
+
+        # Before taking the lock: create_collection takes VECTOR_DB_LOCK itself.
+        await self.create_collection(collection)
+
+        if not await self._has_lexical_tables(collection):
+            async with self.VECTOR_DB_LOCK:
+                if not await self._has_lexical_tables(collection):
+                    async with self.engine.begin() as connection:
+                        await create_lexical_tables(connection, collection)
+                    # Reflect AFTER the DDL transaction commits, as
+                    # create_collection does.
+                    async with self.engine.begin() as connection:
+                        await connection.run_sync(
+                            self._metadata.reflect, only=[docs_table, terms_table]
+                        )
+
+    @retry(
+        retry=retry_if_exception_type((DeadlockDetectedError, DBAPIError)),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=2, min=1, max=6),
+    )
+    async def index_lexical_data_points(
+        self,
+        collection_name: str,
+        field_name: str,
+        data_points: list[DataPoint],
+        *,
+        owns_rows: bool,
+    ) -> None:
+        """Index ``field_name`` of ``data_points`` in ``"<collection_name>_<field_name>"``.
+
+        With ``owns_rows`` the collection rows are upserted first with a NULL
+        vector and the point's payload (on conflict only the payload is
+        replaced, its ``belongs_to_set`` united with the stored tags, and the
+        vector is never touched); without it the rows were written by the
+        embedding path in this same call. Then the rows' postings are replaced:
+        the old ones deleted (cascade), the text split into passages and each
+        passage tokenized and counted by Postgres. One transaction per call,
+        under the collection's write lock.
+        """
+        if not data_points:
+            return
+        collection = f"{collection_name}_{field_name}"
+        if owns_rows and not await self.has_collection(collection):
+            await self.create_collection(collection, payload_schema=type(data_points[0]))
+        await self.create_lexical_index(collection_name, field_name)
+
+        # One row per id: the last point in the batch wins, as in the embedding path.
+        points = list({str(data_point.id): data_point for data_point in data_points}.values())
+        owned_rows = (
+            [
+                {
+                    "id": str(data_point.id),
+                    # NUL bytes would be accepted by the json column but rejected by
+                    # the jsonb casts of the merge and search queries.
+                    "payload": sanitize_relational_payload(serialize_data(data_point.model_dump())),
+                }
+                for data_point in data_points
+            ]
+            if owns_rows
+            else []
+        )
+        passages = build_passage_rows(points, field_name)
+        language = self._lexical_language()
+
+        async with self._get_write_lock(collection), self.get_async_session() as session:
+            if owns_rows:
+                await upsert_owned_rows(session, collection, owned_rows)
+            await replace_postings(
+                session,
+                collection,
+                [str(data_point.id) for data_point in points],
+                passages,
+                language=language,
+            )
+            await session.commit()
+
+    async def lexical_search(
+        self, collection_name: str, query_text: str, limit: int | None = 15
+    ) -> list[ScoredResult]:
+        """Rank the rows of ``collection_name`` by BM25 relevance to ``query_text``.
+
+        Best first; ``score`` is the BM25 relevance (higher is better) of the
+        row's best passage, ``payload`` the stored row payload. A missing
+        collection or index, a blank query, a query with no term left after
+        tokenizing, or a non-positive limit gives ``[]``. ``limit=None`` returns
+        every matching row.
+        """
+        if not query_text or not query_text.strip():
+            return []
+        if limit is not None and limit <= 0:
+            return []
+        docs_table, _ = lexical_table_names(collection_name)
+        if not await self.has_collection(docs_table):
+            return []
+
+        try:
+            async with self.get_async_session() as session:
+                rows = await search_postings(
+                    session, collection_name, query_text, limit, language=self._lexical_language()
+                )
+        except ProgrammingError as error:
+            if not _is_undefined_table_error(error):
+                raise
+            # The posting tables were dropped behind the reflection cache.
+            self._forget_lexical_tables(collection_name)
+            return []
+
+        return [
+            ScoredResult(id=parse_id(str(row_id)), score=score, payload=payload)
+            for row_id, score, payload in rows
+        ]
+
     async def get_table(self, collection_name: str) -> Table:
         """
         Dynamically loads a table using the given collection name
@@ -839,6 +1020,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             if not name:
                 continue
             table_only = _table_only(name)
+            # The BM25 posting tables next to a collection carry no payload.
+            if is_lexical_table_name(table_only):
+                continue
             if table_only and table_only[0].isupper():
                 candidate_tables.append(table_only)
 

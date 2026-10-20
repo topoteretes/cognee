@@ -6,11 +6,14 @@ a subprocess that only imports ``lancedb`` + ``pyarrow`` (no cognee).
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import multiprocessing as mp
 from datetime import timedelta
+from enum import Enum
 from typing import Any
 
 import pyarrow as pa
+from lancedb.index import FTS
 
 from cognee.shared.logging_utils import get_logger
 from cognee_db_workers.harness import (
@@ -28,12 +31,15 @@ from cognee_db_workers.lancedb_protocol import (
     OP_TABLE_ADD,
     OP_TABLE_COMPACT_FRAGMENTS,
     OP_TABLE_COUNT_ROWS,
+    OP_TABLE_CREATE_INDEX,
     OP_TABLE_DELETE,
+    OP_TABLE_LIST_INDICES,
     OP_TABLE_MERGE_INSERT_EXECUTE,
     OP_TABLE_NAMES,
     OP_TABLE_OPTIMIZE,
     OP_TABLE_PRUNE_VERSIONS,
     OP_TABLE_QUERY_EXECUTE,
+    OP_TABLE_REFRESH_INVERTED_INDICES,
     OP_TABLE_RELEASE,
     OP_TABLE_SCHEMA,
     OP_TABLE_TO_ARROW,
@@ -122,6 +128,17 @@ class RemoteQuery(_BuilderChain):
     def where(self, predicate: str) -> RemoteQuery:
         return self._add("where", predicate)
 
+    def nearest_to_text(self, query: str, columns: list[str] | None = None) -> RemoteQuery:
+        """Full-text (BM25) search; lancedb returns the rows best first with
+        the score in ``_score``."""
+        return self._add("nearest_to_text", query, columns=columns)
+
+    def select(self, columns: list[str]) -> RemoteQuery:
+        return self._add("select", columns)
+
+    def limit(self, n: int) -> RemoteQuery:
+        return self._add("limit", n)
+
     async def to_list(self) -> list:
         return await self._terminal("to_list")
 
@@ -159,6 +176,34 @@ class RemoteMergeInsert(_BuilderChain):
 
     async def execute(self, records: list) -> None:
         await self._terminal("execute", records)
+
+
+@dataclasses.dataclass(frozen=True)
+class RemoteIndexConfig:
+    """The slice of ``lancedb.IndexConfig`` the adapter reads, as returned by
+    ``RemoteLanceDBTable.list_indices`` (the real object does not pickle)."""
+
+    name: str
+    index_type: str
+    columns: list[str]
+
+
+def _index_config_params(config) -> tuple[str, dict]:
+    """``(index_kind, params)`` for an index config, as plain builtins.
+
+    The worker rebuilds the config from these; only lancedb's full-text config
+    is supported, which is the one index cognee creates.
+    """
+    if not isinstance(config, FTS):
+        raise TypeError(
+            "RemoteLanceDBTable.create_index supports lancedb.index.FTS configs only, "
+            f"got {type(config).__name__}"
+        )
+    params = {}
+    for field in dataclasses.fields(config):
+        value = getattr(config, field.name)
+        params[field.name] = value.value if isinstance(value, Enum) else value
+    return "FTS", params
 
 
 class RemoteLanceDBTable:
@@ -354,6 +399,63 @@ class RemoteLanceDBTable:
             timeout=None,
         )
         return resp.result
+
+    async def refresh_inverted_indices(self, *, max_segments: int) -> dict:
+        resp = await self._session.call_async(
+            Request(
+                op=OP_TABLE_REFRESH_INVERTED_INDICES,
+                handle_id=self.handle_id,
+                kwargs={"max_segments": max_segments},
+            ),
+            timeout=None,
+        )
+        return resp.result
+
+    async def create_index(
+        self,
+        column: str,
+        *,
+        replace: bool | None = None,
+        config=None,
+        wait_timeout: timedelta | None = None,
+        name: str | None = None,
+        train: bool = True,
+    ) -> None:
+        """Mirrors ``lancedb.AsyncTable.create_index`` for full-text configs.
+
+        The config crosses the boundary as its plain parameters. Sent without a
+        deadline like the compaction halves: building the index over a large
+        table takes as long as it takes, and a timed-out build cannot be
+        re-issued safely while the first one is still running in the worker.
+        """
+        index_kind, params = _index_config_params(config)
+        await self._session.call_async(
+            Request(
+                op=OP_TABLE_CREATE_INDEX,
+                handle_id=self.handle_id,
+                args=(column, index_kind, params),
+                kwargs={
+                    "replace": replace,
+                    "name": name,
+                    "wait_timeout": wait_timeout,
+                    "train": train,
+                },
+            ),
+            timeout=None,
+        )
+
+    async def list_indices(self) -> list[RemoteIndexConfig]:
+        resp = await self._session.call_async(
+            Request(op=OP_TABLE_LIST_INDICES, handle_id=self.handle_id)
+        )
+        return [
+            RemoteIndexConfig(
+                name=str(index["name"]),
+                index_type=str(index["index_type"]),
+                columns=list(index["columns"]),
+            )
+            for index in resp.result or []
+        ]
 
     def query(self) -> RemoteQuery:
         return RemoteQuery(self._session, self.handle_id, OP_TABLE_QUERY_EXECUTE, ())

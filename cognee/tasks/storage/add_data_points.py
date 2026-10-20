@@ -42,6 +42,15 @@ logger = get_logger("add_data_points")
 SEARCH_INDEXED_IDS = "search_indexed_ids"
 
 
+def _without_vector_only_fields(node: DataPoint) -> DataPoint:
+    """A copy of ``node`` with its ``vector_only_fields`` set to None, for the graph write."""
+    fields = (getattr(node, "metadata", None) or {}).get("vector_only_fields") or []
+    present = {field: None for field in fields if getattr(node, field, None) is not None}
+    if not present:
+        return node
+    return node.model_copy(update=present)
+
+
 def _group_by_all_keys(owner_map: dict) -> dict:
     """Artifacts that need the same FULL ref key set, grouped into one call.
 
@@ -240,9 +249,18 @@ async def add_data_points(
         if not ownership.has_chunks:
             ownership = None
 
+    # Fields the vector store serves from its lexical index (a cached document's
+    # full text) stay off the graph node when that index exists; without it the
+    # in-memory fallback reads them from the node, so they stay.
+    graph_nodes = (
+        [_without_vector_only_fields(node) for node in nodes]
+        if not use_hybrid and getattr(vector_engine, "supports_lexical_search", False) is True
+        else nodes
+    )
+
     def _group_nodes():
         groups: dict = {}
-        for node in nodes:
+        for node in graph_nodes:
             owners = ownership.node_owners.get(str(node.id)) if ownership else None
             key = owners[0] if owners else fold_source_ref_key
             groups.setdefault(key, []).append(node)
@@ -269,10 +287,10 @@ async def add_data_points(
         if per_row_refs:
             mapping = {
                 str(node.id): (ownership.node_owners.get(str(node.id)) or [fold_source_ref_key])[0]
-                for node in nodes
+                for node in graph_nodes
             }
             await graph_engine.add_nodes(
-                nodes, source_ref_key=mapping, pipeline_run_id=fold_run_arg
+                graph_nodes, source_ref_key=mapping, pipeline_run_id=fold_run_arg
             )
         else:
             for key, group in _group_nodes().items():

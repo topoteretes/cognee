@@ -14,6 +14,10 @@ class BM25ChunksRetriever(LexicalRetriever):
     in-memory model of LexicalRetriever and adds no dependency or persistence.
     """
 
+    # The backend's lexical index scores with the same BM25, so it answers for
+    # this retriever when the vector store keeps one.
+    collection_name = "DocumentChunk_text"
+
     def __init__(
         self,
         top_k: int = 15,

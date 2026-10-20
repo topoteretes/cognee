@@ -52,6 +52,22 @@ class EmbeddingDimensionMismatchError(CogneeValidationError):
         )
 
 
+class LexicalSearchNotSupportedError(NotImplementedError):
+    """The vector backend keeps no lexical (BM25) index.
+
+    Raised by the default ``VectorDBInterface`` lexical methods. Callers that
+    can fall back (the lexical retrievers scan the graph nodes and score in
+    memory) check ``supports_lexical_search`` first and never see it.
+    """
+
+    def __init__(self, backend: str | None = None):
+        where = f" ({backend})" if backend else ""
+        super().__init__(
+            f"This vector backend{where} has no lexical index; keyword search falls back to "
+            "scoring the graph nodes in memory."
+        )
+
+
 class CollectionNotFoundError(CogneeValidationError):
     """
     Represents an error that occurs when a requested collection cannot be found.

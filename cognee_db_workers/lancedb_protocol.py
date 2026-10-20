@@ -49,3 +49,20 @@ OP_TABLE_PRUNE_VERSIONS = 128
 OP_TABLE_QUERY_EXECUTE = 130  # root = table.query()
 OP_TABLE_VECTOR_SEARCH_EXECUTE = 131  # root = table.vector_search(vec)
 OP_TABLE_MERGE_INSERT_EXECUTE = 132  # root = table.merge_insert(key)
+
+# Index ops.
+# handle_id; args: (column, index_kind, params); kwargs forwarded to lancedb's
+# own ``AsyncTable.create_index`` (replace, name, wait_timeout, train).
+# ``index_kind`` names the lancedb index config class ("FTS" is the only one
+# accepted) and ``params`` is a dict of its plain constructor arguments: the
+# worker builds the config object itself, so nothing but builtins crosses the
+# boundary.
+OP_TABLE_CREATE_INDEX = 140
+# handle_id; returns ``list[dict]`` with ``name``, ``index_type`` and ``columns``
+# per index. lancedb's ``IndexConfig`` is a pyo3 object and does not pickle.
+OP_TABLE_LIST_INDICES = 141
+# handle_id; the third half of cognee's bounded compaction
+# (``lancedb_compaction.refresh_inverted_indices``): fold the rows written
+# since the last pass into the table's inverted (full-text) indexes.
+# kwargs: max_segments
+OP_TABLE_REFRESH_INVERTED_INDICES = 142

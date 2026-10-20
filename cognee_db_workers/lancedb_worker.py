@@ -14,7 +14,12 @@ from .harness import (
     Request,
     run_worker_loop,
 )
-from .lancedb_compaction import compact_fragments, open_as_lance, prune_superseded_versions
+from .lancedb_compaction import (
+    compact_fragments,
+    open_as_lance,
+    prune_superseded_versions,
+    refresh_inverted_indices,
+)
 from .lancedb_protocol import (
     OP_CONNECT,
     OP_CREATE_TABLE,
@@ -23,12 +28,15 @@ from .lancedb_protocol import (
     OP_TABLE_ADD,
     OP_TABLE_COMPACT_FRAGMENTS,
     OP_TABLE_COUNT_ROWS,
+    OP_TABLE_CREATE_INDEX,
     OP_TABLE_DELETE,
+    OP_TABLE_LIST_INDICES,
     OP_TABLE_MERGE_INSERT_EXECUTE,
     OP_TABLE_NAMES,
     OP_TABLE_OPTIMIZE,
     OP_TABLE_PRUNE_VERSIONS,
     OP_TABLE_QUERY_EXECUTE,
+    OP_TABLE_REFRESH_INVERTED_INDICES,
     OP_TABLE_RELEASE,
     OP_TABLE_SCHEMA,
     OP_TABLE_TO_ARROW,
@@ -197,6 +205,44 @@ async def _op_table_prune_versions(registry: HandleRegistry, req: Request):
     return await asyncio.to_thread(prune_superseded_versions, dataset, **req.kwargs)
 
 
+async def _op_table_refresh_inverted_indices(registry: HandleRegistry, req: Request):
+    # Same shape as the fragment rewrite: plan against the latest version under
+    # the caller's write lock, do the I/O off the loop, move the handle along.
+    table = registry.get(req.handle_id)
+    await table.checkout_latest()
+    dataset = await open_as_lance(table)
+    stats = await asyncio.to_thread(refresh_inverted_indices, dataset, **req.kwargs)
+    await table.checkout_latest()
+    return stats
+
+
+async def _op_table_create_index(registry: HandleRegistry, req: Request):
+    table = registry.get(req.handle_id)
+    column, index_kind, params = req.args
+    # The config object is built here from plain parameters; only lancedb's
+    # full-text config is accepted, so no class name from the request is
+    # ever resolved.
+    if index_kind != "FTS":
+        raise ValueError(f"Unsupported index kind {index_kind!r}; only 'FTS' can be created")
+    from lancedb.index import FTS
+
+    await table.create_index(column, config=FTS(**dict(params)), **(req.kwargs or {}))
+
+
+async def _op_table_list_indices(registry: HandleRegistry, req: Request):
+    # lancedb's IndexConfig is a pyo3 object; reduce each one to the three
+    # fields the adapter reads.
+    table = registry.get(req.handle_id)
+    return [
+        {
+            "name": str(index.name),
+            "index_type": str(index.index_type),
+            "columns": [str(column) for column in index.columns],
+        }
+        for index in await table.list_indices()
+    ]
+
+
 def _apply_chain(builder, chain_steps):
     for method_name, args, kwargs in chain_steps:
         builder = getattr(builder, method_name)(*args, **kwargs)
@@ -270,6 +316,9 @@ DISPATCH = {
     OP_TABLE_OPTIMIZE: _op_table_optimize,
     OP_TABLE_COMPACT_FRAGMENTS: _op_table_compact_fragments,
     OP_TABLE_PRUNE_VERSIONS: _op_table_prune_versions,
+    OP_TABLE_REFRESH_INVERTED_INDICES: _op_table_refresh_inverted_indices,
+    OP_TABLE_CREATE_INDEX: _op_table_create_index,
+    OP_TABLE_LIST_INDICES: _op_table_list_indices,
     OP_TABLE_QUERY_EXECUTE: _op_query_execute,
     OP_TABLE_VECTOR_SEARCH_EXECUTE: _op_vector_search_execute,
     OP_TABLE_MERGE_INSERT_EXECUTE: _op_merge_insert_execute,

@@ -5,7 +5,9 @@ from uuid import UUID
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.users.models import User
 
+from .exceptions.exceptions import LexicalSearchNotSupportedError
 from .models.PayloadSchema import PayloadSchema
+from .models.ScoredResult import ScoredResult
 
 
 class VectorDBInterface(Protocol):
@@ -29,6 +31,15 @@ class VectorDBInterface(Protocol):
       the built-in adapters -- so **lower is better**; it is not a similarity.
     * Ids are passed and returned as ``UUID``/``str`` of the ``DataPoint.id``; missing ids
       in ``retrieve``/``score_by_ids`` are omitted from the result, not an error.
+    * **Lexical (BM25) index, optional.** A backend that sets
+      ``supports_lexical_search = True`` keeps a keyword index per collection next to the
+      embedding index and implements ``create_lexical_index``,
+      ``index_lexical_data_points`` and ``lexical_search``. ``DataPoint.metadata``
+      names the fields with ``lexical_fields``; ``index_data_points`` drives the three
+      methods. ``lexical_search`` returns ``ScoredResult`` rows ordered best first with
+      ``score`` = the BM25 relevance (**higher is better**, unlike ``search``). Backends
+      without the index keep the defaults, which raise ``LexicalSearchNotSupportedError``;
+      the lexical retrievers then score the graph nodes in memory instead.
 
     Multi-tenant isolation requires a ``DatasetDatabaseHandlerInterface`` registration
     for the backend (see ``dataset_database_handler/``).
@@ -118,6 +129,58 @@ class VectorDBInterface(Protocol):
             - data_point_ids (Union[List[str], list[str]]): A list of IDs of the data points to retrieve.
         """
         raise NotImplementedError
+
+    # Set True by backends that implement the three lexical methods below.
+    supports_lexical_search: bool = False
+
+    async def create_lexical_index(self, index_name: str, index_property_name: str) -> None:
+        """
+        Make ``index_property_name`` of the ``<index_name>_<index_property_name>``
+        collection searchable by keyword (BM25).
+
+        Named like ``create_vector_index``: ``index_data_points`` passes the
+        DataPoint type name and the field, and the collection is their join
+        (``DocumentChunk_text``). Idempotent: called once per collection per
+        indexing call, before the rows of that call are indexed, and again on
+        every later call. A backend whose index is a property of the table
+        (LanceDB) creates it here; a backend that keeps posting tables
+        (Postgres) creates them here.
+        """
+        raise LexicalSearchNotSupportedError(type(self).__name__)
+
+    async def index_lexical_data_points(
+        self,
+        index_name: str,
+        index_property_name: str,
+        data_points: list[DataPoint],
+        *,
+        owns_rows: bool,
+    ) -> None:
+        """
+        Index ``index_property_name`` of ``data_points`` in the lexical index of the
+        ``<index_name>_<index_property_name>`` collection (named like
+        ``index_data_points``).
+
+        ``owns_rows=True`` means no embedding exists for these rows (the field is in
+        ``lexical_fields`` but not in ``index_fields``): this call creates or replaces
+        the rows, with an empty vector, and indexes their text. ``owns_rows=False``
+        means the embedding path already wrote the rows in this same call: only the
+        text is (re)indexed and the stored vector is kept.
+        """
+        raise LexicalSearchNotSupportedError(type(self).__name__)
+
+    async def lexical_search(
+        self, collection_name: str, query_text: str, limit: int = 15
+    ) -> list[ScoredResult]:
+        """
+        Rank the collection's rows by BM25 relevance to ``query_text``.
+
+        ``collection_name`` is the full name (``DocumentChunk_text``), as for
+        ``search``. Returns at most ``limit`` rows, best first, each a ``ScoredResult`` whose
+        ``score`` is the BM25 relevance (higher is better) and whose ``payload`` is
+        the stored row payload. A missing collection returns ``[]``.
+        """
+        raise LexicalSearchNotSupportedError(type(self).__name__)
 
     async def score_by_ids(
         self, collection_name: str, data_point_ids: list[str], query_vector: list[float]

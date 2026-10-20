@@ -36,6 +36,13 @@ class VectorConfig(BaseSettings):
     vector_db_host: str = ""
     vector_db_subprocess_enabled: bool = True
     vector_pool_args: str | None = None
+    # Tokenization of the lexical (BM25) indexes, one setting for every engine
+    # (env: LEXICAL_SEARCH_LANGUAGE). "simple": lower-case words, no stemming,
+    # the shared stop-word list -- the in-memory scorer's tokens, so every
+    # backend ranks alike. "english": stemming and the engine's English stop
+    # words on Postgres and LanceDB; better English recall, wrong for other
+    # languages.
+    lexical_search_language: str = "simple"
 
     model_config = SettingsConfigDict(extra="allow")
 
@@ -52,6 +59,19 @@ class VectorConfig(BaseSettings):
             self.vector_dataset_database_handler = "pgvector"
         elif provider == "turso" and vector_dataset_database_handler in ("lancedb", "turso"):
             self.vector_dataset_database_handler = "turso"
+        return self
+
+    @pydantic.model_validator(mode="after")
+    def validate_lexical_search_language(self):
+        from cognee.infrastructure.databases.vector.lexical import LEXICAL_SEARCH_LANGUAGES
+
+        language = (self.lexical_search_language or "simple").lower()
+        if language not in LEXICAL_SEARCH_LANGUAGES:
+            raise ValueError(
+                f"LEXICAL_SEARCH_LANGUAGE must be one of {LEXICAL_SEARCH_LANGUAGES}, "
+                f"got {self.lexical_search_language!r}"
+            )
+        self.lexical_search_language = language
         return self
 
     @pydantic.model_validator(mode="after")

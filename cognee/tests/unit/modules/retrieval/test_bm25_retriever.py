@@ -1,8 +1,21 @@
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from cognee.modules.retrieval.bm25_retriever import BM25ChunksRetriever
+
+
+@pytest.fixture(autouse=True)
+def _score_in_memory(monkeypatch):
+    """These tests pin the in-memory scorer; a backend lexical index would answer instead."""
+    import cognee.modules.retrieval.lexical_retriever as lexical_module
+
+    monkeypatch.setattr(
+        lexical_module,
+        "get_vector_engine_async",
+        AsyncMock(return_value=SimpleNamespace(supports_lexical_search=False)),
+    )
 
 
 def _patch_graph(corpus: dict[str, str]):
