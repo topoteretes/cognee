@@ -6,6 +6,7 @@ from cognee.context_global_variables import session_user
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.retrieval.agentic_retriever import AgenticRetriever
 from cognee.modules.retrieval.base_retriever import BaseRetriever
+from cognee.modules.retrieval.bm25_documents_retriever import BM25DocumentsRetriever
 from cognee.modules.retrieval.bm25_retriever import BM25ChunksRetriever
 from cognee.modules.retrieval.broad_retriever import (
     BROAD_BATCH_MB,
@@ -391,6 +392,7 @@ async def get_search_type_retriever_instance(
             },
         ),
         SearchType.CHUNKS_LEXICAL: (BM25ChunksRetriever, {"top_k": top_k}),
+        SearchType.DOCUMENTS_LEXICAL: (BM25DocumentsRetriever, {"top_k": top_k}),
         SearchType.GRAPH_REPORT: (GraphReportRetriever, {"top_n": top_k}),
         SearchType.CODING_RULES: (
             CodingRulesRetriever,

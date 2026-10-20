@@ -627,3 +627,119 @@ async def test_cold_states_are_not_cached_but_warm_is(
     third = await graph_warmup_mod.assess_memory_readiness(user, None)
     assert third.state == graph_warmup_mod.STATE_WARM
     assert len(calls) == 2
+
+
+# --- partially built memory (SDK-397) ---------------------------------------
+
+
+def _partial_probe(graph_warmup_mod, search_level, memory_state, **kwargs):
+    return graph_warmup_mod.WarmupProbe(
+        graph_warmup_mod.STATE_PARTIAL,
+        graph_warmup_mod._WARM_COUNT,
+        search_level=search_level,
+        memory_state=memory_state,
+        message=f"Memory is {memory_state}.",
+        **kwargs,
+    )
+
+
+@pytest.mark.asyncio
+async def test_only_cached_documents_route_to_documents_lexical_with_a_marker(
+    monkeypatch,
+    api_recall_mod,
+    graph_warmup_mod,
+    recall_config_mod,
+    no_remote_client,
+    stub_dataset_auth,
+    stubbed_graph_lane,
+):
+    _use_config(monkeypatch, recall_config_mod)
+    _stub_probe(
+        monkeypatch, graph_warmup_mod, _partial_probe(graph_warmup_mod, "documents", "cached")
+    )
+    graph_warmup_mod.clear_warmup_cache()
+
+    out = await api_recall_mod.recall(
+        query_text="who ruled the garden",
+        dataset_ids=[uuid4()],
+        auto_route=False,
+        user=_make_user(),
+    )
+
+    assert len(stubbed_graph_lane) == 1
+    assert stubbed_graph_lane[0]["query_type"] == SearchType.DOCUMENTS_LEXICAL
+    assert len(out) == 1
+    marker = out[-1]
+    assert isinstance(marker, ResponseMarkerEntry)
+    assert marker.status == "memory_cached"
+    assert "keyword (BM25) search over the cached documents" in marker.text
+    assert "Memory is cached." in marker.text
+
+
+@pytest.mark.asyncio
+async def test_indexed_chunks_keep_the_routed_type_and_add_a_marker(
+    monkeypatch,
+    api_recall_mod,
+    graph_warmup_mod,
+    recall_config_mod,
+    no_remote_client,
+    stub_dataset_auth,
+    stubbed_graph_lane,
+):
+    _use_config(monkeypatch, recall_config_mod)
+    _stub_probe(
+        monkeypatch, graph_warmup_mod, _partial_probe(graph_warmup_mod, "chunks", "indexed")
+    )
+    graph_warmup_mod.clear_warmup_cache()
+
+    out = await api_recall_mod.recall(
+        query_text="q", dataset_ids=[uuid4()], auto_route=False, user=_make_user()
+    )
+
+    assert stubbed_graph_lane[0]["query_type"] == SearchType.HYBRID_COMPLETION
+    assert out[-1].status == "memory_indexed"
+    assert "chunk-level search" in out[-1].text
+
+
+@pytest.mark.asyncio
+async def test_an_explicit_query_type_is_honoured_on_partial_memory(
+    monkeypatch,
+    api_recall_mod,
+    graph_warmup_mod,
+    recall_config_mod,
+    no_remote_client,
+    stub_dataset_auth,
+    stubbed_graph_lane,
+):
+    _use_config(monkeypatch, recall_config_mod)
+    _stub_probe(
+        monkeypatch, graph_warmup_mod, _partial_probe(graph_warmup_mod, "documents", "cached")
+    )
+    graph_warmup_mod.clear_warmup_cache()
+
+    out = await api_recall_mod.recall(
+        query_text="q",
+        query_type=SearchType.GRAPH_COMPLETION,
+        dataset_ids=[uuid4()],
+        auto_route=False,
+        user=_make_user(),
+    )
+
+    assert stubbed_graph_lane[0]["query_type"] == SearchType.GRAPH_COMPLETION
+    assert out[-1].status == "memory_cached"
+
+
+@pytest.mark.asyncio
+async def test_partial_verdicts_are_never_cached(monkeypatch, graph_warmup_mod, recall_config_mod):
+    _use_config(monkeypatch, recall_config_mod)
+    calls = _stub_probe(
+        monkeypatch, graph_warmup_mod, _partial_probe(graph_warmup_mod, "chunks", "indexed")
+    )
+    graph_warmup_mod.clear_warmup_cache()
+    user = _make_user()
+
+    first = await graph_warmup_mod.assess_memory_readiness(user, None)
+    second = await graph_warmup_mod.assess_memory_readiness(user, None)
+
+    assert first.state == second.state == graph_warmup_mod.STATE_PARTIAL
+    assert len(calls) == 2

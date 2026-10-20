@@ -530,6 +530,35 @@ class CogneeClient:
                 status = await get_pipeline_status(dataset_ids, pipeline_name)
                 return status
 
+    async def get_memory_status(self, dataset_ids: list[UUID]) -> dict[str, dict[str, Any]]:
+        """
+        The folded memory state of datasets (what each answers right now).
+
+        Parameters
+        ----------
+        dataset_ids : List[UUID]
+            List of dataset IDs
+
+        Returns
+        -------
+        Dict[str, Dict[str, Any]]
+            ``{dataset_id: {state, search_level, searchable, graph_ready, message, ...}}``
+        """
+        if self.use_api:
+            endpoint = f"{self.api_url}/api/v1/datasets/status/memory"
+            params = [("dataset", str(d)) for d in dataset_ids]
+            response = await self.client.get(
+                endpoint, params=params, headers=self._get_headers(), timeout=READ_TIMEOUT_SECONDS
+            )
+            response.raise_for_status()
+            return response.json()
+        else:
+            from cognee.modules.pipelines.operations.get_memory_status import get_memory_status
+
+            with redirect_stdout(sys.stderr):
+                statuses = await get_memory_status(list(dataset_ids))
+                return {dataset_id: status.to_dict() for dataset_id, status in statuses.items()}
+
     async def list_datasets(self, *, timeout: float | None = None) -> list[dict[str, Any]]:
         """
         List all datasets.
@@ -840,7 +869,13 @@ class CogneeClient:
                 return None
             return max(minimum, deadline - asyncio.get_running_loop().time())
 
-        pipelines = ["add_pipeline", "cognify_pipeline", "code_graph_pipeline"]
+        pipelines = [
+            "add_pipeline",
+            "caching_pipeline",
+            "indexing_pipeline",
+            "cognify_pipeline",
+            "code_graph_pipeline",
+        ]
         if self.use_api:
             hop = remaining()
             visible = await self.list_datasets(timeout=hop if hop is not None else 2.0)

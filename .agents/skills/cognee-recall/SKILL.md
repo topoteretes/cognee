@@ -140,6 +140,17 @@ and appends hits with `source="skills"`. Disable with
   `error_message`) instead of results; a multi-source recall just returns
   no graph results. Wait for the
   remember to finish, or check why it failed.
+- **Partially built memory.** `remember()` makes a dataset searchable in
+  stages (cached documents → embedded chunks → the graph). While the graph
+  is not built yet, a graph-only recall still searches — with
+  `DOCUMENTS_LEXICAL` (BM25 over the cached documents) when only the cache
+  exists and no `query_type` was given, with the routed type once the
+  chunks exist — and appends one `source="system"` item after the results
+  with `status="memory_<state>"` (`memory_cached`, `memory_indexed`,
+  `memory_extracting`, `memory_indexing_failed`, ...) whose `text` says what
+  answered and what improves next. A multi-source recall gets that marker
+  only when the graph lane returned results. `cognee.datasets.get_memory_status()`
+  reports the same state.
 - **Hybrid silently becomes graph completion** when you pass
   `neighborhood_depth` or `feedback_influence > 0` (including a nonzero
   `DEFAULT_FEEDBACK_INFLUENCE`), or the chunk collection is missing.

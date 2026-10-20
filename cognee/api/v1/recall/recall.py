@@ -27,7 +27,12 @@ from cognee.modules.observability import (
     new_span,
 )
 from cognee.modules.operations import get_current_operation, record_operation
+from cognee.modules.pipelines.operations.get_memory_status import (
+    SEARCH_LEVEL_CHUNKS,
+    SEARCH_LEVEL_DOCUMENTS,
+)
 from cognee.modules.preflight import llm_available
+from cognee.modules.recall.methods.graph_warmup import STATE_PARTIAL
 from cognee.modules.recall.types.RecallResponse import (
     RecallResponse,
     ResponseAgentTraceEntry,
@@ -59,6 +64,33 @@ _MIN_WORD_LEN = 2
 # hits, no rules nodeset — and so is worth retrying as the default. Types the
 # router cannot pick never reach this set: the retry only second-guesses a guess.
 _RETRY_ON_EMPTY = frozenset({SearchType.CHUNKS_LEXICAL, SearchType.CODING_RULES})
+
+
+def _partial_memory_marker(probe, recall_config) -> ResponseMarkerEntry:
+    """The ``source="system"`` item recall appends while the graph is not built yet.
+
+    ``status`` is ``memory_<state>`` with the state vocabulary of
+    ``get_memory_status`` (``memory_cached``, ``memory_indexed``,
+    ``memory_extracting``, ``memory_indexing_failed``, ...); ``text`` says what
+    answered and what improves next.
+    """
+    answered = {
+        SEARCH_LEVEL_DOCUMENTS: (
+            "These results come from keyword (BM25) search over the cached documents."
+        ),
+        SEARCH_LEVEL_CHUNKS: "These results come from chunk-level search; the graph is not built yet.",
+    }.get(probe.search_level, "")
+    detail = probe.message or "Memory is still being built."
+    text = f"{answered} {detail}".strip()
+    return ResponseMarkerEntry(
+        source="system",
+        status=f"memory_{probe.memory_state or 'partial'}",
+        text=text,
+        datapoint_count=probe.datapoint_count,
+        threshold=recall_config.recall_warmup_threshold,
+        error_class=probe.error_class,
+        error_message=probe.error_message,
+    )
 
 
 class RecallKwargs(TypedDict, total=False):
@@ -741,6 +773,10 @@ async def recall(
                         )
                         guard_active = False
 
+                # Set while the memory is searchable but its graph is not built
+                # yet: the search runs at the level the memory allows and this
+                # marker is appended to say what answered and what improves next.
+                partial_marker = None
                 if guard_active:
                     from cognee.modules.recall.methods.graph_warmup import (
                         STATE_BUILD_FAILED,
@@ -748,7 +784,25 @@ async def recall(
                     )
 
                     probe = await assess_memory_readiness(user, probe_dataset_ids)
-                    if not probe.is_warm:
+                    if probe.state == STATE_PARTIAL:
+                        span.set_attribute("cognee.recall.warmup_state", probe.state)
+                        span.set_attribute("cognee.recall.memory_state", probe.memory_state or "")
+                        if query_type is None and probe.search_level == SEARCH_LEVEL_DOCUMENTS:
+                            # Only the cached documents exist: the chunk and graph
+                            # lanes have nothing, so the keyword search over the
+                            # documents is the one that answers.
+                            local_query_type = SearchType.DOCUMENTS_LEXICAL
+                            routed_rule = None
+                            span.set_attribute(COGNEE_SEARCH_TYPE, local_query_type.value)
+                        logger.info(
+                            "Recall on partially built memory (state '%s', search level '%s'): "
+                            "searching with %s and appending a status marker.",
+                            probe.memory_state,
+                            probe.search_level,
+                            local_query_type.value,
+                        )
+                        partial_marker = _partial_memory_marker(probe, recall_config)
+                    elif not probe.is_warm:
                         logger.info(
                             "Recall warm-up short-circuit: graph readiness is '%s' "
                             "(threshold %d); skipping search.",
@@ -866,6 +920,12 @@ async def recall(
                     tagged.extend(
                         [ResponseGraphEntry(**item.model_dump(), source="graph") for item in items]
                     )
+                # Graph-only recalls always learn the memory's state; a
+                # multi-source recall only when this lane answered, so the
+                # tools "on_empty" fallback (which fires on an empty merge)
+                # keeps firing.
+                if partial_marker is not None and (sources == ["graph"] or tagged):
+                    tagged.append(partial_marker)
                 return tagged
 
             async def _run_tools() -> list[RecallResponse]:

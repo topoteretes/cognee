@@ -36,6 +36,7 @@ class SearchResultKind(str, Enum):
     TRIPLET_COMPLETION = "triplet_completion"
     CYPHER = "cypher"
     CHUNK = "chunk"
+    DOCUMENT = "document"
     SUMMARY = "summary"
     CODING_RULE = "coding_rule"
     CODE = "code"

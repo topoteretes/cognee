@@ -569,6 +569,7 @@ can read `content[0]._meta["cognee/memory"]`, containing `count` and `state`.
 | `found` | memory contributed; `count` is how many entries |
 | `indexing` | ingestion is still running — retry shortly |
 | `build_failed` | ingestion failed — check `cognify_status` |
+| `partial` | the memory answers from its cached documents or chunks while the knowledge graph is still being built (recall's `memory_cached` / `memory_indexed` markers); answers improve once `cognify_status` reports `ready` |
 | `none` | nothing to return |
 
 `indexing` additionally carries `completed`/`total` when the pipeline reports

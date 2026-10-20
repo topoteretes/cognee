@@ -74,6 +74,16 @@ class ResponseMarkerEntry(BaseModel):
 
     ``text`` carries a human-readable message so generic consumers that fall
     back to text rendering display something sensible.
+
+    ``status`` values: ``memory_warming_up`` (nothing searchable yet, no
+    results), ``build_failed`` (nothing searchable, the last build errored),
+    and ``memory_<state>`` while the memory is searchable but its graph is not
+    built yet -- ``memory_cached`` (keyword search over the cached documents
+    answered), ``memory_indexed`` / ``memory_extracting`` (chunk search
+    answered), ``memory_caching`` / ``memory_indexing`` (a stage is still
+    running), ``memory_indexing_failed`` / ``memory_extraction_failed`` (an
+    earlier stage's results still answer). Those markers are appended after
+    the results; the two cold ones are returned alone.
     """
 
     source: Literal["system"]
@@ -81,9 +91,9 @@ class ResponseMarkerEntry(BaseModel):
     text: str
     datapoint_count: int
     threshold: int
-    # Populated when status == "build_failed": the root cause of the last
-    # errored build, so clients can show WHY memory has no answers instead
-    # of an unexplained empty result.
+    # Populated for failure states: the root cause of the last errored run,
+    # so clients can show WHY memory has fewer answers than expected instead
+    # of an unexplained result.
     error_class: str | None = None
     error_message: str | None = None
 

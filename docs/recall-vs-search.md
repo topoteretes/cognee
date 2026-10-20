@@ -137,6 +137,15 @@ That is why these are *not* auto-routed, even though they are valid
   the retriever then finds no window and answers as HYBRID. With no LLM
   configured, recall picks `CHUNKS` before the router runs, so a temporal
   question never reaches the interval extraction.
+- **Memory that is still being built routes differently.** `remember()` makes a
+  dataset searchable in stages (cached documents, then embedded chunks, then the
+  graph). Before the graph exists, `recall()` without a `query_type` searches at
+  the level the memory allows — `DOCUMENTS_LEXICAL` (BM25 over the cached
+  documents) while only the cache exists, the routed type once the chunks are
+  embedded — and appends a `source="system"` marker (`status="memory_<state>"`)
+  saying what answered and what improves next. An explicit `query_type` is
+  always honoured; `search()` never routes. `cognee.datasets.get_memory_status()`
+  reports the state.
 - "Exact"/"verbatim" phrasing does not select `CHUNKS_LEXICAL`. BM25 tokenizes
   the raw query, so the trigger word itself becomes a rare, high-IDF search
   term and skews the ranking it was meant to sharpen. `quoted_phrase` has no

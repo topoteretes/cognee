@@ -40,6 +40,7 @@ RETURNS_FULL_PROMPT = {
 RETURNS_BARE_CONTEXT = {
     SearchType.CHUNKS,
     SearchType.CHUNKS_LEXICAL,
+    SearchType.DOCUMENTS_LEXICAL,
     SearchType.SUMMARIES,
     SearchType.CYPHER,
     SearchType.NATURAL_LANGUAGE,

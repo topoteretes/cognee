@@ -18,6 +18,8 @@ class SearchType(str, Enum):
     TEMPORAL = "TEMPORAL"
     CODING_RULES = "CODING_RULES"
     CHUNKS_LEXICAL = "CHUNKS_LEXICAL"
+    # BM25 over the cached documents the caching pipeline stores first (SDK-397).
+    DOCUMENTS_LEXICAL = "DOCUMENTS_LEXICAL"
     AGENTIC_COMPLETION = "AGENTIC_COMPLETION"
     CODE = "CODE"
     GRAPH_REPORT = "GRAPH_REPORT"

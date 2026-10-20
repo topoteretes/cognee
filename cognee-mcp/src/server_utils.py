@@ -228,14 +228,31 @@ def recall_items(results: Any) -> list[Any]:
     ]
 
 
+# recall()'s system markers while memory is searchable but its graph is not
+# built yet (status ``memory_<state>``), folded to the two words a consumer
+# acts on: wait a little, or accept chunk-level answers for now.
+_PARTIAL_MARKER_STATES = {
+    "memory_caching": "indexing",
+    "memory_indexing": "indexing",
+    "memory_extracting": "partial",
+    "memory_cached": "partial",
+    "memory_indexed": "partial",
+    "memory_caching_failed": "partial",
+    "memory_indexing_failed": "partial",
+    "memory_extraction_failed": "partial",
+}
+
+
 def recall_marker_state(results: Any) -> RecallState | None:
     results = _unwrap_results(results)
     for item in results if isinstance(results, list) else [results]:
-        if (
-            _get_field(item, "_source", "source") == "system"
-            and _get_field(item, "status") == "build_failed"
-        ):
+        if _get_field(item, "_source", "source") != "system":
+            continue
+        status = _get_field(item, "status")
+        if status == "build_failed":
             return RecallState("build_failed")
+        if status in _PARTIAL_MARKER_STATES:
+            return RecallState(_PARTIAL_MARKER_STATES[status])
     return None
 
 
@@ -309,10 +326,14 @@ def format_recall_results(
         if sources:
             hints = [f"{n} from {hint}" for hint, n in list(sources.items())[:3]]
             summary += " (" + ", ".join(hints) + ")"
+        marker = recall_marker_state(results)
+        if marker is not None and marker.state == "partial":
+            summary += " — early results: the knowledge graph is still being built"
     else:
         state = empty_state or recall_marker_state(results) or RecallState("none")
         summary = {
             "indexing": "still indexing — retry shortly",
+            "partial": "no matching memories yet — the graph is still being built, retry later",
             "build_failed": "memory indexing failed — check cognify_status",
             "none": "no matching memories",
         }.get(state.state, "no matching memories")

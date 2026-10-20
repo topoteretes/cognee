@@ -17,6 +17,7 @@ from src.server_utils import (
     format_recall_body,
     format_recall_results,
     recall_items,
+    recall_marker_state,
 )
 
 
@@ -171,6 +172,8 @@ async def test_api_diagnostics_are_scoped_and_bounded(state):
         assert request.url.params.get_list("dataset") == ["target"]
         assert set(request.url.params.get_list("pipeline")) == {
             "add_pipeline",
+            "caching_pipeline",
+            "indexing_pipeline",
             "cognify_pipeline",
             "code_graph_pipeline",
         }
@@ -296,4 +299,47 @@ def test_multiple_active_pipelines_do_not_double_count_progress():
     }
     assert classify_recall_state({"ds": {"add_pipeline": run, "cognify_pipeline": run}}) == (
         RecallState("indexing")
+    )
+
+
+# --- partially built memory markers (SDK-397) -------------------------------
+
+
+def _marker(status):
+    from cognee.modules.recall.types.RecallResponse import ResponseMarkerEntry
+
+    return ResponseMarkerEntry(
+        source="system", status=status, text="early", datapoint_count=1, threshold=1
+    )
+
+
+@pytest.mark.parametrize(
+    "status,state",
+    [
+        ("memory_cached", "partial"),
+        ("memory_indexed", "partial"),
+        ("memory_extraction_failed", "partial"),
+        ("memory_caching", "indexing"),
+        ("memory_indexing", "indexing"),
+        ("build_failed", "build_failed"),
+    ],
+)
+def test_partial_memory_markers_fold_to_a_recall_state(status, state):
+    assert recall_marker_state([_marker(status)]) == RecallState(state)
+
+
+def test_a_partial_marker_beside_results_adds_the_early_results_note():
+    results = [
+        {"source": "graph", "text": "a hit", "dataset_name": "docs"},
+        _marker("memory_indexed"),
+    ]
+    summary = format_recall_results(results).split("\n")[0]
+    assert summary.startswith("1 memory found")
+    assert "knowledge graph is still being built" in summary
+    assert recall_items(results) == results[:1]
+
+
+def test_a_partial_marker_alone_says_the_graph_is_still_being_built():
+    assert format_recall_results([_marker("memory_cached")]).startswith(
+        "no matching memories yet — the graph is still being built"
     )

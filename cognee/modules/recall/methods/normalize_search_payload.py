@@ -33,6 +33,7 @@ _KIND_BY_SEARCH_TYPE: dict[SearchType, SearchResultKind] = {
     SearchType.CODE: SearchResultKind.CODE,
     SearchType.CHUNKS: SearchResultKind.CHUNK,
     SearchType.CHUNKS_LEXICAL: SearchResultKind.CHUNK,
+    SearchType.DOCUMENTS_LEXICAL: SearchResultKind.DOCUMENT,
     SearchType.SUMMARIES: SearchResultKind.SUMMARY,
     SearchType.AGENTIC_COMPLETION: SearchResultKind.GRAPH_COMPLETION,
     SearchType.SKILLS: SearchResultKind.SKILL,

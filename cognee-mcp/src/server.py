@@ -936,7 +936,11 @@ async def cognify_status(
     Notes
     -----
     - By default this checks "cognify_pipeline" (backward compatible)
-    - Use `pipelines` to restrict to specific pipeline names
+    - Use `pipelines` to restrict to specific pipeline names: add_pipeline,
+      caching_pipeline, indexing_pipeline, cognify_pipeline (the three runs
+      cognify makes, in that order), code_graph_pipeline
+    - A final "Memory:" line folds those runs into the dataset's memory state
+      (cached, indexed, ready, ...) and says what searches answer right now
     - Status information includes job progress, execution time, and completion status
     - The status is returned in string format for easy reading
     - In API mode the dataset id is resolved over HTTP and status is read
@@ -981,8 +985,21 @@ async def cognify_status(
                     if str(dataset_id) in pipeline_status:
                         status[str(dataset_id)][pipeline_name] = pipeline_status[str(dataset_id)]
 
-            # Append any background task errors
             status_text = str(status)
+            # The folded memory state: what the dataset answers right now.
+            try:
+                memory = await cognee_client.get_memory_status([dataset_id])
+                memory_state = memory.get(str(dataset_id)) if isinstance(memory, dict) else None
+                if memory_state:
+                    status_text += (
+                        f"\nMemory: {memory_state.get('state')} "
+                        f"(search level: {memory_state.get('search_level')}) - "
+                        f"{memory_state.get('message')}"
+                    )
+            except Exception as memory_error:
+                logger.debug("Memory status unavailable: %s", memory_error, exc_info=True)
+
+            # Append any background task errors
             dataset_errors = _task_errors.get(dataset_name, [])
             if dataset_errors:
                 error_lines = ["\n\nBackground task errors:"]

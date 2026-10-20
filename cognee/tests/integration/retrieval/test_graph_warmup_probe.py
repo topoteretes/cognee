@@ -25,6 +25,7 @@ from cognee.modules.pipelines.models.PipelineRun import PipelineRunStatus
 from cognee.modules.recall.methods.graph_warmup import (
     STATE_BUILD_FAILED,
     STATE_NEVER_BUILT,
+    STATE_PARTIAL,
     STATE_WARM,
     get_graph_build_status,
 )
@@ -176,5 +177,57 @@ async def test_errored_graph_write_flags_build_failed_until_a_build_completes(
         dataset_id, "cognify_pipeline", PipelineRunStatus.DATASET_PROCESSING_COMPLETED
     )
 
+    probe = await get_graph_build_status(_USER, [dataset_id])
+    assert probe.state == STATE_WARM
+
+
+@pytest.mark.asyncio
+async def test_the_stages_make_memory_partial_before_the_graph_exists(
+    clean_test_environment, monkeypatch
+):
+    """Caching and indexing runs (SDK-397) make the data searchable before any
+    graph build: the probe reports partial with the level reached, a failed
+    extraction keeps it, and a completed one makes it warm."""
+    dataset_id = uuid4()
+    _permit(monkeypatch, [dataset_id])
+
+    await _insert_run(dataset_id, "add_pipeline", PipelineRunStatus.DATASET_PROCESSING_COMPLETED)
+    await _insert_run(
+        dataset_id, "caching_pipeline", PipelineRunStatus.DATASET_PROCESSING_COMPLETED
+    )
+    probe = await get_graph_build_status(_USER, [dataset_id])
+    assert probe.state == STATE_PARTIAL
+    assert probe.search_level == "documents"
+    assert probe.memory_state == "cached"
+    assert probe.is_searchable and not probe.is_warm
+
+    await _insert_run(
+        dataset_id, "indexing_pipeline", PipelineRunStatus.DATASET_PROCESSING_COMPLETED
+    )
+    probe = await get_graph_build_status(_USER, [dataset_id])
+    assert (probe.state, probe.search_level, probe.memory_state) == (
+        STATE_PARTIAL,
+        "chunks",
+        "indexed",
+    )
+
+    await _insert_run(
+        dataset_id,
+        "cognify_pipeline",
+        PipelineRunStatus.DATASET_PROCESSING_ERRORED,
+        error_class="AuthenticationError",
+        error_message="invalid api key",
+    )
+    probe = await get_graph_build_status(_USER, [dataset_id])
+    assert (probe.state, probe.search_level, probe.memory_state) == (
+        STATE_PARTIAL,
+        "chunks",
+        "extraction_failed",
+    )
+    assert probe.error_class == "AuthenticationError"
+
+    await _insert_run(
+        dataset_id, "cognify_pipeline", PipelineRunStatus.DATASET_PROCESSING_COMPLETED
+    )
     probe = await get_graph_build_status(_USER, [dataset_id])
     assert probe.state == STATE_WARM
