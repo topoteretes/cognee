@@ -75,14 +75,6 @@ on:
         required: false
         type: boolean
         default: false
-  # TEMPORARY (RES-28 dry run) — REVERTED IN THE NEXT COMMIT.
-  # workflow_dispatch is not registered until this file reaches the default
-  # branch, so this lets the pilot run from #4878. A pull_request event has no
-  # inputs: the mode step forces a dry run on one weak and one already-good
-  # file, so a PR-triggered run can never push a branch or open a PR (#4668).
-  pull_request:
-    paths:
-      - ".github/workflows/docstring_pilot.yml"
 
 permissions:
   contents: write
@@ -92,7 +84,7 @@ permissions:
 # would leave the draft PR half-refreshed. Keyed on the target file so two
 # dispatches on different pilot files do not block each other.
 concurrency:
-  group: docstring-pilot-${{ inputs.path || github.ref }}
+  group: docstring-pilot-${{ inputs.path }}
   cancel-in-progress: false
 
 jobs:
@@ -187,14 +179,8 @@ jobs:
       - name: Resolve run mode and target spec
         id: mode
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "dry_run=true" >> "$GITHUB_OUTPUT"
-            echo "spec=pr-pair" >> "$GITHUB_OUTPUT"
-            echo "Pull request event — forced dry run on one weak and one good file."
-          else
-            echo "dry_run=${{ inputs.dry_run }}" >> "$GITHUB_OUTPUT"
-            echo "spec=${{ inputs.path }}" >> "$GITHUB_OUTPUT"
-          fi
+          echo "dry_run=${{ inputs.dry_run }}" >> "$GITHUB_OUTPUT"
+          echo "spec=${{ inputs.path }}" >> "$GITHUB_OUTPUT"
 
       # A rejected path must produce zero pull requests, and the reason has to be
       # readable in the run summary — a bad `path` is a human typo, not a bug.
@@ -208,14 +194,6 @@ jobs:
               --print-list \
               --allowlist automation-src/.agents/skills/docstring-author/pilot_files.md \
               --repo-root .
-          elif [ "${TARGET_SPEC}" = "pr-pair" ]; then
-            for path in cognee/context_global_variables.py cognee/api/v1/remember/remember.py; do
-              python3 automation-src/tools/check_docstring_pilot_path.py \
-                --path "${path}" \
-                --allowlist automation-src/.agents/skills/docstring-author/pilot_files.md \
-                --repo-root .
-            done
-            echo 'targets=["cognee/context_global_variables.py", "cognee/api/v1/remember/remember.py"]' >> "$GITHUB_OUTPUT"
           else
             python3 automation-src/tools/check_docstring_pilot_path.py \
               --path "${TARGET_SPEC}" \
