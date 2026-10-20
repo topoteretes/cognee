@@ -166,7 +166,7 @@ async def test_a_retry_with_another_chunk_size_deletes_the_earlier_cut():
     [
         (["indexing_pipeline", "cognify_pipeline"], False, 64),  # extracted before: not ours
         ([], False, 64),  # no earlier indexing run: nothing of it is stored
-        (["indexing_pipeline"], True, 64),  # the store holds this cut: the same chunking
+        (["indexing_pipeline"], True, 256),  # existing chunks with the same settings
         (["indexing_pipeline"], False, 256),  # same settings: never stale
         (["indexing_pipeline"], False, None),  # settings unrecorded: never taken for stale
     ],
@@ -193,6 +193,37 @@ async def test_the_document_is_checked_once_per_item():
     await _run(chunks[1:], ctx, graph)
 
     graph.get_connections.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_retry_retires_the_old_cut_even_when_a_chunk_id_is_reused():
+    """A short paragraph can keep its content ID across a chunk-size change.
+
+    Retire before looking up vectors: the shared ID can itself be deleted,
+    and must then be embedded again rather than recorded as already indexed.
+    """
+    chunks = _cut(_chunks(2), tokens=256)
+    ctx = _item_ctx(uuid4(), stamped=["indexing_pipeline"])
+    stale = _stored(tokens=64)
+    stale[0]["id"] = str(chunks[0].id)
+    found = {stale[0]["id"]}
+    engine = _engine(found)
+    graph = _graph(chunks[0].is_part_of.id, stale)
+
+    async def delete(ids, *_args):
+        found.difference_update(ids)
+
+    with (
+        patch.object(module, "get_vector_engine_async", AsyncMock(return_value=engine)),
+        patch.object(module, "get_graph_engine", AsyncMock(return_value=graph)),
+        patch.object(module, "stores_provenance_in_graph", AsyncMock(return_value=True)),
+        patch.object(module, "delete_chunks_incremental", AsyncMock(side_effect=delete)) as deleted,
+    ):
+        await find_indexed_chunks(chunks, ctx=ctx)
+
+    deleted.assert_awaited_once()
+    assert set(deleted.await_args.args[0]) == {node["id"] for node in stale}
+    assert not ctx.extras.get(SEARCH_INDEXED_IDS)
 
 
 @pytest.mark.asyncio

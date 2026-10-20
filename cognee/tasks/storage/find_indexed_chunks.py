@@ -15,11 +15,10 @@ and the store is right. One id lookup per few hundred chunks; a store that
 cannot answer counts as holding nothing, because embedding a chunk twice costs
 tokens while skipping one that is not there would leave it unsearchable.
 
-A chunk-size change is also why none of the chunks may be found: an earlier
-indexing run cut the document differently and its extraction failed, and the
-retry cuts it anew. Those earlier chunks would stay next to the new ones as a
-second, entity-less copy of the text, so they are deleted
-(``retire_chunks_cut_differently``).
+A chunk-size change can leave an earlier indexing run's chunks alongside the
+new cut after extraction failed. Those earlier chunks are deleted before the
+lookup (``retire_chunks_cut_differently``), even when some content IDs overlap
+the new cut, so there is no second, entity-less copy of the text.
 """
 
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -168,6 +167,11 @@ async def find_indexed_chunks(data_chunks: list[DocumentChunk], ctx=None) -> lis
     if not data_chunks or ctx is None:
         return data_chunks
 
+    # A short chunk can retain its content-derived ID across a chunk-size
+    # change. Check the old cut even when some IDs overlap, before looking up
+    # vectors: retirement can delete one of those shared IDs too.
+    await retire_chunks_cut_differently(data_chunks, ctx)
+
     # Chunk text lives in the ``<ChunkType>_text`` collection (index_data_points
     # names collections ``<type>_<field>``); group by type in case a custom
     # chunker subclasses DocumentChunk.
@@ -181,9 +185,6 @@ async def find_indexed_chunks(data_chunks: list[DocumentChunk], ctx=None) -> lis
         found_ids |= await _ids_in_store(vector_engine, collection_name, ids)
 
     if not found_ids:
-        # Nothing of this cut is stored: if an earlier indexing run stored the
-        # document cut another way, those chunks go.
-        await retire_chunks_cut_differently(data_chunks, ctx)
         return data_chunks
 
     indexed = ctx.extras.setdefault(SEARCH_INDEXED_IDS, set())
