@@ -10,7 +10,7 @@ from pydantic import Field
 from cognee import __version__ as cognee_version
 from cognee.api.DTO import ErrorResponse, InDTO, OutDTO
 from cognee.exceptions import CogneeApiError
-from cognee.modules.search.operations import get_history
+from cognee.modules.search.operations import delete_history, get_history
 from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
@@ -148,6 +148,42 @@ def get_search_router() -> APIRouter:
         created_at: datetime
         # Null when the search was not scoped to a single dataset.
         dataset_id: UUID | None = None
+
+    class SearchHistoryDeleted(OutDTO):
+        queries_deleted: int
+        results_deleted: int
+
+    @router.delete(
+        "/history",
+        summary="Delete the caller's own search history",
+        response_model=SearchHistoryDeleted,
+        responses={
+            403: {"model": ErrorResponse},
+            422: {"model": ErrorResponse},
+        },
+    )
+    async def delete_search_history(user: User = Depends(get_authenticated_user)):
+        """
+        Delete the authenticated user's search and recall history.
+
+        Removes every query the caller ran and every result returned to them,
+        the rows GET /api/v1/search and GET /api/v1/recall list. Only the
+        caller's own history: the endpoint takes no user parameter, so no
+        user, admin or tenant owner can delete anyone else's.
+
+        ## Response
+        - **queries_deleted**: Query rows removed
+        - **results_deleted**: Result rows removed
+        """
+        send_telemetry(
+            "Search API Endpoint Invoked",
+            user,
+            additional_properties={
+                "endpoint": "DELETE /v1/search/history",
+                "cognee_version": cognee_version,
+            },
+        )
+        return await delete_history(user.id)
 
     @router.get(
         "",

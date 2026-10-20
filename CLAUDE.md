@@ -775,6 +775,8 @@ FastAPI application with versioned routes under `/api/v1/` (routers registered i
 - `/users` - Authentication (when `REQUIRE_AUTHENTICATION` is effectively true; see auth posture below)
 - `/visualize` - Graph visualization server
 
+`DELETE /api/v1/search/history` deletes the caller's own search and recall history (the `queries` / `results` rows `GET /api/v1/search` and `GET /api/v1/recall` list); it takes no user parameter, so nobody can delete another user's history, and it is API-only for now — `forget()` and `prune_system(metadata=False)` still leave these rows.
+
 Request bodies accept both snake_case and camelCase (`cognee/api/DTO.py` sets `alias_generator=to_camel` with `populate_by_name=True`). There is no `/feedback` route — feedback is CLI- and SDK-only.
 
 ## Python SDK Entry Points
