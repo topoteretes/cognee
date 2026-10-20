@@ -47,6 +47,25 @@ def test_linear_names_are_pinned_and_a_dlt_table_name():
     )
 
 
+def test_apollo_names_are_pinned_and_a_dlt_table_name():
+    # Same rule as the Linear pin: the literal is deliberate. One Apollo team is one
+    # connection, so there is no scope, and the Cloud control plane only tracks tables that
+    # start with the provider prefix.
+    name = ingestion.resource_name("apollo", CREDENTIAL)
+    assert name == "apollo_e8ba1b716982492b069485f8"
+    assert name == name.lower() and set(name) <= set("abcdefghijklmnopqrstuvwxyz0123456789_")
+    assert len(name) <= 63
+    assert ingestion.source_factory("apollo").__module__ == (
+        "cognee.tasks.ingestion.connectors.apollo"
+    )
+
+
+def test_apollo_service_is_built_from_the_connections_api_key():
+    from cognee.tasks.ingestion.connectors.apollo import ApolloClient
+
+    assert isinstance(ingestion.build_service("apollo", "an-apollo-api-key"), ApolloClient)
+
+
 def test_unknown_provider_is_refused_by_every_provider_keyed_function():
     for call in (
         lambda: ingestion.resource_name("nope", CREDENTIAL),

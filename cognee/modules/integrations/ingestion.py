@@ -52,6 +52,12 @@ def _linear_service(access_token: str) -> Any:
     return build_linear_service(access_token)
 
 
+def _apollo_service(api_key: str) -> Any:
+    from cognee.tasks.ingestion.connectors.apollo import build_apollo_service
+
+    return build_apollo_service(api_key)
+
+
 _PROVIDERS: dict[str, _Provider] = {
     "google_drive": _Provider(
         prefix="google_drive_files",
@@ -82,6 +88,12 @@ _PROVIDERS: dict[str, _Provider] = {
         prefix="notion_pages",
         source_module="cognee.tasks.ingestion.connectors.notion",
         source_name="notion_source",
+    ),
+    "apollo": _Provider(
+        prefix="apollo",
+        source_module="cognee.tasks.ingestion.connectors.apollo",
+        source_name="apollo_source",
+        service_builder=_apollo_service,
     ),
 }
 
