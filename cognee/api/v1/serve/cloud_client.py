@@ -109,6 +109,29 @@ class CloudClient:
             )
             return None
 
+    async def _get_workspace_id(self) -> str:
+        """Cognee Cloud workspace id of the connected API key, or "" when not Cloud.
+
+        Cloud answers ``/api/v1/users/me`` with ``active_workspace_id`` (the
+        control-plane ``tenants.id``). A self-hosted server answers with
+        fastapi-users' ``UserRead``, which has no such field. Any failure is
+        treated as "not Cloud": this must never fail a connection.
+        """
+        try:
+            session = await self._get_session()
+            async with session.get(f"{self.service_url}/api/v1/users/me") as resp:
+                if resp.status != 200:
+                    return ""
+                data = await resp.json()
+            workspace_id = data.get("active_workspace_id") if isinstance(data, dict) else None
+            return str(UUID(str(workspace_id))) if workspace_id else ""
+        except Exception:
+            logger.debug(
+                "Falling back to no workspace after error in CloudClient._get_workspace_id",
+                exc_info=True,
+            )
+            return ""
+
     # ----- V2 Operations -----
 
     async def remember(self, data: Any, dataset_name: str = "main_dataset", **kwargs) -> dict:
