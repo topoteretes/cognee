@@ -37,7 +37,7 @@ def _note_local_execution() -> None:
     except Exception:
         logger.debug("Giving up after error in _note_local_execution", exc_info=True)
         return
-    if creds and creds.service_url:
+    if creds and creds.service_url and creds.api_key:
         logger.warning(
             "Executing memory operations locally. Saved connection credentials for %s "
             "exist, but this process has not called cognee.serve() — call it to route "

@@ -132,23 +132,18 @@ async def test_serve_reconnects_to_saved_instance(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_serve_reconnects_to_saved_keyless_instance(monkeypatch, tmp_path):
-    """A local instance with auth off is saved with no key and reconnects too."""
-    import cognee
-
+async def test_serve_does_not_reuse_a_saved_keyless_connection(monkeypatch, tmp_path):
+    """Without a key nothing proves the saved URL still serves the same
+    instance, so a bare serve() asks for the URL instead of reconnecting."""
     creds_file = tmp_path / "cloud_credentials.json"
+    creds_file.write_text(json.dumps({"service_url": "http://localhost:8000", "api_key": ""}))
     monkeypatch.setattr(creds_mod, "_CREDENTIALS_FILE", creds_file)
     _patch_probes(monkeypatch, health=True, auth_status=200)
 
-    client = await serve(url="http://localhost:8000")
-    await cognee.disconnect()
-    assert json.loads(creds_file.read_text())["api_key"] == ""
+    with pytest.raises(CogneeConfigurationError) as exc_info:
+        await serve()
 
-    client = await serve()
-    try:
-        assert client.service_url == "http://localhost:8000"
-    finally:
-        await cognee.disconnect()
+    assert "cognee.serve(url=" in exc_info.value.message
 
 
 @pytest.mark.asyncio

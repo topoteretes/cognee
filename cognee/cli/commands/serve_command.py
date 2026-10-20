@@ -18,12 +18,13 @@ Connect the local Cognee SDK to a Cognee instance.
 
 Pass the instance URL and its API key (or set COGNEE_SERVICE_URL and
 COGNEE_API_KEY). A successful connection is saved, so a later bare
-`cognee serve` reconnects to the same instance.
+`cognee serve` reconnects to the same instance when it was connected with
+an API key; a local instance without a key needs --url again.
 
 Examples:
   cognee serve --url http://localhost:8000  # Local instance
   cognee serve --url https://my.cognee.ai --api-key ck_...
-  cognee serve                              # Reconnect to the saved instance
+  cognee serve                              # Reconnect to the saved keyed instance
   cognee serve --logout                     # Disconnect + clear credentials
     """
 

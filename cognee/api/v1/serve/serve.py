@@ -23,8 +23,10 @@ async def serve(url: str | None = None, api_key: str | None = None) -> CloudClie
         await cognee.serve(url="https://my-instance.cognee.ai", api_key="ck_...")
 
     Both can also come from ``COGNEE_SERVICE_URL`` / ``COGNEE_API_KEY``. A
-    successful connection is saved, so a later bare ``serve()`` reconnects to
-    the same instance without arguments.
+    successful connection is saved, and a later bare ``serve()`` reconnects to
+    the same instance without arguments when that connection used an API key.
+    A connection without a key (a local instance with auth off) is not reused:
+    pass its ``url`` again.
 
     Once connected, all operations (remember, recall, improve, forget,
     visualize) route to the instance instead of running locally.
@@ -56,10 +58,9 @@ async def serve(url: str | None = None, api_key: str | None = None) -> CloudClie
     from cognee.exceptions import CogneeConfigurationError
 
     creds = load_credentials()
-    # A keyless connection (a local instance with auth off) is saved too, and
-    # reconnects like any other: the authenticated probe rejects it if the
-    # instance has since started requiring a key.
-    if creds and creds.service_url:
+    # Only a keyed connection is reused: the key is what tells a later bare
+    # serve() that the instance at the saved URL is still the one it was.
+    if creds and creds.service_url and creds.api_key:
         return await _serve_saved(creds)
 
     raise CogneeConfigurationError(

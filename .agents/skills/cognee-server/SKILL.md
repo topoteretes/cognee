@@ -38,7 +38,7 @@ auth off you must set `ENABLE_BACKEND_ACCESS_CONTROL=false`.
   ```bash
   cognee-cli serve --url http://localhost:8000        # local instance
   cognee-cli serve --url https://... --api-key ck_... # cognee cloud instance
-  cognee-cli serve                                    # reconnect to the saved instance
+  cognee-cli serve                                    # reconnect to the saved keyed instance
   cognee-cli serve --logout                           # disconnect
   ```
 
