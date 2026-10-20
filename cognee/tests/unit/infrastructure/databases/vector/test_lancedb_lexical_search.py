@@ -518,3 +518,82 @@ async def test_refresh_inverted_indices_leaves_a_table_without_one_alone(tmp_pat
         "inverted_indices_merged": 0,
     }
     assert len(dataset.versions()) == versions
+
+
+@needs_matching_pylance
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", MODES)
+async def test_a_fully_quoted_query_is_searched_by_its_words(mode, tmp_path, monkeypatch):
+    """The index stores no positions, so a phrase query raises once rows are indexed."""
+    monkeypatch.setattr(adapter_module, "DEFAULT_RETENTION_SECONDS", 0)
+    async with _adapter(mode, tmp_path) as (adapter, db_path):
+        report = _cached("report", "the quarterly revenue report")
+        await _index_cached(adapter, [report, _cached("memo", "a memo about pelicans")])
+        await adapter.compact()
+        assert (await _index_stats(db_path, "Cached_text")).num_unindexed_rows == 0
+
+        results = await adapter.lexical_search("Cached_text", '"quarterly revenue"', limit=5)
+
+        assert [result.id for result in results] == [report.id]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", MODES)
+async def test_tokens_longer_than_forty_characters_are_found(mode, tmp_path):
+    """LanceDB drops tokens over 40 characters by default, a SHA-256 among them."""
+    sha = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    async with _adapter(mode, tmp_path) as (adapter, _):
+        release = _cached("release", f"release checksum {sha}")
+        await _index_cached(adapter, [release, _cached("other", "another file")])
+
+        results = await adapter.lexical_search("Cached_text", sha, limit=5)
+
+        assert [result.id for result in results] == [release.id]
+
+
+@pytest.mark.asyncio
+async def test_a_remote_store_still_refreshes_the_indexes_it_wrote(tmp_path, monkeypatch):
+    """No compaction on object storage, but the written tables' indexes take their new rows."""
+    async with _adapter("local", tmp_path) as (adapter, _):
+        await _index_cached(adapter, [_cached("doc", "pelican report")])
+        refreshed = []
+
+        async def fake_refresh(collection, max_segments):
+            refreshed.append(collection.name)
+            return {"inverted_indices": 1, "inverted_indices_merged": 0}
+
+        monkeypatch.setattr(adapter, "_refresh_lexical_indices", fake_refresh)
+        monkeypatch.setattr(adapter, "_store_url", lambda: "s3://bucket/cognee")
+
+        first = await adapter.compact()
+        second = await adapter.compact()
+
+        assert refreshed == ["Cached_text"]
+        assert first == {
+            "skipped": "remote_store",
+            "Cached_text": {"inverted_indices": 1, "inverted_indices_merged": 0},
+        }
+        assert second == {"skipped": "remote_store"}, "nothing was written since"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", MODES)
+async def test_a_schema_migration_keeps_rows_without_a_vector_and_their_index(mode, tmp_path):
+    """The next payload-schema change rebuilds every table; lexical rows have no vector."""
+    from cognee.infrastructure.databases.vector.lancedb.LanceDBAdapter import IndexSchema
+
+    class IndexSchemaNext(IndexSchema):
+        added_in_a_later_release: str | None = None
+
+    async with _adapter(mode, tmp_path) as (adapter, _):
+        pelican = _cached("pelican", "the pelican harbour report")
+        await _index_cached(adapter, [pelican, _cached("zebra", "zebra crossing manual")])
+        old_collection = await adapter.get_collection("Cached_text")
+
+        await adapter._migrate_collection_schema("Cached_text", old_collection, IndexSchemaNext, [])
+
+        assert await adapter.has_lexical_index("Cached_text")
+        results = await adapter.lexical_search("Cached_text", "pelican", limit=5)
+        assert [result.id for result in results] == [pelican.id]
+        [row] = await adapter.retrieve("Cached_text", [str(pelican.id)], include_vector=True)
+        assert row.payload["vector"] is None

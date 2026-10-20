@@ -66,6 +66,11 @@ LEXICAL_TEXT_COLUMN = "payload.text"
 # creator wins the commit (see _ensure_lexical_index).
 _LEXICAL_INDEX_ATTEMPTS = 3
 
+# The longest token the full-text index keeps, in bytes: Postgres's limit for
+# a tsvector word, so both stores find the same identifiers and checksums,
+# while a megabyte-long base64 run is still not indexed as one term.
+_LEXICAL_MAX_TOKEN_BYTES = 2047
+
 
 def _is_commit_conflict(error: BaseException) -> bool:
     """Whether Lance refused a commit because a concurrent one won it.
@@ -252,6 +257,9 @@ class LanceDBAdapter(VectorDBInterface):
         # the same tables, a lock so concurrent passes do not overlap, and the
         # reason compaction was turned off for good, if it was.
         self._compaction_dirty: set[str] = set()
+        # Tables with a full-text index written since their last refresh; on a
+        # remote store the refresh is the only maintenance a pass does.
+        self._lexical_written: set[str] = set()
         self._compaction_cursor = 0
         self._compaction_lock = asyncio.Lock()
         self._compaction_unsupported: str | None = None
@@ -828,6 +836,8 @@ class LanceDBAdapter(VectorDBInterface):
         """
         options = self._compaction_options()
         reason = self._compaction_skip_reason()
+        if reason == "remote_store":
+            return await self._refresh_written_lexical_indices(options["max_index_segments"])
         if reason:
             return {"skipped": reason}
         if self._compaction_lock.locked():
@@ -914,6 +924,42 @@ class LanceDBAdapter(VectorDBInterface):
         )
         return {**(stats or {}), **(refreshed or {}), **(pruned or {})}
 
+    async def _refresh_written_lexical_indices(self, max_segments: int) -> dict:
+        """A remote store's pass: no compaction, but the full-text indexes of the
+        tables written since the last pass take in their new rows.
+
+        Without it a keyword query on a remote store tokenizes every row
+        written since the index was built, forever: the index starts empty
+        when the collection is created and only a refresh adds rows to it.
+        The refresh writes one delta segment of exactly the new rows, so its
+        transfer is bounded by what the run wrote. Fail-open per table, like
+        compaction.
+        """
+        if self._compaction_unsupported:
+            return {"skipped": self._compaction_unsupported}
+        if self._compaction_lock.locked():
+            return {"skipped": "in_progress"}
+        results: dict = {"skipped": "remote_store"}
+        async with self._compaction_lock:
+            for name in sorted(self._lexical_written):
+                self._lexical_written.discard(name)
+                try:
+                    collection = await self.get_collection(name)
+                    results[name] = await self._refresh_lexical_indices(collection, max_segments)
+                except PylanceIncompatibleError as exc:
+                    self._turn_off_compaction(exc)
+                    results[name] = {"error": str(exc)[:200]}
+                    break
+                except Exception as exc:
+                    logger.warning(
+                        "Full-text index refresh skipped for collection '%s': %s",
+                        name,
+                        exc,
+                        exc_info=True,
+                    )
+                    results[name] = {"error": str(exc)[:200]}
+        return results
+
     async def _refresh_lexical_indices(self, collection, max_segments: int) -> dict:
         """Fold the rows written since the last pass into the table's full-text
         indexes; a no-op on a table without one. Takes the write lock, the
@@ -963,6 +1009,9 @@ class LanceDBAdapter(VectorDBInterface):
 
         new_ids = {dp.id for dp in new_lance_data_points}
         typed_old_rows = []
+        # Lexical-only rows (SDK-397) have a NULL vector, which the model's
+        # Vector field rejects; they are written as arrow rows instead.
+        vectorless_rows = []
         skipped = 0
         failed_rows = []
         for row in rows:
@@ -985,6 +1034,11 @@ class LanceDBAdapter(VectorDBInterface):
             # vector searches.
             try:
                 validated_payload = schema_model.model_validate(raw_payload).model_dump()
+                if row.get("vector") is None:
+                    vectorless_rows.append(
+                        {"id": row["id"], "vector": None, "payload": validated_payload}
+                    )
+                    continue
                 typed_old_rows.append(
                     MigrationLanceDataPoint(
                         id=row["id"],
@@ -1022,6 +1076,9 @@ class LanceDBAdapter(VectorDBInterface):
                 "(or make them optional) and re-run migration."
             )
 
+        # Dropping the table drops its indexes; the full-text one is rebuilt.
+        had_lexical_index = self._has_lexical_index(await old_collection.list_indices())
+
         async with self.VECTOR_DB_LOCK:
             connection = await self.get_connection()
             await connection.drop_table(collection_name)
@@ -1034,6 +1091,14 @@ class LanceDBAdapter(VectorDBInterface):
             if typed_old_rows:
                 await collection.add(self._records_for_write(typed_old_rows))
 
+            if vectorless_rows:
+                import pyarrow
+
+                # Built against the table's own schema, as _write_lexical_rows
+                # does: plain dicts would make lancedb re-infer the vector type.
+                schema = await collection.schema()
+                await collection.add(pyarrow.Table.from_pylist(vectorless_rows, schema=schema))
+
             if new_lance_data_points:
                 await (
                     collection.merge_insert("id")
@@ -1042,10 +1107,14 @@ class LanceDBAdapter(VectorDBInterface):
                     .execute(self._records_for_write(new_lance_data_points))
                 )
 
+        if had_lexical_index:
+            await self._ensure_lexical_index(collection_name, collection)
+            self._lexical_written.add(collection_name)
+
         logger.info(
             "Migrated collection '%s' schema (%d existing rows preserved)",
             collection_name,
-            len(typed_old_rows),
+            len(typed_old_rows) + len(vectorless_rows),
         )
 
     @classmethod
@@ -1813,10 +1882,14 @@ class LanceDBAdapter(VectorDBInterface):
     def _lexical_index_config(self) -> FTS:
         """The full-text index configuration for ``LEXICAL_SEARCH_LANGUAGE``.
 
-        ``simple`` reproduces ``tokenize_words``: lower-cased words, no
-        stemming, the shared stop-word list, so every backend ranks alike.
-        ``english`` adds stemming and LanceDB's English stop words. Positions
-        are not stored (no phrase queries), which keeps the index small.
+        ``simple`` follows ``tokenize_words``: lower-cased words, no stemming,
+        the shared stop-word list, so every backend ranks alike; it also folds
+        accents (``ascii_folding``), which ``tokenize_words`` does not.
+        ``english`` adds stemming and LanceDB's English stop words. Tokens up
+        to ``_LEXICAL_MAX_TOKEN_BYTES`` are kept (LanceDB's default drops
+        anything over 40, a SHA-256 among them). Positions are not stored, so
+        there are no phrase queries (``lexical_search`` drops quotes), which
+        keeps the index small.
         """
         if self._lexical_language() == "english":
             return FTS(
@@ -1826,6 +1899,7 @@ class LanceDBAdapter(VectorDBInterface):
                 lower_case=True,
                 ascii_folding=True,
                 with_position=False,
+                max_token_length=_LEXICAL_MAX_TOKEN_BYTES,
             )
         return FTS(
             stem=False,
@@ -1834,6 +1908,7 @@ class LanceDBAdapter(VectorDBInterface):
             custom_stop_words=sorted(DEFAULT_STOP_WORDS),
             ascii_folding=True,
             with_position=False,
+            max_token_length=_LEXICAL_MAX_TOKEN_BYTES,
         )
 
     @staticmethod
@@ -1930,6 +2005,7 @@ class LanceDBAdapter(VectorDBInterface):
         if owns_rows:
             await self._write_lexical_rows(collection_name, collection, field_name, data_points)
         await self._ensure_lexical_index(collection_name, collection)
+        self._lexical_written.add(collection_name)
 
     async def _write_lexical_rows(
         self, collection_name: str, collection, field_name: str, data_points: list[DataPoint]
@@ -2034,6 +2110,11 @@ class LanceDBAdapter(VectorDBInterface):
                 if limit <= 0:
                     return []
 
+            # A query wrapped in double quotes is a phrase query to LanceDB,
+            # which needs the positions this index does not store: it raises
+            # once the rows are indexed. The words are searched instead, as
+            # the other engines do.
+            query_text = query_text.replace('"', " ")
             rows = await (
                 collection.query()
                 .nearest_to_text(query_text, columns=[LEXICAL_TEXT_COLUMN])
@@ -2066,6 +2147,7 @@ class LanceDBAdapter(VectorDBInterface):
                     await collection.delete("id IS NOT NULL")
                     await connection.drop_table(collection_name)
             self._compaction_dirty.clear()
+            self._lexical_written.clear()
 
         if self.url and not self._is_remote_store(self.url):
             db_dir_path = path.dirname(self.url)
