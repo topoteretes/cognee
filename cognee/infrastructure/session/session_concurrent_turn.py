@@ -8,6 +8,8 @@ Public coroutines are fail-open so they never block answer generation.
 """
 
 import asyncio
+from collections.abc import Awaitable, Callable
+from contextvars import ContextVar
 from typing import Any
 from uuid import UUID
 
@@ -60,6 +62,60 @@ class SessionTurnContext(BaseModel):
     previous_answer: str | None = None
     # (entry_id, content) served to the previous answer; the analysis lane rates these.
     previous_served_context: tuple[tuple[str, str], ...] = ()
+
+
+class SharedSessionTurn:
+    """One session turn shared by every dataset of a multi-dataset search.
+
+    A search over several datasets with one ``session_id`` answers one user message, so
+    it is one turn. The search fan-out holds ``session_turn_lock`` for the whole search
+    and publishes this object through ``shared_session_turn``; each dataset's concurrent
+    turn then reuses the same context load, the same analysis, and applies that analysis
+    once, while still retrieving, answering and recording its own QA row. Without it,
+    every dataset took the turn lock in turn, so the datasets of one search ran one after
+    another and each re-analysed the same message.
+    """
+
+    def __init__(self, *, user_id: str, session_id: str):
+        self.user_id = user_id
+        self.session_id = session_id
+        self._snapshot_lock = asyncio.Lock()
+        self._snapshot: SessionTurnContext | None = None
+        self._analysis: asyncio.Future | None = None
+        self._analysis_applied = False
+
+    def covers(self, user_id: str, session_id: str) -> bool:
+        return self.user_id == user_id and self.session_id == session_id
+
+    async def snapshot(
+        self, load: Callable[[], Awaitable[SessionTurnContext]]
+    ) -> SessionTurnContext:
+        """The turn context, loaded by the first dataset and reused by the rest."""
+        async with self._snapshot_lock:
+            if self._snapshot is None:
+                self._snapshot = await load()
+            return self._snapshot
+
+    async def analysis(
+        self, analyze: Callable[[], Awaitable[SessionTurnAnalysis]]
+    ) -> SessionTurnAnalysis:
+        """The turn analysis, started by the first dataset and awaited by the rest."""
+        if self._analysis is None:
+            self._analysis = asyncio.ensure_future(analyze())
+        # Shielded so one cancelled dataset does not cancel the analysis for the others.
+        return await asyncio.shield(self._analysis)
+
+    def claim_analysis_application(self) -> bool:
+        """True exactly once: the analysis' context updates are applied once per turn."""
+        if self._analysis_applied:
+            return False
+        self._analysis_applied = True
+        return True
+
+
+shared_session_turn: ContextVar[SharedSessionTurn | None] = ContextVar(
+    "shared_session_turn", default=None
+)
 
 
 class TurnPrompts(BaseModel):
@@ -263,6 +319,7 @@ async def commit_turn(
     context: Any = "",
     summarize_context: bool = False,
     answered: bool = True,
+    apply_analysis: bool = True,
 ) -> None:
     """Apply the turn's context updates, then store the QA pair.
 
@@ -281,16 +338,20 @@ async def commit_turn(
     exactly what the *next* turn's analysis is handed to rate, and rating guidance the user
     never saw is how the session teaches itself from nothing. The context updates above
     still apply — they rate the previous, genuinely answered turn.
+
+    ``apply_analysis`` is False for every dataset of a shared turn but one, so a
+    multi-dataset search rates the previous turn once rather than once per dataset.
     """
-    await apply_session_turn_analysis(
-        session_manager,
-        user_id=user_id,
-        session_id=session_id,
-        query=snapshot.raw_message,
-        analysis=analysis,
-        previous_qa_id=snapshot.previous_qa_id,
-        served_ids=[entry_id for entry_id, _content in snapshot.previous_served_context],
-    )
+    if apply_analysis:
+        await apply_session_turn_analysis(
+            session_manager,
+            user_id=user_id,
+            session_id=session_id,
+            query=snapshot.raw_message,
+            analysis=analysis,
+            previous_qa_id=snapshot.previous_qa_id,
+            served_ids=[entry_id for entry_id, _content in snapshot.previous_served_context],
+        )
     context_to_store = await context_to_store_for_turn(context, summarize_context=summarize_context)
     try:
         await session_manager.add_qa(

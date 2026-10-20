@@ -24,11 +24,13 @@ from cognee.infrastructure.session.feedback_models import SessionTurnAnalysis
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.infrastructure.session.session_concurrent_turn import (
     SessionTurnContext,
+    SharedSessionTurn,
     TurnPrompts,
     analyze_turn,
     commit_turn,
     complete_turn,
     load_turn_context,
+    shared_session_turn,
 )
 from cognee.infrastructure.session.session_turn import (
     acknowledgement_for_turn,
@@ -300,6 +302,77 @@ async def _retrieve_and_answer(
     return retrieved_objects, context, answer
 
 
+async def _run_turn(
+    retriever,
+    *,
+    raw_query: str,
+    search_type_for_spans: SearchType | None,
+    session_manager,
+    user_uuid,
+    session_id: str,
+    shared_turn: SharedSessionTurn | None,
+) -> tuple[Any, Any, Any, bool, Any]:
+    """Load context, analyse and answer, then commit. The caller holds the turn lock.
+
+    Returns ``(retrieved_objects, context, generated_answer, should_answer,
+    stored_answer)``; ``generated_answer`` is None when the answer lane skipped on empty
+    context, in which case nothing was committed. With ``shared_turn`` the context load
+    and the analysis are the ones every dataset of the search shares, and the analysis
+    is applied by only one of them.
+    """
+    user_cache_key = str(user_uuid)
+
+    def load():
+        return load_turn_context(
+            session_manager,
+            user_id=user_cache_key,
+            session_id=session_id,
+            raw_message=raw_query,
+        )
+
+    snapshot = await (load() if shared_turn is None else shared_turn.snapshot(load))
+    answer_lane = _retrieve_and_answer(
+        retriever,
+        raw_query=raw_query,
+        snapshot=snapshot,
+        user_uuid=user_uuid,
+        session_id=session_id,
+        search_type_for_spans=search_type_for_spans,
+    )
+    if session_manager.is_auto_feedback_enabled():
+        analysis_lane = (
+            analyze_turn(snapshot)
+            if shared_turn is None
+            else shared_turn.analysis(lambda: analyze_turn(snapshot))
+        )
+        analysis, answer_lane_result = await asyncio.gather(analysis_lane, answer_lane)
+    else:
+        analysis = SessionTurnAnalysis()
+        answer_lane_result = await answer_lane
+    retrieved_objects, context, generated_answer = answer_lane_result
+    should_answer = should_answer_turn(analysis, has_previous_qa=bool(snapshot.previous_qa_id))
+    stored_answer = (
+        generated_answer if should_answer else acknowledgement_for_turn(analysis.response_to_user)
+    )
+
+    if generated_answer is None:
+        return retrieved_objects, context, None, should_answer, stored_answer
+
+    await commit_turn(
+        session_manager,
+        snapshot=snapshot,
+        analysis=analysis,
+        answer=stored_answer,
+        user_id=user_cache_key,
+        session_id=session_id,
+        used_graph_element_ids=retriever.extract_context_object_ids(retrieved_objects),
+        context=context,
+        answered=should_answer,
+        apply_analysis=shared_turn is None or shared_turn.claim_analysis_application(),
+    )
+    return retrieved_objects, context, generated_answer, should_answer, stored_answer
+
+
 async def run_concurrent_session_turn(
     retriever,
     *,
@@ -316,54 +389,36 @@ async def run_concurrent_session_turn(
     user_cache_key = str(user_uuid)
     session_id = session_manager.resolve_session_id(retriever.session_id)
 
-    async with session_turn_lock(user_cache_key, session_id):
-        snapshot = await load_turn_context(
-            session_manager,
-            user_id=user_cache_key,
-            session_id=session_id,
-            raw_message=raw_query,
-        )
-        answer_lane = _retrieve_and_answer(
+    shared_turn = shared_session_turn.get()
+    if shared_turn is not None and shared_turn.covers(user_cache_key, session_id):
+        # The search fan-out holds session_turn_lock for the whole search.
+        outcome = await _run_turn(
             retriever,
             raw_query=raw_query,
-            snapshot=snapshot,
+            search_type_for_spans=search_type_for_spans,
+            session_manager=session_manager,
             user_uuid=user_uuid,
             session_id=session_id,
-            search_type_for_spans=search_type_for_spans,
+            shared_turn=shared_turn,
         )
-        if session_manager.is_auto_feedback_enabled():
-            analysis, answer_lane_result = await asyncio.gather(
-                analyze_turn(snapshot),
-                answer_lane,
+    else:
+        async with session_turn_lock(user_cache_key, session_id):
+            outcome = await _run_turn(
+                retriever,
+                raw_query=raw_query,
+                search_type_for_spans=search_type_for_spans,
+                session_manager=session_manager,
+                user_uuid=user_uuid,
+                session_id=session_id,
+                shared_turn=None,
             )
-        else:
-            analysis = SessionTurnAnalysis()
-            answer_lane_result = await answer_lane
-        retrieved_objects, context, generated_answer = answer_lane_result
-        should_answer = should_answer_turn(analysis, has_previous_qa=bool(snapshot.previous_qa_id))
-        stored_answer = (
-            generated_answer
-            if should_answer
-            else acknowledgement_for_turn(analysis.response_to_user)
-        )
+    retrieved_objects, context, generated_answer, should_answer, stored_answer = outcome
 
-        if generated_answer is None:
-            # Empty-context skip in the answer lane: no answer was generated,
-            # so there is no QA turn to record — mirroring the sequential
-            # path, where the guard fires before the session completion runs.
-            return retrieved_objects, context, []
-
-        await commit_turn(
-            session_manager,
-            snapshot=snapshot,
-            analysis=analysis,
-            answer=stored_answer,
-            user_id=user_cache_key,
-            session_id=session_id,
-            used_graph_element_ids=retriever.extract_context_object_ids(retrieved_objects),
-            context=context,
-            answered=should_answer,
-        )
+    if generated_answer is None:
+        # Empty-context skip in the answer lane: no answer was generated,
+        # so there is no QA turn to record — mirroring the sequential
+        # path, where the guard fires before the session completion runs.
+        return retrieved_objects, context, []
 
     # Match the sequential runner: a turn that was acknowledged rather than answered has
     # no retrieval to report. Returning the discarded lane's objects would put them on the

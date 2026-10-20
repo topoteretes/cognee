@@ -11,6 +11,11 @@ from cognee.context_global_variables import (
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.llm.config import LLMConfig
+from cognee.infrastructure.locks import session_turn_lock
+from cognee.infrastructure.session.session_concurrent_turn import (
+    SharedSessionTurn,
+    shared_session_turn,
+)
 from cognee.modules.data.methods.get_authorized_existing_datasets import (
     get_authorized_existing_datasets,
 )
@@ -504,8 +509,26 @@ async def search_in_datasets_context(
 
         tasks.append(_search_without_context())
 
+    # One session_id over several datasets is one user message, so one turn: hold the
+    # turn lock for the whole fan-out and let the datasets share the turn (see
+    # SharedSessionTurn) instead of each taking the lock in turn, which ran them one
+    # after another. Without a session_id every dataset has its own default session.
+    shared_turn = None
+    if backend_access_control_enabled() and session_id is not None and len(search_datasets) > 1:
+        shared_turn = SharedSessionTurn(user_id=str(user.id), session_id=session_id)
+
+    if shared_turn is None:
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+    else:
+        async with session_turn_lock(shared_turn.user_id, shared_turn.session_id):
+            token = shared_session_turn.set(shared_turn)
+            try:
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+            finally:
+                shared_session_turn.reset(token)
+
     return _collect_dataset_results(
-        await asyncio.gather(*tasks, return_exceptions=True),
+        results,
         query_type=query_type,
         query_text=query_text,
         only_context=only_context,
