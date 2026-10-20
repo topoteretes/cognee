@@ -132,6 +132,26 @@ async def test_serve_reconnects_to_saved_instance(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_serve_reconnects_to_saved_keyless_instance(monkeypatch, tmp_path):
+    """A local instance with auth off is saved with no key and reconnects too."""
+    import cognee
+
+    creds_file = tmp_path / "cloud_credentials.json"
+    monkeypatch.setattr(creds_mod, "_CREDENTIALS_FILE", creds_file)
+    _patch_probes(monkeypatch, health=True, auth_status=200)
+
+    client = await serve(url="http://localhost:8000")
+    await cognee.disconnect()
+    assert json.loads(creds_file.read_text())["api_key"] == ""
+
+    client = await serve()
+    try:
+        assert client.service_url == "http://localhost:8000"
+    finally:
+        await cognee.disconnect()
+
+
+@pytest.mark.asyncio
 async def test_serve_saved_creds_with_rejected_key_fail_with_guidance(monkeypatch, tmp_path):
     """A reachable instance whose saved key no longer works must not 'connect'."""
     creds_file = tmp_path / "cloud_credentials.json"

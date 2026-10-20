@@ -56,7 +56,10 @@ async def serve(url: str | None = None, api_key: str | None = None) -> CloudClie
     from cognee.exceptions import CogneeConfigurationError
 
     creds = load_credentials()
-    if creds and creds.service_url and creds.api_key:
+    # A keyless connection (a local instance with auth off) is saved too, and
+    # reconnects like any other: the authenticated probe rejects it if the
+    # instance has since started requiring a key.
+    if creds and creds.service_url:
         return await _serve_saved(creds)
 
     raise CogneeConfigurationError(
