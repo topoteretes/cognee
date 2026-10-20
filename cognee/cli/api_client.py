@@ -146,7 +146,7 @@ class CogneeApiClient:
                         ("data", (os.path.basename(item), fh, mime or "application/octet-stream"))
                     )
                 else:
-                files.append(
+                    files.append(
                     (
                         "data",
                         (
