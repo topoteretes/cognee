@@ -592,3 +592,93 @@ async def test_empty_graph_raises_no_data_error():
         pytest.raises(NoDataError, match="knowledge graph is empty"),
     ):
         await retriever.get_retrieved_objects(query="test query")
+
+
+@pytest.mark.asyncio
+async def test_batch_query_with_global_context_index_preserves_prelude():
+    """Batch queries with include_global_context_index=True must include the global prelude."""
+    retriever = GraphCompletionRetriever(include_global_context_index=True)
+
+    with (
+        patch.object(
+            retriever,
+            "_build_global_context_prelude",
+            new_callable=AsyncMock,
+            return_value="## Global Summary: Knowledge Base",
+        ) as mock_prelude,
+        patch.object(
+            retriever,
+            "resolve_edges_to_text",
+            new_callable=AsyncMock,
+            return_value="Edge context",
+        ),
+    ):
+        contexts = await retriever.get_context_from_objects(
+            query_batch=["query 1", "query 2"],
+            retrieved_objects=[["mock_edge_1"], ["mock_edge_2"]],
+        )
+
+    assert len(contexts) == 2
+    assert contexts[0] == "## Global Summary: Knowledge Base\n\nEdge context"
+    assert contexts[1] == "## Global Summary: Knowledge Base\n\nEdge context"
+    assert mock_prelude.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_batch_query_with_global_context_index_and_empty_triplets_preserves_prelude():
+    """Even when graph triplets are empty, global prelude must be preserved for batch queries."""
+    retriever = GraphCompletionRetriever(include_global_context_index=True)
+
+    with (
+        patch.object(
+            retriever,
+            "_build_global_context_prelude",
+            new_callable=AsyncMock,
+            return_value="## Global Summary: Knowledge Base",
+        ) as mock_prelude,
+        patch.object(
+            retriever,
+            "resolve_edges_to_text",
+            new_callable=AsyncMock,
+            return_value="",
+        ),
+    ):
+        contexts = await retriever.get_context_from_objects(
+            query_batch=["query 1", "query 2"],
+            retrieved_objects=[[], []],
+        )
+
+    assert len(contexts) == 2
+    assert contexts[0] == "## Global Summary: Knowledge Base"
+    assert contexts[1] == "## Global Summary: Knowledge Base"
+    assert mock_prelude.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_batch_query_preserves_per_query_arity_contract():
+    """Per ad04883, batch queries keep their per-query arity contract and are not skipped."""
+    retriever = GraphCompletionRetriever()
+
+    with (
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.generate_completion_batch",
+            new_callable=AsyncMock,
+            return_value=["ans1", "ans2"],
+        ) as mock_generate_batch,
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
+        ) as mock_cache_config,
+    ):
+        mock_config = MagicMock()
+        mock_config.caching = False
+        mock_cache_config.return_value = mock_config
+
+        completion = await retriever.get_completion_from_context(
+            query_batch=["query 1", "query 2"],
+            retrieved_objects=[[], []],
+            context=["", ""],
+        )
+
+    assert len(completion) == 2
+    assert completion == ["ans1", "ans2"]
+    mock_generate_batch.assert_awaited_once()

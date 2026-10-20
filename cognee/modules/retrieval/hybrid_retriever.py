@@ -300,6 +300,7 @@ class HybridRetriever(BaseRetriever):
             # provided" deflection (SDK-270 / gh #3728). A global-context
             # prelude counts as real grounding, so this only fires when every
             # section came back empty.
+            # Batch queries keep their per-query arity contract and are not skipped (ad04883).
             logger.warning("Empty context: skipping LLM completion, returning no results")
             return []
 
