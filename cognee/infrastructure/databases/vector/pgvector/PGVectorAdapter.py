@@ -29,6 +29,7 @@ from ..models.ScoredResult import ScoredResult
 from ..stored_vector_size import choose_stored_vector_size
 from ..vector_db_interface import VectorDBInterface
 from .lexical_index import (
+    backfill_postings,
     build_passage_rows,
     create_lexical_tables,
     is_lexical_table_name,
@@ -619,9 +620,11 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         The collection table is created first (the docs table references its
         ``id`` with ``ON DELETE CASCADE``), then the two posting tables with
-        ``CREATE ... IF NOT EXISTS`` under ``VECTOR_DB_LOCK``. Both are kept in
-        the reflection cache, so the call ``index_data_points`` makes before
-        every batch costs nothing once the tables exist.
+        ``CREATE ... IF NOT EXISTS`` under ``VECTOR_DB_LOCK``. Existing rows
+        are backfilled in that same transaction before the index is visible.
+        Both tables are kept in the reflection cache, so the call
+        ``index_data_points`` makes before every batch costs nothing once the
+        tables exist.
         """
         collection = f"{collection_name}_{field_name}"
         docs_table, terms_table = lexical_table_names(collection)
@@ -635,8 +638,13 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             async with self.VECTOR_DB_LOCK:
                 if not await self._has_lexical_tables(collection):
                     async with self.engine.begin() as connection:
-                        await create_lexical_tables(
-                            connection, collection, language=self._lexical_language()
+                        language = self._lexical_language()
+                        await create_lexical_tables(connection, collection, language=language)
+                        await backfill_postings(
+                            connection,
+                            collection,
+                            field_name,
+                            language=await recorded_language(connection, collection) or language,
                         )
                     # Reflect AFTER the DDL transaction commits, as
                     # create_collection does.

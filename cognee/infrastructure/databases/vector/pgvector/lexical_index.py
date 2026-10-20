@@ -34,6 +34,7 @@ import json
 import math
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any
 
 from sqlalchemy import text
@@ -65,6 +66,10 @@ PASSAGE_BATCH_SIZE = 500
 
 # Rows per owned-rows upsert statement.
 ROW_BATCH_SIZE = 1000
+
+# Backfill reads full document payloads; keep each batch smaller than posting
+# batches, whose text is already split into short passages.
+BACKFILL_BATCH_SIZE = 32
 
 # A passage longer than this many characters is cut into pieces of at most
 # this length. split_passages caps passages by words, and one whitespace-free
@@ -455,6 +460,48 @@ async def replace_postings(
                 "stop_words": stop_words,
             },
         )
+
+
+# --- backfill -----------------------------------------------------------------
+
+
+async def backfill_postings(
+    connection, collection_name: str, field_name: str, *, language: str
+) -> None:
+    """Index rows predating a collection's lexical index in the DDL transaction.
+
+    Embedding rows store the indexed value as ``payload.text``; lexical-only
+    rows use the original field name. Keyset pagination bounds the number of
+    full documents in memory. The index must not be advertised until this
+    backfill and its table creation commit together.
+    """
+    statement = text(
+        f"""
+        SELECT id, COALESCE(payload->>:field, payload->>'text') AS body
+        FROM {quote_identifier(collection_name)}
+        WHERE CAST(:after AS uuid) IS NULL OR id > CAST(:after AS uuid)
+        ORDER BY id
+        LIMIT :batch_size
+        """
+    )
+    after = None
+    while True:
+        result = await connection.execute(
+            statement,
+            {"field": field_name, "after": after, "batch_size": BACKFILL_BATCH_SIZE},
+        )
+        rows = result.all()
+        if not rows:
+            return
+        points = [SimpleNamespace(id=row_id, text=body) for row_id, body in rows]
+        await replace_postings(
+            connection,
+            collection_name,
+            [str(point.id) for point in points],
+            build_passage_rows(points, "text"),
+            language=language,
+        )
+        after = rows[-1][0]
 
 
 # --- search -------------------------------------------------------------------

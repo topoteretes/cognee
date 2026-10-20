@@ -261,6 +261,27 @@ async def test_rows_written_by_the_embedding_path_keep_their_vector(pg_url):
         assert all(hit.score == pytest.approx(0.0, abs=1e-6) for hit in hits)
 
 
+async def test_adding_a_lexical_index_backfills_existing_embeddings(pg_url):
+    """Adding lexical_fields to an existing type must not hide its older rows."""
+    async with _adapter_with_collection(pg_url) as (adapter, type_name, collection):
+        points = [_EmbeddedPoint(text=f"pelican archive {index}") for index in range(35)]
+        await adapter.create_vector_index(type_name, "text")
+        await adapter.index_data_points(type_name, "text", points)
+        assert not await adapter.has_lexical_index(collection)
+
+        await adapter.create_lexical_index(type_name, "text")
+
+        assert await adapter.has_lexical_index(collection)
+        found = await adapter.lexical_search(collection, "pelican", limit=None)
+        assert {hit.id for hit in found} == {point.id for point in points}
+        # Repeated creation must neither duplicate postings nor touch vectors.
+        await adapter.create_lexical_index(type_name, "text")
+        assert len(await adapter.lexical_search(collection, "pelican", limit=None)) == len(points)
+        assert await _scalar(
+            adapter, f'SELECT count(*) FROM "{collection}" WHERE vector IS NOT NULL'
+        ) == len(points)
+
+
 async def test_delete_data_points_removes_the_postings(pg_url):
     async with _adapter_with_collection(pg_url) as (adapter, type_name, collection):
         points = _fixture_points()
