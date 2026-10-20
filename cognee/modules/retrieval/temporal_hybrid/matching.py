@@ -10,7 +10,7 @@ plain hybrid uses, so the temporal result is never smaller than plain hybrid.
 from datetime import datetime, timezone
 
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
-from cognee.tasks.temporal_graph.models import QueryInterval
+from cognee.modules.retrieval.temporal_hybrid.models import QueryInterval
 
 QUERY_INTERVAL_PROMPT = """Extract one time window from the question.
 Return starts_at and ends_at as UTC calendar fields, or null when that side is open.

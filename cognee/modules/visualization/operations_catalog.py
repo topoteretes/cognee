@@ -9,13 +9,12 @@ on edges or weights — live here.
 
 Curated from the implementation:
   * cognee/api/v1/cognify/cognify.py
-  * cognee/modules/memify/memify.py + cognee/memify_pipelines/*
+  * cognee/modules/memify/run_memify_tasks.py + cognee/memify_pipelines/*
   * cognee/api/v1/forget/forget.py
   * cognee/tasks/codingagents/coding_rule_associations.py
 
 The self-improvement rows (feedback weighting, session/trace persistence,
-distillation, preferences, truth subspace, conflict review, triplet enrichment, global context
-index) are **generated** from ``cognee.modules.improve.DEFAULT_STAGES`` — the
+distillation, preferences, truth subspace, conflict review, global context index) are **generated** from ``cognee.modules.improve.DEFAULT_STAGES`` — the
 only description of the improve stages — with their view copy kept here in
 ``_IMPROVE_STAGE_DESCRIPTORS``, keyed by stage name; a test asserts the key
 sets match, so the view cannot drift from what ``improve()`` actually runs
@@ -92,16 +91,6 @@ _OPERATIONS: list[dict[str, Any]] = [
         "effects": [
             {"effect": "modifies", "target_type": "Skill", "property": "procedure"},
             {"effect": "produces", "target_type": "SkillImprovementProposal"},
-        ],
-    },
-    {
-        "name": "temporal_graph",
-        "label": "temporal graph",
-        "kind": "pipeline",
-        "scope": "subset",
-        "summary": "Extracts events and time-stamped relationships.",
-        "effects": [
-            {"effect": "produces", "target_type": "Entity"},
         ],
     },
     {
@@ -207,14 +196,6 @@ _IMPROVE_STAGE_DESCRIPTORS: dict[str, dict[str, Any]] = {
         "effects": [
             {"effect": "produces", "target_type": "FactConflict"},
             {"effect": "modifies", "target_type": "Entity", "property": "description"},
-        ],
-    },
-    "triplet_enrichment": {
-        "label": "memify (triplets)",
-        "summary": "Default enrichment: builds triplet embeddings over the graph.",
-        "pipeline_name": "memify_pipeline",
-        "effects": [
-            {"effect": "enriches", "target_type": "Entity"},
         ],
     },
     "global_context_index": {

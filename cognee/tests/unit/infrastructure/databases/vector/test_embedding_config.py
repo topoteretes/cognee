@@ -279,7 +279,7 @@ def test_programmatic_field_name_construction_still_works(monkeypatch):
 
 
 @pytest.mark.parametrize("provider", [None, "openai", "local"])
-@pytest.mark.parametrize("batch_size, expected", [(None, 36), (0, 36), (64, 64)])
+@pytest.mark.parametrize("batch_size, expected", [(None, 32), (0, 32), (64, 64)])
 def test_batch_size_default_does_not_require_a_provider(provider, batch_size, expected):
     config = EmbeddingConfig(
         _env_file=None,

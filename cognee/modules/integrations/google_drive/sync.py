@@ -4,9 +4,6 @@ Core owns OAuth, resource selection and dataset ownership. The bundled
 connector owns listing, document extraction, cursors and delete tombstones.
 """
 
-import re
-from hashlib import sha256
-
 from cognee.modules.integrations import ingestion
 from cognee.modules.integrations.google_drive import client
 from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
@@ -16,16 +13,8 @@ SYNC_STATUS_OK = "ok"
 SYNC_STATUS_DEGRADED = "degraded"
 
 
-def dataset_name_for_account(email: str, account_id: str = "") -> str:
-    """Keep the account's dataset stable and disambiguate slug collisions."""
-    slug = re.sub(r"[^A-Za-z0-9_]+", "_", email or "").strip("_").lower()
-    name = f"{GOOGLE_DRIVE_DATASET_PREFIX}_{slug or 'account'}"
-    return f"{name}_{sha256(account_id.encode()).hexdigest()[:10]}" if account_id else name
-
-
 def _dataset_name(credential: IntegrationCredential) -> str:
-    email = (credential.provider_metadata or {}).get("email") or ""
-    return dataset_name_for_account(email, str(credential.provider_account_id))
+    return ingestion.dataset_name_for_credential(GOOGLE_DRIVE_DATASET_PREFIX, credential)
 
 
 async def sync_drive(credential: IntegrationCredential) -> None:
