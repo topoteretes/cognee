@@ -1,4 +1,5 @@
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.only_context_prompt import build_only_context_prompt
 from cognee.modules.retrieval.session_aware_completion import run_session_aware_completion
 from cognee.modules.retrieval.utils.evidence import (
@@ -84,6 +85,14 @@ async def get_retriever_output(
     retriever_instance = await get_search_type_retriever_instance(
         query_type=effective_query_type, query_text=query_text, **kwargs
     )
+
+    if graph_is_empty and retriever_instance.requires_graph:
+        # The retriever would raise this from get_retrieved_objects, but only after the
+        # session turn had loaded the session and started its analysis LLM call. A
+        # multi-dataset search pays that for every dataset that was never cognified.
+        raise NoDataError(
+            "The knowledge graph is empty. Ingest data through Cognee before searching."
+        )
 
     only_context = kwargs.get("only_context", False)
     retrieved_objects, context, completion = await run_session_aware_completion(

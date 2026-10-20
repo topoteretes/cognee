@@ -67,6 +67,10 @@ class GraphCompletionRetriever(BaseRetriever):
     # inheritance; AgenticRetriever opts back out.
     skip_completion_on_empty_context = True
 
+    # An empty graph raises NoDataError; get_retriever_output checks it before the
+    # session turn so the turn's LLM calls are not spent first.
+    requires_graph = True
+
     # Resolved once per retrieval in get_retrieved_objects and reused by the
     # context builders, which must not resolve a second engine mid-query. A
     # class-level default keeps it readable on a retriever that has not searched yet.

@@ -8,6 +8,7 @@ import pytest
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.session.session_manager import SessionTurnPreparation
 from cognee.modules.engine.models.node_set import NodeSet
+from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.session_aware_completion import count_retrieved_objects
 from cognee.modules.search.methods.get_retriever_output import get_retriever_output
 from cognee.modules.search.models.EvidenceReference import EvidenceReference
@@ -82,6 +83,9 @@ class _NoAnswerRetriever:
 
 class _DeterministicRetriever:
     supports_session_turn_preparation = False
+    # BaseRetriever's default; this double stands in for the retriever but the test is
+    # about search-type selection, not the empty-graph precondition.
+    requires_graph = False
 
     async def prepare_session_turn_for_retrieval(self, query):
         raise AssertionError("deterministic retrieval must not prepare a conversational turn")
@@ -731,3 +735,71 @@ async def test_hybrid_deferral_to_graph_completion_is_logged_as_a_warning(caplog
 
     assert effective is SearchType.GRAPH_COMPLETION
     assert "HYBRID_COMPLETION is not available for this search" in caplog.text
+
+
+class _EmptyGraphEngine:
+    async def is_empty(self):
+        return True
+
+
+class _GraphRetriever:
+    requires_graph = True
+
+
+class _GraphlessRetriever:
+    requires_graph = False
+
+
+@pytest.mark.asyncio
+async def test_empty_graph_raises_before_the_session_turn_for_a_graph_retriever():
+    """A dataset that was never cognified answers NoDataError without the session turn
+    (and its LLM calls) running first."""
+    door = AsyncMock()
+    with (
+        patch.object(
+            get_retriever_output_module,
+            "get_graph_engine",
+            AsyncMock(return_value=_EmptyGraphEngine()),
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "get_search_type_retriever_instance",
+            AsyncMock(return_value=_GraphRetriever()),
+        ),
+        patch.object(get_retriever_output_module, "run_session_aware_completion", door),
+        pytest.raises(NoDataError, match="knowledge graph is empty"),
+    ):
+        await get_retriever_output(SearchType.GRAPH_COMPLETION, "question")
+
+    door.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_empty_graph_still_runs_a_retriever_that_does_not_need_the_graph():
+    door = AsyncMock(return_value=([], "", ["answer"]))
+    with (
+        patch.object(
+            get_retriever_output_module,
+            "get_graph_engine",
+            AsyncMock(return_value=_EmptyGraphEngine()),
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "get_search_type_retriever_instance",
+            AsyncMock(return_value=_GraphlessRetriever()),
+        ),
+        patch.object(get_retriever_output_module, "run_session_aware_completion", door),
+    ):
+        await get_retriever_output(SearchType.CHUNKS, "question")
+
+    door.assert_awaited_once()
+
+
+def test_graph_retrievers_require_the_graph():
+    from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
+    from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+    from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
+
+    assert GraphCompletionRetriever.requires_graph is True
+    assert HybridRetriever.requires_graph is True
+    assert ChunksRetriever.requires_graph is False

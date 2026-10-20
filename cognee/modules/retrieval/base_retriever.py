@@ -39,6 +39,12 @@ class BaseRetriever(ABC):
     # flows) must leave this False.
     skip_completion_on_empty_context = False
 
+    # When True, a search on a dataset whose graph is empty raises NoDataError before
+    # the session turn starts, so no session reads or LLM calls are spent on a dataset
+    # that can only answer "no data". Set by the retrievers that raise that error from
+    # get_retrieved_objects anyway.
+    requires_graph = False
+
     @abstractmethod
     async def get_retrieved_objects(self, query: str | None, query_batch: str | None) -> Any:
         """

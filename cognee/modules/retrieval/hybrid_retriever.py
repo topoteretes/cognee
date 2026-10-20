@@ -66,6 +66,9 @@ class HybridRetriever(BaseRetriever):
     # is no answer to give (SDK-270 / gh #3728).
     skip_completion_on_empty_context = True
 
+    # Same empty-graph contract as GraphCompletionRetriever.
+    requires_graph = True
+
     def __init__(
         self,
         chunks_top_k: int | None = 5,
