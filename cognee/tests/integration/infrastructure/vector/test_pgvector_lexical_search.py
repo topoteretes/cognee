@@ -165,8 +165,9 @@ async def _count_postings(adapter, collection: str, row_id: UUID) -> tuple[int, 
     )
     terms = await _scalar(
         adapter,
-        f'SELECT count(*) FROM "{terms_table}" WHERE doc_id LIKE :prefix',
-        prefix=f"{row_id}:%",
+        f'SELECT count(*) FROM "{terms_table}" t JOIN "{docs_table}" d '
+        "ON d.doc_key = t.doc_key WHERE d.row_id = :row_id",
+        row_id=row_id,
     )
     return docs, terms
 

@@ -180,37 +180,36 @@ def test_dedupe_owned_rows_last_wins_and_unites_tags():
 def test_create_statements_build_the_two_cascading_tables():
     statements = [str(statement) for statement in create_lexical_tables_statements("Doc_text")]
 
-    assert len(statements) == 4
-    docs, docs_index, terms, terms_index = statements
+    assert len(statements) == 3
+    docs, terms, terms_index = statements
     assert docs.startswith('CREATE TABLE IF NOT EXISTS "Doc_text__lexical_docs" (')
-    assert "doc_id TEXT PRIMARY KEY" in docs
+    assert "doc_key BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY" in docs
     assert 'row_id UUID NOT NULL REFERENCES "Doc_text" (id) ON DELETE CASCADE' in docs
     assert "passage_index INTEGER NOT NULL" in docs and "doc_len INTEGER NOT NULL" in docs
-    assert docs_index == (
-        'CREATE INDEX IF NOT EXISTS "Doc_text__lexical_docs_row_id_idx" '
-        'ON "Doc_text__lexical_docs" (row_id)'
-    )
+    assert "UNIQUE (row_id, passage_index)" in docs, "also serves deletes by row_id"
     assert terms.startswith('CREATE TABLE IF NOT EXISTS "Doc_text__lexical_terms" (')
     assert (
-        'doc_id TEXT NOT NULL REFERENCES "Doc_text__lexical_docs" (doc_id) ON DELETE CASCADE'
-        in (terms)
+        'doc_key BIGINT NOT NULL REFERENCES "Doc_text__lexical_docs" (doc_key) ON DELETE CASCADE'
+        in terms
     )
-    assert "PRIMARY KEY (term, doc_id)" in terms
+    assert "PRIMARY KEY (term, doc_key)" in terms
     assert terms_index == (
-        'CREATE INDEX IF NOT EXISTS "Doc_text__lexical_terms_doc_id_idx" '
-        'ON "Doc_text__lexical_terms" (doc_id)'
+        'CREATE INDEX IF NOT EXISTS "Doc_text__lexical_terms_doc_key_idx" '
+        'ON "Doc_text__lexical_terms" (doc_key)'
     )
 
 
 def test_statements_bind_user_text_instead_of_formatting_it():
     insert = str(insert_passages_statement("Doc_text"))
-    for bind in (":doc_ids", ":row_ids", ":passage_indexes", ":texts", ":config", ":stop_words"):
+    for bind in (":row_ids", ":passage_indexes", ":texts", ":config", ":stop_words"):
         assert bind in insert
+    assert ":doc_ids" not in insert, "passages are keyed by a generated doc_key"
     assert "to_tsvector(CAST(CAST(:config AS text) AS regconfig), p.body)" in insert
     assert "cardinality(v.positions) AS tf" in insert
     assert "v.lexeme <> ALL(CAST(:stop_words AS text[]))" in insert
-    assert 'INSERT INTO "Doc_text__lexical_docs" (doc_id, row_id, passage_index, doc_len)' in insert
-    assert 'INSERT INTO "Doc_text__lexical_terms" (term, doc_id, tf)' in insert
+    assert 'INSERT INTO "Doc_text__lexical_docs" (row_id, passage_index, doc_len)' in insert
+    assert "RETURNING doc_key, row_id, passage_index" in insert
+    assert 'INSERT INTO "Doc_text__lexical_terms" (term, doc_key, tf)' in insert
     assert "CAST(COALESCE(l.doc_len, 0) AS integer)" in insert, "termless passages get doc_len 0"
 
     delete = str(delete_postings_statement("Doc_text"))

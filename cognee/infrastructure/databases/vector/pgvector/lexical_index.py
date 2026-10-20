@@ -3,12 +3,15 @@
 A collection table ``"<collection>"`` (``id``, ``payload``, ``vector``) gets two
 posting tables next to it, created by :func:`create_lexical_tables`:
 
-* ``"<collection>__lexical_docs"`` -- one row per *passage* of an indexed row
-  (``doc_id = "<row_id>:<passage_index>"``) with its length in terms. ``row_id``
-  references the collection row ``ON DELETE CASCADE``, so a plain ``DELETE`` on
-  the collection drops the postings with it.
+* ``"<collection>__lexical_docs"`` -- one row per *passage* of an indexed row,
+  keyed by a generated ``doc_key`` (bigint, unique per ``(row_id,
+  passage_index)``), with its length in terms. ``row_id`` references the
+  collection row ``ON DELETE CASCADE``, so a plain ``DELETE`` on the
+  collection drops the postings with it.
 * ``"<collection>__lexical_terms"`` -- one row per (term, passage) with the term
-  frequency; ``doc_id`` references the docs table ``ON DELETE CASCADE``.
+  frequency; ``doc_key`` references the docs table ``ON DELETE CASCADE``. A
+  bigint key keeps these rows and their two indexes small: they hold one row
+  per distinct term of every passage, so their size and write cost follow it.
 
 Text is tokenized by Postgres itself (``to_tsvector``) with the regconfig of the
 configured language: ``simple`` lower-cases without stemming and the shared
@@ -129,7 +132,12 @@ def tokenizer_settings(language: str) -> tuple[str, list[str]]:
 
 @dataclass(frozen=True)
 class PassageRow:
-    """One docs-table row to write: a passage of a collection row's text."""
+    """One docs-table row to write: a passage of a collection row's text.
+
+    ``doc_id`` names the passage in Python (the reference scorer keys passages
+    by it); the tables key it by ``(row_id, passage_index)`` and a generated
+    ``doc_key``.
+    """
 
     doc_id: str
     row_id: str
@@ -138,7 +146,7 @@ class PassageRow:
 
 
 def passage_doc_id(row_id: str, passage_index: int) -> str:
-    """The docs-table key of passage ``passage_index`` of row ``row_id``."""
+    """The Python name of passage ``passage_index`` of row ``row_id``."""
     return f"{row_id}:{passage_index}"
 
 
@@ -233,26 +241,26 @@ def create_lexical_tables_statements(collection_name: str) -> list[TextClause]:
         quote_identifier(terms_table),
         quote_identifier(collection_name),
     )
-    docs_row_index = quote_identifier(fit_identifier(f"{docs_table}_row_id_idx"))
-    terms_doc_index = quote_identifier(fit_identifier(f"{terms_table}_doc_id_idx"))
+    terms_doc_index = quote_identifier(fit_identifier(f"{terms_table}_doc_key_idx"))
     return [
+        # UNIQUE (row_id, passage_index) also serves the deletes by row_id.
         text(
             f"CREATE TABLE IF NOT EXISTS {docs} ("
-            "doc_id TEXT PRIMARY KEY, "
+            "doc_key BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY, "
             f"row_id {ROW_ID_SQL_TYPE.upper()} NOT NULL "
             f"REFERENCES {collection} (id) ON DELETE CASCADE, "
             "passage_index INTEGER NOT NULL, "
-            "doc_len INTEGER NOT NULL)"
+            "doc_len INTEGER NOT NULL, "
+            "UNIQUE (row_id, passage_index))"
         ),
-        text(f"CREATE INDEX IF NOT EXISTS {docs_row_index} ON {docs} (row_id)"),
         text(
             f"CREATE TABLE IF NOT EXISTS {terms} ("
             "term TEXT NOT NULL, "
-            f"doc_id TEXT NOT NULL REFERENCES {docs} (doc_id) ON DELETE CASCADE, "
+            f"doc_key BIGINT NOT NULL REFERENCES {docs} (doc_key) ON DELETE CASCADE, "
             "tf INTEGER NOT NULL, "
-            "PRIMARY KEY (term, doc_id))"
+            "PRIMARY KEY (term, doc_key))"
         ),
-        text(f"CREATE INDEX IF NOT EXISTS {terms_doc_index} ON {terms} (doc_id)"),
+        text(f"CREATE INDEX IF NOT EXISTS {terms_doc_index} ON {terms} (doc_key)"),
     ]
 
 
@@ -367,28 +375,27 @@ def delete_postings_statement(collection_name: str) -> TextClause:
 def insert_passages_statement(collection_name: str) -> TextClause:
     """Index a batch of passages: one statement writing docs and terms.
 
-    Binds: ``doc_ids``, ``row_ids``, ``texts`` (text[]), ``passage_indexes``
-    (integer[]), ``config`` (the regconfig name) and ``stop_words`` (text[],
-    may be empty). Each passage is tokenized once with ``to_tsvector``; the
-    term rows are the lexemes left after the stop-word filter with their
-    position counts, and the docs row's ``doc_len`` is their sum (0 for a
-    passage with no term left).
+    Binds: ``row_ids``, ``texts`` (text[]), ``passage_indexes`` (integer[]),
+    ``config`` (the regconfig name) and ``stop_words`` (text[], may be empty).
+    Each passage is tokenized once with ``to_tsvector``; the term rows are the
+    lexemes left after the stop-word filter with their position counts, keyed
+    by the ``doc_key`` the docs insert generated, and the docs row's
+    ``doc_len`` is their sum (0 for a passage with no term left).
     """
     docs_table, terms_table = lexical_table_names(collection_name)
     docs, terms = quote_identifier(docs_table), quote_identifier(terms_table)
     return text(
         f"""
         WITH passages AS (
-            SELECT p.doc_id, p.row_id, p.passage_index, p.body
+            SELECT CAST(p.row_id AS {ROW_ID_SQL_TYPE}) AS row_id, p.passage_index, p.body
             FROM unnest(
-                CAST(:doc_ids AS text[]),
                 CAST(:row_ids AS text[]),
                 CAST(:passage_indexes AS integer[]),
                 CAST(:texts AS text[])
-            ) AS p(doc_id, row_id, passage_index, body)
+            ) AS p(row_id, passage_index, body)
         ),
         passage_terms AS (
-            SELECT p.doc_id, v.lexeme AS term, cardinality(v.positions) AS tf
+            SELECT p.row_id, p.passage_index, v.lexeme AS term, cardinality(v.positions) AS tf
             FROM passages p
             CROSS JOIN LATERAL unnest(
                 to_tsvector(CAST(CAST(:config AS text) AS regconfig), p.body)
@@ -396,23 +403,22 @@ def insert_passages_statement(collection_name: str) -> TextClause:
             WHERE v.lexeme <> ALL(CAST(:stop_words AS text[]))
         ),
         passage_lengths AS (
-            SELECT doc_id, sum(tf) AS doc_len FROM passage_terms GROUP BY doc_id
+            SELECT row_id, passage_index, sum(tf) AS doc_len
+            FROM passage_terms
+            GROUP BY row_id, passage_index
         ),
         inserted_docs AS (
-            INSERT INTO {docs} (doc_id, row_id, passage_index, doc_len)
-            SELECT
-                p.doc_id,
-                CAST(p.row_id AS {ROW_ID_SQL_TYPE}),
-                p.passage_index,
-                CAST(COALESCE(l.doc_len, 0) AS integer)
+            INSERT INTO {docs} (row_id, passage_index, doc_len)
+            SELECT p.row_id, p.passage_index, CAST(COALESCE(l.doc_len, 0) AS integer)
             FROM passages p
-            LEFT JOIN passage_lengths l ON l.doc_id = p.doc_id
-            RETURNING doc_id
+            LEFT JOIN passage_lengths l
+                ON l.row_id = p.row_id AND l.passage_index = p.passage_index
+            RETURNING doc_key, row_id, passage_index
         )
-        INSERT INTO {terms} (term, doc_id, tf)
-        SELECT t.term, t.doc_id, t.tf
+        INSERT INTO {terms} (term, doc_key, tf)
+        SELECT t.term, d.doc_key, t.tf
         FROM passage_terms t
-        JOIN inserted_docs d ON d.doc_id = t.doc_id
+        JOIN inserted_docs d ON d.row_id = t.row_id AND d.passage_index = t.passage_index
         """
     )
 
@@ -442,7 +448,6 @@ async def replace_postings(
         await session.execute(
             statement,
             {
-                "doc_ids": [p.doc_id for p in batch],
                 "row_ids": [p.row_id for p in batch],
                 "passage_indexes": [p.passage_index for p in batch],
                 "texts": [p.text for p in batch],
@@ -479,7 +484,7 @@ def search_statement(collection_name: str) -> TextClause:
 
     Binds: ``terms`` (text[], from :func:`query_terms_statement`), ``k1``,
     ``b`` (double precision) and ``limit`` (integer; NULL for no limit). The
-    terms table's ``(term, doc_id)`` key finds the postings of the query
+    terms table's ``(term, doc_key)`` key finds the postings of the query
     terms only; ``N`` and ``avgdl`` come from the docs table, ``df`` from the
     terms table (both computed once: ``MATERIALIZED``, since an inlined CTE is
     re-evaluated per posting), each passage sums the distinct query terms it
@@ -523,10 +528,10 @@ def search_statement(collection_name: str) -> TextClause:
                 ) AS score
             FROM {terms} t
             JOIN term_df f ON f.term = t.term
-            JOIN {docs} d ON d.doc_id = t.doc_id
+            JOIN {docs} d ON d.doc_key = t.doc_key
             CROSS JOIN corpus c
             WHERE t.term = ANY(CAST(:terms AS text[]))
-            GROUP BY d.doc_id, d.row_id
+            GROUP BY d.doc_key, d.row_id
         ),
         row_scores AS (
             SELECT row_id, max(score) AS score FROM passage_scores GROUP BY row_id
