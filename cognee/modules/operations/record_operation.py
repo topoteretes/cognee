@@ -61,6 +61,17 @@ def get_current_operation() -> Optional["OperationContext"]:
     return _current_operation.get()
 
 
+def get_current_session_id() -> str | None:
+    """The session id bound to the innermost active operation, if any.
+
+    Pipeline log writers stamp it onto their rows, so a pipeline launched by a
+    session-bound operation (an ``improve`` distilling one session) can be
+    traced back to that session, not only the operation's own record.
+    """
+    context = _current_operation.get()
+    return context.session_id if context is not None else None
+
+
 class OperationContext:
     """Mutable attribution context for one recorded operation."""
 

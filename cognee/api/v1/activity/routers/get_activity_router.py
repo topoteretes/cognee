@@ -46,6 +46,14 @@ def get_activity_router() -> APIRouter:
                 "unrelated operation records."
             ),
         ),
+        session_id: str | None = Query(
+            None,
+            description=(
+                "Return only rows stamped with this session-cache id: the operation "
+                "record of a session-bound call (e.g. an improve given one session) "
+                "and the pipeline runs it launched."
+            ),
+        ),
         limit: int = Query(50, ge=1, le=500, description="Page size (max 500)."),
         offset: int = Query(0, ge=0, description="Rows to skip for pagination."),
         user: User = Depends(get_authenticated_user),
@@ -64,6 +72,11 @@ def get_activity_router() -> APIRouter:
         - **dataset_id** (Optional[UUID]): Restrict to one dataset (403 if not readable).
         - **pipeline_name** (Optional[str]): Exact-match filter; also excludes
           operation records, which have no `pipeline_name`.
+        - **session_id** (Optional[str]): Exact-match filter on the session-cache
+          id. Pipeline runs inherit it from the operation that launched them, so
+          `pipeline_name=memify_pipeline&session_id=…` lists the improve runs
+          that distilled one session. Rows written before that inheritance
+          carry it on the operation record only.
         - **limit** (int): Page size, 1-500 (default: 50).
         - **offset** (int): Rows to skip for pagination (default: 0).
 
@@ -170,6 +183,8 @@ def get_activity_router() -> APIRouter:
             )
             if pipeline_name is not None:
                 stmt = stmt.where(PipelineRun.pipeline_name == pipeline_name)
+            if session_id is not None:
+                stmt = stmt.where(PipelineRun.session_id == session_id)
 
             result = await session.execute(stmt)
             rows = result.all()

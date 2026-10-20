@@ -158,6 +158,7 @@ async def _close_as_abandoned(pipeline_run, dataset) -> None:
         data_info=(getattr(pipeline_run, "run_info", None) or {}).get("data"),
         origin=getattr(pipeline_run, "origin", None),
         parent_operation_id=getattr(pipeline_run, "parent_operation_id", None),
+        session_id=getattr(pipeline_run, "session_id", None),
     )
 
 
