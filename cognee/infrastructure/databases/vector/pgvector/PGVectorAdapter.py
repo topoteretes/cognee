@@ -4,7 +4,7 @@ from typing import Any, get_type_hints
 from uuid import UUID
 
 from asyncpg import DeadlockDetectedError, DuplicateTableError, UniqueViolationError
-from sqlalchemy import JSON, Column, MetaData, Table, delete, exc, func, select, text
+from sqlalchemy import JSON, Column, MetaData, Table, cast, delete, exc, func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError, ProgrammingError
@@ -38,6 +38,43 @@ QUERY_BATCH_SIZE = 1000
 # retained while idle); the large max_overflow keeps burst headroom, since overflow
 # connections close on release instead of idling.
 _ACCESS_CONTROL_DEFAULT_POOL_ARGS = {"pool_size": 2, "max_overflow": 20}
+
+# pgvector builds HNSW indexes on vector up to 2,000 dimensions and on halfvec up to
+# 4,000; a larger embedding stays unindexed and is searched by a full scan.
+_HNSW_VECTOR_MAX_DIMENSIONS = 2000
+_HNSW_HALFVEC_MAX_DIMENSIONS = 4000
+# An HNSW scan returns at most hnsw.ef_search rows (default 40); pgvector caps the
+# setting at 1,000, so a larger limit keeps the exact full scan.
+_HNSW_DEFAULT_EF_SEARCH = 40
+_HNSW_MAX_EF_SEARCH = 1000
+
+
+def hnsw_index_statement(table_name: str, dimensions: int) -> str | None:
+    """CREATE INDEX for a collection's vector column, or None when pgvector cannot index it.
+
+    Without an index every search is a full scan that reads every stored vector; a
+    3072-dimensional collection of 12k rows is ~830 MB of pages per query, which takes
+    seconds to tens of seconds when the pages are not cached.
+    """
+    if dimensions <= _HNSW_VECTOR_MAX_DIMENSIONS:
+        indexed, operator_class = "vector", "vector_cosine_ops"
+    elif dimensions <= _HNSW_HALFVEC_MAX_DIMENSIONS:
+        indexed, operator_class = f"(vector::halfvec({dimensions}))", "halfvec_cosine_ops"
+    else:
+        return None
+    return (
+        f'CREATE INDEX IF NOT EXISTS "{table_name}_vector_hnsw" '
+        f'ON "{table_name}" USING hnsw ({indexed} {operator_class})'
+    )
+
+
+def _indexed_distance(vector_column, query_vector: list[float], dimensions: int):
+    """The distance expression the HNSW index orders by (see ``hnsw_index_statement``)."""
+    if dimensions <= _HNSW_VECTOR_MAX_DIMENSIONS:
+        return vector_column.cosine_distance(query_vector)
+    from pgvector.sqlalchemy import HALFVEC
+
+    return cast(vector_column, HALFVEC(dimensions)).cosine_distance(query_vector)
 
 
 class IndexSchema(DataPoint):
@@ -370,6 +407,10 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                     # might be rolled back.
                     async with self.engine.begin() as connection:
                         await connection.run_sync(self._metadata.reflect, only=[collection_name])
+                    index_statement = hnsw_index_statement(collection_name, vector_size)
+                    if index_statement is not None:
+                        async with self.engine.begin() as connection:
+                            await connection.execute(text(index_statement))
 
     @retry(
         retry=retry_if_exception_type((DeadlockDetectedError, DBAPIError)),
@@ -708,7 +749,26 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 query = select(
                     *select_columns,
                     PGVectorDataPoint.c.vector.cosine_distance(query_vector).label("similarity"),
-                ).order_by("similarity")
+                )
+                # The column was sized by this engine in create_collection.
+                dimensions = self.embedding_engine.get_vector_size()
+                if (
+                    hnsw_index_statement(collection_name, dimensions) is not None
+                    and limit <= _HNSW_MAX_EF_SEARCH
+                ):
+                    # Order by the indexed expression so the HNSW index serves the scan.
+                    # The planner underestimates a full scan of TOASTed vectors and picks
+                    # it even when the index exists, so it is steered off it here; the
+                    # returned similarity stays the exact cosine distance.
+                    query = query.order_by(
+                        _indexed_distance(PGVectorDataPoint.c.vector, query_vector, dimensions)
+                    )
+                    await session.execute(text("SET LOCAL enable_seqscan = off"))
+                    await session.execute(
+                        text(f"SET LOCAL hnsw.ef_search = {max(limit, _HNSW_DEFAULT_EF_SEARCH)}")
+                    )
+                else:
+                    query = query.order_by("similarity")
 
             if limit > 0:
                 query = query.limit(limit)
