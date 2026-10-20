@@ -1,9 +1,21 @@
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_serializer
 
 from cognee.modules.data.models.Data import Data
+
+
+def _encode_data(value):
+    """Recursively encode ``Data`` instances via ``to_json`` (Pydantic V2
+    replacement for the deprecated ``json_encoders`` config)."""
+    if isinstance(value, Data):
+        return value.to_json()
+    if isinstance(value, dict):
+        return {k: _encode_data(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_encode_data(v) for v in value]
+    return value
 
 
 class PipelineRunInfo(BaseModel):
@@ -18,9 +30,12 @@ class PipelineRunInfo(BaseModel):
     model_config = {
         "arbitrary_types_allowed": True,
         "from_attributes": True,
-        # Add custom encoding handler for Data ORM model
-        "json_encoders": {Data: lambda d: d.to_json()},
     }
+
+    @field_serializer("payload")
+    def serialize_payload(self, payload):
+        """Custom encoding handler for Data ORM model."""
+        return _encode_data(payload)
 
 
 class PipelineRunStarted(PipelineRunInfo):
