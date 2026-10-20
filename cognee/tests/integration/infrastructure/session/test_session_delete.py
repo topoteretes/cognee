@@ -166,6 +166,8 @@ async def test_delete_session_removes_a_dashboard_row_without_cache_content(stor
 
     assert await cognee.session.delete_session("expired", user=SimpleNamespace(id=owner)) is True
     assert (await _footprint(stores, owner, "expired"))["records"] == 0
+    # Expired cache entries leave their Q&A vectors behind; those go too.
+    stores.vectors.assert_awaited_once_with(user_id=str(owner), session_id="expired")
 
 
 @pytest.mark.asyncio
