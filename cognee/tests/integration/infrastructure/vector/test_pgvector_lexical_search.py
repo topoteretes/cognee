@@ -448,3 +448,32 @@ async def test_has_lexical_index_follows_the_posting_tables(pg_url):
         assert await adapter.has_lexical_index(collection) is False
         await adapter.create_lexical_index(type_name, "text")
         assert await adapter.has_lexical_index(collection) is True
+
+
+async def test_text_with_nul_characters_indexes_and_is_found(pg_url):
+    """PDF extractions carry NUL, which Postgres text rejects; the batch must not fail."""
+    async with _adapter_with_collection(pg_url) as (adapter, type_name, collection):
+        clean = _LexicalOnlyPoint(text="the pelican harbour report")
+        with_nul = _LexicalOnlyPoint(text="binary\x00ish notes about the pelican colony")
+        await adapter.create_lexical_index(type_name, "text")
+        await adapter.index_lexical_data_points(
+            type_name, "text", [clean, with_nul], owns_rows=True
+        )
+
+        results = await adapter.lexical_search(collection, "pelican")
+        assert {result.id for result in results} == {clean.id, with_nul.id}
+        assert len(await adapter.lexical_search(collection, "pel\x00ican")) == 2
+
+
+async def test_a_megabyte_whitespace_free_run_indexes_and_is_found(pg_url):
+    """An inline base64 image exceeded the 1 MB tsvector limit as one passage."""
+    async with _adapter_with_collection(pg_url) as (adapter, type_name, collection):
+        blob = "QUJD" * 400_000
+        image_note = _LexicalOnlyPoint(
+            text=f"A photo of the pelican.\n\n![photo](data:image/png;base64,{blob})"
+        )
+        await adapter.create_lexical_index(type_name, "text")
+        await adapter.index_lexical_data_points(type_name, "text", [image_note], owns_rows=True)
+
+        results = await adapter.lexical_search(collection, "pelican")
+        assert [result.id for result in results] == [image_note.id]

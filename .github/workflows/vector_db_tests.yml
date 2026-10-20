@@ -78,6 +78,20 @@ jobs:
           DB_HOST: ${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}
         run: uv run python ./cognee/tests/test_pgvector.py
 
+      # The BM25 posting index on pgvector (SDK-397): the search statement,
+      # english stemming, NUL text, oversized passages, cascade and detagging,
+      # against the real server. A fake embedding engine: no secrets needed.
+      - name: Run PGVector lexical search tests
+        env:
+          ENV: 'dev'
+          VECTOR_DB_PROVIDER: 'pgvector'
+          DB_HOST: ${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}
+          DB_PORT: 5432
+          DB_USERNAME: cognee
+          DB_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          DB_NAME: cognee_db
+        run: uv run pytest cognee/tests/integration/infrastructure/vector/test_pgvector_lexical_search.py -v
+
   run-pgvector-multi-user-tests:
     name: PGVector Multi-User Tests
     runs-on: ubuntu-22.04
