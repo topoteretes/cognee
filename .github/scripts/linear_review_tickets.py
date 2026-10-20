@@ -24,9 +24,9 @@ Input (env):
                                              window start (absent: LOOKBACK_HOURS).
   LINEAR_API_KEY                             Linear personal API key.
   LINEAR_REVIEW_TEAM_KEY                     team the tickets go to, e.g. SDK.
-  LINEAR_REVIEW_LABEL                        label put on every ticket; created in the
-                                             team when neither the workspace, the team
-                                             nor a team above it has that name.
+  LINEAR_REVIEW_LABEL                        label put on every ticket. It must exist
+                                             in the workspace, the team or a team above
+                                             it (the run fails otherwise).
   LOOKBACK_HOURS                             optional fixed window instead of the
                                              run history (manual runs, backfills).
   DRY_RUN                                    "true": read everything, write nothing,
@@ -94,12 +94,7 @@ def main() -> None:
     label_name = os.environ.get("LINEAR_REVIEW_LABEL", "")
     if not label_name:
         raise ValueError("LINEAR_REVIEW_LABEL is empty")
-    label_id = linear.find_label_id(team, label_name)
-    if label_id is None:
-        if dry_run:
-            print(f"Would create label {label_name!r} in team {team['key']}")
-        else:
-            label_id = linear.create_label(team, label_name)
+    label_id = linear.label_id(team, label_name)
     users = linear.users_by_github_id()
 
     created, existing, unmatched = [], [], []
@@ -310,8 +305,8 @@ class Linear:
             "label_team_ids": label_team_ids,
         }
 
-    def find_label_id(self, team: dict, name: str) -> str | None:
-        """The id of the label with this name usable in the team, or None.
+    def label_id(self, team: dict, name: str) -> str:
+        """The id of the label with this name usable in the team.
 
         Usable: a workspace label, or a label of the team or of a team above it.
         A same-named label of an unrelated team is not.
@@ -329,19 +324,13 @@ class Linear:
             for label in data["issueLabels"]["nodes"]
             if label["team"] is None or label["team"]["id"] in team["label_team_ids"]
         ]
-        return usable[0]["id"] if usable else None
-
-    def create_label(self, team: dict, name: str) -> str:
-        data = self.query(
-            """mutation($input: IssueLabelCreateInput!) {
-                 issueLabelCreate(input: $input) { success issueLabel { id } }
-               }""",
-            {"input": {"name": name, "teamId": team["id"]}},
-        )
-        if not data["issueLabelCreate"]["success"]:
-            raise RuntimeError(f"Linear refused to create label {name!r} in team {team['key']}")
-        print(f"Created label {name!r} in team {team['key']}")
-        return data["issueLabelCreate"]["issueLabel"]["id"]
+        if not usable:
+            raise RuntimeError(
+                f"No Linear label {name!r} usable in team {team['key']}: create it in the "
+                "workspace, in the team or in a team above it, or check that the API key "
+                "can read that team"
+            )
+        return usable[0]["id"]
 
     def users_by_github_id(self) -> dict[str, dict]:
         """Active, assignable Linear users who connected GitHub, by GitHub user id."""

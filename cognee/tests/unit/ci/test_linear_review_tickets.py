@@ -142,7 +142,7 @@ class FakeLinear:
         self.labels = (
             labels if labels is not None else [{"id": "lbl-ws", "name": "PR review", "team": None}]
         )
-        self.created_labels = []
+
         self.teams = teams
         self.created = []
         self.attached = []
@@ -229,9 +229,6 @@ class FakeLinear:
             assert "includeArchived: true" in query
             found = variables["id"] in self.existing_ids
             return {"issues": {"nodes": [{"id": variables["id"]}] if found else []}}
-        if "issueLabelCreate" in query:
-            self.created_labels.append(variables["input"])
-            return {"issueLabelCreate": {"success": True, "issueLabel": {"id": "lbl-new"}}}
         if "issueCreate" in query:
             self.created.append(variables["input"])
             return {"issueCreate": {"success": True, "issue": {"id": "x", "identifier": "SDK-1"}}}
@@ -359,7 +356,6 @@ def test_an_existing_team_or_workspace_label_is_used_not_another_teams(monkeypat
     lrt.main()
 
     assert {tuple(t["labelIds"]) for t in fake.created} == {("lbl-ws",)}
-    assert fake.created_labels == []
 
 
 def test_a_label_inherited_from_a_parent_team_is_used(monkeypatch, world):
@@ -375,31 +371,18 @@ def test_a_label_inherited_from_a_parent_team_is_used(monkeypatch, world):
     lrt.main()
 
     assert {tuple(t["labelIds"]) for t in fake.created} == {("lbl-company",)}
-    assert fake.created_labels == []
 
 
-def test_a_missing_label_is_created_in_the_review_team(monkeypatch, world):
-    fake = FakeLinear(
-        labels=[{"id": "lbl-other-team", "name": "PR review", "team": {"id": "team-x"}}]
-    )
+@pytest.mark.parametrize("dry_run", ["false", "true"])
+def test_a_missing_label_fails_the_run_before_any_ticket(monkeypatch, world, dry_run):
+    """Only another team's label exists: the run stops, creating neither a label nor a ticket."""
+    fake = FakeLinear(labels=[{"id": "lbl-other", "name": "PR review", "team": {"id": "team-x"}}])
     _install(monkeypatch, fake)
-    monkeypatch.setenv("DRY_RUN", "false")
+    monkeypatch.setenv("DRY_RUN", dry_run)
 
-    lrt.main()
-
-    assert fake.created_labels == [{"name": "PR review", "teamId": "team-sdk"}]
-    assert {tuple(t["labelIds"]) for t in fake.created} == {("lbl-new",)}
-
-
-def test_a_dry_run_does_not_create_a_missing_label(monkeypatch, world, capsys):
-    fake = FakeLinear(labels=[])
-    _install(monkeypatch, fake)
-    monkeypatch.setenv("DRY_RUN", "true")
-
-    lrt.main()
-
-    assert fake.created_labels == [] and fake.created == []
-    assert "Would create label 'PR review' in team SDK" in capsys.readouterr().out
+    with pytest.raises(RuntimeError, match="No Linear label 'PR review' usable in team SDK"):
+        lrt.main()
+    assert fake.created == [] and fake.attached == []
 
 
 def test_an_empty_label_name_fails_fast(monkeypatch, world):

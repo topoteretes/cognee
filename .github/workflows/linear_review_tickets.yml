@@ -7,8 +7,10 @@ name: PR review tickets
 #
 # Required secret:   LINEAR_API_KEY          Linear personal API key.
 # Optional variable: LINEAR_REVIEW_TEAM_KEY  team the tickets go to (default SDK).
-# Optional variable: LINEAR_REVIEW_LABEL     label put on every ticket (default "PR review";
-#                                            created in the team if it does not exist).
+# Optional variable: LINEAR_REVIEW_LABEL     label put on every ticket (default "PR review");
+#                                            must already exist in Linear.
+#
+# The API key needs Read and Create issues on the review team.
 #
 # Scheduled runs only fire on the default branch (main).
 on:
