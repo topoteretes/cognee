@@ -134,6 +134,9 @@ def test_window_defaults_to_a_day_and_is_capped(monkeypatch):
 class FakeLinear:
     """Answers the script's queries by matching their operation; records mutations."""
 
+    # SDK sits under Engineering, which sits under Company (as in the Linear workspace).
+    PARENTS = {"team-sdk": "team-eng", "team-eng": "team-company", "team-company": None}
+
     def __init__(self, existing_ids=(), labels=None, teams=None):
         self.existing_ids = set(existing_ids)
         self.labels = (
@@ -155,6 +158,7 @@ class FakeLinear:
                         "id": "team-sdk",
                         "key": variables["key"],
                         "name": "SDK",
+                        "parent": {"id": "team-eng"},
                         "states": {
                             "nodes": [
                                 {
@@ -181,6 +185,9 @@ class FakeLinear:
                 ]
             )
             return {"teams": {"nodes": nodes}}
+        if "team(id:" in query:
+            parent = self.PARENTS[variables["id"]]
+            return {"team": {"parent": {"id": parent} if parent else None}}
         if "issueLabels(" in query:
             return {"issueLabels": {"nodes": self.labels}}
         if "users(" in query:
@@ -352,6 +359,22 @@ def test_an_existing_team_or_workspace_label_is_used_not_another_teams(monkeypat
     lrt.main()
 
     assert {tuple(t["labelIds"]) for t in fake.created} == {("lbl-ws",)}
+    assert fake.created_labels == []
+
+
+def test_a_label_inherited_from_a_parent_team_is_used(monkeypatch, world):
+    fake = FakeLinear(
+        labels=[
+            {"id": "lbl-unrelated", "name": "PR review", "team": {"id": "team-x"}},
+            {"id": "lbl-company", "name": "PR Review", "team": {"id": "team-company"}},
+        ]
+    )
+    _install(monkeypatch, fake)
+    monkeypatch.setenv("DRY_RUN", "false")
+
+    lrt.main()
+
+    assert {tuple(t["labelIds"]) for t in fake.created} == {("lbl-company",)}
     assert fake.created_labels == []
 
 

@@ -25,8 +25,8 @@ Input (env):
   LINEAR_API_KEY                             Linear personal API key.
   LINEAR_REVIEW_TEAM_KEY                     team the tickets go to, e.g. SDK.
   LINEAR_REVIEW_LABEL                        label put on every ticket; created in the
-                                             team when no team or workspace label has
-                                             that name.
+                                             team when neither the workspace, the team
+                                             nor a team above it has that name.
   LOOKBACK_HOURS                             optional fixed window instead of the
                                              run history (manual runs, backfills).
   DRY_RUN                                    "true": read everything, write nothing,
@@ -270,13 +270,17 @@ class Linear:
         return payload["data"]
 
     def team(self, key: str) -> dict:
-        """The team with this key, with its completed workflow state."""
+        """The team with this key, its completed workflow state, and its ancestor teams.
+
+        A sub-team (SDK under Engineering) inherits its parents' labels, so the
+        label lookup accepts a label of any team in ``label_team_ids``.
+        """
         if not key:
             raise ValueError("LINEAR_REVIEW_TEAM_KEY is empty")
         data = self.query(
             """query($key: String!) {
                  teams(filter: {key: {eq: $key}}) {
-                   nodes { id key name states { nodes { id name type position } } }
+                   nodes { id key name parent { id } states { nodes { id name type position } } }
                  }
                }""",
             {"key": key},
@@ -291,10 +295,27 @@ class Linear:
         )
         if not completed:
             raise RuntimeError(f"Linear team {key!r} has no completed workflow state")
-        return {"id": team["id"], "key": team["key"], "state_id": completed[0]["id"]}
+        label_team_ids = [team["id"]]
+        parent = team["parent"]
+        while parent is not None:
+            label_team_ids.append(parent["id"])
+            parent = self.query(
+                """query($id: String!) { team(id: $id) { parent { id } } }""",
+                {"id": parent["id"]},
+            )["team"]["parent"]
+        return {
+            "id": team["id"],
+            "key": team["key"],
+            "state_id": completed[0]["id"],
+            "label_team_ids": label_team_ids,
+        }
 
     def find_label_id(self, team: dict, name: str) -> str | None:
-        """The id of the label with this name in the team or workspace-wide; None if there is none."""
+        """The id of the label with this name usable in the team, or None.
+
+        Usable: a workspace label, or a label of the team or of a team above it.
+        A same-named label of an unrelated team is not.
+        """
         data = self.query(
             """query($name: String!) {
                  issueLabels(filter: {name: {eqIgnoreCase: $name}}) {
@@ -306,7 +327,7 @@ class Linear:
         usable = [
             label
             for label in data["issueLabels"]["nodes"]
-            if label["team"] is None or label["team"]["id"] == team["id"]
+            if label["team"] is None or label["team"]["id"] in team["label_team_ids"]
         ]
         return usable[0]["id"] if usable else None
 
