@@ -5,7 +5,11 @@ from uuid import UUID
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.operations import get_operation_origin
 from cognee.modules.pipelines.models import PipelineRun, PipelineRunStatus
-from cognee.modules.pipelines.utils import generate_pipeline_run_id, summarize_run_info_data
+from cognee.modules.pipelines.utils import (
+    errored_run_info_data_ids,
+    generate_pipeline_run_id,
+    summarize_run_info_data,
+)
 from cognee.modules.users.models import User
 
 
@@ -30,6 +34,7 @@ async def log_pipeline_run_start(
         dataset_id=dataset_id,
         run_info={
             "data": data_info,
+            "errored_data": errored_run_info_data_ids(None),
             **({"recovery_lock": recovery_token} if recovery_token else {}),
         },
         user_id=user.id if user else None,

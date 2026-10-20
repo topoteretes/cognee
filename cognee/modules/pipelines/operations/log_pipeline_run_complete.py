@@ -6,7 +6,7 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.operations import get_operation_origin
 from cognee.modules.operations.usage_accumulator import get_parent_run_id
 from cognee.modules.pipelines.models import OperationOutcome, PipelineRun, PipelineRunStatus
-from cognee.modules.pipelines.utils import summarize_run_info_data
+from cognee.modules.pipelines.utils import errored_run_info_data_ids, summarize_run_info_data
 from cognee.modules.users.models import User
 
 
@@ -34,6 +34,7 @@ async def log_pipeline_run_complete(
         dataset_id=dataset_id,
         run_info={
             "data": data_info,
+            "errored_data": errored_run_info_data_ids(results),
         },
         user_id=user.id if user else None,
         tenant_id=getattr(user, "tenant_id", None) if user else None,

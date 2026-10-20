@@ -1,76 +1,41 @@
 from typing import Any
 
-from cognee.modules.data.models import Data
 from cognee.modules.pipelines.models.PipelineRunInfo import (
-    PipelineRunAlreadyCompleted,
     PipelineRunCompleted,
     PipelineRunErrored,
 )
 
-# ``run_info["data"]`` is audit metadata: the three ``log_pipeline_run_*``
-# writers store it and only startup recovery reads it, to copy a STARTED row's
-# value onto the ERRORED row it writes. Persisting the full payload made the
-# ``pipeline_runs`` table grow without bound (#3074, #4363): raw inputs were
-# stored verbatim, and ``cognify`` hands every writer the dataset's whole
-# ``Data`` list, most of which an incremental run skips as already completed,
-# so each run stored one id per corpus document. Inputs are kept as a bounded
-# preview; document lists are summarized by what the run did with them.
-MAX_RUN_INFO_DATA_CHARS = 512
+# ``run_info["data"]`` names the documents a run completed, as a list of
+# ``data_id`` strings — the same type the column held for ``cognify`` before.
+# It used to hold every document the pipeline was handed (one id per corpus
+# document on every run, #3074 / #4363) or a stringified preview of raw input,
+# which put user text in the audit table. Ids come from the per-item
+# ``{"run_info": ..., "data_id": ...}`` results the item runners yield, so an
+# item skipped as already completed is not listed, and raw inputs (``add``)
+# are named by the ``data_id`` ingestion gave them.
 
 
-def summarize_run_info_data(data: Any, results: list | None = None):
-    """Return a compact, size-bounded description of pipeline-run input data.
+def summarize_run_info_data(data: Any = None, results: list | None = None) -> list[str]:
+    """The ``data_id``s this run completed; empty before any item has run.
 
-    A list of ``Data`` records becomes a dict sized by the work the run did
-    (see ``summarize_run_data``); any other payload is stringified and truncated
-    so a single pipeline run cannot persist an arbitrarily large blob.
+    ``data`` is accepted for callers that still pass the run's input; the ids
+    are read from ``results`` alone.
     """
-    if not data:
-        return "None"
-
-    if isinstance(data, list) and all(isinstance(item, Data) for item in data):
-        return summarize_run_data(data, results)
-
-    text = str(data)
-    if len(text) > MAX_RUN_INFO_DATA_CHARS:
-        return f"{text[:MAX_RUN_INFO_DATA_CHARS]}... [truncated, {len(text)} chars total]"
-    return text
+    return _data_ids_with_status(results, PipelineRunCompleted)
 
 
-def summarize_run_data(data: list[Data], results: list | None) -> dict:
-    """What a run did with a dataset's documents, sized by the work done, not the corpus.
+def errored_run_info_data_ids(results: list | None) -> list[str]:
+    """The ``data_id``s of the items that failed in this run."""
+    return _data_ids_with_status(results, PipelineRunErrored)
 
-    ``dataset_data_count`` records how many documents the dataset held. The ids
-    kept are only those of the documents this run processed or failed, read from
-    the per-item ``{"run_info": ..., "data_id": ...}`` results the item runners
-    yield; documents the run skipped as already completed are counted, not
-    listed. A steady-state run over a large dataset therefore stores a handful
-    of ids rather than the whole corpus, while still naming every document it
-    touched. Before any item has run (the STARTED row) only the count is known.
-    """
-    summary = {"dataset_data_count": len(data)}
-    if results is None:
-        return summary
 
-    processed_data_ids: list[str] = []
-    errored_data_ids: list[str] = []
-    skipped_completed = 0
-    for result in results:
-        if not isinstance(result, dict):
-            continue
-        run_info = result.get("run_info")
-        data_id = result.get("data_id")
-        if isinstance(run_info, PipelineRunAlreadyCompleted):
-            skipped_completed += 1
-        elif isinstance(run_info, PipelineRunErrored):
-            # An item that raised before naming its document has no id; its
-            # error is recorded in run_info["error"] by the error writer.
-            if data_id is not None:
-                errored_data_ids.append(str(data_id))
-        elif isinstance(run_info, PipelineRunCompleted) and data_id is not None:
-            processed_data_ids.append(str(data_id))
-
-    summary["processed_data_ids"] = processed_data_ids
-    summary["errored_data_ids"] = errored_data_ids
-    summary["skipped_completed"] = skipped_completed
-    return summary
+def _data_ids_with_status(results: list | None, status: type) -> list[str]:
+    # An item that raised before naming its document has no id; its error is
+    # recorded in run_info["error"] by the error writer.
+    return [
+        str(result["data_id"])
+        for result in results or []
+        if isinstance(result, dict)
+        and isinstance(result.get("run_info"), status)
+        and result.get("data_id") is not None
+    ]
