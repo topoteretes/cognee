@@ -3,7 +3,8 @@
 The default question prepares your coming client meetings: for each client you meet in the
 next week, which orders are late or at risk, why, and what to tell them. Today's date goes
 into the question, so "next week" and "late" mean what they should. Pass --ask for your own,
-and --sample to ask the sample's dataset `google_workspace_memory_sample`.
+and --sample to ask the sample's dataset `google_workspace_memory_sample`. ask_api() asks a
+cognee server instead, across the datasets scripts/sync_api.py synced into.
 
 Run alone: uv run python examples/cookbooks/google_workspace_memory/scripts/ask.py [--ask "question"] [--sample]
 """
@@ -12,6 +13,8 @@ import argparse
 import asyncio
 import os
 from datetime import datetime
+
+import aiohttp
 
 os.environ.setdefault("LOG_LEVEL", "ERROR")  # quiet cognee's logs; set before importing it
 
@@ -28,6 +31,11 @@ DEFAULT_QUESTION = (
 )
 
 
+def dated(question: str) -> str:
+    """Today's date in front of the question, so relative times are measured from today."""
+    return f"Today is {datetime.now().astimezone().date().isoformat()}. {question}"
+
+
 async def ask(question: str | None = None, sample: bool = False) -> None:
     question = question or DEFAULT_QUESTION
     dataset = SAMPLE_DATASET if sample else DATASET
@@ -38,13 +46,34 @@ async def ask(question: str | None = None, sample: bool = False) -> None:
         )
     print(f"[ask] {question}")
     answer = await cognee.recall(
-        f"Today is {datetime.now().astimezone().date().isoformat()}. {question}",
+        dated(question),
         query_type=SearchType.HYBRID_COMPLETION,
         datasets=[dataset],
     )
     if not answer:
         raise SystemExit("[ask] Nothing found. Run the ingest scripts first.")
     print(f"[ask] Answer:\n\n{answer[0].text}")
+
+
+async def ask_api(question: str | None, dataset_ids: list[str]) -> None:
+    """The same question, answered by the cognee server over the datasets it synced."""
+    question = question or DEFAULT_QUESTION
+    print(f"[ask] {question}")
+    url = os.environ.get("COGNEE_API_URL", "http://localhost:8000").rstrip("/")
+    headers = {"Authorization": f"Bearer {os.environ.get('COGNEE_API_TOKEN', '')}"}
+    payload = {
+        "query": dated(question),
+        "searchType": SearchType.HYBRID_COMPLETION.value,
+        "datasetIds": dataset_ids,
+    }
+    async with (
+        aiohttp.ClientSession(headers=headers, raise_for_status=True) as session,
+        session.post(f"{url}/api/v1/recall", json=payload) as response,
+    ):
+        answer = await response.json()
+    if not answer:
+        raise SystemExit("[ask] Nothing found. Wait for the syncs to finish, then ask again.")
+    print(f"[ask] Answer:\n\n{answer[0]['text']}")
 
 
 if __name__ == "__main__":

@@ -24,6 +24,8 @@ Auth setup (OAuth user credentials):
       GOOGLE_CALENDAR_TOKEN_PATH=/path/to/cache-the-user-token.json
   - The first run opens a browser for one-time consent; later runs reuse the
     cached, auto-refreshed token.
+  - A GOOGLE_CALENDAR_ACCESS_TOKEN or GOOGLE_CALENDAR_REFRESH_TOKEN in the
+    environment takes precedence over the two paths; unset them to use this flow.
 
 Also set the usual cognee LLM_API_KEY (see .env.template) — this example
 calls cognee.recall(), which needs an LLM for the final completion.
@@ -62,7 +64,7 @@ async def main():
         "Who do I meet with most often, and what are those meetings about?",
         datasets=[DATASET_NAME],
     )
-    print("Recall:", answer[0].text)
+    print("Recall:", answer[0].text if answer else "nothing found")
 
     print("\n=== Incremental re-sync (only new, changed or deleted events) ===")
     source = google_calendar_source(CALENDARS)

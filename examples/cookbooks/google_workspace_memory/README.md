@@ -32,8 +32,9 @@ or the keys.
 
 ## Try it on sample data
 
-`setup.py` writes a sample workspace to `sample/` (git-ignored), in the shape the three
-Google connectors give the scripts, dated relative to today. Ana Novak runs Birchwood
+`setup.py` writes a sample workspace to `sample/` (git-ignored), dated relative to today.
+Each file is the text cognee builds from a connector row: a `# <title>` line, then what
+the Calendar, Gmail or Drive connector writes. Ana Novak runs Birchwood
 Ceramics, which makes tableware for restaurants. Her orders sheet, her inbox and her
 calendar show that she meets Harbor Café in two days and Olive & Fig in four, that a
 courier delayed Harbor Café's plates past their menu launch, and that a back-ordered glaze
@@ -94,6 +95,7 @@ google_workspace_memory/
     ├── ingest_calendar.py
     ├── ingest_gmail.py
     ├── ingest_drive.py
+    ├── sync_api.py               only with --api
     └── ask.py
 ```
 
@@ -107,6 +109,7 @@ script also runs alone with the same options.
 | 2 | `scripts/ingest_calendar.py [--sample]` | Remembers every event of your primary calendar, past and future, through cognee's Google Calendar connector `google_calendar_source` (node set `calendar`) | cognee dataset |
 | 3 | `scripts/ingest_gmail.py [--emails N] [--sample]` | Remembers the newest 50 inbox emails by default (`--emails N`, at least 1), through cognee's Gmail connector `gmail_source` (node set `email`). Emails that leave the newest N are forgotten on the next run | cognee dataset |
 | 4 | `scripts/ingest_drive.py [--sample]` | Remembers the Docs, Sheets (first sheet, as CSV), PDFs and text files in `GOOGLE_DRIVE_FOLDER_ID` and its subfolders (PDFs and text files over 25 MB are skipped; `GOOGLE_DRIVE_INCLUDE_SUBFOLDERS` and `GOOGLE_DRIVE_MAX_FILE_SIZE_MB` in `.env` change these defaults), through cognee's Google Drive connector `google_drive_source` (node set `drive`) | cognee dataset |
+| – | `scripts/sync_api.py` (or `--api`) | Replaces steps 1–4 when a cognee server syncs for you; see [Through a cognee server](#through-a-cognee-server---api) | the server's datasets |
 | 5 | `scripts/ask.py [--ask "question"] [--sample]` | Answers one question across all three with a `HYBRID_COMPLETION` recall. Today's date goes into the question; the default prepares your client meetings of the next seven days | nothing |
 
 All scripts use the cognee dataset `google_workspace_memory`, or `google_workspace_memory_sample`
@@ -145,6 +148,36 @@ events and files are forgotten. Gmail reads the newest emails again each run. co
 the ones it already holds, unless their labels changed (read, starred), and forgets those
 no longer among the newest, so memory holds your inbox as it is now. Add `--clear` to
 forget the dataset `google_workspace_memory` first and start over.
+
+## Through a cognee server (`--api`)
+
+The steps above read Google from your machine with your own OAuth client. When cognee runs
+as a server for several people, the server can hold the Google OAuth clients instead: each
+user connects their account once in the browser, and the server syncs each app into that
+account's own dataset. `--api` drives that flow:
+
+```bash
+uv run python examples/cookbooks/google_workspace_memory/google_workspace_memory.py --api --check
+uv run python examples/cookbooks/google_workspace_memory/google_workspace_memory.py --api
+```
+
+For each app it selects your primary calendar, the `INBOX` label or the folder
+`GOOGLE_DRIVE_FOLDER_ID`, starts a sync, waits for it to finish, and then asks the server
+across the three datasets. `--sample`, `--clear` and `--emails` don't apply: the server's
+datasets are its own, and Gmail syncs the whole label.
+
+| What | Where |
+|---|---|
+| `COGNEE_API_TOKEN` (your bearer token) and `COGNEE_API_URL` (default `http://localhost:8000`) | `.env` at the repo root |
+| Per app, `GOOGLE_CALENDAR_*`, `GOOGLE_GMAIL_*`, `GOOGLE_DRIVE_*`: `CLIENT_ID`, `CLIENT_SECRET` (an OAuth client of type *Web application*), `REDIRECT_URI` (`<server>/api/v1/integrations/<provider>/callback`, also listed on the client), `STATE_SECRET`, `FRONTEND_BASE_URL` | the server's environment, see `.env.template` |
+| `INTEGRATION_CREDENTIALS_KEYS` and `INTEGRATION_CREDENTIALS_ACTIVE_KEY_ID`, to encrypt the stored Google tokens | the server's environment |
+| Each app connected to your cognee user | the browser, see below |
+
+Connecting happens in the browser, never in the script: the server only accepts a consent
+that finishes in the same browser that started it. Connect Drive and Gmail on the cognee
+UI's Integrations page. Calendar has no card there yet: in the same browser, open the
+server's `/docs`, call `POST /api/v1/integrations/google_calendar/authorize`, and open the
+`authorizeUrl` it returns. `--api --check` reports each app that is not connected yet.
 
 ## Clean up
 

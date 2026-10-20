@@ -33,7 +33,7 @@ SAMPLE = COOKBOOK_DIR / "sample" / "drive"
 
 async def ingest_drive(sample: bool = False) -> None:
     if sample:
-        files = [f"{path.stem}\n\n{path.read_text()}" for path in sorted(SAMPLE.glob("*"))]
+        files = [path.read_text() for path in sorted(SAMPLE.glob("*.txt"))]
         await cognee.remember(
             files, dataset_name=SAMPLE_DATASET, node_set=["drive"], self_improvement=False
         )

@@ -35,6 +35,13 @@ use the sample even when their account is set up. The sample lives in its own da
    which sources went in (the `[ingest_calendar]`, `[ingest_gmail]` and `[ingest_drive]`
    lines).
 
+If the user runs cognee as a server with their Google account connected there, add `--api`
+to both commands: the server syncs and answers, and `--check` reports each app that is not
+connected yet (the README's "Through a cognee server" section says how to connect it).
+
+If a run stops after `--check` passed, the last `[<step>]` line (or the traceback) says why.
+Tell the user what failed; rerun only that step's script from `scripts/` once it is fixed.
+
 For a follow-up question on the same data, run
 `uv run python examples/cookbooks/google_workspace_memory/scripts/ask.py --ask "..."`, with
 `--sample` if the first run was on the sample; it doesn't ingest again.

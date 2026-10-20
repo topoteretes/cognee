@@ -44,8 +44,8 @@ async def ingest_calendar(sample: bool = False) -> None:
         "event and can take ten minutes or more; later runs fetch only changes.",
         flush=True,  # shows before the long remember(), even when output is piped
     )
-    # The empty tokens keep a GOOGLE_CALENDAR_REFRESH_TOKEN or _ACCESS_TOKEN in .env (the
-    # calendar guide's setup) from taking precedence over the cookbook's credentials.json.
+    # The empty tokens keep a GOOGLE_CALENDAR_REFRESH_TOKEN or _ACCESS_TOKEN in .env from
+    # taking precedence over the cookbook's credentials.json.
     settings = GoogleCalendarSettings(
         credentials_path=str(CREDENTIALS), token_path=str(TOKEN), refresh_token="", access_token=""
     )
