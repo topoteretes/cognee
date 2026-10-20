@@ -8,6 +8,19 @@ Cognee is an open-source AI memory platform that transforms raw data into persis
 
 **Requirements**: Python 3.10 - 3.14
 
+## Design Principles
+
+1. **Don't overengineer**: Simple beats complex.
+2. **No fallbacks**: One correct path, no alternatives.
+3. **One way**: One way to do things, not many.
+4. **Throw errors**: Fail fast when the operation's preconditions aren't met. Observability (telemetry, logging) is best-effort and never changes the outcome of the operation.
+5. **No backups**: Trust the primary mechanism.
+6. **Separation of concerns**: Each function has a single responsibility.
+7. **Be concise but informative**: No essays, but the docstrings and comments a reader needs.
+8. **No invented limits**: No cutoffs (`max_n`, `[:k]`, "older than X") or expiries (TTLs, cooldowns, eviction) unless asked for — both are silent data loss. An unavoidable bound is a named setting, unbounded by default, loud when hit.
+
+**Methodology**: surgical changes only; evidence-based debugging (minimal, targeted logging); fix root causes, not symptoms. Debug like a detective: form the theory of the crime, collect evidence, and change code only once the evidence proves it.
+
 ## Development Commands
 
 ### Setup
