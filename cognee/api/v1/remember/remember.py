@@ -768,12 +768,13 @@ class RememberResult:
             short machine-readable reason such as ``"insufficient_credits"``.
             The data was stored as usual and ``improve`` stays ``None``; a
             later improve covers what this one would have. ``None`` otherwise.
-        memory_state: The dataset's memory state once the pipeline run that
-            this result reports finished (``"ready"`` after a completed
-            cognify, ``"extraction_failed"`` after a failed one, the
-            preparation states while a background run is still going); the
-            vocabulary of ``cognee.datasets.get_memory_status``. ``None`` for
-            session-only and typed-entry results.
+        memory_state: The dataset's memory state when the cognify run this
+            result reports finished: ``"ready"`` after a completed run,
+            ``"extraction_failed"`` after a failed one (the vocabulary of
+            ``cognee.datasets.get_memory_status``). ``None`` while a
+            background run is still going, since the result is handed back
+            when the run starts (poll ``get_memory_status`` for the stages it
+            reaches), and for session-only and typed-entry results.
 
     Example::
 
