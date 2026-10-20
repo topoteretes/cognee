@@ -477,3 +477,19 @@ async def test_a_megabyte_whitespace_free_run_indexes_and_is_found(pg_url):
 
         results = await adapter.lexical_search(collection, "pelican")
         assert [result.id for result in results] == [image_note.id]
+
+
+async def test_an_index_keeps_the_language_it_was_built_with(pg_url, monkeypatch):
+    """Switching LEXICAL_SEARCH_LANGUAGE does not re-tokenize stored postings, so
+    queries and later writes keep the recorded language instead of missing matches."""
+    async with _adapter_with_collection(pg_url) as (adapter, type_name, collection):
+        first = _LexicalOnlyPoint(text="The runners were running quickly")
+        await adapter.index_lexical_data_points(type_name, "text", [first], owns_rows=True)
+
+        monkeypatch.setattr(adapter, "_lexical_language", lambda: "english")
+        later = _LexicalOnlyPoint(text="Running again tomorrow")
+        await adapter.index_lexical_data_points(type_name, "text", [later], owns_rows=True)
+
+        found = await adapter.lexical_search(collection, "running")
+        assert {result.id for result in found} == {first.id, later.id}
+        assert await adapter.lexical_search(collection, "run") == [], "still simple: no stemming"

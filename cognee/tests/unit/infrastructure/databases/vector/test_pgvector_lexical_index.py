@@ -309,6 +309,7 @@ def _bare_adapter():
 
     adapter = object.__new__(PGVectorAdapter)
     adapter._write_locks = {}
+    adapter._lexical_languages = {}
     adapter._lexical_language = lambda: "simple"
     return adapter
 
@@ -346,13 +347,58 @@ async def test_lexical_search_maps_rows_to_scored_results_best_first():
     first, second = uuid4(), uuid4()
     rows = [(first, 2.5, {"text": "zebra"}), (second, 0.25, {"text": "apple"})]
 
-    with patch(f"{ADAPTER_MODULE}.search_postings", AsyncMock(return_value=rows)) as search:
+    with (
+        patch(f"{ADAPTER_MODULE}.search_postings", AsyncMock(return_value=rows)) as search,
+        patch(f"{ADAPTER_MODULE}.recorded_language", AsyncMock(return_value=None)),
+    ):
         results = await adapter.lexical_search("Doc_text", "zebra apple", limit=7)
 
     search.assert_awaited_once_with(session, "Doc_text", "zebra apple", 7, language="simple")
     assert [(result.id, result.score, result.payload) for result in results] == rows
     assert all(isinstance(result.id, UUID) for result in results)
     assert results[0].score > results[1].score
+
+
+@pytest.mark.asyncio
+async def test_a_search_is_tokenized_like_the_index_was_built(caplog):
+    """Stored postings are never re-tokenized: a changed setting must not break matches."""
+    adapter = _bare_adapter()
+    adapter._lexical_language = lambda: "english"
+    adapter.has_collection = AsyncMock(return_value=True)
+
+    @asynccontextmanager
+    async def fake_session():
+        yield object()
+
+    adapter.get_async_session = fake_session
+    recorded = AsyncMock(return_value="simple")
+
+    with (
+        patch(f"{ADAPTER_MODULE}.search_postings", AsyncMock(return_value=[])) as search,
+        patch(f"{ADAPTER_MODULE}.recorded_language", recorded),
+        caplog.at_level("WARNING"),
+    ):
+        await adapter.lexical_search("Doc_text", "running")
+        await adapter.lexical_search("Doc_text", "running")
+
+    assert [call.kwargs["language"] for call in search.await_args_list] == ["simple", "simple"]
+    recorded.assert_awaited_once()  # cached per collection
+    assert sum("keeps it" in record.message for record in caplog.records) == 1
+
+
+@pytest.mark.asyncio
+async def test_tables_without_a_record_use_the_configured_language():
+    adapter = _bare_adapter()
+    adapter._lexical_language = lambda: "english"
+
+    @asynccontextmanager
+    async def fake_session():
+        yield object()
+
+    adapter.get_async_session = fake_session
+    with patch(f"{ADAPTER_MODULE}.recorded_language", AsyncMock(return_value=None)):
+        assert await adapter._index_language("Doc_text") == "english"
+    assert adapter._lexical_languages == {}, "an unrecorded language is not cached"
 
 
 @pytest.mark.asyncio

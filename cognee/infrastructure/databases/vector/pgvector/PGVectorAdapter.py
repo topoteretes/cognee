@@ -33,6 +33,7 @@ from .lexical_index import (
     create_lexical_tables,
     is_lexical_table_name,
     lexical_table_names,
+    recorded_language,
     replace_postings,
     search_postings,
     upsert_owned_rows,
@@ -120,6 +121,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         self.VECTOR_DB_LOCK = asyncio.Lock()
         self._write_locks: dict[str, asyncio.Lock] = {}
         self._metadata = MetaData()
+        # Collection -> the language its lexical postings were tokenized with.
+        self._lexical_languages: dict[str, str] = {}
         # True when this adapter created its own engine and must dispose it on close().
         # False when the engine is borrowed from the relational adapter.
         self._owns_engine: bool = False
@@ -552,6 +555,35 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         """The tokenizer language of the lexical indexes (``LEXICAL_SEARCH_LANGUAGE``)."""
         return get_vectordb_config().lexical_search_language
 
+    async def _index_language(self, collection_name: str) -> str:
+        """The language ``collection_name``'s postings were tokenized with.
+
+        Recorded on its posting tables when they were created. Stored postings
+        are never re-tokenized, so a query, and every later write, keeps that
+        language even after ``LEXICAL_SEARCH_LANGUAGE`` changed; re-caching
+        the documents (``forget(memory_only=True)``, then ``cognify()``)
+        rebuilds the index with the new one. Tables without a record (none
+        written by a release) use the configured language.
+        """
+        cached = self._lexical_languages.get(collection_name)
+        if cached is not None:
+            return cached
+        configured = self._lexical_language()
+        async with self.get_async_session() as session:
+            recorded = await recorded_language(session, collection_name)
+        if recorded is None:
+            return configured
+        if recorded != configured:
+            logger.warning(
+                "Keyword index %s was built with LEXICAL_SEARCH_LANGUAGE=%s and keeps it; the "
+                "setting is %s. Re-cache the documents to rebuild it with the new language.",
+                collection_name,
+                recorded,
+                configured,
+            )
+        self._lexical_languages[collection_name] = recorded
+        return recorded
+
     async def _has_lexical_tables(self, collection_name: str) -> bool:
         docs_table, terms_table = lexical_table_names(collection_name)
         return await self.has_collection(docs_table) and await self.has_collection(terms_table)
@@ -572,6 +604,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             table = self._metadata.tables.get(table_name)
             if table is not None:
                 self._metadata.remove(table)
+        self._lexical_languages.pop(collection_name, None)
 
     @retry(
         retry=retry_if_exception_type(
@@ -601,7 +634,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             async with self.VECTOR_DB_LOCK:
                 if not await self._has_lexical_tables(collection):
                     async with self.engine.begin() as connection:
-                        await create_lexical_tables(connection, collection)
+                        await create_lexical_tables(
+                            connection, collection, language=self._lexical_language()
+                        )
                     # Reflect AFTER the DDL transaction commits, as
                     # create_collection does.
                     async with self.engine.begin() as connection:
@@ -656,7 +691,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             else []
         )
         passages = build_passage_rows(points, field_name)
-        language = self._lexical_language()
+        language = await self._index_language(collection)
 
         async with self._get_write_lock(collection), self.get_async_session() as session:
             if owns_rows:
@@ -692,7 +727,11 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         try:
             async with self.get_async_session() as session:
                 rows = await search_postings(
-                    session, collection_name, query_text, limit, language=self._lexical_language()
+                    session,
+                    collection_name,
+                    query_text,
+                    limit,
+                    language=await self._index_language(collection_name),
                 )
         except ProgrammingError as error:
             if not _is_undefined_table_error(error):
@@ -1128,6 +1167,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             )
 
         self._metadata.clear()
+        self._lexical_languages.clear()
         await self.delete_database()
 
     async def run_migrations(self):

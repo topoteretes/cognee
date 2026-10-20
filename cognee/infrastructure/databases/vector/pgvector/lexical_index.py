@@ -256,10 +256,56 @@ def create_lexical_tables_statements(collection_name: str) -> list[TextClause]:
     ]
 
 
-async def create_lexical_tables(connection, collection_name: str) -> None:
-    """Run :func:`create_lexical_tables_statements` on ``connection`` (an open transaction)."""
+async def create_lexical_tables(
+    connection, collection_name: str, language: str | None = None
+) -> None:
+    """Run :func:`create_lexical_tables_statements` on ``connection`` (an open transaction).
+
+    With ``language``, the posting tables' tokenizer language is recorded too
+    (:func:`record_language`), unless they already carry one.
+    """
     for statement in create_lexical_tables_statements(collection_name):
         await connection.execute(statement)
+    if language is not None:
+        await record_language(connection, collection_name, language)
+
+
+# The docs table's comment names the language its postings were tokenized
+# with. Changing LEXICAL_SEARCH_LANGUAGE does not re-tokenize stored postings,
+# so a query must keep being tokenized like them.
+LANGUAGE_COMMENT_PREFIX = "cognee lexical index; language="
+
+
+def _docs_regclass(collection_name: str) -> str:
+    docs_table, _ = lexical_table_names(collection_name)
+    return quote_identifier(docs_table)
+
+
+async def recorded_language(connection, collection_name: str) -> str | None:
+    """The language recorded on ``collection_name``'s posting tables, or None."""
+    result = await connection.execute(
+        text("SELECT obj_description(to_regclass(:docs), 'pg_class')"),
+        {"docs": _docs_regclass(collection_name)},
+    )
+    comment = result.scalar()
+    if not comment or not str(comment).startswith(LANGUAGE_COMMENT_PREFIX):
+        return None
+    language = str(comment)[len(LANGUAGE_COMMENT_PREFIX) :]
+    return language if language in LEXICAL_SEARCH_LANGUAGES else None
+
+
+async def record_language(connection, collection_name: str, language: str) -> None:
+    """Record ``language`` on the posting tables unless they already carry one."""
+    tokenizer_settings(language)  # validates the name, which the comment inlines
+    if await recorded_language(connection, collection_name) is not None:
+        return
+    # COMMENT takes no bind parameters; the language is one of a fixed set.
+    await connection.execute(
+        text(
+            f"COMMENT ON TABLE {_docs_regclass(collection_name)} "
+            f"IS '{LANGUAGE_COMMENT_PREFIX}{language}'"
+        )
+    )
 
 
 # --- writes -------------------------------------------------------------------
