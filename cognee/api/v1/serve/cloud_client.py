@@ -2,8 +2,10 @@
 
 import io
 import json
+import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 from uuid import UUID
 
 import aiohttp
@@ -12,6 +14,26 @@ from cognee.modules.ingestion.data_types.TextData import create_text_data
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("serve.cloud_client")
+
+# Cognee Cloud tenant instances are served as https://tenant-<id>.aws.cognee.ai,
+# where <id> is the control-plane tenants.id.
+CLOUD_HOST_SUFFIX = ".cognee.ai"
+_UUID_IN_LABEL = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE
+)
+
+
+def _tenant_id_from_cloud_url(service_url: str) -> str:
+    """Tenant id in a Cognee Cloud instance URL, or "" for any other URL."""
+    try:
+        host = urlparse(service_url).hostname or ""
+        if not host.endswith(CLOUD_HOST_SUFFIX):
+            return ""
+        match = _UUID_IN_LABEL.search(host.split(".", 1)[0])
+        return str(UUID(match.group(0))) if match else ""
+    except Exception:
+        logger.debug("Ignoring error in _tenant_id_from_cloud_url", exc_info=True)
+        return ""
 
 
 def _text_upload_filename(text: str) -> str:
@@ -110,27 +132,27 @@ class CloudClient:
             return None
 
     async def _get_workspace_id(self) -> str:
-        """Cognee Cloud workspace id of the connected API key, or "" when not Cloud.
+        """Cognee Cloud workspace id (control-plane ``tenants.id``), or "" when not Cloud.
 
-        Cloud answers ``/api/v1/users/me`` with ``active_workspace_id`` (the
-        control-plane ``tenants.id``). A self-hosted server answers with
-        fastapi-users' ``UserRead``, which has no such field. Any failure is
-        treated as "not Cloud": this must never fail a connection.
+        ``active_workspace_id`` from ``/api/v1/users/me`` is the source of
+        truth; only Cloud reports it, so it is accepted from any host. Until
+        Cloud tenant instances return it, the id is read from the instance URL
+        (``https://tenant-<id>.aws.cognee.ai``). Self-hosted servers have
+        neither, so nothing is recorded. Never fails a connection.
         """
         try:
             session = await self._get_session()
             async with session.get(f"{self.service_url}/api/v1/users/me") as resp:
-                if resp.status != 200:
-                    return ""
-                data = await resp.json()
+                data = await resp.json() if resp.status == 200 else None
             workspace_id = data.get("active_workspace_id") if isinstance(data, dict) else None
-            return str(UUID(str(workspace_id))) if workspace_id else ""
+            if workspace_id:
+                return str(UUID(str(workspace_id)))
         except Exception:
             logger.debug(
-                "Falling back to no workspace after error in CloudClient._get_workspace_id",
+                "Ignoring error reading active_workspace_id in CloudClient._get_workspace_id",
                 exc_info=True,
             )
-            return ""
+        return _tenant_id_from_cloud_url(self.service_url)
 
     # ----- V2 Operations -----
 
