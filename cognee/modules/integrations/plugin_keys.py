@@ -12,14 +12,14 @@ user row: a failure anywhere rolls the prune back too, and two concurrent
 provisions serialize instead of racing past the cap.
 """
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from sqlalchemy import and_, delete, false, func, or_, select, update
 
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.users.api_key.create_api_key import apiKeySettings, generate_api_key
-from cognee.modules.users.api_key.hash_api_key import prepare_api_key
+from cognee.modules.users.api_key.create_api_key import apiKeySettings, build_api_key_row
 from cognee.modules.users.models import User
 from cognee.modules.users.models.UserApiKey import UserApiKey
 
@@ -74,6 +74,11 @@ async def add_plugin_agent_key(agent_user_id: UUID, plugin_key: str) -> UserApiK
         PluginAgentKeyLimitError: the agent is still full after pruning; nothing
         was deleted or added.
     """
+    # Built before the transaction: with HASH_API_KEY on, hashing is a slow
+    # PBKDF2 run that must not hold the agent's row lock (or SQLite's write
+    # lock), nor block the event loop.
+    user_api_key, raw_key = await asyncio.to_thread(build_api_key_row, agent_user_id, plugin_key)
+
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
         async with session.begin():
@@ -97,13 +102,6 @@ async def add_plugin_agent_key(agent_user_id: UUID, plugin_key: str) -> UserApiK
             if remaining + 1 > limit:
                 raise PluginAgentKeyLimitError(limit)
 
-            raw_key = generate_api_key()
-            user_api_key = UserApiKey(
-                user_id=agent_user_id,
-                api_key=prepare_api_key(raw_key),
-                label=raw_key[:8] + "****",
-                name=plugin_key,
-            )
             session.add(user_api_key)
 
         user_api_key.api_key = raw_key  # return raw key so caller can show it once

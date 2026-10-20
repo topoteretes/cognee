@@ -378,20 +378,58 @@ async def test_two_provisions_racing_at_the_cap_never_exceed_it(key_settings):
 
 @pytest.mark.asyncio
 async def test_a_failed_insert_rolls_back_the_prune():
+    from sqlalchemy.exc import IntegrityError
+
     from cognee.modules.integrations import plugin_keys
+    from cognee.modules.users.api_key.create_api_key import build_api_key_row
 
     async with _client(await _parent()) as client:
         stale = await _provision(client)
     await _age_key(stale["keyId"], created_ago=timedelta(days=60), last_used_ago=timedelta(days=31))
 
-    # Fails after the prune's DELETE ran inside the transaction.
+    # A row the database refuses (api_key is NOT NULL): the insert fails at
+    # commit, after the prune's DELETE ran inside the same transaction.
+    def _unsavable_row(user_id, name):
+        row, raw_key = build_api_key_row(user_id, name)
+        row.api_key = None
+        return row, raw_key
+
     with (
-        patch.object(plugin_keys, "generate_api_key", side_effect=RuntimeError("boom")),
-        pytest.raises(RuntimeError),
+        patch.object(plugin_keys, "build_api_key_row", side_effect=_unsavable_row),
+        pytest.raises(IntegrityError),
     ):
         await plugin_keys.add_plugin_agent_key(UUID(stale["agentId"]), "claude-code")
 
     assert await _key_ids(stale["agentId"]) == {stale["keyId"]}
+
+
+@pytest.mark.asyncio
+async def test_the_key_is_built_and_hashed_before_the_lock_is_taken():
+    """With HASH_API_KEY on, hashing is a slow PBKDF2 run; it must not hold the lock."""
+    from cognee.modules.integrations import plugin_keys
+    from cognee.modules.users.api_key.create_api_key import build_api_key_row
+
+    async with _client(await _parent()) as client:
+        agent_id = UUID((await _provision(client))["agentId"])
+
+    calls = []
+    real_lock = plugin_keys._lock_agent_row
+
+    def _build(user_id, name):
+        calls.append("build")
+        return build_api_key_row(user_id, name)
+
+    async def _lock(session, user_id):
+        calls.append("lock")
+        await real_lock(session, user_id)
+
+    with (
+        patch.object(plugin_keys, "build_api_key_row", side_effect=_build),
+        patch.object(plugin_keys, "_lock_agent_row", side_effect=_lock),
+    ):
+        await plugin_keys.add_plugin_agent_key(agent_id, "claude-code")
+
+    assert calls == ["build", "lock"]
 
 
 # ---------------------------------------------------------------------------
