@@ -21,8 +21,8 @@ together.
 | `TRIPLET_COMPLETION` | `GraphCompletionRetriever` | `graph_completion_retriever.py` | yes | Deprecated, removed in the next release: triplet embeddings were removed, so `search()` / `recall()` resolve it to `GRAPH_COMPLETION` with a `FutureWarning` (`DEPRECATED_SEARCH_TYPES`) |
 | `AGENTIC_COMPLETION` | `AgenticRetriever` | `agentic_retriever.py` | yes | Special-cased in the factory (not in the dict): tool loop with `skills`, `tools`, `max_iter` |
 | `CHUNKS` | `ChunksRetriever` | `chunks_retriever.py` | no | Vector search over `DocumentChunk_text` |
-| `CHUNKS_LEXICAL` | `BM25ChunksRetriever` | `bm25_retriever.py` | no | BM25 over chunks (`LexicalRetriever` subclass): the vector store's lexical index when the backend keeps one (`supports_lexical_search`), else scored in memory over the chunk nodes |
-| `DOCUMENTS_LEXICAL` | `BM25DocumentsRetriever` | `bm25_documents_retriever.py` | no | BM25 over the cached documents the caching pipeline stores first (SDK-397); one hit per document with its best passage as `text`. Same index-or-memory split as `CHUNKS_LEXICAL` |
+| `CHUNKS_LEXICAL` | `BM25ChunksRetriever` | `bm25_retriever.py` | no | BM25 over chunks (`LexicalRetriever` subclass), scored in memory over the chunk nodes; the vector store's lexical index answers instead once `DocumentChunk_text` has one (`has_lexical_index`), which no built-in type creates yet |
+| `DOCUMENTS_LEXICAL` | `BM25DocumentsRetriever` | `bm25_documents_retriever.py` | no | BM25 over the cached documents the caching pipeline stores first (SDK-397); one hit per document with its best passage as `text`. The vector store's lexical index on `CachedDocument_text` when the backend keeps one, else scored in memory over the `CachedDocument` nodes |
 | `SUMMARIES` | `SummariesRetriever` | `summaries_retriever.py` | no | Vector search over `TextSummary_text` |
 | `SKILLS` | `SkillsRetriever` | `skills_retriever.py` | no | Metadata-only skill discovery; exactly one dataset |
 | `CODE` | `CodeRetriever` | `code_retriever.py` | no | Deterministic code-graph operations via `code_query` |
