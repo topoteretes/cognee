@@ -539,36 +539,49 @@ def _get_api_key_fingerprint() -> str:
     return _get_api_key_tracking_id()
 
 
-def _get_cloud_identity() -> dict[str, str]:
-    """Return the Cognee Cloud tenant this install has connected to, if any.
+# Only Cognee Cloud hosts are sent as-is; a self-hosted server's hostname can be
+# an internal name or IP, so it is reduced to a category.
+_CLOUD_HOST_SUFFIX = ".cognee.ai"
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
-    Read from the connection ``cognee.serve(url=..., api_key=...)`` saves: when
-    the instance is Cognee Cloud, serve() records the workspace id it reports
-    (the control-plane ``tenants.id``), so analytics can join an install's
-    ``persistent_id`` to its cloud tenant (CLO-804). It is the workspace active
-    at connect time; a user in several workspaces can switch later.
 
-    Empty when the install never connected, or connected to a self-hosted
-    server. Only the tenant id and the instance host are sent — never the API
-    key or the full service URL.
+def _connected_host_label(service_url: str) -> str:
+    from urllib.parse import urlparse
+
+    host = urlparse(service_url).hostname or ""
+    if host.endswith(_CLOUD_HOST_SUFFIX):
+        return host
+    if host in _LOCAL_HOSTS:
+        return "localhost"
+    return "self_hosted"
+
+
+def _get_connected_tenant() -> dict[str, str]:
+    """Return the tenant this install connected to with ``serve()``, if any.
+
+    ``serve(url=..., api_key=...)`` saves the ``tenant_id`` the instance's
+    ``/api/v1/users/me`` reports. On a Cognee Cloud instance that is the
+    control-plane ``tenants.id``, so analytics can join an install's
+    ``persistent_id`` to its cloud tenant (CLO-804); self-hosted servers report
+    their own local tenant, told apart by ``connected_host``. It is the tenant
+    active at connect time.
+
+    Empty when the install never connected. Never sends the API key, and a
+    self-hosted hostname is reduced to ``self_hosted`` / ``localhost``.
     """
     try:
-        from urllib.parse import urlparse
-
         from cognee.api.v1.serve.credentials import load_credentials
 
         creds = load_credentials()
         if not creds or not creds.tenant_id:
             return {}
-        identity = {"cloud_tenant_id": str(creds.tenant_id)}
-        # The instance host says which control plane (dev or prod) the id
-        # belongs to. Parsed inside the guard: a hand-edited URL can raise.
-        host = urlparse(creds.service_url).hostname if creds.service_url else None
-        if host:
-            identity["cloud_service_host"] = host
-        return identity
+        # Parsed inside the guard: a hand-edited URL can raise.
+        return {
+            "connected_tenant_id": str(creds.tenant_id),
+            "connected_host": _connected_host_label(creds.service_url),
+        }
     except Exception:
-        logger.debug("Ignoring exception in _get_cloud_identity", exc_info=True)
+        logger.debug("Ignoring exception in _get_connected_tenant", exc_info=True)
         return {}
 
 
@@ -639,9 +652,10 @@ def send_telemetry(
     - **api_key_tracking_id**: Stable pseudonymous ID derived from the full
       LLM API key when configured. Use this to group activity by key without
       sending the key or visible key fragments.
-    - **cloud_tenant_id** / **cloud_service_host**: Only when the install has
-      connected to Cognee Cloud via ``serve()``: the cloud tenant id and the
-      host of the instance it connected to. Absent otherwise.
+    - **connected_tenant_id** / **connected_host**: Only when the install has
+      connected to an instance via ``serve()``: the tenant id it reported and
+      the instance host (a ``*.cognee.ai`` host for Cognee Cloud, otherwise
+      ``self_hosted`` or ``localhost``). Absent otherwise.
     """
     if additional_properties is None:
         additional_properties = {}
@@ -660,7 +674,7 @@ def send_telemetry(
     anonymous_id = str(get_anonymous_id())
     persistent_id = str(get_persistent_id())
     api_key_tracking_id = _get_api_key_tracking_id()
-    cloud_identity = _get_cloud_identity()
+    connected_tenant = _get_connected_tenant()
     # Where this telemetry event originates. Defaults to "sdk"; deployments such
     # as the managed cloud set TELEMETRY_ORIGIN (e.g. "cloud") so events can be
     # segmented by origin.
@@ -675,7 +689,7 @@ def send_telemetry(
             "persistent_id": persistent_id,
             "api_key_tracking_id": api_key_tracking_id,
             "api_key_hash": api_key_tracking_id,
-            **cloud_identity,
+            **connected_tenant,
         },
         "properties": {
             "time": current_time.strftime("%m/%d/%Y"),
@@ -686,7 +700,7 @@ def send_telemetry(
             "api_key_tracking_id": api_key_tracking_id,
             "api_key_hash": api_key_tracking_id,
             "telemetry_origin": origin,
-            **cloud_identity,
+            **connected_tenant,
             **additional_properties,
         },
     }
