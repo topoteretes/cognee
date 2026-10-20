@@ -1,7 +1,21 @@
-"""Unit tests for the session operation-event mapper (pure, no cache/DB)."""
+"""Unit tests for the session operation-event mapper and the collector's ordering
+(no cache/DB: the session manager is stubbed)."""
+
+import importlib
+from types import SimpleNamespace
+from unittest.mock import patch
+
+import pytest
 
 from cognee.infrastructure.databases.cache.models import SessionQAEntry
+from cognee.modules.visualization import session_events
 from cognee.modules.visualization.session_events import map_session_entries_to_events
+
+# importlib, not `import ... as`: the package __init__ rebinds the name to the
+# function (see test_session_event_scoping.py).
+get_session_manager_module = importlib.import_module(
+    "cognee.infrastructure.session.get_session_manager"
+)
 
 
 def _entry(**overrides):
@@ -64,3 +78,37 @@ class TestMapSessionEntriesToEvents:
         assert map_session_entries_to_events("s1", entries) == map_session_entries_to_events(
             "s1", entries
         )
+
+
+@pytest.mark.asyncio
+async def test_collected_events_are_ordered_by_utc_time_not_by_string():
+    """`11:00:10+02:00` is 09:00:10 UTC, earlier than a naive `10:00:00`, though
+    it sorts after it as text. The order matters beyond display: live-events
+    takes the last event as its cursor, so a misplaced event would move the
+    cursor back and redeliver the newer one on the next poll."""
+    sessions = {
+        "s1": [_entry(qa_id="naive-newer", time="2026-08-03T10:00:00.000000", feedback_score=4)],
+        "s2": [
+            _entry(qa_id="offset-older", time="2026-08-03T11:00:10+02:00"),
+            _entry(qa_id="untimed", time=""),
+        ],
+    }
+
+    async def _get_session(*, user_id, session_id):
+        return sessions[session_id]
+
+    with patch.object(
+        get_session_manager_module,
+        "get_session_manager",
+        return_value=SimpleNamespace(is_available=True, get_session=_get_session),
+    ):
+        events = await session_events.collect_session_events(
+            user=SimpleNamespace(id="user"), session_ids=["s1", "s2"]
+        )
+
+    assert [(e["qa_id"], e["kind"]) for e in events] == [
+        ("untimed", "search"),
+        ("offset-older", "search"),
+        ("naive-newer", "search"),
+        ("naive-newer", "improve"),
+    ]
