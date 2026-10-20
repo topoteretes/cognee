@@ -62,5 +62,6 @@ jobs:
           DRY_RUN: ${{ github.event_name == 'schedule' && 'false' || (github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true') || (github.event_name == 'workflow_dispatch' && 'false') || 'true' }}
           # Pull-request dry runs look at the last week.
           LOOKBACK_HOURS: ${{ github.event_name == 'pull_request' && '168' || inputs.lookback_hours }}
-          PR_NUMBER: ${{ inputs.pr_number }}
+          # TEMPORARY single-PR test (#5893, approved by dexters1 only); remove before merging.
+          PR_NUMBER: ${{ github.event_name == 'pull_request' && '5893' || inputs.pr_number }}
         run: python3 .github/scripts/linear_review_tickets.py
