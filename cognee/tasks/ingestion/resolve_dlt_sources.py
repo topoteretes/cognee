@@ -413,20 +413,19 @@ async def _build_source_manifest_item(
     }
 
     fk_lookup: dict[tuple[str, str], UUID] = {}
+    shadowed: dict[str, int] = {}
     for key, row in unique_rows.items():
-        node_id = node_ids[key]
         fk_key = (row.table_name, row.primary_key_value)
-        existing = fk_lookup.get(fk_key)
-        if existing is not None and existing != node_id:
-            logger.warning(
-                "Duplicate primary key during FK resolution: table=%s pk=%s. "
-                "FK edges targeting this key resolve to the last row "
-                "(content_hash=%s); earlier rows with this key are shadowed.",
-                row.table_name,
-                row.primary_key_value,
-                row.content_hash,
-            )
-        fk_lookup[fk_key] = node_id
+        if fk_key in fk_lookup:
+            shadowed[row.table_name] = shadowed.get(row.table_name, 0) + 1
+        fk_lookup[fk_key] = node_ids[key]
+    for table_name, count in shadowed.items():
+        logger.warning(
+            "Table '%s': %d rows share a primary key value with an earlier row; a foreign "
+            "key to such a value resolves to the last of those rows.",
+            table_name,
+            count,
+        )
 
     tables: dict[str, dict] = {}
     manifest_rows: list[dict] = []
@@ -444,7 +443,7 @@ async def _build_source_manifest_item(
         manifest_row = {
             "node_id": str(node_ids[key]),
             "table_name": row.table_name,
-            "primary_key_column": row.primary_key_column,
+            "primary_key_column": ", ".join(row.primary_key_columns),
             "primary_key_value": row.primary_key_value,
             "content_hash": row.content_hash,
             "text": _build_schema_context_text(row),
@@ -555,7 +554,7 @@ def _selected_column_values(dlt_row: DltRowData, selection: dict | None) -> dict
     fk_columns = {fk.get("column", "") for fk in dlt_row.foreign_keys}
     picked = {}
     for column, value in dlt_row.row_data.items():
-        if column == dlt_row.primary_key_column or column in fk_columns:
+        if column in dlt_row.primary_key_columns or column in fk_columns:
             continue
         if not column_selected(selection, dlt_row.table_name, column):
             continue
