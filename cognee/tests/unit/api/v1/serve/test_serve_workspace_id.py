@@ -1,9 +1,9 @@
 """serve() records the Cloud workspace id so telemetry can join installs to tenants.
 
-Cognee Cloud answers ``/api/v1/users/me`` with ``active_workspace_id`` (the
-control-plane ``tenants.id``); a self-hosted server answers with fastapi-users'
-``UserRead``, which has none. The saved connection must carry the id for Cloud
-and nothing for self-hosted, and the lookup must never fail a connection.
+``active_workspace_id`` from ``/api/v1/users/me`` is the source of truth; until
+Cloud tenant instances return it, the id comes from the instance URL
+(``https://tenant-<id>.aws.cognee.ai``). Self-hosted servers have neither, so
+nothing is recorded, and the lookup must never fail a connection.
 """
 
 import uuid
@@ -12,7 +12,10 @@ import pytest
 from aiohttp import web
 
 from cognee.api.v1.serve import credentials, state
+from cognee.api.v1.serve.cloud_client import CloudClient, _tenant_id_from_cloud_url
 from cognee.api.v1.serve.serve import _serve_direct, _serve_saved
+
+TENANT_ID = "f7974d52-a58b-4497-8c9c-5369fa413d41"
 
 
 async def _start_instance(users_me):
@@ -47,12 +50,55 @@ async def _connect(users_me):
     return credentials.load_credentials()
 
 
+def _user_read(tenant_id):
+    """What an OSS server (and today's Cloud tenant instance) returns from /users/me."""
+    return {
+        "id": str(uuid.uuid4()),
+        "email": "a@example.com",
+        "is_active": True,
+        "is_superuser": False,
+        "is_verified": True,
+        "parent_user_id": None,
+        "tenant_id": tenant_id,
+    }
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        f"https://tenant-{TENANT_ID}.aws.cognee.ai",
+        f"https://tenant-{TENANT_ID}.aws.cognee.ai/",
+        f"https://{TENANT_ID}.aws.cognee.ai",
+        f"https://TENANT-{TENANT_ID.upper()}.aws.cognee.ai",
+    ],
+)
+def test_tenant_id_is_read_from_a_cloud_instance_url(url):
+    assert _tenant_id_from_cloud_url(url) == TENANT_ID
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        f"https://tenant-{TENANT_ID}.example.com",  # not Cloud, even with a UUID
+        f"https://{TENANT_ID}.cognee.ai.example.com",
+        "https://platform.cognee.ai",  # Cloud host without a tenant
+        "http://localhost:8000",
+        "https://[bad",
+        "",
+    ],
+)
+def test_no_tenant_id_from_other_urls(url):
+    assert _tenant_id_from_cloud_url(url) == ""
+
+
 @pytest.mark.asyncio
-async def test_cloud_connection_saves_the_workspace_id(credentials_file):
+async def test_active_workspace_id_is_saved_from_any_host(credentials_file):
     workspace_id = str(uuid.uuid4())
 
     async def users_me(request):
-        return web.json_response({"id": str(uuid.uuid4()), "active_workspace_id": workspace_id})
+        return web.json_response(
+            {**_user_read(str(uuid.uuid4())), "active_workspace_id": workspace_id}
+        )
 
     creds = await _connect(users_me)
 
@@ -60,13 +106,27 @@ async def test_cloud_connection_saves_the_workspace_id(credentials_file):
 
 
 @pytest.mark.asyncio
-async def test_self_hosted_connection_saves_no_workspace(credentials_file):
+async def test_self_hosted_tenant_id_is_not_recorded(credentials_file):
+    """A self-hosted server reports its local tenant_id; it is not a Cloud tenant."""
+
     async def users_me(request):
-        return web.json_response({"id": str(uuid.uuid4()), "email": "a@example.com"})
+        return web.json_response(_user_read(str(uuid.uuid4())))
 
     creds = await _connect(users_me)
 
     assert creds.tenant_id == ""
+
+
+@pytest.mark.asyncio
+async def test_cloud_url_is_the_fallback_when_users_me_has_no_workspace(monkeypatch):
+    client = CloudClient(f"https://tenant-{TENANT_ID}.aws.cognee.ai", "ck_x")
+
+    async def unreachable():
+        raise ConnectionError("no network in unit tests")
+
+    monkeypatch.setattr(client, "_get_session", unreachable)
+
+    assert await client._get_workspace_id() == TENANT_ID
 
 
 @pytest.mark.asyncio
@@ -94,7 +154,7 @@ async def test_saved_connection_without_workspace_is_backfilled(credentials_file
     workspace_id = str(uuid.uuid4())
 
     async def users_me(request):
-        return web.json_response({"active_workspace_id": workspace_id})
+        return web.json_response({**_user_read(None), "active_workspace_id": workspace_id})
 
     runner, url = await _start_instance(users_me)
     try:
