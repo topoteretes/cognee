@@ -593,6 +593,8 @@ def _stub_code_graph_tasks(monkeypatch):
     monkeypatch.setattr(module, "extract_code_graph", extract)
     monkeypatch.setattr(module, "add_code_graph_data_points", AsyncMock(return_value=[]))
     monkeypatch.setattr(module, "add_code_graph_edges", AsyncMock(return_value=[]))
+    # The docs tail that follows the edges (test_code_graph_docs_tail covers it).
+    monkeypatch.setattr(module, "add_code_graph_docs", AsyncMock(return_value=[]))
     return extract
 
 

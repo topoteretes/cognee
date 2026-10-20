@@ -87,4 +87,8 @@ def send_api_exception_telemetry(
             # The exception class itself is malformed — our bug, not a user error.
             properties["improperly_defined_exception"] = True
 
-        send_telemetry(API_EXCEPTION_EVENT, None, additional_properties=properties)
+        # The caller get_authenticated_user stored on the request, so the event
+        # carries its id, tenant and agent fields; None for an error raised
+        # before authentication (or on a route without it).
+        user = getattr(getattr(request, "state", None), "user", None)
+        send_telemetry(API_EXCEPTION_EVENT, user, additional_properties=properties)

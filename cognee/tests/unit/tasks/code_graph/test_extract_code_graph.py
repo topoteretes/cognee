@@ -740,9 +740,17 @@ async def test_public_code_graph_pipeline_accepts_repo_path_payload_with_access_
         lambda run_in_background: execute_in_process,
     )
 
+    # The docs tail is the list's last task; stubbed here (its wiring has its own
+    # tests), it must still run once the graph is loaded, for the snapshot's
+    # repository label and with the pipeline's ctx.
+    code_docs_tail = AsyncMock(return_value={})
+    monkeypatch.setattr(
+        importlib.import_module("cognee.tasks.code_docs"), "code_docs_tail", code_docs_tail
+    )
+
     repo_path = "/tmp/shop"
     result = await cognee.run_custom_pipeline(
-        tasks=get_code_graph_tasks(repo_path, snapshot_dir=FIXTURES_DIR),
+        tasks=get_code_graph_tasks(repo_path, snapshot_dir=FIXTURES_DIR, code_docs=True),
         data=repo_path,
         dataset="code_graph_demo",
         pipeline_name="code_graph_pipeline",
@@ -750,6 +758,9 @@ async def test_public_code_graph_pipeline_accepts_repo_path_payload_with_access_
 
     assert len(result) == 1
     assert len(result[0]) == 17
+    code_docs_tail.assert_awaited_once()
+    assert code_docs_tail.await_args.kwargs["repo"] == "acme/shop"
+    assert isinstance(code_docs_tail.await_args.kwargs["ctx"], PipelineContext)
     # One bulk node load, then the incremental-skip stamp on the repository node.
     assert graph_engine.add_nodes.await_count == 2
     stamped = graph_engine.add_nodes.await_args_list[-1].args[0]

@@ -64,8 +64,10 @@ def get_memify_router() -> APIRouter:
               Unknown names are rejected with 422. Tasks requiring parameters are SDK-only.
         - **enrichmentTasks** Optional[List[str]]: Names of built-in Cognee Tasks to handle enrichment of provided graph/data from extraction tasks.
               Supported names: cognify_session, cognify_agent_trace_feedback, apply_feedback_weights,
-              merge_entity_duplicates, index_data_points, cognify_code_doc_chunks, add_data_points,
-              add_code_doc_edges.
+              merge_entity_duplicates, index_data_points, cognify_code_doc_chunks, store_code_docs,
+              add_data_points, add_code_doc_edges. The code docs chain is ["store_code_docs",
+              "add_code_doc_edges"] (entity mode: "cognify_code_doc_chunks" first); store_code_docs
+              writes only the docs the graph lacks, add_data_points writes everything it is handed.
         - **data** Optional[List[str]]: The data to ingest. Can be any text data when custom extraction and enrichment tasks are used.
               Data provided here will be forwarded to the first extraction task in the pipeline as input.
               If no data is provided the whole graph (or subgraph if node_name/node_type is specified) will be forwarded,

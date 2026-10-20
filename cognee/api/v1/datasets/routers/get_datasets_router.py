@@ -710,7 +710,7 @@ def get_datasets_router() -> APIRouter:
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "GET /v1/datasets/status/progress",
                 "datasets": [str(dataset_id) for dataset_id in datasets],

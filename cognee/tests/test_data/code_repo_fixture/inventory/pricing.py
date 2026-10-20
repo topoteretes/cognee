@@ -14,6 +14,10 @@ def line_total(unit_price, quantity):
 
 
 def compute_total(lines):
+    """Total of the (unit price, quantity) lines, tax included.
+
+    Rounded down to whole cents, so the total never exceeds the exact taxed sum.
+    """
     subtotal = sum(line_total(price, qty) for price, qty in lines)
     return math.floor(subtotal * (1 + TAX_RATE) * 100) / 100
 

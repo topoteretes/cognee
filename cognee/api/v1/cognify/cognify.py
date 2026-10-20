@@ -15,6 +15,7 @@ from cognee.modules.cognify.config import (
     GLINER_DEMO_EXTRACTOR,
     ensure_extractor_runtime,
     get_cognify_config,
+    resolve_code_docs,
     resolve_extractor,
     resolve_summary_method,
 )
@@ -159,6 +160,7 @@ async def cognify(
     summary_method: Literal["llm", "from_extraction"] | None = None,
     early_chunk_indexing: bool | None = None,
     document_caching: bool | None = None,
+    code_docs: bool | None = None,
     **kwargs,
 ):
     """
@@ -298,6 +300,15 @@ async def cognify(
                  (``DOCUMENTS_LEXICAL``, BM25) answer seconds after the data was
                  added. The explicit argument wins over the DOCUMENT_CACHING setting
                  (on by default). Raises while connected to a remote instance.
+        code_docs: Whether the code routes (code files and code repositories) also
+                 store the docstrings enola extracted (its docs.jsonl) as
+                 DocumentChunks linked to the code graph by ``describes`` edges, so recall / CHUNKS / GRAPH_COMPLETION
+                 answer "what does X do" from the docstring and reach the symbol.
+                 The code graph itself never calls the LLM; the chunks are embedded
+                 (with the local fastembed model when no key is configured). The
+                 explicit argument wins over the CODE_GRAPH_DOCS setting (on by
+                 default); False builds the code graph alone. Raises while
+                 connected to a remote instance.
 
     Returns:
         Union[dict, list[PipelineRunInfo], DryRunEstimate]:
@@ -394,6 +405,7 @@ async def cognify(
     # other than what the caller selected.
     resolved_extractor = resolve_extractor(extractor, cognify_config)
     resolved_summary_method = resolve_summary_method(summary_method, cognify_config)
+    resolved_code_docs = resolve_code_docs(code_docs, cognify_config)
 
     if dry_run and resolved_extractor == GLINER_DEMO_EXTRACTOR:
         raise ValueError(
@@ -451,6 +463,13 @@ async def cognify(
         if document_caching is not None:
             raise ValueError(
                 "document_caching is not supported while connected to a remote Cognee "
+                "instance. Call cognee.disconnect() to choose it locally."
+            )
+        if code_docs is not None:
+            # Same as extractor: client.cognify() has no code_docs field, so the
+            # remote would run its own CODE_GRAPH_DOCS setting.
+            raise ValueError(
+                "code_docs is not supported while connected to a remote Cognee "
                 "instance. Call cognee.disconnect() to choose it locally."
             )
         return await client.cognify(
@@ -604,8 +623,8 @@ async def cognify(
             CognifyRoute.DLT_SOURCE: await get_dlt_tasks(
                 chunk_size=chunk_size, chunks_per_batch=chunks_per_batch
             ),
-            CognifyRoute.CODE: get_code_file_tasks(),
-            CognifyRoute.CODE_REPO: get_code_repo_tasks(),
+            CognifyRoute.CODE: get_code_file_tasks(code_docs=resolved_code_docs),
+            CognifyRoute.CODE_REPO: get_code_repo_tasks(code_docs=resolved_code_docs),
         }
 
         def resolve_cognify_tasks(data_item):
