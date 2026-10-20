@@ -1081,11 +1081,17 @@ class LanceDBAdapter(VectorDBInterface):
 
         async with self.VECTOR_DB_LOCK:
             connection = await self.get_connection()
-            await connection.drop_table(collection_name)
-            await connection.create_table(
-                name=collection_name,
-                schema=self._schema_for_create_table(MigrationLanceDataPoint),
-            )
+            schema = self._schema_for_create_table(MigrationLanceDataPoint)
+            if had_lexical_index:
+                # Replaced in place, not dropped: on Windows the open files of
+                # a full-text index survive drop_table, and a table created
+                # again under the name reads the dropped one's manifest. An
+                # overwrite starts a new version without the index and deletes
+                # nothing; compaction prunes the old version later.
+                await connection.create_table(name=collection_name, schema=schema, mode="overwrite")
+            else:
+                await connection.drop_table(collection_name)
+                await connection.create_table(name=collection_name, schema=schema)
             collection = await connection.open_table(collection_name)
 
             if typed_old_rows:

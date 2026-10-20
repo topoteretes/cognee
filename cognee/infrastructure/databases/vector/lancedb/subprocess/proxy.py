@@ -550,8 +550,10 @@ class RemoteLanceDBConnection:
         return list(resp.result or [])
 
     async def create_table(
-        self, name: str, schema: pa.Schema, exist_ok: bool = True
+        self, name: str, schema: pa.Schema, exist_ok: bool = True, mode: str | None = None
     ) -> RemoteLanceDBTable:
+        """Mirrors ``lancedb.AsyncConnection.create_table``; ``mode="overwrite"``
+        replaces an existing table in place."""
         await self._ensure_connected()
         # Use Arrow's native IPC schema serialization rather than pickle —
         # the worker is otherwise an unconditional ``pickle.loads`` target
@@ -559,9 +561,10 @@ class RemoteLanceDBConnection:
         # typed, structured format and ``read_schema`` rejects anything
         # that isn't a valid Arrow schema.
         schema_bytes = schema.serialize().to_pybytes()
-        await self._session.call_async(
-            Request(op=OP_CREATE_TABLE, args=(name, schema_bytes, exist_ok))
+        args = (
+            (name, schema_bytes, exist_ok) if mode is None else (name, schema_bytes, exist_ok, mode)
         )
+        await self._session.call_async(Request(op=OP_CREATE_TABLE, args=args))
         return await self.open_table(name)
 
     async def open_table(self, name: str) -> RemoteLanceDBTable:
