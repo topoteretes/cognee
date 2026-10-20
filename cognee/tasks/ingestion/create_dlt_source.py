@@ -55,8 +55,11 @@ def create_dlt_source_from_connection_string(
     import sqlalchemy
     from dlt.sources.sql_database import sql_database
 
+    _require_database_ingestion_allowed()
     if connection_string.startswith("sqlite:///"):
         connection_string = _allowed_sqlite_connection_string(connection_string)
+    else:
+        _require_foreign_database_server(connection_string)
 
     if query:
         table_name, where_clause = _parse_sql_query(query)
@@ -143,6 +146,153 @@ def _allowed_sqlite_connection_string(connection_string: str) -> str:
         ) from error
 
     return url.set(database=database_path).render_as_string(hide_password=False)
+
+
+ALLOW_DATABASE_INGESTION_ENV = "ALLOW_DATABASE_INGESTION"
+
+# Default ports of the network schemes ``DB_CONNECTION_PATTERNS`` accepts, for
+# comparing a connection string that omits its port with cognee's own servers.
+_DEFAULT_PORTS = {
+    "postgresql": 5432,
+    "postgres": 5432,
+    "mysql": 3306,
+    "mssql": 1433,
+    "oracle": 1521,
+}
+
+# Query options that move a connection to another target than the URL's host
+# and port: a libpq host / hostaddr / port / service override, or a socket.
+_TARGET_OVERRIDE_OPTIONS = frozenset(
+    {"host", "hostaddr", "port", "service", "servicefile", "unix_socket"}
+)
+
+
+def _require_database_ingestion_allowed() -> None:
+    """Refuse every connection-string source when ``ALLOW_DATABASE_INGESTION`` is off.
+
+    On by default. A deployment that serves callers it does not trust turns it
+    off: the server connects with its own network position, so a caller who can
+    name a database can read any one the server reaches.
+    """
+    from cognee.exceptions import CogneeValidationError
+    from cognee.tasks.web_scraper.ssrf_protection import _FALSEY
+
+    if os.getenv(ALLOW_DATABASE_INGESTION_ENV, "true").strip().lower() in _FALSEY:
+        raise CogneeValidationError(
+            message="Ingesting a database from a connection string is disabled on this "
+            f"server ({ALLOW_DATABASE_INGESTION_ENV}=false).",
+            name="DatabaseIngestionDisabled",
+        )
+
+
+def _require_foreign_database_server(connection_string: str) -> None:
+    """Raise when a network connection string targets a server cognee itself uses.
+
+    Matched by server (resolved address + port), not database name: the per-dataset
+    Postgres handlers keep one database per dataset on the same server, so any
+    database there may belong to another user.
+    """
+    from sqlalchemy.engine import make_url
+
+    from cognee.exceptions import CogneeValidationError
+
+    url = make_url(connection_string)
+    # A target the URL does not state (a socket, a host or service given as an
+    # option) cannot be compared with cognee's servers; refuse rather than guess.
+    if not url.host or _TARGET_OVERRIDE_OPTIONS & set(url.query):
+        raise CogneeValidationError(
+            message="Database connection strings must name the server as the URL's "
+            "host, without socket, host, port or service options.",
+            name="DatabaseSourceRefused",
+        )
+    target = _server_addresses(url.host, url.port or _DEFAULT_PORTS.get(url.get_backend_name()))
+    if not target:
+        raise CogneeValidationError(
+            message=f"The database host '{url.host}' does not resolve.",
+            name="DatabaseSourceRefused",
+        )
+    if _shares_a_server(target, get_cognee_database_servers()):
+        raise CogneeValidationError(
+            message="This database server is part of cognee's own storage and cannot be "
+            "ingested as a source.",
+            name="DatabaseSourceRefused",
+        )
+
+
+def get_cognee_database_servers() -> set[tuple[str, int | None]]:
+    """Every ``(address, port)`` of a database server cognee's settings point at.
+
+    Read from the relational, vector, graph and session-cache settings, whether set
+    as a URL or as host and port. A port of ``None`` stands for every port on that
+    address. Hosts that do not resolve are left out: cognee cannot reach them either.
+    """
+    from sqlalchemy.engine import make_url
+    from sqlalchemy.exc import ArgumentError
+
+    from cognee.infrastructure.databases.cache.config import get_cache_config
+    from cognee.infrastructure.databases.graph.config import get_graph_config
+    from cognee.infrastructure.databases.relational.config import get_relational_config
+    from cognee.infrastructure.databases.vector.config import get_vectordb_config
+
+    relational = get_relational_config()
+    vector = get_vectordb_config()
+    graph = get_graph_config()
+
+    endpoints: list[tuple[str | None, int | None]] = [
+        (relational.db_host, _port(relational.db_port)),
+        (vector.vector_db_host, _port(vector.vector_db_port)),
+        (graph.graph_database_host, _port(graph.graph_database_port)),
+    ]
+    for value in (vector.vector_db_url, graph.graph_database_url, get_cache_config().cache_db_url):
+        if not value or "://" not in value:
+            continue
+        try:
+            url = make_url(value)
+        except ArgumentError:
+            continue
+        endpoints.append((url.host, url.port or _DEFAULT_PORTS.get(url.get_backend_name())))
+
+    servers: set[tuple[str, int | None]] = set()
+    for host, port in endpoints:
+        if host:
+            servers |= _server_addresses(host, port)
+    return servers
+
+
+def _shares_a_server(
+    target: set[tuple[str, int | None]], servers: set[tuple[str, int | None]]
+) -> bool:
+    """True when an address of ``target`` is one of ``servers`` on the same port.
+
+    A ``None`` port on either side matches every port on that address.
+    """
+    return any(
+        address == server_address and (port is None or server_port is None or port == server_port)
+        for address, port in target
+        for server_address, server_port in servers
+    )
+
+
+def _server_addresses(host: str, port: int | None) -> set[tuple[str, int | None]]:
+    """``host`` resolved to its addresses, each paired with ``port``; empty if unresolvable.
+
+    Resolving makes ``localhost``, ``127.0.0.1`` and a service name for the same
+    server compare equal.
+    """
+    import socket
+
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except (socket.gaierror, UnicodeError):
+        return set()
+    return {(info[4][0], port) for info in infos}
+
+
+def _port(value) -> int | None:
+    try:
+        return int(value) if value else None
+    except (TypeError, ValueError):
+        return None
 
 
 CSV_DELIMITER_CANDIDATES = (",", ";", "\t", "|")
