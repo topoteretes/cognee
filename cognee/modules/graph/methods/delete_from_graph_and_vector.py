@@ -1,5 +1,6 @@
 from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 from cognee.infrastructure.databases.vector.get_vector_engine import get_vector_engine_async
+from cognee.infrastructure.engine.utils.vector_fields import node_vector_fields
 from cognee.modules.engine.utils import generate_node_id
 from cognee.modules.graph.legacy.mark_ledger_as_deleted import (
     mark_ledger_edges_as_deleted,
@@ -70,7 +71,7 @@ async def delete_from_graph_and_vector(
     # Delete from vector DB - group by collection
     affected_vector_collections: dict[str, list[Node]] = {}
     for node in unique_nodes:
-        for indexed_field in node.indexed_fields:
+        for indexed_field in node_vector_fields(node.type, node.indexed_fields):
             collection_name = f"{node.type}_{indexed_field}"
             affected_vector_collections.setdefault(collection_name, []).append(node)
 

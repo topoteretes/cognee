@@ -4,6 +4,7 @@ from cognee.api.v1.exceptions.exceptions import DocumentSubgraphNotFoundError
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.engine.utils.vector_fields import vector_fields_of
 from cognee.modules.data.models import Data
 from cognee.modules.graph.methods.deleted_graph_elements import DeletedGraphElements
 from cognee.modules.graph.models.EdgeType import EdgeType
@@ -41,8 +42,8 @@ async def legacy_delete(data: Data, mode: str = "soft"):
     vector_collections = []
 
     for subclass in subclasses:
-        index_fields = subclass.model_fields["metadata"].default.get("index_fields", [])
-        for field_name in index_fields:
+        # Embedded and lexical-only fields alike have a collection (SDK-397).
+        for field_name in vector_fields_of(subclass.model_fields["metadata"].default):
             vector_collections.append(f"{subclass.__name__}_{field_name}")
 
     # If no collections found, use default collections

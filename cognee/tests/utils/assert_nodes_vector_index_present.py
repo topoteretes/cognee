@@ -1,5 +1,6 @@
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.engine.models.DataPoint import DataPoint
+from cognee.infrastructure.engine.utils.vector_fields import vector_fields_of
 
 
 async def assert_nodes_vector_index_present(data_points: list[DataPoint]):
@@ -9,7 +10,7 @@ async def assert_nodes_vector_index_present(data_points: list[DataPoint]):
 
     for data_point in data_points:
         node_metadata = data_point.metadata or {}
-        collection_name = data_point.type + "_" + node_metadata["index_fields"][0]
+        collection_name = data_point.type + "_" + vector_fields_of(node_metadata)[0]
 
         if collection_name not in data_points_by_vector_collection:
             data_points_by_vector_collection[collection_name] = []

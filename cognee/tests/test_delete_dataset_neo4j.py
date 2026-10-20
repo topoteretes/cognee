@@ -9,6 +9,7 @@ import cognee
 from cognee.api.v1.datasets import datasets
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine_async
+from cognee.infrastructure.engine.utils.vector_fields import vector_fields_of
 from cognee.infrastructure.llm import LLMGateway
 from cognee.modules.engine.operations.setup import setup
 from cognee.modules.users.methods import create_user, get_default_user
@@ -148,7 +149,8 @@ async def main(mock_create_structured_output: AsyncMock):
     initial_nodes, initial_edges = await graph_engine.get_graph_data()
     # 15 data nodes + EdgeType nodes from index_graph_edges (one per unique relationship_name)
     data_nodes = [n for n in initial_nodes if n[1].get("type") != "EdgeType"]
-    assert len(data_nodes) == 15, f"Expected 15 data nodes, got {len(data_nodes)}"
+    # 17 = 15 graph nodes + one CachedDocument per document (caching pipeline, SDK-397).
+    assert len(data_nodes) == 17, f"Expected 17 data nodes, got {len(data_nodes)}"
     assert len(initial_edges) == 19, f"Expected 19 edges, got {len(initial_edges)}"
 
     initial_nodes_by_vector_collection = {}
@@ -156,7 +158,7 @@ async def main(mock_create_structured_output: AsyncMock):
     for node in initial_nodes:
         node_data = node[1]
         node_metadata = json.loads(node_data["metadata"])
-        collection_name = node_data["type"] + "_" + node_metadata["index_fields"][0]
+        collection_name = node_data["type"] + "_" + vector_fields_of(node_metadata)[0]
         if collection_name not in initial_nodes_by_vector_collection:
             initial_nodes_by_vector_collection[collection_name] = []
         initial_nodes_by_vector_collection[collection_name].append(node)
@@ -168,8 +170,8 @@ async def main(mock_create_structured_output: AsyncMock):
 
     nodes, edges = await graph_engine.get_graph_data()
     remaining_data_nodes = [n for n in nodes if n[1].get("type") != "EdgeType"]
-    assert len(remaining_data_nodes) == 9 and len(edges) == 10, (
-        f"Expected 9 data nodes and 10 edges after first delete, got {len(remaining_data_nodes)} and {len(edges)}"
+    assert len(remaining_data_nodes) == 10 and len(edges) == 10, (
+        f"Expected 10 data nodes and 10 edges after first delete, got {len(remaining_data_nodes)} and {len(edges)}"
     )
     assert not any(
         node[1]["name"] == "john" or node[1]["name"] == "food for hungry"
@@ -183,7 +185,7 @@ async def main(mock_create_structured_output: AsyncMock):
     for node in initial_nodes:
         node_data = node[1]
         node_metadata = json.loads(node_data["metadata"])
-        collection_name = node_data["type"] + "_" + node_metadata["index_fields"][0]
+        collection_name = node_data["type"] + "_" + vector_fields_of(node_metadata)[0]
         if collection_name not in after_delete_nodes_by_vector_collection:
             after_delete_nodes_by_vector_collection[collection_name] = []
         after_delete_nodes_by_vector_collection[collection_name].append(node)

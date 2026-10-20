@@ -10,6 +10,7 @@ from cognee.api.v1.datasets import datasets
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine_async
+from cognee.infrastructure.engine.utils.vector_fields import vector_fields_of
 from cognee.infrastructure.llm import LLMGateway
 from cognee.infrastructure.locks import dataset_lock
 from cognee.modules.engine.operations.setup import setup
@@ -154,8 +155,9 @@ async def test_delete_dataset_ladybug(mock_create_structured_output: AsyncMock):
     graph_engine = await get_graph_engine()
     johns_initial_nodes, johns_initial_edges = await graph_engine.get_graph_data()
     johns_data_nodes = [n for n in johns_initial_nodes if n[1].get("type") != "EdgeType"]
-    assert len(johns_data_nodes) == 9 and len(johns_initial_edges) == 10, (
-        f"Expected 9 data nodes and 10 edges for John, got {len(johns_data_nodes)} and {len(johns_initial_edges)}"
+    # 10 = 9 graph nodes + the document's CachedDocument (caching pipeline, SDK-397).
+    assert len(johns_data_nodes) == 10 and len(johns_initial_edges) == 10, (
+        f"Expected 10 data nodes and 10 edges for John, got {len(johns_data_nodes)} and {len(johns_initial_edges)}"
     )
 
     # Canonical lock order (SDK-483): hold the dataset lock before the legacy
@@ -166,15 +168,15 @@ async def test_delete_dataset_ladybug(mock_create_structured_output: AsyncMock):
     graph_engine = await get_graph_engine()
     maries_initial_nodes, maries_initial_edges = await graph_engine.get_graph_data()
     maries_data_nodes = [n for n in maries_initial_nodes if n[1].get("type") != "EdgeType"]
-    assert len(maries_data_nodes) == 9 and len(maries_initial_edges) == 10, (
-        f"Expected 9 data nodes and 10 edges for Marie, got {len(maries_data_nodes)} and {len(maries_initial_edges)}"
+    assert len(maries_data_nodes) == 10 and len(maries_initial_edges) == 10, (
+        f"Expected 10 data nodes and 10 edges for Marie, got {len(maries_data_nodes)} and {len(maries_initial_edges)}"
     )
 
     johns_initial_nodes_by_collection = {}
 
     for node in johns_initial_nodes:
         node_data = node[1]
-        collection_name = node_data["type"] + "_" + node_data["metadata"]["index_fields"][0]
+        collection_name = node_data["type"] + "_" + vector_fields_of(node_data["metadata"])[0]
         if collection_name not in johns_initial_nodes_by_collection:
             johns_initial_nodes_by_collection[collection_name] = []
         johns_initial_nodes_by_collection[collection_name].append(node)
@@ -183,7 +185,7 @@ async def test_delete_dataset_ladybug(mock_create_structured_output: AsyncMock):
 
     for node in maries_initial_nodes:
         node_data = node[1]
-        collection_name = node_data["type"] + "_" + node_data["metadata"]["index_fields"][0]
+        collection_name = node_data["type"] + "_" + vector_fields_of(node_data["metadata"])[0]
         if collection_name not in maries_initial_nodes_by_collection:
             maries_initial_nodes_by_collection[collection_name] = []
         maries_initial_nodes_by_collection[collection_name].append(node)

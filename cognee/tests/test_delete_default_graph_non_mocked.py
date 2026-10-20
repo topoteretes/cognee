@@ -9,6 +9,7 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.provenance import make_source_ref_key
 from cognee.infrastructure.databases.provenance.markers import stores_provenance_in_graph
 from cognee.infrastructure.databases.vector import get_vector_engine_async
+from cognee.infrastructure.engine.utils.vector_fields import vector_fields_of
 from cognee.modules.engine.operations.setup import setup
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
@@ -86,7 +87,7 @@ async def main():
             if type(node_data["metadata"]) is dict
             else json.loads(node_data["metadata"])
         )
-        collection_name = node_data["type"] + "_" + node_metadata["index_fields"][0]
+        collection_name = node_data["type"] + "_" + vector_fields_of(node_metadata)[0]
         if collection_name not in initial_nodes_by_vector_collection:
             initial_nodes_by_vector_collection[collection_name] = []
         initial_nodes_by_vector_collection[collection_name].append(node)
@@ -140,7 +141,7 @@ async def main():
             if type(node_data["metadata"]) is dict
             else json.loads(node_data["metadata"])
         )
-        collection_name = node_data["type"] + "_" + node_metadata["index_fields"][0]
+        collection_name = node_data["type"] + "_" + vector_fields_of(node_metadata)[0]
         if collection_name not in after_delete_nodes_by_vector_collection:
             after_delete_nodes_by_vector_collection[collection_name] = []
         after_delete_nodes_by_vector_collection[collection_name].append(node)

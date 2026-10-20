@@ -15,8 +15,8 @@ Vectors are deleted first so that a failure leaves graph provenance intact and a
 retry converges. All three steps are individually idempotent.
 
 Vector ids mirror ``delete_from_graph_and_vector``:
-  - node -> collection ``f"{node_type}_{field}"`` for each indexed field,
-    id = node_id;
+  - node -> collection ``f"{node_type}_{field}"`` for each indexed field and
+    each lexical field of the type (``node_vector_fields``), id = node_id;
   - edge -> ``EdgeType.id_for(edge_text)`` in ``EdgeType_relationship_name``;
     ``generate_node_id(source_id + relationship_name + target_id)`` in
     ``Triplet_text`` (best-effort; legacy rows only — cognee no longer writes
@@ -31,6 +31,7 @@ from cognee.infrastructure.databases.provenance import (
     EdgeIdentity,
     NodeDeleteData,
 )
+from cognee.infrastructure.engine.utils.vector_fields import node_vector_fields
 from cognee.modules.engine.utils import generate_node_id
 from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
@@ -99,7 +100,9 @@ async def execute_source_ref_removal(
     node_vector_collections: dict[str, list[str]] = {}
     for node_id in unowned_node_ids:
         data = node_data[node_id]
-        for field in data.indexed_fields:
+        # The embedded fields the snapshot carries plus the type's lexical-only
+        # ones (a cached document's text has no embedding, only a keyword-index row).
+        for field in node_vector_fields(data.node_type, data.indexed_fields):
             collection_name = f"{data.node_type}_{field}"
             node_vector_collections.setdefault(collection_name, []).append(node_id)
 
