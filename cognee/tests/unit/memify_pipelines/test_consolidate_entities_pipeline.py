@@ -338,6 +338,42 @@ async def test_merge_without_clusters_is_noop():
 # --------------------------------------------------------------------------- #
 # belongs_to_set union + canonical id preservation
 # --------------------------------------------------------------------------- #
+def test_build_canonical_entity_decodes_json_string_metadata():
+    from cognee.tasks.memify.consolidate_entities import _build_canonical_entity
+
+    canonical_id = str(uuid4())
+    canonical = {
+        "id": canonical_id,
+        "name": "patse-ops",
+        "type": "project",
+        "description": "ops tooling",
+        "belongs_to_set": ["homelab"],
+        "props": {
+            "id": canonical_id,
+            "name": "patse-ops",
+            "description": "ops tooling",
+            "belongs_to_set": ["homelab"],
+            # Neo4j cannot store nested maps: dict-valued properties come back as JSON text.
+            "metadata": '{"index_fields": ["name"], "identity_fields": ["name"]}',
+        },
+    }
+    duplicate = {
+        "id": str(uuid4()),
+        "name": "patse ops",
+        "type": "project",
+        "description": "the same ops tooling",
+        "belongs_to_set": ["ipse-patse"],
+        "props": {},
+    }
+
+    entity = _build_canonical_entity(canonical, duplicate and [duplicate])
+
+    assert entity is not None
+    assert str(entity.id) == canonical_id
+    assert entity.metadata == {"index_fields": ["name"], "identity_fields": ["name"]}
+    assert set(entity.belongs_to_set) == {"homelab", "ipse-patse"}
+
+
 def test_union_belongs_to_set_handles_mixed_shapes_and_dedups():
     members = [
         {"belongs_to_set": ["a", "b"]},
