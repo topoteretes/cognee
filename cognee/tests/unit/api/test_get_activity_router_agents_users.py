@@ -6,6 +6,8 @@ matter what the queries filter on; real rows are what prove the caller never
 sees the other user, their agent, or anything computed from their activity.
 """
 
+import asyncio
+import contextvars
 import importlib
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -191,3 +193,112 @@ def test_users_without_a_tenant_is_empty(monkeypatch):
 
     assert response.status_code == 200
     assert response.json() == []
+
+
+# --------------------------------------------------------------------------- #
+# /spans
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def span_buffer(monkeypatch):
+    """A real in-memory span buffer, filled the way requests fill it."""
+    pytest.importorskip("opentelemetry.sdk.trace")
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+
+    from cognee.modules.observability import tracing as tracing_module
+
+    exporter = tracing_module.CogneeSpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr(tracing_module, "get_exporter", lambda: exporter)
+
+    tracer = provider.get_tracer("test")
+
+    def record(owner, root_name):
+        """One trace finished under ``owner`` (None: no request started it)."""
+        from opentelemetry import context as otel_context
+
+        def run():
+            if owner is not None:
+                tracing_module.bind_trace_owner(owner)
+            token = otel_context.attach(otel_context.Context())
+            try:
+                with (
+                    tracer.start_as_current_span(root_name),
+                    tracer.start_as_current_span("cognee.db.query"),
+                ):
+                    pass
+            finally:
+                otel_context.detach(token)
+
+        contextvars.copy_context().run(run)
+
+    yield record
+    provider.shutdown()
+
+
+def _root_names(response):
+    return {trace["root_name"] for trace in response.json()}
+
+
+def test_spans_returns_the_callers_and_their_agents_traces_only(two_users, span_buffer):
+    span_buffer(two_users.alice, "alice.recall")
+    span_buffer(two_users.alice_agent, "alice_agent.remember")
+    span_buffer(two_users.bob, "bob.search")
+    span_buffer(two_users.bob_agent, "bob_agent.remember")
+
+    alice = _client(two_users.alice).get("/activity/spans")
+    bob = _client(two_users.bob).get("/activity/spans")
+    alice_agent = _client(two_users.alice_agent).get("/activity/spans")
+
+    assert alice.status_code == 200
+    assert _root_names(alice) == {"alice.recall", "alice_agent.remember"}
+    assert _root_names(bob) == {"bob.search", "bob_agent.remember"}
+    # An agent has no children: it sees itself, never its parent.
+    assert _root_names(alice_agent) == {"alice_agent.remember"}
+
+
+def test_spans_never_returns_a_trace_with_no_owner(two_users, span_buffer):
+    span_buffer(None, "startup.recovery")
+
+    assert _client(two_users.alice).get("/activity/spans").json() == []
+
+
+def test_spans_names_a_trace_after_its_root_span(two_users, span_buffer):
+    # The child finishes first, so it is buffered first.
+    span_buffer(two_users.alice, "cognee.api.recall")
+
+    (trace,) = _client(two_users.alice).get("/activity/spans").json()
+    assert trace["root_name"] == "cognee.api.recall"
+    assert trace["span_count"] == 2
+
+
+def test_spans_without_tracing_is_empty(two_users, monkeypatch):
+    from cognee.modules.observability import tracing as tracing_module
+
+    monkeypatch.setattr(tracing_module, "get_exporter", lambda: None)
+
+    response = _client(two_users.alice).get("/activity/spans")
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+@pytest.mark.asyncio
+async def test_get_authenticated_user_binds_the_trace_owner(monkeypatch):
+    from cognee.modules.observability import tracing as tracing_module
+
+    auth_module = importlib.import_module("cognee.modules.users.methods.get_authenticated_user")
+    user = SimpleNamespace(id=uuid4())
+
+    async def fake_get_user(_user_id):
+        return user
+
+    monkeypatch.setattr(auth_module, "get_user", fake_get_user)
+
+    async def run():
+        await auth_module.get_authenticated_user(user=SimpleNamespace(id=user.id))
+        return tracing_module.current_trace_owner()
+
+    assert await asyncio.create_task(run()) == str(user.id)
