@@ -61,6 +61,22 @@ _MIN_WORD_LEN = 2
 _RETRY_ON_EMPTY = frozenset({SearchType.CHUNKS_LEXICAL, SearchType.CODING_RULES})
 
 
+def _code_hits(payloads: list[SearchResultPayload]) -> list[SearchResultPayload]:
+    """The routed CODE payloads whose ``ask`` found at least one seed.
+
+    Seed-miss markers (multi-dataset searches) and seedless results are misses.
+    Raises CodeGraphUnavailableError when no searched dataset has a code graph.
+    """
+    from cognee.modules.retrieval.code_retriever import CodeGraphUnavailableError
+
+    if payloads and all((p.completion or {}).get("code") == "no_code_graph" for p in payloads):
+        names = ", ".join(f"'{p.dataset_name}'" for p in payloads)
+        raise CodeGraphUnavailableError(f"No code graph in any searched dataset: {names}.")
+    return [
+        p for p in payloads if isinstance(p.result_object, dict) and p.result_object.get("seeds")
+    ]
+
+
 class RecallKwargs(TypedDict, total=False):
     """Backward-compatible export for callers that import RecallKwargs."""
 
@@ -654,6 +670,7 @@ async def recall(
                 # Set only when the router chose the type, so the retry below
                 # never second-guesses a pinned type or the no-LLM CHUNKS pick.
                 routed_rule = None
+                routed_config = retriever_specific_config
 
                 if query_type is not None:
                     local_query_type = query_type
@@ -669,6 +686,12 @@ async def recall(
                     decision = route_query(query_text)
                     local_query_type = decision.search_type
                     routed_rule = decision.rule
+                    if decision.retriever_config:
+                        # The caller's keys win over the router's.
+                        routed_config = {
+                            **decision.retriever_config,
+                            **(retriever_specific_config or {}),
+                        }
                 else:
                     local_query_type = ROUTER_FALLBACK_TYPE
 
@@ -792,7 +815,9 @@ async def recall(
                             )
                         ]
 
-                async def _search(search_type: SearchType):
+                async def _search(
+                    search_type: SearchType, config: dict | None = retriever_specific_config
+                ):
                     return await authorized_search(
                         query_text=query_text,
                         query_type=search_type,
@@ -808,7 +833,7 @@ async def recall(
                         wide_search_top_k=wide_search_top_k,
                         triplet_distance_penalty=triplet_distance_penalty,
                         feedback_influence=feedback_influence,
-                        retriever_specific_config=retriever_specific_config,
+                        retriever_specific_config=config,
                         neighborhood_depth=neighborhood_depth,
                         neighborhood_seed_top_k=neighborhood_seed_top_k,
                         include_references=include_references,
@@ -824,7 +849,7 @@ async def recall(
                 )
 
                 try:
-                    graph_results = await _search(local_query_type)
+                    graph_results = await _search(local_query_type, routed_config)
                 except (UnsupportedSearchTypeError, SearchTypeNotSupported) as error:
                     if not routed_guess:
                         raise
@@ -849,6 +874,11 @@ async def recall(
                     )
                     local_query_type = ROUTER_FALLBACK_TYPE
                     graph_results = await _search(local_query_type)
+
+                if routed_guess and local_query_type is SearchType.CODE:
+                    # A routed CODE search is a hit or nothing; only a search
+                    # where no dataset has a code graph fails, and loudly.
+                    graph_results = _code_hits(graph_results)
 
                 # A fallback above may have changed the type that answered; the
                 # span recorded the routed one before the search ran.

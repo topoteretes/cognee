@@ -984,6 +984,96 @@ class TestRecallResponseModelParam:
         assert remote_client.recall.await_args.kwargs["response_schema"] is None
 
 
+class TestRecallRoutedConfig:
+    """A route's retriever config reaches the routed search."""
+
+    @staticmethod
+    async def _routed_recall(query: str, payloads=(), **recall_kwargs) -> tuple[list, dict]:
+        """recall()'s results and the kwargs its search ran with."""
+        recall_mod = _get_recall_module()
+        user = MagicMock()
+        user.id = uuid4()
+        authorized_search = AsyncMock(return_value=list(payloads))
+        with (
+            patch("cognee.shared.utils.send_telemetry", lambda *args, **kwargs: None),
+            patch.object(recall_mod, "llm_available", return_value=True),
+            patch.object(recall_mod, "get_default_user", AsyncMock(return_value=user)),
+            patch.object(recall_mod, "set_session_user_context_variable", AsyncMock()),
+            patch.object(_mod_search_methods, "authorized_search", authorized_search),
+        ):
+            results = await recall_mod.recall(query, **recall_kwargs)
+        return results, authorized_search.await_args.kwargs
+
+    @staticmethod
+    def _ask_payload(dataset: str, seeds=()) -> SearchResultPayload:
+        result = {"operation": "ask", "seeds": list(seeds)}
+        return SearchResultPayload(
+            result_object=result,
+            completion=result,
+            search_type=SearchType.CODE,
+            dataset_name=dataset,
+        )
+
+    @staticmethod
+    def _no_code_graph_marker(dataset: str) -> SearchResultPayload:
+        """The payload search reports for a dataset without a code graph."""
+        error = "This dataset has no code graph."
+        return SearchResultPayload(
+            completion={"seed_not_found": True, "error": error, "code": "no_code_graph"},
+            error=error,
+            search_type=SearchType.CODE,
+            dataset_name=dataset,
+        )
+
+    @pytest.mark.asyncio
+    async def test_code_route_runs_ask(self):
+        _, kwargs = await self._routed_recall("What calls parse_config?")
+
+        assert kwargs["query_type"] is SearchType.CODE
+        assert kwargs["retriever_specific_config"] == {
+            "operation": "ask",
+            "question": "parse_config",
+        }
+
+    @pytest.mark.asyncio
+    async def test_caller_config_wins_over_the_route(self):
+        _, kwargs = await self._routed_recall(
+            "What calls parse_config?",
+            retriever_specific_config={"question": "where is config parsed"},
+        )
+
+        assert kwargs["retriever_specific_config"] == {
+            "operation": "ask",
+            "question": "where is config parsed",
+        }
+
+    @pytest.mark.asyncio
+    async def test_code_route_returns_only_datasets_with_seeds(self):
+        results, _ = await self._routed_recall(
+            "What calls parse_config?",
+            [self._ask_payload("hit", seeds=[{"name": "parse_config"}]), self._ask_payload("miss")],
+        )
+
+        assert [result.dataset_name for result in results] == ["hit"]
+
+    @pytest.mark.asyncio
+    async def test_code_route_raises_when_no_dataset_has_a_code_graph(self):
+        from cognee.modules.retrieval.code_retriever import CodeGraphUnavailableError
+
+        markers = [self._no_code_graph_marker("docs"), self._no_code_graph_marker("notes")]
+        with pytest.raises(CodeGraphUnavailableError, match="'docs', 'notes'"):
+            await self._routed_recall("What calls parse_config?", markers)
+
+    @pytest.mark.asyncio
+    async def test_code_route_miss_beside_a_missing_graph_returns_nothing(self):
+        results, _ = await self._routed_recall(
+            "What calls parse_config?",
+            [self._no_code_graph_marker("docs"), self._ask_payload("code")],
+        )
+
+        assert results == []
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("flag", [None, False, True])
 @pytest.mark.parametrize("background", [False, True])

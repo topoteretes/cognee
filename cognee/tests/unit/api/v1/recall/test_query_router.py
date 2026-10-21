@@ -18,6 +18,7 @@ ROUTABLE_TYPES = {
     SearchType.HYBRID_COMPLETION,
     SearchType.CHUNKS_LEXICAL,
     SearchType.CODING_RULES,
+    SearchType.CODE,
     SearchType.TEMPORAL,
 }
 
@@ -28,6 +29,22 @@ GOLDEN = [
     ("What coding rules apply to error handling?", SearchType.CODING_RULES),
     ("Show me the code review guidelines", SearchType.CODING_RULES),
     ("What coding rules apply to gate.py?", SearchType.CODING_RULES),
+    # code_question: code phrasing plus an identifier
+    ("Where is parse_config defined?", SearchType.CODE),
+    ("WHERE IS parse_config DEFINED?", SearchType.CODE),
+    ("What calls route_query?", SearchType.CODE),
+    ("Who imports CodeRetriever?", SearchType.CODE),
+    ("Which classes inherit from BaseRetriever?", SearchType.CODE),
+    ("What does getUser depend on?", SearchType.CODE),
+    ("Show the callers of foo()", SearchType.CODE),
+    ("List the usages of DEFAULT_TIMEOUT", SearchType.CODE),
+    # one code signal alone stays on the default
+    ("What calls the billing service?", SearchType.HYBRID_COMPLETION),
+    ("What did Alice say about parse_config?", SearchType.HYBRID_COMPLETION),
+    ("Which customers use acme.com?", SearchType.HYBRID_COMPLETION),
+    # `use` is not code phrasing: brand names look like CamelCase identifiers
+    ("Which teams use PowerPoint?", SearchType.HYBRID_COMPLETION),
+    ("Who uses McDonald's coupons?", SearchType.HYBRID_COMPLETION),
     # default
     ("Who won Nobel Prizes?", SearchType.HYBRID_COMPLETION),
     ("What did Einstein discover?", SearchType.HYBRID_COMPLETION),
@@ -152,6 +169,11 @@ class TestRouteDecision:
     def test_matching_rule_name(self):
         assert route_query('"polonium and radium"').rule == "quoted_phrase"
         assert route_query("Show me the coding rules").rule == "coding_rules_intent"
+
+    def test_code_route_asks_about_the_identifiers_only(self):
+        decision = route_query("What calls parse_config and getUser?")
+        assert decision.rule == "code_question"
+        assert decision.retriever_config == {"operation": "ask", "question": "parse_config getUser"}
 
     def test_whitespace_is_ignored(self):
         assert route_query('   "polonium and radium"  ').search_type == SearchType.CHUNKS_LEXICAL

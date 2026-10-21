@@ -9,8 +9,9 @@ Auto-routing may only pick a strategy that is at least as good as the HYBRID
 default on a default-built graph and does not add LLM calls without an
 unambiguous signal. HYBRID already searches document chunks, summaries, and the
 entity neighbourhood in one LLM call, so a rule here fires either on an input
-that is not a natural-language question and for which HYBRID is the wrong
-operation rather than a worse one, or — TEMPORAL only — on a question scoped
+for which HYBRID is the wrong operation rather than a worse one — one that is
+not a natural-language question, or a question about code (HYBRID cannot reach
+the code graph) — or — TEMPORAL only — on a question scoped
 to an absolute date, where the target is HYBRID's own candidates reranked by
 that date and never a smaller context. Other question-shaped intent (summary,
 reasoning, context extension) stays reachable only through an explicit
@@ -30,10 +31,12 @@ ROUTER_FALLBACK_TYPE = SearchType.HYBRID_COMPLETION
 
 @dataclass(frozen=True)
 class RouteDecision:
-    """Routing decision: the chosen search type and the rule that picked it."""
+    """Routing decision: the chosen search type, the rule that picked it, and
+    the retriever config the type needs (CODE: which operation to run)."""
 
     search_type: SearchType
     rule: str
+    retriever_config: dict | None = None
 
 
 # The temporal signal: a time preposition followed directly by an absolute date
@@ -69,6 +72,34 @@ _FOR_DATE = (
     rf"|the\s+{_YEAR_AS_OBJECT})"
 )
 
+_CODE_PHRASE = (
+    r"(?i:"
+    r"\bwhere\s+(?:is|are)\b.*\b(?:defined|declared|implemented)\b"
+    r"|\b(?:what|who|which)\b.*\b"
+    r"(?:calls?|imports?|references?|overrides?|implements?"
+    r"|inherits?\s+from|subclass(?:es)?|depends?\s+on)\b"
+    r"|\b(?:callers?|call\s+sites?|usages?|implement(?:ation|er|or)s?)\s+of\b"
+    r")"
+)
+
+_IDENTIFIER = (
+    r"(?:"
+    r"\b_*[A-Za-z][A-Za-z0-9]*_\w+"  # snake_case: parse_config, MAX_SIZE
+    r"|\b[A-Z][a-z0-9]+[A-Z]\w*"  # UpperCamelCase: CodeRetriever
+    r"|\b[a-z][a-z0-9]*[A-Z]\w*"  # lowerCamelCase: getUser
+    r"|\b\w+\(\)"  # call: foo()
+    r")"
+)
+
+# The code signal: a question routes to CODE only when it has both code
+# phrasing (`where is … defined`, `what calls …`) and an identifier
+# (`parse_config`, `CodeRetriever`, `foo()`). A routed CODE search does not
+# fall back to the default when it finds nothing, so one signal alone is not
+# enough: `what calls the billing service?` has no identifier, and `what did
+# Alice say about parse_config?` has no code phrasing. Case-sensitive, because
+# CamelCase is detected by its capital letters.
+_CODE_QUESTION = re.compile(rf"^(?=.*{_CODE_PHRASE})(?=.*{_IDENTIFIER})")
+
 # (rule name, pattern, search type). Shape rules (what the input looks like) come
 # first and win: a quoted string is handled as what it is, even when its text
 # also reads as intent — `"coding rules"` is a lexical search. The temporal rule
@@ -97,6 +128,11 @@ _RULES: tuple[tuple[str, re.Pattern, SearchType], ...] = (
         SearchType.CODING_RULES,
     ),
     (
+        "code_question",
+        _CODE_QUESTION,
+        SearchType.CODE,
+    ),
+    (
         "time_scoped_question",
         re.compile(
             rf"(?:\b{_TIME_PREPOSITION}\s+(?:{_ABSOLUTE_DATE}|the\s+{_YEAR}s)\b|{_FOR_DATE}\b)",
@@ -105,6 +141,17 @@ _RULES: tuple[tuple[str, re.Pattern, SearchType], ...] = (
         SearchType.TEMPORAL,
     ),
 )
+
+
+def _retriever_config(search_type: SearchType, query: str) -> dict | None:
+    """The retriever config a routed type needs, or None when it needs none.
+
+    CODE runs ``ask`` over the query's identifiers only, so words like
+    `defined` or `calls` do not become search terms.
+    """
+    if search_type is not SearchType.CODE:
+        return None
+    return {"operation": "ask", "question": " ".join(re.findall(_IDENTIFIER, query))}
 
 
 def route_query(query: str) -> RouteDecision:
@@ -122,7 +169,11 @@ def route_query(query: str) -> RouteDecision:
     for rule, pattern, search_type in _RULES:
         if pattern.search(stripped):
             logger.debug("query_router: rule=%s routed=%s", rule, search_type.value)
-            return RouteDecision(search_type=search_type, rule=rule)
+            return RouteDecision(
+                search_type=search_type,
+                rule=rule,
+                retriever_config=_retriever_config(search_type, stripped),
+            )
 
     logger.debug("query_router: rule=default routed=%s", ROUTER_FALLBACK_TYPE.value)
     return RouteDecision(search_type=ROUTER_FALLBACK_TYPE, rule="default")

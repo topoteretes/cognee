@@ -82,13 +82,15 @@ like* — come first and win over intent rules, so a quoted string or a Cypher s
 handled as what it is even when its text also reads as intent: `"coding rules"` is a lexical
 search for that phrase, not a request for the rule list. No query in the golden table depends
 on that ordering (a test enforces this). Anything unmatched goes to `HYBRID_COMPLETION`.
-Matching is case-insensitive.
+Matching is case-insensitive, except the identifier check of `code_question`, which tells
+CamelCase by its capital letters.
 
 | # | Rule | Signal in the query | Routes to |
 |---|---|---|---|
 | 1 | `quoted_phrase` | The whole query is one `"quoted phrase"` | `CHUNKS_LEXICAL` |
 | 2 | `coding_rules_intent` | `coding rules` / `coding standards` / `coding conventions`, or `code review guidelines` (and the `rules`, `standards`, `checklist`, `conventions` variants) | `CODING_RULES` |
-| 3 | `time_scoped_question` | A time preposition (`in`, `before`, `after`, `since`, `between`, `from`, `on`, `during`, `as of`, …) directly followed by an absolute date — or `for` followed by one that ends the phrase (`scheduled for 2031`, but not `for 2000 users`): a four-digit year (`in 2019`, `in early 2024`), a decade (`in the 1990s`), a month and year (`in July 1969`), a full date (`on 7 November 1867`, `on March 1, 2024`), or an ISO date (`on 2024-03-01`) | `TEMPORAL` |
+| 3 | `code_question` | Code phrasing — `where is … defined/declared/implemented`, what/who/which followed by `calls`, `imports`, `references`, `overrides`, `implements`, `inherits from`, `subclasses` or `depends on`, or `callers of` / `call sites of` / `usages of` / `implementations of` — **and** an identifier: snake_case (`parse_config`), CamelCase (`CodeRetriever`, `getUser`) or a call (`foo()`) | `CODE` (`ask` over the identifiers) |
+| 4 | `time_scoped_question` | A time preposition (`in`, `before`, `after`, `since`, `between`, `from`, `on`, `during`, `as of`, …) directly followed by an absolute date — or `for` followed by one that ends the phrase (`scheduled for 2031`, but not `for 2000 users`): a four-digit year (`in 2019`, `in early 2024`), a decade (`in the 1990s`), a month and year (`in July 1969`), a full date (`on 7 November 1867`, `on March 1, 2024`), or an ISO date (`on 2024-03-01`) | `TEMPORAL` |
 | — | `default` | Anything else | `HYBRID_COMPLETION` |
 
 `CYPHER` is **not** in the table and never will be. The Cypher retriever runs
@@ -109,7 +111,10 @@ entity neighbourhood in a single LLM call. Almost every alternative strategy
 sees a *subset* of that context, sometimes with an extra round trip attached.
 So each rule above fires on an input that is not a natural-language question at
 all — pasted Cypher, a fully quoted literal, a request for the rule list — and
-for which HYBRID is the wrong operation rather than a worse one. A rule that
+for which HYBRID is the wrong operation rather than a worse one. `code_question` also
+fires on ordinary questions, because for a question about code HYBRID is
+the wrong operation too: code ingestion produces no chunks or embeddings, so HYBRID's
+vector search never reaches the code graph. A rule that
 fires on an ordinary question is a regression even when its target sounds
 better suited.
 
@@ -137,6 +142,16 @@ That is why these are *not* auto-routed, even though they are valid
   the retriever then finds no window and answers as HYBRID. With no LLM
   configured, recall picks `CHUNKS` before the router runs, so a temporal
   question never reaches the interval extraction.
+- `CODE` *is* routed, but only when a question has both code phrasing and an
+  identifier. A routed `CODE` search does not fall back to the default, so one
+  signal alone is not enough: `what calls the billing service?` names no
+  symbol, and `what did Alice say about parse_config?` asks about prose. `use`
+  is not code phrasing, because brand names look like CamelCase identifiers
+  (`which teams use PowerPoint?`), and dotted names are not identifiers,
+  because domains and `e.g.` look like them. The route runs `ask` over the
+  question's identifiers only, so words like `defined` or `calls` do not
+  become search terms. Known limitation: an acronym-led name (`HTTPError`) is
+  not recognised as an identifier.
 - "Exact"/"verbatim" phrasing does not select `CHUNKS_LEXICAL`. BM25 tokenizes
   the raw query, so the trigger word itself becomes a rare, high-IDF search
   term and skews the ranking it was meant to sharpen. `quoted_phrase` has no
@@ -147,14 +162,20 @@ That is why these are *not* auto-routed, even though they are valid
 
 ### When a routed strategy comes up empty
 
-A routed type is a guess, so `recall()` never lets one do worse than the
-default. When the router picked a type **other than the default**, the query is
+A routed type is a guess, so `recall()` does not let one do worse than the
+default — except `CODE`, below. When the router picked a type **other than the default**, the query is
 retried once as `HYBRID_COMPLETION` in two cases:
 
 - the backend rejects the type; or
 - the search returns nothing and the empty result means the lane was
   unavailable — `CHUNKS_LEXICAL` with no lexical hits, `CODING_RULES` on a
   dataset with no rules nodeset.
+
+A routed `CODE` search is retried only when the backend rejects the type, never for its
+result. It returns the datasets whose `ask` found at least one symbol, or nothing when
+none did, and raises `CodeGraphUnavailableError` only when no searched dataset has a code
+graph — with several datasets, one without a code graph is skipped, as a dataset without
+data is.
 
 The search history records the type that actually answered. Two things are
 never second-guessed: a type you pinned yourself returns empty or raises as
