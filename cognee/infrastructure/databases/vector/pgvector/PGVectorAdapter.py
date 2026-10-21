@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import re
 from typing import Any, get_type_hints
 from uuid import UUID
@@ -43,34 +44,79 @@ _ACCESS_CONTROL_DEFAULT_POOL_ARGS = {"pool_size": 2, "max_overflow": 20}
 # 4,000; a larger embedding stays unindexed and is searched by a full scan.
 _HNSW_VECTOR_MAX_DIMENSIONS = 2000
 _HNSW_HALFVEC_MAX_DIMENSIONS = 4000
+# HNSW arrived in pgvector 0.5.0 and the halfvec type in 0.7.0. On an older server a
+# collection is left unindexed and searched by the exact scan, as before.
+_HNSW_MIN_PGVECTOR = (0, 5, 0)
+_HALFVEC_MIN_PGVECTOR = (0, 7, 0)
 # An HNSW scan returns at most hnsw.ef_search rows (default 40); pgvector caps the
 # setting at 1,000, so a larger limit keeps the exact full scan.
 _HNSW_DEFAULT_EF_SEARCH = 40
 _HNSW_MAX_EF_SEARCH = 1000
+# Postgres truncates identifiers to NAMEDATALEN - 1 bytes, with only a NOTICE.
+_PG_MAX_IDENTIFIER_BYTES = 63
+
+PgvectorVersion = tuple[int, ...]
 
 
-def hnsw_index_statement(table_name: str, dimensions: int) -> str | None:
+def parse_pgvector_version(version: str | None) -> PgvectorVersion | None:
+    """``pg_extension.extversion`` ("0.8.0") as a comparable tuple, or None if unknown."""
+    if not version:
+        return None
+    parts = re.findall(r"\d+", version)
+    return tuple(int(part) for part in parts[:3]) if parts else None
+
+
+def hnsw_index_name(table_name: str) -> str:
+    """Index name for a collection, unique per schema even for long collection names.
+
+    A name past 63 bytes would be truncated by Postgres, and two collections sharing their
+    first bytes would get the same index name, so the second one would be silently skipped
+    by ``IF NOT EXISTS``. Long names get a hash of the full table name instead.
+    """
+    name = f"{table_name}_vector_hnsw"
+    if len(name.encode()) <= _PG_MAX_IDENTIFIER_BYTES:
+        return name
+    digest = hashlib.sha1(table_name.encode()).hexdigest()[:12]
+    prefix = table_name.encode()[:40].decode(errors="ignore")
+    return f"{prefix}_{digest}_hnsw"
+
+
+def _indexed_type(dimensions: int, pgvector_version: PgvectorVersion | None) -> str | None:
+    """``vector`` or ``halfvec`` when pgvector can index ``dimensions``, else None."""
+    if pgvector_version is None or pgvector_version < _HNSW_MIN_PGVECTOR or dimensions <= 0:
+        return None
+    if dimensions <= _HNSW_VECTOR_MAX_DIMENSIONS:
+        return "vector"
+    if dimensions <= _HNSW_HALFVEC_MAX_DIMENSIONS and pgvector_version >= _HALFVEC_MIN_PGVECTOR:
+        return "halfvec"
+    return None
+
+
+def hnsw_index_statement(
+    table_name: str, dimensions: int, pgvector_version: PgvectorVersion | None
+) -> str | None:
     """CREATE INDEX for a collection's vector column, or None when pgvector cannot index it.
 
     Without an index every search is a full scan that reads every stored vector; a
-    3072-dimensional collection of 12k rows is ~830 MB of pages per query, which takes
-    seconds to tens of seconds when the pages are not cached.
+    3072-dimensional collection of 12k rows is ~160 MB of TOAST pages per query, which
+    took 20 s on a Neon compute whose cache was empty.
     """
-    if dimensions <= _HNSW_VECTOR_MAX_DIMENSIONS:
+    indexed_type = _indexed_type(dimensions, pgvector_version)
+    if indexed_type == "vector":
         indexed, operator_class = "vector", "vector_cosine_ops"
-    elif dimensions <= _HNSW_HALFVEC_MAX_DIMENSIONS:
+    elif indexed_type == "halfvec":
         indexed, operator_class = f"(vector::halfvec({dimensions}))", "halfvec_cosine_ops"
     else:
         return None
     return (
-        f'CREATE INDEX IF NOT EXISTS "{table_name}_vector_hnsw" '
+        f'CREATE INDEX IF NOT EXISTS "{hnsw_index_name(table_name)}" '
         f'ON "{table_name}" USING hnsw ({indexed} {operator_class})'
     )
 
 
-def _indexed_distance(vector_column, query_vector: list[float], dimensions: int):
+def _indexed_distance(vector_column, query_vector: list[float], indexed_type: str, dimensions: int):
     """The distance expression the HNSW index orders by (see ``hnsw_index_statement``)."""
-    if dimensions <= _HNSW_VECTOR_MAX_DIMENSIONS:
+    if indexed_type == "vector":
         return vector_column.cosine_distance(query_vector)
     from pgvector.sqlalchemy import HALFVEC
 
@@ -133,6 +179,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         # Read by schema-scoped overrides of get_table_names()/delete_database().
         self.schema: str = schema or ""
         self.VECTOR_DB_LOCK = asyncio.Lock()
+        # pgvector's extversion, read on first use (see _pgvector_version).
+        self._pgvector_version_cache: PgvectorVersion | None = None
         self._write_locks: dict[str, asyncio.Lock] = {}
         self._metadata = MetaData()
         # True when this adapter created its own engine and must dispose it on close().
@@ -328,6 +376,23 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 widths.append(int(match.group(1)))
         return choose_stored_vector_size(widths, self.name)
 
+    async def _pgvector_version(self, executor=None) -> PgvectorVersion | None:
+        """The installed pgvector version, which decides whether collections get an index.
+
+        Cached once known. None (the extension is not installed yet) is not cached, so
+        the first collection created after ``CREATE EXTENSION`` still sees the version.
+        """
+        if self._pgvector_version_cache is not None:
+            return self._pgvector_version_cache
+        statement = text("SELECT extversion FROM pg_extension WHERE extname = 'vector'")
+        if executor is not None:  # an open connection or session: no extra checkout
+            raw = (await executor.execute(statement)).scalar_one_or_none()
+        else:
+            async with self.engine.connect() as own_connection:
+                raw = (await own_connection.execute(statement)).scalar_one_or_none()
+        self._pgvector_version_cache = parse_pgvector_version(raw)
+        return self._pgvector_version_cache
+
     async def has_collection(self, collection_name: str) -> bool:
         """
         Check if a specified collection exists in the database.
@@ -402,15 +467,21 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                             await connection.run_sync(
                                 Base.metadata.create_all, tables=[PGVectorDataPoint.__table__]
                             )
+                        # Same transaction as the table: if the index fails, the table
+                        # rolls back with it and the retry starts over, instead of the
+                        # retry finding the table and leaving it unindexed.
+                        index_statement = hnsw_index_statement(
+                            collection_name,
+                            vector_size,
+                            await self._pgvector_version(connection),
+                        )
+                        if index_statement is not None:
+                            await connection.execute(text(index_statement))
                     # Reflect AFTER the DDL transaction commits so
                     # _metadata is never populated for a table that
                     # might be rolled back.
                     async with self.engine.begin() as connection:
                         await connection.run_sync(self._metadata.reflect, only=[collection_name])
-                    index_statement = hnsw_index_statement(collection_name, vector_size)
-                    if index_statement is not None:
-                        async with self.engine.begin() as connection:
-                            await connection.execute(text(index_statement))
 
     @retry(
         retry=retry_if_exception_type((DeadlockDetectedError, DBAPIError)),
@@ -697,6 +768,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         # Get PGVectorDataPoint Table from database
         PGVectorDataPoint = await self.get_table(collection_name)
 
+        # A search without a limit wants every row. The approximate index does not
+        # guarantee that, so it keeps the exact scan whatever the row count turns out to be.
+        exact_scan_required = limit is None
         if limit is None:
             async with self.get_async_session() as session:
                 query = select(func.count()).select_from(PGVectorDataPoint)
@@ -721,6 +795,21 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         )
         # Use async session to connect to the database
         async with self.get_async_session() as session:
+            # The column was sized by this engine in create_collection.
+            dimensions = self.embedding_engine.get_vector_size()
+            indexed_type = _indexed_type(dimensions, await self._pgvector_version(session))
+            use_index = (
+                indexed_type is not None
+                and not node_name
+                and not exact_scan_required
+                and limit <= _HNSW_MAX_EF_SEARCH
+            )
+            if indexed_type == "vector" and not use_index:
+                # Up to 2,000 dimensions the index is on the column itself, so Postgres
+                # would also pick it for an exact ORDER BY and return at most
+                # hnsw.ef_search rows, before any node-set filter is applied. Searches
+                # that must be exact keep the full scan.
+                await session.execute(text("SET LOCAL enable_indexscan = off"))
             if node_name:
                 if node_name_filter_operator == "AND":
                     filter_operator = "?&"
@@ -750,18 +839,16 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                     *select_columns,
                     PGVectorDataPoint.c.vector.cosine_distance(query_vector).label("similarity"),
                 )
-                # The column was sized by this engine in create_collection.
-                dimensions = self.embedding_engine.get_vector_size()
-                if (
-                    hnsw_index_statement(collection_name, dimensions) is not None
-                    and limit <= _HNSW_MAX_EF_SEARCH
-                ):
+                if use_index:
                     # Order by the indexed expression so the HNSW index serves the scan.
                     # The planner underestimates a full scan of TOASTed vectors and picks
                     # it even when the index exists, so it is steered off it here; the
-                    # returned similarity stays the exact cosine distance.
+                    # returned similarity stays the exact cosine distance, and the rows are
+                    # re-sorted by it below.
                     query = query.order_by(
-                        _indexed_distance(PGVectorDataPoint.c.vector, query_vector, dimensions)
+                        _indexed_distance(
+                            PGVectorDataPoint.c.vector, query_vector, indexed_type, dimensions
+                        )
                     )
                     await session.execute(text("SET LOCAL enable_seqscan = off"))
                     await session.execute(
@@ -790,6 +877,10 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         if len(vector_list) == 0:
             return []
+
+        # An index scan returns rows in the index's order (half precision above 2,000
+        # dimensions); callers expect them sorted by the exact distance they carry.
+        vector_list.sort(key=lambda row: row["_distance"])
 
         # Return backend raw cosine distance as score (lower is better)
         for i in range(len(vector_list)):
