@@ -461,6 +461,31 @@ async def test_str_response_model_uses_plain_completion():
 
 
 @pytest.mark.asyncio
+async def test_str_budget_exhausted_error_raises_payment_required_without_retry():
+    """A budget error on the plain-text path is terminal, like the structured path."""
+    from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
+    from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
+        NativeLiteLLMAdapter,
+    )
+
+    adapter = NativeLiteLLMAdapter(
+        api_key="test-key", model="openai/gpt-5-mini", max_completion_tokens=4096
+    )
+
+    mock_acompletion = AsyncMock(side_effect=_PaymentRequiredError("Payment required"))
+
+    with patch("litellm.acompletion", mock_acompletion), pytest.raises(LLMPaymentRequiredError):
+        await adapter.acreate_structured_output(
+            text_input="say hi",
+            system_prompt="be brief",
+            response_model=str,
+        )
+
+    # Not retried with backoff: exactly one provider call.
+    assert mock_acompletion.call_count == 1
+
+
+@pytest.mark.asyncio
 async def test_cancellation_is_not_retried():
     """asyncio.CancelledError must propagate immediately, not be retried."""
     from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
