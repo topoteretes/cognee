@@ -358,3 +358,10 @@ class CacheDBInterface(ABC):
         Returns:
             List of usage log entries, most recent first.
         """
+
+    async def delete_usage_logs(self, user_id: str) -> None:
+        """
+        Delete every usage log entry for the given user, and no one else's.
+
+        Adapters that do not store usage logs keep this no-op default.
+        """

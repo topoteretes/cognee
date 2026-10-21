@@ -615,6 +615,18 @@ async def test_log_usage_and_get_usage_logs(adapter):
 
 
 @pytest.mark.asyncio
+async def test_delete_usage_logs_removes_only_that_users_logs(adapter):
+    await adapter.log_usage("u1", {"endpoint": "/add"})
+    await adapter.log_usage("u1", {"endpoint": "/search"})
+    await adapter.log_usage("u2", {"endpoint": "/cognify"})
+
+    await adapter.delete_usage_logs("u1")
+
+    assert await adapter.get_usage_logs("u1") == []
+    assert await adapter.get_usage_logs("u2") == [{"endpoint": "/cognify"}]
+
+
+@pytest.mark.asyncio
 async def test_log_usage_does_not_rewrite_fresh_rows(adapter):
     """A logged call must not re-stamp the user's recently-written log rows (#4393)."""
     await adapter.log_usage("u1", {"endpoint": "/add"})
