@@ -4,12 +4,13 @@ from uuid import UUID
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.operations import (
-    get_current_session_id,
+    get_current_session_ids,
     get_operation_origin,
     scrub_error_message,
 )
 from cognee.modules.operations.usage_accumulator import get_parent_run_id
 from cognee.modules.pipelines.models import OperationOutcome, PipelineRun, PipelineRunStatus
+from cognee.modules.pipelines.operations.run_sessions import add_run_sessions, single_session
 from cognee.modules.pipelines.utils import summarize_run_info_data
 from cognee.modules.users.models import User
 
@@ -32,11 +33,11 @@ async def log_pipeline_run_error(
     data_info: Any = None,
     origin: str | None = None,
     parent_operation_id: UUID | None = None,
-    session_id: str | None = None,
+    session_ids: tuple[str, ...] | None = None,
 ):
     """Append the ERRORED row for a run.
 
-    ``data_info``, ``origin``, ``parent_operation_id`` and ``session_id`` default to what this
+    ``data_info``, ``origin``, ``parent_operation_id`` and ``session_ids`` default to what this
     call's own context provides. A writer closing a run on behalf of a process
     that is gone (startup recovery) passes the STARTED row's values instead, so
     the ERRORED row describes the run that died, not the process closing it.
@@ -45,6 +46,8 @@ async def log_pipeline_run_error(
     """
     if data_info is None:
         data_info = summarize_run_info_data(data)
+    if session_ids is None:
+        session_ids = get_current_session_ids()
 
     pipeline_run = PipelineRun(
         pipeline_run_id=pipeline_run_id,
@@ -70,7 +73,7 @@ async def log_pipeline_run_error(
         tokens_out=tokens_out,
         embedding_tokens=embedding_tokens,
         origin=origin if origin is not None else get_operation_origin(),
-        session_id=session_id if session_id is not None else get_current_session_id(),
+        session_id=single_session(session_ids),
         # This writer runs inside the pipeline's own parent_run_scope —
         # exclude it so the row parents to the next enclosing run.
         parent_operation_id=(
@@ -83,7 +86,7 @@ async def log_pipeline_run_error(
     db_engine = get_relational_engine()
 
     async with db_engine.get_async_session() as session:
-        session.add(pipeline_run)
+        add_run_sessions(session, pipeline_run, session_ids)
         await session.commit()
 
     return pipeline_run

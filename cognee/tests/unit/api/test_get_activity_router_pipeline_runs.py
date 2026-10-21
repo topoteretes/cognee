@@ -31,6 +31,7 @@ from cognee.modules.users.exceptions import PermissionDeniedError
 # ``from ... import get_activity_router`` yields the function, not the module
 # whose attributes these tests monkeypatch.
 router_module = importlib.import_module("cognee.api.v1.activity.routers.get_activity_router")
+run_sessions_module = importlib.import_module("cognee.modules.pipelines.operations.run_sessions")
 
 
 def _run(**overrides) -> PipelineRun:
@@ -103,10 +104,12 @@ class _FakeEngine:
         return _FakeSession(self._rows, self._statements)
 
 
-def _stub_engine(monkeypatch, rows) -> list:
+def _stub_engine(monkeypatch, rows, sessions=None) -> list:
     """Swap the router's lazily imported engine for the fake one.
 
-    Returns the list every executed statement is appended to.
+    ``sessions`` maps a row id to the sessions the session lookup reports for
+    it (none by default). Returns the list every executed statement is
+    appended to.
     """
     from cognee.infrastructure.databases import relational as relational_module
 
@@ -114,6 +117,11 @@ def _stub_engine(monkeypatch, rows) -> list:
     monkeypatch.setattr(
         relational_module, "get_relational_engine", lambda: _FakeEngine(rows, statements)
     )
+
+    async def fake_session_ids(row_ids):
+        return {row_id: sessions[row_id] for row_id in row_ids if row_id in (sessions or {})}
+
+    monkeypatch.setattr(run_sessions_module, "get_run_session_ids", fake_session_ids)
     return statements
 
 
@@ -418,8 +426,10 @@ def test_no_pipeline_name_leaves_the_filter_out(monkeypatch):
     assert "pipeline_name" not in _where_terms(statements[0])
 
 
-def test_session_id_filters_by_exact_match(monkeypatch):
-    """The session page asks for one session's improve runs (CLO-1105)."""
+def test_session_id_filters_through_the_session_table(monkeypatch):
+    """The session page asks for one session's improve runs (CLO-1105), including
+    runs of an improve over several sessions: the filter is row id IN the rows
+    pipeline_run_sessions lists for that session, not an equality on session_id."""
     user_id = uuid4()
     statements = _stub_engine(monkeypatch, [])
     _stub_visibility(monkeypatch, visible_user_ids=[user_id], permitted_dataset_ids=[])
@@ -430,14 +440,29 @@ def test_session_id_filters_by_exact_match(monkeypatch):
     )
 
     assert response.status_code == 200
-    session_terms = [
+    id_terms = [
         clause
         for clause in statements[0].whereclause.clauses
-        if getattr(clause, "left", None) is not None and clause.left.name == "session_id"
+        if getattr(clause, "left", None) is not None and clause.left.name == "id"
     ]
-    assert len(session_terms) == 1
-    assert session_terms[0].operator is operators.eq
-    assert session_terms[0].right.value == "chat_1"
+    assert len(id_terms) == 1
+    assert id_terms[0].operator is operators.in_op
+    compiled = str(id_terms[0].right.compile(compile_kwargs={"literal_binds": True}))
+    assert "FROM pipeline_run_sessions" in compiled
+    assert "pipeline_run_sessions.session_id = 'chat_1'" in compiled
+    assert "session_id" not in _where_terms(statements[0])
+
+
+def test_rows_list_every_session_they_belong_to(monkeypatch):
+    user_id = uuid4()
+    run = _run(user_id=user_id, session_id=None)
+    _stub_engine(monkeypatch, [_joined(run)], sessions={run.id: ["chat_1", "chat_2"]})
+    _stub_visibility(monkeypatch, visible_user_ids=[user_id], permitted_dataset_ids=[])
+
+    (row,) = _client(user_id).get("/activity/pipeline-runs").json()
+
+    assert row["session_ids"] == ["chat_1", "chat_2"]
+    assert row["session_id"] is None
 
 
 def test_no_session_id_leaves_the_filter_out(monkeypatch):

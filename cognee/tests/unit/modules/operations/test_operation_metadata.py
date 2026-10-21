@@ -23,6 +23,7 @@ from cognee.modules.operations.origin import (
 )
 from cognee.modules.operations.scrub_error import ERROR_MESSAGE_MAX_LENGTH, scrub_error_message
 from cognee.modules.pipelines.models.PipelineRun import PipelineRun
+from cognee.modules.pipelines.models.PipelineRunSession import PipelineRunSession
 
 record_operation_mod = importlib.import_module("cognee.modules.operations.record_operation")
 record_operation = record_operation_mod.record_operation
@@ -42,7 +43,10 @@ async def ops_engine(tmp_path, monkeypatch):
     )
 
     async with engine.engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all, tables=[PipelineRun.__table__])
+        await connection.run_sync(
+            Base.metadata.create_all,
+            tables=[PipelineRun.__table__, PipelineRunSession.__table__],
+        )
 
     monkeypatch.setattr(record_operation_mod, "get_relational_engine", lambda: engine)
 

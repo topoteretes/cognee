@@ -46,6 +46,7 @@ async def _no_op_context(*_args, **_kwargs):
 
 def _run(pipeline_name, status=PipelineRunStatus.DATASET_PROCESSING_STARTED, **overrides):
     fields = {
+        "id": uuid4(),  # the STARTED row's own id, whose sessions recovery copies
         "pipeline_name": pipeline_name,
         "pipeline_id": uuid4(),
         "dataset_id": uuid4(),
@@ -88,11 +89,15 @@ def _wire(monkeypatch, runs, datasets, *, rollback_fails=False, users=None):
     async def _latest_runs():
         return runs
 
+    async def _no_sessions(row_ids):
+        return {}
+
     monkeypatch.setattr(recovery_module, "get_relational_engine", lambda: _FakeEngine(datasets))
     monkeypatch.setattr(recovery_module, "get_unterminated_pipeline_runs", _latest_runs)
     monkeypatch.setattr(recovery_module, "set_database_global_context_variables", _no_op_context)
     monkeypatch.setattr(recovery_module, "ROLLBACK_HANDLERS", {"cognify_pipeline": _rollback})
     monkeypatch.setattr(recovery_module, "log_pipeline_run_error", _log_error)
+    monkeypatch.setattr(recovery_module, "get_run_session_ids", _no_sessions)
     monkeypatch.setattr(recovery_module, "get_user", _get_user)
     monkeypatch.setattr(recovery_module, "STALE_RUN_MIN_AGE_SECONDS", 3600)
 
