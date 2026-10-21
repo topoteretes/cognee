@@ -34,7 +34,8 @@ def _adapter_with_mocked_writes(existing_rows=None):
 
 
 def _write_calls(adapter, param_key):
-    """Query calls carrying ``param_key`` — i.e. the writes, not the probe."""
+    """Query calls carrying ``param_key``: writes carry nodes/edges, the node
+    probe carries ids, the edge lookup carries source_ids."""
     return [call for call in adapter.query.await_args_list if param_key in call.args[1]]
 
 
@@ -149,6 +150,30 @@ async def test_add_nodes_deduplicates_ids_within_a_batch():
     await adapter.add_nodes(duplicated)
 
     assert [len(call.args[1]["nodes"]) for call in _write_calls(adapter, "nodes")] == [1]
+
+
+@pytest.mark.asyncio
+async def test_add_edges_looks_up_existing_edges_once_per_call():
+    """The lookup runs once ahead of the chunk loop, not once per 2,000-row chunk."""
+    adapter = _adapter_with_mocked_writes()
+
+    await adapter.add_edges(_fake_edges(_WRITE_CHUNK_SIZE * 3 + 1))
+
+    lookups = _write_calls(adapter, "source_ids")
+    assert len(lookups) == 1
+    assert len(lookups[0].args[1]["source_ids"]) == _WRITE_CHUNK_SIZE * 3 + 1
+    assert len(_write_calls(adapter, "edges")) == 4
+
+
+@pytest.mark.asyncio
+async def test_has_edges_uses_the_same_lookup():
+    adapter = _adapter_with_mocked_writes(existing_rows=[("a", "b", "knows", "{}")])
+
+    found = await adapter.has_edges([("a", "b", "knows"), ("a", "c", "knows")])
+
+    assert found == [("a", "b", "knows")]
+    (call,) = _write_calls(adapter, "source_ids")
+    assert call.args[1]["source_ids"] == ["a"]
 
 
 @pytest.mark.asyncio

@@ -19,7 +19,7 @@ import pytest
 
 from cognee.infrastructure.databases.graph.ladybug.adapter import (
     _EDGE_CREATE_QUERY,
-    _EDGE_PROBE_QUERY,
+    _EDGE_LOOKUP_QUERY,
     _EDGE_UPDATE_QUERY,
     _NODE_CREATE_QUERY,
     _NODE_PROBE_QUERY,
@@ -116,13 +116,15 @@ async def test_edge_endpoints_use_separate_match_clauses(adapter):
 
 
 @pytest.mark.asyncio
-async def test_edge_probe_expands_outgoing_edges_only(adapter):
-    """The probe walks the source nodes' outgoing edges instead of matching
-    both endpoints plus the relationship, which plans as a scan even with both
-    endpoints bound. Cost is the sum of those out-degrees — and cognee's hub
-    nodes (EntityType, via `is_a`) are hubs by IN-degree, which this never
-    touches.
+async def test_edge_lookup_expands_outgoing_edges_only(adapter):
+    """The lookup add_edges and has_edges share walks the source nodes' outgoing
+    edges instead of matching both endpoints plus the relationship: the latter
+    plans as a scan even with both endpoints bound, and shapes that seek both
+    endpoints cost per key. Cost is the sum of the sources' out-degrees, and
+    cognee's hub nodes (EntityType, via `is_a`) are hubs by IN-degree, which
+    this never touches. It runs once per call, never per chunk.
     """
-    assert "-[r:EDGE]->(to:Node)" in _EDGE_PROBE_QUERY
-    plan = await _plan(adapter, _EDGE_PROBE_QUERY, {"ids": IDS})
+    assert "-[r:EDGE]->(to:Node)" in _EDGE_LOOKUP_QUERY
+    plan = await _plan(adapter, _EDGE_LOOKUP_QUERY, {"source_ids": IDS})
     assert _count(plan, "SCAN_REL_TABLE") <= 1, plan
+    assert _count(plan, "CROSS_PRODUCT") == 0, plan
