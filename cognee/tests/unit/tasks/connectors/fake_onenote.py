@@ -2,6 +2,7 @@
 # Modified to ship in the Cognee SDK with SDK-local imports and test paths.
 """Offline Microsoft Graph fake: notebooks, sections, pages and HTML served through ``httpx``."""
 
+import json
 from collections import Counter, deque
 from copy import deepcopy
 from urllib.parse import urlencode
@@ -222,6 +223,21 @@ def rows(pipeline, table):
         client.execute_query(f'SELECT id, title, content FROM "{table}"') as cursor,
     ):
         return list(cursor.fetchall())
+
+
+def structures(pipeline, table):
+    """``{page id: ancestors}`` as staged in the ``cognee_structure`` column, nearest parent first."""
+    assert table.replace("_", "").isalnum()
+    with (
+        pipeline.sql_client() as client,
+        client.execute_query(f'SELECT id, cognee_structure FROM "{table}"') as cursor,
+    ):
+        return {page: json.loads(value)["ancestors"] for page, value in cursor.fetchall()}
+
+
+def loaded_rows(pipeline, table):
+    """How many rows the last run of ``pipeline`` extracted for ``table`` (tombstones included)."""
+    return pipeline.last_trace.last_normalize_info.row_counts[table]
 
 
 def resource_cache(pipeline, table):

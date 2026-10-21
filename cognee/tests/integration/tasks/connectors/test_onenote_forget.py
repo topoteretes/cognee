@@ -15,6 +15,7 @@ import pytest
 import pytest_asyncio
 
 import cognee
+from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingResult
 from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
@@ -37,6 +38,10 @@ BRAVO = "Bravoperson"
 SHARED = "Sharedservice"
 
 
+# The chunk text of every graph extraction the mocked model was asked for.
+EXTRACTIONS: list[str] = []
+
+
 async def _mock_structured_output(
     text_input=None, system_prompt=None, response_model=str, **_kwargs
 ):
@@ -49,6 +54,7 @@ async def _mock_structured_output(
     if response_model == SummarizedContent:
         return SummarizedContent(summary="Mock summary", description="Mock summary")
     if response_model == KnowledgeGraph:
+        EXTRACTIONS.append(text_input)
         names = [t for t in (ALPHA, BRAVO, SHARED) if text_input and t in text_input]
         nodes = [
             KGNode(id=name, name=name, type="Person", description=f"{name} entity")
@@ -101,6 +107,7 @@ async def clean_environment(tmp_path, monkeypatch):
 
     monkeypatch.setattr(LiteLLMEmbeddingEngine, "embed_text", _mock_embed_text)
 
+    EXTRACTIONS.clear()
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
     yield
@@ -350,3 +357,93 @@ async def test_an_interrupted_fetch_keeps_the_stores_and_the_next_sync_recovers(
     recovered = await _documents()
     assert set(recovered) == {"p1", "p2", "p3"}
     assert {k: recovered[k] for k in before} == before
+
+
+async def _page_tree() -> set[tuple[str, str]]:
+    """The graph's ``child_of`` edges as (child, parent) labels: a page by its OneNote id, a
+    container by ``kind:id``."""
+    user = await get_default_user()
+    (dataset,) = await get_authorized_existing_datasets(
+        user=user, permission_type="read", datasets=[DATASET]
+    )
+    page_ids = {str(data_id): page for page, data_id in (await _documents()).items()}
+    async with set_database_global_context_variables(dataset.id, user.id):
+        nodes, edges = await (await get_graph_engine()).get_graph_data()
+
+    def label(node_id):
+        node_id = str(node_id)
+        if node_id in page_ids:
+            return page_ids[node_id]
+        properties = dict(nodes)[node_id]
+        assert properties["type"] == "StructureContainer", properties
+        return f"{properties['kind']}:{properties['external_id']}"
+
+    return {(label(edge[0]), label(edge[1])) for edge in edges if edge[2] == "child_of"}
+
+
+@pytest.mark.asyncio
+async def test_pages_hang_under_their_section_and_notebook(clean_environment):
+    await _sync(_notebook())
+
+    assert await _page_tree() == {
+        ("p1", "section:s-a"),
+        ("p2", "section:s-a"),
+        ("section:s-a", "notebook:a"),
+    }
+    # The stored text is the page itself: where it sits is the structure, not the text.
+    for text in EXTRACTIONS:
+        assert "Project Alpha" not in text and "OneNote:" not in text
+
+
+@pytest.mark.asyncio
+async def test_renaming_a_section_and_a_notebook_extracts_nothing_again(clean_environment):
+    graph = _notebook()
+    await _sync(graph)
+    before = await _documents()
+    extractions = len(EXTRACTIONS)
+
+    graph.sections["a"] = "Execution"
+    graph.notebooks["a"] = "Project Beta"
+    source = await _sync(graph)
+
+    assert source.cognee_sync_stats["complete"] == 1
+    assert await _documents() == before, "a rename keeps every page's data id"
+    assert len(EXTRACTIONS) == extractions, "a rename sends nothing to the model"
+    assert await _page_tree() == {
+        ("p1", "section:s-a"),
+        ("p2", "section:s-a"),
+        ("section:s-a", "notebook:a"),
+    }
+
+
+@pytest.mark.asyncio
+async def test_an_unchanged_sync_stages_no_rows_and_extracts_nothing(clean_environment):
+    graph = _notebook()
+    await _sync(graph)
+    before = await _documents()
+    extractions = len(EXTRACTIONS)
+    html_calls = graph.content_requests()
+
+    source = await _sync(graph)
+
+    assert source.cognee_sync_stats["skipped"] == 2
+    assert graph.content_requests() == html_calls
+    assert await _documents() == before
+    assert len(EXTRACTIONS) == extractions
+
+
+@pytest.mark.asyncio
+async def test_an_edit_extracts_only_the_edited_page(clean_environment):
+    graph = _notebook()
+    await _sync(graph)
+    before = await _documents()
+    extractions = len(EXTRACTIONS)
+
+    graph.pages["a"][0]["lastModifiedDateTime"] = "2026-10-03T00:00:00Z"
+    graph.html["p1"] = f"<p>Ada {ALPHA} moved on</p>"
+    await _sync(graph)
+
+    after = await _documents()
+    assert after["p1"] != before["p1"] and after["p2"] == before["p2"]
+    new = EXTRACTIONS[extractions:]
+    assert new and all("moved on" in text for text in new)

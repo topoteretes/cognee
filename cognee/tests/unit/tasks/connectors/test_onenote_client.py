@@ -307,6 +307,47 @@ def test_transport_retries_stop_at_the_wait_budget(monkeypatch):
     assert not isinstance(failure.value, onenote.OneNoteRateLimitedError)
 
 
+def test_retry_wait_budget_is_spent_by_the_whole_run_not_by_each_request(monkeypatch):
+    monkeypatch.setattr(onenote, "RETRY_WAIT_BUDGET_SECONDS", 5)
+    delays, answers = [], iter([429, 200, 429, 200])
+    monkeypatch.setattr(onenote.time, "sleep", delays.append)
+
+    def response(request):
+        status = next(answers)
+        if status == 200:
+            return httpx.Response(200, json={"value": []})
+        return httpx.Response(status, headers={"Retry-After": "3"})
+
+    url = f"{onenote._BASE}/notebooks"
+    with httpx.Client(transport=httpx.MockTransport(response)) as client:
+        graph = onenote._Graph("offline-token", client)
+        graph.request(url)
+        assert delays == [3]
+        # The second request alone would fit the budget, the run as a whole does not.
+        with pytest.raises(onenote.OneNoteRateLimitedError, match="wait budget"):
+            graph.request(url)
+    assert delays == [3]
+
+
+def test_transport_retry_wait_is_also_spent_by_the_whole_run(monkeypatch):
+    monkeypatch.setattr(onenote, "RETRY_WAIT_BUDGET_SECONDS", 1)
+    sleeps, outcomes = [], iter(["fail", "ok", "fail", "ok"])
+    monkeypatch.setattr(onenote.time, "sleep", sleeps.append)
+
+    def respond(request):
+        if next(outcomes) == "fail":
+            raise httpx.ReadTimeout("slow", request=request)
+        return httpx.Response(200, json={"value": []})
+
+    url = f"{onenote._BASE}/notebooks"
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        graph = onenote._Graph("offline-token", client)
+        graph.request(url)
+        with pytest.raises(OneNoteError, match="retry wait budget"):
+            graph.request(url)
+    assert sleeps == [1]
+
+
 def _chain_text(error):
     texts = []
     while error is not None:

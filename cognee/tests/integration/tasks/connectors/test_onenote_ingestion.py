@@ -81,7 +81,13 @@ async def test_a_first_sync_stores_tagged_documents_and_a_quiet_one_changes_noth
 
     assert set(first) == {"p1", "p2"}
     assert {doc.system_metadata["table_name"] for doc in first.values()} == {TABLE}
-    assert "Project Alpha > Planning" in _stored_text(first["p1"])
+    assert _stored_text(first["p1"]).startswith("# p1\n\nOriginal body")
+    assert "Project Alpha" not in _stored_text(first["p1"])
+    structure = first["p1"].system_metadata["structure"]["ancestors"]
+    assert [(entry["kind"], entry["id"]) for entry in structure] == [
+        ("section", "s-a"),
+        ("notebook", "a"),
+    ]
     html_calls = graph.content_requests()
 
     quiet = await _sync(graph)

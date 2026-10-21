@@ -18,7 +18,15 @@ import httpx
 import pytest
 from dlt.extract.exceptions import InvalidResourceDataTypeMultiplePipes
 from dlt.pipeline.exceptions import PipelineStepFailed
-from fake_onenote import Graph, deletion_graph, resource_cache, rows, sync
+from fake_onenote import (
+    Graph,
+    deletion_graph,
+    loaded_rows,
+    resource_cache,
+    rows,
+    structures,
+    sync,
+)
 
 from cognee.tasks.ingestion.connectors import onenote_source
 from cognee.tasks.ingestion.connectors.onenote import OneNoteError
@@ -46,28 +54,44 @@ def test_initial_selection_html_and_unchanged_replay(pipeline):
     first = rows(pipeline, table)
     assert len(first) == 1
     assert "Original body" in first[0][2]
-    assert "Project Alpha" in first[0][2]
-    assert "Planning" in first[0][2]
     assert "Architecture diagram" in first[0][2]
     assert "resources/image/content" in first[0][2]
+    # The row text is the page body only: where the page sits travels as its structure.
+    assert "Project Alpha" not in first[0][2] and "Planning" not in first[0][2]
+    assert "Source:" not in first[0][2] and "onenote.com" not in first[0][2]
+    assert structures(pipeline, table) == {
+        "p1": [
+            {"kind": "section", "id": "s-a", "name": "Planning"},
+            {"kind": "notebook", "id": "a", "name": "Project Alpha"},
+        ]
+    }
+    assert loaded_rows(pipeline, table) == 1
     calls = graph.content_requests()
     sync(pipeline, graph)
     assert rows(pipeline, table) == first
     assert graph.content_requests() == calls
+    # Nothing changed, so nothing is staged again.
+    assert loaded_rows(pipeline, table) == 0
+    assert graph.last_stats["complete"] == 1 and graph.last_stats["skipped"] == 1
     assert not any("secret" in path for path, _ in graph.requests)
 
 
-def test_rename_rebuilds_breadcrumbs_without_html_fetch(pipeline):
+def test_rename_updates_the_structure_and_keeps_the_text(pipeline):
     graph = Graph()
     (table,) = sync(pipeline, graph)
-    calls = graph.content_requests()
+    before = rows(pipeline, table)
     graph.notebooks["a"] = "Project Beta"
     graph.sections["a"] = "Execution"
     sync(pipeline, graph)
-    content = rows(pipeline, table)[0][2]
-    assert "Project Beta" in content and "Execution" in content
-    assert "Project Alpha" not in content and "Planning" not in content
-    assert graph.content_requests() == calls
+    # The row is published again so the structure is written, and its text is the same, so
+    # cognee derives the same content hash and does not extract it again.
+    assert loaded_rows(pipeline, table) == 1
+    assert rows(pipeline, table) == before
+    assert structures(pipeline, table)["p1"] == [
+        {"kind": "section", "id": "s-a", "name": "Execution"},
+        {"kind": "notebook", "id": "a", "name": "Project Beta"},
+    ]
+    assert graph.last_stats["complete"] == 1
 
 
 def test_edits_timestamp_only_and_older_new_page(pipeline):
@@ -188,8 +212,12 @@ def test_move_between_independently_synced_notebooks(pipeline):
     sync(pipeline, graph, ("a", "b"))
     all_rows = [row for table in tables for row in rows(pipeline, table)]
     assert len(all_rows) == 2
-    moved = next(row for row in all_rows if "Original body" in row[2])
-    assert "Excluded > Private" in moved[2]
+    assert any("Original body" in row[2] for row in all_rows)
+    assert structures(pipeline, tables[1])["p1"][-1] == {
+        "kind": "notebook",
+        "id": "b",
+        "name": "Excluded",
+    }
     assert graph.content_requests()["pages/p1/content"] == calls["pages/p1/content"] + 1
 
 
@@ -321,10 +349,14 @@ def nested_graph():
     return graph
 
 
-def test_section_group_recursion_renders_complete_breadcrumb(pipeline, nested_graph):
+def test_section_group_recursion_records_the_whole_ancestor_chain(pipeline, nested_graph):
     graph = nested_graph
     (table,) = sync(pipeline, graph)
-    assert "Project Alpha > Research > Planning" in rows(pipeline, table)[0][2]
+    assert structures(pipeline, table)["p1"] == [
+        {"kind": "section", "id": "s-a", "name": "Planning"},
+        {"kind": "sectionGroup", "id": "group", "name": "Research"},
+        {"kind": "notebook", "id": "a", "name": "Project Alpha"},
+    ]
 
 
 @pytest.mark.parametrize("container_path", ["sections/s-a/pages", "sectionGroups/group/sections"])
@@ -439,7 +471,10 @@ def test_valid_nesting_beyond_thirty_groups(pipeline):
     graph.group_sections["g35"] = [("s-a", "Deep planning")]
     (table,) = sync(pipeline, graph)
     assert graph.last_stats["complete"] == 1
-    assert "Level 35 > Deep planning" in rows(pipeline, table)[0][2]
+    ancestors = structures(pipeline, table)["p1"]
+    assert [entry["name"] for entry in ancestors[:2]] == ["Deep planning", "Level 35"]
+    assert [entry["name"] for entry in ancestors[-2:]] == ["Level 0", "Project Alpha"]
+    assert len(ancestors) == 38
 
 
 def test_duplicate_after_collection_changes_aborts_without_partial_rows(pipeline):
@@ -538,7 +573,7 @@ print('RESUMED=' + json.dumps(result, default=str))
     assert fresh_graph.last_stats["deleted"] == 12
     assert fresh_graph.last_stats["requests"] == 8
     assert rows(restored, table) == []
-    assert resource_cache(restored, table)["page_ids"] == []
+    assert resource_cache(restored, table)["published"] == {}
     assert not resource_cache(restored, table).get("confirmed_missing")
     all_checks = (
         first_checks
@@ -625,23 +660,34 @@ def test_creation_order_pagination_is_stable_when_an_earlier_page_is_edited(pipe
     assert all(params["$orderby"] == "createdDateTime asc" for params in page_calls)
 
 
-def test_persisted_cache_stores_unique_body_once_after_success_and_interruption(pipeline):
+def test_state_holds_no_page_text_after_a_run_and_only_unpublished_bodies_after_a_cut(pipeline):
     graph = Graph()
     graph.html["p1"] = "<p>UniqueBodyOne_Alpha</p>"
     (table,) = sync(pipeline, graph)
     cache = resource_cache(pipeline, table)
-    assert cache["page_ids"] == ["p1"]
-    assert json.dumps(cache).count("UniqueBodyOne_Alpha") == 1
+    assert list(cache["published"]) == ["p1"]
+    assert "UniqueBodyOne_Alpha" not in json.dumps(cache)
+    assert "pending" not in cache
     graph.pages["a"] += [Graph.page("p2"), Graph.page("p3")]
     graph.html.update(p2="<p>UniqueBodyTwo_Beta</p>", p3="<p>Eventually succeeds</p>")
     graph.errors["pages/p3/content"] = (403, "40003")
     sync(pipeline, graph)
     cache = resource_cache(pipeline, table)
     assert graph.last_stats["complete"] == 0
-    assert cache["page_ids"] == ["p1"]
-    assert json.dumps(cache).count("UniqueBodyOne_Alpha") == 1
+    assert list(cache["published"]) == ["p1"]
+    assert list(cache["pending"]) == ["p2"]
     assert json.dumps(cache).count("UniqueBodyTwo_Beta") == 1
+    assert "UniqueBodyOne_Alpha" not in json.dumps(cache)
     assert len(rows(pipeline, table)) == 1
+    del graph.errors["pages/p3/content"]
+    sync(pipeline, graph)
+    cache = resource_cache(pipeline, table)
+    assert graph.last_stats["complete"] == 1
+    assert sorted(cache["published"]) == ["p1", "p2", "p3"]
+    assert "pending" not in cache
+    assert "UniqueBodyTwo_Beta" not in json.dumps(cache)
+    # Each published page costs one short fingerprint, not its text.
+    assert all(len(value) == 24 for value in cache["published"].values())
 
 
 def test_malformed_page_links_checkpoint_bodies_and_recover_after_attach(pipeline):
@@ -652,25 +698,28 @@ def test_malformed_page_links_checkpoint_bodies_and_recover_after_attach(pipelin
     graph.html["p1"] = "<p>Healthy edit held until full recovery</p>"
     graph.pages["a"].append(Graph.page("p2"))
     graph.pages["a"][1]["links"] = []
-    graph.html["p2"] = "<p>Malformed metadata body checkpoint</p>"
+    graph.html["p2"] = "<p>Malformed page body</p>"
     sync(pipeline, graph)
     assert graph.last_stats["complete"] == 0
     assert rows(pipeline, table) == before
     calls = graph.content_requests()
-    assert calls["pages/p2/content"] == 1
+    assert calls["pages/p1/content"] == 2
+    # The malformed page is refused before its body is read; the healthy edit is kept.
+    assert "pages/p2/content" not in calls
     assert (
-        resource_cache(pipeline, table)["bodies"]["p2"]["text"]
-        == "Malformed metadata body checkpoint"
+        resource_cache(pipeline, table)["pending"]["p1"]["text"]
+        == "Healthy edit held until full recovery"
     )
     restored = dlt.attach(pipeline.pipeline_name, pipelines_dir=pipeline.pipelines_dir)
     restored.destination = pipeline.destination
     graph.pages["a"][1]["links"] = {"oneNoteWebUrl": {"href": "https://onenote.com/p2"}}
     sync(restored, graph)
     assert graph.last_stats["complete"] == 1
-    assert graph.content_requests() == calls
+    assert graph.content_requests()["pages/p1/content"] == calls["pages/p1/content"]
+    assert graph.content_requests()["pages/p2/content"] == 1
     final_content = "\n".join(row[2] for row in rows(restored, table))
     assert "Healthy edit held until full recovery" in final_content
-    assert "Malformed metadata body checkpoint" in final_content
+    assert "Malformed page body" in final_content
 
 
 @pytest.mark.parametrize("name", ["", "   ", 0, False, [], {}])
@@ -745,8 +794,8 @@ def test_document_sync_version_guard_accepts_only_supported_versions(monkeypatch
         monkeypatch.delattr(dlt_utils, "DOCUMENT_SYNC_VERSION", raising=False)
     else:
         monkeypatch.setattr(dlt_utils, "DOCUMENT_SYNC_VERSION", version)
-    if version is None or version == 0:
-        with pytest.raises(RuntimeError, match="(?i)(document|sync|Cognee)"):
+    if version is None or version < 3:
+        with pytest.raises(RuntimeError, match="structure"):
             onenote_source("offline-token", notebook_id="a", account_id="tenant:user")
     else:
         assert onenote_source("offline-token", notebook_id="a", account_id="tenant:user").name
@@ -793,7 +842,7 @@ def test_observed_page_invalidates_removal_confirmation_during_incomplete_scan(
     assert graph.last_stats["failed"] == 1
     assert rows(pipeline, table) == before
     if failure_kind == "malformed_links":
-        assert "zz-malformed" in resource_cache(pipeline, table)["bodies"]
+        assert "zz-malformed" not in resource_cache(pipeline, table).get("pending", {})
     else:
         assert any(
             path == "sections/s-a/pages" and params.get("$skip") == "100"
@@ -877,8 +926,8 @@ def test_page_answering_20102_is_kept_and_counted_without_blocking_the_notebook(
         assert current["p1"] == before["p1"]
         assert "Edited second body" in current["p2"]
         cache = resource_cache(pipeline, table)
-        assert cache["page_ids"] == ["p1", "p2"]
-        assert "p1" in cache["bodies"]
+        assert sorted(cache["published"]) == ["p1", "p2"]
+        assert cache["unresolved"] == ["p1"]
         assert not cache.get("confirmed_missing")
         assert [path for path, _ in graph.requests].count("pages/p1") == 1, attempt
     # Once the page is listed again it is an ordinary page and nothing is unresolved.
@@ -899,7 +948,7 @@ def test_a_notebook_with_only_unresolved_pages_cleans_up_nothing(pipeline):
     assert graph.last_stats["deleted"] == 0
     assert graph.last_stats["complete"] == 1
     assert rows(pipeline, table) == before
-    assert resource_cache(pipeline, table)["page_ids"] == ["p1"]
+    assert list(resource_cache(pipeline, table)["published"]) == ["p1"]
 
 
 def test_unresolved_page_is_forgotten_once_graph_answers_20113_for_it(pipeline):
@@ -940,7 +989,7 @@ def test_page_listed_nowhere_but_resolving_in_the_same_notebook_stops_the_run(pi
     assert graph.last_stats["complete"] == 0
     assert graph.last_stats["deleted"] == 0
     assert rows(pipeline, table) == before
-    assert resource_cache(pipeline, table)["page_ids"] == ["p1"]
+    assert list(resource_cache(pipeline, table)["published"]) == ["p1"]
 
 
 @pytest.mark.parametrize("first_sync", [True, False])
@@ -1189,13 +1238,17 @@ def test_page_without_a_title_field_still_fails_the_notebook(pipeline):
     assert rows(pipeline, table) == before
 
 
-def test_page_without_a_web_link_has_no_source_line(pipeline):
+def test_page_without_a_web_link_syncs_with_an_empty_url(pipeline):
     graph = Graph()
     graph.pages["a"][0]["links"] = {}
     (table,) = sync(pipeline, graph)
     content = rows(pipeline, table)[0][2]
-    assert "Source:" not in content
-    assert content.startswith("OneNote: Project Alpha > Planning\n\n")
+    assert content.startswith("Plan\n")
+    with (
+        pipeline.sql_client() as client,
+        client.execute_query(f'SELECT url FROM "{table}"') as cursor,
+    ):
+        assert cursor.fetchall() == [("",)]
 
 
 def test_rate_limit_and_budget_stop_the_run_with_their_own_counts(pipeline, monkeypatch):
@@ -1349,7 +1402,7 @@ def test_page_content_that_is_not_html_fails_the_run_and_is_not_cached(
     assert (graph.last_stats["failed"], graph.last_stats["complete"]) == (1, 0)
     assert "content is not HTML" in caplog.text
     assert rows(pipeline, table) == before
-    assert "Not what Graph promised" not in str(resource_cache(pipeline, table)["bodies"])
+    assert "Not what Graph promised" not in str(resource_cache(pipeline, table))
 
 
 def test_a_notebook_lookup_answering_with_another_identity_fails_the_run(pipeline, caplog):
@@ -1461,9 +1514,10 @@ def test_check_active_failure_after_the_walk_publishes_nothing(pipeline, late_ca
     graph.html.update(p1="<p>Original body</p>", p2="<p>Second body</p>")
     (table,) = sync(pipeline, graph)
     before = rows(pipeline, table)
-    # p1 is deleted and p3 is new: the walk ends with its sixth request (the p1 lookup), then
-    # checks before publishing, before the p1 deletion, and before each of the rows p2, p3.
-    graph.pages["a"] = [Graph.page("p2"), Graph.page("p3")]
+    # p1 is deleted, p2 edited and p3 new: the walk ends with its seventh request (the p1
+    # lookup), then checks before publishing, before the p1 deletion, and before each of the
+    # rows p2, p3.
+    graph.pages["a"] = [Graph.page("p2", "2026-10-09T00:00:00Z"), Graph.page("p3")]
     graph.html["p3"] = "<p>Third body</p>"
     graph.requests.clear()
     cancelled = MyCancelled("connection revoked")
@@ -1471,7 +1525,7 @@ def test_check_active_failure_after_the_walk_publishes_nothing(pipeline, late_ca
 
     def check_active():
         nonlocal late
-        if len(graph.requests) == 6:
+        if len(graph.requests) == 7:
             late += 1
             if late == late_call:
                 raise cancelled
@@ -1481,6 +1535,152 @@ def test_check_active_failure_after_the_walk_publishes_nothing(pipeline, late_ca
     chain = list(_chain(captured.value))
     assert any(error is cancelled for error in chain)
     assert not any(isinstance(error, OneNoteError) for error in chain)
-    assert len(graph.requests) == 6
+    assert len(graph.requests) == 7
     assert rows(pipeline, table) == before
-    assert resource_cache(pipeline, table)["page_ids"] == ["p1", "p2"]
+    assert sorted(resource_cache(pipeline, table)["published"]) == ["p1", "p2"]
+
+
+def test_the_first_sync_publishes_every_page_and_an_edit_only_that_page(pipeline):
+    graph = Graph()
+    graph.pages["a"] = [Graph.page(f"p{index}") for index in range(5)]
+    graph.html.update({f"p{index}": f"<p>Body {index}</p>" for index in range(5)})
+    (table,) = sync(pipeline, graph)
+    assert loaded_rows(pipeline, table) == 5
+    graph.pages["a"][2]["lastModifiedDateTime"] = "2026-10-05T00:00:00Z"
+    graph.html["p2"] = "<p>Body 2 edited</p>"
+    sync(pipeline, graph)
+    assert loaded_rows(pipeline, table) == 1
+    assert graph.last_stats["skipped"] == 4
+    assert {row[0]: row[2] for row in rows(pipeline, table)}["p2"] == "Body 2 edited"
+    assert len(rows(pipeline, table)) == 5
+
+
+def test_an_edit_and_a_deletion_publish_one_row_and_one_tombstone(pipeline):
+    graph = Graph()
+    graph.pages["a"] = [Graph.page("p1"), Graph.page("p2"), Graph.page("p3")]
+    graph.html.update(p1="<p>One</p>", p2="<p>Two</p>", p3="<p>Three</p>")
+    (table,) = sync(pipeline, graph)
+    graph.pages["a"] = [Graph.page("p1", "2026-10-05T00:00:00Z"), Graph.page("p3")]
+    graph.html["p1"] = "<p>One edited</p>"
+    graph.mark_deleted("p2")
+    sync(pipeline, graph)
+    assert loaded_rows(pipeline, table) == 2
+    assert graph.last_stats["deleted"] == 1
+    assert {row[0] for row in rows(pipeline, table)} == {"p1", "p3"}
+
+
+def test_state_costs_one_short_fingerprint_per_page(pipeline):
+    graph = Graph()
+    graph.pages["a"] = [Graph.page(f"p{index}") for index in range(50)]
+    graph.html.update({f"p{index}": "<p>" + "text " * 2000 + "</p>" for index in range(50)})
+    (table,) = sync(pipeline, graph)
+    assert len(json.dumps(resource_cache(pipeline, table))) < 50 * 100
+
+
+def test_moving_a_page_into_a_section_group_rewrites_its_structure_only(pipeline):
+    graph = Graph()
+    (table,) = sync(pipeline, graph)
+    before = rows(pipeline, table)
+    graph.nest_sections()
+    sync(pipeline, graph)
+    assert loaded_rows(pipeline, table) == 1
+    assert rows(pipeline, table) == before
+    assert [entry["kind"] for entry in structures(pipeline, table)["p1"]] == [
+        "section",
+        "sectionGroup",
+        "notebook",
+    ]
+
+
+def test_a_rename_costs_one_html_request_per_affected_page_and_no_extraction(pipeline):
+    graph = Graph()
+    graph.pages["a"] = [Graph.page("p1"), Graph.page("p2")]
+    graph.html.update(p1="<p>One</p>", p2="<p>Two</p>")
+    (table,) = sync(pipeline, graph)
+    before = rows(pipeline, table)
+    graph.sections["a"] = "Renamed"
+    sync(pipeline, graph)
+    assert graph.content_requests() == {"pages/p1/content": 2, "pages/p2/content": 2}
+    assert rows(pipeline, table) == before
+    assert {entry[0]["name"] for entry in structures(pipeline, table).values()} == {"Renamed"}
+
+
+def _hidden_pages_graph(count=12):
+    """A kept page plus ``count`` pages that vanished from the listing and answer 20102."""
+    graph = deletion_graph(count)
+    hidden = [page["id"] for page in graph.pages["a"]]
+    return graph, hidden
+
+
+def test_unresolved_pages_outnumbering_the_budget_never_block_the_notebook(pipeline):
+    graph, hidden = _hidden_pages_graph()
+    (table,) = sync(pipeline, graph)
+    graph.pages["a"] = [Graph.page("kept")]
+    graph.html["kept"] = "<p>Kept page body</p>"
+    for page_id in hidden:
+        graph.hide_page(page_id)
+    # Finding out which pages are unresolved costs one request each, so the first runs are
+    # cut by the budget and checkpoint what they learned.
+    for _ in range(10):
+        sync(pipeline, graph, max_requests=8)
+        if graph.last_stats["complete"]:
+            break
+    assert graph.last_stats["complete"] == 1
+    checked = set()
+    for _ in range(6):
+        graph.requests.clear()
+        sync(pipeline, graph, max_requests=8)
+        stats = graph.last_stats
+        assert (stats["complete"], stats["failed"], stats["failed_budget"]) == (1, 0, 0)
+        assert (stats["unresolved"], stats["deleted"]) == (12, 0)
+        assert stats["requests"] == 8
+        checked |= {path.removeprefix("pages/") for path, _ in graph.requests if "deleted-" in path}
+    # Every unresolved page was asked about again, and none was forgotten.
+    assert checked == set(hidden)
+    assert {row[0] for row in rows(pipeline, table)} == {"kept", *hidden}
+
+
+def test_a_page_that_answers_20113_on_a_later_check_is_forgotten(pipeline):
+    graph = Graph()
+    graph.pages["a"] = [Graph.page("p1"), Graph.page("p2"), Graph.page("p3")]
+    graph.html.update(p1="<p>One</p>", p2="<p>Two</p>", p3="<p>Three</p>")
+    (table,) = sync(pipeline, graph)
+    graph.pages["a"] = [Graph.page("p3")]
+    graph.hide_page("p1")
+    graph.hide_page("p2")
+    sync(pipeline, graph)
+    assert graph.last_stats["unresolved"] == 2
+    graph.hidden.discard("p1")
+    graph.mark_deleted("p1")
+    sync(pipeline, graph)
+    assert (graph.last_stats["deleted"], graph.last_stats["unresolved"]) == (1, 1)
+    assert resource_cache(pipeline, table)["unresolved"] == ["p2"]
+    assert {row[0] for row in rows(pipeline, table)} == {"p2", "p3"}
+
+
+def test_a_page_that_is_listed_again_leaves_the_unresolved_queue(pipeline):
+    graph = Graph()
+    (table,) = sync(pipeline, graph)
+    page = graph.pages["a"].pop()
+    graph.hide_page("p1")
+    sync(pipeline, graph)
+    assert resource_cache(pipeline, table)["unresolved"] == ["p1"]
+    graph.pages["a"].append(page)
+    sync(pipeline, graph)
+    assert resource_cache(pipeline, table)["unresolved"] == []
+    assert graph.last_stats["unresolved"] == 0
+
+
+def test_the_retry_wait_budget_is_one_budget_for_the_whole_sync(pipeline, monkeypatch):
+    from cognee.tasks.ingestion.connectors import onenote
+
+    delays = []
+    monkeypatch.setattr(onenote.time, "sleep", delays.append)
+    graph = Graph()
+    graph.script("notebooks", (429, {"Retry-After": "40"}))
+    graph.script("notebooks/a/sections", (429, {"Retry-After": "40"}))
+    (table,) = sync(pipeline, graph)
+    assert delays == [40]
+    assert graph.last_stats["failed_rate_limit"] == 1
+    assert (graph.last_stats["failed"], graph.last_stats["complete"]) == (1, 0)
+    assert rows(pipeline, table) == []

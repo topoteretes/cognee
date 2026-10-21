@@ -2,8 +2,9 @@
 # Modified to ship in the Cognee SDK with SDK-local imports and test paths.
 """OneNote connector for cognee: a ``dlt`` source that syncs one notebook through Microsoft Graph.
 
-One source is one explicit notebook. It yields one document row per page and is meant to be
-handed directly to :func:`cognee.remember`. See ``onenote.md`` for what is read, the
+One source is one explicit notebook. It yields one document row per new or changed page, with
+the page's place in the notebook as ``cognee_structure``, and is meant to be handed directly to
+:func:`cognee.remember`. See ``onenote.md`` for what is read, the
 incremental model, deletion and its gaps, limits and privacy.
 """
 
@@ -18,12 +19,17 @@ from urllib.parse import quote, urlsplit
 
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion import dlt_utils
-from cognee.tasks.ingestion.dlt_utils import DOCUMENT_SOURCE_ATTR, PIPELINE_SCOPE_ATTR
+from cognee.tasks.ingestion.dlt_utils import (
+    DOCUMENT_SOURCE_ATTR,
+    PIPELINE_SCOPE_ATTR,
+    STRUCTURE_COLUMN,
+    STRUCTURE_COLUMN_HINT,
+)
 
 _BASE = "https://graph.microsoft.com/v1.0/me/onenote"
-_RENDERER_VERSION = 1
-# A request may sleep at most this long in total across its retries. The walk runs under
-# cognee's process-wide dlt staging lock, so a longer server delay stops the request instead.
+_RENDERER_VERSION = 2
+# One run may sleep at most this long in total across all its retries. The walk runs under
+# cognee's process-wide dlt staging lock, so a longer wait stops the run instead.
 RETRY_WAIT_BUDGET_SECONDS = 60
 # Microsoft's OneNote error codes: 20113 "the resource specified in the request was deleted",
 # 20102 "you requested a resource that doesn't exist". Only 20113 counts as proof of a deletion;
@@ -77,6 +83,8 @@ class _Graph:
         self.stats = stats if stats is not None else {"requests": 0}
         self.check_active = check_active
         self.max_requests = max_requests
+        # Seconds this run has spent waiting to retry, against RETRY_WAIT_BUDGET_SECONDS.
+        self.slept = 0
 
     def ensure_active(self):
         if self.check_active is not None:
@@ -107,7 +115,6 @@ class _Graph:
             or not parsed.path.startswith("/v1.0/me/onenote/")
         ):
             raise OneNoteError("Unsafe Graph URL rejected")
-        slept = 0
         for attempt in range(5):
             self.ensure_active()
             if self.stats["requests"] >= self.max_requests:
@@ -141,9 +148,9 @@ class _Graph:
                 if attempt == 4:
                     raise OneNoteError("Graph transport failed after five attempts")
                 delay = 2**attempt
-                if slept + delay > RETRY_WAIT_BUDGET_SECONDS:
+                if self.slept + delay > RETRY_WAIT_BUDGET_SECONDS:
                     raise OneNoteError("Graph retry wait budget exhausted")
-                slept += delay
+                self.slept += delay
                 time.sleep(delay)
                 continue
             if response.status_code in (429, 500, 502, 503, 504) and attempt < 4:
@@ -153,12 +160,12 @@ class _Graph:
                         delay = 2**attempt
                 except ValueError:
                     delay = 2**attempt
-                if slept + delay > RETRY_WAIT_BUDGET_SECONDS:
+                if self.slept + delay > RETRY_WAIT_BUDGET_SECONDS:
                     error = OneNoteRateLimitedError if response.status_code == 429 else OneNoteError
                     raise error(
                         "Graph Retry-After exceeds wait budget", status=response.status_code
                     )
-                slept += delay
+                self.slept += delay
                 time.sleep(delay)
                 continue
             if response.status_code != 200:
@@ -258,7 +265,8 @@ def _body(html: str) -> str:
     return soup.get_text(separator="\n", strip=True)
 
 
-def _row(page: dict, breadcrumb: list[str], body: str) -> dict:
+def _fields(page: dict) -> dict:
+    """The row columns that come from page metadata, validated."""
     _require(page, "id", "lastModifiedDateTime")
     _require_text(page, "title")
     links = page.get("links", {})
@@ -267,13 +275,28 @@ def _row(page: dict, breadcrumb: list[str], body: str) -> dict:
     url = links.get("oneNoteWebUrl", {}).get("href", "")
     if not isinstance(url, str):
         raise OneNoteError("Invalid page source URL")
-    source = f"Source: {url}\n" if url else ""
-    return {
-        "id": page["id"],
-        "title": page["title"].strip() or "Untitled",
-        "url": url,
-        "content": f"OneNote: {' > '.join(breadcrumb)}\n{source}\n{body}",
-    }
+    return {"id": page["id"], "title": page["title"].strip() or "Untitled", "url": url}
+
+
+def _fingerprint(page: dict, fields: dict, ancestors: tuple[dict, ...]) -> str:
+    """Everything that decides a page's row except its body: the body only changes with the
+    timestamp, and the structure is not hashed by cognee but must be published when it moves."""
+    return _identity(
+        json.dumps(
+            [
+                page["lastModifiedDateTime"],
+                _RENDERER_VERSION,
+                fields["title"],
+                fields["url"],
+                list(ancestors),
+            ],
+            sort_keys=True,
+        )
+    )
+
+
+def _row(fields: dict, ancestors: tuple[dict, ...], body: str) -> dict:
+    return {**fields, "content": body, STRUCTURE_COLUMN: {"ancestors": list(ancestors)}}
 
 
 def _containers(listings):
@@ -291,12 +314,44 @@ def _container_is_live(graph, container):
     return True
 
 
+def _lookup(graph, page_id, notebook_id):
+    """Ask Graph about a page the listing no longer shows. Returns ``True`` when it is
+    confirmed gone (deleted, or moved to another notebook) and ``False`` when Graph only says
+    it does not exist, which is no proof."""
+    try:
+        page = graph.request(f"{_BASE}/pages/{_path(page_id)}?$expand=parentNotebook,parentSection")
+    except OneNoteError as exc:
+        if exc.status in (404, 410) and exc.code == _DELETED_CODE:
+            return True
+        if exc.status in (404, 410) and exc.code == _NOT_FOUND_CODE:
+            # "Does not exist" also fits a page the token can no longer see, so it is
+            # not proof of deletion: keep the page, never tombstone it, and ask again later.
+            return False
+        raise
+    _require(page, "id", "lastModifiedDateTime")
+    _require_text(page, "title")
+    if page["id"] != page_id:
+        raise OneNoteError("Page identity mismatch")
+    parent = page.get("parentNotebook", {})
+    _require(parent, "id")
+    if parent["id"] == notebook_id:
+        raise OneNoteError("Page moved during traversal; retry a fresh complete snapshot")
+    # A positive move outside this notebook authorizes removing its old copy.
+    return True
+
+
 def _snapshot(graph, notebook_id, cache):
-    """Build an authoritative view; retain parsed bodies even if traversal fails."""
-    cache.setdefault("bodies", {})
-    old_ids = set(cache.get("page_ids", []))
+    """Build an authoritative view of the notebook.
+
+    Returns ``(rows, present, unresolved)``: the rows of pages that are new or whose
+    fingerprint changed, ``{page_id: fingerprint}`` of every listed page, and the pages kept
+    because Graph answered 20102 for them. Bodies fetched for the rows are kept in
+    ``cache["pending"]`` until a run publishes them, so a failed run does not repeat them.
+    """
+    pending = cache.setdefault("pending", {})
+    published = cache.get("published", {})
     rows = {}
-    unresolved = set()
+    present = {}
     locations = {}
     deleted_parent = False
     # Containers whose listing answered 20113 and was read as "no children" in this walk.
@@ -332,49 +387,54 @@ def _snapshot(graph, notebook_id, cache):
         _require(notebook, "id", "displayName")
         if notebook["id"] != notebook_id:
             raise OneNoteError("Notebook identity mismatch")
-        pending = [(f"notebooks/{_path(notebook_id)}", [notebook["displayName"]])]
+        # A container's ancestors are nearest parent first, as cognee_structure wants them.
+        root = ({"kind": "notebook", "id": notebook_id, "name": notebook["displayName"]},)
+        pending_containers = [(f"notebooks/{_path(notebook_id)}", root)]
         seen = set()
-        while pending:
-            container, prefix = pending.pop()
+        while pending_containers:
+            container, ancestors = pending_containers.pop()
             if container in seen:
                 raise OneNoteError("Section group cycle")
             seen.add(container)
             for section in children(f"{container}/sections"):
                 _require(section, "id", "displayName")
+                page_ancestors = (
+                    {"kind": "section", "id": section["id"], "name": section["displayName"]},
+                    *ancestors,
+                )
                 for page in children(f"sections/{_path(section['id'])}/pages"):
-                    _require(page, "id", "lastModifiedDateTime")
-                    _require_text(page, "title")
+                    fields = _fields(page)
                     page_id = page["id"]
                     if page_id in locations:
                         raise OneNoteError("Page appeared in multiple locations during traversal")
-                    locations[page_id] = (prefix + [section["displayName"]], page)
+                    locations[page_id] = page
                     graph.stats["scanned"] += 1
-                    body = cache["bodies"].get(page_id)
-                    if (
-                        body is None
-                        or body.get("timestamp") != page["lastModifiedDateTime"]
-                        or body.get("renderer") != _RENDERER_VERSION
-                    ):
-                        body = {
-                            "timestamp": page["lastModifiedDateTime"],
-                            "renderer": _RENDERER_VERSION,
+                    fingerprint = _fingerprint(page, fields, page_ancestors)
+                    present[page_id] = fingerprint
+                    if published.get(page_id) == fingerprint:
+                        graph.stats["skipped"] += 1
+                        continue
+                    held = pending.get(page_id)
+                    if held is None or held["fingerprint"] != fingerprint:
+                        held = {
+                            "fingerprint": fingerprint,
                             "text": _body(
                                 graph.request(f"{_BASE}/pages/{_path(page_id)}/content", html=True)
                             ),
                         }
-                        cache["bodies"][page_id] = body
-                    else:
-                        graph.stats["skipped"] += 1
-                    rows[page_id] = _row(page, locations[page_id][0], body["text"])
+                        pending[page_id] = held
+                    rows[page_id] = _row(fields, page_ancestors, held["text"])
             for group in children(f"{container}/sectionGroups"):
                 _require(group, "id", "displayName")
-                pending.append(
-                    (f"sectionGroups/{_path(group['id'])}", prefix + [group["displayName"]])
+                group_ancestors = (
+                    {"kind": "sectionGroup", "id": group["id"], "name": group["displayName"]},
+                    *ancestors,
                 )
+                pending_containers.append((f"sectionGroups/{_path(group['id'])}", group_ancestors))
 
     # Only a fresh complete walk can validate these checkpoints. A page restored
     # to this notebook must be confirmed again if it disappears on a later run.
-    missing = old_ids - set(rows)
+    missing = set(published) - set(present)
     confirmed = cache.setdefault("confirmed_missing", {})
     # A confirmation carried over from an earlier failed run (typically a budget cut) lets a
     # large deletion finish across runs. It is only trusted while this walk reads no container
@@ -394,33 +454,30 @@ def _snapshot(graph, notebook_id, cache):
         # now voids the carried confirmations.
         if confirmed and any(_container_is_live(graph, name) for name in _containers(swallowed)):
             confirmed.clear()
-    for page_id in sorted(missing - set(confirmed)):
+    # The pages Graph answered 20102 for, oldest check first. One that is listed again is no
+    # longer in question. Each one is checkpointed the moment it is classified.
+    unresolved = [page_id for page_id in cache.get("unresolved", []) if page_id in missing]
+    cache["unresolved"] = unresolved
+    earlier = set(unresolved)
+    for page_id in sorted(missing - set(confirmed) - earlier):
+        if _lookup(graph, page_id, notebook_id):
+            confirmed[page_id] = True
+        else:
+            unresolved.append(page_id)
+    # Pages already unresolved are asked about again only with the budget the walk and the
+    # confirmations left, oldest check first, so they can never starve the notebook. Running
+    # out of budget here fails nothing: they stay kept and are asked about next run.
+    for page_id in [page_id for page_id in unresolved if page_id in earlier]:
         try:
-            page = graph.request(
-                f"{_BASE}/pages/{_path(page_id)}?$expand=parentNotebook,parentSection"
-            )
-        except OneNoteError as exc:
-            if exc.status in (404, 410) and exc.code == _DELETED_CODE:
-                confirmed[page_id] = True
-                continue
-            if exc.status in (404, 410) and exc.code == _NOT_FOUND_CODE:
-                # "Does not exist" also fits a page the token can no longer see, so it is
-                # not proof of deletion: keep the page and its body, never tombstone it, and
-                # ask again on the next run. The rest of the notebook is still published.
-                unresolved.add(page_id)
-                continue
-            raise
-        _require(page, "id", "lastModifiedDateTime")
-        _require_text(page, "title")
-        if page["id"] != page_id:
-            raise OneNoteError("Page identity mismatch")
-        parent = page.get("parentNotebook", {})
-        _require(parent, "id")
-        if parent["id"] == notebook_id:
-            raise OneNoteError("Page moved during traversal; retry a fresh complete snapshot")
-        # A positive move outside this notebook authorizes removing its old copy.
-        confirmed[page_id] = True
-    return rows, unresolved
+            gone = _lookup(graph, page_id, notebook_id)
+        except OneNoteBudgetExceededError:
+            break
+        unresolved.remove(page_id)
+        if gone:
+            confirmed[page_id] = True
+        else:
+            unresolved.append(page_id)
+    return rows, present, set(unresolved)
 
 
 def onenote_source(
@@ -451,10 +508,10 @@ def onenote_source(
     import dlt
     from dlt.common.normalizers.naming.snake_case import NamingConvention
 
-    if getattr(dlt_utils, "DOCUMENT_SYNC_VERSION", 0) < 1:
+    if getattr(dlt_utils, "DOCUMENT_SYNC_VERSION", 0) < 3:
         raise RuntimeError(
-            "OneNote sync requires a Cognee build with table-scoped DLT document cleanup. "
-            "Upgrade Cognee before syncing to avoid deleting another source's data."
+            "OneNote sync requires a Cognee build that reads per-row structure "
+            "(DOCUMENT_SYNC_VERSION >= 3). Upgrade Cognee before syncing."
         )
     if not account_id.strip() or not notebook_id.strip():
         raise ValueError("Stable account_id and explicit notebook_id are required")
@@ -481,6 +538,7 @@ def onenote_source(
                 field: {"data_type": "text", "nullable": False}
                 for field in ("id", "title", "content", "url")
             },
+            **STRUCTURE_COLUMN_HINT,
             "_deleted": {"data_type": "bool", "hard_delete": True},
         },
     )
@@ -521,13 +579,13 @@ def onenote_source(
         )
         try:
             try:
-                rows, unresolved = _snapshot(graph, notebook_id, cache)
+                rows, present, unresolved = _snapshot(graph, notebook_id, cache)
             except OneNoteError as exc:
                 stats["failed"] += 1
                 stats["failed_rate_limit"] += int(isinstance(exc, OneNoteRateLimitedError))
                 stats["failed_budget"] += int(isinstance(exc, OneNoteBudgetExceededError))
                 logger.warning(
-                    "OneNote sync incomplete; retaining documents and checkpointing bodies",
+                    "OneNote sync incomplete; retaining documents and checkpointing progress",
                     reason=str(exc),
                 )
                 yield dlt.mark.materialize_table_schema()
@@ -539,21 +597,22 @@ def onenote_source(
                     "OneNote pages answered not found; keeping their memory and retrying",
                     pages=len(unresolved),
                 )
-            deleted = set(cache.get("page_ids", [])) - set(rows) - unresolved
+            published = cache.get("published", {})
+            deleted = set(published) - set(present) - unresolved
             for page_id in sorted(deleted):
                 graph.ensure_active()
                 yield {"id": page_id, "title": "", "content": "", "url": "", "_deleted": True}
-            if rows:
-                for page_id in sorted(rows):
-                    graph.ensure_active()
-                    yield rows[page_id]
-            elif not deleted:
+            for page_id in sorted(rows):
+                graph.ensure_active()
+                yield rows[page_id]
+            if not rows and not deleted:
                 yield dlt.mark.materialize_table_schema()
-            kept = set(rows) | unresolved
-            cache["page_ids"] = sorted(kept)
-            cache["bodies"] = {
-                key: value for key, value in cache.get("bodies", {}).items() if key in kept
+            # Unresolved pages keep the fingerprint of the row that is still staged.
+            cache["published"] = {
+                **{page_id: published[page_id] for page_id in unresolved},
+                **present,
             }
+            cache.pop("pending", None)
             cache.pop("confirmed_missing", None)
             cache.pop("swallowed", None)
             stats["deleted"] = len(deleted)

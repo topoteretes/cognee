@@ -64,7 +64,7 @@ belongs to another account or notebook. Renaming a source starts it over, and do
 under the old name are not cleaned up.
 
 After a run, `source.cognee_sync_stats` holds counts only: `scanned` (pages seen), `skipped`
-(page bodies reused from the cache), `deleted`, `failed`, `failed_rate_limit`, `failed_budget`,
+(pages unchanged since the last sync, neither fetched nor published again), `deleted`, `failed`, `failed_rate_limit`, `failed_budget`,
 `unresolved`, `requests` and `complete` (1 only when the whole notebook was read and published).
 An empty dictionary means dlt resumed a pending load without extracting this resource: build a
 fresh source and run again.
@@ -80,33 +80,47 @@ one row:
 | id | the Graph page id (the dlt primary key) |
 | title | the page title, or `Untitled` when it is empty |
 | url | the page's `oneNoteWebUrl` link |
-| content | `OneNote: <notebook> > <section groups> > <section>`, `Source: <url>` (left out when the page has no web link), a blank line, then the page text |
+| content | the page text |
+| cognee_structure | `{"ancestors": [...]}`, nearest parent first: the section, its section groups from the innermost out, then the notebook, each as `{"kind", "id", "name"}` with the Graph id |
 
 The page text is the HTML body as plain text. Images become `Image: <alt text> (<reference>)` and
 attachments `Attachment: <name> (<reference>)`; links keep their target in parentheses. **Images
 and attachments are not downloaded**, and handwriting or text inside images is not read.
 
-The breadcrumb is part of the text, so renaming a notebook, section or section group, or moving a
-page to another section, re-extracts every affected page once.
+Where a page sits is not part of its text. It travels as `cognee_structure`, which cognee does not
+hash, so renaming a notebook, section or section group, or moving a page to another section or
+section group, keeps every page's document id, extracts nothing again and only updates the
+`child_of` edges (`Notebook <- Section <- Page`; the containers have no row of their own). The
+page's `url` is a column, not text.
 
 ## Incremental model
 
 Graph has no delta feed for OneNote, so every run lists the whole notebook (metadata only) and
-fetches the HTML of a page only when it is new, its `lastModifiedDateTime` changed, or the
-renderer version changed. Unchanged bodies come from a cache kept in dlt resource state (each
-page's text once, plus its timestamp). Current metadata is applied on top, so renames and moves
-refresh the breadcrumb without an HTML request. A timestamp that changes while the text stays
-the same costs one HTML request and no re-extraction.
+compares each page with what the last complete run published. A page is fetched and published
+only when it is new or its fingerprint changed: its `lastModifiedDateTime`, title, link, the
+notebook, section groups and section above it, or the renderer version. Unchanged pages are
+neither fetched nor yielded (they stay in the staging table, and cognee reads the whole table
+back), so a quiet sync stages no rows and extracts nothing. A timestamp that changes while the
+text stays the same costs one HTML request and no re-extraction. Renaming or moving a container
+changes the fingerprint of every page below it: each costs one HTML request (the text is not
+kept), is published again so its structure is written, and is not extracted again.
 
 A run is **all or nothing for the notebook**: documents and deletions are published only after
 the complete snapshot was read and validated. Any expected failure (Graph error, rate limit,
 spent budget, malformed metadata or an unreadable page) returns normally with `failed > 0` and
-`complete == 0`, publishes nothing and keeps what it already parsed: page bodies and confirmed
-removals are checkpointed, so the next run resumes without repeating them.
+`complete == 0`, publishes nothing and keeps what it already learned: the bodies fetched but not
+yet published and confirmed removals are checkpointed, so the next run resumes without repeating
+them. Bodies are dropped from state the moment a complete run publishes them.
 
 State keys: `connection` (a hash of account and notebook, so another notebook cannot reuse the
-name), `onenote_cache.bodies`, `onenote_cache.page_ids`, `onenote_cache.confirmed_missing` and
-`onenote_cache.swallowed`.
+name), `onenote_cache.published` (page id to a 24 character fingerprint, no page text),
+`onenote_cache.pending` (page id to the fetched text, only between a cut run and the run that
+publishes it), `onenote_cache.unresolved`, `onenote_cache.confirmed_missing` and
+`onenote_cache.swallowed`. State does not grow with the size of the pages.
+
+If the staging table is deleted while the dlt state is kept, unchanged pages are not published
+again and stay missing until they change. `cognee.forget` removes neither, so it does not cause
+this.
 
 ## Deletion and its gaps
 
@@ -130,10 +144,15 @@ the pages that were synced from it, once each page is confirmed as above.
 **Code 20102 is not proof of deletion, and it does not block the notebook.** Microsoft describes
 it as "you requested a resource that doesn't exist", which also fits a page this token can no
 longer see (for example after a scope change). A page that answers 20102 is therefore never
-forgotten: it keeps its row, its cached body and its document, and it is counted in the
-`unresolved` stat. The rest of the notebook syncs and publishes normally. The page is asked about
-again on every run, and it stops being unresolved the moment it is listed again or Graph answers
-20113 for it.
+forgotten: it keeps its row and its document, and it is counted in the `unresolved` stat. The
+rest of the notebook syncs and publishes normally. Such pages are checkpointed in the state and
+asked about again only with the request budget that the walk and the deletion checks left over,
+oldest check first, so they can never use up the whole budget or hold back the notebook; running
+out of budget on them is not a failure. Every run counts all of them in `unresolved`, checked or
+not. A page stops being unresolved the moment it is listed again or Graph answers 20113 for it.
+Finding out that a page is unresolved costs one request each, so a scope change that hides many
+pages at once takes a few runs under `max_requests` (each run records what it learned), the same
+as a large deletion.
 
 How the stats read for such a run: `complete` stays 1 (the whole notebook was walked and
 published), `failed` stays 0 (nothing went wrong), `deleted` does not count the page, and
@@ -154,7 +173,7 @@ Other gaps:
   page without a web link or whose HTML has no `<body>` (its whole text is used). Skipping a
   malformed page is not safe: a new page would stay unsynced without notice, and a page already
   synced would either go stale or be removed on partial evidence. Fix or remove the page and
-  the next run recovers from the cache.
+  the next run recovers.
 - **Paging can miss a new page for one run.** Pages are read with `$skip` paging. If another
   page is deleted while the walk is between two batches, a new page can shift past the batch
   boundary, and the run still reports `complete == 1`. The next run picks it up. A page that was
@@ -176,12 +195,9 @@ notebooks or other apps of the same user share the 400.
 
 Graph does not send `Retry-After` for OneNote, so a 429, 500, 502, 503 or 504 is retried up to
 five attempts in total with a 1, 2, 4, 8 second fallback; a `Retry-After` header is honoured when
-present. The total sleep per request is capped at `RETRY_WAIT_BUDGET_SECONDS` (60), because the
-walk runs under cognee's process-wide staging lock; a longer wait stops the run cleanly
-(`failed_rate_limit` for a 429) and resumes next time. The cap is per request, not per sync:
-across a whole run the waiting is bounded only by `max_requests` and the five attempts per
-request. Because Graph does not send `Retry-After` for OneNote, the 1, 2, 4, 8 second fallback is
-what mostly applies. Redirects are never followed and every
+present. The total sleep of a whole sync is capped at `RETRY_WAIT_BUDGET_SECONDS` (60), because
+the walk runs under cognee's process-wide staging lock; once it is spent, the next wait stops the
+run cleanly (`failed_rate_limit` for a 429) and the sync resumes next time. Redirects are never followed and every
 URL, a paging link included, must be `https://graph.microsoft.com/v1.0/me/onenote/...`.
 
 A 401 stops the run with `failed > 0`. Hosts should refresh the token and run again. Errors carry
@@ -199,8 +215,8 @@ This connector reads personal notes. Nothing is fetched until you construct a so
   and embedding providers, like any document you add to cognee. Check that you may send your
   notes there, or use local models. Anyone with read access to the target dataset can read them,
   so keep the notebook in its own dataset.
-- dlt state stores the account/notebook hash, page ids, timestamps and each page's parsed text
-  (once). dlt's staging database for the dataset (`dlt_database_<dataset>`) holds the rendered
+- dlt state stores the account/notebook hash, page ids and a fingerprint per page, plus the parsed
+  text of pages that were fetched but not yet published (a cut run). dlt's staging database for the dataset (`dlt_database_<dataset>`) holds the rendered
   text of every page.
 - Logs and `cognee_sync_stats` contain counts and statuses. The token is never logged, stored or
   put in an error.
@@ -217,11 +233,12 @@ This connector reads personal notes. Nothing is fetched until you construct a so
 
 ## Graph shape
 
-Pages are plain text documents: no node set and no structure. In the Cloud graph view such data
-sits in the grey `uncategorized` source; entities with the same name merge across pages. A node
-set (for example `onenote:<notebook>`) is hashed into every document, so it can only be added
-before a first release without re-extracting everything. People named in a note are text, not
-typed entities.
+Pages are plain text documents with a position in the notebook: after cognify each page has a
+`child_of` edge to its section, a section to its section group or notebook, and so on up to the
+notebook (`StructureContainer` nodes with the Graph id and name). Entities with the same name
+merge across pages. There is no node set; one (for example `onenote:<notebook>`) is hashed into
+every document, so it can only be added before a first release without re-extracting everything.
+People named in a note are text, not typed entities.
 
 ## Testing
 
