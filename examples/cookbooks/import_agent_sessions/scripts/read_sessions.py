@@ -3,7 +3,8 @@
 Claude Code keeps every session in ~/.claude/projects/<project>/<session id>.jsonl, and Codex
 in ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl. Both are JSON lines full of tool calls,
 system reminders and injected instructions. This keeps only what was said: each prompt you
-typed and the agent's final answer to it. Text that looks like an API key or token is
+typed and the agent's final answer to it, in full. Text that looks like a secret (API keys and
+tokens, private keys, passwords in URLs, values assigned to names like API_KEY or PASSWORD) is
 replaced with [redacted] before anything is written.
 
 The files go to sessions/<agent>/ next to this cookbook (git-ignored), named after the
@@ -11,7 +12,7 @@ session's start date and id, so a rerun rewrites the same files and cognee skips
 whose content did not change. Nothing here calls an LLM or cognee.
 
 Run alone: uv run python examples/cookbooks/import_agent_sessions/scripts/read_sessions.py \
-    [--agents claude,codex] [--limit 20] [--project cognee] [--since 2026-09-01]
+    [--agents claude,codex] [--limit 20] [--project ~/code/cognee] [--since 2026-09-01]
 """
 
 import argparse
@@ -27,9 +28,6 @@ OUT = Path(__file__).parent.parent / "sessions"
 
 AGENTS = {"claude": "Claude Code", "codex": "Codex"}
 
-MAX_PROMPT_CHARS = 2_000
-MAX_ANSWER_CHARS = 3_000
-MAX_SESSION_CHARS = 30_000
 RUNNING_SECONDS = 120  # a file written to this recently is a session still running
 
 # Blocks the harness puts into a user turn; they are not what the user typed. The bash-*
@@ -59,11 +57,26 @@ NOISE = re.compile(
     re.DOTALL,
 )
 
+# Secrets by their format: OpenAI/Anthropic, GitHub, GitLab, AWS access key ids, Slack, Stripe,
+# Google, Hugging Face and npm tokens, JWTs, bearer tokens and PEM private keys.
 SECRET = re.compile(
     r"sk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,}"
-    r"|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}"
-    r"|AKIA[0-9A-Z]{16}|xox[abprs]-[A-Za-z0-9-]{10,}"
+    r"|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|glpat-[A-Za-z0-9_-]{20,}"
+    r"|(?:AKIA|ASIA)[0-9A-Z]{16}|xox[abeprs]-[A-Za-z0-9-]{10,}"
+    r"|(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{10,}|whsec_[A-Za-z0-9]{20,}"
+    r"|AIza[0-9A-Za-z_-]{30,}|hf_[A-Za-z0-9]{30,}|npm_[A-Za-z0-9]{36}"
+    r"|eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"
     r"|(?i:bearer)\s+[A-Za-z0-9._~+/-]{20,}=*"
+    r"|-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|\Z)",
+    re.DOTALL,
+)
+# Secrets by where they sit: the password in a URL (postgresql://user:password@host), and the
+# value assigned to a name that says it is secret (DB_PASSWORD=..., "api_key": "...",
+# token: ...), whatever its format. Values under 8 characters are left, like max_tokens=4096.
+URL_PASSWORD = re.compile(r"(://[^/\s:@]+:)[^/\s@]+(@)")
+NAMED_SECRET = re.compile(
+    r"(?i)(\b[\w.-]*(?:api[_-]?key|secret|passw(?:or)?d|token|private[_-]?key|access[_-]?key"
+    r"|credentials?|auth)[\w.-]*[\"']?\s*[:=]\s*[\"']?)[^\s\"',;}]{8,}"
 )
 
 
@@ -78,9 +91,14 @@ class Session:
     turns: list[tuple[str, str]] = field(default_factory=list)  # (prompt, answer)
 
 
-def clean(text: str, limit: int) -> str:
-    text = SECRET.sub("[redacted]", NOISE.sub("", text)).strip()
-    return text if len(text) <= limit else text[:limit].rstrip() + " […]"
+def redact(text: str) -> str:
+    text = SECRET.sub("[redacted]", text)
+    text = URL_PASSWORD.sub(r"\1[redacted]\2", text)
+    return NAMED_SECRET.sub(r"\1[redacted]", text)
+
+
+def clean(text: str) -> str:
+    return redact(NOISE.sub("", text)).strip()
 
 
 def parse_time(value: str | None) -> datetime | None:
@@ -100,7 +118,7 @@ def json_lines(path: Path):
 
 
 def add_turn(session: Session, prompt: str, answer: str) -> None:
-    prompt, answer = clean(prompt, MAX_PROMPT_CHARS), clean(answer, MAX_ANSWER_CHARS)
+    prompt, answer = clean(prompt), clean(answer)
     if prompt:
         session.turns.append((prompt, answer))
 
@@ -113,7 +131,7 @@ def read_claude_session(path: Path) -> Session | None:
     for record in json_lines(path):
         kind = record.get("type")
         if kind == "ai-title" and session:
-            session.title = clean(record.get("aiTitle") or "", 200)
+            session.title = clean(record.get("aiTitle") or "")
         if kind not in ("user", "assistant") or record.get("isSidechain"):
             continue
         if session is None:
@@ -140,7 +158,7 @@ def read_claude_session(path: Path) -> Session | None:
                 continue
             if any(b.get("type") == "tool_result" for b in blocks):
                 continue
-            text = clean("\n".join(texts), MAX_PROMPT_CHARS)
+            text = clean("\n".join(texts))
             if not text:
                 continue  # only harness noise, like a /clear
             if prompt is not None:
@@ -188,7 +206,7 @@ def read_codex_session(path: Path) -> Session | None:
             texts = [
                 codex_prompt(p.get("text", "")) for p in parts if p.get("type") == "input_text"
             ]
-            text = clean("\n".join(texts), MAX_PROMPT_CHARS)
+            text = clean("\n".join(texts))
             if not text:
                 continue
             if prompt is not None:
@@ -212,10 +230,24 @@ def history_files(agent: str) -> list[Path]:
     return sorted(root.glob("*/*/*/rollout-*.jsonl"))
 
 
+def in_projects(cwd: str, projects: list[str]) -> bool:
+    """Whether a session's folder is one of `projects` or lies inside one. A project is a folder
+    path (~ expanded), so ~/code/shop matches ~/code/shop/api but not ~/code/shop-v2."""
+    folder = Path(cwd)
+    for project in projects:
+        root = Path(project).expanduser()
+        if not root.is_absolute():
+            raise ValueError(f"--project takes a folder path, like ~/code/shop, not {project!r}")
+        if folder == root or root in folder.parents:
+            return True
+    return False
+
+
 def read_sessions(
-    agent: str, limit: int = 20, project: str | None = None, since: str | None = None
+    agent: str, limit: int = 20, projects: list[str] | None = None, since: str | None = None
 ) -> list[Session]:
-    """The newest `limit` finished sessions of one agent that have at least one turn."""
+    """The newest `limit` finished sessions of one agent that have at least one turn, from
+    `projects` and the folders inside them (every folder when none is given)."""
     reader = read_claude_session if agent == "claude" else read_codex_session
     cutoff = datetime.fromisoformat(since).astimezone() if since else None
     files = sorted(history_files(agent), key=lambda p: p.stat().st_mtime, reverse=True)
@@ -227,7 +259,7 @@ def read_sessions(
         if cutoff and datetime.fromtimestamp(path.stat().st_mtime).astimezone() < cutoff:
             break  # files are newest first, so every later one is older too
         session = reader(path)
-        if not session or (project and project.lower() not in session.cwd.lower()):
+        if not session or (projects and not in_projects(session.cwd, projects)):
             continue
         if cutoff and session.started < cutoff:
             continue
@@ -252,9 +284,6 @@ def render(session: Session) -> str:
     for number, (prompt, answer) in enumerate(session.turns, 1):
         lines += ["", f"## Turn {number}", "", f"**User:** {prompt}", ""]
         lines.append(f"**{name}:** {answer or '(no answer recorded)'}")
-        if sum(len(line) for line in lines) > MAX_SESSION_CHARS:
-            lines += ["", f"(The session continues for {len(session.turns) - number} more turns.)"]
-            break
     return "\n".join(lines) + "\n"
 
 
@@ -275,7 +304,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--agents", default="claude,codex", help="claude, codex or both")
     parser.add_argument("--limit", type=int, default=20, help="newest sessions per agent")
-    parser.add_argument("--project", help="only sessions whose folder contains this text")
+    parser.add_argument(
+        "--project",
+        action="append",
+        help="only sessions in this folder or inside it; repeat for several",
+    )
     parser.add_argument("--since", help="only sessions started on or after this date")
     args = parser.parse_args()
     for agent in args.agents.split(","):

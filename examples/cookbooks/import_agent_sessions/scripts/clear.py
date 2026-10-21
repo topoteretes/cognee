@@ -14,6 +14,11 @@ os.environ.setdefault("LOG_LEVEL", "ERROR")  # quiet cognee's logs; set before i
 import cognee
 from cognee.modules.engine.operations.setup import setup
 
+try:
+    from scripts.configure import configure_cognee
+except ModuleNotFoundError:  # run alone from scripts/
+    from configure import configure_cognee
+
 DATASET = "imported_agent_sessions"  # the same in every script
 
 
@@ -27,4 +32,5 @@ async def clear(dataset: str = DATASET) -> None:
 
 
 if __name__ == "__main__":
+    configure_cognee()  # cognee checks the dataset's embedder before forgetting it
     asyncio.run(clear())

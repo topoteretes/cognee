@@ -2,7 +2,9 @@
 
 For Claude Code and Codex it reports how each is installed (command line, desktop app, VS Code
 or Cursor extension) and how many sessions are on disk, split by where they were started:
-every session file records that (`entrypoint` for Claude Code, `originator` for Codex).
+every session file records that (`entrypoint` for Claude Code, `originator` for Codex). It also
+counts the sessions per project folder (the session's working directory), so you can choose
+which projects to import.
 Apps whose history this cookbook cannot read are named too, with the reason, so nothing is
 silently left out. Reads only the first lines of each session file; no LLM, no cognee.
 
@@ -69,6 +71,7 @@ class Agent:
     name: str  # "claude" or "codex"
     installs: list[str] = field(default_factory=list)
     surfaces: Counter = field(default_factory=Counter)
+    folders: Counter = field(default_factory=Counter)  # project folder -> sessions
 
     @property
     def sessions(self) -> int:
@@ -93,25 +96,51 @@ def installs(agent: str) -> list[str]:
     return found
 
 
-def surface(path: Path, agent: str) -> str:
-    """Where one session was started, from the first lines of its file."""
+def origin(path: Path, agent: str) -> tuple[str, str]:
+    """Where one session was started and its project folder, from the first lines of its file."""
+    where, folder = "", ""
     with path.open(encoding="utf-8", errors="replace") as file:
         for _, line in zip(range(40), file):
             try:
                 record = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            payload = record.get("payload") or {}
-            value = record.get("entrypoint") if agent == "claude" else payload.get("originator")
-            if value:
-                return SURFACES.get(value, value)
-    return "unknown"
+            source = record if agent == "claude" else record.get("payload") or {}
+            value = source.get("entrypoint" if agent == "claude" else "originator")
+            where = where or SURFACES.get(value, value) or ""
+            folder = folder or source.get("cwd") or ""
+            if where and folder:
+                break
+    return where or "unknown", folder or "unknown"
 
 
 def find_agents() -> list[Agent]:
+    found = []
+    for name in AGENTS:
+        agent = Agent(name, installs(name))
+        for path in history_files(name):
+            where, folder = origin(path, name)
+            agent.surfaces[where] += 1
+            agent.folders[folder] += 1
+        found.append(agent)
+    return found
+
+
+def projects(agents: list[Agent]) -> list[str]:
+    """One line per project folder, most sessions first: the folder and each agent's count."""
+    folders = Counter()
+    for agent in agents:
+        folders.update(agent.folders)
     return [
-        Agent(name, installs(name), Counter(surface(path, name) for path in history_files(name)))
-        for name in AGENTS
+        folder
+        + " ("
+        + ", ".join(
+            f"{AGENTS[agent.name]} {agent.folders[folder]}"
+            for agent in agents
+            if agent.folders[folder]
+        )
+        + ")"
+        for folder, _ in folders.most_common()
     ]
 
 
@@ -129,7 +158,10 @@ def describe(agent: Agent) -> str:
 
 
 if __name__ == "__main__":
-    for agent in find_agents():
+    agents = find_agents()
+    for agent in agents:
         print(f"[find_agents] {describe(agent)}")
+    for line in projects(agents):
+        print(f"[find_agents] Project: {line}")
     for line in not_read():
         print(f"[find_agents] Not imported: {line}.")

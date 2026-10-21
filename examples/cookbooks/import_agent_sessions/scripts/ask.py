@@ -25,8 +25,10 @@ from cognee.modules.search.types import SearchType
 os.environ["AUTO_FEEDBACK"] = "false"
 
 try:
+    from scripts.configure import configure_cognee
     from scripts.ingest_sessions import node_set
 except ModuleNotFoundError:  # run alone from scripts/
+    from configure import configure_cognee
     from ingest_sessions import node_set
 
 DATASET = "imported_agent_sessions"  # the same in every script
@@ -65,4 +67,5 @@ if __name__ == "__main__":
     parser.add_argument("question")
     parser.add_argument("--agents", default="claude,codex", help="claude, codex or both")
     args = parser.parse_args()
+    configure_cognee()
     asyncio.run(ask(args.question, args.agents.split(",")))

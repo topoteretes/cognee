@@ -22,6 +22,11 @@ os.environ.setdefault("LOG_LEVEL", "ERROR")  # quiet cognee's logs; set before i
 import cognee
 from cognee.modules.engine.operations.setup import setup
 
+try:
+    from scripts.configure import configure_cognee
+except ModuleNotFoundError:  # run alone from scripts/
+    from configure import configure_cognee
+
 DATASET = "imported_agent_sessions"  # the same in every script
 SESSIONS = Path(__file__).parent.parent / "sessions"
 AGENT_NODE_SETS = {"claude": "claude_code", "codex": "codex"}
@@ -79,4 +84,6 @@ async def ingest_sessions(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--agents", default="claude,codex", help="claude, codex or both")
-    asyncio.run(ingest_sessions(parser.parse_args().agents.split(",")))
+    args = parser.parse_args()
+    configure_cognee()
+    asyncio.run(ingest_sessions(args.agents.split(",")))

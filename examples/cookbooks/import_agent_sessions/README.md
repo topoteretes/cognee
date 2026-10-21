@@ -25,7 +25,7 @@ uv run python examples/cookbooks/import_agent_sessions/import_agent_sessions.py 
 ```
 
 ```text
-[setup] Demo: sample Claude Code and Codex sessions; cognee runs on anthropic claude-haiku-5-5 (ANTHROPIC_API_KEY).
+[setup] Demo: sample Claude Code and Codex sessions; cognee runs on anthropic claude-haiku-5-5 (ANTHROPIC_API_KEY), local fastembed embeddings.
 [setup] Wrote the sample Claude Code and Codex sessions from setup.py.
 [clear] Forgot the dataset imported_agent_sessions_demo
 [read_sessions] Claude Code: 2 sessions, 4 turns
@@ -44,19 +44,24 @@ It does not look at your agents or your history.
 
 ## What it finds
 
-Every run, `--check` included, starts by listing the agents on this machine:
+Every run except `--demo`, `--check` included, starts by listing the agents on this machine
+and the project folders their sessions were started in:
 
 ```text
 [find_agents] Claude Code (command line, VS Code extension): 645 sessions (605 terminal, 40 Agent SDK)
 [find_agents] Codex (command line, VS Code extension): 467 sessions (391 IDE extension, 70 codex exec, 6 terminal)
+[find_agents] Project: /Users/you/code/shop (Claude Code 240, Codex 210)
+[find_agents] Project: /Users/you/code/client-app (Claude Code 130)
 [find_agents] Not imported: Cursor's own agent keeps its chats in Cursor's database, ...
 ```
 
 How each agent is installed comes from the `claude` / `codex` command on `PATH`, the macOS
 app, and the VS Code and Cursor extensions. Where each session was started comes from the
-session file itself (`entrypoint` in Claude Code, `originator` in Codex). Every session in
-`~/.claude/projects` and `~/.codex/sessions` is imported, wherever it was started; Codex's IDE
-extension, for example, saves to the same folder as its command line.
+session file itself (`entrypoint` in Claude Code, `originator` in Codex), and so does its project
+folder (the session's working directory). Sessions from `~/.claude/projects` and
+`~/.codex/sessions` are imported wherever they were started; Codex's IDE extension, for example,
+saves to the same folder as its command line. `--project` keeps the import to the projects you
+name, so sessions from other repos (a client's, say) are never sent to the LLM.
 
 Some installed apps keep chats this cookbook cannot read, and the run names them:
 
@@ -68,18 +73,25 @@ Some installed apps keep chats this cookbook cannot read, and the run names them
 
 ## What it needs
 
-One LLM key in `.env` at the repo root. It runs cognee, and cognee imports every agent's
+One LLM key in `.env` at the repo root. It runs cognee's LLM, and cognee imports every agent's
 history with it, Claude Code's (`~/.claude/projects/*/*.jsonl`) and Codex's
 (`~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`) alike. Whichever key it is, every imported
 session is sent to that provider.
 
-| Key | cognee runs on |
+| Key | cognee's LLM |
 |---|---|
-| `LLM_API_KEY` | what `.env` configures (`LLM_PROVIDER`, `LLM_MODEL`, embeddings), used as it is |
+| `LLM_API_KEY` | what `.env` configures (`LLM_PROVIDER`, `LLM_MODEL`), used as it is |
 | `OPENAI_API_KEY` | OpenAI, cognee's default |
-| `ANTHROPIC_API_KEY` | `claude-haiku-5-5`, with local fastembed embeddings (Anthropic has no embedding API) |
+| `ANTHROPIC_API_KEY` | `claude-haiku-5-5` |
 
-The first one set in that order wins. `CLAUDE_CONFIG_DIR` and `CODEX_HOME` move the history
+The first one set in that order wins. Embeddings are always local fastembed
+(`BAAI/bge-small-en-v1.5`, downloaded once, about 70 MB), whichever key it is, unless `.env`
+sets `EMBEDDING_PROVIDER`. A dataset's vectors must all come from one model, so this lets you
+switch keys between runs. If you do set `EMBEDDING_PROVIDER`, keep it for every run, or
+`--clear` first. With `ENABLE_BACKEND_ACCESS_CONTROL=false` all datasets share one vector
+store, so it also has to match what your other datasets were embedded with.
+`scripts/configure.py` makes these choices, and every script that calls cognee uses it, so each
+also runs alone. `CLAUDE_CONFIG_DIR` and `CODEX_HOME` move the history
 folders, as they do for the agents themselves.
 
 ## Run it
@@ -94,7 +106,7 @@ uv run python examples/cookbooks/import_agent_sessions/import_agent_sessions.py
 After listing your agents it asks which agents' sessions to ingest; Enter takes them all:
 
 ```text
-[setup] cognee runs on openai (OPENAI_API_KEY).
+[setup] cognee runs on openai (OPENAI_API_KEY), local fastembed embeddings.
 [choose] Which agent sessions should be ingested into cognee?
 [choose]   1) Claude Code: 645 sessions
 [choose]   2) Codex: 467 sessions
@@ -123,7 +135,7 @@ Options:
 | `--check` | Lists the agents, their sessions and the ones you can choose, and reports what is missing. Imports nothing |
 | `--agents claude,codex` | Imports these agents without asking |
 | `--limit N` | Imports the newest `N` sessions per agent (default 20). Every session costs LLM calls, so start small |
-| `--project TEXT` | Only sessions whose working folder contains `TEXT`, like `--project cognee` |
+| `--project PATH` | Only sessions started in this folder or inside it, like `--project ~/code/cognee` (not `~/code/cognee-docs`). Repeat it for several projects. The paths are the ones on the `[find_agents] Project:` lines |
 | `--since YYYY-MM-DD` | Only sessions started on or after that date |
 | `--ask "..."` | Asks this instead of "What is the topic of my data?" |
 | `--clear` | Forgets the dataset first, so only this run's sessions are in it |
@@ -143,6 +155,7 @@ import_agent_sessions/
 ├── sample/                     written by setup.py, git-ignored
 ├── sessions/                   written by read_sessions.py, git-ignored
 └── scripts/
+    ├── configure.py            which LLM key cognee runs on, and its local embeddings
     ├── find_agents.py
     ├── clear.py
     ├── read_sessions.py
@@ -152,9 +165,9 @@ import_agent_sessions/
 
 | # | Command (`uv run python examples/cookbooks/import_agent_sessions/...`) | Does | Writes |
 |---|---|---|---|
-| 0 | `scripts/find_agents.py` | Lists the installed agents, their sessions by where they were started, and the apps it leaves out. Reads only the first lines of each session file | nothing |
+| 0 | `scripts/find_agents.py` | Lists the installed agents, their sessions by where they were started and by project folder, and the apps it leaves out. Reads only the first lines of each session file | nothing |
 | 1 | `scripts/clear.py` (or `--clear`) | Forgets the dataset `imported_agent_sessions`. Your files in `~/.claude` and `~/.codex` are never touched | cognee dataset |
-| 2 | `scripts/read_sessions.py [--agents ...] [--limit N]` | Reads each agent's history and writes one Markdown file per session: your prompts and the agent's final answers, without tool calls, system reminders or injected instructions. No LLM, no cognee | `sessions/<agent>/*.md` |
+| 2 | `scripts/read_sessions.py [--agents ...] [--limit N] [--project PATH]` | Reads each agent's history and writes one Markdown file per session: your prompts and the agent's final answers, without tool calls, system reminders or injected instructions. No LLM, no cognee | `sessions/<agent>/*.md` |
 | 3 | `scripts/ingest_sessions.py [--agents ...]` | Remembers the files, tagged with a node set per agent (`imported_agent_sessions:claude_code`, `imported_agent_sessions:codex`) | cognee dataset |
 | 4 | `scripts/ask.py "question" [--agents ...]` | A `HYBRID_COMPLETION` recall over every chosen agent's node set, then one per agent's node set. Each answer runs in a new session, so earlier answers never leak into it | nothing |
 
@@ -165,16 +178,24 @@ Open a file in `sessions/` to see exactly what cognee is given before you import
 
 ## What is kept, and what is not
 
-- **Kept:** each prompt you typed (up to 2,000 characters), the agent's last answer to it (up to
-  3,000), and the session's folder, git branch, start time and title. A session stops at about
-  30,000 characters.
+- **Kept, in full:** each prompt you typed, the agent's last answer to it, and the session's
+  folder, git branch, start time and title. Long sessions are not cut; cognee chunks them.
 - **Dropped:** tool calls and their output, the agent's thinking, subagent transcripts, the
   blocks the harness adds to a prompt (system reminders, `AGENTS.md`, environment context, the
   IDE's open tabs), the summary `/compact` writes, interrupt markers, and `!` shell commands
   run in Claude Code with their output.
-- **Redacted:** text in prompts, answers and titles that looks like an API key or token (`sk-...`, `ghp_...`, `AKIA...`,
-  `xox...-`, `Bearer ...`) becomes `[redacted]`. This catches the common formats, not every
-  secret, so read a few files in `sessions/` before importing a lot.
+- **Redacted:** in prompts, answers and titles, these become `[redacted]`:
+  - keys and tokens by their format: OpenAI and Anthropic (`sk-...`), GitHub (`ghp_...`,
+    `github_pat_...`), GitLab (`glpat-...`), AWS key ids (`AKIA...`), Slack (`xox...-`), Stripe
+    (`sk_live_...`, `rk_...`, `whsec_...`), Google (`AIza...`), Hugging Face (`hf_...`), npm,
+    JWTs, `Bearer ...` and PEM private keys
+  - the password in a URL, like `postgresql://user:[redacted]@host`
+  - a value of 8 characters or more assigned to a name that says it is secret (`DB_PASSWORD=...`,
+    `"api_key": "..."`, `auth_token: ...`), whatever its format. Code that assigns such a name
+    (`token = request.headers[...]`) is redacted too.
+
+  This catches the common shapes, not every secret, so read a few files in `sessions/` before
+  importing a lot.
 - **Skipped:** a session whose file changed in the last two minutes. That is a session still
   running, such as the one you run this cookbook from, and it would mostly describe the import.
 

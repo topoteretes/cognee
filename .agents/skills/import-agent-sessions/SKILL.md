@@ -32,24 +32,31 @@ their own question.
    - Exit 0: go on.
 2. Tell the user what was found, from the `[find_agents]` lines: each agent, how it is
    installed, and how many sessions it has and where they were started. Name each
-   `Not imported:` app (Claude desktop chats, Cursor's own agent) and why its chats can't be
-   read.
+   `Not imported:` app (Claude desktop chats, Cursor's own agent, ChatGPT) and why its chats
+   can't be read.
 3. Ask the user which agent sessions to ingest into cognee, with your question tool when you
    have one: one choice per `[setup] Can import:` line, several allowed. Skip asking only
    when the user already named the agents. Don't choose for them: without `--agents` the
    import stops with `[setup] CHOOSE:`, because the script cannot ask without a terminal.
-4. Run the import with `--agents` set to the user's choice, like `--agents claude,codex`.
-   Start with the default `--limit 20` unless the user asked for more, and pass the user's
-   filters: `--project <text>` for one repo, `--since YYYY-MM-DD` for a period. Pass their
-   question with `--ask "..."`; without one the run asks "What is the topic of my data?":
-   `uv run python examples/cookbooks/import_agent_sessions/import_agent_sessions.py --agents <choice> --ask "..."`.
+4. Ask the user which projects to import, from the `[find_agents] Project:` lines, with
+   "All projects" as one choice. Every imported session is sent to the LLM provider, and a
+   machine often holds work the user can't share, so never assume all. When there are more
+   projects than your question tool shows, list them and ask the user to name theirs. Skip
+   asking only when the user already named the projects.
+5. Run the import with `--agents` set to the user's choice, like `--agents claude,codex`, and
+   one `--project <path>` per chosen project, copying the path from its `Project:` line (leave
+   `--project` out for all projects). A project includes the folders inside it. Start with the
+   default `--limit 20` unless the user asked for more, and pass `--since YYYY-MM-DD` for a
+   period. Pass their question with `--ask "..."`; without one the run asks "What is the topic
+   of my data?":
+   `uv run python examples/cookbooks/import_agent_sessions/import_agent_sessions.py --agents <choice> --project <path> --ask "..."`.
    It takes a few minutes for 20 sessions.
-5. The answers are on the `[ask]` lines: `all sessions>` over everything, and with two agents
+6. The answers are on the `[ask]` lines: `all sessions>` over everything, and with two agents
    one `<agent> only>` line each. Give them to the user.
-6. Later questions don't need a new import:
+7. Later questions don't need a new import:
    `uv run python examples/cookbooks/import_agent_sessions/scripts/ask.py "..." --agents claude,codex`
    (list only the agents the user chose).
-7. If a step fails, the run exits 1 and the traceback's last line says why. Run that script
+8. If a step fails, the run exits 1 and the traceback's last line says why. Run that script
    from `examples/cookbooks/import_agent_sessions/scripts/` on its own to look closer.
 
 ## Rules
@@ -60,7 +67,7 @@ their own question.
   and raise `--limit` only when they want more history.
 - Pass `--clear` only when the user asked to start over: it forgets everything the dataset
   holds. It never touches `~/.claude` or `~/.codex`.
-- Redaction catches common key formats only. If the user is about to import a lot, suggest
+- Redaction catches common key formats and secret-named values (`DB_PASSWORD=...`) only. If the user is about to import a lot, suggest
   they look at a few files in `examples/cookbooks/import_agent_sessions/sessions/` first.
 
 ## Clean up

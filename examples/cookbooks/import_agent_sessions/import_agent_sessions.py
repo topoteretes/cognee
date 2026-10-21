@@ -4,12 +4,13 @@
     uv run python examples/cookbooks/import_agent_sessions/import_agent_sessions.py --check
     uv run python examples/cookbooks/import_agent_sessions/import_agent_sessions.py
     uv run python examples/cookbooks/import_agent_sessions/import_agent_sessions.py \
-        --limit 50 --project cognee --ask "Which tickets did I work on?"
+        --limit 50 --project ~/code/cognee --ask "Which tickets did I work on?"
 
 It first lists the coding agents installed on this machine and the sessions each has kept,
 then asks which agents' sessions to ingest (or takes them from --agents; without a terminal
 to ask in, --agents is required). One LLM key runs cognee and imports every agent's history:
-an OpenAI or an Anthropic key, or the LLM_API_KEY your .env configures. Everything goes into
+an OpenAI or an Anthropic key, or the LLM_API_KEY your .env configures; embeddings are local
+(scripts/configure.py). Everything goes into
 one dataset, so every question is answered over all the agents you chose. --demo instead
 imports the sample Claude Code and Codex sessions from setup.py into a dataset of its own, so
 it works with no history. Each script in scripts/ also runs alone. Exit codes: 0 done, 2 setup
@@ -20,59 +21,20 @@ import argparse
 import asyncio
 import os
 import sys
+from pathlib import Path
 
 os.environ.setdefault("LOG_LEVEL", "ERROR")  # quiet cognee's logs; set before importing it
 
 from scripts.ask import ask
 from scripts.clear import clear
-from scripts.find_agents import Agent, describe, find_agents, not_read
+from scripts.configure import NO_KEY, configure_cognee, has_key
+from scripts.find_agents import Agent, describe, find_agents, not_read, projects
 from scripts.ingest_sessions import DATASET, ingest_sessions
 from scripts.read_sessions import AGENTS, OUT, read_sessions, write_sessions
 from setup import SAMPLE, write_sample
 
 DEFAULT_QUESTION = "What is the topic of my data?"
 DEMO_DATASET = "imported_agent_sessions_demo"  # never mixes with your own imported sessions
-ANTHROPIC_MODEL = "claude-haiku-5-5"  # cheap and fast; cognify makes one call per chunk
-
-
-NO_KEY = "No LLM key is set. Put OPENAI_API_KEY or ANTHROPIC_API_KEY in .env."
-
-
-def has_key() -> bool:
-    """Whether cognee has an LLM key to run on. Any one key imports every agent's history."""
-    return any(
-        os.environ.get(name) for name in ("LLM_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY")
-    )
-
-
-def configure_cognee() -> str:
-    """Run cognee on a key you have, and say which. An LLM_API_KEY in .env is used as it is."""
-    import cognee
-
-    if os.environ.get("LLM_API_KEY"):
-        return f"{os.environ.get('LLM_PROVIDER', 'openai')} (LLM_API_KEY)"
-    if os.environ.get("OPENAI_API_KEY"):
-        # embeddings reuse it, as by default
-        cognee.config.set_llm_api_key(os.environ["OPENAI_API_KEY"])
-        return "openai (OPENAI_API_KEY)"
-    cognee.config.set_llm_config(
-        {
-            "llm_provider": "anthropic",
-            "llm_model": ANTHROPIC_MODEL,
-            "llm_api_key": os.environ["ANTHROPIC_API_KEY"],
-        }
-    )
-    if not os.environ.get("EMBEDDING_PROVIDER"):
-        # Anthropic has no embedding API, so embed on your machine with fastembed (a core
-        # dependency; the model downloads once, about 70 MB)
-        cognee.config.set_embedding_config(
-            {
-                "embedding_provider": "fastembed",
-                "embedding_model": "BAAI/bge-small-en-v1.5",
-                "embedding_dimensions": 384,
-            }
-        )
-    return f"anthropic {ANTHROPIC_MODEL} (ANTHROPIC_API_KEY)"
 
 
 def choose_agents(choices: list[Agent]) -> list[str]:
@@ -102,6 +64,12 @@ def missing_setup(args: argparse.Namespace, found: list[Agent]) -> list[str]:
     if not has_key():
         return [NO_KEY]
     missing = []
+    for project in args.project or []:
+        if not Path(project).expanduser().is_absolute():
+            missing.append(
+                f"--project {project} is not a folder path; pass one from a"
+                " [find_agents] Project: line, like ~/code/cognee."
+            )
     for agent in args.agents:
         if agent not in AGENTS:
             missing.append(f"--agents names {agent}; use claude, codex or both.")
@@ -143,13 +111,15 @@ if __name__ == "__main__":
     parser.add_argument(
         "--limit", type=int, default=20, help="newest sessions per agent (default 20)"
     )
-    parser.add_argument("--project", help="only sessions whose folder path contains this text")
+    parser.add_argument(
+        "--project",
+        action="append",
+        help="only sessions in this folder or inside it; repeat for several projects",
+    )
     parser.add_argument("--since", help="only sessions started on or after this date (YYYY-MM-DD)")
     parser.add_argument("--clear", action="store_true", help="forget the dataset before importing")
     parser.add_argument("--ask", default=DEFAULT_QUESTION, help=f'default: "{DEFAULT_QUESTION}"')
     args = parser.parse_args()
-
-    import cognee  # loads .env, so keys set there are seen by the check
 
     if args.demo:  # the sample has both agents' sessions
         if not has_key():
@@ -167,6 +137,8 @@ if __name__ == "__main__":
     found = find_agents()
     for agent in found:
         print(f"[find_agents] {describe(agent)}")
+    for line in projects(found):
+        print(f"[find_agents] Project: {line}")
     for line in not_read():
         print(f"[find_agents] Not imported: {line}.")
 
