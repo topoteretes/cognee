@@ -1,6 +1,6 @@
 import os
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 
 from cognee.shared.logging_utils import get_logger
 
@@ -83,6 +83,9 @@ _auth_dependency = fastapi_users.current_user(active=True, optional=not REQUIRE_
 
 async def get_authenticated_user(
     user: User | None = Depends(_auth_dependency),
+    # FastAPI injects the request; the None default keeps direct callers
+    # working. ``Request | None`` would not be injected, hence the ignore.
+    request: Request = None,  # type: ignore[assignment]
 ) -> User:
     """
     Get authenticated user with environment-controlled behavior:
@@ -107,5 +110,11 @@ async def get_authenticated_user(
         # outlive the request) can access user.tenants / user.roles without
         # DetachedInstanceError.
         user = await get_user(user.id)
+
+    # Who the request is, for code with the request but not this dependency's
+    # result: the exception middleware, which runs outside the handler's
+    # context, reads it to attribute error telemetry.
+    if request is not None:
+        request.state.user = user
 
     return user

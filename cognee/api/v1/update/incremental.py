@@ -748,7 +748,7 @@ async def _run_incremental_update(
     )
     send_telemetry(
         "Incremental Update Run Started",
-        user.id,
+        user,
         additional_properties={"dataset_id": str(dataset.id), "data_id": str(data_id)},
     )
     try:
@@ -784,7 +784,7 @@ async def _run_incremental_update(
     )
     send_telemetry(
         "Incremental Update Run Completed",
-        user.id,
+        user,
         additional_properties={"dataset_id": str(dataset.id), "data_id": str(data_id), **result},
     )
     return {**result, "pipeline_run_id": pipeline_run.pipeline_run_id}
@@ -1088,9 +1088,7 @@ async def _write_and_publish(
             chunk.belongs_to_set = document.belongs_to_set
             chunk.source_node_set = document.source_node_set
         summaries = await extract(batch, context)
-        await add_data_points(
-            summaries, ctx=context, embed_triplets=cognify_config.triplet_embedding
-        )
+        await add_data_points(summaries, ctx=context)
     if reused_chunks:
         await _restore_repositioned_chunks(reused_chunks, context)
 

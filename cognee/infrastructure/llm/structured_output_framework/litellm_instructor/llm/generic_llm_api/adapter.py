@@ -3,7 +3,7 @@
 import base64
 import logging
 import mimetypes
-from typing import Any
+from typing import Any, cast
 
 import instructor
 import litellm
@@ -171,6 +171,9 @@ class GenericAPIAdapter(LLMInterface):
                 api_version=self.api_version,
                 **merged_kwargs,
             )
+            # litellm types acompletion() as ModelResponse | CustomStreamWrapper whatever
+            # `stream` is; a call without stream=True returns a ModelResponse.
+            response = cast(litellm.ModelResponse, response)
         # Guarded for the same reason the streaming loop is: content-filter
         # refusals and some proxy error envelopes come back with choices == [],
         # and a bare IndexError is not retryable and says nothing useful.
@@ -378,10 +381,11 @@ class GenericAPIAdapter(LLMInterface):
             api_base=self.endpoint,
             max_retries=self.MAX_RETRIES,
         )
+        response = cast(litellm.ModelResponse, response)
 
         if not response.choices or response.choices[0].message is None:
             raise ValueError("Transcription failed. No response received.")
-        return TranscriptionReturnType(response.choices[0].message.content, response)
+        return TranscriptionReturnType(response.choices[0].message.content or "", response)
 
     @observe(as_type="transcribe_image")
     @retry(
@@ -423,7 +427,7 @@ class GenericAPIAdapter(LLMInterface):
             raise ValueError(
                 f"Could not determine MIME type for image file: {input}. Is the extension correct?"
             )
-        response: litellm.ModelResponse = await litellm.acompletion(
+        response = await litellm.acompletion(
             model=self.image_transcribe_model,
             messages=[
                 {
@@ -451,4 +455,4 @@ class GenericAPIAdapter(LLMInterface):
             reasoning_effort=reasoning_effort,
             drop_params=True,
         )
-        return response
+        return cast(litellm.ModelResponse, response)
