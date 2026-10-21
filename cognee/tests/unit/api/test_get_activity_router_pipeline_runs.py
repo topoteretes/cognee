@@ -58,7 +58,6 @@ def _run(**overrides) -> PipelineRun:
         "tokens_out": None,
         "embedding_tokens": None,
         "origin": None,
-        "session_id": None,
         "parent_operation_id": None,
         "background": None,
     }
@@ -455,14 +454,21 @@ def test_session_id_filters_through_the_session_table(monkeypatch):
 
 def test_rows_list_every_session_they_belong_to(monkeypatch):
     user_id = uuid4()
-    run = _run(user_id=user_id, session_id=None)
-    _stub_engine(monkeypatch, [_joined(run)], sessions={run.id: ["chat_1", "chat_2"]})
+    two = _run(user_id=user_id)
+    one = _run(user_id=user_id)
+    none = _run(user_id=user_id)
+    _stub_engine(
+        monkeypatch,
+        [_joined(two), _joined(one), _joined(none)],
+        sessions={two.id: ["chat_1", "chat_2"], one.id: ["chat_1"]},
+    )
     _stub_visibility(monkeypatch, visible_user_ids=[user_id], permitted_dataset_ids=[])
 
-    (row,) = _client(user_id).get("/activity/pipeline-runs").json()
+    rows = _client(user_id).get("/activity/pipeline-runs").json()
 
-    assert row["session_ids"] == ["chat_1", "chat_2"]
-    assert row["session_id"] is None
+    assert [r["session_ids"] for r in rows] == [["chat_1", "chat_2"], ["chat_1"], []]
+    # session_id is derived from session_ids: the session when there is exactly one.
+    assert [r["session_id"] for r in rows] == [None, "chat_1", None]
 
 
 def test_no_session_id_leaves_the_filter_out(monkeypatch):

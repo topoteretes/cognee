@@ -89,8 +89,12 @@ async def test_session_id_is_persisted(ops_engine):
         context.set_session_id("session-xyz")
 
     rows = await _fetch_rows(ops_engine)
-    assert rows[0].session_id == "session-abc"
-    assert rows[1].session_id == "session-xyz"
+    sessions = {}
+    async with ops_engine.get_async_session() as session:
+        for link in (await session.execute(select(PipelineRunSession))).scalars():
+            sessions.setdefault(link.pipeline_run_row_id, []).append(link.session_id)
+    assert sessions[rows[0].id] == ["session-abc"]
+    assert sessions[rows[1].id] == ["session-xyz"]
 
 
 @pytest.mark.asyncio

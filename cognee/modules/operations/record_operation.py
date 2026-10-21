@@ -96,8 +96,8 @@ class OperationContext:
         self.tenant_id = tenant_id
         self.dataset_id = dataset_id
         self.usage = usage or OperationUsage()
-        # Every session this operation is bound to; ``session_id`` is the one
-        # when there is exactly one (pipeline_runs.session_id).
+        # Every session this operation is bound to, stored one row per session
+        # in pipeline_run_sessions with each pipeline_runs row it writes.
         self.session_ids: tuple[str, ...] = (session_id,) if session_id else ()
         self.background = background
         self.parent_operation_id = parent_operation_id
@@ -121,11 +121,6 @@ class OperationContext:
     def set_dataset(self, dataset_id: UUID | None) -> None:
         """Bind the target dataset, when the operation has exactly one."""
         self.dataset_id = dataset_id
-
-    @property
-    def session_id(self) -> str | None:
-        """The bound session when there is exactly one (joins SessionModelUsage)."""
-        return self.session_ids[0] if len(self.session_ids) == 1 else None
 
     def set_session_id(self, session_id: str | None) -> None:
         """Bind one active session-cache id."""
@@ -208,7 +203,6 @@ async def _write_operation_row(
         tokens_out=context.usage.tokens_out,
         embedding_tokens=context.usage.embedding_tokens,
         origin=get_operation_origin(),
-        session_id=context.session_id,
         parent_operation_id=context.parent_operation_id,
         background=context.background,
     )

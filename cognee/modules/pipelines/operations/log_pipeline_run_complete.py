@@ -6,7 +6,7 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.operations import get_current_session_ids, get_operation_origin
 from cognee.modules.operations.usage_accumulator import get_parent_run_id
 from cognee.modules.pipelines.models import OperationOutcome, PipelineRun, PipelineRunStatus
-from cognee.modules.pipelines.operations.run_sessions import add_run_sessions, single_session
+from cognee.modules.pipelines.operations.run_sessions import add_run_sessions
 from cognee.modules.pipelines.utils import summarize_run_info_data
 from cognee.modules.users.models import User
 
@@ -46,7 +46,6 @@ async def log_pipeline_run_complete(
         tokens_out=tokens_out,
         embedding_tokens=embedding_tokens,
         origin=get_operation_origin(),
-        session_id=single_session(session_ids),
         # This writer runs inside the pipeline's own parent_run_scope —
         # exclude it so the row parents to the next enclosing run.
         parent_operation_id=get_parent_run_id(excluding=pipeline_run_id),

@@ -3,8 +3,8 @@
 An ``improve`` given sessions stamps them on its own operation record, but the
 dashboard lists the ``memify_pipeline`` rows the run wrote. Without inheritance
 those carry no session, so every session page shows every improve run on the
-dataset (CLO-1105). Every row lists its sessions in ``pipeline_run_sessions``;
-``pipeline_runs.session_id`` holds the session when there is exactly one.
+dataset (CLO-1105). A row's sessions live in ``pipeline_run_sessions`` only, one
+row per session.
 
 Runs against a real temporary SQLite database — no LLM, no network.
 """
@@ -105,10 +105,9 @@ async def test_pipeline_rows_carry_the_operations_session_id(ops_engine):
         PipelineRunStatus.DATASET_PROCESSING_STARTED,
         PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
     }
-    assert all(row.session_id == "chat_1" for row in memify_rows)
-    # The operation record keeps its own stamp.
-    assert {row.session_id for row in rows} == {"chat_1"}
     sessions = await _sessions(ops_engine)
+    assert all(sessions[row.id] == ["chat_1"] for row in memify_rows)
+    # The operation record keeps its own stamp.
     assert all(sessions[row.id] == ["chat_1"] for row in rows)
 
 
@@ -122,7 +121,8 @@ async def test_errored_row_carries_the_session_id(ops_engine):
         )
 
     rows = [row for row in await _rows(ops_engine) if row.pipeline_run_id == run_id]
-    assert [row.session_id for row in rows] == ["chat_1"]
+    assert len(rows) == 1
+    assert (await _sessions(ops_engine))[rows[0].id] == ["chat_1"]
 
 
 @pytest.mark.asyncio
@@ -141,7 +141,7 @@ async def test_explicit_session_ids_win_for_recovery(ops_engine):
     )
 
     rows = await _rows(ops_engine)
-    assert [row.session_id for row in rows] == ["chat_1"]
+    assert len(rows) == 1
     assert (await _sessions(ops_engine))[rows[0].id] == ["chat_1"]
 
 
@@ -153,7 +153,7 @@ async def test_no_session_outside_a_session_bound_operation(ops_engine):
     async with record_operation("improve"):
         await _run_memify(uuid4())
 
-    assert {row.session_id for row in await _rows(ops_engine)} == {None}
+    assert len(await _rows(ops_engine)) == 5  # two runs of two rows, one operation record
     assert await _sessions(ops_engine) == {}
 
 
@@ -179,7 +179,8 @@ async def test_background_run_keeps_the_session_after_the_scope_exits(ops_engine
 
     rows = [row for row in await _rows(ops_engine) if row.pipeline_run_id == run_ids[0]]
     assert len(rows) == 2
-    assert all(row.session_id == "chat_1" for row in rows)
+    sessions = await _sessions(ops_engine)
+    assert all(sessions[row.id] == ["chat_1"] for row in rows)
 
 
 @pytest.mark.asyncio
@@ -191,7 +192,6 @@ async def test_a_multi_session_operation_stamps_every_session_on_every_row(ops_e
 
     rows = await _rows(ops_engine)
     assert len(rows) == 3  # STARTED, COMPLETED, the operation record
-    assert {row.session_id for row in rows} == {None}
     sessions = await _sessions(ops_engine)
     assert all(sessions[row.id] == ["chat_1", "chat_2"] for row in rows)
     assert {row.pipeline_run_id for row in rows if row.pipeline_name} == {run_id}
@@ -202,9 +202,8 @@ async def test_session_ids_keep_order_and_drop_duplicates_and_blanks(ops_engine)
     async with record_operation("improve") as operation:
         operation.set_session_ids(["chat_2", "", "chat_1", "chat_2", None])
         assert operation.session_ids == ("chat_2", "chat_1")
-        assert operation.session_id is None
-        operation.set_session_ids(["chat_1"])
-        assert operation.session_id == "chat_1"
+        operation.set_session_id("chat_1")
+        assert operation.session_ids == ("chat_1",)
 
 
 @pytest.mark.asyncio
@@ -225,5 +224,4 @@ async def test_recovery_carries_every_session_of_the_started_row(ops_engine):
         if row.status == PipelineRunStatus.DATASET_PROCESSING_ERRORED
     ]
     assert len(errored) == 1
-    assert errored[0].session_id is None
     assert (await _sessions(ops_engine))[errored[0].id] == ["chat_1", "chat_2"]

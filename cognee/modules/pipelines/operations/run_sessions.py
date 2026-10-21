@@ -10,11 +10,6 @@ from cognee.modules.pipelines.models.PipelineRun import PipelineRun
 from cognee.modules.pipelines.models.PipelineRunSession import PipelineRunSession
 
 
-def single_session(session_ids: Sequence[str]) -> str | None:
-    """The value of ``pipeline_runs.session_id``: the session when there is exactly one."""
-    return session_ids[0] if len(session_ids) == 1 else None
-
-
 def add_run_sessions(db_session, pipeline_run: PipelineRun, session_ids: Sequence[str]) -> None:
     """Add ``pipeline_run`` and one ``pipeline_run_sessions`` row per session to ``db_session``.
 

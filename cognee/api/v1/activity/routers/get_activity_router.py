@@ -77,8 +77,9 @@ def get_activity_router() -> APIRouter:
           launched them, so `pipeline_name=memify_pipeline&session_id=…` lists
           the improve runs over that session, including an improve over several
           sessions. Each row lists its sessions in `session_ids`; `session_id`
-          is set only when there is exactly one. Rows written before that
-          inheritance carry it on the operation record only.
+          is derived from it (the session when there is exactly one, else
+          null). Rows written before that inheritance carry it on the operation
+          record only.
         - **limit** (int): Page size, 1-500 (default: 50).
         - **offset** (int): Rows to skip for pagination (default: 0).
 
@@ -236,11 +237,17 @@ def get_activity_router() -> APIRouter:
                 "started_at": run.started_at.isoformat() if run.started_at else None,
                 "ended_at": run.ended_at.isoformat() if run.ended_at else None,
                 "user_id": str(run.user_id) if run.user_id else None,
-                "session_id": run.session_id,
-                # Every session the row belongs to (more than one for, e.g., an
-                # improve over several sessions); session_id is the one when
-                # there is exactly one.
+                # Every session the row belongs to (several for an improve over
+                # several sessions). session_id is derived: the session when
+                # there is exactly one, else null; kept for clients that read
+                # the single field (the Cloud dashboard labels a run's channel
+                # by it). Sessions are stored only in pipeline_run_sessions.
                 "session_ids": sessions_by_row.get(run.id, []),
+                "session_id": (
+                    sessions_by_row[run.id][0]
+                    if len(sessions_by_row.get(run.id, [])) == 1
+                    else None
+                ),
                 "parent_operation_id": str(run.parent_operation_id)
                 if run.parent_operation_id
                 else None,

@@ -4,14 +4,12 @@ from cognee.infrastructure.databases.relational import Base
 
 
 class PipelineRunSession(Base):
-    """One session a ``pipeline_runs`` row belongs to.
+    """One session a ``pipeline_runs`` row belongs to; the only place sessions are stored.
 
     A run launched by an operation bound to several sessions (an ``improve``
-    over two sessions) belongs to each of them, which one ``session_id``
-    column cannot hold. Every row that carries sessions gets one row here per
-    session, so "the runs of session X" is one indexed equality lookup on
-    every relational backend. ``pipeline_runs.session_id`` still holds the
-    session when there is exactly one.
+    over two sessions) belongs to each of them. Every row that carries
+    sessions gets one row here per session, so "the runs of session X" is one
+    indexed equality lookup on every relational backend.
     """
 
     __tablename__ = "pipeline_run_sessions"
