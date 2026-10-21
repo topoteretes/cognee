@@ -18,6 +18,12 @@ CREDENTIAL = SimpleNamespace(user_id=USER_ID, provider_account_id="acct-1")
         ("gmail", "", "gmail_messages_e8ba1b716982492b069485f8"),
         ("google_drive", "folder-1", "google_drive_files_c0d03acdd392958b38a3b6c4"),
         ("google_drive", "folder-é", "google_drive_files_4a926936081ee8448fba9596"),
+        ("google_calendar", "", "google_calendar_events_e8ba1b716982492b069485f8"),
+        (
+            "google_calendar",
+            "team@group.calendar.google.com",
+            "google_calendar_events_834ee7babdf83d4d429c35f3",
+        ),
     ],
 )
 def test_google_resource_names_are_pinned(provider, scope, expected):
@@ -39,6 +45,25 @@ def test_linear_names_are_pinned_and_a_dlt_table_name():
     assert ingestion.source_factory("linear").__module__ == (
         "cognee.tasks.ingestion.connectors.linear"
     )
+
+
+def test_apollo_names_are_pinned_and_a_dlt_table_name():
+    # Same rule as the Linear pin: the literal is deliberate. One Apollo team is one
+    # connection, so there is no scope, and the Cloud control plane only tracks tables that
+    # start with the provider prefix.
+    name = ingestion.resource_name("apollo", CREDENTIAL)
+    assert name == "apollo_e8ba1b716982492b069485f8"
+    assert name == name.lower() and set(name) <= set("abcdefghijklmnopqrstuvwxyz0123456789_")
+    assert len(name) <= 63
+    assert ingestion.source_factory("apollo").__module__ == (
+        "cognee.tasks.ingestion.connectors.apollo"
+    )
+
+
+def test_apollo_service_is_built_from_the_connections_api_key():
+    from cognee.tasks.ingestion.connectors.apollo import ApolloClient
+
+    assert isinstance(ingestion.build_service("apollo", "an-apollo-api-key"), ApolloClient)
 
 
 def test_unknown_provider_is_refused_by_every_provider_keyed_function():

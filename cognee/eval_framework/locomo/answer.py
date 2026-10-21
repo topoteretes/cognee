@@ -6,7 +6,9 @@ every question, ``LocomoEval`` grades every answer with the LLM judge, and the a
 to the ingestion report.
 
 Every question is answered with the same prompt (``qa_prompts/unified.txt``) and asked as written:
-the dataset's category label reaches neither the prompt nor the question.
+the dataset's category label reaches neither the prompt nor the question. Out-of-scope questions
+(see ``scope.py``) are dropped before anything else, so they are never retrieved for, answered or
+judged.
 
 Usage (normally driven by ``run_locomo_eval.py``)::
 
@@ -26,14 +28,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-os.environ.setdefault("CACHING", "true")
-# No per-turn analysis while answering: it is one extra LLM call per question and the
-# retrievers here run without a session_id anyway.
-os.environ.setdefault("AUTO_FEEDBACK", "false")
-os.environ.setdefault("ENABLE_BACKEND_ACCESS_CONTROL", "false")
-os.environ.setdefault("LOG_LEVEL", "ERROR")
-os.environ.setdefault("COGNEE_LOG_FILE", "false")
-
 from cognee.eval_framework.beam.eval.sweep import (
     build_registry_base_configs,
     load_beam_sweep_payload_from_file,
@@ -41,6 +35,7 @@ from cognee.eval_framework.beam.eval.sweep import (
 )
 from cognee.eval_framework.benchmark_adapters.locomo_adapter import LocomoAdapter
 from cognee.eval_framework.eval_config import EvalConfig
+from cognee.eval_framework.locomo.scope import DEFAULT_GOLD_EXCLUSIONS, EvaluationScope
 from cognee.eval_framework.reporting.io import write_json
 from cognee.eval_framework.sweeps.retriever_sweep_runner import (
     RetrieverSweepSettings,
@@ -113,11 +108,19 @@ def with_answer_prompt(configs: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 async def answer_conversation(args: argparse.Namespace) -> dict[str, Any]:
     started = time.monotonic()
+    scope = EvaluationScope.load(args.gold_exclusions)
     adapter = LocomoAdapter(max_sessions=args.max_sessions, data_path=args.data_path)
     conversation = adapter.load_conversation(args.conversation_index)
-    questions = adapter.questions_for(conversation, load_golden_context=True)
+    all_questions = adapter.questions_for(conversation, load_golden_context=True)
+    in_scope = [
+        question
+        for question in all_questions
+        if scope.includes(
+            args.conversation_index, question["question_idx"], question["question_type"]
+        )
+    ]
     questions = select_questions(
-        questions,
+        in_scope,
         question_types=args.question_types,
         max_questions=args.max_questions,
     )
@@ -136,8 +139,9 @@ async def answer_conversation(args: argparse.Namespace) -> dict[str, Any]:
     for question in questions:
         type_counts[question["question_type"]] = type_counts.get(question["question_type"], 0) + 1
     print_step(
-        f"{conversation.sample_id}: {len(questions)} questions {json.dumps(type_counts)} x "
-        f"{len(configs)} retriever(s) x {args.num_runs} run(s); prompt={QA_PROMPT_PATH.name}; "
+        f"{conversation.sample_id}: {len(questions)} questions {json.dumps(type_counts)} "
+        f"({len(in_scope)} of {len(all_questions)} in scope) x {len(configs)} retriever(s) x "
+        f"{args.num_runs} run(s); prompt={QA_PROMPT_PATH.name}; "
         f"answer model={os.getenv('LLM_MODEL')} judge={os.getenv('LOCOMO_JUDGE_MODEL')}"
     )
 
@@ -162,6 +166,11 @@ async def answer_conversation(args: argparse.Namespace) -> dict[str, Any]:
         "sample_id": conversation.sample_id,
         "question_count": len(questions),
         "question_type_counts": type_counts,
+        "scope": {
+            **scope.metadata(),
+            "questions_before_scope": len(all_questions),
+            "questions_in_scope": len(in_scope),
+        },
         "answer_model": os.getenv("LLM_MODEL"),
         "judge_model": os.getenv("LOCOMO_JUDGE_MODEL"),
         "answer_prompt": QA_PROMPT_PATH.name,
@@ -206,6 +215,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument("--config-json-path", type=Path, required=True)
     parser.add_argument("--data-path", default=None)
+    parser.add_argument(
+        "--gold-exclusions",
+        type=Path,
+        default=DEFAULT_GOLD_EXCLUSIONS,
+        help="audit exclusions; these and open-domain questions are not answered",
+    )
     parser.add_argument("--max-sessions", type=int, default=None)
     parser.add_argument("--max-questions", type=int, default=None)
     parser.add_argument("--question-types", type=_parse_csv, default=None)
@@ -214,7 +229,24 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _apply_env_defaults() -> None:
+    """Benchmark settings for a standalone run, set before cognee reads its (cached) config.
+
+    Only the entry point applies them: setting them at import time would change the settings of
+    every process that imports this module, the test suite included, and turn off access control
+    for it. ``run_locomo_eval.py`` passes the same values to its child processes explicitly.
+    """
+    os.environ.setdefault("CACHING", "true")
+    # No per-turn analysis while answering: it is one extra LLM call per question and the
+    # retrievers here run without a session_id anyway.
+    os.environ.setdefault("AUTO_FEEDBACK", "false")
+    os.environ.setdefault("ENABLE_BACKEND_ACCESS_CONTROL", "false")
+    os.environ.setdefault("LOG_LEVEL", "ERROR")
+    os.environ.setdefault("COGNEE_LOG_FILE", "false")
+
+
 def main() -> None:
+    _apply_env_defaults()
     args = _parse_args()
     try:
         asyncio.run(answer_conversation(args))

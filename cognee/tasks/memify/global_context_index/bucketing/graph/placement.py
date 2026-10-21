@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from cognee.modules.graph.utils.entity_scoring import entities_weight, weighted_jaccard
+
 from ...ids import create_bucket_id
 from ...models import BucketAssignment, SummaryNode
 from ..common import (
@@ -9,7 +11,6 @@ from ..common import (
     mark_bucket_for_persistence,
     record_bucket_assignment,
 )
-from .scoring import entities_weight, weighted_jaccard
 
 
 def rebuild_graph_buckets_for_level(

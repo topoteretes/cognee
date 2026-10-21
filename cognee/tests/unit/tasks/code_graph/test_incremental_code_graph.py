@@ -8,6 +8,7 @@ import pytest
 
 from cognee.tasks.code_graph.enola import snapshot_identity
 from cognee.tasks.code_graph.extract_code_graph import (
+    CODE_GRAPH_MAPPING_VERSION,
     add_code_graph_data_points,
     add_code_graph_edges,
     extract_code_graph,
@@ -71,7 +72,10 @@ def test_snapshot_identity_prefers_receipt_and_falls_back_to_hash(tmp_path):
 async def test_extract_skips_when_stored_snapshot_id_matches(tmp_path, monkeypatch):
     _write_snapshot(tmp_path, FACTS)
     engine = _mock_engine(monkeypatch)
-    engine.get_node.return_value = {"last_snapshot_id": SNAPSHOT_ID}
+    engine.get_node.return_value = {
+        "last_snapshot_id": SNAPSHOT_ID,
+        "last_mapping_version": CODE_GRAPH_MAPPING_VERSION,
+    }
 
     data_points = await extract_code_graph(repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path)
 
@@ -83,7 +87,14 @@ async def test_extract_skips_when_stored_snapshot_id_matches(tmp_path, monkeypat
 async def test_extract_reads_marker_from_json_properties_blob(tmp_path, monkeypatch):
     _write_snapshot(tmp_path, FACTS)
     engine = _mock_engine(monkeypatch)
-    engine.get_node.return_value = {"properties": json.dumps({"last_snapshot_id": SNAPSHOT_ID})}
+    engine.get_node.return_value = {
+        "properties": json.dumps(
+            {
+                "last_snapshot_id": SNAPSHOT_ID,
+                "last_mapping_version": CODE_GRAPH_MAPPING_VERSION,
+            }
+        )
+    }
 
     data_points = await extract_code_graph(repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path)
 

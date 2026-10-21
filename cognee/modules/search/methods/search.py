@@ -402,11 +402,15 @@ async def search_in_datasets_context(
         except CodeSeedNotFoundError as error:
             # ``error`` is the one place a caller reads a dataset's failure; the
             # completion marker is the shape this case shipped with and stays
-            # for callers that already parse it.
+            # for callers that already parse it, plus the error's stable code
+            # (not_found, ambiguous, no_code_graph, feature_unavailable).
+            completion = {"seed_not_found": True, "error": str(error), "code": error.error_code}
+            if error.error_param:
+                completion["param"] = error.error_param
             return SearchResultPayload(
                 result_object=None,
                 context=None,
-                completion={"seed_not_found": True, "error": str(error)},
+                completion=completion,
                 error=str(error),
                 search_type=query_type,
                 only_context=False,

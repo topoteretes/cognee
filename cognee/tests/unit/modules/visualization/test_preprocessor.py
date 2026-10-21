@@ -379,7 +379,7 @@ def test_schema_graph_falls_back_to_type_graph_when_no_schema_nodes():
     assert "type:Person" in type_node_ids
 
 
-def test_schema_graph_uses_schema_nodes_when_present():
+def test_schema_graph_draws_one_card_per_table_in_the_type_graph_shape():
     nodes_data = [
         (
             "users",
@@ -402,8 +402,9 @@ def test_schema_graph_uses_schema_nodes_when_present():
     ]
     edges_data = [("posts", "users", "has_relationship", {"relationship_name": "foreign_key"})]
     result = preprocess((nodes_data, edges_data))
-    schema_node_types = {n.get("type") for n in result.schema_graph["nodes"]}
-    assert "SchemaTable" in schema_node_types
+    cards = {n["name"]: n for n in result.schema_graph["nodes"] if n["type"] == "GraphNodeType"}
+    assert set(cards) == {"users", "posts"}
+    assert [f["name"] for f in cards["users"]["fields"]] == ["id"]
 
 
 def test_schema_type_nodes_resolve_semantic_types_via_is_a():
@@ -622,3 +623,49 @@ def test_operation_layer_maps_operations_to_present_types():
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+def test_a_foreign_key_becomes_a_relationship_edge_between_the_table_cards():
+    """The Schema view reads GraphNodeType cards and GraphRelationshipType
+    edges; raw SchemaTable and SchemaRelationship nodes were dropped there, so
+    a SQL dataset's schema tab drew nothing."""
+    tables = [
+        (name, {"type": "SchemaTable", "name": name, "columns": "[]"}) for name in ("pins", "parts")
+    ]
+    foreign_key = (
+        "fk",
+        {
+            "type": "SchemaRelationship",
+            "name": "pins_part_id",
+            "source_table": "pins",
+            "target_table": "parts",
+            "relationship_type": "foreign_key",
+        },
+    )
+
+    schema_graph = preprocess(([*tables, foreign_key], [])).schema_graph
+
+    edges = [n for n in schema_graph["nodes"] if n["type"] == "GraphRelationshipType"]
+    assert [(e["source_type"], e["target_type"], e["relationship_label"]) for e in edges] == [
+        ("pins", "parts", "foreign_key")
+    ]
+
+
+def test_a_relationship_to_a_table_that_is_not_there_is_not_drawn():
+    nodes = [
+        ("pins", {"type": "SchemaTable", "name": "pins", "columns": "[]"}),
+        (
+            "fk",
+            {
+                "type": "SchemaRelationship",
+                "name": "pins_part_id",
+                "source_table": "pins",
+                "target_table": "parts",
+                "relationship_type": "foreign_key",
+            },
+        ),
+    ]
+
+    schema_graph = preprocess((nodes, [])).schema_graph
+
+    assert [n["type"] for n in schema_graph["nodes"]] == ["GraphNodeType"]

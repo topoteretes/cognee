@@ -272,7 +272,6 @@ class TestImproveEndpoint:
 
         result = client.improve(
             dataset_name="docs",
-            node_name=["Alice"],
             session_ids=["s1"],
             run_in_background=True,
             build_global_context_index=True,
@@ -287,7 +286,6 @@ class TestImproveEndpoint:
         assert kwargs["json"] == {
             "run_in_background": True,
             "dataset_name": "docs",
-            "node_name": ["Alice"],
             "session_ids": ["s1"],
             "build_global_context_index": True,
             "build_truth_subspace": True,

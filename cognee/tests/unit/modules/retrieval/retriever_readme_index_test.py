@@ -21,6 +21,8 @@ FACTORY = (
 OUT_OF_DICT = {
     "AGENTIC_COMPLETION": "AgenticRetriever",
     "FEELING_LUCKY": "—",
+    # Deprecated: resolved to GRAPH_COMPLETION before the registry is read.
+    "TRIPLET_COMPLETION": "GraphCompletionRetriever",
 }
 
 

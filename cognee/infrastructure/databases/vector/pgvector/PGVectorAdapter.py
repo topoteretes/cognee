@@ -23,7 +23,7 @@ from cognee.shared.logging_utils import get_logger
 
 from ...relational.ModelBase import Base
 from ...relational.sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
-from ..embeddings.EmbeddingEngine import EmbeddingEngine
+from ..embeddings.EmbeddingGateway import EmbeddingGateway
 from ..exceptions import CollectionNotFoundError, SharedDatabasePruneError
 from ..models.ScoredResult import ScoredResult
 from ..stored_vector_size import choose_stored_vector_size
@@ -76,7 +76,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         self,
         connection_string: str,
         api_key: str | None,
-        embedding_engine: EmbeddingEngine,
+        embedding_engine: EmbeddingGateway,
         schema: str = "",
     ):
         """Initialize the adapter and, when possible, reuse the relational engine.
