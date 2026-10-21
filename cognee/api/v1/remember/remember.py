@@ -1733,8 +1733,7 @@ async def _remember_inner(
                 # fastembed model when no key is configured, so it must not demand
                 # an API key on first run. This per-call skip leaves that fallback
                 # on; the COGNEE_SKIP_* / MOCK_EMBEDDING env vars switch it off, and
-                # a tail that then finds no provider is logged by add_code_graph_docs
-                # while the code graph is kept. With index_vectors=True the code
+                # a tail that then finds no provider raises. With index_vectors=True the code
                 # facts are embedded with the configured provider, so the checks
                 # stay on.
                 skip_connection_test = not bool(index_vectors)

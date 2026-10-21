@@ -440,8 +440,7 @@ async def extract_code_repo_graph(
     docstrings from the docs.jsonl enola just wrote into this directory's
     .enola snapshot, runs with this route's ``ctx``, so the chunks belong to
     the manifest's data item and forget(data_id) removes them with the code
-    graph, and is best effort: when it fails, add_code_graph_docs logs the
-    error and the item completes with its code graph.
+    graph; a tail that fails errors the item.
 
     A call-level node_set (add()/remember()'s ``node_set`` argument) reaches
     every document this manifest's repo carries, but not the code nodes
