@@ -8,22 +8,24 @@ Data records like the Linear and Apollo tests. An unchanged page costs no HTML r
 page Graph reports as not found keeps its document, and the token never lands in a document.
 """
 
+import logging
+
 import pytest
 
 import cognee
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.users.methods import get_default_user
-from cognee.tasks.ingestion.connectors import onenote_source
+from cognee.tasks.ingestion.connectors import list_onenote_notebooks, onenote, onenote_source
 from cognee.tests.unit.tasks.connectors.fake_onenote import Graph
 
 DATASET = "onenote_integration_test"
 TABLE = "onenote_test"
-TOKEN = "offline-token"
+TOKEN = "onenote-secret-token-9d41"
 
 
 def _notebook() -> Graph:
-    graph = Graph()
+    graph = Graph(token=TOKEN)
     graph.pages["a"] = [Graph.page("p1"), Graph.page("p2")]
     graph.html.update(p1="<p>Original body</p>", p2="<p>Second body</p>")
     return graph
@@ -133,9 +135,42 @@ async def test_a_page_answering_20102_keeps_its_document(clean_environment):
     assert {k: d.id for k, d in (await _documents()).items()} == before
 
 
+def _chain_text(error) -> str:
+    texts = []
+    while error is not None:
+        texts.append(f"{error!s} {error!r} {error.args}")
+        error = error.__cause__ or error.__context__
+    return " ".join(texts)
+
+
 @pytest.mark.asyncio
-async def test_the_token_never_lands_in_a_stored_document(clean_environment):
+async def test_the_token_never_lands_in_a_document_the_state_an_error_or_a_log(
+    clean_environment, tmp_path, caplog
+):
+    """A server that echoes the bearer token in its error bodies must not get it stored."""
+    caplog.set_level(logging.DEBUG)
     graph = _notebook()
+    graph.echo_token = True
     await _sync(graph)
 
-    assert all(TOKEN not in _stored_text(doc) for doc in (await _documents()).values())
+    graph.errors["notebooks/a/sections"] = (401, "InvalidAuthenticationToken")
+    failed = await _sync(graph)
+    assert (failed.cognee_sync_stats["failed"], failed.cognee_sync_stats["complete"]) == (1, 0)
+    assert "OneNote sync incomplete" in caplog.text
+
+    graph.errors["notebooks"] = (401, "InvalidAuthenticationToken")
+    with graph.client() as client, pytest.raises(onenote.OneNoteError) as raised:
+        list_onenote_notebooks(TOKEN, http_client=client)
+    exception_text = _chain_text(raised.value)
+    # The fake did put the token into the response bodies the client read.
+    assert graph.echoed >= 2
+
+    documents = await _documents()
+    assert set(documents) == {"p1", "p2"}
+    assert all(TOKEN not in _stored_text(doc) for doc in documents.values())
+    assert TOKEN not in exception_text
+    assert TOKEN not in caplog.text
+    # dlt keeps the resource state, schemas and load packages under DLT_DATA_DIR.
+    dlt_files = [path for path in (tmp_path / "dlt").rglob("*") if path.is_file()]
+    assert any(path.name == "state.json" for path in dlt_files)
+    assert [str(path) for path in dlt_files if TOKEN.encode() in path.read_bytes()] == []

@@ -112,6 +112,10 @@ def test_invalid_retry_after_uses_bounded_fallback(monkeypatch, retry_after):
         "https://evil.example/v1.0/me/onenote/notebooks",
         "https://graph.microsoft.com.evil.example/v1.0/me/onenote/notebooks",
         "https://user:password@graph.microsoft.com/v1.0/me/onenote/notebooks",
+        "https://graph.microsoft.com/v1.0/me/messages",
+        "https://graph.microsoft.com/v1.0/me/onenote-evil/notebooks",
+        "https://graph.microsoft.com:8443/v1.0/me/onenote/notebooks",
+        "https://graph.microsoft.com/v1.0/me/onenote/notebooks#fragment",
     ],
 )
 def test_unsafe_pagination_link_never_receives_token(next_link):
@@ -127,6 +131,27 @@ def test_unsafe_pagination_link_never_receives_token(next_link):
     ):
         list_onenote_notebooks("offline-token", http_client=client)
     assert len(requests) == 1
+
+
+def test_an_explicit_default_port_is_a_safe_pagination_link():
+    requests = []
+
+    def response(request):
+        requests.append(request)
+        if len(requests) == 1:
+            return httpx.Response(
+                200,
+                json={
+                    "value": [{"id": "a"}],
+                    "@odata.nextLink": "https://graph.microsoft.com:443/v1.0/me/onenote/"
+                    "notebooks?$skiptoken=next",
+                },
+            )
+        return httpx.Response(200, json={"value": []})
+
+    with httpx.Client(transport=httpx.MockTransport(response)) as client:
+        assert list_onenote_notebooks("offline-token", http_client=client) == [{"id": "a"}]
+    assert len(requests) == 2
 
 
 def test_injected_redirect_enabled_client_still_does_not_follow_redirects():
@@ -192,6 +217,25 @@ def test_successful_next_link_is_followed():
         ]
 
 
+@pytest.mark.parametrize("rows_before", [0, 1], ids=["first_page", "after_rows"])
+def test_next_link_on_an_empty_page_fails_instead_of_looping(rows_before):
+    requests = []
+
+    def response(request):
+        requests.append(request)
+        assert len(requests) < 6, "the client kept following next links from an empty page"
+        value = [{"id": "a"}] if len(requests) == 1 and rows_before else []
+        link = f"https://graph.microsoft.com/v1.0/me/onenote/notebooks?$skiptoken={len(requests)}"
+        return httpx.Response(200, json={"value": value, "@odata.nextLink": link})
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(response)) as client,
+        pytest.raises(OneNoteError, match="Invalid Graph next link"),
+    ):
+        list_onenote_notebooks("offline-token", http_client=client)
+    assert len(requests) == 1 + rows_before
+
+
 def test_long_retry_after_stops_without_retrying_early(monkeypatch):
     from cognee.tasks.ingestion.connectors import onenote
 
@@ -241,6 +285,26 @@ def test_retry_wait_budget_constant_bounds_the_cumulative_sleep(monkeypatch):
     assert delays == [3]
     assert len(requests) == 2
     assert onenote.RETRY_WAIT_BUDGET_SECONDS == 5
+
+
+def test_transport_retries_stop_at_the_wait_budget(monkeypatch):
+    monkeypatch.setattr(onenote, "RETRY_WAIT_BUDGET_SECONDS", 3)
+    requests, sleeps = [], []
+    monkeypatch.setattr(onenote.time, "sleep", sleeps.append)
+
+    def timeout(request):
+        requests.append(request)
+        raise httpx.ReadTimeout("slow", request=request)
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(timeout)) as client,
+        pytest.raises(OneNoteError, match="retry wait budget") as failure,
+    ):
+        list_onenote_notebooks("offline-token", http_client=client)
+    assert sleeps == [1, 2]
+    assert sum(sleeps) <= onenote.RETRY_WAIT_BUDGET_SECONDS
+    assert len(requests) == 3
+    assert not isinstance(failure.value, onenote.OneNoteRateLimitedError)
 
 
 def _chain_text(error):

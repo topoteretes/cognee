@@ -317,19 +317,7 @@ def test_later_pagination_failure_preserves_snapshot_and_cache(pipeline):
 @pytest.fixture
 def nested_graph():
     graph = Graph()
-    original = graph.handle
-
-    def nested(request):
-        path = request.url.path.removeprefix("/v1.0/me/onenote/")
-        if path == "notebooks/a/sections":
-            return httpx.Response(200, json={"value": []})
-        if path == "notebooks/a/sectionGroups":
-            return httpx.Response(200, json={"value": [{"id": "group", "displayName": "Research"}]})
-        if path == "sectionGroups/group/sections" and path not in graph.errors:
-            return httpx.Response(200, json={"value": [{"id": "s-a", "displayName": "Planning"}]})
-        return original(request)
-
-    graph.handle = nested
+    graph.nest_sections()
     return graph
 
 
@@ -444,26 +432,11 @@ def test_explicit_ordering_survives_fallback_pagination(pipeline):
 
 def test_valid_nesting_beyond_thirty_groups(pipeline):
     graph = Graph()
-    original = graph.handle
-
-    def nested(request):
-        path = request.url.path.removeprefix("/v1.0/me/onenote/")
-        if path == "notebooks/a/sections":
-            return httpx.Response(200, json={"value": []})
-        if path == "notebooks/a/sectionGroups":
-            return httpx.Response(200, json={"value": [{"id": "g0", "displayName": "Level 0"}]})
-        if path.startswith("sectionGroups/g"):
-            group, collection = path.split("/")[1:]
-            level = int(group[1:])
-            values = []
-            if collection == "sectionGroups" and level < 35:
-                values = [{"id": f"g{level + 1}", "displayName": f"Level {level + 1}"}]
-            if collection == "sections" and level == 35:
-                values = [{"id": "s-a", "displayName": "Deep planning"}]
-            return httpx.Response(200, json={"value": values})
-        return original(request)
-
-    graph.handle = nested
+    graph.root_sections_hidden = True
+    graph.groups["notebooks/a"] = [("g0", "Level 0")]
+    for level in range(35):
+        graph.groups[f"sectionGroups/g{level}"] = [(f"g{level + 1}", f"Level {level + 1}")]
+    graph.group_sections["g35"] = [("s-a", "Deep planning")]
     (table,) = sync(pipeline, graph)
     assert graph.last_stats["complete"] == 1
     assert "Level 35 > Deep planning" in rows(pipeline, table)[0][2]
@@ -521,6 +494,7 @@ pipeline = dlt.attach(sys.argv[2], pipelines_dir=sys.argv[3])
 pipeline.destination = dlt.destinations.sqlalchemy(sys.argv[4])
 graph = ns['Graph']()
 graph.pages['a'] = []
+graph.mark_deleted(*[f'deleted-{index:02d}' for index in range(12)])
 ns['sync'](pipeline, graph, max_requests=8)
 result = {'stats': graph.last_stats, 'cache': ns['resource_cache'](pipeline, sys.argv[5]),
           'requests': graph.requests}
@@ -558,6 +532,7 @@ print('RESUMED=' + json.dumps(result, default=str))
     restored.destination = pipeline.destination
     fresh_graph = Graph()
     fresh_graph.pages["a"] = []
+    fresh_graph.mark_deleted(*(page_id for page_id, _, _ in before))
     sync(restored, fresh_graph, max_requests=8)
     assert fresh_graph.last_stats["complete"] == 1
     assert fresh_graph.last_stats["deleted"] == 12
@@ -1253,3 +1228,259 @@ def test_retry_after_beyond_the_wait_budget_counts_as_a_rate_limit(pipeline, mon
     assert graph.last_stats["failed_rate_limit"] == 1
     assert graph.last_stats["failed_budget"] == 0
     assert delays == []
+
+
+def test_an_unchanged_page_is_counted_as_skipped(pipeline):
+    graph = Graph()
+    graph.pages["a"] = [Graph.page("p1"), Graph.page("p2")]
+    graph.html.update(p1="<p>Original body</p>", p2="<p>Second body</p>")
+    sync(pipeline, graph)
+    assert (graph.last_stats["scanned"], graph.last_stats["skipped"]) == (2, 0)
+    graph.pages["a"][0]["lastModifiedDateTime"] = "2026-10-03T00:00:00Z"
+    sync(pipeline, graph)
+    assert (graph.last_stats["scanned"], graph.last_stats["skipped"]) == (2, 1)
+    sync(pipeline, graph)
+    assert (graph.last_stats["scanned"], graph.last_stats["skipped"]) == (2, 2)
+
+
+def test_the_page_lookup_asks_graph_for_the_parents(pipeline):
+    graph = Graph()
+    sync(pipeline, graph)
+    graph.pages["b"].append(graph.pages["a"].pop())
+    graph.requests.clear()
+    sync(pipeline, graph)
+    assert (graph.last_stats["complete"], graph.last_stats["deleted"]) == (1, 1)
+    (lookup,) = [params for path, params in graph.requests if path == "pages/p1"]
+    assert set(lookup["$expand"].split(",")) == {"parentNotebook", "parentSection"}
+
+
+def test_a_page_lookup_answering_without_a_parent_fails_the_run(pipeline):
+    # No parentNotebook must never be read as "not moved", so the run stops instead.
+    graph = Graph()
+    (table,) = sync(pipeline, graph)
+    before = rows(pipeline, table)
+    graph.pages["a"] = []
+    graph.script("pages/p1", httpx.Response(200, json=Graph.page("p1")))
+    sync(pipeline, graph)
+    assert graph.last_stats["failed"] == 1
+    assert rows(pipeline, table) == before
+
+
+def test_410_with_20113_confirms_a_page_deletion(pipeline):
+    graph = Graph()
+    graph.pages["a"] = [Graph.page("p1"), Graph.page("p2")]
+    graph.html.update(p1="<p>Original body</p>", p2="<p>Second body</p>")
+    (table,) = sync(pipeline, graph)
+    graph.pages["a"] = [Graph.page("p2")]
+    graph.errors["pages/p1"] = (410, "20113")
+    sync(pipeline, graph)
+    assert (graph.last_stats["complete"], graph.last_stats["deleted"]) == (1, 1)
+    assert [row[0] for row in rows(pipeline, table)] == ["p2"]
+
+
+def test_410_with_20113_on_a_container_listing_is_read_as_no_children(pipeline):
+    graph = Graph()
+    (table,) = sync(pipeline, graph)
+    graph.pages["a"] = []
+    graph.errors["sections/s-a/pages"] = (410, "20113")
+    sync(pipeline, graph)
+    assert (graph.last_stats["complete"], graph.last_stats["deleted"]) == (1, 1)
+    assert rows(pipeline, table) == []
+
+
+def test_410_with_20113_on_the_notebook_lookup_confirms_its_pages_are_gone(pipeline):
+    graph = Graph()
+    (table,) = sync(pipeline, graph)
+    graph.pages["a"] = []
+    del graph.notebooks["a"]
+    graph.errors["notebooks/a"] = (410, "20113")
+    sync(pipeline, graph)
+    assert (graph.last_stats["complete"], graph.last_stats["deleted"]) == (1, 1)
+    assert rows(pipeline, table) == []
+
+
+def test_410_with_20102_keeps_the_page_and_counts_it_unresolved(pipeline):
+    graph = Graph()
+    (table,) = sync(pipeline, graph)
+    before = rows(pipeline, table)
+    graph.pages["a"] = []
+    graph.errors["pages/p1"] = (410, "20102")
+    sync(pipeline, graph)
+    stats = graph.last_stats
+    assert (stats["complete"], stats["failed"], stats["deleted"], stats["unresolved"]) == (
+        1,
+        0,
+        0,
+        1,
+    )
+    assert rows(pipeline, table) == before
+
+
+def test_a_section_answering_410_is_still_deleted_and_keeps_the_confirmations(pipeline):
+    graph = Graph()
+    graph.pages["a"] = [Graph.page("p1"), Graph.page("p2")]
+    graph.html.update(p1="<p>Original body</p>", p2="<p>Second body</p>")
+    (table,) = sync(pipeline, graph)
+    graph.delete_section()
+    for path in ("sections/s-a/pages", "sections/s-a", "pages/p1", "pages/p2"):
+        graph.errors[path] = (410, "20113")
+    sync(pipeline, graph, max_requests=5)
+    assert list(resource_cache(pipeline, table)["confirmed_missing"]) == ["p1"]
+    graph.requests.clear()
+    sync(pipeline, graph)
+    paths = [path for path, _ in graph.requests]
+    assert paths.count("sections/s-a") == 1
+    assert paths.count("pages/p1") == 0
+    assert (graph.last_stats["complete"], graph.last_stats["deleted"]) == (1, 2)
+    assert rows(pipeline, table) == []
+
+
+@pytest.mark.parametrize("content_type", ["application/json", "text/plain", ""])
+def test_page_content_that_is_not_html_fails_the_run_and_is_not_cached(
+    pipeline, caplog, content_type
+):
+    graph = Graph()
+    (table,) = sync(pipeline, graph)
+    before = rows(pipeline, table)
+    graph.pages["a"][0]["lastModifiedDateTime"] = "2026-10-03T00:00:00Z"
+    graph.html["p1"] = "<p>Not what Graph promised</p>"
+    graph.content_types["p1"] = content_type
+    sync(pipeline, graph)
+    assert (graph.last_stats["failed"], graph.last_stats["complete"]) == (1, 0)
+    assert "content is not HTML" in caplog.text
+    assert rows(pipeline, table) == before
+    assert "Not what Graph promised" not in str(resource_cache(pipeline, table)["bodies"])
+
+
+def test_a_notebook_lookup_answering_with_another_identity_fails_the_run(pipeline, caplog):
+    graph = Graph()
+    (table,) = sync(pipeline, graph)
+    before = rows(pipeline, table)
+    del graph.notebooks["a"]
+    graph.script("notebooks/a", httpx.Response(200, json={"id": "b", "displayName": "Excluded"}))
+    sync(pipeline, graph)
+    assert (graph.last_stats["failed"], graph.last_stats["complete"]) == (1, 0)
+    assert "Notebook identity mismatch" in caplog.text
+    assert rows(pipeline, table) == before
+
+
+def test_a_page_listed_in_two_sections_fails_the_run(pipeline, caplog):
+    graph = Graph()
+    graph.nest_sections()
+    (table,) = sync(pipeline, graph)
+    before = rows(pipeline, table)
+    graph.root_sections_hidden = False
+    sync(pipeline, graph)
+    assert (graph.last_stats["failed"], graph.last_stats["complete"]) == (1, 0)
+    assert "multiple locations" in caplog.text
+    assert rows(pipeline, table) == before
+
+
+def test_a_page_lookup_answering_with_another_identity_fails_the_run(pipeline, caplog):
+    graph = Graph()
+    (table,) = sync(pipeline, graph)
+    before = rows(pipeline, table)
+    graph.pages["a"] = []
+    # Another page, moved to another notebook: its parent would confirm p1 as moved.
+    other = {**Graph.page("other"), "parentNotebook": {"id": "b", "displayName": "Excluded"}}
+    graph.script("pages/p1", httpx.Response(200, json=other))
+    sync(pipeline, graph)
+    assert (graph.last_stats["failed"], graph.last_stats["complete"]) == (1, 0)
+    assert "Page identity mismatch" in caplog.text
+    assert rows(pipeline, table) == before
+
+
+@pytest.mark.parametrize("cycle", [["g1"], ["g1", "g2"]], ids=["self", "pair"])
+def test_a_section_group_cycle_fails_the_run_before_the_request_budget(pipeline, caplog, cycle):
+    graph = Graph()
+    (table,) = sync(pipeline, graph)
+    before = rows(pipeline, table)
+    graph.groups["notebooks/a"] = [(cycle[0], "Loop")]
+    for index, group in enumerate(cycle):
+        following = cycle[(index + 1) % len(cycle)]
+        graph.groups[f"sectionGroups/{group}"] = [(following, "Loop")]
+    sync(pipeline, graph)
+    assert graph.last_stats["failed"] == 1
+    assert graph.last_stats["failed_budget"] == 0
+    assert graph.last_stats["complete"] == 0
+    assert "Section group cycle" in caplog.text
+    assert rows(pipeline, table) == before
+
+
+def test_next_link_pagination_is_followed_and_keeps_the_ordering(pipeline):
+    graph = Graph()
+    graph.next_link_size = 2
+    graph.pages["a"] = [Graph.page(f"p{index}") for index in range(5)]
+    graph.html.update({f"p{index}": f"<p>Body {index}</p>" for index in range(5)})
+    (table,) = sync(pipeline, graph)
+    assert graph.last_stats["complete"] == 1
+    assert len(rows(pipeline, table)) == 5
+    calls = [params for path, params in graph.requests if path == "sections/s-a/pages"]
+    assert [call.get("$skiptoken") for call in calls] == [None, "2", "4"]
+    assert all("$skip" not in call for call in calls[1:])
+    assert all(call["$orderby"] == "createdDateTime asc" for call in calls)
+
+
+def test_a_server_error_exhausts_five_attempts_without_counting_as_a_rate_limit(
+    pipeline, monkeypatch
+):
+    from cognee.tasks.ingestion.connectors import onenote
+
+    delays = []
+    monkeypatch.setattr(onenote.time, "sleep", delays.append)
+    graph = Graph()
+    graph.script("notebooks", *[(500, {})] * 5)
+    sync(pipeline, graph)
+    assert graph.last_stats["failed"] == 1
+    assert graph.last_stats["failed_rate_limit"] == 0
+    assert graph.last_stats["requests"] == 5
+    assert delays == [1, 2, 4, 8]
+
+
+def test_a_throttled_request_waits_for_retry_after_and_the_run_completes(pipeline, monkeypatch):
+    from cognee.tasks.ingestion.connectors import onenote
+
+    delays = []
+    monkeypatch.setattr(onenote.time, "sleep", delays.append)
+    graph = Graph()
+    graph.script("notebooks", (429, {"Retry-After": "3"}), (503, {"Retry-After": "1"}))
+    (table,) = sync(pipeline, graph)
+    assert (graph.last_stats["complete"], graph.last_stats["failed"]) == (1, 0)
+    assert delays == [3, 1]
+    assert len(rows(pipeline, table)) == 1
+
+
+@pytest.mark.parametrize(
+    "late_call",
+    [1, 2, 3, 4],
+    ids=["before_publication", "before_deletion", "before_first_row", "between_rows"],
+)
+def test_check_active_failure_after_the_walk_publishes_nothing(pipeline, late_call):
+    graph = Graph()
+    graph.pages["a"] = [Graph.page("p1"), Graph.page("p2")]
+    graph.html.update(p1="<p>Original body</p>", p2="<p>Second body</p>")
+    (table,) = sync(pipeline, graph)
+    before = rows(pipeline, table)
+    # p1 is deleted and p3 is new: the walk ends with its sixth request (the p1 lookup), then
+    # checks before publishing, before the p1 deletion, and before each of the rows p2, p3.
+    graph.pages["a"] = [Graph.page("p2"), Graph.page("p3")]
+    graph.html["p3"] = "<p>Third body</p>"
+    graph.requests.clear()
+    cancelled = MyCancelled("connection revoked")
+    late = 0
+
+    def check_active():
+        nonlocal late
+        if len(graph.requests) == 6:
+            late += 1
+            if late == late_call:
+                raise cancelled
+
+    with pytest.raises(PipelineStepFailed) as captured:
+        sync(pipeline, graph, check_active=check_active)
+    chain = list(_chain(captured.value))
+    assert any(error is cancelled for error in chain)
+    assert not any(isinstance(error, OneNoteError) for error in chain)
+    assert len(graph.requests) == 6
+    assert rows(pipeline, table) == before
+    assert resource_cache(pipeline, table)["page_ids"] == ["p1", "p2"]
