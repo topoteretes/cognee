@@ -1,7 +1,16 @@
+"""Embedding rate limiting: the client-side limiter paces requests, it never rejects them.
+
+``embedding_rate_limiter_context_manager`` returns an ``aiolimiter.AsyncLimiter``
+(a leaky bucket) when ``EMBEDDING_RATE_LIMIT_ENABLED`` is set. Entering it waits
+for capacity, so requests above the configured rate are delayed until they fit
+the budget instead of failing. These tests pin that contract: every request
+succeeds, and a burst takes as long as the configured rate requires.
+"""
+
 import asyncio
-import logging
-import os
 import time
+
+import pytest
 
 from cognee.infrastructure.databases.vector.embeddings.config import (
     get_embedding_config,
@@ -9,189 +18,78 @@ from cognee.infrastructure.databases.vector.embeddings.config import (
 from cognee.shared import rate_limiting
 from cognee.tests.unit.infrastructure.mock_embedding_engine import MockEmbeddingEngine
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
+@pytest.fixture
+def embedding_rate_limit(monkeypatch):
+    """Configure the embedding limiter for one test, with fresh config and limiter caches."""
 
-async def test_embedding_rate_limiting_realistic():
-    """
-    Test the embedding rate limiting feature with a realistic scenario:
-    - Set limit to 3 requests per 5 seconds
-    - Send requests in bursts with waiting periods
-    - Track successful and rate-limited requests
-    - Verify the rate limiter's behavior
-    """
-    # Set up environment variables for rate limiting
-    os.environ["EMBEDDING_RATE_LIMIT_ENABLED"] = "true"
-    os.environ["EMBEDDING_RATE_LIMIT_REQUESTS"] = "3"  # Only 3 requests per interval
-    os.environ["EMBEDDING_RATE_LIMIT_INTERVAL"] = "5"
-    os.environ["MOCK_EMBEDDING"] = "true"  # Use mock embeddings for testing
-    os.environ["DISABLE_RETRIES"] = "true"  # Disable automatic retries for testing
+    def _configure(enabled: bool, requests: int = 3, interval: int = 1) -> None:
+        monkeypatch.setenv("EMBEDDING_RATE_LIMIT_ENABLED", "true" if enabled else "false")
+        monkeypatch.setenv("EMBEDDING_RATE_LIMIT_REQUESTS", str(requests))
+        monkeypatch.setenv("EMBEDDING_RATE_LIMIT_INTERVAL", str(interval))
+        monkeypatch.setenv("MOCK_EMBEDDING", "true")
+        get_embedding_config.cache_clear()
+        rate_limiting._embedding_rate_limiter = None
 
-    # Clear the config and rate limiter caches to ensure our settings are applied
+    yield _configure
+
     get_embedding_config.cache_clear()
     rate_limiting._embedding_rate_limiter = None
 
-    # Create a fresh config instance and verify settings
-    config = get_embedding_config()
-    logger.info(f"Embedding Rate Limiting Enabled: {config.embedding_rate_limit_enabled}")
-    logger.info(
-        f"Embedding Rate Limit: {config.embedding_rate_limit_requests} requests per {config.embedding_rate_limit_interval} seconds"
+
+async def _burst(engine: MockEmbeddingEngine, size: int) -> tuple[list, float]:
+    """Send ``size`` concurrent requests; return their results and the elapsed wall time."""
+    start = time.monotonic()
+    results = await asyncio.gather(
+        *(engine.embed_text([f"text {i}"]) for i in range(size)), return_exceptions=True
     )
+    return results, time.monotonic() - start
 
-    # Create a mock embedding engine
-    engine = MockEmbeddingEngine()
-    # Configure some delay to simulate realistic API calls but not too long
-    engine.configure_mock(add_delay=0.1)
 
-    # Track overall statistics
-    total_requests = 0
-    total_successes = 0
-    total_rate_limited = 0
+@pytest.mark.asyncio
+async def test_embedding_rate_limiter_paces_a_burst_instead_of_rejecting(embedding_rate_limit):
+    """9 concurrent requests at 3 per second: all succeed, and the burst takes ~2s."""
+    embedding_rate_limit(enabled=True, requests=3, interval=1)
+    engine = MockEmbeddingEngine(dimensions=4)
 
-    # Create a list of tasks to simulate concurrent requests
-    async def make_request(i):
-        nonlocal total_successes, total_rate_limited
+    results, elapsed = await _burst(engine, 9)
+
+    # Nothing is rejected: the limiter delays requests, it never raises.
+    assert all(not isinstance(result, BaseException) for result in results), results
+    assert all(result == [[0.1] * 4] for result in results)
+    # A leaky bucket of 3 admits 3 at once, then drains at 3/s, so the other 6
+    # need about 2s. The lower bound is what proves pacing happened.
+    assert elapsed >= 1.5, f"burst finished in {elapsed:.2f}s; the limiter did not pace it"
+
+
+@pytest.mark.asyncio
+async def test_disabled_embedding_rate_limiter_does_not_pace(embedding_rate_limit):
+    """The same burst with the limiter off completes immediately (the control case)."""
+    embedding_rate_limit(enabled=False)
+    engine = MockEmbeddingEngine(dimensions=4)
+
+    results, elapsed = await _burst(engine, 9)
+
+    assert all(not isinstance(result, BaseException) for result in results), results
+    assert elapsed < 1.0, f"burst took {elapsed:.2f}s with rate limiting disabled"
+
+
+@pytest.mark.asyncio
+async def test_mock_failures_surface_through_the_rate_limited_engine(embedding_rate_limit):
+    """Failures raised by the engine propagate; the limiter does not swallow or mask them."""
+    embedding_rate_limit(enabled=True, requests=10, interval=1)
+    engine = MockEmbeddingEngine(dimensions=4)
+    engine.configure_mock(fail_every_n_requests=3)
+
+    outcomes = []
+    for i in range(9):
         try:
-            logger.info(f"Making request #{i + 1}")
-            text = f"Concurrent - Text {i}"
-            embedding = await engine.embed_text([text])
-            logger.info(f"Request #{i + 1} succeeded with embedding size: {len(embedding[0])}")
-            return True
-        except Exception as e:
-            logger.info(f"Request #{i + 1} rate limited: {e}", exc_info=True)
-            return False
+            await engine.embed_text([f"text {i}"])
+            outcomes.append("ok")
+        except RuntimeError:
+            outcomes.append("failed")
 
-    # Batch 1: Send 10 concurrent requests (expect 3 to succeed, 7 to be rate limited)
-    batch_size = 10
-    logger.info(f"\n--- Batch 1: Sending {batch_size} concurrent requests ---")
-
-    batch_start = time.time()
-    tasks = [make_request(i) for i in range(batch_size)]
-    results = await asyncio.gather(*tasks, return_exceptions=False)
-
-    batch_successes = results.count(True)
-    batch_rate_limited = results.count(False)
-
-    batch_end = time.time()
-    logger.info(f"Batch 1 completed in {batch_end - batch_start:.2f} seconds")
-    logger.info(f"Successes: {batch_successes}, Rate limited: {batch_rate_limited}")
-
-    total_requests += batch_size
-    total_successes += batch_successes
-    total_rate_limited += batch_rate_limited
-
-    # Wait 2 seconds (should recover some capacity but not all)
-    wait_time = 2
-    logger.info(f"\nWaiting {wait_time} seconds to allow partial capacity recovery...")
-    await asyncio.sleep(wait_time)
-
-    # Batch 2: Send 5 more requests (expect some to succeed, some to be rate limited)
-    batch_size = 5
-    logger.info(f"\n--- Batch 2: Sending {batch_size} concurrent requests ---")
-
-    batch_start = time.time()
-    tasks = [make_request(i) for i in range(batch_size)]
-    results = await asyncio.gather(*tasks, return_exceptions=False)
-
-    batch_successes = results.count(True)
-    batch_rate_limited = results.count(False)
-
-    batch_end = time.time()
-    logger.info(f"Batch 2 completed in {batch_end - batch_start:.2f} seconds")
-    logger.info(f"Successes: {batch_successes}, Rate limited: {batch_rate_limited}")
-
-    total_requests += batch_size
-    total_successes += batch_successes
-    total_rate_limited += batch_rate_limited
-
-    # Wait 5 seconds (should recover full capacity)
-    wait_time = 5
-    logger.info(f"\nWaiting {wait_time} seconds to allow full capacity recovery...")
-    await asyncio.sleep(wait_time)
-
-    # Batch 3: Send 3 more requests sequentially (all should succeed)
-    batch_size = 3
-    logger.info(f"\n--- Batch 3: Sending {batch_size} sequential requests ---")
-
-    batch_start = time.time()
-    batch_successes = 0
-    batch_rate_limited = 0
-
-    for i in range(batch_size):
-        try:
-            logger.info(f"Making request #{i + 1}")
-            text = f"Sequential - Text {i}"
-            embedding = await engine.embed_text([text])
-            logger.info(f"Request #{i + 1} succeeded with embedding size: {len(embedding[0])}")
-            batch_successes += 1
-        except Exception as e:
-            logger.info(f"Request #{i + 1} rate limited: {e}", exc_info=True)
-            batch_rate_limited += 1
-
-    batch_end = time.time()
-    logger.info(f"Batch 3 completed in {batch_end - batch_start:.2f} seconds")
-    logger.info(f"Successes: {batch_successes}, Rate limited: {batch_rate_limited}")
-
-    total_requests += batch_size
-    total_successes += batch_successes
-    total_rate_limited += batch_rate_limited
-
-    # Log overall results
-    logger.info("\n--- Test Summary ---")
-    logger.info(f"Total requests: {total_requests}")
-    logger.info(f"Total successes: {total_successes}")
-    logger.info(f"Total rate limited: {total_rate_limited}")
-
-    # Verify the behavior
-    assert total_successes > 0, "Expected some successful requests"
-    assert total_rate_limited > 0, "Expected some rate limited requests"
-
-    # Reset environment variables
-    os.environ.pop("EMBEDDING_RATE_LIMIT_ENABLED", None)
-    os.environ.pop("EMBEDDING_RATE_LIMIT_REQUESTS", None)
-    os.environ.pop("EMBEDDING_RATE_LIMIT_INTERVAL", None)
-    os.environ.pop("MOCK_EMBEDDING", None)
-    os.environ.pop("DISABLE_RETRIES", None)
-
-
-async def test_with_mock_failures():
-    """
-    Test with the mock engine's ability to generate controlled failures.
-    """
-    # Setup rate limiting (more permissive settings)
-    os.environ["EMBEDDING_RATE_LIMIT_ENABLED"] = "true"
-    os.environ["EMBEDDING_RATE_LIMIT_REQUESTS"] = "10"
-    os.environ["EMBEDDING_RATE_LIMIT_INTERVAL"] = "5"
-    os.environ["DISABLE_RETRIES"] = "true"
-
-    # Clear caches
-    get_embedding_config.cache_clear()
-    rate_limiting._embedding_rate_limiter = None
-
-    # Create a mock engine configured to fail every 3rd request
-    engine = MockEmbeddingEngine()
-    engine.configure_mock(fail_every_n_requests=3, add_delay=0.1)
-
-    logger.info("\n--- Testing controlled failures with mock ---")
-
-    # Send 10 requests, expecting every 3rd to fail
-    for i in range(10):
-        try:
-            logger.info(f"Making request #{i + 1}")
-            text = f"Test text {i}"
-            embedding = await engine.embed_text([text])
-
-            logger.info(f"Request #{i + 1} succeeded for {embedding!s}")
-        except Exception as e:
-            logger.info(f"Request #{i + 1} failed as expected: {e}", exc_info=True)
-
-    # Reset environment variables
-    os.environ.pop("EMBEDDING_RATE_LIMIT_ENABLED", None)
-    os.environ.pop("EMBEDDING_RATE_LIMIT_REQUESTS", None)
-    os.environ.pop("EMBEDDING_RATE_LIMIT_INTERVAL", None)
-    os.environ.pop("DISABLE_RETRIES", None)
+    assert outcomes == ["ok", "ok", "failed"] * 3
 
 
 def test_embedding_rate_limit_fields_on_embedding_config(monkeypatch):
@@ -218,8 +116,3 @@ def test_llm_config_no_longer_defines_embedding_rate_limit_fields():
         "embedding_rate_limit_tokens",
     ):
         assert field not in LLMConfig.model_fields
-
-
-if __name__ == "__main__":
-    asyncio.run(test_embedding_rate_limiting_realistic())
-    asyncio.run(test_with_mock_failures())

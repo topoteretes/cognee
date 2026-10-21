@@ -24,6 +24,10 @@ class SlackSettings(IntegrationSettings):
     # Env: SLACK_SIGNING_SECRET
     signing_secret: str = ""
 
+    # Per-dataset selections remain opt-in. Disable this worker when an
+    # external scheduler calls sync_due_slack_history instead.
+    history_sync_enabled: bool = True
+
 
 slack_settings = SlackSettings()
 

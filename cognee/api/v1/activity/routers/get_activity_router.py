@@ -98,8 +98,9 @@ def get_activity_router() -> APIRouter:
         - **background** (bool|null): True when the call launched background work.
           NULL means not applicable / not recorded.
         - **error_class** (str|null): Exception class name when `outcome="failed"`.
-        - **tokens_in** / **tokens_out** (int|null): Provider-billed token counts.
+        - **tokens_in** / **tokens_out** (int|null): Provider-billed LLM token counts.
           NULL means *not measured*; `0` means *measured zero* — do not conflate.
+        - **embedding_tokens** (int|null): Embedding token count, same NULL/0 convention.
         - **started_at** / **ended_at** (str|null): ISO-8601 timestamps.
         - **user_id** (str|null): Triggering user.
         - **session_id** (str|null): Session-cache id; joins `session_model_usage`.
@@ -208,6 +209,7 @@ def get_activity_router() -> APIRouter:
                 # distinction the schema deliberately encodes.
                 "tokens_in": run.tokens_in,
                 "tokens_out": run.tokens_out,
+                "embedding_tokens": run.embedding_tokens,
                 "started_at": run.started_at.isoformat() if run.started_at else None,
                 "ended_at": run.ended_at.isoformat() if run.ended_at else None,
                 "user_id": str(run.user_id) if run.user_id else None,

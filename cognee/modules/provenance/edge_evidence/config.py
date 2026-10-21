@@ -16,7 +16,7 @@ class ProvenanceConfig(BaseSettings):
     edge_evidence_enabled: bool = True
     edge_evidence_flush_threshold: int = Field(default=10_000, ge=100)
 
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    model_config = SettingsConfigDict(extra="allow")
 
 
 @lru_cache
