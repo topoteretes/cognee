@@ -585,6 +585,29 @@ class TestSessionManager:
         mock_cache.get_all_qa_entries.assert_called_once_with("u1", "s1")
 
     @pytest.mark.asyncio
+    async def test_get_session_since_calls_the_bounded_read(self, sm, mock_cache):
+        from datetime import datetime, timezone
+
+        since = datetime(2026, 6, 11, tzinfo=timezone.utc)
+        mock_cache.get_qa_entries_since = AsyncMock(return_value=[])
+
+        await sm.get_session(user_id="u1", session_id="s1", since=since, lead_in=1)
+
+        mock_cache.get_qa_entries_since.assert_called_once_with("u1", "s1", since, lead_in=1)
+        mock_cache.get_all_qa_entries.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_get_session_since_is_exclusive_with_last_n(self, sm):
+        from datetime import datetime, timezone
+
+        with pytest.raises(SessionParameterValidationError):
+            await sm.get_session(
+                user_id="u1", session_id="s1", since=datetime.now(timezone.utc), last_n=3
+            )
+        with pytest.raises(SessionParameterValidationError):
+            await sm.get_session(user_id="u1", session_id="s1", lead_in=1)
+
+    @pytest.mark.asyncio
     async def test_get_session_formatted(self, sm, mock_cache):
         """get_session with formatted=True returns string."""
         mock_cache.get_all_qa_entries.return_value = [
@@ -1425,3 +1448,49 @@ class TestAutoFeedbackPredicate:
         assert sm.is_auto_feedback_enabled() is True
         monkeypatch.setenv("AUTO_FEEDBACK", "false")
         assert sm.is_auto_feedback_enabled() is False
+
+
+class TestContextEntryReadFailOpen:
+    """The context-entry read fails open by default; ``raise_on_error`` re-raises."""
+
+    @staticmethod
+    def _manager(read_error: Exception | None = None) -> SessionManager:
+        cache = MagicMock()
+        cache.get_session_context_entries = AsyncMock(
+            side_effect=read_error, return_value=[{"id": "row", "kind": "context"}]
+        )
+        return SessionManager(cache_engine=cache)
+
+    @pytest.mark.asyncio
+    async def test_a_failed_read_answers_empty_by_default(self):
+        sm = self._manager(ConnectionError("down"))
+
+        assert await sm.get_session_context_entries(user_id="u", session_id="s") == []
+
+    @pytest.mark.asyncio
+    async def test_raise_on_error_re_raises_a_failed_read(self):
+        sm = self._manager(ConnectionError("down"))
+
+        with pytest.raises(ConnectionError):
+            await sm.get_session_context_entries(user_id="u", session_id="s", raise_on_error=True)
+
+    @pytest.mark.asyncio
+    async def test_raise_on_error_still_answers_empty_for_an_unavailable_cache(self):
+        """No cache means nothing could have been stored; that is not a read failure."""
+        sm = SessionManager(cache_engine=None)
+
+        assert (
+            await sm.get_session_context_entries(user_id="u", session_id="s", raise_on_error=True)
+            == []
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_successful_read_is_unchanged_either_way(self):
+        sm = self._manager()
+
+        rows = await sm.get_session_context_entries(user_id="u", session_id="s")
+        strict = await sm.get_session_context_entries(
+            user_id="u", session_id="s", raise_on_error=True
+        )
+
+        assert rows == strict == [{"id": "row", "kind": "context"}]

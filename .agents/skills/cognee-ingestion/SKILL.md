@@ -54,7 +54,7 @@ All cognee functions are async. Without `dataset_name` data goes to
 | Argument | What it does |
 |---|---|
 | `dataset_name` / `dataset_id` | Target dataset. `dataset_id` wins. A dataset is the unit of permissions and isolation. |
-| `node_set=["AI", "FinTech"]` | Tags the data so recall can filter to it later with `recall(..., node_name=["AI"])`. |
+| `node_set=["AI", "FinTech"]` | Tags the data so recall can filter to it later with `recall(..., node_name=["AI"])`. With `session_id` it pins the session's node set instead (first write wins, a different set later is a 409); `improve()` carries it into the graph. See the `cognee-improve-sessions` skill. |
 | `session_id="chat_1"` | Writes to the fast session cache instead of the graph; `improve()` bridges it into the graph in the background. See the `cognee-improve-sessions` skill. Requires `CACHING=true`. |
 
 ### How the graph is built
@@ -125,8 +125,8 @@ it with `await cognee.remember(report)`, or pass `auto_apply=True`.
 `extractor="gliner"` builds the graph and summaries with a local GLiNER2
 model, with no LLM call (embeddings still run). Install
 `pip install "cognee[gliner]"`; the model (about 750 MB) downloads on first use.
-It cannot be combined with a custom `graph_model`, `dry_run`,
-`session_id`, or a remote instance.
+It cannot be combined with a custom `graph_model`, `dry_run`, `session_id`,
+or a remote instance.
 
 > **For production:** the open-source GLiNER extractor is a demo. cognee's
 > enterprise GLiNER extraction is more accurate and covers more labels. The
@@ -142,7 +142,7 @@ It cannot be combined with a custom `graph_model`, `dry_run`,
   | Option | Workaround through remember() |
   |---|---|
   | `ontology_file_path` | `config={"ontology_config": ...}` or `ONTOLOGY_FILE_PATH` (above) |
-  | `functional_relationships`, `chunk_attachment` | None yet. Only `cognee.cognify()` accepts them. |
+  | `chunk_attachment` | None yet. Only `cognee.cognify()` accepts it. |
   | `extraction_rules` | Pass it through the loader: `preferred_loaders={"beautiful_soup_loader": {"extraction_rules": {...}}}` (works in `remember()` and `add()`). Needs the `scraping` extra: without it the loader is not registered and the rules are silently ignored |
   | `tavily_config`, `soup_crawler_config` | Not honoured by `add()` or `remember()`; only the `cognee/tasks/web_scraper` tasks use them |
   | `column_value_columns` (dlt) | None yet. Only `cognee.add()` accepts it. |

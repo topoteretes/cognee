@@ -5,7 +5,6 @@ from cognee.infrastructure.engine.models.Edge import Edge
 from cognee.modules.chunking.external_metadata import normalize_external_metadata
 from cognee.modules.data.processing.document_types import Document
 from cognee.modules.engine.models import Entity, Timestamp
-from cognee.tasks.temporal_graph.models import Event
 
 
 class DocumentChunk(DataPoint):
@@ -23,7 +22,7 @@ class DocumentChunk(DataPoint):
     - chunk_index: The index of the chunk in the original document.
     - cut_type: The type of cut that defined this chunk.
     - is_part_of: The document to which this chunk belongs.
-    - contains: A list of entities or events contained within the chunk (default is None).
+    - contains: A list of entities or timestamps contained within the chunk (default is None).
     - document_id: Flat string id of the source document, for reference rendering.
     - document_name: Display name (basename) of the source document, for reference rendering.
     - external_metadata: The parent document's external_metadata as JSON text, copied onto
@@ -51,7 +50,7 @@ class DocumentChunk(DataPoint):
     # falls through to the tiling check.
     chunker_id: str | None = None
     is_part_of: Document
-    contains: list[Entity | Event | Timestamp | tuple[Edge, Entity | Timestamp]] = None
+    contains: list[Entity | Timestamp | tuple[Edge, Entity | Timestamp]] = None
     importance_weight: float | None = 0.5
     document_id: str | None = None
     document_name: str | None = None

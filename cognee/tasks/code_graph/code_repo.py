@@ -44,6 +44,7 @@ from cognee.modules.engine.models.node_set import validate_node_set_names
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.code_graph.resolve_repo import (
     CodeRepositoryError,
+    clone_dir,
     code_repo_clone_url,
     redact_repo_spec,
     resolve_repo_source,
@@ -242,6 +243,7 @@ async def resolve_code_repository(
     dataset_id=None,
     source_url: str | None = None,
     include_documents: bool = True,
+    identity: Path | None = None,
 ):
     """Build the repo-level DataItem (and the document file list) for a project.
 
@@ -249,6 +251,7 @@ async def resolve_code_repository(
     to the stable identity (user, dataset, repo path) — mirroring DLT source
     manifests — so re-adding the same repo updates one record instead of
     accreting new ones; without a user context the id is left content-derived.
+    ``identity`` stands in for the repo path in that id.
     With a pinned id and a dataset, the stored row's add stamp is cleared so
     the re-add reaches ingestion's content comparison (see the reset below).
     ``source_url`` (credential-free) records where a cloned repository came
@@ -286,7 +289,7 @@ async def resolve_code_repository(
     if user is not None:
         from cognee.modules.data.methods.get_unique_data_id import get_unique_data_id
 
-        data_id = await get_unique_data_id(f"code_repo:{directory}", user, dataset_id)
+        data_id = await get_unique_data_id(f"code_repo:{identity or directory}", user, dataset_id)
 
     if data_id is not None and dataset_id is not None:
         from cognee.modules.data.methods import reset_data_pipeline_status
@@ -325,7 +328,9 @@ async def resolve_code_repository(
     return manifest_item, documents, len(skipped)
 
 
-async def resolve_code_repository_url(spec: str, user=None, dataset_id=None):
+async def resolve_code_repository_url(
+    spec: str, user=None, dataset_id=None, branch: str | None = None
+):
     """Clone a hosted repository URL and build its repo-level DataItem.
 
     ``add()``'s implicit counterpart of ``remember(content_type="code")``: a
@@ -334,7 +339,9 @@ async def resolve_code_repository_url(spec: str, user=None, dataset_id=None):
     exactly like a local code project -- one ``code_repo`` manifest for the
     CODE_REPO cognify route plus the repository's documents as individual
     items. Returns ``(manifest_item, document_paths, skip_count)``; the
-    manifest carries the credential-free URL as ``repo_url``.
+    manifest carries the credential-free URL as ``repo_url``. ``branch`` clones
+    that branch instead of the remote's default; a dataset still holds one data
+    row per URL, so adding it on another branch replaces that row's code graph.
     """
     clone_url = code_repo_clone_url(spec)
     if clone_url is None:
@@ -342,9 +349,17 @@ async def resolve_code_repository_url(spec: str, user=None, dataset_id=None):
             f"'{redact_repo_spec(spec)}' is not a repository URL add() can clone; "
             "expected https://github.com/<owner>/<repo>, a gitlab.com project, or a .git URL."
         )
-    repo_path = await resolve_repo_source(clone_url)
+    repo_path = await resolve_repo_source(clone_url, branch=branch)
+    source_url = redact_repo_spec(clone_url)
     return await resolve_code_repository(
-        repo_path, user=user, dataset_id=dataset_id, source_url=redact_repo_spec(clone_url)
+        repo_path,
+        user=user,
+        dataset_id=dataset_id,
+        source_url=source_url,
+        # Keyed on the default branch's clone, as every URL row was before branches:
+        # existing rows keep their ids, and branches of one URL share the row, since
+        # their code graphs share the repository's node ids.
+        identity=clone_dir(source_url),
     )
 
 

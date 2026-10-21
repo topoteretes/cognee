@@ -14,12 +14,8 @@ from cognee.modules.retrieval.hybrid.pairs import (
     summary_text_by_chunk_id,
 )
 from cognee.modules.retrieval.hybrid.ranking import rank_chunk_summary_pairs
-from cognee.modules.retrieval.hybrid.results import (
-    display_value,
-    payload,
-    payload_matches_node_filter,
-    result_id,
-)
+from cognee.modules.retrieval.hybrid.results import payload_matches_node_filter
+from cognee.modules.retrieval.utils.results import display_value, payload, result_id
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("HybridRetriever")
