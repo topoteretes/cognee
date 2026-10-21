@@ -2177,7 +2177,7 @@ async def _remember_inner(
                         )
 
         if session_ids:
-            operation_context.set_session_id(session_ids[0] if len(session_ids) == 1 else None)
+            operation_context.set_session_ids(session_ids)
 
         if run_in_background:
             # outcome="succeeded" on this row means "accepted and started"

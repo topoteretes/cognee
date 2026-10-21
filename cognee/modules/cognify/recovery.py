@@ -20,6 +20,7 @@ from cognee.modules.pipelines.methods import get_unterminated_pipeline_runs
 from cognee.modules.pipelines.methods.get_pipeline_run import get_latest_pipeline_run
 from cognee.modules.pipelines.models import PipelineRunStatus
 from cognee.modules.pipelines.operations.log_pipeline_run_error import log_pipeline_run_error
+from cognee.modules.pipelines.operations.run_sessions import get_run_session_ids
 from cognee.modules.pipelines.operations.run_tasks_with_telemetry import (
     PIPELINE_RUN_ERRORED,
     pipeline_run_telemetry_properties,
@@ -145,6 +146,7 @@ async def pipeline_recovery_service():
 
 async def _close_as_abandoned(pipeline_run, dataset) -> None:
     """Write the ERRORED row for ``pipeline_run``, carrying the STARTED row's metadata."""
+    session_ids = (await get_run_session_ids([pipeline_run.id])).get(pipeline_run.id, [])
     await log_pipeline_run_error(
         pipeline_run_id=pipeline_run.pipeline_run_id,
         pipeline_id=pipeline_run.pipeline_id,
@@ -158,7 +160,7 @@ async def _close_as_abandoned(pipeline_run, dataset) -> None:
         data_info=(getattr(pipeline_run, "run_info", None) or {}).get("data"),
         origin=getattr(pipeline_run, "origin", None),
         parent_operation_id=getattr(pipeline_run, "parent_operation_id", None),
-        session_id=getattr(pipeline_run, "session_id", None),
+        session_ids=tuple(session_ids),
     )
 
 

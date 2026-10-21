@@ -49,9 +49,9 @@ def get_activity_router() -> APIRouter:
         session_id: str | None = Query(
             None,
             description=(
-                "Return only rows stamped with this session-cache id: the operation "
-                "record of a session-bound call (e.g. an improve given one session) "
-                "and the pipeline runs it launched."
+                "Return only rows that belong to this session-cache id: the operation "
+                "record of a session-bound call (e.g. an improve given one or more "
+                "sessions) and the pipeline runs it launched."
             ),
         ),
         limit: int = Query(50, ge=1, le=500, description="Page size (max 500)."),
@@ -72,11 +72,14 @@ def get_activity_router() -> APIRouter:
         - **dataset_id** (Optional[UUID]): Restrict to one dataset (403 if not readable).
         - **pipeline_name** (Optional[str]): Exact-match filter; also excludes
           operation records, which have no `pipeline_name`.
-        - **session_id** (Optional[str]): Exact-match filter on the session-cache
-          id. Pipeline runs inherit it from the operation that launched them, so
-          `pipeline_name=memify_pipeline&session_id=…` lists the improve runs
-          that distilled one session. Rows written before that inheritance
-          carry it on the operation record only.
+        - **session_id** (Optional[str]): Rows that belong to this session-cache
+          id. Pipeline runs inherit their sessions from the operation that
+          launched them, so `pipeline_name=memify_pipeline&session_id=…` lists
+          the improve runs over that session, including an improve over several
+          sessions. Each row lists its sessions in `session_ids`; `session_id`
+          is derived from it (the session when there is exactly one, else
+          null). Rows written before that inheritance carry it on the operation
+          record only.
         - **limit** (int): Page size, 1-500 (default: 50).
         - **offset** (int): Rows to skip for pagination (default: 0).
 
@@ -134,6 +137,10 @@ def get_activity_router() -> APIRouter:
         from cognee.infrastructure.databases.relational import get_relational_engine
         from cognee.modules.data.models.Dataset import Dataset
         from cognee.modules.pipelines.models import PipelineRun
+        from cognee.modules.pipelines.operations.run_sessions import (
+            get_run_session_ids,
+            rows_of_session,
+        )
         from cognee.modules.users.models import User
 
         if dataset_id is not None:
@@ -184,10 +191,12 @@ def get_activity_router() -> APIRouter:
             if pipeline_name is not None:
                 stmt = stmt.where(PipelineRun.pipeline_name == pipeline_name)
             if session_id is not None:
-                stmt = stmt.where(PipelineRun.session_id == session_id)
+                stmt = stmt.where(PipelineRun.id.in_(rows_of_session(session_id)))
 
             result = await session.execute(stmt)
             rows = result.all()
+
+        sessions_by_row = await get_run_session_ids(run.id for run, *_ in rows)
 
         return [
             {
@@ -228,7 +237,17 @@ def get_activity_router() -> APIRouter:
                 "started_at": run.started_at.isoformat() if run.started_at else None,
                 "ended_at": run.ended_at.isoformat() if run.ended_at else None,
                 "user_id": str(run.user_id) if run.user_id else None,
-                "session_id": run.session_id,
+                # Every session the row belongs to (several for an improve over
+                # several sessions). session_id is derived: the session when
+                # there is exactly one, else null; kept for clients that read
+                # the single field (the Cloud dashboard labels a run's channel
+                # by it). Sessions are stored only in pipeline_run_sessions.
+                "session_ids": sessions_by_row.get(run.id, []),
+                "session_id": (
+                    sessions_by_row[run.id][0]
+                    if len(sessions_by_row.get(run.id, [])) == 1
+                    else None
+                ),
                 "parent_operation_id": str(run.parent_operation_id)
                 if run.parent_operation_id
                 else None,

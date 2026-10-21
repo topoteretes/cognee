@@ -61,15 +61,15 @@ def get_current_operation() -> Optional["OperationContext"]:
     return _current_operation.get()
 
 
-def get_current_session_id() -> str | None:
-    """The session id bound to the innermost active operation, if any.
+def get_current_session_ids() -> tuple[str, ...]:
+    """The session ids bound to the innermost active operation, if any.
 
-    Pipeline log writers stamp it onto their rows, so a pipeline launched by a
-    session-bound operation (an ``improve`` distilling one session) can be
-    traced back to that session, not only the operation's own record.
+    Pipeline log writers stamp them onto their rows, so a pipeline launched by
+    a session-bound operation (an ``improve`` distilling one or more sessions)
+    can be traced back to each session, not only the operation's own record.
     """
     context = _current_operation.get()
-    return context.session_id if context is not None else None
+    return context.session_ids if context is not None else ()
 
 
 class OperationContext:
@@ -96,7 +96,9 @@ class OperationContext:
         self.tenant_id = tenant_id
         self.dataset_id = dataset_id
         self.usage = usage or OperationUsage()
-        self.session_id = session_id
+        # Every session this operation is bound to, stored one row per session
+        # in pipeline_run_sessions with each pipeline_runs row it writes.
+        self.session_ids: tuple[str, ...] = (session_id,) if session_id else ()
         self.background = background
         self.parent_operation_id = parent_operation_id
         self.started_at = datetime.now(timezone.utc)
@@ -121,9 +123,13 @@ class OperationContext:
         self.dataset_id = dataset_id
 
     def set_session_id(self, session_id: str | None) -> None:
-        """Bind the active session-cache id (joins SessionModelUsage)."""
+        """Bind one active session-cache id."""
         if session_id:
-            self.session_id = session_id
+            self.session_ids = (session_id,)
+
+    def set_session_ids(self, session_ids) -> None:
+        """Bind every session this operation works on, in order, without duplicates."""
+        self.session_ids = tuple(dict.fromkeys(s for s in session_ids or () if s))
 
     def set_background(self, background: bool) -> None:
         """Mark whether this call launched background work.
@@ -176,6 +182,7 @@ async def _write_operation_row(
     error_message: str | None,
 ) -> None:
     from cognee.modules.pipelines.models import PipelineRun
+    from cognee.modules.pipelines.operations.run_sessions import add_run_sessions
 
     pipeline_run = PipelineRun(
         status=None,
@@ -196,7 +203,6 @@ async def _write_operation_row(
         tokens_out=context.usage.tokens_out,
         embedding_tokens=context.usage.embedding_tokens,
         origin=get_operation_origin(),
-        session_id=context.session_id,
         parent_operation_id=context.parent_operation_id,
         background=context.background,
     )
@@ -204,7 +210,7 @@ async def _write_operation_row(
     db_engine = get_relational_engine()
 
     async with db_engine.get_async_session() as session:
-        session.add(pipeline_run)
+        add_run_sessions(session, pipeline_run, context.session_ids)
         await session.commit()
 
 
