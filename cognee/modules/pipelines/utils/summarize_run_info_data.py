@@ -18,8 +18,9 @@ from cognee.modules.pipelines.models.PipelineRunInfo import (
 def summarize_run_info_data(data: Any = None, results: list | None = None) -> list[str]:
     """The ``data_id``s this run completed; empty before any item has run.
 
-    ``data`` is accepted for callers that still pass the run's input; the ids
-    are read from ``results`` alone.
+    ``data`` is deprecated and ignored: the ids are read from ``results``
+    alone. It stays in the signature for callers outside core that still pass
+    the run's input positionally, and will be removed once they stop.
     """
     return _data_ids_with_status(results, PipelineRunCompleted)
 

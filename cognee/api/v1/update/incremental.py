@@ -777,10 +777,16 @@ async def _run_incremental_update(
             dataset.id,
             [data_id],
             error,
+            errored_data_ids=[data_id],
         )
         raise
     await log_pipeline_run_complete(
-        pipeline_run.pipeline_run_id, pipeline_id, RUN_PIPELINE_NAME, dataset.id, result
+        pipeline_run.pipeline_run_id,
+        pipeline_id,
+        RUN_PIPELINE_NAME,
+        dataset.id,
+        result,
+        data_ids=[data_id],
     )
     send_telemetry(
         "Incremental Update Run Completed",

@@ -23,8 +23,19 @@ async def log_pipeline_run_complete(
     tokens_out: int | None = None,
     embedding_tokens: int | None = None,
     results: list | None = None,
+    data_ids: list | None = None,
 ):
-    data_info = summarize_run_info_data(data, results)
+    """Append the COMPLETED row for a run.
+
+    ``run_info["data"]`` lists the documents the run completed, read from the
+    per-item ``results``; a writer that does not run items through the pipeline
+    runner (``update()``) names them with ``data_ids`` instead. ``data`` is not
+    recorded.
+    """
+    if data_ids is not None:
+        data_info = [str(data_id) for data_id in data_ids]
+    else:
+        data_info = summarize_run_info_data(results=results)
 
     pipeline_run = PipelineRun(
         pipeline_run_id=pipeline_run_id,

@@ -34,7 +34,7 @@ from cognee.shared.utils import send_telemetry, telemetry_exception_properties, 
 from cognee.tasks.ingestion import resolve_data_directories
 
 from ..tasks.task import Task
-from .run_tasks_data_item import run_tasks_data_item
+from .run_tasks_data_item import item_data_id, run_tasks_data_item
 from .run_tasks_with_telemetry import (
     PIPELINE_RUN_COMPLETED,
     PIPELINE_RUN_ERRORED,
@@ -117,6 +117,10 @@ async def run_tasks(
         database_ready = False
         run_finished = False
         items_failed = False
+        # Each item's final result, recorded as the item finishes: a raising item
+        # aborts gather() before its results are collected, and the ERRORED row
+        # must still name what completed and what failed.
+        finished_results: list = []
         async with AsyncExitStack() as stack:
             try:
                 yield PipelineRunStarted(
@@ -226,10 +230,23 @@ async def run_tasks(
                             "Failed to log pipeline run progress",
                         )
 
+                def _errored_item_result(data_item, error: BaseException) -> dict:
+                    return {
+                        "run_info": PipelineRunErrored(
+                            pipeline_run_id=pipeline_run_id,
+                            payload=repr(error),
+                            dataset_id=dataset.id,
+                            dataset_name=dataset.name,
+                            error_class=type(error).__name__,
+                            error_message=scrub_error_message(error),
+                        ),
+                        "data_id": item_data_id(data_item),
+                    }
+
                 async def _run_item(data_item, item_tasks):
                     try:
                         async with semaphore:
-                            return await run_tasks_data_item(
+                            result = await run_tasks_data_item(
                                 data_item,
                                 dataset,
                                 item_tasks,
@@ -251,8 +268,15 @@ async def run_tasks(
                                 data_cache,
                                 progress_state,
                             )
+                    except Exception as error:
+                        # Cancellation is not an item failure, so only Exception.
+                        finished_results.append(_errored_item_result(data_item, error))
+                        raise
                     finally:
                         await _record_item_progress()
+                    if result:
+                        finished_results.append(result)
+                    return result
 
                 item_futures = [
                     asyncio.create_task(_run_item(item, item_tasks))
@@ -278,18 +302,7 @@ async def run_tasks(
                     if isinstance(result, BaseException):
                         logger.error(f"Item {i} failed: {result}", exc_info=result)
                         first_item_error = first_item_error or result
-                        results.append(
-                            {
-                                "run_info": PipelineRunErrored(
-                                    pipeline_run_id=pipeline_run_id,
-                                    payload=repr(result),
-                                    dataset_id=dataset.id,
-                                    dataset_name=dataset.name,
-                                    error_class=type(result).__name__,
-                                    error_message=scrub_error_message(result),
-                                ),
-                            }
-                        )
+                        results.append(_errored_item_result(work_items[i][0], result))
                     elif result:
                         results.append(result)
 
@@ -400,8 +413,8 @@ async def run_tasks(
                     tokens_in=run_usage.tokens_in if run_usage else 0,
                     tokens_out=run_usage.tokens_out if run_usage else 0,
                     embedding_tokens=run_usage.embedding_tokens if run_usage else 0,
-                    # None when the run failed before any item ran: counts only.
-                    results=locals().get("results"),
+                    # Empty when the run failed before any item finished.
+                    results=finished_results,
                 )
 
                 ownership.closed = True

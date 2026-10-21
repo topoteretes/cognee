@@ -43,6 +43,22 @@ from ..tasks.task import Task
 logger = get_logger("run_tasks_data_item")
 
 
+def item_data_id(data_item: Any):
+    """The ``data_id`` an item already carries, or None for raw input.
+
+    Raw input (text, a path) is only given an id by ingestion, inside the
+    incremental runner; the run record cannot name it before that.
+    """
+    if isinstance(data_item, Data):
+        return data_item.id
+
+    from cognee.tasks.ingestion.data_item import DataItem as DataItemType
+
+    if isinstance(data_item, DataItemType):
+        return data_item.data_id
+    return None
+
+
 def _push_stage_progress(
     yielded: PipelineRunYield,
     ctx: PipelineContext | None,
@@ -343,7 +359,8 @@ async def run_tasks_data_item_regular(
             pipeline_run_id=pipeline_run_id,
             dataset_id=dataset.id,
             dataset_name=dataset.name,
-        )
+        ),
+        "data_id": item_data_id(data_item),
     }
 
 

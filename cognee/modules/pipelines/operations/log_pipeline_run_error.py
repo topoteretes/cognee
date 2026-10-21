@@ -29,6 +29,7 @@ async def log_pipeline_run_error(
     origin: str | None = None,
     parent_operation_id: UUID | None = None,
     results: list | None = None,
+    errored_data_ids: list | None = None,
 ):
     """Append the ERRORED row for a run.
 
@@ -38,9 +39,18 @@ async def log_pipeline_run_error(
     the ERRORED row describes the run that died, not the process closing it.
     ``user_id`` and ``tenant_id`` preserve that stored identity without requiring
     a live ``User`` model. When ``user`` is supplied, its identity takes precedence.
+
+    ``run_info["data"]`` and ``run_info["errored_data"]`` list the documents the
+    run completed and failed, read from the per-item ``results``; a writer that
+    does not run items through the pipeline runner (``update()``) names the
+    failed ones with ``errored_data_ids`` instead. ``data`` is not recorded.
     """
     if data_info is None:
-        data_info = summarize_run_info_data(data, results)
+        data_info = summarize_run_info_data(results=results)
+    if errored_data_ids is not None:
+        errored_data = [str(data_id) for data_id in errored_data_ids]
+    else:
+        errored_data = errored_run_info_data_ids(results)
 
     pipeline_run = PipelineRun(
         pipeline_run_id=pipeline_run_id,
@@ -50,7 +60,7 @@ async def log_pipeline_run_error(
         dataset_id=dataset_id,
         run_info={
             "data": data_info,
-            "errored_data": errored_run_info_data_ids(results),
+            "errored_data": errored_data,
             # Scrubbed like error_message — persisting the raw text here would
             # defeat the redaction (and run_info growth is capped, COG-5359).
             "error": scrub_error_message(e),
