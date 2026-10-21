@@ -8,7 +8,11 @@ call to it raises ``AssertionError`` and fails the test that made it.
 
 import math
 
-from cognee.tasks.ingestion.connectors.apollo import ApolloNotFoundError
+from cognee.tasks.ingestion.connectors.apollo import (
+    BASE_URL,
+    ApolloNotFoundError,
+    _endpoint,
+)
 
 CONTACT_STAGES = [{"id": "cs1", "name": "Cold"}, {"id": "cs2", "name": "Interested"}]
 ACCOUNT_STAGES = [{"id": "as1", "name": "Prospect"}, {"id": "as2", "name": "Customer"}]
@@ -41,7 +45,8 @@ class FakeApollo:
         self.no_pagination: set[str] = set()
         self.bodies: list[tuple[str, dict]] = []
         self.calls: list[tuple[str, str]] = []
-        self.rate_limit: dict[str, int | None] = {}
+        # what the client reports per endpoint label, see ApolloClient.rate_limit
+        self.rate_limit: dict[str, dict[str, int | None]] = {}
         self._clock = 0
 
     # -- seeding -----------------------------------------------------------
@@ -54,7 +59,9 @@ class FakeApollo:
             "id": contact_id,
             "name": name,
             "title": "Engineer",
-            "organization_name": "Acme",
+            # distinct from every account name the tests use, so a text that names the account
+            # cannot have got the name from here
+            "organization_name": "Acme Inc",
             "contact_stage_id": "cs1",
             "label_ids": [],
             "typed_custom_fields": {},
@@ -196,3 +203,45 @@ class FakeApollo:
                 "total_pages": math.ceil(total / per_page) if per_page else 0,
             },
         }
+
+
+class _HTTPResponse:
+    def __init__(self, status: int, payload, minute_left: int):
+        self.status_code = status
+        self._payload = payload
+        self.headers = {"x-minute-requests-left": str(minute_left), "x-hourly-requests-left": "199"}
+
+    def json(self):
+        return self._payload
+
+
+def serve_over_http(
+    fake: FakeApollo, *, keys: list[str] | None = None, windows: dict | None = None
+):
+    """A stand-in for ``requests.request`` that answers from ``fake`` the way Apollo's HTTP API does.
+
+    ``keys`` collects the ``x-api-key`` of every request. ``windows`` maps an endpoint label
+    (``/contacts/{id}``) to the calls left in its minute window: every answer for that endpoint,
+    a 404 included, carries what is left in its headers and spends one, and an endpoint at 0
+    answers 429. An endpoint not listed reports 49 and never runs out.
+    """
+    windows = {} if windows is None else windows
+
+    def request(method, url, *, headers, json=None, params=None, timeout=None, **_):
+        if keys is not None:
+            keys.append(headers["x-api-key"])
+        path = url.removeprefix(BASE_URL)
+        label = _endpoint(path)
+        left = windows.get(label)
+        if left == 0:
+            return _HTTPResponse(429, {}, 0)
+        if left is not None:
+            windows[label] = left = left - 1
+        minute = 49 if left is None else left
+        try:
+            payload = fake.request(method, path, body=json, params=params)
+        except ApolloNotFoundError:
+            return _HTTPResponse(422, {"error": "This contact has been deleted."}, minute)
+        return _HTTPResponse(200, payload, minute)
+
+    return request
