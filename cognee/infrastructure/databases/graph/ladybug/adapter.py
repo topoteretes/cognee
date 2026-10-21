@@ -65,6 +65,24 @@ logger = get_logger()
 # progress is safe. Does not change how many data points the pipeline batches.
 _WRITE_CHUNK_SIZE = 2000
 
+# Properties improve() writes onto stored elements after ingestion (feedback
+# weights, the truth subspace). A DataPoint only ever carries their defaults, so
+# a re-add of an existing element (the same entity in a new document, a session
+# window, an update) must keep the stored value instead of resetting it. The
+# update replaces the whole properties blob, so the existing-row probe returns
+# the stored blob and these keys are carried into the new one.
+LEARNED_NODE_PROPERTIES = ("feedback_weight", "truth_alignment", "truth_epoch")
+LEARNED_EDGE_PROPERTIES = ("feedback_weight",)
+
+
+def _with_learned(properties: str, stored: str | None, keys: tuple[str, ...]) -> str:
+    """``properties`` (a JSON blob) with the learned ``keys`` of the ``stored`` blob kept."""
+    learned = json.loads(stored) if stored else {}
+    kept = {key: learned[key] for key in keys if key in learned}
+    if not kept:
+        return properties
+    return json.dumps({**json.loads(properties), **kept}, cls=JSONEncoder)
+
 
 # ── Bulk upsert statements (COG-6216) ────────────────────────────────────────
 #
@@ -97,7 +115,7 @@ _WRITE_CHUNK_SIZE = 2000
 _NODE_PROBE_QUERY = """
 UNWIND $ids AS node_id
 MATCH (n:Node {id: node_id})
-RETURN n.id
+RETURN n.id, n.properties
 """
 
 _NODE_CREATE_QUERY = """
@@ -127,7 +145,7 @@ SET n.name = node.name,
 _EDGE_PROBE_QUERY = """
 UNWIND $ids AS node_id
 MATCH (from:Node {id: node_id})-[r:EDGE]->(to:Node)
-RETURN from.id, to.id, r.relationship_name
+RETURN from.id, to.id, r.relationship_name, r.properties
 """
 
 _EDGE_CREATE_QUERY = """
@@ -1123,35 +1141,6 @@ class LadybugAdapter(GraphDBInterface):
 
     # Helper method for building edge queries
 
-    def _edge_query_and_params(
-        self, from_node: str, to_node: str, relationship_name: str, properties: dict[str, Any]
-    ) -> tuple[str, dict]:
-        """Build the edge creation query and parameters."""
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
-        query = """
-            MATCH (from:Node), (to:Node)
-            WHERE from.id = $from_id AND to.id = $to_id
-            MERGE (from)-[r:EDGE {
-                relationship_name: $relationship_name
-            }]->(to)
-            ON CREATE SET
-                r.created_at = TIMESTAMP($created_at),
-                r.updated_at = TIMESTAMP($updated_at),
-                r.properties = $properties
-            ON MATCH SET
-                r.updated_at = TIMESTAMP($updated_at),
-                r.properties = $properties
-        """
-        params = {
-            "from_id": from_node,
-            "to_id": to_node,
-            "relationship_name": relationship_name,
-            "created_at": now,
-            "updated_at": now,
-            "properties": json.dumps(properties, cls=JSONEncoder),
-        }
-        return query, params
-
     # Node Operations
 
     async def has_node(self, node_id: str) -> bool:
@@ -1345,14 +1334,26 @@ class LadybugAdapter(GraphDBInterface):
                 ):
                     for start in range(0, total, _WRITE_CHUNK_SIZE):
                         chunk = node_params[start : start + _WRITE_CHUNK_SIZE]
+                        # id -> stored properties blob, for the rows that exist.
                         existing = {
-                            row[0]
+                            row[0]: row[1]
                             for row in await self.query(
                                 _NODE_PROBE_QUERY, {"ids": [node["id"] for node in chunk]}
                             )
                         }
                         new_nodes = [node for node in chunk if node["id"] not in existing]
-                        old_nodes = [node for node in chunk if node["id"] in existing]
+                        old_nodes = [
+                            {
+                                **node,
+                                "properties": _with_learned(
+                                    node["properties"],
+                                    existing[node["id"]],
+                                    LEARNED_NODE_PROPERTIES,
+                                ),
+                            }
+                            for node in chunk
+                            if node["id"] in existing
+                        ]
                         if new_nodes:
                             await self.query(create_query, {"nodes": new_nodes, **extra_params})
                         if old_nodes:
@@ -2136,11 +2137,9 @@ class LadybugAdapter(GraphDBInterface):
         if edge_properties is None:
             edge_properties = {}
         try:
-            query, params = self._edge_query_and_params(
-                from_node, to_node, relationship_name, edge_properties
-            )
-            await self.query(query, params)
-            await self.checkpoint()
+            # One edge is a batch of one: the same probe -> CREATE / SET path,
+            # so the single write neither MERGEs nor resets learned properties.
+            await self.add_edges([(from_node, to_node, relationship_name, edge_properties)])
         except Exception as e:
             logger.error(f"Failed to add edge: {e}")
             raise
@@ -2241,8 +2240,10 @@ class LadybugAdapter(GraphDBInterface):
                     # nodes. Cost is the sum of their out-degrees, not the node
                     # table — and cognee's hub nodes (EntityType) are hubs by
                     # in-degree, which this never touches.
+                    # (from, to, relationship) -> stored properties blob, for
+                    # every outgoing edge of this chunk's source nodes.
                     existing = {
-                        tuple(row)
+                        (row[0], row[1], row[2]): row[3]
                         for row in await self.query(
                             _EDGE_PROBE_QUERY,
                             {"ids": sorted({edge["from_id"] for edge in chunk})},
@@ -2252,7 +2253,17 @@ class LadybugAdapter(GraphDBInterface):
                     old_edges = []
                     for edge in chunk:
                         key = (edge["from_id"], edge["to_id"], edge["relationship_name"])
-                        (old_edges if key in existing else new_edges).append(edge)
+                        if key in existing:
+                            old_edges.append(
+                                {
+                                    **edge,
+                                    "properties": _with_learned(
+                                        edge["properties"], existing[key], LEARNED_EDGE_PROPERTIES
+                                    ),
+                                }
+                            )
+                        else:
+                            new_edges.append(edge)
                     if new_edges:
                         await self.query(create_query, {"edges": new_edges, **extra_params})
                     if old_edges:

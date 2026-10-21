@@ -23,8 +23,8 @@ from cognee.infrastructure.databases.graph.ladybug.adapter import (
 
 def _adapter_with_mocked_writes(existing_rows=None):
     """Adapter whose queries are mocked. ``existing_rows`` is what the
-    existing-row probe returns, so a test can drive the CREATE path (default:
-    nothing exists yet) or the SET path.
+    existing-row probe returns (id and stored properties blob for nodes), so a
+    test can drive the CREATE path (default: nothing exists yet) or the SET path.
     """
     adapter = object.__new__(LadybugAdapter)
     adapter.query = AsyncMock(return_value=existing_rows or [])
@@ -76,7 +76,7 @@ async def test_add_nodes_small_batch_is_one_probe_and_one_write():
 async def test_add_nodes_updates_rows_the_probe_found():
     """Ids the probe returns take the SET path. Sending them to CREATE would
     raise a primary-key violation on every re-ingest."""
-    adapter = _adapter_with_mocked_writes(existing_rows=[("node-0",), ("node-1",)])
+    adapter = _adapter_with_mocked_writes(existing_rows=[("node-0", "{}"), ("node-1", "{}")])
 
     await adapter.add_nodes(_fake_nodes(3))
 
@@ -88,6 +88,56 @@ async def test_add_nodes_updates_rows_the_probe_found():
     }
     assert by_kind["SET"] == ["node-0", "node-1"]
     assert by_kind["CREATE"] == ["node-2"]
+
+
+@pytest.mark.asyncio
+async def test_add_nodes_keeps_learned_properties_of_the_rows_it_updates():
+    """The probe returns the stored blob, and the SET carries its learned keys
+    (feedback_weight, truth state) over the DataPoint defaults; a new row and
+    the rest of the blob come from the DataPoint."""
+    import json
+
+    adapter = _adapter_with_mocked_writes(
+        existing_rows=[("node-0", json.dumps({"feedback_weight": 0.9, "truth_epoch": 3, "old": 1}))]
+    )
+    nodes = [
+        SimpleNamespace(id="node-0", name="n0", type="Node", feedback_weight=0.5, fresh=True),
+        SimpleNamespace(id="node-1", name="n1", type="Node", feedback_weight=0.5),
+    ]
+
+    await adapter.add_nodes(nodes)
+
+    written = {
+        node["id"]: json.loads(node["properties"])
+        for call in _write_calls(adapter, "nodes")
+        for node in call.args[1]["nodes"]
+    }
+    assert written["node-0"] == {"feedback_weight": 0.9, "truth_epoch": 3, "fresh": True}
+    assert written["node-1"] == {"feedback_weight": 0.5}
+
+
+@pytest.mark.asyncio
+async def test_add_edges_keeps_learned_properties_of_the_rows_it_updates():
+    import json
+
+    adapter = _adapter_with_mocked_writes(
+        existing_rows=[("from-0", "to-0", "relates_to", json.dumps({"feedback_weight": 0.8}))]
+    )
+
+    await adapter.add_edges(
+        [
+            ("from-0", "to-0", "relates_to", {"feedback_weight": 0.5, "edge_text": "new"}),
+            ("from-1", "to-1", "relates_to", {"feedback_weight": 0.5}),
+        ]
+    )
+
+    written = {
+        (edge["from_id"], edge["to_id"]): json.loads(edge["properties"])
+        for call in _write_calls(adapter, "edges")
+        for edge in call.args[1]["edges"]
+    }
+    assert written[("from-0", "to-0")] == {"feedback_weight": 0.8, "edge_text": "new"}
+    assert written[("from-1", "to-1")] == {"feedback_weight": 0.5}
 
 
 @pytest.mark.asyncio
