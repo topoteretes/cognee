@@ -98,6 +98,9 @@ class CogneeClient:
         resolved_scheme = api_auth_scheme or os.environ.get("COGNEE_API_AUTH_SCHEME")
         self.api_auth_scheme = resolved_scheme.lower().strip() if resolved_scheme else None
         self.use_api = bool(api_url)
+        # Whether the server's QAEntry schema has ``node_set``; probed once (see
+        # _server_takes_entry_node_set).
+        self._entry_node_set_supported: bool | None = None
 
         # Extract tenant ID from tenant URL pattern: tenant-<uuid>.*.cognee.ai
         self.tenant_id: str | None = None
@@ -685,6 +688,29 @@ class CogneeClient:
                 direction=direction,
             )
 
+    async def _server_takes_entry_node_set(self) -> bool | None:
+        """Whether the server's ``QAEntry`` schema has a ``node_set`` property.
+
+        A server older than SDK-336 ignores unknown entry fields, so a tagged
+        session write would be stored untagged and still succeed. Probed once
+        per client from ``/openapi.json``, the check the plugins make. ``None``
+        means unknown (no schema served, or no ``QAEntry`` in it) and is not
+        cached, so a later call can still find out.
+        """
+        if self._entry_node_set_supported is not None:
+            return self._entry_node_set_supported
+        try:
+            response = await self.client.get(
+                f"{self.api_url}/openapi.json", headers=self._get_headers()
+            )
+            response.raise_for_status()
+            schema = response.json()["components"]["schemas"]["QAEntry"]
+        except (httpx.HTTPError, ValueError, KeyError, TypeError):
+            logger.warning("remember: could not read the server schema to check node_set support")
+            return None
+        self._entry_node_set_supported = "node_set" in schema.get("properties", {})
+        return self._entry_node_set_supported
+
     # -- V2 API methods -----------------------------------------------------
 
     async def remember(
@@ -698,6 +724,7 @@ class CogneeClient:
         ontology_key: str | list[str] | None = None,
         self_improvement: bool = True,
         name: str | None = None,
+        node_set: list[str] | None = None,
     ) -> dict[str, Any]:
         """Store data in memory via remember().
 
@@ -713,6 +740,12 @@ class CogneeClient:
         extraction; local mode resolves keys for the default user.
         `name` names a text `data` document (permanent memory only); without
         it the text is stored under a content-hash name.
+        node_set tags permanent data and, with session_id, pins the session's
+        node set (the typed entry's ``node_set`` field in API mode, the
+        call-level kwarg in local mode); a different set on a pinned session
+        is refused by the server with HTTP 409. In API mode a session
+        ``node_set`` needs a server that has it on ``QAEntry``; against an
+        older server the call raises instead of storing the entry untagged.
         """
         if content_base64 and data:
             raise ValueError("Pass either `data` or `filename` + `content_base64`, not both.")
@@ -754,6 +787,14 @@ class CogneeClient:
                     "dataset_name": dataset_name,
                     "session_id": session_id,
                 }
+                if node_set:
+                    if await self._server_takes_entry_node_set() is False:
+                        raise ValueError(
+                            "This Cognee server does not support node_set on session "
+                            "entries and would store the entry untagged. Upgrade the "
+                            "server, or omit node_set."
+                        )
+                    payload["entry"]["node_set"] = list(node_set)
                 if not self_improvement:
                     payload["self_improvement"] = False
                 response = await self.client.post(
@@ -771,6 +812,8 @@ class CogneeClient:
                 form_data["custom_prompt"] = custom_prompt
             if ontology_keys:
                 form_data["ontology_key"] = ontology_keys
+            if node_set:
+                form_data["node_set"] = list(node_set)
             if not self_improvement:
                 form_data["self_improvement"] = "false"
             response = await self.client.post(
@@ -844,6 +887,8 @@ class CogneeClient:
                     kwargs["custom_prompt"] = custom_prompt
                 if not self_improvement:
                     kwargs["self_improvement"] = False
+                if node_set:
+                    kwargs["node_set"] = list(node_set)
 
                 try:
                     result = await self.cognee.remember(**kwargs)
@@ -1023,7 +1068,6 @@ class CogneeClient:
         self,
         dataset_name: str = "main_dataset",
         session_ids: list[str] | None = None,
-        node_name: list[str] | None = None,
         build_global_context_index: bool = False,
         build_truth_subspace: bool = False,
     ) -> dict[str, Any]:
@@ -1038,8 +1082,6 @@ class CogneeClient:
             payload: dict[str, Any] = {"dataset_name": dataset_name}
             if session_ids:
                 payload["session_ids"] = session_ids
-            if node_name:
-                payload["node_name"] = node_name
             if build_global_context_index:
                 payload["build_global_context_index"] = True
             if build_truth_subspace:
@@ -1052,8 +1094,6 @@ class CogneeClient:
                 kwargs: dict[str, Any] = {"dataset": dataset_name}
                 if session_ids:
                     kwargs["session_ids"] = session_ids
-                if node_name:
-                    kwargs["node_name"] = node_name
                 if build_global_context_index:
                     kwargs["build_global_context_index"] = True
                 if build_truth_subspace:

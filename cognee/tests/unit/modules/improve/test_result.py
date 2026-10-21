@@ -144,7 +144,8 @@ def test_improve_result_status_summary():
     assert all_skipped.status == "skipped"
     assert all(stage.reason == REASON_LOCK_HELD for stage in all_skipped.stages)
     assert all_skipped.session_ids == ["s"]
-    assert all_skipped.memify_run == {}
+    with pytest.warns(FutureWarning, match="memify_run is deprecated"):
+        assert all_skipped.memify_run == {}
 
 
 def test_lock_held_decodes_only_the_lost_claim_shape():
@@ -166,8 +167,7 @@ def test_model_dump_includes_status_and_serializes_run_info():
     info = _info(PipelineRunCompleted)
     result = ImproveResult(
         dataset_id=uuid4(),
-        stages=[StageResult.from_pipeline_run("triplet_enrichment", {info.dataset_id: info})],
-        memify_run={},
+        stages=[StageResult.from_pipeline_run("review_conflicts", {info.dataset_id: info})],
     )
     dumped = result.model_dump(mode="json")
     assert dumped["status"] == "completed"
@@ -179,3 +179,15 @@ def test_model_dump_includes_status_and_serializes_run_info():
 async def test_wait_is_a_noop_for_foreground_results():
     result = ImproveResult()
     assert await result.wait() is result
+
+
+def test_legacy_remote_payload_is_kept_on_the_deprecated_memify_run():
+    """An older server returns its memify run mapping, not stages; it is not dropped."""
+    legacy = {"dataset-id": {"status": "PipelineRunCompleted"}}
+
+    result = ImproveResult.from_remote_payload(legacy, ["s1"])
+
+    assert result.stages == []
+    assert result.session_ids == ["s1"]
+    with pytest.warns(FutureWarning, match="read ImproveResult.stages"):
+        assert result.memify_run == legacy

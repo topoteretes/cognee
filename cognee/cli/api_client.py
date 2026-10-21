@@ -209,7 +209,7 @@ class CogneeApiClient:
 
     # -- memify ----------------------------------------------------------
 
-    def memify(
+    def memify(  # deprecated (SDK-1115), removed in the next release
         self,
         dataset_name: str | None = None,
         dataset_id: str | None = None,
@@ -350,7 +350,6 @@ class CogneeApiClient:
         self,
         dataset_name: str | None = None,
         dataset_id: str | None = None,
-        node_name: list[str] | None = None,
         session_ids: list[str] | None = None,
         run_in_background: bool = False,
         build_global_context_index: bool = False,
@@ -363,8 +362,6 @@ class CogneeApiClient:
             payload["dataset_name"] = dataset_name
         if dataset_id:
             payload["dataset_id"] = str(dataset_id)
-        if node_name:
-            payload["node_name"] = node_name
         if session_ids:
             payload["session_ids"] = session_ids
         if build_global_context_index:

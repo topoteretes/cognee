@@ -19,7 +19,8 @@ Vector ids mirror ``delete_from_graph_and_vector``:
     id = node_id;
   - edge -> ``EdgeType.id_for(edge_text)`` in ``EdgeType_relationship_name``;
     ``generate_node_id(source_id + relationship_name + target_id)`` in
-    ``Triplet_text`` (best-effort; the collection may not exist).
+    ``Triplet_text`` (best-effort; legacy rows only — cognee no longer writes
+    that collection, but databases built before SDK-1115 may hold it).
 """
 
 import dataclasses

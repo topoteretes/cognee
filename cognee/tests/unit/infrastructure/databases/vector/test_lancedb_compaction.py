@@ -888,131 +888,7 @@ async def test_a_mismatched_lance_core_turns_compaction_off(
     await _write_n_points(adapter, collection, 3)  # writes are unaffected
 
     assert await adapter.compact() == {"skipped": "lance_core_mismatch"}
-    assert adapter._open_prune_task is None
     assert len(_data_files(db_path, collection)) == 3
-
-
-async def _reopen(tmp_path) -> LanceDBAdapter:
-    """A second adapter on the same store: a new process, or a re-created engine."""
-    adapter, _ = _adapter(tmp_path)
-    await adapter.get_connection()
-    return adapter
-
-
-@pytest.mark.asyncio
-async def test_opening_a_quiet_store_reclaims_its_superseded_versions(
-    tmp_path, compaction_settings
-):
-    """The files a pass supersedes go only in a later pass; a store that gets no
-    more writes (searches only) must still get them back."""
-    compaction_settings(retention_seconds=0)
-    writer, db_path = _adapter(tmp_path)
-    collection = "QuietStore_label"
-    await _write_n_points(writer, collection, 6)
-    await writer.close()
-    assert _version_count(db_path, collection) >= 7
-
-    reader = await _reopen(tmp_path)
-    await asyncio.wait({reader._open_prune_task})
-
-    assert reader._open_prune_task.result()[collection]["old_versions_removed"] >= 6
-    assert _version_count(db_path, collection) == 1
-    assert await (await reader.get_collection(collection)).count_rows() == 6
-    await reader.close()
-
-
-@pytest.mark.asyncio
-async def test_the_open_prune_is_bounded_like_a_pass(tmp_path, compaction_settings):
-    compaction_settings(retention_seconds=0, max_versions_per_run=2)
-    writer, db_path = _adapter(tmp_path)
-    collection = "OpenBudget_label"
-    await _write_n_points(writer, collection, 6)
-    await writer.close()
-    before = _version_count(db_path, collection)
-
-    reader = await _reopen(tmp_path)
-    await asyncio.wait({reader._open_prune_task})
-
-    assert _version_count(db_path, collection) == before - 2
-    await reader.close()
-
-
-@pytest.mark.asyncio
-async def test_compact_and_close_wait_for_a_running_open_prune(
-    tmp_path, compaction_settings, monkeypatch
-):
-    """The two never overlap, and closing never tears the store down under it."""
-    compaction_settings(retention_seconds=0)
-    adapter, _ = _adapter(tmp_path)
-    started, finished = asyncio.Event(), []
-
-    async def slow_prune_pass(options):
-        started.set()
-        await asyncio.sleep(0.2)
-        finished.append(True)
-        return {}
-
-    monkeypatch.setattr(adapter, "_prune_pass", slow_prune_pass)
-    await adapter.get_connection()
-    await started.wait()
-
-    stats = await adapter.compact()
-
-    assert finished == [True]
-    assert "skipped" not in stats
-
-    second, _ = _adapter(tmp_path)
-    monkeypatch.setattr(second, "_prune_pass", slow_prune_pass)
-    started.clear()
-    await second.get_connection()
-    await started.wait()
-    await second.close()
-    assert finished == [True, True]
-    await adapter.close()
-
-
-@pytest.mark.asyncio
-async def test_prune_never_drops_tables_under_a_running_open_prune(
-    tmp_path, compaction_settings, monkeypatch
-):
-    compaction_settings(retention_seconds=0)
-    writer, _ = _adapter(tmp_path)
-    await _write_n_points(writer, "PruneRace_label", 2)
-    await writer.close()
-
-    adapter, _ = _adapter(tmp_path)
-    started, events = asyncio.Event(), []
-
-    async def slow_prune_pass(options):
-        started.set()
-        await asyncio.sleep(0.2)
-        events.append("open_prune_done")
-        return {}
-
-    monkeypatch.setattr(adapter, "_prune_pass", slow_prune_pass)
-    await adapter.get_connection()
-    await started.wait()
-
-    await adapter.prune()
-    events.append("pruned")
-
-    assert events == ["open_prune_done", "pruned"]
-    assert not await adapter.has_collection("PruneRace_label")
-    await adapter.close()
-
-
-@pytest.mark.asyncio
-async def test_prune_on_a_fresh_adapter_starts_no_open_prune(tmp_path, compaction_settings):
-    compaction_settings(retention_seconds=0)
-    writer, _ = _adapter(tmp_path)
-    await _write_n_points(writer, "PruneFresh_label", 2)
-    await writer.close()
-
-    adapter, _ = _adapter(tmp_path)
-    await adapter.prune()
-
-    assert adapter._open_prune_task is None
-    await adapter.close()
 
 
 @pytest.mark.asyncio
@@ -1037,94 +913,65 @@ async def test_prune_waits_for_a_running_compaction_pass(tmp_path, compaction_se
 
 
 @pytest.mark.asyncio
-async def test_versions_a_pass_left_pending_are_pruned_once_aged(tmp_path, compaction_settings):
-    """An adapter that stays open (a server) reclaims them without another cognify."""
-    compaction_settings(retention_seconds=1)
-    adapter, db_path = _adapter(tmp_path)
-    collection = "Followup_label"
-    await _write_n_points(adapter, collection, 4)
-
-    await adapter.compact()
-    assert _version_count(db_path, collection) > 1  # still inside the retention window
-    assert adapter._followup_prune_handle is not None
-
-    await asyncio.sleep(2.3)
-    await adapter._wait_for_open_prune()
-    assert _version_count(db_path, collection) == 1
-    assert _data_files(db_path, collection) == _referenced_files(db_path, collection)
-
-    await adapter.compact()
-    assert adapter._followup_prune_handle is not None
-    await adapter.close()
-    assert adapter._followup_prune_handle is None
-
-
-@pytest.mark.asyncio
-async def test_a_followup_prune_waits_for_a_running_prune(
-    tmp_path, compaction_settings, monkeypatch
+async def test_an_rpc_after_the_cache_evicted_the_adapter_spawns_no_worker(
+    tmp_path, monkeypatch, compaction_settings
 ):
-    """The follow-up takes the prune slot; whoever waits on the slot must still
-    wait for the prune it replaced (both hold the compaction lock in turn)."""
-    compaction_settings(retention_seconds=0)
-    adapter, _ = _adapter(tmp_path)
-    started, events = asyncio.Event(), []
+    """The engine cache closes an evicted subprocess adapter through
+    ``_start_close`` while a caller on the loop that opened the store may
+    still hold the connection. An RPC that lands after the session was shut
+    down must be refused, not recovered: the adapter no longer owns the
+    session, so a respawned worker is never closed (#5710 reached this through
+    the first-open prune, since removed; the contract holds for any late
+    caller, so a compaction pass or a read racing an eviction is covered)."""
+    import multiprocessing
 
-    async def slow_prune_pass(options):
-        started.set()
-        await asyncio.sleep(0.2)
-        events.append("prune_done")
-        return {}
-
-    monkeypatch.setattr(adapter, "_prune_pass", slow_prune_pass)
-    await adapter.get_connection()  # first-open prune starts
-    await started.wait()
-    first = adapter._open_prune_task
-
-    adapter._start_followup_prune(adapter._compaction_options())
-    assert adapter._open_prune_task is not first
-
-    await adapter._wait_for_open_prune()
-
-    assert first.done()
-    assert events == ["prune_done", "prune_done"]
-    await adapter.close()
-
-
-@pytest.mark.asyncio
-async def test_prunes_are_drained_by_wait_for_background_tasks(
-    tmp_path, compaction_settings, monkeypatch
-):
-    """The server's shutdown drain (and scripts) must not cut a prune off."""
-    from cognee.infrastructure.background_tasks import wait_for_background_tasks
+    from cognee.infrastructure.databases.utils.closing_lru_cache import _start_close
+    from cognee.infrastructure.databases.vector.config import VectorConfig
+    from cognee_db_workers.harness import SubprocessTransportError
 
     compaction_settings(retention_seconds=0)
-    adapter, _ = _adapter(tmp_path)
-    finished = []
+    factory = importlib.import_module("cognee.infrastructure.databases.vector.create_vector_engine")
+    monkeypatch.setattr(factory, "get_embedding_engine", _FakeEmbeddingEngine)
+    config = VectorConfig(
+        vector_db_provider="lancedb",
+        vector_db_url=str(tmp_path / "db"),
+        vector_db_name="evicted_under_a_caller",
+        vector_db_subprocess_enabled=True,
+    )
+    children_before = {proc.pid for proc in multiprocessing.active_children()}
+    engine = factory.create_vector_engine(**config.to_dict())
+    adapter = getattr(engine, "__wrapped__", engine)  # the cache hands out a proxy
+    assert adapter._subprocess_mode
 
-    async def slow_prune_pass(options):
-        await asyncio.sleep(0.2)
-        finished.append(True)
-        return {}
+    # Take the RPC target before the close, as any in-flight caller would.
+    connection = await adapter.get_connection()
+    session = adapter._session
+    real_spawn = session._respawn_factory
+    spawned = []
 
-    monkeypatch.setattr(adapter, "_prune_pass", slow_prune_pass)
-    await adapter.get_connection()
+    def counting_spawn():
+        procs = real_spawn()
+        spawned.append(procs[0])
+        return procs
 
-    assert await wait_for_background_tasks(timeout=5)
-    assert finished == [True]
-    await adapter.close()
+    session._respawn_factory = counting_spawn
+    try:
+        await asyncio.wrap_future(_start_close(adapter))
 
+        with pytest.raises(SubprocessTransportError):
+            await connection.table_names()
 
-@pytest.mark.asyncio
-async def test_prune_cancels_a_pending_followup(tmp_path, compaction_settings):
-    compaction_settings(retention_seconds=60)
-    adapter, _ = _adapter(tmp_path)
-    await _write_n_points(adapter, "FollowupPrune_label", 2)
-    await adapter.compact()
-    handle = adapter._followup_prune_handle
-    assert handle is not None
-
-    await adapter.prune()
-
-    assert handle.cancelled()
-    assert adapter._followup_prune_handle is None
-    await adapter.close()
+        assert spawned == [], "the late RPC respawned a worker after close()"
+        live = [
+            proc
+            for proc in multiprocessing.active_children()
+            if proc.pid not in children_before and proc.is_alive()
+        ]
+        assert live == [], f"worker processes outlived close(): {[p.pid for p in live]}"
+        assert session._closed
+    finally:
+        for proc in spawned:
+            if proc.is_alive():
+                proc.kill()
+                proc.join(timeout=5.0)
+        await asyncio.to_thread(session.shutdown)
