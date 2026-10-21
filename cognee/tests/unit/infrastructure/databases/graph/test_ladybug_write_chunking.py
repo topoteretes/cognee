@@ -5,7 +5,7 @@ rows and could never finish).
 
 Each chunk is an upsert spelled out as probe / CREATE-missing / SET-existing
 rather than one MERGE, because Kuzu never plans MERGE through the primary-key
-index (COG-6216). The plans themselves are asserted against a real database in
+index (COG-6773 / #5474). The plans themselves are asserted against a real database in
 ``test_ladybug_write_query_plans.py``; these tests cover chunking and the
 statement shapes."""
 

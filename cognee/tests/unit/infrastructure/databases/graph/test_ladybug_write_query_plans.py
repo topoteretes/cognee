@@ -1,6 +1,6 @@
 """The bulk-write statements must reach nodes through the primary-key index.
 
-This is the test that would have caught COG-6216. ``Node.id`` is declared
+This is the test that would have caught COG-6773 / #5474. ``Node.id`` is declared
 ``STRING PRIMARY KEY``, so the writes look like index seeks — but Kuzu plans
 ``MERGE`` as SCAN_NODE_TABLE + HASH_JOIN and ignores the index entirely. One
 scanning statement per 2000-row chunk turns a bulk ingest into O(N^2): the

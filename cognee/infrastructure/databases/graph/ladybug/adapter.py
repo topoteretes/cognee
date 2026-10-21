@@ -56,13 +56,13 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger()
 
 
-# Rows per bulk MERGE statement (same convention as the Postgres/Turso
+# Rows per bulk write statement (same convention as the Postgres/Turso
 # adapters' _WRITE_CHUNK_SIZE). Bulk node/edge writes are split into chunks of
 # this size so no single statement can exceed the subprocess engine's per-call
 # deadline on large graphs (e.g. code-graph ingests with tens of thousands of
-# facts). Each chunk is its own statement; the writes are idempotent MERGEs
-# and failed runs are swept by the pipeline rollback ledger, so partial
-# progress is safe. Does not change how many data points the pipeline batches.
+# facts). Each chunk is its own probe / CREATE / SET sequence, an upsert, and
+# failed runs are swept by the pipeline rollback ledger, so partial progress is
+# safe. Does not change how many data points the pipeline batches.
 _WRITE_CHUNK_SIZE = 2000
 
 # Properties improve() writes onto stored elements after ingestion (feedback
@@ -84,7 +84,7 @@ def _with_learned(properties: str, stored: str | None, keys: tuple[str, ...]) ->
     return json.dumps({**json.loads(properties), **kept}, cls=JSONEncoder)
 
 
-# ── Bulk upsert statements (COG-6216) ────────────────────────────────────────
+# ── Bulk upsert statements (COG-6773, #5474) ────────────────────────────────────────
 #
 # Kuzu never plans ``MERGE`` through the ``Node.id`` primary-key index. EXPLAIN
 # on ``UNWIND $rows AS row MERGE (n:Node {id: row.id})`` returns
