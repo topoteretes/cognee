@@ -23,8 +23,22 @@ snapshot "cognee-memory"           debian-slim + cognee, built once, reused
             └─ handover: cognee-review-<run>  --phase review   supervisor recalls the worker's report
 ```
 
-The handover itself has two forms (`--handover`, default `auto`):
+The handover itself has three forms (`--handover`, default `cogx`):
 
+- **cogx** — the shared dataset travels as a [COGX](https://docs.cognee.ai/examples/migrate-memory-systems)
+  archive, cognee's exchange format. In the parent, `cogx_handover.py export`
+  runs `cognee.export(dataset_id, format="cogx", include_permissions=True)` as
+  the dataset's owner: a directory of plain files (`manifest.json`,
+  `entities.jsonl`, `facts.jsonl`, `documents.jsonl`, `nodes.jsonl` with the
+  chunks, and `permissions.json` with the owner and ACL grants, credentials
+  included), packed to a few kB. The host pulls the tarball and the token and
+  pushes them into a fresh sandbox from the snapshot, where
+  `cogx_handover.py import` runs `cognee.remember(COGXArchiveSource(dir))`:
+  the dataset is restored under its archived owner with the archived grants,
+  with no LLM call (embeddings are recomputed). Only that dataset crosses; the
+  supervisor's private dataset never leaves the first sandbox. Restored
+  accounts get new ids, and a dataset id derives from its owner's, so the
+  import re-issues the token with the restored dataset's id.
 - **fork** — Daytona clones a running sandbox copy-on-write, so the handover
   *is* the fork: no copying, no shared mount. Fork exists for **Linux VM
   sandboxes only**, and a VM sandbox can only come from a VM-class snapshot
@@ -38,10 +52,12 @@ The handover itself has two forms (`--handover`, default `auto`):
   crosses. `auto` tries a fork and falls back to this on that 422, then uses it
   for the rest of the chain.
 
-The copy path is what runs on a stock account today (verified: Tier 1/2
-organization, shared `eu`/`us` regions, no VM runners in either). The fork
-path needs a VM-class snapshot and an organization with VM runners; it has not
-been exercised end to end here.
+`fork` and `copy` move the *whole* embedded state (every dataset, the private
+one included, protected only by the ACLs that travel with it); `cogx` moves
+one dataset. Both `cogx` and `copy` run on a stock account today (verified:
+Tier 1/2 organization, shared `eu`/`us` regions, no VM runners in either). The
+fork path needs a VM-class snapshot and an organization with VM runners; it
+has not been exercised end to end here.
 
 `<run>` is a random suffix minted per invocation. Names never collide with
 sandboxes a previous `--keep` left behind, and every sandbox of a run carries a
@@ -50,13 +66,15 @@ script lost its handle to (a `create` that timed out after the sandbox existed,
 a fork whose posture re-assertion failed). Cleanup deletes children first,
 because a forked parent cannot be deleted while a fork of it is alive.
 
-Either way the next sandbox receives the whole cognee state (SQLite
-users/ACLs, one `.lbug` graph and one `.lance.db` vector store per dataset) on
-sandbox-local disk, exactly like the `sbx cp` snapshot in the Docker demo — and
-exactly like there, what it can *read* is gated by cognee's ACLs: the private
-dataset raises `PermissionDeniedError`, the shared dataset is reachable by UUID
-only (dataset names are namespaced per user), and the report is written back
-with `dataset_id=`.
+Either way the next sandbox ends up with cognee state on sandbox-local disk
+(SQLite users/ACLs, one `.lbug` graph and one `.lance.db` vector store per
+dataset) — the whole of it with `copy`/`fork`, exactly like the `sbx cp`
+snapshot in the Docker demo; the shared dataset rebuilt from the archive with
+`cogx`. And in every case what the worker can *read* is gated by cognee's
+ACLs: the private dataset raises `PermissionDeniedError` (with `cogx` it is
+not even on the machine — a dataset id the user has no grant on is denied the
+same way), the shared dataset is reachable by UUID only (dataset names are
+namespaced per user), and the report is written back with `dataset_id=`.
 
 ## Mapping the sbx kit onto Daytona
 
@@ -131,9 +149,16 @@ $ export LLM_API_KEY=sk-...           # first run only: creates the host-scoped 
 $ python handover.py                  # ~3 min snapshot build the first time, then the 3 phases
 $ python handover.py --keep           # leave the sandboxes for inspection
 $ python handover.py --rebuild        # rebuild the snapshot after a cognee release
-$ python handover.py --handover copy  # skip the fork attempt
+$ python handover.py --handover copy  # move the raw state instead of a COGX archive
 $ python handover.py --strict-walls   # fail on the Tier 1/2 proxy-path gap
 ```
+
+A snapshot Daytona has deactivated (it does that to snapshots that sit unused
+for a while; a `create` from one is refused with `400 Snapshot … is inactive`)
+is activated and waited for before the first sandbox is created. Activating a
+declaratively built snapshot is a rebuild on Daytona's side, so a run after a
+quiet fortnight starts with a few minutes of `snapshot state: building` instead
+of a traceback.
 
 Output ends with the handover mode and network wall the run got, the dataset
 UUID that crossed the user boundary, and the token in
@@ -187,11 +212,50 @@ snapshot and the Secret are kept for the next run.
   `distributed/deploy/daytona_sandbox.py`) and put its host on each sandbox's
   domain allow list.
 
+## Walkthrough: the run, explained step by step
+
+`walkthrough.py` shows a run of `handover.py` as terminal output, one block
+at a time, and after every block says what just happened: which Daytona or
+cognee mechanism produced those lines, what each line proves, how long the
+step took. The explanations are derived from the lines themselves (status
+codes, archive size, dataset UUID, elapsed time), so they describe the run on
+screen, not an idealised one.
+
+```console
+$ python walkthrough.py                      # replay transcript.txt; needs no account
+$ python walkthrough.py --pause              # wait for Enter between steps (presenting)
+$ python walkthrough.py --live               # run handover.py now and annotate it as it streams
+$ python walkthrough.py --live --record transcript.txt -- --keep   # record; flags pass through
+$ python walkthrough.py --markdown > WALKTHROUGH.md                # the same as a document
+```
+
+`transcript.txt` is a real run on a stock (Tier 1/2) account, recorded with
+`--live --record`; `WALKTHROUGH.md` is its Markdown rendering. A transcript is
+the stdout+stderr of `handover.py` with an elapsed-time stamp in front of each
+line, so `python handover.py 2>&1 | python walkthrough.py --stamp` annotates
+a run started by hand as well.
+
+## Memory in an RL rollout loop
+
+[`rl/`](rl/) takes the same pieces (snapshot, Secret, posture, COGX) into the
+shape of Daytona's [HUD RL cookbook](https://www.daytona.io/docs/en/guides/reinforcement-learning/hud-rl-cookbook/):
+a bug-fix task with variants, one fresh 1 GB sandbox per attempt, pytest as
+the grader, binary rewards, groups of attempts per variant. What it adds is
+the part the cookbook leaves ephemeral: a memory sandbox running cognee for
+the whole run, recalled before every group and scored after every attempt,
+with `improve()` distilling each step into lessons for the next, and the
+held-out pass rate measured with memory off and on. See [`rl/README.md`](rl/README.md).
+
 ## Layout
 
 ```
 daytona/
 ├── handover.py        # snapshot → supervisor → handover → worker → handover → review
+├── cogx_handover.py   # runs in the sandbox: export / import the shared dataset as COGX
+├── walkthrough.py     # the run as annotated terminal output (replay, live, or Markdown)
+├── transcript.txt     # a recorded run on a stock account, what walkthrough.py replays
+├── WALKTHROUGH.md     # the same run rendered as a document
 ├── handover-out/      # the JSON handover token (created at runtime)
+├── rl/                # memory in an RL rollout loop (HUD cookbook shape); own README
 └── README.md
 ```

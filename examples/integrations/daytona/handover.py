@@ -10,14 +10,18 @@ cognee's ACLs. What changes is how the memory travels between sandboxes::
       -> handover: cognee-worker-<run>    --phase work     (recall by UUID, prove denials, report)
       -> handover: cognee-review-<run>    --phase review   (supervisor reads the report)
 
-A handover is a **fork** when Daytona offers one — a copy-on-write clone of a
-running Linux VM sandbox — and otherwise a **copy**: the parent's cognee state
-is archived, pulled to the host and pushed into a fresh sandbox from the
-snapshot (the ``sbx cp`` mechanism of the Docker demo). Fork exists for VM
-sandboxes only, and those need a VM-class snapshot plus VM runners in the
-region; a container sandbox answers ``422 Forking is not supported`` and
-``--handover auto`` (the default) falls back to the copy. A sandbox is stopped
-as soon as its phase is done and its state handed over.
+A handover moves the shared dataset, by default as a **COGX** archive —
+cognee's exchange format: ``cognee.export(format="cogx",
+include_permissions=True)`` in the parent, ``cognee.remember(COGXArchiveSource)``
+in a fresh sandbox from the snapshot (see ``cogx_handover.py``). Only the
+shared dataset travels, with its owner and ACL grants; the supervisor's private
+dataset never leaves the first sandbox. Two raw-state alternatives remain for
+comparison (``--handover copy`` / ``fork``): the whole ``~/cognee-state``
+directory archived into a fresh sandbox (the ``sbx cp`` mechanism of the Docker
+demo), or a copy-on-write fork of the running VM (Linux VM sandboxes only;
+container sandboxes answer ``422 Forking is not supported``, and ``auto`` falls
+back to the copy). A sandbox is stopped as soon as its phase is done and its
+state handed over.
 
 ``<run>`` is a random suffix minted per invocation, so a run never collides
 with sandboxes a previous ``--keep`` left behind, and every sandbox carries a
@@ -55,7 +59,7 @@ Usage::
     python handover.py                # full round trip, sandboxes deleted afterwards
     python handover.py --keep         # leave the three sandboxes for inspection
     python handover.py --rebuild      # rebuild the snapshot (e.g. after a cognee release)
-    python handover.py --handover copy    # skip the fork attempt
+    python handover.py --handover copy    # raw state copy instead of a COGX archive
     python handover.py --strict-walls     # fail on the Tier 1/2 proxy-path gap
 """
 
@@ -66,6 +70,7 @@ import json
 import os
 import secrets
 import sys
+import time
 from pathlib import Path
 
 from daytona import (  # type: ignore[import-untyped]
@@ -80,6 +85,7 @@ from daytona import (  # type: ignore[import-untyped]
     Resources,
     Sandbox,
 )
+from daytona_api_client import SnapshotState  # type: ignore[import-untyped]
 
 SNAPSHOT_NAME = os.environ.get("COGNEE_SNAPSHOT", "cognee-memory")
 # Name of the Daytona Secret that holds the LLM key. Only this label is ever
@@ -129,12 +135,16 @@ AUTO_STOP_MINUTES = 30
 STATE_DIR = "cognee-state"
 DEMO_DIR = "handover-demo"
 PAYLOAD_NAME = "supervisor_worker_handover.py"
+HELPER_NAME = "cogx_handover.py"  # export/import of the shared dataset, runs in the sandbox
 TOKEN_REL_PATH = f"{DEMO_DIR}/handover-out/handover_token.json"
+# The dataset owner the COGX export runs as (mirrors the payload's constant).
+SUPERVISOR_EMAIL = "supervisor@handover.demo"
 
 # Single source of truth for the payload: the Docker Sandboxes demo next door.
 DEFAULT_PAYLOAD = (
     Path(__file__).resolve().parent.parent / "docker-sandbox-kit" / "demo" / PAYLOAD_NAME
 )
+HELPER = Path(__file__).resolve().parent / HELPER_NAME
 
 
 def run_labels(run_id: str, role: str) -> dict[str, str]:
@@ -169,14 +179,27 @@ def ensure_secret(daytona: Daytona) -> str:
 
 
 def ensure_snapshot(daytona: Daytona, rebuild: bool) -> None:
-    """Build the cognee snapshot once; every sandbox in the chain starts from it."""
+    """Build the cognee snapshot once; every sandbox in the chain starts from it.
+
+    A snapshot that sits unused for a while is deactivated by Daytona (state
+    ``inactive``) and a ``create`` from it is refused with ``400 Snapshot ... is
+    inactive``. Existing is not enough: an inactive snapshot is activated and
+    waited for before the first sandbox is created.
+    """
     if not rebuild:
         try:
-            daytona.snapshot.get(SNAPSHOT_NAME)
-            print(f"=== snapshot '{SNAPSHOT_NAME}' exists, reusing ===")
-            return
+            snapshot = daytona.snapshot.get(SNAPSHOT_NAME)
         except DaytonaError:
-            pass
+            snapshot = None
+        if snapshot is not None:
+            if snapshot.state == SnapshotState.ACTIVE:
+                print(f"=== snapshot '{SNAPSHOT_NAME}' exists, reusing ===")
+            else:
+                print(
+                    f"=== snapshot '{SNAPSHOT_NAME}' exists but is {snapshot.state.value}: activating ==="
+                )
+                activate_snapshot(daytona)
+            return
     else:
         try:
             daytona.snapshot.delete(daytona.snapshot.get(SNAPSHOT_NAME))
@@ -194,6 +217,31 @@ def ensure_snapshot(daytona: Daytona, rebuild: bool) -> None:
         on_logs=lambda line: print(f"[snapshot] {line}", end="", flush=True),
     )
     print()
+
+
+def activate_snapshot(daytona: Daytona, timeout: float = 900, name: str = SNAPSHOT_NAME) -> None:
+    """Bring an inactive snapshot back to ``active`` and wait until it is.
+
+    Activating a declaratively built snapshot makes Daytona rebuild it (the
+    state goes through ``building``), which takes about as long as the first
+    build did. A snapshot already on its way (``building``, ``pending``,
+    ``pulling``, e.g. from an interrupted earlier run) is only waited for.
+    """
+    if daytona.snapshot.get(name).state == SnapshotState.INACTIVE:
+        daytona.snapshot.activate(name)
+    deadline = time.monotonic() + timeout
+    last = None
+    while time.monotonic() < deadline:
+        state = daytona.snapshot.get(name).state
+        if state != last:
+            print(f"    snapshot state: {state.value}")
+            last = state
+        if state == SnapshotState.ACTIVE:
+            return
+        if state in (SnapshotState.ERROR, SnapshotState.BUILD_FAILED):
+            raise RuntimeError(f"snapshot '{name}' failed to activate: {state.value}")
+        time.sleep(3)
+    raise RuntimeError(f"snapshot '{name}' did not become active within {timeout:.0f}s")
 
 
 def run_in(sandbox: Sandbox, command: str, *, cwd: str | None = None, env=None, timeout=1800):
@@ -263,22 +311,32 @@ def create_sandbox(
     return sandbox, NETWORK_POLICY_ORGANIZATION
 
 
+def upload_demo(sandbox: Sandbox, payload: Path) -> str:
+    """Create the state and demo directories and upload the payload and the COGX helper."""
+    home = sandbox.get_user_home_dir()
+    run_in(sandbox, f"mkdir -p {home}/{STATE_DIR} {home}/{DEMO_DIR}/handover-out")
+    sandbox.fs.upload_file(payload.read_bytes(), f"{home}/{DEMO_DIR}/{PAYLOAD_NAME}")
+    sandbox.fs.upload_file(HELPER.read_bytes(), f"{home}/{DEMO_DIR}/{HELPER_NAME}")
+    return home
+
+
 def create_supervisor(daytona: Daytona, payload: Path, run_id: str) -> tuple[Sandbox, str]:
     """First sandbox in the chain: fresh from the snapshot, payload uploaded, empty memory."""
     sandbox, policy = create_sandbox(
         daytona, f"cognee-supervisor-{run_id}", "supervisor", run_id, policy=None
     )
-    home = sandbox.get_user_home_dir()
-    run_in(sandbox, f"mkdir -p {home}/{STATE_DIR} {home}/{DEMO_DIR}/handover-out")
-    sandbox.fs.upload_file(payload.read_bytes(), f"{home}/{DEMO_DIR}/{PAYLOAD_NAME}")
+    upload_demo(sandbox, payload)
     return sandbox, policy
 
 
 # How the memory travels between two sandboxes of the chain.
+HANDOVER_COGX = "cogx"  # export the shared dataset as a COGX archive, restore it in a fresh sandbox
 HANDOVER_FORK = "fork"  # copy-on-write clone of the parent VM (Linux VM sandboxes only)
-HANDOVER_COPY = "copy"  # archive the state out of the parent, into a fresh sandbox
+HANDOVER_COPY = "copy"  # archive the whole state out of the parent, into a fresh sandbox
 _FORK_UNSUPPORTED = "Forking is not supported"
 STATE_ARCHIVE = "/tmp/cognee-handover.tgz"
+COGX_DIR = "/tmp/cognee-handover.cogx"
+COGX_ARCHIVE = f"{COGX_DIR}.tar.gz"
 
 
 def fork_into(
@@ -348,6 +406,59 @@ def copy_into(
     return child
 
 
+def cogx_into(
+    daytona: Daytona,
+    parent: Sandbox,
+    name: str,
+    role: str,
+    run_id: str,
+    policy: str,
+    created: list[Sandbox],
+    payload: Path,
+) -> Sandbox:
+    """Hand the memory over as a COGX archive: export the shared dataset, restore it elsewhere.
+
+    In the parent, ``cogx_handover.py export`` runs ``cognee.export(format="cogx",
+    include_permissions=True)`` on the dataset named in the token, as its owner:
+    the graph (entities, facts, chunks as raw nodes) plus the owner and ACL
+    grants. The packed archive and the token are pulled to the host and pushed
+    into a fresh sandbox, where ``cogx_handover.py import`` restores the dataset
+    under the archived owner (``cognee.remember(COGXArchiveSource)``, no LLM)
+    and re-issues the token with the restored dataset's id. The private dataset
+    stays behind: it is not in the archive.
+    """
+    print(f"=== exporting {parent.name} -> {name} (the memory handover, COGX) ===")
+    home = parent.get_user_home_dir()
+    token_path = f"{home}/{TOKEN_REL_PATH}"
+    run_in(
+        parent,
+        f"python3 {HELPER_NAME} export --as {SUPERVISOR_EMAIL} "
+        f"--token handover-out/handover_token.json --out {COGX_DIR}",
+        cwd=f"{home}/{DEMO_DIR}",
+        env=cognee_env(home),
+    )
+    archive = parent.fs.download_file(COGX_ARCHIVE) or b""
+    token = parent.fs.download_file(token_path) or b""
+    run_in(parent, f"rm -rf {COGX_DIR} {COGX_ARCHIVE}")
+    retire(parent)  # before the child exists: the quota counts running sandboxes
+
+    child, _ = create_sandbox(daytona, name, role, run_id, policy)
+    created.append(child)
+    child_home = upload_demo(child, payload)
+    child.fs.upload_file(token, f"{child_home}/{TOKEN_REL_PATH}")
+    child.fs.upload_file(archive, COGX_ARCHIVE)
+    print(f"=== importing into {name} (COGX restore) ===")
+    run_in(
+        child,
+        f"python3 {HELPER_NAME} import --archive {COGX_ARCHIVE} "
+        "--token handover-out/handover_token.json",
+        cwd=f"{child_home}/{DEMO_DIR}",
+        env=cognee_env(child_home),
+    )
+    run_in(child, f"rm -f {COGX_ARCHIVE}")
+    return child
+
+
 def handover(
     daytona: Daytona,
     parent: Sandbox,
@@ -357,16 +468,20 @@ def handover(
     policy: str,
     mode: str,
     created: list[Sandbox],
+    payload: Path,
 ) -> tuple[Sandbox, str]:
     """Move the memory from `parent` into a new sandbox; returns it and the mode used.
 
-    `auto` tries a fork first. Daytona forks Linux VM sandboxes only; a
-    container sandbox — which is what any snapshot built with the declarative
+    `cogx` (the default) exports the shared dataset and restores it in a fresh
+    sandbox. `auto` tries a fork first. Daytona forks Linux VM sandboxes only;
+    a container sandbox — which is what any snapshot built with the declarative
     builder gives, and what organizations without VM runners get — answers
     422 "Forking is not supported", and the handover falls back to the
     archive copy. The mode that worked is returned so the next hop skips the
     failed attempt.
     """
+    if mode == HANDOVER_COGX:
+        return cogx_into(daytona, parent, name, role, run_id, policy, created, payload), mode
     if mode in ("auto", HANDOVER_FORK):
         try:
             return fork_into(parent, name, role, run_id, policy, created), HANDOVER_FORK
@@ -526,10 +641,11 @@ def main() -> None:
     )
     parser.add_argument(
         "--handover",
-        choices=("auto", HANDOVER_FORK, HANDOVER_COPY),
-        default="auto",
-        help="how memory moves between sandboxes: fork (Linux VM sandboxes only), "
-        "copy (archive out of the parent, into a fresh sandbox), or auto (fork, then copy)",
+        choices=(HANDOVER_COGX, "auto", HANDOVER_FORK, HANDOVER_COPY),
+        default=HANDOVER_COGX,
+        help="how memory moves between sandboxes: cogx (export the shared dataset as a COGX "
+        "archive, restore it in a fresh sandbox; default), copy (archive the whole cognee "
+        "state out of the parent), fork (Linux VM sandboxes only), or auto (fork, then copy)",
     )
     args = parser.parse_args()
 
@@ -537,6 +653,8 @@ def main() -> None:
         raise SystemExit("DAYTONA_API_KEY is required (https://app.daytona.io)")
     if not args.payload.is_file():
         raise SystemExit(f"payload not found: {args.payload}")
+    if not HELPER.is_file():
+        raise SystemExit(f"COGX helper not found: {HELPER}")
 
     daytona = Daytona()  # reads DAYTONA_API_KEY / DAYTONA_API_URL from the environment
     placeholder = ensure_secret(daytona)
@@ -564,6 +682,7 @@ def main() -> None:
             policy,
             args.handover,
             sandboxes,
+            args.payload,
         )
         run_phase(worker, "work")
 
@@ -576,6 +695,7 @@ def main() -> None:
             policy,
             mode,
             sandboxes,
+            args.payload,
         )
         run_phase(review, "review")
 
