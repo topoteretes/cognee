@@ -329,6 +329,37 @@ async def test_budget_exhausted_error_raises_payment_required_without_retry():
 
 
 @pytest.mark.asyncio
+async def test_plain_text_budget_error_raises_payment_required_without_retry():
+    """A budget error on the plain-text (response_model=str) path surfaces as
+    LLMPaymentRequiredError and is not retried (#6185)."""
+    import litellm
+    from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
+    from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
+        NativeLiteLLMAdapter,
+    )
+
+    adapter = NativeLiteLLMAdapter(
+        api_key="test-key",
+        model="openai/gpt-5-mini",
+        max_completion_tokens=4096,
+    )
+
+    mock_acompletion = AsyncMock(
+        side_effect=litellm.BudgetExceededError(current_cost=1.0, max_budget=0.5)
+    )
+
+    with patch("litellm.acompletion", mock_acompletion), pytest.raises(LLMPaymentRequiredError):
+        await adapter.acreate_structured_output(
+            text_input="Test input",
+            system_prompt="Test prompt",
+            response_model=str,
+        )
+
+    # Mapped to an actionable, non-retryable error — called exactly once.
+    assert mock_acompletion.call_count == 1
+
+
+@pytest.mark.asyncio
 async def test_schema_native_passes_response_model_as_response_format():
     """Schema-capable models get the Pydantic class straight through as response_format."""
     from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
