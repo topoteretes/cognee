@@ -19,6 +19,7 @@ ROUTABLE_TYPES = {
     SearchType.CHUNKS_LEXICAL,
     SearchType.CODING_RULES,
     SearchType.CODE,
+    SearchType.BROAD,
     SearchType.TEMPORAL,
 }
 
@@ -45,6 +46,16 @@ GOLDEN = [
     # `use` is not code phrasing: brand names look like CamelCase identifiers
     ("Which teams use PowerPoint?", SearchType.HYBRID_COMPLETION),
     ("Who uses McDonald's coupons?", SearchType.HYBRID_COMPLETION),
+    # count_question: a count across records
+    ("How many customers churned?", SearchType.BROAD),
+    ("how many rows are in table 2024_sales?", SearchType.BROAD),
+    ("What is the total number of open tickets?", SearchType.BROAD),
+    # aggregate-looking words that are often prose or a stated value stay on the default
+    ("We found a number of issues in the audit", SearchType.HYBRID_COMPLETION),
+    ("How much does the premium plan cost?", SearchType.HYBRID_COMPLETION),
+    ("What is the average response time?", SearchType.HYBRID_COMPLETION),
+    ("Is the whole more than the sum of its parts?", SearchType.HYBRID_COMPLETION),
+    ("Who wrote The Count of Monte Cristo?", SearchType.HYBRID_COMPLETION),
     # default
     ("Who won Nobel Prizes?", SearchType.HYBRID_COMPLETION),
     ("What did Einstein discover?", SearchType.HYBRID_COMPLETION),
@@ -102,7 +113,6 @@ GOLDEN = [
     ("What was the 1990s policy on remote work?", SearchType.HYBRID_COMPLETION),
     ("Open ticket 2048", SearchType.HYBRID_COMPLETION),
     ("Error 1045 in the logs", SearchType.HYBRID_COMPLETION),
-    ("How many rows are in table 2024_sales?", SearchType.HYBRID_COMPLETION),
     ("Which version shipped in Q4 2024?", SearchType.HYBRID_COMPLETION),
     ("What did Alice say in 2 meetings?", SearchType.HYBRID_COMPLETION),
     ("What is the budget for 2000 users?", SearchType.HYBRID_COMPLETION),
@@ -159,6 +169,16 @@ def test_shape_rules_win_over_intent_rules():
     turn this into a rules listing.
     """
     assert route_query('"coding rules"').rule == "quoted_phrase"
+
+
+def test_code_wins_over_count():
+    """BROAD reads document text and code has none, so a counting code question is CODE's."""
+    assert route_query("How many callers of parse_config are there?").rule == "code_question"
+
+
+def test_count_wins_over_temporal():
+    """TEMPORAL only reranks HYBRID's top results, so a dated count is BROAD's."""
+    assert route_query("How many incidents happened in 2019?").rule == "count_question"
 
 
 class TestRouteDecision:

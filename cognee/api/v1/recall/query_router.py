@@ -10,8 +10,9 @@ default on a default-built graph and does not add LLM calls without an
 unambiguous signal. HYBRID already searches document chunks, summaries, and the
 entity neighbourhood in one LLM call, so a rule here fires either on an input
 for which HYBRID is the wrong operation rather than a worse one — one that is
-not a natural-language question, or a question about code (HYBRID cannot reach
-the code graph) — or — TEMPORAL only — on a question scoped
+not a natural-language question, a question about code (HYBRID cannot reach
+the code graph), or a count (HYBRID sees only the passages most similar to the
+question) — or — TEMPORAL only — on a question scoped
 to an absolute date, where the target is HYBRID's own candidates reranked by
 that date and never a smaller context. Other question-shaped intent (summary,
 reasoning, context extension) stays reachable only through an explicit
@@ -102,8 +103,11 @@ _CODE_QUESTION = re.compile(rf"^(?=.*{_CODE_PHRASE})(?=.*{_IDENTIFIER})")
 
 # (rule name, pattern, search type). Shape rules (what the input looks like) come
 # first and win: a quoted string is handled as what it is, even when its text
-# also reads as intent — `"coding rules"` is a lexical search. The temporal rule
-# is last so an explicit coding-rules phrase keeps its route.
+# also reads as intent — `"coding rules"` is a lexical search. A code question
+# that counts goes to CODE, because BROAD reads document text and code has none.
+# A count scoped to a date goes to BROAD, because TEMPORAL only reranks HYBRID's
+# top results and cannot count. The temporal rule is last so an explicit
+# coding-rules phrase keeps its route.
 # No query in the golden table depends on the order (test_no_query_matches_two_rules).
 #
 # CYPHER is deliberately NOT routable. A retriever runs the query text verbatim
@@ -131,6 +135,11 @@ _RULES: tuple[tuple[str, re.Pattern, SearchType], ...] = (
         "code_question",
         _CODE_QUESTION,
         SearchType.CODE,
+    ),
+    (
+        "count_question",
+        re.compile(r"\b(?:how\s+many|total\s+number\s+of)\b", re.IGNORECASE),
+        SearchType.BROAD,
     ),
     (
         "time_scoped_question",
