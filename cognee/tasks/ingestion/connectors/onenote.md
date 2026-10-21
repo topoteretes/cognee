@@ -65,9 +65,9 @@ under the old name are not cleaned up.
 
 After a run, `source.cognee_sync_stats` holds counts only: `scanned` (pages seen), `skipped`
 (page bodies reused from the cache), `deleted`, `failed`, `failed_rate_limit`, `failed_budget`,
-`unresolved`, `requests` and `complete` (1 only when the whole notebook was read and published). An empty
-dictionary means dlt resumed a pending load without extracting this resource: build a fresh
-source and run again.
+`unresolved`, `requests` and `complete` (1 only when the whole notebook was read and published).
+An empty dictionary means dlt resumed a pending load without extracting this resource: build a
+fresh source and run again.
 
 ## What is read
 
@@ -78,9 +78,9 @@ one row:
 | Field | Value |
 |---|---|
 | id | the Graph page id (the dlt primary key) |
-| title | the page title |
+| title | the page title, or `Untitled` when it is empty |
 | url | the page's `oneNoteWebUrl` link |
-| content | `OneNote: <notebook> > <section groups> > <section>`, `Source: <url>`, a blank line, then the page text |
+| content | `OneNote: <notebook> > <section groups> > <section>`, `Source: <url>` (left out when the page has no web link), a blank line, then the page text |
 
 The page text is the HTML body as plain text. Images become `Image: <alt text> (<reference>)` and
 attachments `Attachment: <name> (<reference>)`; links keep their target in parentheses. **Images
@@ -105,7 +105,8 @@ spent budget, malformed metadata or an unreadable page) returns normally with `f
 removals are checkpointed, so the next run resumes without repeating them.
 
 State keys: `connection` (a hash of account and notebook, so another notebook cannot reuse the
-name), `onenote_cache.bodies`, `onenote_cache.page_ids` and `onenote_cache.confirmed_missing`.
+name), `onenote_cache.bodies`, `onenote_cache.page_ids`, `onenote_cache.confirmed_missing` and
+`onenote_cache.swallowed`.
 
 ## Deletion and its gaps
 
@@ -116,9 +117,15 @@ alone. Its metadata is read once more, and it is forgotten only when
   was deleted"), or
 - the page is still there but its parent notebook is another notebook (a positive move).
 
-Confirmations are checkpointed and survive a failed or cut run, but are dropped the moment the
-page shows up again. A notebook that Graph answers 20113 for clears the pages that were synced
-from it, once each page is confirmed as above.
+Confirmations are checkpointed so a large deletion can finish across runs cut by the request
+budget, but they are dropped the moment the page shows up again. A carried confirmation is also
+dropped, and the page asked about afresh, when a run reads a container as gone (a section,
+section group or notebook whose listing answers 20113) that the run which recorded the
+confirmation did not. When it is the same container as before, the container itself is asked
+about once per run (one extra request each, counted in `max_requests`); if it resolves now, the
+carried confirmations are dropped as well. A page restored in between could otherwise be
+forgotten because one listing answered wrongly. A notebook that Graph answers 20113 for clears
+the pages that were synced from it, once each page is confirmed as above.
 
 **Code 20102 is not proof of deletion, and it does not block the notebook.** Microsoft describes
 it as "you requested a resource that doesn't exist", which also fits a page this token can no
@@ -131,8 +138,8 @@ again on every run, and it stops being unresolved the moment it is listed again 
 How the stats read for such a run: `complete` stays 1 (the whole notebook was walked and
 published), `failed` stays 0 (nothing went wrong), `deleted` does not count the page, and
 `unresolved` holds the number of pages kept this way. A host that must notice them should watch
-`unresolved`, like the other connectors' `held_back`. The log gets one warning per run with the
-count and no ids.
+`unresolved`, because nothing else in the stats changes. The log gets one warning per run with
+the count and no ids.
 
 **Not verified:** which of the two codes Graph returns for a page deleted inside a notebook that
 still exists was not checked against a live account. If it answers 20113, such a page is
@@ -141,11 +148,18 @@ until it answers 20113 or you erase it with `cognee.forget` (see Privacy).
 
 Other gaps:
 
-- **A malformed page blocks its notebook.** A page with missing or invalid metadata fails the
-  run before anything is published. A page whose HTML has no `<body>` is not malformed: its whole
-  text is used. Skipping it is not safe: a new page would stay unsynced
-  without notice, and a page already synced would either go stale or be removed on partial
-  evidence. Fix or remove the page and the next run recovers from the cache.
+- **A malformed page blocks its notebook.** A page whose `id` or `lastModifiedDateTime` is
+  missing or blank, whose `title` is missing or not a string, or whose links are not objects
+  fails the run before anything is published. An empty title is fine (`Untitled`), and so is a
+  page without a web link or whose HTML has no `<body>` (its whole text is used). Skipping a
+  malformed page is not safe: a new page would stay unsynced without notice, and a page already
+  synced would either go stale or be removed on partial evidence. Fix or remove the page and
+  the next run recovers from the cache.
+- **Paging can miss a new page for one run.** Pages are read with `$skip` paging. If another
+  page is deleted while the walk is between two batches, a new page can shift past the batch
+  boundary, and the run still reports `complete == 1`. The next run picks it up. A page that was
+  already synced and is missed this way is not forgotten: its check finds it inside this
+  notebook and fails the run with "Page moved during traversal".
 - A notebook you leave out of your selection keeps its memory; nothing is forgotten for it.
 - Only one active sync per account and dataset is supported.
 - A very large notebook can need several runs: the budget counts metadata requests too, so if
@@ -164,11 +178,15 @@ Graph does not send `Retry-After` for OneNote, so a 429, 500, 502, 503 or 504 is
 five attempts in total with a 1, 2, 4, 8 second fallback; a `Retry-After` header is honoured when
 present. The total sleep per request is capped at `RETRY_WAIT_BUDGET_SECONDS` (60), because the
 walk runs under cognee's process-wide staging lock; a longer wait stops the run cleanly
-(`failed_rate_limit` for a 429) and resumes next time. Redirects are never followed and every
+(`failed_rate_limit` for a 429) and resumes next time. The cap is per request, not per sync:
+across a whole run the waiting is bounded only by `max_requests` and the five attempts per
+request. Because Graph does not send `Retry-After` for OneNote, the 1, 2, 4, 8 second fallback is
+what mostly applies. Redirects are never followed and every
 URL, a paging link included, must be `https://graph.microsoft.com/v1.0/me/onenote/...`.
 
 A 401 stops the run with `failed > 0`. Hosts should refresh the token and run again. Errors carry
-a status and a Graph code, never a response body or the token.
+a status and a Graph code, never a response body or the token. A token is sent with surrounding
+whitespace stripped, and one with whitespace inside is refused before any request.
 
 ## Privacy
 
@@ -192,8 +210,7 @@ This connector reads personal notes. Nothing is fetched until you construct a so
 - `cognee.forget(data_id=...)` or `forget(dataset=...)` removes the documents, graph and vectors,
   but **not** the staged copy of the text or the dlt state, so the next sync under the same
   dataset and `resource_name` builds everything again. Permanent erasure today means deleting the
-  page in OneNote (see the 20102 note above) or
-  dropping the notebook from your selection.
+  page in OneNote (see the 20102 note above) or dropping the notebook from your selection.
 - dlt also keeps completed load packages, with the rendered text of every row, under `~/.dlt` of
   the process, outside cognee's data directories. A page that was deleted in OneNote leaves the
   graph but not that copy. This is a core gap, not specific to OneNote.
@@ -214,6 +231,7 @@ uv run pytest cognee/tests/unit/tasks/connectors/ cognee/tests/integration/tasks
 
 No Microsoft account or token is needed. `cognee/tests/unit/tasks/connectors/fake_onenote.py` is
 an in-memory Graph served through `httpx.MockTransport`: notebooks, section groups, paged pages,
-HTML and not-found answers (20113 for a deleted page, section or notebook by default, 20102 for a page marked as hidden). `test_onenote_forget.py` and `test_onenote_ingestion.py` run the real
+HTML and not-found answers (20113 for a deleted page, section or notebook by default, 20102 for a
+page marked as hidden). `test_onenote_forget.py` and `test_onenote_ingestion.py` run the real
 cognee pipeline with the LLM and embeddings mocked. The connector has not been run against a live
 Microsoft account.

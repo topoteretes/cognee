@@ -4,7 +4,8 @@
 
 Ingests two pages, cognifies them with the LLM mocked, removes one in OneNote and checks that
 only the deleted page leaves every store. A page Graph answers 20102 for (does not exist, which also
-fits a page the token cannot see) keeps its memory, and forgetting a page by hand is undone by the next sync, because its staging row stays.
+fits a page the token cannot see) keeps its memory, and forgetting a page by hand is undone by
+the next sync, because its staging row stays.
 """
 
 import importlib

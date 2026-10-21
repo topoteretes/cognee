@@ -656,7 +656,6 @@ def test_persisted_cache_stores_unique_body_once_after_success_and_interruption(
     (table,) = sync(pipeline, graph)
     cache = resource_cache(pipeline, table)
     assert cache["page_ids"] == ["p1"]
-    assert "rows" not in cache
     assert json.dumps(cache).count("UniqueBodyOne_Alpha") == 1
     graph.pages["a"] += [Graph.page("p2"), Graph.page("p3")]
     graph.html.update(p2="<p>UniqueBodyTwo_Beta</p>", p3="<p>Eventually succeeds</p>")
@@ -668,40 +667,6 @@ def test_persisted_cache_stores_unique_body_once_after_success_and_interruption(
     assert json.dumps(cache).count("UniqueBodyOne_Alpha") == 1
     assert json.dumps(cache).count("UniqueBodyTwo_Beta") == 1
     assert len(rows(pipeline, table)) == 1
-
-
-def test_legacy_rendered_row_cache_converts_without_refetching(pipeline, monkeypatch):
-    graph = Graph()
-    graph.html["p1"] = "<p>UniqueLegacyBody</p>"
-    (table,) = sync(pipeline, graph)
-    before = rows(pipeline, table)
-    calls = graph.content_requests()
-    original_state = dlt.current.resource_state
-
-    def legacy_state(*args, **kwargs):
-        state = original_state(*args, **kwargs)
-        cache = state["onenote_cache"]
-        cache.pop("page_ids", None)
-        cache["rows"] = {
-            row[0]: {
-                "id": row[0],
-                "title": row[1],
-                "content": row[2],
-                "url": "https://onenote.com/p1",
-            }
-            for row in before
-        }
-        return state
-
-    monkeypatch.setattr(dlt.current, "resource_state", legacy_state)
-    sync(pipeline, graph)
-    assert graph.last_stats["complete"] == 1
-    assert rows(pipeline, table) == before
-    assert graph.content_requests() == calls
-    cache = resource_cache(pipeline, table)
-    assert cache["page_ids"] == ["p1"]
-    assert "rows" not in cache
-    assert json.dumps(cache).count("UniqueLegacyBody") == 1
 
 
 def test_malformed_page_links_checkpoint_bodies_and_recover_after_attach(pipeline):
@@ -1144,3 +1109,147 @@ def test_token_provider_failure_reaches_the_host_unchanged(pipeline):
     assert not any(type(error) is RuntimeError for error in chain)
     assert not any("Callback" in type(error).__name__ for error in chain)
     assert graph.requests == []
+
+
+def test_carried_confirmation_is_not_trusted_when_a_listing_flaps(pipeline):
+    # Run 1 confirms p1 as deleted and is cut by the budget before p2. p1 is then restored, and
+    # run 2's section listing answers 20113 (read as "no children"), so p1 looks missing again.
+    # The confirmation carried from run 1 must not stand in for a fresh check of p1.
+    graph = Graph()
+    graph.pages["a"] = [Graph.page("p1"), Graph.page("p2")]
+    graph.html.update(p1="<p>Original body</p>", p2="<p>Second body</p>")
+    (table,) = sync(pipeline, graph)
+    before = rows(pipeline, table)
+    graph.pages["a"] = []
+    sync(pipeline, graph, max_requests=5)
+    assert graph.last_stats["failed_budget"] == 1
+    assert list(resource_cache(pipeline, table)["confirmed_missing"]) == ["p1"]
+
+    graph.pages["a"] = [Graph.page("p1")]
+    graph.errors["sections/s-a/pages"] = (404, "20113")
+    graph.requests.clear()
+    sync(pipeline, graph)
+
+    assert [path for path, _ in graph.requests].count("pages/p1") == 1
+    assert graph.last_stats["failed"] == 1
+    assert graph.last_stats["deleted"] == 0
+    assert rows(pipeline, table) == before
+
+
+def test_carried_confirmation_is_not_trusted_when_the_same_section_flaps(pipeline):
+    # Same container as the recording run: its listing keeps answering 20113 after the section
+    # and its page were restored. The section itself is asked about directly and resolves.
+    graph = Graph()
+    graph.pages["a"] = [Graph.page("p1"), Graph.page("p2")]
+    graph.html.update(p1="<p>Original body</p>", p2="<p>Second body</p>")
+    (table,) = sync(pipeline, graph)
+    before = rows(pipeline, table)
+    graph.delete_section()
+    sync(pipeline, graph, max_requests=5)
+    assert graph.last_stats["failed_budget"] == 1
+    cache = resource_cache(pipeline, table)
+    assert list(cache["confirmed_missing"]) == ["p1"]
+    assert cache["swallowed"] == ["sections/s-a/pages"]
+
+    graph.pages["a"] = [Graph.page("p1")]
+    graph.deleted_sections.clear()
+    graph.requests.clear()
+    sync(pipeline, graph)
+
+    paths = [path for path, _ in graph.requests]
+    assert paths.count("sections/s-a") == 1
+    assert paths.count("pages/p1") == 1
+    assert graph.last_stats["failed"] == 1
+    assert graph.last_stats["deleted"] == 0
+    assert rows(pipeline, table) == before
+
+
+def test_a_section_that_is_still_deleted_costs_one_check_and_keeps_the_confirmations(pipeline):
+    graph = Graph()
+    graph.pages["a"] = [Graph.page("p1"), Graph.page("p2")]
+    graph.html.update(p1="<p>Original body</p>", p2="<p>Second body</p>")
+    (table,) = sync(pipeline, graph)
+    graph.delete_section()
+    sync(pipeline, graph, max_requests=5)
+    assert list(resource_cache(pipeline, table)["confirmed_missing"]) == ["p1"]
+    graph.requests.clear()
+    sync(pipeline, graph)
+    paths = [path for path, _ in graph.requests]
+    assert paths.count("sections/s-a") == 1
+    assert paths.count("pages/p1") == 0
+    assert graph.last_stats["complete"] == 1
+    assert graph.last_stats["deleted"] == 2
+    assert rows(pipeline, table) == []
+
+
+def test_carried_confirmations_survive_a_budget_cut_while_a_section_stays_deleted(pipeline):
+    graph = deletion_graph()
+    (table,) = sync(pipeline, graph)
+    graph.delete_section()
+    for _ in range(8):
+        sync(pipeline, graph, max_requests=8)
+        if graph.last_stats["complete"]:
+            break
+    assert graph.last_stats["complete"] == 1
+    assert graph.last_stats["deleted"] == 12
+    assert rows(pipeline, table) == []
+
+
+def test_a_blank_title_is_rendered_untitled_and_syncs(pipeline):
+    graph = Graph()
+    graph.pages["a"][0]["title"] = ""
+    (table,) = sync(pipeline, graph)
+    assert graph.last_stats["complete"] == 1
+    assert rows(pipeline, table)[0][1] == "Untitled"
+
+
+def test_page_without_a_title_field_still_fails_the_notebook(pipeline):
+    graph = Graph()
+    (table,) = sync(pipeline, graph)
+    before = rows(pipeline, table)
+    del graph.pages["a"][0]["title"]
+    sync(pipeline, graph)
+    assert graph.last_stats["failed"] == 1
+    assert graph.last_stats["complete"] == 0
+    assert rows(pipeline, table) == before
+
+
+def test_page_without_a_web_link_has_no_source_line(pipeline):
+    graph = Graph()
+    graph.pages["a"][0]["links"] = {}
+    (table,) = sync(pipeline, graph)
+    content = rows(pipeline, table)[0][2]
+    assert "Source:" not in content
+    assert content.startswith("OneNote: Project Alpha > Planning\n\n")
+
+
+def test_rate_limit_and_budget_stop_the_run_with_their_own_counts(pipeline, monkeypatch):
+    from cognee.tasks.ingestion.connectors import onenote
+
+    monkeypatch.setattr(onenote.time, "sleep", lambda _: None)
+    graph = Graph()
+    original = graph.handle
+    graph.handle = lambda request: httpx.Response(429, json={"error": {"code": "10001"}})
+    sync(pipeline, graph)
+    assert graph.last_stats["failed_rate_limit"] == 1
+    assert graph.last_stats["failed_budget"] == 0
+    graph.handle = original
+    sync(pipeline, graph, max_requests=1)
+    assert graph.last_stats["failed_budget"] == 1
+    assert graph.last_stats["failed_rate_limit"] == 0
+
+
+def test_retry_after_beyond_the_wait_budget_counts_as_a_rate_limit(pipeline, monkeypatch):
+    from cognee.tasks.ingestion.connectors import onenote
+
+    delays = []
+    monkeypatch.setattr(onenote.time, "sleep", delays.append)
+    graph = Graph()
+    graph.handle = lambda request: httpx.Response(
+        429, headers={"Retry-After": "999"}, json={"error": {"code": "10001"}}
+    )
+    sync(pipeline, graph)
+    assert graph.last_stats["failed"] == 1
+    assert graph.last_stats["failed_rate_limit"] == 1
+    assert graph.last_stats["failed_budget"] == 0
+    assert delays == []

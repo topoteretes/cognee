@@ -25,6 +25,7 @@ class Graph:
         self.requests = []
         self.gone_code = "20113"
         self.hidden = set()
+        self.deleted_sections = set()
 
     def hide_page(self, page_id):
         """The page answers 404 + 20102 ("does not exist"), as for a page this token cannot see."""
@@ -33,6 +34,7 @@ class Graph:
     def delete_section(self, notebook="a"):
         """Delete the section: its pages vanish and Graph answers 20113 for each of them."""
         self.pages[notebook] = []
+        self.deleted_sections.add(f"s-{notebook}")
         self.errors[f"sections/s-{notebook}/pages"] = (404, "20113")
 
     @staticmethod
@@ -59,6 +61,10 @@ class Graph:
             values = [
                 {"id": identity, "displayName": title} for identity, title in self.notebooks.items()
             ]
+        elif parts[0] in ("sections", "sectionGroups") and len(parts) == 2:
+            if parts[1] in self.deleted_sections:
+                return httpx.Response(404, json={"error": {"code": "20113"}})
+            return httpx.Response(200, json={"id": parts[1], "displayName": parts[1]})
         elif parts[0] == "notebooks" and len(parts) == 2:
             return httpx.Response(
                 200, json={"id": parts[1], "displayName": self.notebooks[parts[1]]}

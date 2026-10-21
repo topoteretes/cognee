@@ -10,6 +10,7 @@ incremental model, deletion and its gaps, limits and privacy.
 import hashlib
 import json
 import math
+import re
 import time
 from collections.abc import Callable
 from typing import Any
@@ -40,6 +41,14 @@ class OneNoteError(RuntimeError):
         super().__init__(message)
         self.status = status
         self.code = code
+
+
+class OneNoteRateLimitedError(OneNoteError):
+    """Graph answered 429, or asked for a longer wait than the retry budget allows."""
+
+
+class OneNoteBudgetExceededError(OneNoteError):
+    """The run spent its ``max_requests`` budget; it resumes on the next run."""
 
 
 def _identity(value: str) -> str:
@@ -81,6 +90,13 @@ class _Graph:
         import httpx
 
         parsed = urlsplit(url)
+        # Dot segments (also percent-encoded) are normalized by httpx, so a link under
+        # /v1.0/me/onenote/ could otherwise send the token to another Graph endpoint.
+        # A backslash, plain or encoded, is refused for the same reason.
+        if any(part in (".", "..") for part in parsed.path.split("/")) or re.search(
+            r"%2e|%5c|\\", parsed.path, re.IGNORECASE
+        ):
+            raise OneNoteError("Unsafe Graph URL rejected")
         if (
             parsed.scheme != "https"
             or parsed.hostname != "graph.microsoft.com"
@@ -95,11 +111,19 @@ class _Graph:
         for attempt in range(5):
             self.ensure_active()
             if self.stats["requests"] >= self.max_requests:
-                raise OneNoteError("Graph request budget exhausted", code="budget")
+                raise OneNoteBudgetExceededError("Graph request budget exhausted")
             token = self.token() if callable(self.token) else self.token
             if not isinstance(token, str) or not token.strip():
                 raise OneNoteError("A delegated access token is required")
+            token = token.strip()
+            if any(char.isspace() for char in token):
+                raise OneNoteError("The access token must not contain whitespace")
+            if not token.isascii() or not token.isprintable():
+                raise OneNoteError("The access token is not a valid header value")
             self.stats["requests"] += 1
+            # The failure is raised after the except block so no exception that mentions the
+            # request (and so possibly the token) stays attached as __context__.
+            failure = None
             try:
                 response = self.client.get(
                     url,
@@ -107,12 +131,18 @@ class _Graph:
                     timeout=30,
                     follow_redirects=False,
                 )
+            except httpx.LocalProtocolError:
+                failure = "protocol"
             except httpx.TransportError:
+                failure = "transport"
+            if failure == "protocol":
+                raise OneNoteError("Graph request could not be sent; check the access token")
+            if failure == "transport":
                 if attempt == 4:
-                    raise OneNoteError("Graph transport failed after five attempts") from None
+                    raise OneNoteError("Graph transport failed after five attempts")
                 delay = 2**attempt
                 if slept + delay > RETRY_WAIT_BUDGET_SECONDS:
-                    raise OneNoteError("Graph retry wait budget exhausted") from None
+                    raise OneNoteError("Graph retry wait budget exhausted")
                 slept += delay
                 time.sleep(delay)
                 continue
@@ -124,7 +154,8 @@ class _Graph:
                 except ValueError:
                     delay = 2**attempt
                 if slept + delay > RETRY_WAIT_BUDGET_SECONDS:
-                    raise OneNoteError(
+                    error = OneNoteRateLimitedError if response.status_code == 429 else OneNoteError
+                    raise error(
                         "Graph Retry-After exceeds wait budget", status=response.status_code
                     )
                 slept += delay
@@ -135,13 +166,16 @@ class _Graph:
                 try:
                     code = str(response.json().get("error", {}).get("code", ""))
                 except (ValueError, AttributeError):
+                    # An unreadable error body leaves the code empty, which no caller treats
+                    # as proof of a deletion, so the request fails closed.
                     pass
                 message = (
                     "Graph rejected the token; reauthenticate the selected account"
                     if response.status_code == 401
                     else "Graph request failed; snapshot was not authorized for replacement"
                 )
-                raise OneNoteError(message, status=response.status_code, code=code)
+                error = OneNoteRateLimitedError if response.status_code == 429 else OneNoteError
+                raise error(message, status=response.status_code, code=code)
             if html:
                 if "text/html" not in response.headers.get("content-type", "").lower():
                     raise OneNoteError("Graph page content is not HTML")
@@ -153,7 +187,6 @@ class _Graph:
             if not isinstance(result, dict):
                 raise OneNoteError("Expected a Graph object")
             return result
-        raise OneNoteError("Graph retry budget exhausted")
 
     def collection(self, path: str):
         base = f"{_BASE}/{path}"
@@ -193,6 +226,12 @@ def _require(row, *fields):
         raise OneNoteError("Graph metadata is missing required fields")
 
 
+def _require_text(row, field):
+    # A page may legitimately have an empty title, but the field must still be a string.
+    if not isinstance(row, dict) or not isinstance(row.get(field), str):
+        raise OneNoteError("Graph metadata is missing required fields")
+
+
 def list_onenote_notebooks(token: Token, *, http_client: Any = None) -> list[dict]:
     """List notebook metadata for explicit selection; does not download page content."""
     graph = _Graph(token, http_client)
@@ -220,19 +259,36 @@ def _body(html: str) -> str:
 
 
 def _row(page: dict, breadcrumb: list[str], body: str) -> dict:
-    _require(page, "id", "title", "lastModifiedDateTime")
+    _require(page, "id", "lastModifiedDateTime")
+    _require_text(page, "title")
     links = page.get("links", {})
     if not isinstance(links, dict) or not isinstance(links.get("oneNoteWebUrl", {}), dict):
         raise OneNoteError("Invalid page source links")
     url = links.get("oneNoteWebUrl", {}).get("href", "")
     if not isinstance(url, str):
         raise OneNoteError("Invalid page source URL")
+    source = f"Source: {url}\n" if url else ""
     return {
         "id": page["id"],
-        "title": page["title"],
+        "title": page["title"].strip() or "Untitled",
         "url": url,
-        "content": f"OneNote: {' > '.join(breadcrumb)}\nSource: {url}\n\n{body}",
+        "content": f"OneNote: {' > '.join(breadcrumb)}\n{source}\n{body}",
     }
+
+
+def _containers(listings):
+    """The container resources behind the listing paths a walk read as gone."""
+    return sorted({re.sub(r"/(pages|sections|sectionGroups)$", "", path) for path in listings})
+
+
+def _container_is_live(graph, container):
+    try:
+        graph.request(f"{_BASE}/{container}")
+    except OneNoteError as exc:
+        if exc.status in (404, 410) and exc.code == _DELETED_CODE:
+            return False
+        raise
+    return True
 
 
 def _snapshot(graph, notebook_id, cache):
@@ -243,6 +299,8 @@ def _snapshot(graph, notebook_id, cache):
     unresolved = set()
     locations = {}
     deleted_parent = False
+    # Containers whose listing answered 20113 and was read as "no children" in this walk.
+    swallowed = set()
 
     def children(path):
         try:
@@ -256,6 +314,7 @@ def _snapshot(graph, notebook_id, cache):
             return items
         except OneNoteError as exc:
             if exc.status in (404, 410) and exc.code == _DELETED_CODE:
+                swallowed.add(path)
                 return []
             raise
 
@@ -268,6 +327,7 @@ def _snapshot(graph, notebook_id, cache):
             if exc.status not in (404, 410) or exc.code != _DELETED_CODE:
                 raise
             deleted_parent = True
+            swallowed.add(f"notebooks/{_path(notebook_id)}")
     if not deleted_parent:
         _require(notebook, "id", "displayName")
         if notebook["id"] != notebook_id:
@@ -282,7 +342,8 @@ def _snapshot(graph, notebook_id, cache):
             for section in children(f"{container}/sections"):
                 _require(section, "id", "displayName")
                 for page in children(f"sections/{_path(section['id'])}/pages"):
-                    _require(page, "id", "title", "lastModifiedDateTime")
+                    _require(page, "id", "lastModifiedDateTime")
+                    _require_text(page, "title")
                     page_id = page["id"]
                     if page_id in locations:
                         raise OneNoteError("Page appeared in multiple locations during traversal")
@@ -315,8 +376,24 @@ def _snapshot(graph, notebook_id, cache):
     # to this notebook must be confirmed again if it disappears on a later run.
     missing = old_ids - set(rows)
     confirmed = cache.setdefault("confirmed_missing", {})
+    # A confirmation carried over from an earlier failed run (typically a budget cut) lets a
+    # large deletion finish across runs. It is only trusted while this walk reads no container
+    # as "gone" that the run which recorded it did not. Otherwise a page restored in between
+    # and omitted by a flapping listing would be forgotten without a fresh check.
+    recorded = set(cache.get("swallowed", []))
     for page_id in set(confirmed) - missing:
         del confirmed[page_id]
+    if swallowed - recorded:
+        confirmed.clear()
+        cache["swallowed"] = sorted(swallowed)
+    else:
+        cache["swallowed"] = sorted(recorded | swallowed)
+        # The same containers answered 20113 as when the confirmations were recorded, but a
+        # container that was restored in between and still answers 20113 for its listing would
+        # look the same. Ask each one directly (one request per container); any that resolves
+        # now voids the carried confirmations.
+        if confirmed and any(_container_is_live(graph, name) for name in _containers(swallowed)):
+            confirmed.clear()
     for page_id in sorted(missing - set(confirmed)):
         try:
             page = graph.request(
@@ -333,7 +410,8 @@ def _snapshot(graph, notebook_id, cache):
                 unresolved.add(page_id)
                 continue
             raise
-        _require(page, "id", "title", "lastModifiedDateTime")
+        _require(page, "id", "lastModifiedDateTime")
+        _require_text(page, "title")
         if page["id"] != page_id:
             raise OneNoteError("Page identity mismatch")
         parent = page.get("parentNotebook", {})
@@ -356,36 +434,19 @@ def onenote_source(
     check_active: Callable[[], None] | None = None,
     max_requests: int = 300,
 ):
-    """Return one merge resource with durable body checkpoints and scoped deletion.
+    """Return one merge resource that syncs one OneNote notebook.
 
-    Expected Graph failures (including malformed page metadata), throttling and
-    budget exhaustion return normally so DLT can persist parsed bodies and
-    confirmed removals. No document changes are published on these runs. A normal
-    return is not proof of a completed sync: require ``cognee_sync_stats['failed']
-    == 0`` and ``cognee_sync_stats['complete'] == 1`` before processing memory. A page
-    Graph answers 20102 ("does not exist", which also fits a page the token can no
-    longer see) for is kept and counted in ``unresolved`` without failing the run. Only 20113
-    ("was deleted") or a move to another notebook confirms a removal.
-    A malformed page blocks its entire notebook until corrected: skipping it would
-    either leave a new page silently unsynced or leave an old page stale or wrongly
-    removed. Failures of ``check_active`` or of a token callable raise unchanged, and
-    so do unexpected programming errors.
+    A normal return is not proof of a finished sync. Hosts must require
+    ``cognee_sync_stats['failed'] == 0`` and ``cognee_sync_stats['complete'] == 1``, and
+    should watch ``cognee_sync_stats['unresolved']``: pages Graph answered 20102 for are
+    kept, not forgotten, and do not fail the run. Expected Graph failures, throttling and a
+    spent ``max_requests`` budget return normally, publish nothing and checkpoint progress;
+    failures of ``check_active`` or of a token callable raise unchanged.
 
-    ``max_requests=300`` is a conservative per-extraction choice below Microsoft's
-    delegated allowance of 400 requests per hour per app and user (120 per minute,
-    five concurrent), not an hourly rate limiter. It counts metadata, HTML, removal
-    checks and every retry. Confirmed removals resume across runs, but if metadata
-    enumeration alone exhausts this budget, increasing it or reducing the notebook
-    structure is required. Graph does not send ``Retry-After`` for OneNote, so retries
-    mostly use the 1, 2, 4, 8 second fallback; the cumulative retry sleep per request
-    is capped at ``RETRY_WAIT_BUDGET_SECONDS`` while Cognee holds its staging lock, and
-    a longer server delay stops the request without retrying early.
-
-    ``http_client`` and ``service`` are two names for one ``httpx.Client`` (supply
-    at most one). Only one active sync per account/dataset is supported. Omitted
-    notebooks retain their memory. ``resource_name`` is normalized to DLT's
-    snake-case table name and must not be empty or whitespace; preserve that
-    canonical name across runs.
+    ``token`` is a delegated access token or a zero-argument callable returning one.
+    ``http_client`` and ``service`` are two names for one ``httpx.Client`` (give at most
+    one). ``resource_name`` is normalized to dlt's snake-case table name and must stay the
+    same across runs. See ``onenote.md`` for what is read, deletion, limits and privacy.
     """
     import dlt
     from dlt.common.normalizers.naming.snake_case import NamingConvention
@@ -451,9 +512,6 @@ def onenote_source(
             raise ValueError("Resource name is already bound to another OneNote connection")
         state["connection"] = identity
         cache = state.setdefault("onenote_cache", {})
-        if "rows" in cache:
-            # Earlier development builds duplicated body text in rendered rows.
-            cache["page_ids"] = list(cache.pop("rows"))
         graph = _Graph(
             token,
             http_client if http_client is not None else service,
@@ -466,8 +524,8 @@ def onenote_source(
                 rows, unresolved = _snapshot(graph, notebook_id, cache)
             except OneNoteError as exc:
                 stats["failed"] += 1
-                stats["failed_rate_limit"] += int(exc.status == 429)
-                stats["failed_budget"] += int(exc.code == "budget")
+                stats["failed_rate_limit"] += int(isinstance(exc, OneNoteRateLimitedError))
+                stats["failed_budget"] += int(isinstance(exc, OneNoteBudgetExceededError))
                 logger.warning(
                     "OneNote sync incomplete; retaining documents and checkpointing bodies",
                     reason=str(exc),
@@ -497,6 +555,7 @@ def onenote_source(
                 key: value for key, value in cache.get("bodies", {}).items() if key in kept
             }
             cache.pop("confirmed_missing", None)
+            cache.pop("swallowed", None)
             stats["deleted"] = len(deleted)
             stats["complete"] = 1
         finally:

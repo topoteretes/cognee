@@ -241,3 +241,113 @@ def test_retry_wait_budget_constant_bounds_the_cumulative_sleep(monkeypatch):
     assert delays == [3]
     assert len(requests) == 2
     assert onenote.RETRY_WAIT_BUDGET_SECONDS == 5
+
+
+def _chain_text(error):
+    texts = []
+    while error is not None:
+        texts.append(f"{error!s} {error!r} {error.args}")
+        error = error.__cause__ or error.__context__
+    return " ".join(texts)
+
+
+def test_token_with_a_trailing_newline_is_stripped_and_never_retried(monkeypatch):
+    delays, seen = [], []
+    monkeypatch.setattr(onenote.time, "sleep", delays.append)
+
+    def response(request):
+        seen.append(request.headers["Authorization"])
+        return httpx.Response(200, json={"value": []})
+
+    with httpx.Client(transport=httpx.MockTransport(response)) as client:
+        assert list_onenote_notebooks(lambda: "secret-token\n", http_client=client) == []
+    assert seen == ["Bearer secret-token"]
+    assert delays == []
+
+
+def test_token_with_inner_whitespace_is_rejected_without_leaking_it(monkeypatch):
+    delays, requests = [], []
+    monkeypatch.setattr(onenote.time, "sleep", delays.append)
+
+    def response(request):
+        requests.append(request)
+        return httpx.Response(200, json={"value": []})
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(response)) as client,
+        pytest.raises(OneNoteError) as failure,
+    ):
+        list_onenote_notebooks("secret\ntoken", http_client=client)
+    assert requests == [] and delays == []
+    assert "secret" not in _chain_text(failure.value)
+
+
+def test_a_protocol_error_is_not_retried_and_leaves_no_token_in_the_chain(monkeypatch):
+    delays, requests = [], []
+    monkeypatch.setattr(onenote.time, "sleep", delays.append)
+
+    def refuse(request):
+        requests.append(request)
+        raise httpx.LocalProtocolError("Illegal header value b'Bearer secret-token'")
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(refuse)) as client,
+        pytest.raises(OneNoteError) as failure,
+    ):
+        list_onenote_notebooks("secret-token", http_client=client)
+    assert len(requests) == 1 and delays == []
+    assert "secret-token" not in _chain_text(failure.value)
+    assert failure.value.__context__ is None
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/v1.0/me/onenote/../messages?$top=5",
+        "/v1.0/me/onenote/%2e%2e/messages",
+        "/v1.0/me/onenote/%2E%2E/messages",
+        "/v1.0/me/onenote/notebooks/./../../messages",
+        "/v1.0/me/onenote/..%5cmessages",
+        "/v1.0/me/onenote/..%5Cmessages",
+        "/v1.0/me/onenote/..\\messages",
+    ],
+)
+def test_next_link_with_dot_segments_never_receives_the_token(path):
+    requests = []
+
+    def response(request):
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "value": [{"id": "a"}],
+                "@odata.nextLink": f"https://graph.microsoft.com{path}",
+            },
+        )
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(response)) as client,
+        pytest.raises(OneNoteError, match="Unsafe"),
+    ):
+        list_onenote_notebooks("offline-token", http_client=client)
+    assert len(requests) == 1
+
+
+@pytest.mark.parametrize("token", ["SECRET\u00e9", "SECRET\x7f", "SECRET\x00"])
+def test_token_that_is_not_a_header_value_is_refused_without_leaking_it(token, monkeypatch, caplog):
+    delays, requests = [], []
+    monkeypatch.setattr(onenote.time, "sleep", delays.append)
+
+    def response(request):
+        requests.append(request)
+        return httpx.Response(200, json={"value": []})
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(response)) as client,
+        pytest.raises(OneNoteError) as failure,
+    ):
+        list_onenote_notebooks(token, http_client=client)
+    assert requests == [] and delays == []
+    assert failure.value.__context__ is None and failure.value.__cause__ is None
+    assert "SECRET" not in _chain_text(failure.value)
+    assert "SECRET" not in caplog.text

@@ -89,7 +89,8 @@ _PROVIDERS: dict[str, _Provider] = {
         source_module="cognee.tasks.ingestion.connectors.notion",
         source_name="notion_source",
     ),
-    # ``onenote_source`` takes the delegated token itself, so there is no service to build.
+    # No service builder: ``onenote_source`` takes the delegated token itself, and the host
+    # injects any HTTP client through ``service=`` or ``http_client=``.
     "onenote": _Provider(
         prefix="onenote",
         source_module="cognee.tasks.ingestion.connectors.onenote",
