@@ -7,7 +7,7 @@ the answers from earlier runs would end up in this one's context. Automatic feed
 off here, since nothing ever improves those sessions.
 
 Run alone: uv run python examples/cookbooks/import_agent_sessions/scripts/ask.py \
-    "What is the topic of my data?" [--agents claude,codex]
+    "What did I work on in these sessions?" [--agents claude,codex]
 """
 
 import argparse

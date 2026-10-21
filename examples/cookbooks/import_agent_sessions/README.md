@@ -32,7 +32,7 @@ uv run python examples/cookbooks/import_agent_sessions/import_agent_sessions.py
 [read_sessions] Codex: 2 sessions, 2 turns
 [ingest_sessions] Remembered 2 claude sessions as imported_agent_sessions_demo:claude_code
 [ingest_sessions] Remembered 2 codex sessions as imported_agent_sessions_demo:codex
-[ask] you> What is the topic of my data?
+[ask] you> What did I work on in these sessions?
 [ask] all sessions> Your sessions cover the acme-shop project, an online store. The work includes an order history page under /account/orders with a new orders(user_id, created_at) index (migration 0042), a fix for stock overselling at checkout (products.stock), token-bucket rate limiting on the public API, and a fix for double charges on checkout retry in src/checkout/.
 [ask] Claude Code only> Your data covers two Claude Code sessions in the acme-shop project. One added an order history page at /account/orders ...
 [ask] Codex only> Your data covers two Codex sessions on the acme-shop project. One fixed a checkout stock check that let two orders buy the last item ...
@@ -115,7 +115,7 @@ uv run python examples/cookbooks/import_agent_sessions/import_agent_sessions.py 
 [read_sessions] Codex: 20 sessions, 31 turns
 [ingest_sessions] Remembered 20 claude sessions as imported_agent_sessions:claude_code
 [ingest_sessions] Remembered 20 codex sessions as imported_agent_sessions:codex
-[ask] you> What is the topic of my data?
+[ask] you> What did I work on in these sessions?
 [ask] all sessions> Your sessions are mainly about ...
 [ask] Claude Code only> ...
 [ask] Codex only> ...
@@ -132,7 +132,7 @@ Options:
 | `--limit N` | Imports the newest `N` sessions per agent (default 20). Every session costs LLM calls, so start small |
 | `--project PATH` | Only sessions started in this folder or inside it, like `--project ~/code/cognee` (not `~/code/cognee-docs`). Repeat it for several projects. The paths are the ones on the `[find_agents] Project:` lines |
 | `--since YYYY-MM-DD` | Only sessions started on or after that date |
-| `--ask "..."` | Asks this instead of "What is the topic of my data?" |
+| `--ask "..."` | Asks this instead of "What did I work on in these sessions?" |
 | `--clear` | Forgets the dataset first, so only this run's sessions are in it |
 
 Running it again adds new sessions and skips the ones whose content did not change. A session

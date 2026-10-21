@@ -47,8 +47,8 @@ their own question.
    one `--project <path>` per chosen project, copying the path from its `Project:` line (leave
    `--project` out for all projects). A project includes the folders inside it. Start with the
    default `--limit 20` unless the user asked for more, and pass `--since YYYY-MM-DD` for a
-   period. Pass their question with `--ask "..."`; without one the run asks "What is the topic
-   of my data?":
+   period. Pass their question with `--ask "..."`; without one the run asks "What did I work
+   on in these sessions?":
    `uv run python examples/cookbooks/import_agent_sessions/import_agent_sessions.py --agents <choice> --project <path> --ask "..."`.
    It takes a few minutes for 20 sessions.
 6. The answers are on the `[ask]` lines: `all sessions>` over everything, and with two agents

@@ -32,7 +32,7 @@ from scripts.ingest_sessions import DATASET, ingest_sessions
 from scripts.read_sessions import AGENTS, OUT, read_sessions, write_sessions
 from setup import SAMPLE, write_sample
 
-DEFAULT_QUESTION = "What is the topic of my data?"
+DEFAULT_QUESTION = "What did I work on in these sessions?"
 DEMO_DATASET = "imported_agent_sessions_demo"  # never mixes with your own imported sessions
 DEFAULT_LIMIT = 20
 
