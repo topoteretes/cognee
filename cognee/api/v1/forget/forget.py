@@ -248,20 +248,33 @@ async def _forget_data_item(data_id: UUID, dataset_ref: str | UUID, user: Any) -
 
     dataset_id = await _resolve_dataset_id(dataset_ref, user)
 
-    await datasets.delete_data(
+    receipt = await datasets.delete_data(
         dataset_id=dataset_id,
         data_id=data_id,
         user=user,
         delete_dataset_if_empty=False,
     )
 
-    logger.info(
-        "forget: deleted data_id=%s from dataset=%s for user=%s",
-        data_id,
-        dataset_id,
-        user.id,
-    )
-    return {"data_id": str(data_id), "dataset_id": str(dataset_id), "status": "success"}
+    if receipt["status"] == "not_found":
+        # Nothing existed for the id (wrong id, or already deleted): say so, so
+        # the log never reads as a deletion that did not happen.
+        logger.info(
+            "forget: nothing to delete for data_id=%s in dataset=%s for user=%s (not found)",
+            data_id,
+            dataset_id,
+            user.id,
+        )
+    else:
+        logger.info(
+            "forget: deleted data_id=%s from dataset=%s for user=%s",
+            data_id,
+            dataset_id,
+            user.id,
+        )
+    # The receipt is returned as-is: it already carries status, dataset_id and
+    # data_id — the latter the *resolved* id, which differs from the input when a
+    # legacy id was passed, so it must not be overwritten with the caller's value.
+    return receipt
 
 
 async def _forget_dataset_memory(dataset_ref: str | UUID, user: Any) -> dict:

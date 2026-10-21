@@ -1,6 +1,6 @@
 from fastapi import status
 
-from cognee.exceptions import CogneeConfigurationError, CogneeValidationError
+from cognee.exceptions import CogneeConfigurationError, CogneeSystemError, CogneeValidationError
 
 
 class InvalidConfigAttributeError(CogneeConfigurationError):
@@ -41,6 +41,29 @@ class DataNotFoundError(CogneeValidationError):
         name: str = "DataNotFoundError",
         status_code: int = status.HTTP_404_NOT_FOUND,
     ):
+        super().__init__(message, name, status_code)
+
+
+class DataDeletionIncompleteError(CogneeSystemError):
+    """``datasets.delete_data`` found the ``Data`` row still present after deleting it.
+
+    The relational delete returned without raising, yet the row is still
+    there (a concurrent writer re-inserted the same content-derived id, or the
+    delete did not take effect). The receipt a caller would get must never say
+    ``success`` for that, so the delete fails instead; the caller retries.
+    """
+
+    def __init__(
+        self,
+        data_id,
+        dataset_id,
+        name: str = "DataDeletionIncompleteError",
+        status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR,
+    ):
+        message = (
+            f"Data '{data_id}' is still present in dataset '{dataset_id}' after the delete. "
+            "Nothing was reported as deleted; retry the delete."
+        )
         super().__init__(message, name, status_code)
 
 

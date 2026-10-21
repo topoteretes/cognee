@@ -1,7 +1,8 @@
 import asyncio
 from uuid import UUID
 
-from cognee.api.v1.datasets.dto import DataDTO
+from cognee.api.v1.datasets.dto import DataDTO, DeleteDataReceiptDTO
+from cognee.api.v1.exceptions import DataDeletionIncompleteError
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.locks import dataset_lock
@@ -9,7 +10,7 @@ from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessErro
 from cognee.modules.data.methods import (
     get_authorized_dataset,
     get_authorized_existing_datasets,
-    get_dataset_data,
+    has_data,
     has_dataset_data,
 )
 from cognee.modules.graph.methods import (
@@ -102,6 +103,48 @@ async def _invalidate_sessions_for_deleted_data_nonfatal(
         )
 
 
+async def _delete_dataset_if_empty(dataset, requested: bool) -> bool:
+    """Drop ``dataset`` when the caller asked for it and no Data row is left.
+
+    One count query, never a listing: the receipt only needs to know whether
+    the dataset went away.
+    """
+    if not requested or await has_dataset_data(dataset.id):
+        return False
+    from cognee.modules.data.methods import delete_dataset
+
+    await delete_dataset(dataset)
+    return True
+
+
+def _delete_data_receipt(
+    *,
+    dataset_id: UUID,
+    data_id: UUID,
+    data_record_found: bool,
+    deleted_elements: DeletedGraphElements,
+    data_remaining: bool | None,
+    dataset_deleted: bool,
+    status: str = "success",
+) -> dict:
+    """Build the receipt ``datasets.delete_data`` returns.
+
+    ``DeleteDataReceiptDTO`` is the one definition of the shape: the SDK gets
+    its ``model_dump`` (snake_case keys, ids as strings) and the REST routes
+    re-validate that dict against the same model, so the two cannot drift.
+    """
+    return DeleteDataReceiptDTO(
+        status=status,
+        dataset_id=dataset_id,
+        data_id=data_id,
+        data_record_found=data_record_found,
+        deleted_nodes=len(deleted_elements.node_ids),
+        deleted_edges=len(deleted_elements.edge_ids),
+        data_remaining=data_remaining,
+        dataset_deleted=dataset_deleted,
+    ).model_dump(mode="json")
+
+
 class datasets:
     """
     Dataset management namespace for Cognee.
@@ -143,6 +186,9 @@ class datasets:
         # with, so callers read the same attributes (``row.id`` as a UUID,
         # ``row.mime_type`` not ``mimeType``) in both modes.
         from cognee.api.v1.serve.state import get_remote_client
+
+        # Imported at call time so the package attribute is the seam (tests
+        # patch cognee.modules.data.methods.get_dataset_data).
         from cognee.modules.data.methods import get_dataset_data
 
         client = get_remote_client()
@@ -221,11 +267,48 @@ class datasets:
         user: User | None = None,
         mode: str = "soft",  # mode is there for backwards compatibility. Don't use "hard", it is dangerous.
         delete_dataset_if_empty: bool = False,  # if this flag is True, delete the whole dataset if it is left empty after data deletion
-    ):
+    ) -> dict:
+        """Delete one data item and return a receipt of what was removed.
+
+        ``status`` never contradicts the outcome:
+
+        - ``"success"``: something was removed and, when a ``Data`` row
+          existed, it is verifiably gone.
+        - ``"not_found"``: no ``Data`` row for ``data_id`` in this dataset and
+          no graph element owned by it either — a mistyped id, an id from
+          another dataset, or an already-deleted item. Nothing was removed and
+          the counts are ``0``. Deleting is idempotent, so this is a receipt,
+          not an error; ``delete_dataset_if_empty`` is still honoured, so a
+          repeat delete of the last item can still drop the empty dataset.
+        - A ``Data`` row still present when checked after the relational
+          delete raises ``DataDeletionIncompleteError`` (500) instead of any
+          receipt.
+
+        The receipt keeps the historical ``status`` key and adds the facts a
+        caller needs to trust the deletion without listing the dataset again
+        (``DeleteDataReceiptDTO`` is the schema):
+
+        - ``dataset_id`` / ``data_id``: the targets, as strings (``data_id``
+          is the resolved id when a legacy id was passed).
+        - ``data_record_found``: whether a ``Data`` row for ``data_id`` existed
+          in the dataset. ``False`` means the custom-graph-model path ran —
+          only graph elements owned by the id were removed.
+        - ``deleted_nodes`` / ``deleted_edges``: graph elements removed. On
+          the legacy (pre-provenance) graph path the counts are approximate:
+          edges are not tracked there (``0``) and the node count includes the
+          chunk ``contains`` edge-vector ids removed alongside the nodes.
+        - ``data_remaining``: ``False`` when a single-row existence check run
+          after the delete no longer finds the ``Data`` row — the verified
+          outcome, meaningful only together with ``data_record_found=True``.
+          ``None`` when no row existed, so there was nothing to observe. It
+          is never ``True`` on a returned receipt (that case raises).
+        - ``dataset_deleted``: whether ``delete_dataset_if_empty`` removed the
+          now-empty dataset.
+        """
         async with record_operation(
             "delete", user=user, dataset_id=dataset_id
         ) as operation_context:
-            from cognee.modules.data.methods import delete_data, delete_dataset, get_data
+            from cognee.modules.data.methods import delete_data, get_data
 
             if not user:
                 user = await get_default_user()
@@ -242,35 +325,40 @@ class datasets:
             # Same per-dataset lock as pipeline runs: wait for any in-flight pipeline
             # on this dataset and exclude concurrent deletes.
             async with dataset_lock(dataset.id):
-                # Every id ever issued keeps resolving: exact id first, then the
-                # recorded original of a backfill-split row (legacy_id).
-                from cognee.modules.data.methods import resolve_data_id
+                # One row lookup scoped to the dataset. Every id ever issued keeps
+                # resolving: exact id first, then the recorded original of a
+                # backfill-split row (legacy_id). Access was granted through the
+                # dataset ACL above, so row ownership is not re-checked here.
+                data = await get_data(user.id, data_id, dataset.id, verify_owner=False)
+                if data is not None:
+                    data_id = data.id
 
-                resolved_id = await resolve_data_id(dataset.id, data_id)
-                if resolved_id is not None:
-                    data_id = resolved_id
-
-                dataset_data = [
-                    data for data in await get_dataset_data(dataset.id) if data.id == data_id
-                ]
-
-                data = dataset_data[0] if len(dataset_data) > 0 else None
-
-                if not data:
-                    # If data is not found in the system, user is using a custom graph model.
+                if data is None:
+                    # No Data row: the id can only own graph elements (custom graph
+                    # model). Removing none of those means the id is unknown here —
+                    # reported as status "not_found", never as a success.
                     async with set_database_global_context_variables(dataset_id, dataset.owner_id):
                         deleted_elements = await delete_data_nodes_and_edges(
                             dataset_id, data_id, user.id
                         )
-                        await _invalidate_sessions_for_deleted_data_nonfatal(
-                            dataset.id, deleted_elements, user.id
+                        removed = bool(deleted_elements.node_ids or deleted_elements.edge_ids)
+                        if removed:
+                            await _invalidate_sessions_for_deleted_data_nonfatal(
+                                dataset.id, deleted_elements, user.id
+                            )
+                        dataset_deleted = await _delete_dataset_if_empty(
+                            dataset, delete_dataset_if_empty
                         )
 
-                        dataset_data = await get_dataset_data(dataset.id)
-                        if not dataset_data and delete_dataset_if_empty:
-                            await delete_dataset(dataset)
-
-                    return {"status": "success"}
+                    return _delete_data_receipt(
+                        dataset_id=dataset.id,
+                        data_id=data_id,
+                        data_record_found=False,
+                        deleted_elements=deleted_elements,
+                        data_remaining=None,
+                        dataset_deleted=dataset_deleted,
+                        status="success" if removed else "not_found",
+                    )
 
                 if str(data.dataset_id) != str(dataset_id):
                     raise UnauthorizedDataAccessError(f"Data {data_id} not accessible.")
@@ -306,11 +394,22 @@ class datasets:
 
                     await delete_data(data, dataset_id)
 
-                    dataset_data = await get_dataset_data(dataset.id)
-                    if not dataset_data and delete_dataset_if_empty:
-                        await delete_dataset(dataset)
+                    # Observe the outcome, don't assume it: a row that survived
+                    # the delete must never come back as a success receipt.
+                    if await has_data(dataset.id, data_id):
+                        raise DataDeletionIncompleteError(data_id, dataset.id)
+                    dataset_deleted = await _delete_dataset_if_empty(
+                        dataset, delete_dataset_if_empty
+                    )
 
-            return {"status": "success"}
+            return _delete_data_receipt(
+                dataset_id=dataset.id,
+                data_id=data_id,
+                data_record_found=True,
+                deleted_elements=deleted_elements,
+                data_remaining=False,
+                dataset_deleted=dataset_deleted,
+            )
 
     @staticmethod
     async def delete_all(user: User | None = None):

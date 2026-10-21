@@ -184,7 +184,8 @@ async def test_api_delete_data_uses_graph_provenance_when_ledger_has_no_nodes():
 
     with (
         patch.object(datasets_module, "get_authorized_dataset", AsyncMock(return_value=dataset)),
-        patch.object(datasets_module, "get_dataset_data", AsyncMock(side_effect=[[data], [data]])),
+        patch.object(data_methods_module, "get_data", AsyncMock(return_value=data)),
+        patch.object(datasets_module, "has_data", AsyncMock(return_value=False)),
         patch.object(
             datasets_module,
             "set_database_global_context_variables",
@@ -198,7 +199,6 @@ async def test_api_delete_data_uses_graph_provenance_when_ledger_has_no_nodes():
         ) as graph_delete,
         patch.object(datasets_module, "delete_data_nodes_and_edges", AsyncMock()) as ledger_delete,
         patch.object(datasets_module, "legacy_delete", AsyncMock()) as legacy_delete,
-        patch.object(data_methods_module, "resolve_data_id", AsyncMock(return_value=None)),
         patch.object(
             datasets_module, "_invalidate_sessions_for_deleted_data_nonfatal", AsyncMock()
         ) as session_invalidate,
@@ -207,7 +207,7 @@ async def test_api_delete_data_uses_graph_provenance_when_ledger_has_no_nodes():
     ):
         result = await datasets_module.datasets.delete_data(dataset_id, data_id, user)
 
-    assert result == {"status": "success"}
+    assert result["status"] == "success"
     graph_delete.assert_awaited_once_with(dataset_id, data_id)
     ledger_delete.assert_not_called()
     legacy_delete.assert_not_called()
@@ -223,7 +223,8 @@ async def test_api_delete_data_uses_legacy_when_no_ledger_nodes_and_unmarked_gra
 
     with (
         patch.object(datasets_module, "get_authorized_dataset", AsyncMock(return_value=dataset)),
-        patch.object(datasets_module, "get_dataset_data", AsyncMock(side_effect=[[data], [data]])),
+        patch.object(data_methods_module, "get_data", AsyncMock(return_value=data)),
+        patch.object(datasets_module, "has_data", AsyncMock(return_value=False)),
         patch.object(
             datasets_module,
             "set_database_global_context_variables",
@@ -237,7 +238,6 @@ async def test_api_delete_data_uses_legacy_when_no_ledger_nodes_and_unmarked_gra
         ) as graph_delete,
         patch.object(datasets_module, "delete_data_nodes_and_edges", AsyncMock()) as ledger_delete,
         patch.object(datasets_module, "legacy_delete", AsyncMock()) as legacy_delete,
-        patch.object(data_methods_module, "resolve_data_id", AsyncMock(return_value=None)),
         patch.object(
             datasets_module, "_invalidate_sessions_for_deleted_data_nonfatal", AsyncMock()
         ),
@@ -246,7 +246,7 @@ async def test_api_delete_data_uses_legacy_when_no_ledger_nodes_and_unmarked_gra
     ):
         result = await datasets_module.datasets.delete_data(dataset_id, data_id, user)
 
-    assert result == {"status": "success"}
+    assert result["status"] == "success"
     graph_delete.assert_awaited_once_with(dataset_id, data_id)
     ledger_delete.assert_not_called()
     legacy_delete.assert_awaited_once_with(data, "soft")
@@ -261,7 +261,8 @@ async def test_api_delete_data_uses_ledger_delete_when_ledger_has_nodes():
 
     with (
         patch.object(datasets_module, "get_authorized_dataset", AsyncMock(return_value=dataset)),
-        patch.object(datasets_module, "get_dataset_data", AsyncMock(side_effect=[[data], [data]])),
+        patch.object(data_methods_module, "get_data", AsyncMock(return_value=data)),
+        patch.object(datasets_module, "has_data", AsyncMock(return_value=False)),
         patch.object(
             datasets_module,
             "set_database_global_context_variables",
@@ -279,7 +280,6 @@ async def test_api_delete_data_uses_ledger_delete_when_ledger_has_nodes():
             AsyncMock(),
         ) as ledger_delete,
         patch.object(datasets_module, "legacy_delete", AsyncMock()) as legacy_delete,
-        patch.object(data_methods_module, "resolve_data_id", AsyncMock(return_value=None)),
         patch.object(
             datasets_module, "_invalidate_sessions_for_deleted_data_nonfatal", AsyncMock()
         ),
@@ -288,7 +288,7 @@ async def test_api_delete_data_uses_ledger_delete_when_ledger_has_nodes():
     ):
         result = await datasets_module.datasets.delete_data(dataset_id, data_id, user)
 
-    assert result == {"status": "success"}
+    assert result["status"] == "success"
     ledger_delete.assert_awaited_once_with(dataset_id, data_id, user.id)
     graph_delete.assert_not_called()
     legacy_delete.assert_not_called()
