@@ -267,5 +267,5 @@ if __name__ == "__main__":
         " sample sessions to sample/."
     )
     print(
-        "[setup] Now run: uv run python examples/cookbooks/import_agent_sessions/import_agent_sessions.py --demo"
+        "[setup] Now run: uv run python examples/cookbooks/import_agent_sessions/import_agent_sessions.py"
     )

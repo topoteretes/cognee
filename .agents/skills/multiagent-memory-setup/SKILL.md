@@ -18,8 +18,8 @@ Run every command from the repo root.
 
 When the user has no Claude Code or Codex history, or wants to see it work first, run the
 demo instead of the steps below. It needs one key and imports sample sessions of both
-agents (a made-up web shop), never the user's own:
-`uv run python examples/cookbooks/import_agent_sessions/import_agent_sessions.py --demo`
+agents (a made-up web shop), never the user's own. It is what the cookbook runs without
+`--agents`: `uv run python examples/cookbooks/import_agent_sessions/import_agent_sessions.py`
 (`--check` first to check the key; exit 2 with a `MISSING:` line means no key is set). Give
 the user the `[ask]` answers and tell them they come from sample data. Pass `--ask "..."` for
 their own question.
@@ -35,9 +35,9 @@ their own question.
    `Not imported:` app (Claude desktop chats, Cursor's own agent, ChatGPT) and why its chats
    can't be read.
 3. Ask the user which agent sessions to ingest into cognee, with your question tool when you
-   have one: one choice per `[setup] Can import:` line, several allowed. Skip asking only
-   when the user already named the agents. Don't choose for them: without `--agents` the
-   import stops with `[setup] CHOOSE:`, because the script cannot ask without a terminal.
+   have one: one choice per agent the `OK:` line names, several allowed. Skip asking only
+   when the user already named the agents. Don't choose for them, and never leave
+   `--agents` out of the import: without it the run is the demo on sample data.
 4. Ask the user which projects to import, from the `[find_agents] Project:` lines, with
    "All projects" as one choice. Every imported session is sent to the LLM provider, and a
    machine often holds work the user can't share, so never assume all. When there are more

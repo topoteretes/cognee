@@ -17,11 +17,11 @@ Agents run this cookbook through the `multiagent-memory-setup` skill,
 
 `setup.py` writes four sample sessions to `sample/` (git-ignored): two from Claude Code and two
 from Codex, two weeks of work on a made-up web shop, in the same file formats the agents write,
-tool calls and injected instructions included. `--demo` imports both agents' samples and asks
-the default question:
+tool calls and injected instructions included. Run without `--agents`, the cookbook runs this
+demo: it imports both agents' samples and asks the default question:
 
 ```bash
-uv run python examples/cookbooks/import_agent_sessions/import_agent_sessions.py --demo
+uv run python examples/cookbooks/import_agent_sessions/import_agent_sessions.py
 ```
 
 ```text
@@ -36,15 +36,17 @@ uv run python examples/cookbooks/import_agent_sessions/import_agent_sessions.py 
 [ask] all sessions> Your sessions cover the acme-shop project, an online store. The work includes an order history page under /account/orders with a new orders(user_id, created_at) index (migration 0042), a fix for stock overselling at checkout (products.stock), token-bucket rate limiting on the public API, and a fix for double charges on checkout retry in src/checkout/.
 [ask] Claude Code only> Your data covers two Claude Code sessions in the acme-shop project. One added an order history page at /account/orders ...
 [ask] Codex only> Your data covers two Codex sessions on the acme-shop project. One fixed a checkout stock check that let two orders buy the last item ...
+[setup] Those answers come from sample sessions. To import your own, pass --agents claude, codex or both (--check lists what you have).
 ```
 
 The demo has a dataset of its own (`imported_agent_sessions_demo`), forgotten at the start of
 every demo run, so it never mixes with your imported sessions. `--ask` asks something else.
-It does not look at your agents or your history.
+It does not look at your agents or your history. `--limit`, `--project` and `--since` choose
+from your own sessions, so they need `--agents`; without it the run stops with `[setup] MISSING:`.
 
 ## What it finds
 
-Every run except `--demo`, `--check` included, starts by listing the agents on this machine
+`--check` and every run with `--agents` start by listing the agents on this machine
 and the project folders their sessions were started in:
 
 ```text
@@ -100,17 +102,14 @@ From the repo root:
 
 ```bash
 uv run python examples/cookbooks/import_agent_sessions/import_agent_sessions.py --check
-uv run python examples/cookbooks/import_agent_sessions/import_agent_sessions.py
+uv run python examples/cookbooks/import_agent_sessions/import_agent_sessions.py --agents claude,codex
 ```
 
-After listing your agents it asks which agents' sessions to ingest; Enter takes them all:
+`--check` lists your agents and the projects their sessions were started in, so you can pick.
+`--agents` names the agents whose history to import, and only agents with sessions can be named:
 
 ```text
 [setup] cognee runs on openai (OPENAI_API_KEY), local fastembed embeddings.
-[choose] Which agent sessions should be ingested into cognee?
-[choose]   1) Claude Code: 645 sessions
-[choose]   2) Codex: 467 sessions
-[choose] Numbers separated by commas, or Enter for all:
 [setup] Importing Claude Code and Codex history.
 [read_sessions] Claude Code: 20 sessions, 164 turns
 [read_sessions] Codex: 20 sessions, 31 turns
@@ -122,18 +121,14 @@ After listing your agents it asks which agents' sessions to ingest; Enter takes 
 [ask] Codex only> ...
 ```
 
-Only agents with sessions are offered. With one agent chosen, only the
-`all sessions` answer is printed. `--agents claude,codex` answers the question up front; without
-a terminal to ask in (when an agent runs the cookbook) it is required, and a run without it
-stops with `[setup] CHOOSE:` and exit 2.
+With one agent named, only the `all sessions` answer is printed.
 
 Options:
 
 | Option | Does |
 |---|---|
-| `--demo` | Imports the sample sessions from `setup.py`, both agents. Combine with `--check` to only check the key |
-| `--check` | Lists the agents, their sessions and the ones you can choose, and reports what is missing. Imports nothing |
-| `--agents claude,codex` | Imports these agents without asking |
+| `--agents claude,codex` | Imports these agents' history. Without it the run is the demo on the sample sessions from `setup.py` |
+| `--check` | Lists the agents, their sessions and projects, and reports what is missing. Imports nothing |
 | `--limit N` | Imports the newest `N` sessions per agent (default 20). Every session costs LLM calls, so start small |
 | `--project PATH` | Only sessions started in this folder or inside it, like `--project ~/code/cognee` (not `~/code/cognee-docs`). Repeat it for several projects. The paths are the ones on the `[find_agents] Project:` lines |
 | `--since YYYY-MM-DD` | Only sessions started on or after that date |
@@ -150,8 +145,8 @@ forgotten first, so the dataset never holds two versions of one session. Exit co
 ```
 import_agent_sessions/
 ├── README.md                   this file
-├── import_agent_sessions.py    finds your agents, asks which to ingest, then calls the scripts in order
-├── setup.py                    writes the sample sessions, for --demo
+├── import_agent_sessions.py    the demo, or finds your agents and imports the ones you name
+├── setup.py                    writes the sample sessions, for the demo
 ├── sample/                     written by setup.py, git-ignored
 ├── sessions/                   written by read_sessions.py, git-ignored
 └── scripts/
