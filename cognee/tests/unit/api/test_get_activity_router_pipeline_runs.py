@@ -416,3 +416,36 @@ def test_no_pipeline_name_leaves_the_filter_out(monkeypatch):
     _client(user_id).get("/activity/pipeline-runs")
 
     assert "pipeline_name" not in _where_terms(statements[0])
+
+
+def test_session_id_filters_by_exact_match(monkeypatch):
+    """The session page asks for one session's improve runs (CLO-1105)."""
+    user_id = uuid4()
+    statements = _stub_engine(monkeypatch, [])
+    _stub_visibility(monkeypatch, visible_user_ids=[user_id], permitted_dataset_ids=[])
+
+    response = _client(user_id).get(
+        "/activity/pipeline-runs",
+        params={"pipeline_name": "memify_pipeline", "session_id": "chat_1"},
+    )
+
+    assert response.status_code == 200
+    session_terms = [
+        clause
+        for clause in statements[0].whereclause.clauses
+        if getattr(clause, "left", None) is not None and clause.left.name == "session_id"
+    ]
+    assert len(session_terms) == 1
+    assert session_terms[0].operator is operators.eq
+    assert session_terms[0].right.value == "chat_1"
+
+
+def test_no_session_id_leaves_the_filter_out(monkeypatch):
+    """Most rows carry no session id, so an always-applied filter would hide them."""
+    user_id = uuid4()
+    statements = _stub_engine(monkeypatch, [])
+    _stub_visibility(monkeypatch, visible_user_ids=[user_id], permitted_dataset_ids=[])
+
+    _client(user_id).get("/activity/pipeline-runs")
+
+    assert "session_id" not in _where_terms(statements[0])
