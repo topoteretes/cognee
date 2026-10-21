@@ -19,14 +19,19 @@ directly to :func:`cognee.remember`::
 
 Design
 ------
-* **Rows** are flat ``{id, title, content, url, _deleted}``. Ids are prefixed by kind
-  (``contact:<id>``, ``account:<id>``, ``sequence:<id>``). Every column feeds the stored
-  document identity, so the rendering is frozen and deterministic: nothing volatile
-  (last-activity dates, step positions, rates) is rendered and lists are sorted.
-* **What is rendered** is names, titles, companies, domains, stages, lists and, per
-  contact, the names and statuses of its sequences. Emails, phone numbers and social
-  profiles are never rendered. Custom fields are free text that teams use for exactly
-  those, so none are rendered unless ``custom_field_ids`` names them.
+* **Rows** are flat ``{id, title, content, url, _deleted, cognee_node_set}``. Ids are
+  prefixed by kind (``contact:<id>``, ``account:<id>``, ``sequence:<id>``). Every column this
+  source emits feeds the stored document identity, so the rendering and the node set are
+  frozen and deterministic: nothing volatile (last-activity dates, step positions, rates) is
+  rendered and lists are sorted. A tombstone carries no node set.
+* **Node set** ``apollo:<team id>:<kind>`` (``contacts``, ``accounts``, ``sequences``) scopes a
+  ``recall`` to Apollo, to one kind, or to one team.
+* **What is rendered** is names, titles, accounts, domains, stages, lists and, per contact,
+  the names and statuses of its sequences. Each text opens with one sentence that names its
+  kind, and a contact names its account by the account's own title, so the graph can join
+  the two records. Emails, phone numbers and social profiles are never rendered. Custom
+  fields are free text that teams use for exactly those, so none are rendered unless
+  ``custom_field_ids`` names them.
 * **Incremental** by fingerprint. Apollo has no change feed and no deleted flag, so every
   cycle lists each included kind in full, oldest first, and a row is emitted only when
   the hash of its rendered text changed. The fingerprints live in dlt resource state.
@@ -43,13 +48,15 @@ Design
 * **A run is bounded and resumable.** On a rate limit, low remaining quota, a spent
   request budget or a rejected key after rows were emitted, the source stops cleanly, keeps
   the state it reached and reports it in ``cognee_sync_stats`` (``failed_rate_limit``,
-  ``failed_budget``, ``failed_auth``). It neither raises nor waits out a rate limit:
-  ``dlt`` rolls the state of a failed run back, so a workspace too big for one window would
-  never finish, and waiting would hold the process-wide staging lock.
+  ``failed_budget``, ``failed_auth``). Apollo counts per endpoint, so the quota that stops a
+  run is the one of the endpoint it is about to call. It neither raises nor waits out a rate
+  limit: ``dlt`` rolls the state of a failed run back, so a workspace too big for one window
+  would never finish, and waiting would hold the process-wide staging lock.
 * **One team per resource_name.** The first run stores the team id Apollo reports, and a
   run under another team's key is refused, because it would forget the first team's rows.
 * **Key** is a plain Apollo API key. It lives in the client object only; errors carry
-  statuses and endpoints, never the key or a record id.
+  statuses and endpoints, never the key or a record id. A redirect is an error, not
+  followed: ``requests`` would send the key to whatever host it names.
 
 Privacy
 -------
@@ -69,7 +76,7 @@ from typing import Any
 
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion import dlt_utils
-from cognee.tasks.ingestion.dlt_utils import DOCUMENT_SOURCE_ATTR
+from cognee.tasks.ingestion.dlt_utils import DOCUMENT_SOURCE_ATTR, NODE_SET_COLUMN
 
 logger = get_logger("apollo_connector")
 
@@ -83,7 +90,8 @@ PAGE_SIZE = 100
 SEARCH_CAP = 50_000
 # One capped listing (500 pages) per run; the rate-limit windows stop smaller plans first.
 DEFAULT_MAX_REQUESTS = 500
-# Requests left untouched in each rate-limit window, for the key's other users.
+# Requests left untouched in each rate-limit window of an endpoint, for the key's other users.
+# Apollo counts per endpoint, so one endpoint running low never stops calls to another.
 _REQUESTS_RESERVE = 10
 # (connect, read) seconds; our own choice, Apollo documents no expected latency.
 _TIMEOUT = (10, 30)
@@ -107,6 +115,11 @@ _RATE_HEADERS = {
 _GONE_MESSAGE = re.compile(
     r"(oops! )?this (contact|account) (has been deleted|does not exist in apollo)[.!]?"
 )
+# A record id goes into the URL of its own read, so no ``.``, ``/``, ``?``, ``#`` or ``%`` may
+# get through: ``../organizations/enrich?domain=x.com`` reads another endpoint, and ``..`` alone
+# still normalizes to /api/v1/ after quote(safe="") (requests 2.34.2). Ids seen live are 24
+# hex characters; only the character set is checked, so a longer or non-hex id still works.
+_RECORD_ID = re.compile(r"[0-9A-Za-z]+")
 
 
 class ApolloSourceError(RuntimeError):
@@ -131,6 +144,12 @@ class ApolloRateLimitedError(ApolloSourceError):
 
 class ApolloNotFoundError(ApolloAPIError):
     """The record was deleted or never existed."""
+
+
+# The count key of an error that ends a run by raising, matched with isinstance. An error with no
+# entry (a 5xx, a bad filter, another team's state) raises with ``failed`` alone. A record read
+# that is refused never gets here: _should_forget counts it and goes on.
+_RAISED_REASONS = {ApolloAuthError: "failed_auth", ApolloAccessError: "failed_access"}
 
 
 def _int_header(headers: Any, name: str) -> int | None:
@@ -158,22 +177,40 @@ def _endpoint(path: str) -> str:
     return path
 
 
+def _record_path(collection: str, record_id: str) -> str:
+    """The path that reads one record of a ``collection``, the plural path segment (``contacts``).
+
+    Raises for an id that is not alphanumeric. The id comes out of an Apollo answer, and the
+    error names the endpoint, never the id. It guards the request only: the id stays as it is
+    in the row id and the ``url`` column, where it is never requested.
+    """
+    if not _RECORD_ID.fullmatch(record_id):
+        raise ApolloAPIError(
+            f"Apollo sent a record id with characters other than letters and digits, "
+            f"so /{collection}/{{id}} was not requested"
+        )
+    return f"/{collection}/{record_id}"
+
+
 class ApolloClient:
     """Minimal synchronous REST client for Apollo.
 
-    After every successful call ``rate_limit`` holds the requests left in the minute,
-    hourly and daily windows. Tests and hosts can pass any object with the same ``request``
-    method and ``rate_limit`` attribute instead.
+    Apollo limits per endpoint, so after every answer that carries the rate-limit headers, an
+    error answer included, ``rate_limit`` holds the requests left in the minute, hourly and
+    daily windows under that endpoint's label (``_endpoint``):
+    ``{"/contacts/{id}": {"minute": 40, "hourly": 390, "daily": 1900}}``. Tests and hosts can
+    pass any object with the same ``request`` method and ``rate_limit`` attribute instead.
     """
 
     def __init__(self, api_key: str, *, sleep: Callable[[float], None] = time.sleep):
         key = (api_key or "").strip()
-        # Reject early and without echoing the key: requests would put it in its exception.
+        # This check is what keeps the key out of an exception: requests names the value of a
+        # header it rejects, and every key it would reject is refused here.
         if not key or not key.isascii() or not key.isprintable() or " " in key:
             raise ValueError("The Apollo API key is empty or has an invalid format")
         self._api_key = key
         self._sleep = sleep
-        self.rate_limit: dict[str, int | None] = {}
+        self.rate_limit: dict[str, dict[str, int | None]] = {}
 
     def __repr__(self) -> str:
         return "ApolloClient(api_key=<redacted>)"
@@ -203,19 +240,41 @@ class ApolloClient:
                     params=params,
                     headers=headers,
                     timeout=_TIMEOUT,
+                    # requests drops Authorization on a hop to another host but not x-api-key.
+                    allow_redirects=False,
                 )
             except requests.RequestException as exc:
                 if last:
+                    # `from None` keeps the cause out of this error, not out of __context__,
+                    # which dlt's trace file still reads (dlt 1.30.0, pipeline/trace.py): the
+                    # key is kept out of an exception by the check in __init__.
                     raise ApolloAPIError(f"Apollo request failed: {type(exc).__name__}") from None
                 self._sleep(2**attempt)
                 continue
+            self._read_rate_limit(response, path)
             if response.status_code >= 500 and not last:
                 self._sleep(2**attempt)
                 continue
             return self._parse(response, path)
 
+    def _read_rate_limit(self, response: Any, path: str) -> None:
+        """Keep the windows an answer reports under the endpoint it came from.
+
+        An answer without the headers (a 5xx from a proxy) leaves what is known about the
+        endpoint: it says nothing about the windows.
+        """
+        windows = {
+            window: _int_header(response.headers, name) for window, name in _RATE_HEADERS.items()
+        }
+        if any(left is not None for left in windows.values()):
+            self.rate_limit[_endpoint(path)] = windows
+
     def _parse(self, response: Any, path: str) -> Any:
         status = response.status_code
+        if 300 <= status < 400:
+            raise ApolloAPIError(
+                f"Apollo answered {_endpoint(path)} with a redirect (HTTP {status})"
+            )
         if status == 401:
             raise ApolloAuthError("Apollo rejected the API key (HTTP 401)")
         if status == 403:
@@ -236,10 +295,6 @@ class ApolloClient:
         expected = list if path == "/labels" else dict
         if not isinstance(payload, expected):
             raise ApolloAPIError(f"Apollo sent an unreadable answer for {_endpoint(path)}")
-        headers = response.headers
-        self.rate_limit = {
-            window: _int_header(headers, name) for window, name in _RATE_HEADERS.items()
-        }
         return payload
 
 
@@ -287,6 +342,10 @@ class Lookups:
     # "contact.<id>" or "account.<id>".
     fields: dict[str, str] = field(default_factory=dict)
     sequences: dict[str, str] = field(default_factory=dict)
+    # Account id to [title, domain], as the accounts listing read them. The walker keeps it in
+    # the dlt state: a run that resumes after the accounts listing finished never reads them
+    # again, and a contact must still render the title its account's own document carries.
+    accounts: dict[str, list[str]] = field(default_factory=dict)
 
 
 def _text(value: Any) -> str:
@@ -314,45 +373,78 @@ def _custom_fields(kind: str, values: Any, lookup: dict[str, str]) -> list[tuple
     return sorted((label, text) for label, text in pairs if label and text)
 
 
+def _account_title(account: dict[str, Any]) -> str:
+    """The name an account is known by: its name, else its domain, else empty."""
+    return _text(account.get("name")) or _text(account.get("domain"))
+
+
 def render_contact(contact: dict[str, Any], lookups: Lookups) -> dict[str, Any]:
+    """A contact's row. Its account is named by the account's own title when the listing read
+    it, else by the contact's ``organization_name``.
+
+    The text opens with one sentence naming the kind and the account ("Apollo contact Dana
+    Whitfield works at Acme as Chief Financial Officer."): each record is its own document,
+    and the graph only joins two of them when their texts use the same name.
+    """
     name = _text(contact.get("name")) or _text(
         f"{contact.get('first_name') or ''} {contact.get('last_name') or ''}"
     )
     title = name or "Unnamed contact"
+    account, domain = lookups.accounts.get(contact.get("account_id")) or ("", "")
+    # A known account with neither name nor domain names nothing: that contact keeps its own
+    # organization_name too, or every such account would merge into one "Unnamed account".
+    account = account or _text(contact.get("organization_name"))
+    job_title = _text(contact.get("title"))
+    employment = " ".join(
+        part
+        for part in (f"at {account}" if account else "", f"as {job_title}" if job_title else "")
+        if part
+    )
     sequences = sorted(
         f"{lookups.sequences.get(status.get('emailer_campaign_id'), 'Unknown sequence')}"
         f" ({_text(status.get('status')) or 'unknown'})"
         for status in contact.get("contact_campaign_statuses") or []
     )
+    # Contact and account stages are told apart: a stage called "Cold" on both would
+    # otherwise merge into one entity.
     fields = [
-        ("Job title", _text(contact.get("title"))),
-        ("Company", _text(contact.get("organization_name"))),
-        ("Stage", lookups.contact_stages.get(contact.get("contact_stage_id"), "")),
+        ("Account", f"{account} ({domain})" if domain and domain != account else account),
+        ("Contact stage", lookups.contact_stages.get(contact.get("contact_stage_id"), "")),
         ("Lists", _names(contact.get("label_ids"), lookups.labels)),
         *_custom_fields("contact", contact.get("typed_custom_fields"), lookups.fields),
         ("Sequences", "; ".join(sequences)),
     ]
+    intro = (
+        f"Apollo contact {title} works {employment}." if employment else f"Apollo contact {title}."
+    )
     return {
         "id": f"contact:{contact['id']}",
         "title": title,
-        "content": "\n".join(_lines(fields)) or title,
+        "content": "\n".join([intro, *_lines(fields)]),
         "url": f"{APP_URL}/contacts/{contact['id']}",
         "_deleted": False,
     }
 
 
 def render_account(account: dict[str, Any], lookups: Lookups) -> dict[str, Any]:
-    title = _text(account.get("name")) or _text(account.get("domain")) or "Unnamed account"
+    title = _account_title(account) or "Unnamed account"
+    domain = _text(account.get("domain"))
     fields = [
-        ("Domain", _text(account.get("domain"))),
-        ("Stage", lookups.account_stages.get(account.get("account_stage_id"), "")),
+        ("Account stage", lookups.account_stages.get(account.get("account_stage_id"), "")),
         ("Lists", _names(account.get("label_ids"), lookups.labels)),
         *_custom_fields("account", account.get("typed_custom_fields"), lookups.fields),
     ]
+    # An account with no name is titled by its domain: say it once.
+    has_domain = domain and domain != title
+    intro = (
+        f"Apollo account {title} has the domain {domain}."
+        if has_domain
+        else f"Apollo account {title}."
+    )
     return {
         "id": f"account:{account['id']}",
         "title": title,
-        "content": "\n".join(_lines(fields)) or title,
+        "content": "\n".join([intro, *_lines(fields)]),
         "url": f"{APP_URL}/accounts/{account['id']}",
         "_deleted": False,
     }
@@ -364,14 +456,24 @@ def render_sequence(sequence: dict[str, Any]) -> dict[str, Any]:
         status = "archived"
     else:
         status = "active" if sequence.get("active") else "inactive"
-    fields = [("Status", status), ("Steps", _text(sequence.get("num_steps")))]
+    intro = f"Apollo sequence {title} is {status}."
+    fields = [("Steps", _text(sequence.get("num_steps")))]
     return {
         "id": f"sequence:{sequence['id']}",
         "title": title,
-        "content": "\n".join(_lines(fields)),
+        "content": "\n".join([intro, *_lines(fields)]),
         "url": f"{APP_URL}/sequences/{sequence['id']}",
         "_deleted": False,
     }
+
+
+def _node_set(team_id: str, kind: str) -> list[str]:
+    """The node set of a row: ``apollo:<team id>:<kind>``, with ``kind`` one of ``KINDS``.
+
+    It is hashed into the document identity like every other column, so changing it gives
+    every record of the kind a new ``data_id`` and one more extraction on the tenant's LLM key.
+    """
+    return [f"apollo:{team_id}:{kind}"]
 
 
 def _hash(value: Any) -> str:
@@ -448,13 +550,18 @@ class _Walker:
         # The records in back-off as the run starts, so a run that is cut or capped before it
         # closes the listing still reports the ones it leaves alone.
         stats["held_back"] = sum(self._in_back_off(row_id) for row_id in self.check_failures)
-        self.lookups = Lookups()
+        # The titles contacts name their accounts by, ids to [title, domain]: state, because a run
+        # resumed after the accounts listing finished skips it, and the contact text would flip
+        # between the account's title and the contact's organization_name. A forgotten account
+        # leaves it (_forget).
+        self.account_names: dict[str, list[str]] = state.setdefault("account_names", {})
+        self.lookups = Lookups(accounts=self.account_names)
 
     # -- requests ----------------------------------------------------------
     def _call(self, method: str, path: str, **kwargs: Any) -> Any:
         if self.check_active is not None:
             self.check_active()
-        self._check_budget()
+        self._check_budget(path)
         # A call the client retries on a 5xx or a network error still counts once: the budget
         # and this count are about what the run asks for, and the client owns its retries.
         self.stats["requests"] += 1
@@ -467,10 +574,11 @@ class _Walker:
                 raise _CutShortError("auth") from None
             raise
 
-    def _check_budget(self) -> None:
+    def _check_budget(self, path: str) -> None:
         if self.stats["requests"] >= self.max_requests:
             raise _CutShortError("budget")
-        remaining = getattr(self.client, "rate_limit", None) or {}
+        # Apollo counts per endpoint: only the windows of the one about to be called matter.
+        remaining = (getattr(self.client, "rate_limit", None) or {}).get(_endpoint(path)) or {}
         for window in _RATE_HEADERS:
             left = remaining.get(window)
             if left is not None and left < _REQUESTS_RESERVE:
@@ -499,6 +607,7 @@ class _Walker:
         # A sequence's rows need the list, and so do the sequence names in a contact's text.
         sequence_list = list(self._all_sequences()) if contacts or sequences else []
         self.lookups = Lookups(
+            accounts=self.account_names,
             contact_stages={s["id"]: _text(s.get("name")) for s in contact_stages},
             account_stages={s["id"]: _text(s.get("name")) for s in account_stages},
             labels={label["id"]: _text(label.get("name")) for label in labels},
@@ -610,11 +719,18 @@ class _Walker:
         progress["done"] = True
 
     def _changed_rows(
-        self, records: Iterable[dict], render: Callable[[dict], dict]
+        self, records: Iterable[dict], render: Callable[[dict], dict], kind: str
     ) -> Iterator[dict]:
-        """Render each record and yield the rows whose fingerprint changed."""
+        """Render each record and yield the rows whose fingerprint changed.
+
+        The fingerprint hashes the whole row, so it follows what is rendered: a renamed account
+        changes the text of its contacts and re-emits them, and so would a new node set.
+        """
         for record in records:
-            row = render(record)
+            row: dict[str, Any] = {
+                **render(record),
+                NODE_SET_COLUMN: _node_set(self.state["team_id"], kind),
+            }
             fingerprint = _hash(row)
             self.seen.append(row["id"])
             self.stats["scanned"] += 1
@@ -632,7 +748,7 @@ class _Walker:
         capped = any(progress.get("capped") for progress in walks.values())
         if capped:
             # A capped listing is incomplete, so nothing missing can be trusted as deleted.
-            self.stats["failed"] = max(1, self.stats.get("failed", 0))
+            self.stats["failed"] += 1
             self.stats["failed_cap"] = 1
             logger.warning(
                 "Apollo search is capped at %d records; narrow the sync with stage or list "
@@ -679,6 +795,9 @@ class _Walker:
             row_id = pending[0]
             if self._should_forget(row_id):
                 self.fingerprints.pop(row_id, None)
+                if row_id.startswith("account:"):
+                    # A forgotten account must not go on naming the contacts that point at it.
+                    self.account_names.pop(row_id.removeprefix("account:"), None)
                 self.stats["deleted"] += 1
                 yield {"id": row_id, "_deleted": True}
             pending.pop(0)
@@ -717,12 +836,13 @@ class _Walker:
             return True  # deselected kinds leave memory
         if kind == "sequence":
             return True  # the sequence list is read in full every run
+        path = _record_path(f"{kind}s", record_id)
         try:
-            record = self._call("GET", f"/{kind}s/{record_id}").get(kind)
+            record = self._call("GET", path).get(kind)
         except ApolloNotFoundError:
             return True
         if not isinstance(record, dict):
-            raise ApolloAPIError(f"Apollo sent no {kind} for /{kind}s/{{id}}")
+            raise ApolloAPIError(f"Apollo sent no {kind} for {_endpoint(path)}")
         # Still in Apollo: forget it only if it left the selected stages or lists.
         return not self._in_scope(kind, record)
 
@@ -735,6 +855,15 @@ class _Walker:
             return True
         return bool(set(record.get("label_ids") or []) & set(label_ids))
 
+    def _record_account_titles(self, accounts: Iterable[dict]) -> Iterator[dict]:
+        """Pass the accounts of a listing on, recording each one's title and domain first."""
+        for account in accounts:
+            self.account_names[account["id"]] = [
+                _account_title(account),
+                _text(account.get("domain")),
+            ]
+            yield account
+
     # -- the run -----------------------------------------------------------
     def rows(self) -> Iterator[dict]:
         sequences = self._load_lookups()
@@ -742,14 +871,20 @@ class _Walker:
         # Finish deletions a cut run left behind before starting a new listing.
         yield from self._forget()
         if "sequences" in self.include:
-            yield from self._changed_rows(sequences, render_sequence)
+            yield from self._changed_rows(sequences, render_sequence, "sequences")
+        # Accounts come before contacts, so every contact is rendered with the titles of the
+        # accounts this cycle listed.
         if "accounts" in self.include:
             yield from self._changed_rows(
-                self._walk("accounts"), lambda account: render_account(account, self.lookups)
+                self._record_account_titles(self._walk("accounts")),
+                lambda account: render_account(account, self.lookups),
+                "accounts",
             )
         if "contacts" in self.include:
             yield from self._changed_rows(
-                self._walk("contacts"), lambda contact: render_contact(contact, self.lookups)
+                self._walk("contacts"),
+                lambda contact: render_contact(contact, self.lookups),
+                "contacts",
             )
         self._close_cycle()
         yield from self._forget()
@@ -780,9 +915,21 @@ def _iter_rows(
     try:
         yield from walker.rows()
     except _CutShortError as cut:
-        stats["failed"] = max(1, stats.get("failed", 0))
+        stats["failed"] += 1
         stats[f"failed_{cut.reason}"] = 1
         logger.warning("Apollo sync stopped early (%s); it resumes on the next run.", cut.reason)
+    except ApolloSourceError as exc:
+        # A lookup or a listing the key cannot call, or a key Apollo rejects before any row, ends
+        # the run with a raise instead of a cut: a cut run keeps its state, so a listing already
+        # marked done stays done, the refused one never finishes and the cycle never closes, so
+        # no later delete is seen. The host reads these counts after the raise: dlt drops the
+        # state, not this object. Every raise counts as a failure; only an error with a count key
+        # of its own also sets that key.
+        stats["failed"] += 1
+        reason = next((k for t, k in _RAISED_REASONS.items() if isinstance(exc, t)), None)
+        if reason:
+            stats[reason] = stats.get(reason, 0) + 1
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -866,10 +1013,10 @@ def apollo_source(
     """
     import dlt
 
-    if getattr(dlt_utils, "DOCUMENT_SYNC_VERSION", 0) < 1:
+    if getattr(dlt_utils, "DOCUMENT_SYNC_VERSION", 0) < 2:
         raise RuntimeError(
-            "Apollo sync requires a Cognee build with table-scoped DLT document cleanup. "
-            "Upgrade Cognee before syncing to avoid deleting another source's data."
+            "Apollo sync requires a Cognee build that reads per-row node sets "
+            "(DOCUMENT_SYNC_VERSION >= 2). Upgrade Cognee before syncing."
         )
     if not isinstance(resource_name, str) or not resource_name.strip():
         raise ValueError("apollo_source needs a resource_name, one per Apollo team")
@@ -894,6 +1041,8 @@ def apollo_source(
         name=resource_name,
         primary_key="id",
         write_disposition="merge",
+        # cognee_node_set needs no json hint here: ingest_dlt_source applies
+        # DOCUMENT_COLUMN_HINTS to every document source, merged with this one.
         columns={"_deleted": {"data_type": "bool", "hard_delete": True}},
     )
     def apollo_team():
