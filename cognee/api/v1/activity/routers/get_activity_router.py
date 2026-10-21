@@ -223,7 +223,11 @@ def get_activity_router() -> APIRouter:
 
     @router.get("/spans")
     async def get_spans(user: User = Depends(get_authenticated_user)):
-        """Return in-memory OTEL spans from the CogneeSpanExporter buffer."""
+        """Return the caller's and their own agents' traces from the in-memory buffer.
+
+        A trace belongs to the users its requests authenticated as
+        (``bind_trace_owner``); one with no owner is returned to nobody.
+        """
         try:
             from cognee.modules.observability.trace_context import is_tracing_enabled
             from cognee.modules.observability.tracing import get_exporter
@@ -236,11 +240,17 @@ def get_activity_router() -> APIRouter:
             if exporter is None:
                 return []
 
-            all_traces = exporter.get_all_traces()
+            visible_ids = {str(user_id) for user_id in await get_visible_user_ids(user.id)}
+            visible_traces = exporter.get_traces_owned_by(visible_ids)
 
             result = []
-            for trace_id, spans in all_traces.items():
-                root = spans[0] if spans else None
+            for trace_id, spans in visible_traces.items():
+                # Spans are buffered as they finish, children before their
+                # parent, so the root is the span without a parent, not spans[0].
+                root = next(
+                    (s for s in spans if s.get("parent_span_id") is None),
+                    min(spans, key=lambda s: s.get("start_time_ns") or 0, default=None),
+                )
                 duration = max((s.get("duration_ms", 0) for s in spans), default=0)
                 result.append(
                     {
