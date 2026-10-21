@@ -56,7 +56,7 @@ async def test_s3_temp_file_reopened_by_name_and_cleaned_up():
     engine = _FakeLoaderEngine()
     captured = {}
 
-    async def fake_pull_from_s3(file_path, destination_file):
+    async def fake_pull_to_local_copy(file_path, destination_file):
         destination_file.write(b"payload-bytes")
 
     real_named_temp_file = tempfile.NamedTemporaryFile
@@ -68,7 +68,7 @@ async def test_s3_temp_file_reopened_by_name_and_cleaned_up():
         return handle
 
     with (
-        patch.object(ditf, "pull_from_s3", new=fake_pull_from_s3),
+        patch.object(ditf, "pull_to_local_copy", new=fake_pull_to_local_copy),
         patch.object(ditf, "get_loader_engine", return_value=engine),
         patch.object(ditf.tempfile, "NamedTemporaryFile", side_effect=spy_named_temp_file),
     ):
