@@ -314,6 +314,10 @@ def _iter_rows(service, config: _DriveConfig, state: dict, stats: dict[str, int]
     # the folder, so skip the subfolder walk entirely when nothing changed.
     if changed_ids:
         scope_folder_ids = _get_scope_folder_ids(service, config)
+        if config.folder_id == "root":
+            canonical_root_id = _resolve_canonical_folder_id(service, "root")
+            if canonical_root_id:
+                scope_folder_ids.add(canonical_root_id)
         for file_id in changed_ids:
             try:
                 file_meta = (
@@ -407,6 +411,27 @@ def _get_scope_folder_ids(service, config: _DriveConfig) -> set[str]:
                 break
 
     return scope_ids
+
+
+def _resolve_canonical_folder_id(service: Any, folder_id: str) -> str | None:
+    """Resolve a folder alias (such as 'root') to its canonical Drive ID.
+
+    The Drive API accepts 'root' in queries, but file metadata responses carry
+    the canonical ID in their `parents` list. Resolving the alias ensures that
+    scope checks during incremental sync match top-level files.
+    """
+    try:
+        response = (
+            service.files().get(fileId=folder_id, fields="id", supportsAllDrives=True).execute()
+        )
+        return response.get("id")
+    except Exception as e:  # noqa: BLE001
+        logger.debug(
+            "Google Drive: could not resolve canonical ID for folder '%s': %s",
+            folder_id,
+            e,
+        )
+        return None
 
 
 def _list_files_in_scope(service, config: _DriveConfig):
