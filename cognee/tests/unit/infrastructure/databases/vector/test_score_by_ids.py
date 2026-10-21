@@ -53,7 +53,7 @@ async def test_lancedb_scores_distant_ids_with_a_vector_index(tmp_path):
 @pytest.mark.parametrize("backend", ["lancedb", "lancedb-subprocess", "turso"])
 async def test_scores_only_requested_rows_across_batches(tmp_path, backend):
     if backend == "turso":
-        pytest.importorskip("libsql_experimental")
+        pytest.importorskip("turso")
         adapter = TursoVectorAdapter(str(tmp_path / "vectors.db"), None, _Embeddings())
         batch_target = (
             "cognee.infrastructure.databases.vector.turso.TursoVectorAdapter.QUERY_BATCH_SIZE"

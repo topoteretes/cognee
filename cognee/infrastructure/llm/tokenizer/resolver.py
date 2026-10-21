@@ -17,9 +17,15 @@ Resolution, by embedding provider:
 * ``mistral``           -> ``MistralTokenizer`` for the model.
 * ``fastembed``         -> the model's own HuggingFace tokenizer (BGE/MiniLM are
   wordpiece), instead of the old hardcoded ``gpt-4o`` BPE tokenizer.
+  ``HuggingFaceTokenizer`` loads it with the ``tokenizers`` library (a core
+  dependency); transformers is optional and only used for repos with no
+  ``tokenizer.json``.
 * ollama / openai-compatible / custom / other -> an explicit
-  ``HUGGINGFACE_TOKENIZER`` override if set, otherwise the embedding model's own
-  HuggingFace repo.
+  ``HUGGINGFACE_TOKENIZER`` override if set; else ``TikTokenTokenizer`` when the
+  model is an OpenAI model tiktoken knows (``openai/text-embedding-3-large``
+  behind ``EMBEDDING_PROVIDER=custom``, or a gateway id such as
+  ``openrouter/openai/text-embedding-3-small``), resolved locally rather than
+  404ing on HuggingFace; otherwise the embedding model's own HuggingFace repo.
 
 Any failure to load a matching tokenizer falls back to TikToken and logs a
 warning. Resolution is advisory only and never raises: a wrong count is a
@@ -42,6 +48,10 @@ _MISMATCH_HINT = (
     "that does not match the embedding model will mis-size chunks. Set "
     "HUGGINGFACE_TOKENIZER to a tokenizer matching your embedding model to fix this."
 )
+# HUGGINGFACE_TOKENIZER cannot help when the library that loads it is missing.
+_TRANSFORMERS_HINT = (
+    'transformers is not installed. Install it with: pip install "cognee[huggingface]"'
+)
 
 
 def _bare_model(model: str | None) -> str | None:
@@ -54,6 +64,23 @@ def _bare_model(model: str | None) -> str | None:
     providers keep the full id.
     """
     return model.split("/", 1)[-1] if model and "/" in model else model
+
+
+def _tiktoken_model(model: str | None) -> str | None:
+    """The OpenAI model name tiktoken knows ``model`` by, or ``None``.
+
+    Every ``provider/`` tag is dropped (OpenAI model names carry no ``/``), so a
+    gateway id resolves too. Only tiktoken's name table is consulted; no encoding
+    is loaded.
+    """
+    from tiktoken.model import encoding_name_for_model
+
+    name = (model or "").rsplit("/", 1)[-1]
+    try:
+        encoding_name_for_model(name)
+    except KeyError:
+        return None
+    return name
 
 
 def _fastembed_hf_repo(model: str | None) -> str | None:
@@ -103,12 +130,13 @@ def _load_or_tiktoken_fallback(
     try:
         return build()
     except Exception as error:
+        missing = isinstance(error, ImportError) and (error.name or "").startswith("transformers")
         logger.warning(
             "Could not load a matching tokenizer for %s (%s). Falling back to "
             "TikToken, so token counts are approximate. %s",
             context,
             error,
-            _MISMATCH_HINT,
+            _TRANSFORMERS_HINT if missing else _MISMATCH_HINT,
             exc_info=True,
         )
         return TikTokenTokenizer(model=None, max_completion_tokens=max_completion_tokens)
@@ -193,7 +221,19 @@ def resolve_embedding_tokenizer(
         )
 
     # ollama / openai-compatible / custom / other: an explicit HUGGINGFACE_TOKENIZER
-    # override wins, otherwise use the embedding model's own repo.
+    # override wins; else an OpenAI model name (the provider field never reaches
+    # litellm, so such a config embeds fine) is counted with TikToken instead of
+    # being looked up on HuggingFace; otherwise use the embedding model's own repo.
+    openai_model = None if huggingface_tokenizer else _tiktoken_model(model)
+    if openai_model:
+        return _load_or_tiktoken_fallback(
+            lambda: TikTokenTokenizer(
+                model=openai_model, max_completion_tokens=max_completion_tokens
+            ),
+            max_completion_tokens,
+            context=f"openai embedding model {model!r}",
+        )
+
     target = huggingface_tokenizer or model
     if not target:
         logger.warning(

@@ -2,7 +2,7 @@ from typing import NamedTuple
 
 from cognee.context_global_variables import current_dataset_id
 from cognee.modules.retrieval.hybrid.chunks import chunk_candidate_limit, search_collection
-from cognee.modules.retrieval.hybrid.results import result_id
+from cognee.modules.retrieval.utils.results import result_id
 from cognee.modules.truth_subspace import align
 from cognee.modules.truth_subspace.centroids import load_centroids, pad_coords
 from cognee.modules.truth_subspace.constants import DEFAULT_K

@@ -96,11 +96,11 @@ jobs:
     steps:
       # cognee (this repo) supplies the shared orchestrator + reporter.
       - name: Checkout cognee (orchestrator)
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       # cognee-rs supplies the CLI, the perf harness, and the committed cassette.
       - name: Checkout cognee-rs (latest)
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           repository: topoteretes/cognee-rs
           ref: ${{ inputs.cognee_rs_ref }}
@@ -115,7 +115,7 @@ jobs:
           toolchain: stable
 
       - name: Install mold linker
-        uses: rui314/setup-mold@7e4f20ad28a2e8ca6fd0892ccf72e2abb706b9c3  # v1
+        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621  # v1
         with:
           make-default: true
 
@@ -123,7 +123,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler cmake
 
       - name: Free disk space
-        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be  # main
+        uses: jlumbroso/free-disk-space@ceedf095f4ec1a097402bc6bd80831f2e1a6fde6  # main
         with:
           tool-cache: false
           # large-packages removes ^llvm-.* (libclang) which litert bindgen needs.
@@ -138,7 +138,7 @@ jobs:
           shared-key: perf-rust
 
       - name: Cache ORT binary
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: cognee-rs/target/ort-cache
           key: ort-perf-rust-linux-x86_64

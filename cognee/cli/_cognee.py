@@ -378,6 +378,11 @@ def main() -> int:
         try:
             api_dispatch(args)
         except Exception as ex:
+            # Keep the friendly console message, but always log the full
+            # exception (type + traceback) so delegated-command failures stay
+            # diagnosable in CI/production even when --debug is off.
+            # See issue #3335.
+            logger.exception("Delegated command failed")
             fmt.error(str(ex))
             if debug.is_debug_enabled():
                 raise

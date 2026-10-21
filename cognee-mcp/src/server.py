@@ -8,6 +8,7 @@ import sys
 from collections import deque
 from contextlib import redirect_stdout
 from datetime import datetime, timezone
+from typing import Literal
 
 import fastmcp
 import uvicorn
@@ -363,6 +364,7 @@ async def remember(
     background: bool = False,
     ontology_key: str | list[str] | None = None,
     self_improvement: bool = True,
+    node_set: list[str] | None = None,
 ) -> list:
     """Store data in memory.
 
@@ -416,6 +418,14 @@ async def remember(
         deadline shorter than ingestion takes. Ignored with session_id, which
         is already fast. Errors surface via cognify_status, not the return
         value.
+    node_set : list[str], optional
+        Node-set names to file the data under, the same names recall filters
+        on with node_name. Permanent memory tags the ingested data. With
+        session_id the first write that carries one pins it on the session;
+        later writes must repeat it or omit it, and a different set is
+        refused, so one session never spans two node sets. improve() keeps
+        the pinned set on everything it bridges from the session into the
+        graph. Used for per-project memory.
     """
     if content_base64 and data:
         return [
@@ -481,6 +491,7 @@ async def remember(
                 custom_prompt=custom_prompt,
                 ontology_key=ontology_key,
                 self_improvement=self_improvement,
+                node_set=node_set,
             ),
             dataset=dataset_name,
         )
@@ -508,6 +519,7 @@ async def remember(
                 custom_prompt=custom_prompt,
                 ontology_key=ontology_key,
                 self_improvement=self_improvement,
+                node_set=node_set,
             )
             status = result.get("status", "completed")
             if session_id:
@@ -534,6 +546,8 @@ async def recall(
     session_id: str | None = None,
     system_prompt: str | None = None,
     top_k: int = 15,
+    scope: str | None = None,
+    code_query: dict | None = None,
 ) -> list:
     """Search memory with auto-routing and session awareness.
 
@@ -553,8 +567,8 @@ async def recall(
         (answer written by an LLM): HYBRID_COMPLETION (the default when
         routing is off), GRAPH_COMPLETION, GRAPH_COMPLETION_COT,
         GRAPH_COMPLETION_CONTEXT_EXTENSION, GRAPH_COMPLETION_DECOMPOSITION,
-        GRAPH_SUMMARY_COMPLETION, RAG_COMPLETION, TRIPLET_COMPLETION,
-        TEMPORAL, AGENTIC_COMPLETION. Retrieval-only types (no LLM):
+        GRAPH_SUMMARY_COMPLETION, RAG_COMPLETION, TEMPORAL,
+        AGENTIC_COMPLETION. Retrieval-only types (no LLM):
         CHUNKS, CHUNKS_LEXICAL, SUMMARIES, SKILLS, CODE. Other: CYPHER,
         NATURAL_LANGUAGE, CODING_RULES, GRAPH_REPORT, FEELING_LUCKY.
         An unknown name is rejected with a validation error.
@@ -568,6 +582,21 @@ async def recall(
         on the server.
     top_k : int
         Maximum results to return (default: 15).
+    scope : str, optional
+        Comma-separated memory sources to include: 'graph', 'session',
+        'session_first', 'trace', 'session_context', 'tools', 'code', 'all',
+        'auto'. Defaults to 'auto' (session first when session_id is set,
+        else graph). 'tools' and 'code' are explicit opt-in only. 'code' runs
+        a deterministic code-graph query and tags results source='code'.
+    code_query : dict, optional
+        'code' scope only: structured operation and arguments for the
+        deterministic code-graph query, e.g. {"operation": "query_facts",
+        "property": "language", "limit": 500}. Supported operations:
+        query_facts, explore, traverse, find_path, impact_analysis, insights,
+        architecture, delta, capabilities, search, neighbors, subgraph, flows,
+        hubs, ask. When omitted, 'code' scope runs an 'explore' seeded with the
+        query text. Most operations take exact node names/IDs or structured
+        filters; search and ask take natural-language text.
 
     Returns a one-line memory-hit or empty-state summary followed by the original
     result text. Status markers do not count as hits. Empty-state checks are
@@ -577,6 +606,9 @@ async def recall(
         try:
             normalized_top_k = validate_top_k(top_k)
             dataset_list = parse_csv_list(datasets)
+            scope_list = parse_csv_list(scope)
+            if code_query is not None and not isinstance(code_query, dict):
+                raise ValueError("code_query must be a JSON object (dict).")
             results = await cognee_client.recall(
                 query_text=query,
                 search_type=search_type,
@@ -584,6 +616,8 @@ async def recall(
                 session_id=session_id,
                 system_prompt=system_prompt,
                 top_k=normalized_top_k,
+                scope=scope_list or None,
+                code_query=code_query,
             )
             empty_state = recall_marker_state(results)
             items = recall_items(results)
@@ -626,6 +660,77 @@ async def recall(
             error_msg = _tool_error_text("Recall failed", e)
             logger.exception(error_msg)
             return [types.TextContent(type="text", text=f"Error: {error_msg}")]
+
+
+@registry.tool(tags={DEFAULT_TAG})
+async def code_search(
+    operation: Literal[
+        "query_facts",
+        "explore",
+        "traverse",
+        "find_path",
+        "impact_analysis",
+        "insights",
+        "architecture",
+        "delta",
+        "capabilities",
+        "search",
+        "neighbors",
+        "subgraph",
+        "flows",
+        "hubs",
+        "ask",
+    ],
+    arguments: dict | None = None,
+    datasets: str | None = None,
+    query: str = "",
+    top_k: int = 15,
+) -> list:
+    """Search Cognee's indexed code graph with a structured operation.
+
+    This tool is for source-code structure, symbols, call/dependency paths,
+    impact, architecture, and index changes. It does not search conversational
+    memory. Choose an operation and pass its operation-specific fields in
+    ``arguments``. For example, use operation="query_facts" with
+    arguments={"kinds": ["module", "symbol"], "limit": 100}, or
+    operation="impact_analysis" with arguments={"seeds": ["UserService"]}.
+    For a question in plain words ("how does checkout work?"), use
+    operation="ask" with the question as ``query``: it returns matching
+    symbols, entry-point flows, their neighbourhood and file:line citations.
+
+    Parameters
+    ----------
+    operation : str
+        Code-graph operation: query_facts, explore, traverse, find_path,
+        impact_analysis, insights, architecture, delta, capabilities, search,
+        neighbors, subgraph, flows, hubs, or ask.
+    arguments : dict, optional
+        Operation-specific structured arguments. Do not include an "operation"
+        key here; select it with the operation parameter.
+    datasets : str, optional
+        Comma-separated Cognee dataset names containing indexed code.
+    query : str
+        Optional seed text, used by explore when no explicit seed is supplied
+        in arguments, and the text or question for search and ask.
+    top_k : int
+        Maximum number of results to return (default: 15).
+    """
+    code_arguments = arguments or {}
+    if "operation" in code_arguments:
+        return [
+            types.TextContent(
+                type="text",
+                text='Error: Select the operation with the "operation" parameter, not in arguments.',
+            )
+        ]
+    return await recall(
+        query=query,
+        search_type="CODE",
+        datasets=datasets,
+        top_k=top_k,
+        scope="code",
+        code_query={"operation": operation, **code_arguments},
+    )
 
 
 @registry.tool(tags={DEFAULT_TAG, MEMORY_TAG})
@@ -709,7 +814,6 @@ async def forget(
 async def improve(
     dataset_name: str | None = None,
     session_ids: str | None = None,
-    node_name: str | None = None,
     build_global_context_index: bool = False,
     build_truth_subspace: bool = False,
 ) -> list:
@@ -724,7 +828,7 @@ async def improve(
     5. distill_sessions        - gated guidance becomes entity-anchored lessons
     6. update_user_preferences - ratings fold into preference weights
     7. build_truth_subspace    - opt-in (build_truth_subspace=True)
-    8. triplet_enrichment      - triplet embeddings, when the graph changed
+    8. review_conflicts        - opt-in (IMPROVE_REVIEW_CONFLICTS=true)
     9. global_context_index    - opt-in (build_global_context_index=True)
 
     Stages 1-7 need session_ids and are skipped with `no_session_ids`
@@ -739,10 +843,8 @@ async def improve(
         detected.
     session_ids : str, optional
         Comma-separated session IDs to bridge into the permanent graph.
-    node_name : str, optional
-        Comma-separated entity names; restricts enrichment to those nodes.
     build_global_context_index : bool
-        Also build the global context index after enrichment.
+        Also build the global context index.
     build_truth_subspace : bool
         Also build the truth subspace from the sessions' distilled learnings
         (needs session_ids and a graph backend with truth state).
@@ -751,11 +853,9 @@ async def improve(
     with redirect_stdout(sys.stderr):
         try:
             session_list = parse_csv_list(session_ids)
-            node_list = parse_csv_list(node_name)
             result = await cognee_client.improve(
                 dataset_name=dataset_name,
                 session_ids=session_list,
-                node_name=node_list,
                 build_global_context_index=build_global_context_index,
                 build_truth_subspace=build_truth_subspace,
             )

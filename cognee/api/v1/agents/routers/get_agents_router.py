@@ -148,7 +148,8 @@ def get_agents_router() -> APIRouter:
     async def get_my_connection_detail(
         agent_session_name: str | None = Query(
             None,
-            description="Filter by connection name. "
+            description="Filter by connection name. A named lookup also returns inactive "
+            "(unregistered) connections; check agent.status. "
             "Uses the authenticated user's ID as the agent ID.",
         ),
         user: User = Depends(get_authenticated_user),
@@ -156,7 +157,8 @@ def get_agents_router() -> APIRouter:
         """Get my connection detail — GET /api/v1/agents/connections/me.
 
         ## Query Parameters
-        - **agent_session_name** (Optional[str]): Filter by connection name. Uses the authenticated
+        - **agent_session_name** (Optional[str]): Filter by connection name. A named lookup also
+          returns inactive (unregistered) connections; check agent.status. Uses the authenticated
           user's ID as the agent ID.
         """
         response = await get_agent_connection_detail(
@@ -173,7 +175,9 @@ def get_agents_router() -> APIRouter:
         agent_id: UUID,
         agent_session_name: str | None = Query(
             None,
-            description="Filter by connection name within the agent's connections.",
+            description="Filter by connection name within the agent's connections. "
+            "A named lookup also returns inactive (unregistered) connections; "
+            "check agent.status.",
         ),
         user: User = Depends(get_authenticated_user),
     ):
@@ -184,7 +188,8 @@ def get_agents_router() -> APIRouter:
 
         ## Query Parameters
         - **agent_session_name** (Optional[str]): Filter by connection name within the agent's
-          connections.
+          connections. A named lookup also returns inactive (unregistered) connections; check
+          agent.status.
         """
         response = await get_agent_connection_detail(
             user=user,

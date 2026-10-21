@@ -8,6 +8,9 @@ from .exceptions import (
     RoleNotFoundError,
     UserNotFoundError,
     PermissionDeniedError,
+    CapabilityDeniedError,
+    CapabilityGrantToNonMemberError,
     TenantNotFoundError,
     PermissionNotFoundError,
+    CapabilityNotFoundError,
 )

@@ -22,6 +22,7 @@ from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.cache.config import get_cache_config
 from cognee.infrastructure.databases.graph.graph_db_interface import (
     GraphDBInterface,
+    temporal_anchors_from_rows,
 )
 from cognee.infrastructure.databases.provenance import (
     EdgeDeleteData,
@@ -41,7 +42,6 @@ from cognee.infrastructure.databases.provenance.source_refs import (
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.files.storage import get_file_storage
 from cognee.infrastructure.utils.run_sync import run_sync
-from cognee.modules.engine.utils.generate_timestamp_datapoint import date_to_int
 from cognee.modules.observability import OtelStatusCode as StatusCode
 from cognee.modules.observability import new_span
 from cognee.modules.observability.tracing import (
@@ -52,7 +52,6 @@ from cognee.modules.observability.tracing import (
 )
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.shared.logging_utils import get_logger
-from cognee.tasks.temporal_graph.models import Timestamp
 
 logger = get_logger()
 
@@ -65,6 +64,15 @@ logger = get_logger()
 # and failed runs are swept by the pipeline rollback ledger, so partial
 # progress is safe. Does not change how many data points the pipeline batches.
 _WRITE_CHUNK_SIZE = 2000
+
+# Properties improve() writes onto stored elements after ingestion (feedback
+# weights, the truth subspace). A DataPoint only ever carries their defaults, so
+# a re-add of an existing element (the same entity in a new document, a session
+# window, an update) must keep the stored value instead of resetting it. The
+# MERGE replaces the whole properties blob, so the stored values are read first
+# and carried into the new blob.
+LEARNED_NODE_PROPERTIES = ("feedback_weight", "truth_alignment", "truth_epoch")
+LEARNED_EDGE_PROPERTIES = ("feedback_weight",)
 
 
 DEFAULT_KUZU_BUFFER_POOL_SIZE = 1 << 35  # 32 GB (must be a power of 2 for Kuzu)
@@ -189,18 +197,31 @@ def _encode_provenance_row(row: dict) -> dict:
 
 
 def _parse_properties_blob(raw: Any) -> dict[str, Any]:
-    """Decode a node/edge JSON ``properties`` blob, tolerating empty/invalid input."""
+    """Decode a node/edge JSON ``properties`` blob, tolerating empty/invalid input.
+
+    Anything that does not decode to a JSON object (``None``, ``""``, malformed
+    JSON, or a non-object value such as ``"null"`` or a list) yields ``{}``.
+    """
     if not raw:
         return {}
     try:
-        return json.loads(raw)
+        parsed = json.loads(raw)
     except json.JSONDecodeError:
         return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 cache_config = get_cache_config()
 if cache_config.shared_ladybug_lock:
     from cognee.infrastructure.databases.cache.get_cache_engine import get_cache_engine
+
+
+def _json_string(value: Any) -> str:
+    """A string field read back through json_extract, unquoted."""
+    if value is None:
+        return ""
+    text = str(value)
+    return text[1:-1] if len(text) >= 2 and text[0] == text[-1] == '"' else text
 
 
 class LadybugAdapter(GraphDBInterface):
@@ -1125,6 +1146,7 @@ class LadybugAdapter(GraphDBInterface):
             ON CREATE SET n += {{{", ".join(fields)}}}
             """
             await self.query(merge_query, params)
+            await self.checkpoint()
 
         except Exception as e:
             logger.error(f"Failed to add node: {e}")
@@ -1165,6 +1187,10 @@ class LadybugAdapter(GraphDBInterface):
             per_row_refs = isinstance(source_ref_key, dict)
             fold_fields = _per_row_fold_fields(pipeline_run_id) if per_row_refs else None
 
+            stored = await self._stored_learned_node_properties(
+                [str(getattr(node, "id", "")) for node in nodes]
+            )
+
             # Prepare all nodes data
             node_params = []
             for node in nodes:
@@ -1183,6 +1209,8 @@ class LadybugAdapter(GraphDBInterface):
                 # Provenance lives in declared STRING columns, never the JSON blob.
                 for key in PROVENANCE_COLUMNS:
                     properties.pop(key, None)
+
+                properties.update(stored.get(core_properties["id"], {}))
 
                 node_params.append(
                     {
@@ -1271,6 +1299,7 @@ class LadybugAdapter(GraphDBInterface):
         """
         query_str = "MATCH (n:Node) WHERE n.id = $id DETACH DELETE n"
         await self.query(query_str, {"id": node_id})
+        await self.checkpoint()
 
     async def delete_nodes(self, node_ids: list[str]) -> None:
         """
@@ -1287,6 +1316,7 @@ class LadybugAdapter(GraphDBInterface):
         """
         query_str = "MATCH (n:Node) WHERE n.id IN $ids DETACH DELETE n"
         await self.query(query_str, {"ids": node_ids})
+        await self.checkpoint()
 
     # ------------------------------------------------------------------
     # Graph provenance (COG-5522 Part 1)
@@ -2016,10 +2046,20 @@ class LadybugAdapter(GraphDBInterface):
         if edge_properties is None:
             edge_properties = {}
         try:
+            stored = await self._stored_learned_edge_properties(
+                [(str(from_node), str(to_node), str(relationship_name))]
+            )
             query, params = self._edge_query_and_params(
-                from_node, to_node, relationship_name, edge_properties
+                from_node,
+                to_node,
+                relationship_name,
+                {
+                    **edge_properties,
+                    **stored.get((str(from_node), str(to_node), str(relationship_name)), {}),
+                },
             )
             await self.query(query, params)
+            await self.checkpoint()
         except Exception as e:
             logger.error(f"Failed to add edge: {e}")
             raise
@@ -2059,12 +2099,24 @@ class LadybugAdapter(GraphDBInterface):
             per_row_refs = isinstance(source_ref_key, dict)
             fold_fields = _per_row_fold_fields(pipeline_run_id) if per_row_refs else None
 
+            stored = await self._stored_learned_edge_properties(
+                [(str(from_node), str(to_node), str(name)) for from_node, to_node, name, _ in edges]
+            )
+
             edge_params = [
                 {
                     "from_id": from_node,
                     "to_id": to_node,
                     "relationship_name": relationship_name,
-                    "properties": json.dumps(properties, cls=JSONEncoder),
+                    "properties": json.dumps(
+                        {
+                            **properties,
+                            **stored.get(
+                                (str(from_node), str(to_node), str(relationship_name)), {}
+                            ),
+                        },
+                        cls=JSONEncoder,
+                    ),
                     "created_at": now,
                     "updated_at": now,
                     # KeyError on a missing identity is deliberate — see add_nodes.
@@ -2375,6 +2427,7 @@ class LadybugAdapter(GraphDBInterface):
         RETURN n.id AS node_id
         """
         result = await self.query(query, {"items": updates, "updated_at": now})
+        await self.checkpoint()
         rows_dicts = self._rows_to_dicts(result, ["node_id"])
         return {str(r["node_id"]) for r in rows_dicts if r.get("node_id") is not None}
 
@@ -2417,6 +2470,7 @@ class LadybugAdapter(GraphDBInterface):
         RETURN n.id AS node_id
         """
         result = await self.query(query, {"items": updates, "updated_at": now})
+        await self.checkpoint()
         rows_dicts = self._rows_to_dicts(result, ["node_id"])
         return {str(r["node_id"]) for r in rows_dicts if r.get("node_id") is not None}
 
@@ -2468,8 +2522,73 @@ class LadybugAdapter(GraphDBInterface):
         RETURN item.edge_object_id AS edge_object_id
         """
         result = await self.query(query, {"items": edge_updates, "updated_at": now})
+        await self.checkpoint()
         rows_dicts = self._rows_to_dicts(result, ["edge_object_id"])
         return {str(r["edge_object_id"]) for r in rows_dicts if r.get("edge_object_id") is not None}
+
+    async def _stored_learned_node_properties(
+        self, node_ids: list[str]
+    ) -> dict[str, dict[str, Any]]:
+        """LEARNED_NODE_PROPERTIES of the nodes among ``node_ids`` that already exist.
+
+        Read by the batch write so a re-add keeps them; a failed read raises
+        rather than let the write silently reset what improve() learned.
+        """
+        ids = sorted({node_id for node_id in node_ids if node_id})
+        stored: dict[str, dict[str, Any]] = {}
+        # Chunked like the write: one statement over a huge batch can outrun
+        # the subprocess engine's per-call deadline.
+        for start in range(0, len(ids), _WRITE_CHUNK_SIZE):
+            rows = await self.query(
+                """
+                UNWIND $node_ids AS node_id
+                MATCH (n:Node {id: node_id})
+                RETURN n.id, n.properties
+                """,
+                {"node_ids": ids[start : start + _WRITE_CHUNK_SIZE]},
+            )
+            for node_id, properties_raw in rows:
+                properties = json.loads(properties_raw) if properties_raw else {}
+                kept = {
+                    key: properties[key] for key in LEARNED_NODE_PROPERTIES if key in properties
+                }
+                if kept:
+                    stored[str(node_id)] = kept
+        return stored
+
+    async def _stored_learned_edge_properties(
+        self, edges: list[tuple[str, str, str]]
+    ) -> dict[tuple[str, str, str], dict[str, Any]]:
+        """LEARNED_EDGE_PROPERTIES of the edges among ``edges`` that already exist.
+
+        Keyed like the MERGE in ``add_edges``: (from id, to id, relationship name).
+        """
+        keys = sorted(set(edges))
+        stored: dict[tuple[str, str, str], dict[str, Any]] = {}
+        for start in range(0, len(keys), _WRITE_CHUNK_SIZE):
+            rows = await self.query(
+                """
+                UNWIND $edge_keys AS edge
+                MATCH (from:Node {id: edge.from_id})
+                      -[r:EDGE {relationship_name: edge.relationship_name}]->
+                      (to:Node {id: edge.to_id})
+                RETURN from.id, to.id, r.relationship_name, r.properties
+                """,
+                {
+                    "edge_keys": [
+                        {"from_id": from_id, "to_id": to_id, "relationship_name": name}
+                        for from_id, to_id, name in keys[start : start + _WRITE_CHUNK_SIZE]
+                    ]
+                },
+            )
+            for from_id, to_id, name, properties_raw in rows:
+                properties = json.loads(properties_raw) if properties_raw else {}
+                kept = {
+                    key: properties[key] for key in LEARNED_EDGE_PROPERTIES if key in properties
+                }
+                if kept:
+                    stored[(str(from_id), str(to_id), str(name))] = kept
+        return stored
 
     async def get_node_feedback_weights(self, node_ids: list[str]) -> dict[str, float]:
         if not node_ids:
@@ -2580,6 +2699,8 @@ class LadybugAdapter(GraphDBInterface):
             query,
             {"id": node_id, "properties": json.dumps(properties, cls=JSONEncoder)},
         )
+        if result:
+            await self.checkpoint()
         return bool(result)
 
     async def get_edge_feedback_weights(self, edge_object_ids: list[str]) -> dict[str, float]:
@@ -2818,6 +2939,7 @@ class LadybugAdapter(GraphDBInterface):
         DELETE r
         """
         await self.query(query_str, {"node_ids": node_ids, "edge_label": edge_label})
+        await self.checkpoint()
 
     async def remove_connection_to_successors_of(
         self, node_ids: list[str], edge_label: str
@@ -2841,6 +2963,7 @@ class LadybugAdapter(GraphDBInterface):
         DELETE r
         """
         await self.query(query_str, {"node_ids": node_ids, "edge_label": edge_label})
+        await self.checkpoint()
 
     # Graph-wide Operations
 
@@ -3360,6 +3483,14 @@ class LadybugAdapter(GraphDBInterface):
             logger.error(f"Error during ID-filtered graph data retrieval: {e!s}")
             raise
 
+    async def get_graph_counts(self) -> tuple[int, int]:
+        """Count nodes and edges with two aggregation queries."""
+        node_count_result = await self.query("MATCH (n:Node) RETURN COUNT(n)")
+        edge_count_result = await self.query("MATCH ()-[r:EDGE]->() RETURN COUNT(r)")
+        num_nodes = node_count_result[0][0] if node_count_result else 0
+        num_edges = edge_count_result[0][0] if edge_count_result else 0
+        return num_nodes, num_edges
+
     async def get_graph_metrics(self, include_optional=False) -> dict[str, Any]:
         """
         Get metrics on graph structure and connectivity.
@@ -3381,10 +3512,7 @@ class LadybugAdapter(GraphDBInterface):
         """
 
         try:
-            node_count_result = await self.query("MATCH (n:Node) RETURN COUNT(n)")
-            edge_count_result = await self.query("MATCH ()-[r:EDGE]->() RETURN COUNT(r)")
-            num_nodes = node_count_result[0][0] if node_count_result else 0
-            num_edges = edge_count_result[0][0] if edge_count_result else 0
+            num_nodes, num_edges = await self.get_graph_counts()
 
             # Calculate mandatory metrics
             mandatory_metrics = {
@@ -3706,134 +3834,108 @@ class LadybugAdapter(GraphDBInterface):
         result = await self.query(query)
         return [record[0] for record in result] if result else []
 
-    def _normalize_temporal_ids(self, ids: list[str] | str) -> list[str]:
-        if isinstance(ids, str):
-            return [uid.strip().strip("'\"") for uid in ids.split(",") if uid.strip()]
-
-        return ids
-
-    async def collect_events(self, ids: list[str] | str) -> Any:
+    async def get_timestamps_in_range(
+        self, start: int | None, end: int | None
+    ) -> list[dict[str, Any]]:
+        """Timestamp nodes whose ``[time_at, time_until)`` overlaps ``[start, end)``."""
+        conditions = ["time_at IS NOT NULL"]
+        params: dict[str, Any] = {}
+        if end is not None:
+            conditions.append("time_at < $window_end")
+            params["window_end"] = int(end)
+        if start is not None:
+            conditions.append("time_until > $window_start")
+            params["window_start"] = int(start)
+        # Properties live in a JSON string column; the casts run only on Timestamp
+        # nodes (filtered first). A node written before ``time_until`` existed
+        # yields '' from json_extract and a stored null yields 'null'; both must
+        # become NULL *before* the cast — Kuzu casts a whole batch at once, so a
+        # CASE guard around the CAST does not stop it from raising on them.
+        query_str = f"""
+        MATCH (n:Node)
+        WHERE n.type = 'Timestamp'
+        WITH n,
+             json_extract(n.properties, '$.time_at') AS at_str,
+             json_extract(n.properties, '$.time_until') AS until_str
+        WITH n,
+             CAST(nullif(nullif(at_str, ''), 'null') AS INT64) AS time_at,
+             CAST(nullif(nullif(until_str, ''), 'null') AS INT64) AS until_raw
+        WITH n, time_at, COALESCE(until_raw, time_at + 1000) AS time_until
+        WHERE {" AND ".join(conditions)}
+        RETURN n.id, json_extract(n.properties, '$.timestamp_str'), time_at, time_until
+        ORDER BY time_at, n.id
         """
-        Collect all Event-type nodes reachable within 1..2 hops
-        from the given node IDs.
-
-        Args:
-            graph_engine: Object exposing an async .query(str) -> Any
-            ids: List of node IDs (strings)
-
-        Returns:
-            List of events
-        """
-
-        event_collection_cypher = """UNWIND $ids AS uid
-            MATCH (start {id: uid})
-            MATCH (start)-[*1..2]-(event)
-            WHERE event.type = 'Event'
-            WITH DISTINCT event
-            RETURN collect(event) AS events;
-        """
-
-        ids = self._normalize_temporal_ids(ids)
-        result = await self.query(event_collection_cypher, {"ids": ids})
-        events = []
-        if not result or not result[0] or not result[0][0]:
-            return [{"events": events}]
-
-        for node in result[0][0]:
-            props = json.loads(node["properties"])
-
-            event = {
-                "id": node["id"],
-                "name": node["name"],
-                "description": props.get("description"),
+        rows = await self.query(query_str, params)
+        return [
+            {
+                "id": row[0],
+                "type": "Timestamp",
+                "timestamp_str": _json_string(row[1]),
+                "time_at": row[2],
+                "time_until": row[3],
             }
+            for row in rows
+        ]
 
-            if props.get("location"):
-                event["location"] = props["location"]
-
-            events.append(event)
-
-        return [{"events": events}]
-
-    async def collect_time_ids(
+    async def get_temporal_anchors(
         self,
-        time_from: Timestamp | None = None,
-        time_to: Timestamp | None = None,
-    ) -> list[str]:
+        chunk_ids,
+        entity_ids,
+        start: int | None,
+        end: int | None,
+    ) -> dict[str, set[str]]:
+        """Candidates attached to a Timestamp overlapping ``[start, end)``: directly,
+        or (for chunks) through an entity they ``contains``. See the interface."""
+        chunk_list = sorted({str(node_id) for node_id in chunk_ids})
+        entity_list = sorted({str(node_id) for node_id in entity_ids})
+        if not chunk_list and not entity_list:
+            return temporal_anchors_from_rows([], [], [])
+        conditions = ["time_at IS NOT NULL"]
+        params: dict[str, Any] = {}
+        if end is not None:
+            conditions.append("time_at < $window_end")
+            params["window_end"] = int(end)
+        if start is not None:
+            conditions.append("time_until > $window_start")
+            params["window_start"] = int(start)
+        # The same JSON casts as get_timestamps_in_range, applied only to the
+        # Timestamp nodes the candidates' edges reach.
+        window = f"""
+        WITH {{carry}}, t,
+             json_extract(t.properties, '$.time_at') AS at_str,
+             json_extract(t.properties, '$.time_until') AS until_str
+        WITH {{carry}}, t,
+             CAST(nullif(nullif(at_str, ''), 'null') AS INT64) AS time_at,
+             CAST(nullif(nullif(until_str, ''), 'null') AS INT64) AS until_raw
+        WITH {{carry}}, t, time_at, COALESCE(until_raw, time_at + 1000) AS time_until
+        WHERE {" AND ".join(conditions)}
         """
-        Collect IDs of Timestamp nodes between time_from and time_to.
-
-        Args:
-            graph_engine: Object exposing an async .query(query, params) -> list[dict]
-            time_from: Lower bound int (inclusive), optional
-            time_to: Upper bound int (inclusive), optional
-
-        Returns:
-            A list of timestamp node IDs.
-        """
-
-        ids: list[str] = []
-
-        if time_from and time_to:
-            time_from = date_to_int(time_from)
-            time_to = date_to_int(time_to)
-
-            cypher = f"""
-            MATCH (n:Node)
-            WHERE n.type = 'Timestamp'
-            // Extract time_at from the JSON string and cast to INT64
-            WITH n, json_extract(n.properties, '$.time_at') AS t_str
-            WITH n,
-                 CASE
-                   WHEN t_str IS NULL OR t_str = '' THEN NULL
-                   ELSE CAST(t_str AS INT64)
-                 END AS t
-            WHERE t >= {time_from}
-            AND t <= {time_to}
-            RETURN n.id as id
-            """
-
-        elif time_from:
-            time_from = date_to_int(time_from)
-
-            cypher = f"""
-            MATCH (n:Node)
-            WHERE n.type = 'Timestamp'
-            // Extract time_at from the JSON string and cast to INT64
-            WITH n, json_extract(n.properties, '$.time_at') AS t_str
-            WITH n,
-                 CASE
-                   WHEN t_str IS NULL OR t_str = '' THEN NULL
-                   ELSE CAST(t_str AS INT64)
-                 END AS t
-            WHERE t >= {time_from}
-            RETURN n.id as id
-            """
-
-        elif time_to:
-            time_to = date_to_int(time_to)
-
-            cypher = f"""
-            MATCH (n:Node)
-            WHERE n.type = 'Timestamp'
-            // Extract time_at from the JSON string and cast to INT64
-            WITH n, json_extract(n.properties, '$.time_at') AS t_str
-            WITH n,
-                 CASE
-                   WHEN t_str IS NULL OR t_str = '' THEN NULL
-                   ELSE CAST(t_str AS INT64)
-                 END AS t
-            WHERE t <= {time_to}
-            RETURN n.id as id
-            """
-
-        else:
-            return ids
-
-        time_nodes = await self.query(cypher)
-        time_ids_list = [item[0] for item in time_nodes]
-
-        return time_ids_list
+        direct_rows = await self.query(
+            f"""
+            MATCH (c:Node)-[r:EDGE]->(t:Node)
+            WHERE c.id IN $candidate_ids AND t.type = 'Timestamp'
+            {window.format(carry="c")}
+            RETURN DISTINCT c.id, t.id
+            """,
+            {**params, "candidate_ids": chunk_list + entity_list},
+        )
+        via_rows = []
+        if chunk_list:
+            via_rows = await self.query(
+                f"""
+                MATCH (c:Node)-[r1:EDGE]->(e:Node)-[r2:EDGE]->(t:Node)
+                WHERE c.id IN $chunk_ids AND r1.relationship_name = 'contains'
+                  AND e.type = 'Entity' AND t.type = 'Timestamp'
+                {window.format(carry="c, e")}
+                RETURN DISTINCT c.id, e.id, t.id
+                """,
+                {**params, "chunk_ids": chunk_list},
+            )
+        return temporal_anchors_from_rows(
+            [(row[0], row[1]) for row in direct_rows],
+            [(row[0], row[1], row[2]) for row in via_rows],
+            chunk_list,
+        )
 
     async def get_triplets_batch(self, offset: int, limit: int) -> list[dict[str, Any]]:
         """

@@ -152,21 +152,10 @@ def _dispatch_search(client: CogneeApiClient, args: argparse.Namespace) -> None:
 
 
 def _dispatch_memify(client: CogneeApiClient, args: argparse.Namespace) -> None:
-    label = args.dataset_id or args.dataset_name
-    fmt.echo(f"Running memify on '{label}'...")
-    result = client.memify(
-        dataset_name=args.dataset_name,
-        dataset_id=args.dataset_id,
-        data=getattr(args, "data", None),
-        node_name=getattr(args, "node_name", None),
-        run_in_background=getattr(args, "background", False),
-    )
-    if getattr(args, "background", False):
-        fmt.success("Memify started in background.")
-    else:
-        fmt.success("Memify completed.")
-    if result:
-        fmt.echo(json.dumps(result, indent=2, default=str))
+    from cognee.cli.commands.memify_command import MEMIFY_CLI_DEPRECATION_MESSAGE
+
+    # Same as the local command: nothing left to run, so the server is not called.
+    fmt.warning(MEMIFY_CLI_DEPRECATION_MESSAGE)
 
 
 def _dispatch_datasets(client: CogneeApiClient, args: argparse.Namespace) -> None:
@@ -337,15 +326,17 @@ def _dispatch_improve(client: CogneeApiClient, args: argparse.Namespace) -> None
     from cognee.cli.commands.improve_command import print_improve_result
 
     dataset = args.dataset_id or args.dataset_name
+    if getattr(args, "node_name", None) is not None:
+        fmt.warning("--node-name is deprecated and ignored.")
     fmt.echo(f"Improving knowledge graph for dataset '{dataset}'...")
     result = client.improve(
         dataset_name=args.dataset_name if not args.dataset_id else None,
         dataset_id=args.dataset_id,
-        node_name=getattr(args, "node_name", None),
         session_ids=getattr(args, "session_ids", None),
         run_in_background=getattr(args, "background", False),
         build_global_context_index=getattr(args, "build_global_context_index", False),
         build_truth_subspace=getattr(args, "build_truth_subspace", False),
+        review_conflicts=getattr(args, "review_conflicts", False),
         feedback_alpha=getattr(args, "feedback_alpha", None),
     )
     if isinstance(result, dict) and "stages" in result:

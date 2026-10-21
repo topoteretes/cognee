@@ -36,6 +36,11 @@ _router_module = importlib.import_module(
 )
 
 
+# The forget package re-exports the function under the submodule's name, so a
+# dotted-string patch target resolves to the function on Python 3.10.
+_forget_module = importlib.import_module("cognee.api.v1.forget.forget")
+
+
 class _FakeUser:
     id = USER_ID
 
@@ -271,6 +276,194 @@ def test_connection_status_reports_connected_with_generic_fields(client):
     assert body["providerAccountId"] == "ACC1"
 
 
+def _connected_credential():
+    return type(
+        "Cred",
+        (),
+        {
+            "account_label": "Acme",
+            "provider_account_id": "ACC1",
+            "created_at": __import__("datetime").datetime(2026, 1, 1),
+            "sync_status": None,
+            "last_synced_at": None,
+        },
+    )()
+
+
+def test_connection_status_reports_the_dataset_of_any_provider_that_names_one(client):
+    integration = supported_integrations["fake"]
+    summary = AsyncMock(return_value=("dataset-1", 7))
+    with (
+        patch.object(
+            _router_module,
+            "get_active_credential_for_user",
+            new=AsyncMock(return_value=_connected_credential()),
+        ),
+        patch.object(integration, "dataset_name", return_value="fake_acme"),
+        patch("cognee.modules.integrations.ingestion.dataset_summary", summary),
+    ):
+        body = client.get("/api/v1/integrations/fake/connection").json()
+
+    assert body["datasetId"] == "dataset-1"
+    assert body["storedItems"] == 7
+    assert summary.await_args.args[1] == "fake_acme"
+
+
+def test_connection_status_has_no_dataset_for_a_provider_that_names_none(client):
+    summary = AsyncMock()
+    with (
+        patch.object(
+            _router_module,
+            "get_active_credential_for_user",
+            new=AsyncMock(return_value=_connected_credential()),
+        ),
+        patch("cognee.modules.integrations.ingestion.dataset_summary", summary),
+    ):
+        body = client.get("/api/v1/integrations/fake/connection").json()
+
+    summary.assert_not_awaited()
+    assert body.get("datasetId") is None
+
+
+def test_disconnect_with_delete_data_forgets_the_providers_dataset(client):
+    integration = supported_integrations["fake"]
+    forget = AsyncMock()
+    with (
+        patch.object(
+            _router_module,
+            "get_active_credential_for_user",
+            new=AsyncMock(return_value=type("Cred", (), {"provider_account_id": "ACC1"})()),
+        ),
+        patch.object(integration, "dataset_name", return_value="fake_acme"),
+        patch.object(integration, "revoke_remote", new=AsyncMock()),
+        patch.object(
+            _router_module, "revoke_credential_by_account", new=AsyncMock(return_value=True)
+        ),
+        patch.object(_forget_module, "forget", forget),
+    ):
+        response = client.delete("/api/v1/integrations/fake/connection?delete_data=true")
+
+    assert response.json() == {"disconnected": True}
+    assert forget.await_args.kwargs["dataset"] == "fake_acme"
+
+
+def test_disconnect_with_delete_data_is_refused_without_a_dataset(client):
+    with patch.object(
+        _router_module,
+        "get_active_credential_for_user",
+        new=AsyncMock(return_value=type("Cred", (), {"provider_account_id": "ACC1"})()),
+    ):
+        response = client.delete("/api/v1/integrations/fake/connection?delete_data=true")
+
+    assert response.status_code == 400
+
+
+# --- a provider that cannot read null as "all resources" ---
+#
+# The picker stores a null selection as "everything", and listing shows every
+# resource selected for it. A provider whose sync has no such meaning (Google
+# Calendar) must refuse the null at the boundary instead of storing it.
+
+
+def put_resources(client, integration, body, *, allows_all, monkeypatch):
+    update = AsyncMock(return_value=type("Cred", (), {"provider_metadata": {"picked": body}})())
+    monkeypatch.setattr(integration, "resource_selection_key", "picked")
+    monkeypatch.setattr(integration, "resource_selection_allows_all", allows_all)
+    monkeypatch.setattr(
+        _router_module,
+        "get_active_credential_for_user",
+        AsyncMock(return_value=type("Cred", (), {"provider_account_id": "ACC1"})()),
+    )
+    monkeypatch.setattr(_router_module, "update_provider_metadata", update)
+    response = client.put("/api/v1/integrations/fake/resources", json={"resourceIds": body})
+    return response, update
+
+
+def test_a_null_selection_is_refused_for_a_provider_that_cannot_select_all(client, monkeypatch):
+    response, update = put_resources(
+        client, supported_integrations["fake"], None, allows_all=False, monkeypatch=monkeypatch
+    )
+
+    assert response.status_code == 422
+    assert "explicit list" in response.json()["detail"]
+    update.assert_not_awaited()
+
+
+def test_a_null_selection_is_still_stored_for_a_provider_that_allows_all(client, monkeypatch):
+    response, update = put_resources(
+        client, supported_integrations["fake"], None, allows_all=True, monkeypatch=monkeypatch
+    )
+
+    assert response.status_code == 200
+    update.assert_awaited_once_with("fake", "ACC1", {"picked": None})
+
+
+def test_a_list_selection_is_stored_for_a_provider_that_cannot_select_all(client, monkeypatch):
+    response, update = put_resources(
+        client,
+        supported_integrations["fake"],
+        ["a", "a", "b"],
+        allows_all=False,
+        monkeypatch=monkeypatch,
+    )
+
+    assert response.status_code == 200
+    update.assert_awaited_once_with("fake", "ACC1", {"picked": ["a", "b"]})
+
+
+# A blank id is never a real resource. Stored, it makes the sync of every provider
+# that checks the selection shape fail until the user saves again.
+@pytest.mark.parametrize("allows_all", [True, False])
+@pytest.mark.parametrize("body", [[""], [" "], ["a", "\t"], ["a", "  \n"]])
+def test_a_blank_resource_id_is_refused_and_nothing_is_stored(
+    client, monkeypatch, allows_all, body
+):
+    response, update = put_resources(
+        client, supported_integrations["fake"], body, allows_all=allows_all, monkeypatch=monkeypatch
+    )
+
+    assert response.status_code == 422
+    assert "blank" in response.json()["detail"]
+    update.assert_not_awaited()
+
+
+def test_ids_are_stored_as_given_and_deduplicated(client, monkeypatch):
+    response, update = put_resources(
+        client,
+        supported_integrations["fake"],
+        ["b", " a ", "b"],
+        allows_all=True,
+        monkeypatch=monkeypatch,
+    )
+
+    assert response.status_code == 200
+    update.assert_awaited_once_with("fake", "ACC1", {"picked": ["b", " a "]})
+
+
+def test_a_manual_sync_is_not_accepted_while_one_is_running(client):
+    from cognee.modules.integrations import ingestion
+
+    credential = type("Cred", (), {"provider_account_id": "ACC1"})()
+    integration = supported_integrations["fake"]
+    sync_now = AsyncMock()
+    with (
+        patch.object(
+            _router_module, "get_active_credential_for_user", new=AsyncMock(return_value=credential)
+        ),
+        patch.object(integration, "sync_now", sync_now),
+    ):
+        ingestion._running_syncs.add(("fake", "ACC1"))
+        try:
+            running = client.post("/api/v1/integrations/fake/sync").json()
+        finally:
+            ingestion._running_syncs.discard(("fake", "ACC1"))
+        idle = client.post("/api/v1/integrations/fake/sync").json()
+
+    assert running == {"accepted": False}
+    assert idle == {"accepted": True}
+    sync_now.assert_called_once_with(credential)
+
+
 def test_disconnect_calls_revoke_remote_and_revokes_locally(client):
     fake_credential = type("Cred", (), {"provider_account_id": "ACC1"})()
     integration = supported_integrations["fake"]
@@ -469,3 +662,161 @@ def test_a_non_ascii_nonce_cookie_is_filtered_out_not_a_crash():
     # itself raise TypeError, before ever reaching the real one.
     assert _install_nonce_matches(_FakeRequest(), "fake", "someone-elses-nonce") is False
     assert _install_nonce_matches(_FakeRequest(), "fake", "realnonce") is True
+
+
+@pytest.mark.asyncio
+async def test_spawned_integration_work_is_registered_for_the_shutdown_drain():
+    import asyncio
+
+    from cognee.infrastructure import background_tasks
+
+    router_module = importlib.import_module(
+        "cognee.api.v1.integrations.routers.get_integrations_router"
+    )
+    gate, finished = asyncio.Event(), []
+
+    async def work():
+        await gate.wait()
+        finished.append(True)
+
+    before = set(background_tasks._BACKGROUND_TASKS)
+    router_module._spawn_background(work(), description="test work")
+    assert len(background_tasks._BACKGROUND_TASKS - before) == 1
+    gate.set()
+    assert await background_tasks.wait_for_background_tasks(timeout=2)
+    assert finished == [True]
+
+
+class _Connection:
+    def __init__(self, account_id, label="Workspace"):
+        self.provider_account_id = account_id
+        self.account_label = label
+        self.created_at = None
+
+
+def test_the_connections_of_a_provider_are_listed_with_their_account_ids(client):
+    connections = [_Connection("ACC2", "Second"), _Connection("ACC1", "First")]
+    with patch.object(
+        _router_module,
+        "list_active_credentials_for_provider",
+        new=AsyncMock(return_value=connections),
+    ) as listing:
+        response = client.get("/api/v1/integrations/fake/connections")
+
+    assert response.status_code == 200
+    assert [item["providerAccountId"] for item in response.json()["connections"]] == [
+        "ACC2",
+        "ACC1",
+    ]
+    listing.assert_awaited_once_with(USER_ID, "fake")
+
+
+_ACCOUNT_ROUTES = [
+    ("get", "/api/v1/integrations/fake/connection"),
+    ("get", "/api/v1/integrations/fake/resources"),
+    ("put", "/api/v1/integrations/fake/resources"),
+    ("post", "/api/v1/integrations/fake/sync"),
+    ("delete", "/api/v1/integrations/fake/connection"),
+]
+
+
+def _call(client, method, url, **params):
+    kwargs = {"json": {"resource_ids": ["a"]}} if method == "put" else {}
+    return getattr(client, method)(url, params=params, **kwargs)
+
+
+@pytest.mark.parametrize("method, url", _ACCOUNT_ROUTES)
+def test_a_named_account_that_is_not_the_users_is_a_404_not_another_account(client, method, url):
+    integration = supported_integrations["fake"]
+    integration.resource_selection_key = "picked"
+    lookup = AsyncMock(return_value=None)
+    try:
+        with patch.object(_router_module, "get_active_credential_for_user", new=lookup):
+            response = _call(client, method, url, account_id="SOMEONE-ELSES")
+    finally:
+        integration.resource_selection_key = None
+
+    # The body tells "that account" from "no connection at all": the other 404s of these
+    # routes ("fake is not connected") would pass for the second.
+    assert response.status_code == 404
+    assert response.json()["detail"] == "fake account is not connected"
+    lookup.assert_awaited_once_with(USER_ID, "fake", "SOMEONE-ELSES")
+
+
+@pytest.mark.parametrize("method, url", _ACCOUNT_ROUTES)
+def test_without_an_account_id_the_lookup_is_the_newest_connection_as_before(client, method, url):
+    integration = supported_integrations["fake"]
+    integration.resource_selection_key = "picked"
+    lookup = AsyncMock(return_value=None)
+    try:
+        with patch.object(_router_module, "get_active_credential_for_user", new=lookup):
+            response = _call(client, method, url)
+    finally:
+        integration.resource_selection_key = None
+
+    # No connection at all keeps each route's own answer: a status, a 404 or a false.
+    assert response.status_code in (200, 404)
+    lookup.assert_awaited_once_with(USER_ID, "fake", None)
+
+
+def test_a_manual_sync_runs_for_the_named_account(client):
+    credential = type("Cred", (), {"provider_account_id": "ACC2"})()
+    integration = supported_integrations["fake"]
+    sync_now = AsyncMock()
+    lookup = AsyncMock(return_value=credential)
+    with (
+        patch.object(_router_module, "get_active_credential_for_user", new=lookup),
+        patch.object(integration, "sync_now", sync_now),
+    ):
+        response = client.post("/api/v1/integrations/fake/sync", params={"account_id": "ACC2"})
+
+    assert response.json() == {"accepted": True}
+    lookup.assert_awaited_once_with(USER_ID, "fake", "ACC2")
+    sync_now.assert_called_once_with(credential)
+
+
+def test_disconnect_revokes_the_named_account_only(client):
+    credential = type("Cred", (), {"provider_account_id": "ACC2"})()
+    integration = supported_integrations["fake"]
+    with (
+        patch.object(
+            _router_module, "get_active_credential_for_user", new=AsyncMock(return_value=credential)
+        ),
+        patch.object(integration, "revoke_remote", AsyncMock()) as revoke_remote,
+        patch.object(_router_module, "revoke_credential_by_account", AsyncMock()) as revoke_local,
+    ):
+        response = client.delete(
+            "/api/v1/integrations/fake/connection", params={"account_id": "ACC2"}
+        )
+
+    assert response.json() == {"disconnected": True}
+    revoke_remote.assert_awaited_once_with(credential)
+    revoke_local.assert_awaited_once_with("fake", "ACC2")
+
+
+@pytest.mark.parametrize("method, url", _ACCOUNT_ROUTES)
+@pytest.mark.parametrize("blank", ["", "  "])
+def test_a_blank_account_id_names_nothing_and_is_refused(client, method, url, blank):
+    integration = supported_integrations["fake"]
+    integration.resource_selection_key = "picked"
+    lookup = AsyncMock(return_value=None)
+    try:
+        with patch.object(_router_module, "get_active_credential_for_user", new=lookup):
+            response = _call(client, method, url, account_id=blank)
+    finally:
+        integration.resource_selection_key = None
+
+    assert response.status_code == 422
+    lookup.assert_not_awaited()
+
+
+def test_a_connection_without_a_label_leaves_the_field_out(client):
+    connections = [_Connection("ACC1", None)]
+    with patch.object(
+        _router_module,
+        "list_active_credentials_for_provider",
+        new=AsyncMock(return_value=connections),
+    ):
+        body = client.get("/api/v1/integrations/fake/connections").json()
+
+    assert body == {"connections": [{"providerAccountId": "ACC1"}]}
