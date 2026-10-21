@@ -30,6 +30,7 @@ from cognee.modules.observability import (
 from cognee.modules.operations import record_operation
 from cognee.modules.search.methods import search as search_function
 from cognee.modules.search.types import SearchResult, SearchType
+from cognee.modules.search.types.SearchType import resolve_deprecated_search_type
 from cognee.modules.users.exceptions.exceptions import UserNotFoundError
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
@@ -122,6 +123,8 @@ async def search(
             Direct graph database queries using Cypher syntax.
             Best for: Advanced users, specific graph traversals, debugging.
             Returns: Raw graph query results.
+            Disabled by default; set ALLOW_CYPHER_QUERY=true to enable it
+            (also covers NATURAL_LANGUAGE).
 
         **FEELING_LUCKY**:
             Intelligently selects and runs the most appropriate search type.
@@ -174,11 +177,22 @@ async def search(
                     operations are query_facts, explore, traverse, find_path,
                     impact_analysis, insights (enola explainer findings with their
                     evidence facts, filterable by source/min_confidence), architecture
-                    (module-level overview with symbol edges rolled up to modules), and
-                    delta (what the last ingestion changed, plus the snapshot receipt).
-                    Add ``"diagram": "mermaid"`` (or ``"dot"``) to any operation to get
-                    the result rendered as diagram source under ``result["diagram"]``;
-                    architecture includes a Mermaid diagram unless ``"diagram": False``.
+                    (module-level overview with symbol edges rolled up to modules),
+                    delta (what the last ingestion changed, plus the snapshot receipt),
+                    and the agent navigation operations: capabilities (what the graph
+                    and server support), search (rank symbols, routes and flows by
+                    name, docstring and path), neighbors (every edge of one node),
+                    subgraph (the graph around up to 20 seeds, with truncation
+                    reported), flows (enola's entry points: list, show, through), hubs
+                    (the most connected nodes) and ask (seeds, flows, a one-hop
+                    neighbourhood, file:line citations and coverage notes for a
+                    natural-language question). Add ``"diagram": "mermaid"`` (or
+                    ``"dot"``) to get the result rendered as diagram source under
+                    ``result["diagram"]`` (search, ask, flows, hubs and capabilities
+                    have no graph to draw); architecture includes a Mermaid diagram
+                    unless ``"diagram": False``. Rejections raise
+                    ``CodeSearchValidationError`` with a stable ``error_code`` and
+                    ``error_param``.
         skills: Explicit skill names or Skill objects to load into the agentic retriever.
         tools: Optional whitelist of tool names available to the agentic retriever.
         max_iter: Maximum number of agentic tool-call iterations before forcing a final answer.
@@ -234,6 +248,7 @@ async def search(
         - GRAPH_DATABASE_PROVIDER: Must match what was used during cognify
 
     """
+    query_type = resolve_deprecated_search_type(query_type)
     if neighborhood_depth is not None and (
         not isinstance(neighborhood_depth, int) or neighborhood_depth < 1
     ):

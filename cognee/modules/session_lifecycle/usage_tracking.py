@@ -111,6 +111,10 @@ _PRICING_PER_M_TOKENS = {
     "gemini-2.0-flash": (0.10, 0.40),
     "gemini-1.5-pro": (1.25, 5.00),
     "gemini-1.5-flash": (0.075, 0.30),
+    # OpenAI embeddings (input only) — https://openai.com/api/pricing
+    "text-embedding-3-large": (0.13, 0.0),
+    "text-embedding-3-small": (0.02, 0.0),
+    "text-embedding-ada-002": (0.10, 0.0),
 }
 
 
@@ -186,3 +190,31 @@ async def record_llm_call(
         )
     except Exception as exc:
         logger.debug("record_llm_call: accumulate failed (%s)", exc, exc_info=True)
+
+
+async def record_embedding_call(*, model: str | None, tokens: int) -> None:
+    """Accumulate one embedding call's input tokens, kept separate from LLM tokens."""
+    op_usage = get_active_operation_usage()
+    if op_usage is not None:
+        op_usage.add_embedding(tokens)
+
+    target = _active_session.get()
+    if target is None:
+        return
+    session_id, user_id = target
+
+    cost = _estimate_cost_usd(model, tokens, 0)
+
+    try:
+        from cognee.modules.session_lifecycle.metrics import UsageKind, accumulate_usage
+
+        await accumulate_usage(
+            session_id=session_id,
+            user_id=user_id,
+            embedding_tokens=tokens,
+            embedding_cost_usd=cost,
+            model=model,
+            kind=UsageKind.EMBEDDING,
+        )
+    except Exception as exc:
+        logger.debug("record_embedding_call: accumulate failed (%s)", exc, exc_info=True)

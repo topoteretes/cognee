@@ -20,7 +20,6 @@ class CognifyConfig(BaseSettings):
     # "from_extraction": one "Type: name, name" line per extracted type, then
     # the chunk's relation texts, one per line, no LLM call.
     summary_method: Literal["llm", "from_extraction"] = "llm"
-    triplet_embedding: bool = False
     chunks_per_batch: int | None = None
     # Opt-in audit-grade provenance ledger (env: PROVENANCE_TRACKING). Default
     # OFF so the standard cognify pipeline is unchanged.
@@ -49,7 +48,6 @@ class CognifyConfig(BaseSettings):
         return {
             "classification_model": self.classification_model,
             "summarization_model": self.summarization_model,
-            "triplet_embedding": self.triplet_embedding,
             "chunks_per_batch": self.chunks_per_batch,
             "provenance_tracking": self.provenance_tracking,
             "graph_extractor": self.graph_extractor,
@@ -73,9 +71,23 @@ def _warn_if_contradiction_detection_is_set() -> None:
         )
 
 
+def _warn_if_triplet_embedding_is_set() -> None:
+    """A stale TRIPLET_EMBEDDING would otherwise look like it still wrote triplets.
+
+    Triplet embeddings and TRIPLET_COMPLETION were removed (SDK-1115). Called
+    from the cached read, so the warning fires once per process.
+    """
+    if os.getenv("TRIPLET_EMBEDDING") is not None:
+        logger.warning(
+            "TRIPLET_EMBEDDING is ignored: triplet embeddings and TRIPLET_COMPLETION "
+            "were removed. Cognify no longer writes the Triplet_text collection."
+        )
+
+
 @lru_cache
 def get_cognify_config():
     _warn_if_contradiction_detection_is_set()
+    _warn_if_triplet_embedding_is_set()
     return CognifyConfig()
 
 

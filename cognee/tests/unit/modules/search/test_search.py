@@ -808,7 +808,7 @@ async def test_code_seed_miss_reports_through_the_same_error_field(monkeypatch, 
     assert [payload.dataset_name for payload in results] == ["repo_a", "repo_b"]
     missed = results[1]
     assert "parse_config" in missed.error
-    assert missed.completion == {"seed_not_found": True, "error": missed.error}
+    assert missed.completion == {"seed_not_found": True, "error": missed.error, "code": "not_found"}
 
 
 def test_recall_normalizes_an_empty_dataset_entry_to_no_items():
