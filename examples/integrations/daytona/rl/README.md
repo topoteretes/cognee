@@ -87,6 +87,15 @@ graded rollouts. The run prints what memory changes for such a trainer:
 
 ## What a run looks like
 
+![Reward grid of the recorded run: per bug family, every attempt as a square across the three training steps and the held-out evaluation with memory off and on](results.svg)
+
+Each square is one attempt in its own sandbox, filled when every hidden test
+passed. Read it row by row: a family flips from all-fail to all-pass the step
+after its failures were distilled; "mixed group" marks the groups a
+group-relative trainer could learn from; the held-out columns are the same
+unseen bugs without and with the lessons. `make_figure.py` draws it from a
+run's report JSON.
+
 Four full runs on a stock Tier 1/2 account (policy `openai/gpt-5.6-luna`,
 3 steps, 4 variants, groups of 8, 4 sandboxes at a time; 128 rollouts, about
 15 minutes, 17 s per attempt). `transcript.txt` is the last one.
@@ -155,6 +164,8 @@ sandboxes, and a fresh container is about three seconds here.
 rl/
 ├── rl_loop.py        # memory sandbox + rollout groups + improve + eval + COGX export
 ├── ledger_env.py     # the task: reference ledger, seeded variants, hidden tests, prompt, grader
+├── make_figure.py    # reward grid (results.svg) from a run's report JSON
+├── results.svg       # the recorded run's reward grid
 ├── transcript.txt    # the recorded run (replay with ../walkthrough.py --transcript)
 ├── WALKTHROUGH.md    # the same run as an annotated document
 ├── out/              # COGX checkpoint and per-run report JSON (created at runtime)
