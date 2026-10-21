@@ -483,7 +483,8 @@ async def test_startup_recovery_closes_stale_runs_of_every_pipeline(
     assert closed.started_at is not None and closed.started_at.replace(
         tzinfo=None
     ) == started_at.replace(tzinfo=None)
-    assert closed.run_info["data"] == ["some-data-id"]
+    # A run closed from outside knows no ids; the legacy STARTED row's list is not copied.
+    assert closed.run_info["data"] == [] and closed.run_info["errored_data"] == []
 
     # Running recovery again leaves the ERRORED run alone.
     await recover_stale_pipeline_runs_on_startup()

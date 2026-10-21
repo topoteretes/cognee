@@ -26,7 +26,11 @@ from cognee.modules.pipelines.operations import (
     log_pipeline_run_start,
 )
 from cognee.modules.pipelines.run_ownership import pipeline_run_ownership
-from cognee.modules.pipelines.utils import generate_pipeline_id
+from cognee.modules.pipelines.utils import (
+    errored_run_info_data_ids,
+    generate_pipeline_id,
+    summarize_run_info_data,
+)
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -95,7 +99,7 @@ async def run_tasks(
     with pipeline_run_ownership() as ownership:
         pipeline_id = generate_pipeline_id(user.id, dataset.id, pipeline_name)
         pipeline_run = await log_pipeline_run_start(
-            pipeline_id, pipeline_name, dataset.id, data, user=user, recovery_token=ownership.token
+            pipeline_id, pipeline_name, dataset.id, user=user, recovery_token=ownership.token
         )
         pipeline_run_id = pipeline_run.pipeline_run_id
         # getattr (not attribute access) because unit tests stub
@@ -332,12 +336,12 @@ async def run_tasks(
                     pipeline_id,
                     pipeline_name,
                     dataset.id,
-                    data,
                     user=user,
                     started_at=run_started_at,
                     tokens_in=run_usage.tokens_in if run_usage else 0,
                     tokens_out=run_usage.tokens_out if run_usage else 0,
                     embedding_tokens=run_usage.embedding_tokens if run_usage else 0,
+                    completed_data_ids=summarize_run_info_data(results),
                 )
                 ownership.closed = True
                 run_finished = True
@@ -392,13 +396,15 @@ async def run_tasks(
                     pipeline_id,
                     pipeline_name,
                     dataset.id,
-                    data,
                     root_error,
                     user=user,
                     started_at=run_started_at,
                     tokens_in=run_usage.tokens_in if run_usage else 0,
                     tokens_out=run_usage.tokens_out if run_usage else 0,
                     embedding_tokens=run_usage.embedding_tokens if run_usage else 0,
+                    # None when the run failed before any item ran.
+                    completed_data_ids=summarize_run_info_data(locals().get("results")),
+                    errored_data_ids=errored_run_info_data_ids(locals().get("results")),
                 )
 
                 ownership.closed = True

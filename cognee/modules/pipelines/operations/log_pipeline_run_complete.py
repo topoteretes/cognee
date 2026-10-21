@@ -1,12 +1,10 @@
 from datetime import datetime, timezone
-from typing import Any
 from uuid import UUID
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.operations import get_operation_origin
 from cognee.modules.operations.usage_accumulator import get_parent_run_id
 from cognee.modules.pipelines.models import OperationOutcome, PipelineRun, PipelineRunStatus
-from cognee.modules.pipelines.utils import summarize_run_info_data
 from cognee.modules.users.models import User
 
 
@@ -15,25 +13,26 @@ async def log_pipeline_run_complete(
     pipeline_id: UUID,
     pipeline_name: str,
     dataset_id: UUID,
-    data: Any,
     *,
     user: User | None = None,
     started_at: datetime | None = None,
     tokens_in: int | None = None,
     tokens_out: int | None = None,
     embedding_tokens: int | None = None,
+    completed_data_ids: list[str] | None = None,
 ):
-    data_info = summarize_run_info_data(data)
+    """Append the COMPLETED row for a run.
 
+    ``completed_data_ids`` are the documents the run processed. A run completes only
+    when no item failed, so the row's ``errored_data`` is always empty.
+    """
     pipeline_run = PipelineRun(
         pipeline_run_id=pipeline_run_id,
         pipeline_name=pipeline_name,
         pipeline_id=pipeline_id,
         status=PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
         dataset_id=dataset_id,
-        run_info={
-            "data": data_info,
-        },
+        run_info={"data": completed_data_ids or [], "errored_data": []},
         user_id=user.id if user else None,
         tenant_id=getattr(user, "tenant_id", None) if user else None,
         operation_name=pipeline_name,

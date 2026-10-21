@@ -183,7 +183,12 @@ async def test_run_tasks_resolver_shares_one_run_lifecycle(monkeypatch, runner_p
 
     async def _fake_item_run(data_item, ds, item_tasks, *args, **kwargs):
         processed.append((data_item, item_tasks))
-        return {"run_info": "ok"}
+        return {
+            "run_info": PipelineRunCompleted(
+                pipeline_run_id=run_id, dataset_id=dataset.id, dataset_name=dataset.name
+            ),
+            "data_id": data_item,
+        }
 
     monkeypatch.setattr(run_tasks_module, "run_tasks_data_item", _fake_item_run)
 
@@ -203,8 +208,8 @@ async def test_run_tasks_resolver_shares_one_run_lifecycle(monkeypatch, runner_p
     assert logs.error.await_count == 0
     assert [type(e) for e in events] == [PipelineRunStarted, PipelineRunCompleted]
     assert all(e.pipeline_run_id == run_id for e in events)
-    # log_pipeline_run_start received the real item list, not None.
-    assert logs.start.await_args.args[3] == ["m1", "m2", "r1"]
+    # The COMPLETED row lists the items this run completed, by id.
+    assert logs.complete.await_args.kwargs["completed_data_ids"] == ["m1", "m2", "r1"]
 
     # Every item ran with its own resolved task list.
     assert sorted(processed) == [
