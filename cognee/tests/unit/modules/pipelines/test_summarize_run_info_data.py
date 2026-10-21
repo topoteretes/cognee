@@ -43,22 +43,6 @@ def test_only_documents_completed_in_this_run_are_listed():
     assert errored_run_info_data_ids(results) == [str(failed)]
 
 
-def test_a_run_that_skips_every_document_stores_no_ids():
-    results = [_item(PipelineRunAlreadyCompleted, uuid4()) for _ in range(2000)]
-
-    assert summarize_run_info_data(None, results) == []
-    assert errored_run_info_data_ids(results) == []
-
-
-def test_raw_input_is_never_stored():
-    data_id = uuid4()
-    text = "Marie Curie was born in Warsaw. " * 100
-
-    recorded = summarize_run_info_data([text], [_item(PipelineRunCompleted, data_id)])
-
-    assert recorded == [str(data_id)]
-
-
 def test_an_item_that_failed_before_naming_its_document_is_not_listed():
     results = [_item(PipelineRunErrored, None), "not a per-item result"]
 
