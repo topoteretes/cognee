@@ -199,11 +199,10 @@ _IMPROVE_STAGE_DESCRIPTORS: dict[str, dict[str, Any]] = {
     },
     "global_context_index": {
         "label": "global context index",
-        "summary": "Builds hierarchical context summaries for retrieval.",
+        "summary": "Builds per-document and dataset-root context summaries for retrieval.",
         "pipeline_name": "memify_pipeline",
         "effects": [
             {"effect": "produces", "target_type": "GlobalContextSummary"},
-            {"effect": "enriches", "target_type": "TextSummary"},
         ],
     },
 }
