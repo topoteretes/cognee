@@ -131,8 +131,8 @@ async def cognify_rollback_handler(
     data_ingestion_info: Any = None,
     keep_completed_data: bool = False,
     **kwargs: Any,
-) -> None:
-    """Undo what ``pipeline_run_id`` wrote into ``dataset``.
+) -> set[UUID]:
+    """Undo what ``pipeline_run_id`` wrote into ``dataset``; return the data ids reverted.
 
     With ``keep_completed_data`` the documents the run marked complete keep their
     artifacts and their completed status; only the run's unfinished work is
@@ -141,6 +141,9 @@ async def cognify_rollback_handler(
     them, so deleting them would leave the dataset with holes nothing refills.
     The inline failure path keeps the default, whole-run rollback: there the
     redo is immediate.
+
+    The returned ids are the documents whose cognify status was cleared, so the
+    run's ERRORED row does not list them as completed.
     """
     dataset_id = getattr(dataset, "id", None)
     if not dataset_id or not pipeline_run_id:
@@ -150,7 +153,7 @@ async def cognify_rollback_handler(
             dataset_id,
             pipeline_run_id,
         )
-        return
+        return set()
 
     user_id = getattr(user, "id", None)
     db_engine = get_relational_engine()
@@ -180,8 +183,9 @@ async def cognify_rollback_handler(
                 str(pipeline_run_id), keep_data_ids=kept_data_ids or None
             )
 
+            reverted_data_ids = target_data_ids - kept_data_ids
             async with db_engine.get_async_session() as session:
-                await _reset_pipeline_status(session, target_data_ids - kept_data_ids, dataset_id)
+                await _reset_pipeline_status(session, reverted_data_ids, dataset_id)
                 await session.commit()
 
             logger.info(
@@ -190,7 +194,7 @@ async def cognify_rollback_handler(
                 dataset_id,
                 user_id,
             )
-            return
+            return reverted_data_ids
 
     async with db_engine.get_async_session() as session:
         target_nodes = (
@@ -309,7 +313,8 @@ async def cognify_rollback_handler(
                 edge_filter = and_(edge_filter, Edge.data_id.notin_(list(kept_data_ids)))
             await session.execute(delete(Edge).where(edge_filter))
 
-        await _reset_pipeline_status(session, target_data_ids - kept_data_ids, dataset_id)
+        reverted_data_ids = target_data_ids - kept_data_ids
+        await _reset_pipeline_status(session, reverted_data_ids, dataset_id)
 
         await session.commit()
 
@@ -321,3 +326,4 @@ async def cognify_rollback_handler(
         len(target_nodes),
         len(target_edges),
     )
+    return reverted_data_ids

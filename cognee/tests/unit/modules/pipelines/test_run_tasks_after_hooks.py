@@ -156,6 +156,7 @@ async def _reported_failure_item(*args, **kwargs):
 async def test_after_items_ran_still_runs_when_an_item_failed_but_after_run_completed_does_not(
     monkeypatch, runner_plumbing
 ):
+    monkeypatch.setenv("RAISE_INCREMENTAL_LOADING_ERRORS", "false")
     dataset, logs = _setup(monkeypatch, runner_plumbing, _reported_failure_item)
     after_items_ran, after_run_completed = AsyncMock(), AsyncMock()
 
@@ -175,6 +176,7 @@ async def test_a_failing_after_items_ran_after_a_reported_failure_keeps_the_repo
 ):
     """A reported failure is returned, not raised, and callers act on its error class
     (improve stops its run on a budget error). A broken hook must not replace it."""
+    monkeypatch.setenv("RAISE_INCREMENTAL_LOADING_ERRORS", "false")
     from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
 
     async def budget_item(*args, **kwargs):

@@ -312,7 +312,7 @@ async def test_rollback_preserves_markers_of_previously_extracted_data(monkeypat
     monkeypatch.setattr(rollback_module, "multi_user_support_possible", lambda: False)
     monkeypatch.setattr(rollback_module, "_reset_pipeline_status", _capture_reset)
 
-    await rollback_module.cognify_rollback_handler(
+    reverted = await rollback_module.cognify_rollback_handler(
         pipeline_run_id=pipeline_run_id,
         dataset=SimpleNamespace(id=dataset_id),
         data_ingestion_info=[
@@ -338,6 +338,8 @@ async def test_rollback_preserves_markers_of_previously_extracted_data(monkeypat
 
     assert reset_calls == [{errored_id}]
     assert previously_extracted_id not in reset_calls[0]
+    # run_tasks drops what was reverted from the ERRORED row's completed ids.
+    assert reverted == {errored_id}
 
 
 @pytest.mark.asyncio

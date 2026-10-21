@@ -24,6 +24,7 @@ from cognee.infrastructure.databases.relational import (
     get_relational_engine,
 )
 from cognee.modules.data.models import Data
+from cognee.modules.ingestion import StoredFile
 from cognee.modules.pipelines.models import PipelineRun
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunCompleted,
@@ -43,7 +44,7 @@ def _item_result(status, data_id, dataset_id):
     return {"run_info": run_info, "data_id": data_id}
 
 
-async def _run_until_error(monkeypatch, runner_plumbing, item_run, items):
+async def _run_until_error(monkeypatch, runner_plumbing, item_run, items, rollback_handler=None):
     dataset = SimpleNamespace(id=uuid4(), name="ds", owner_id=uuid4())
     logs = runner_plumbing(run_tasks_module, dataset)
     monkeypatch.setattr(run_tasks_module, "validate_pipeline_tasks", lambda tasks: None)
@@ -58,6 +59,7 @@ async def _run_until_error(monkeypatch, runner_plumbing, item_run, items):
             data=items,
             user=SimpleNamespace(id=uuid4(), tenant_id=None),
             pipeline_name="cognify_pipeline",
+            rollback_handler=rollback_handler,
         ):
             pass
 
@@ -93,6 +95,7 @@ async def test_a_reported_item_failure_leaves_completed_and_failed_ids(
     monkeypatch, runner_plumbing
 ):
     """RAISE_INCREMENTAL_LOADING_ERRORS=false: the item returns its failure."""
+    monkeypatch.setenv("RAISE_INCREMENTAL_LOADING_ERRORS", "false")
     done, failing = Data(id=uuid4(), name="done"), Data(id=uuid4(), name="failing")
 
     def item_run(dataset):
@@ -108,6 +111,120 @@ async def test_a_reported_item_failure_leaves_completed_and_failed_ids(
 
     assert completed == [str(done.id)]
     assert errored == [str(failing.id)]
+
+
+@pytest.mark.asyncio
+async def test_a_rolled_back_item_is_not_listed_as_completed(monkeypatch, runner_plumbing):
+    """cognify rolls the whole run back: what it reverted did not complete."""
+    reverted, kept = Data(id=uuid4(), name="reverted"), Data(id=uuid4(), name="kept")
+    failing = Data(id=uuid4(), name="failing")
+    seen = {}
+
+    def item_run(dataset):
+        async def run(data_item, *args, **kwargs):
+            if data_item is failing:
+                await asyncio.sleep(0.05)  # let the other items finish first
+                raise RuntimeError("extraction failed")
+            return _item_result(PipelineRunCompleted, data_item.id, dataset.id)
+
+        return run
+
+    async def rollback(**kwargs):
+        seen["data_ingestion_info"] = kwargs["data_ingestion_info"]
+        return {reverted.id}
+
+    completed, errored = await _run_until_error(
+        monkeypatch, runner_plumbing, item_run, [reverted, kept, failing], rollback
+    )
+
+    # The rollback is told about every item that finished before the failure,
+    # although gather() never returned their results.
+    assert {result["data_id"] for result in seen["data_ingestion_info"]} == {
+        reverted.id,
+        kept.id,
+        failing.id,
+    }
+    assert completed == [str(kept.id)]
+    assert errored == [str(failing.id)]
+
+
+@pytest.mark.asyncio
+async def test_a_raised_item_failure_keeps_the_id_the_runner_resolved(monkeypatch, runner_plumbing):
+    """RAISE_INCREMENTAL_LOADING_ERRORS=true: raw input carries no id of its own,
+    so the run must keep the one the item runner resolved for it."""
+    monkeypatch.setenv("RAISE_INCREMENTAL_LOADING_ERRORS", "true")
+    data_id, error = uuid4(), RuntimeError("extraction failed")
+
+    dataset = SimpleNamespace(id=uuid4(), name="ds", owner_id=uuid4())
+    logs = runner_plumbing(run_tasks_module, dataset)
+    monkeypatch.setattr(run_tasks_module, "validate_pipeline_tasks", lambda tasks: None)
+
+    async def run(data_item, *args, **kwargs):
+        return {**_item_result(PipelineRunErrored, data_id, dataset.id), "error": error}
+
+    monkeypatch.setattr(run_tasks_module, "run_tasks_data_item", run)
+
+    with pytest.raises(RuntimeError) as raised:
+        async for _ in run_tasks_module.run_tasks(
+            tasks=["TASKS"],
+            dataset_id=dataset.id,
+            data=["some raw text"],
+            user=SimpleNamespace(id=uuid4(), tenant_id=None),
+            pipeline_name="cognify_pipeline",
+        ):
+            pass
+
+    assert raised.value is error
+    results = logs.error.await_args.kwargs["results"]
+    assert summarize_run_info_data(results=results) == []
+    assert errored_run_info_data_ids(results) == [str(data_id)]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_raw_input_is_named_by_the_row_ingestion_created(monkeypatch):
+    """Fresh content has no row at the pre-check; the failure is recorded under
+    the row ingestion created before the item failed."""
+    minted = SimpleNamespace(id=uuid4(), pipeline_status={})
+    rows = {"row": None}
+
+    monkeypatch.setattr(data_item_module, "get_relational_engine", lambda: SimpleNamespace())
+    monkeypatch.setattr(
+        data_item_module,
+        "save_data_item_to_storage_detailed",
+        AsyncMock(
+            return_value=StoredFile(file_path="file:///tmp/x.txt", metadata={"content_hash": "h"})
+        ),
+    )
+
+    async def identify(content_hash, user, dataset_id, session=None):
+        return rows["row"]
+
+    monkeypatch.setattr(data_item_module.ingestion, "identify_data_by_hash", identify)
+
+    async def ingest_then_fail(**kwargs):
+        rows["row"] = minted
+        raise RuntimeError("extraction failed")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(data_item_module, "run_tasks_with_telemetry", ingest_then_fail)
+
+    events = [
+        event
+        async for event in data_item_module.run_tasks_data_item_incremental(
+            data_item="some raw text",
+            dataset=SimpleNamespace(id=uuid4(), name="ds"),
+            tasks=[],
+            pipeline_name="add_pipeline",
+            pipeline_id=uuid4(),
+            pipeline_run_id=uuid4(),
+            ctx=None,
+            user=SimpleNamespace(id=uuid4()),
+        )
+    ]
+
+    assert len(events) == 1
+    assert isinstance(events[0]["run_info"], PipelineRunErrored)
+    assert events[0]["data_id"] == minted.id
 
 
 @pytest.mark.asyncio

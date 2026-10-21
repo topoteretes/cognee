@@ -138,6 +138,7 @@ async def test_telemetry_follows_the_whole_run_lifecycle(monkeypatch, outcome):
 
 @pytest.mark.asyncio
 async def test_run_tasks_calls_custom_rollback_on_pipeline_failure(monkeypatch):
+    monkeypatch.setenv("RAISE_INCREMENTAL_LOADING_ERRORS", "false")
     dataset_id = uuid4()
     user_id = uuid4()
     owner_id = uuid4()

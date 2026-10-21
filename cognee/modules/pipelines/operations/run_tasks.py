@@ -34,7 +34,7 @@ from cognee.shared.utils import send_telemetry, telemetry_exception_properties, 
 from cognee.tasks.ingestion import resolve_data_directories
 
 from ..tasks.task import Task
-from .run_tasks_data_item import item_data_id, run_tasks_data_item
+from .run_tasks_data_item import item_data_id, raise_item_errors, run_tasks_data_item
 from .run_tasks_with_telemetry import (
     PIPELINE_RUN_COMPLETED,
     PIPELINE_RUN_ERRORED,
@@ -43,6 +43,19 @@ from .run_tasks_with_telemetry import (
 )
 
 logger = get_logger("run_tasks(tasks: [Task], data)")
+
+
+def _without_reverted(results: list, reverted_data_ids: set) -> list:
+    """``results`` minus the completed items the rollback reverted."""
+    reverted = {str(data_id) for data_id in reverted_data_ids}
+    return [
+        result
+        for result in results
+        if not (
+            isinstance(result.get("run_info"), PipelineRunCompleted)
+            and str(result.get("data_id")) in reverted
+        )
+    ]
 
 
 async def run_tasks(
@@ -54,7 +67,7 @@ async def run_tasks(
     incremental_loading: bool = False,
     data_per_batch: int = 20,
     extras: dict | None = None,
-    rollback_handler: Callable[..., Awaitable[None]] | None = None,
+    rollback_handler: Callable[..., Awaitable[set[UUID] | None]] | None = None,
     llm_config: LLMConfig | None = None,
     embedding_config: EmbeddingConfig | None = None,
     data_cache: bool = False,
@@ -69,6 +82,9 @@ async def run_tasks(
     domain-blind). A constant list is just the degenerate resolver; items
     resolved to different lists still share this run's lifecycle — one run
     record, one database context, one rollback, one terminal status.
+
+    ``rollback_handler`` is awaited when the run fails and returns the data ids
+    it reverted (or None); the ERRORED row does not list those as completed.
 
     ``after_run_completed`` is awaited once the run is recorded and reported
     complete, still inside this dataset's database context (cognify uses it
@@ -198,9 +214,8 @@ async def run_tasks(
                 progress_state = {"current_stage": None}
 
                 async def _record_item_progress():
-                    # An item that hard-raised (e.g. incremental loading with
-                    # RAISE_INCREMENTAL_LOADING_ERRORS=true, the default) never
-                    # reaches _run_item's `return` — this is called from `finally`
+                    # An item that raised (e.g. a failure in the regular item
+                    # runner) never reaches _run_item's `return` — this is called from `finally`
                     # instead, so completed_items reaches total_items regardless of
                     # how the item ended. The error/success split itself still
                     # happens after gather() below; this only tracks "done", not
@@ -276,6 +291,13 @@ async def run_tasks(
                         await _record_item_progress()
                     if result:
                         finished_results.append(result)
+                        # The incremental runner returns its failure, data_id
+                        # included, instead of raising it; raise it here.
+                        if (
+                            isinstance(result["run_info"], PipelineRunErrored)
+                            and raise_item_errors()
+                        ):
+                            raise result["error"]
                     return result
 
                 item_futures = [
@@ -372,19 +394,28 @@ async def run_tasks(
                     raise
                 # Rollback needs a successfully opened database context. Failures
                 # during setup and generator closure still receive a terminal record.
+                # It gets every result recorded so far: a raising item aborts
+                # gather() before ``results`` exists, and the items that completed
+                # by then must be reverted too.
+                reverted_data_ids = set()
                 if database_ready and callable(rollback_handler):
                     try:
-                        await rollback_handler(
-                            pipeline_run_id=pipeline_run_id,
-                            pipeline_id=pipeline_id,
-                            pipeline_name=pipeline_name,
-                            dataset=dataset,
-                            user=user,
-                            data=data,
-                            data_ingestion_info=locals().get("results"),
-                            error=error,
+                        reverted_data_ids = (
+                            await rollback_handler(
+                                pipeline_run_id=pipeline_run_id,
+                                pipeline_id=pipeline_id,
+                                pipeline_name=pipeline_name,
+                                dataset=dataset,
+                                user=user,
+                                data=data,
+                                data_ingestion_info=finished_results,
+                                error=error,
+                            )
+                            or set()
                         )
                     except Exception:
+                        # Status is reset last, so a failed rollback leaves the
+                        # completed items marked completed, as the row lists them.
                         logger.exception("Rollback errored")
 
                 # Per-item failures arrive wrapped in a generic
@@ -414,7 +445,7 @@ async def run_tasks(
                     tokens_out=run_usage.tokens_out if run_usage else 0,
                     embedding_tokens=run_usage.embedding_tokens if run_usage else 0,
                     # Empty when the run failed before any item finished.
-                    results=finished_results,
+                    results=_without_reverted(finished_results, reverted_data_ids),
                 )
 
                 ownership.closed = True

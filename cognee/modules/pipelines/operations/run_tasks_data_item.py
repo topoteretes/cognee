@@ -59,6 +59,15 @@ def item_data_id(data_item: Any):
     return None
 
 
+def raise_item_errors() -> bool:
+    """Whether a failed item ends the run with its own error.
+
+    ``RAISE_INCREMENTAL_LOADING_ERRORS`` (default true). When false, the run
+    finishes the other items first and fails with ``PipelineRunFailedError``.
+    """
+    return os.getenv("RAISE_INCREMENTAL_LOADING_ERRORS", "true").lower() == "true"
+
+
 def _push_stage_progress(
     yielded: PipelineRunYield,
     ctx: PipelineContext | None,
@@ -281,11 +290,20 @@ async def run_tasks_data_item_incremental(
         }
 
     except Exception as error:
-        # Temporarily swallow error and try to process rest of documents first, then re-raise error at end of data ingestion pipeline
-        logger.error(
-            f"Exception caught while processing data: {error}.\n Data processing failed for data item: {data_item}."
-        )
+        # Hand the failure back as this item's result; run_tasks raises it when
+        # raise_item_errors() says so, after recording which document failed.
+        logger.exception(f"Data processing failed for data item: {data_item}.")
         from cognee.modules.operations import scrub_error_message
+
+        if data_id is None and content_hash is not None:
+            # Fresh content had no row at the pre-check; ingestion may have
+            # created one before the failure. Best-effort: the lookup must not
+            # replace the item's own error.
+            try:
+                data_point = await ingestion.identify_data_by_hash(content_hash, user, dataset.id)
+                data_id = data_point.id if data_point is not None else None
+            except Exception:
+                logger.exception("Failed to resolve the data id of a failed data item")
 
         yield {
             "run_info": PipelineRunErrored(
@@ -303,9 +321,6 @@ async def run_tasks_data_item_incremental(
             "error": error,
             "data_id": data_id,
         }
-
-        if os.getenv("RAISE_INCREMENTAL_LOADING_ERRORS", "true").lower() == "true":
-            raise
 
 
 async def run_tasks_data_item_regular(
@@ -430,15 +445,22 @@ async def run_tasks_data_item(
     try:
         result = await _drain_item_events(events, ctx, tasks, pipeline_run_id, progress_state)
     except Exception:
-        # Preserve the original pipeline exception if flushing already-written
-        # edge evidence also fails; rollback still has graph-native run refs.
-        try:
-            await flush_context_provenance(ctx)
-        except Exception:
-            logger.exception(
-                "Failed to persist provenance for an errored data item",
-            )
+        await _flush_provenance_of_errored_item(ctx)
         raise
 
-    await flush_context_provenance(ctx)
+    if isinstance(result, dict) and isinstance(result.get("run_info"), PipelineRunErrored):
+        await _flush_provenance_of_errored_item(ctx)
+    else:
+        await flush_context_provenance(ctx)
     return result
+
+
+async def _flush_provenance_of_errored_item(ctx: PipelineContext | None) -> None:
+    # Preserve the original pipeline exception if flushing already-written
+    # edge evidence also fails; rollback still has graph-native run refs.
+    try:
+        await flush_context_provenance(ctx)
+    except Exception:
+        logger.exception(
+            "Failed to persist provenance for an errored data item",
+        )
