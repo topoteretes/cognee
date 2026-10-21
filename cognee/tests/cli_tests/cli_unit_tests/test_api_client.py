@@ -217,6 +217,30 @@ class TestAddFileDetection:
             os.unlink(path)
 
 
+class TestRecallEndpoint:
+    """recall() must serialize the source-reference option for the API."""
+
+    def _client_with_mock(self, json_body):
+        with patch("cognee.cli.api_client._import_httpx"):
+            client = CogneeApiClient("http://localhost:8000")
+            resp = MagicMock(status_code=200)
+            resp.json.return_value = json_body
+            http = MagicMock()
+            http.post.return_value = resp
+            client._client = http
+            return client, http
+
+    def test_include_references_is_sent_to_recall_endpoint(self):
+        client, http = self._client_with_mock([{"text": "answer", "source": "graph"}])
+
+        result = client.recall("Summarize the report", include_references=True)
+
+        assert result == [{"text": "answer", "source": "graph"}]
+        url, kwargs = http.post.call_args[0][0], http.post.call_args.kwargs
+        assert url.endswith("/api/v1/recall")
+        assert kwargs["json"]["include_references"] is True
+
+
 class TestImproveEndpoint:
     """improve() serializes every SDK option; omitted ones stay off the wire."""
 

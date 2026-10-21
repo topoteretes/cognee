@@ -217,6 +217,29 @@ class TestRecallCommand:
 
         assert actions["query_type"].default is None
         assert "HYBRID_COMPLETION" in actions["query_type"].choices
+        assert actions["include_references"].default is False
+        assert parser.parse_args(["question", "--include-references"]).include_references is True
+
+    @patch("cognee.cli.commands.recall_command.asyncio.run", side_effect=_mock_run)
+    def test_include_references_is_forwarded_to_sdk(self, mock_asyncio_run):
+        mock_cognee = MagicMock()
+        mock_cognee.recall = AsyncMock(return_value=["answer"])
+
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = RecallCommand()
+            args = argparse.Namespace(
+                query_text="Summarize the report",
+                query_type=None,
+                datasets=["docs"],
+                top_k=10,
+                system_prompt=None,
+                session_id=None,
+                output_format="pretty",
+                include_references=True,
+            )
+            command.execute(args)
+
+        assert mock_cognee.recall.await_args.kwargs["include_references"] is True
 
     @patch("cognee.cli.commands.recall_command.asyncio.run", side_effect=_mock_run)
     def test_session_only_when_query_type_is_omitted(self, mock_asyncio_run):

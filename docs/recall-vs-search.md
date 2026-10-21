@@ -31,6 +31,21 @@ Source of truth: `cognee/api/v1/recall/recall.py` and `cognee/api/v1/search/sear
 5. **Structured output shorthand.** `response_model=` validates the LLM answer against a
    Pydantic model and returns it in the result's `structured` field.
 
+## Including source references
+
+For completion-style answers, set `include_references=True` to append an evidence section to
+the answer with the source references used to support it. The CLI exposes the same option for
+both its in-process and API modes:
+
+```bash
+cognee-cli recall "Summarize the report" -d reports --include-references
+cognee-cli --api-url http://localhost:8000 recall "Summarize the report" \
+  -d reports --include-references --output-format json
+```
+
+The option defaults to off. Use JSON output when a script needs to consume the returned
+references; the pretty output is intended for reading the answer and evidence together.
+
 ## When to call search() directly
 
 - You need the agentic extras as first-class parameters: `skills`, `tools`, `max_iter`,

@@ -56,7 +56,8 @@ def _print_graph_results(results, fallback_type: str) -> None:
 
     if resolved_type in COMPLETION_SEARCH_TYPES:
         for i, result in enumerate(results, 1):
-            fmt.echo(f"{fmt.bold('Response:')} {result}")
+            answer = _field(result, "text")
+            fmt.echo(f"{fmt.bold('Response:')} {answer if answer is not None else result}")
             if i < len(results):
                 fmt.echo("-" * 40)
     elif resolved_type == "CHUNKS":

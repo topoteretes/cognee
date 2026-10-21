@@ -304,7 +304,7 @@ def _dispatch_recall(client: CogneeApiClient, args: argparse.Namespace) -> None:
         top_k=args.top_k,
         system_prompt=getattr(args, "system_prompt", None),
         session_id=args.session_id,
-        include_references=getattr(args, "include_references", False)
+        include_references=getattr(args, "include_references", False),
     )
 
     output_format = getattr(args, "output_format", "pretty")

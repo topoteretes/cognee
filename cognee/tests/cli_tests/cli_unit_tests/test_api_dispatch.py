@@ -190,6 +190,37 @@ class TestRecallDispatch:
         assert mock_instance.recall.call_args.kwargs["search_type"] == "CHUNKS"
 
     @patch("cognee.cli.api_dispatch.CogneeApiClient")
+    def test_include_references_is_forwarded(self, MockClient):
+        mock_instance = self._client(MockClient, ["answer"])
+
+        dispatch(self._args(include_references=True))
+
+        assert mock_instance.recall.call_args.kwargs["include_references"] is True
+
+    @patch("cognee.cli.api_dispatch.CogneeApiClient")
+    def test_completion_output_shows_answer_and_evidence_text(self, MockClient, capsys):
+        self._client(
+            MockClient,
+            [
+                {
+                    "source": "graph",
+                    "search_type": "HYBRID_COMPLETION",
+                    "text": "Answer: report summary\n\nEvidence:\n- report.pdf, page 2",
+                    "raw": {"internal": "payload"},
+                }
+            ],
+        )
+
+        dispatch(self._args(include_references=True))
+
+        output = capsys.readouterr().out
+        assert "Answer: report summary" in output
+        assert "Evidence:" in output
+        assert "report.pdf, page 2" in output
+        assert "internal" not in output
+        assert "search_type" not in output
+
+    @patch("cognee.cli.api_dispatch.CogneeApiClient")
     def test_session_entries_print_as_question_and_answer(self, MockClient, capsys):
         """The wire tag is "source"; the branch used to look for "_source"."""
         self._client(
