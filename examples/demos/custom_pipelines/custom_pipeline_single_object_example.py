@@ -1,9 +1,10 @@
 """
-Custom pipeline example: LLM-powered entity extraction on DataPoint objects.
+Custom pipeline example: LLM-powered entity extraction into typed DataPoints.
 
-Demonstrates the deferred-call pipeline pattern (TaskSpec / BoundTask)
-with typed DataPoint models, field annotations, LLM structured output,
-and per-source freshness tracking via source_content_hash.
+Demonstrates a custom Task pipeline with typed DataPoint models, field
+annotations, LLM structured output, and per-source freshness tracking via
+source_content_hash — run against a named dataset so the nodes it stores are
+attributed to that dataset and searchable with recall().
 
 Usage:
     uv run python examples/demos/custom_pipelines/custom_pipeline_single_object_example.py
@@ -17,13 +18,17 @@ from typing import Annotated
 
 from pydantic import BaseModel, Field
 
+import cognee
 from cognee.infrastructure.engine import DataPoint, Dedup, Embeddable
+from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm import LLMGateway
-from cognee.modules.pipelines.operations.run_pipeline import run_pipeline
-from cognee.modules.pipelines.tasks.task import task
+from cognee.modules.data.models import Data
+from cognee.modules.pipelines import Task
 from cognee.tasks.storage import add_data_points
 
-# -- Data models --
+DATASET_NAME = "science_claims"
+
+# -- Graph models: what gets stored --
 
 
 class ScientificClaim(DataPoint):
@@ -42,47 +47,78 @@ class Person(DataPoint):
     claims: list[ScientificClaim] | None = None
 
 
-class AnalysisResult(BaseModel):
-    """LLM output model for structured extraction."""
+# -- LLM output models: what the model is asked to produce --
+#
+# Kept separate from the DataPoints on purpose. A DataPoint carries id, metadata,
+# versioning and provenance fields, and a structured-output call would hand every
+# one of them to the LLM to fill in. Extract into plain schemas, then build the
+# DataPoints from them so ids, metadata and provenance come from cognee.
 
-    people: list[Person] = Field(default_factory=list)
-    claims: list[ScientificClaim] = Field(default_factory=list)
+
+class ExtractedPerson(BaseModel):
+    name: str
+    role: str = ""
+
+
+class ExtractedClaim(BaseModel):
+    text: str
+    subject: str = ""
+    confidence: float = 1.0
+
+
+class ExtractionResult(BaseModel):
+    people: list[ExtractedPerson] = Field(default_factory=list)
+    claims: list[ExtractedClaim] = Field(default_factory=list)
+
+
+class ClaimAssignment(BaseModel):
+    person_name: str
+    claim_texts: list[str]
+
+
+class Assignments(BaseModel):
+    assignments: list[ClaimAssignment]
 
 
 # -- Pipeline tasks --
 
 
-@task
-async def extract_entities(text: str) -> AnalysisResult:
-    """Use LLM to extract people and claims from text."""
-    result = await LLMGateway.acreate_structured_output(
-        text_input=text,
+async def extract_entities(data_items: list[Data]) -> list[Person | ScientificClaim]:
+    """Read the ingested document(s) and extract people and claims as DataPoints."""
+    text_parts = []
+    for data_item in data_items:
+        async with open_data_file(data_item.raw_data_location, mode="r", encoding="utf-8") as file:
+            text_parts.append(file.read())
+
+    extraction = await LLMGateway.acreate_structured_output(
+        text_input="\n".join(text_parts),
         system_prompt=(
             "Extract all people and scientific claims from the text. "
             "For each person, provide their name and role. "
             "For each claim, provide the claim text, subject, and confidence (0-1)."
         ),
-        response_model=AnalysisResult,
+        response_model=ExtractionResult,
     )
-    return result
+
+    people = [Person(name=p.name, role=p.role) for p in extraction.people]
+    claims = [
+        ScientificClaim(text=c.text, subject=c.subject, confidence=c.confidence)
+        for c in extraction.claims
+    ]
+
+    # Returned as one list of DataPoints so the pipeline stamps provenance —
+    # including the source document's content hash — on every node before the
+    # next task wires them together.
+    return [*people, *claims]
 
 
-@task
-async def link_claims_to_people(analysis: AnalysisResult) -> list[Person]:
+async def link_claims_to_people(nodes: list[Person | ScientificClaim]) -> list[Person]:
     """Associate claims with the people who made them, using LLM."""
-
-    class ClaimAssignment(BaseModel):
-        person_name: str
-        claim_texts: list[str]
-
-    class Assignments(BaseModel):
-        assignments: list[ClaimAssignment]
+    people = [node for node in nodes if isinstance(node, Person)]
+    claims = [node for node in nodes if isinstance(node, ScientificClaim)]
 
     assignments = await LLMGateway.acreate_structured_output(
-        text_input=(
-            f"People: {[p.name for p in analysis.people]}\n"
-            f"Claims: {[c.text for c in analysis.claims]}"
-        ),
+        text_input=(f"People: {[p.name for p in people]}\nClaims: {[c.text for c in claims]}"),
         system_prompt=(
             "Assign each claim to the person who made it or is most associated with it. "
             "Return a list of assignments, each with a person_name and their claim_texts."
@@ -91,20 +127,19 @@ async def link_claims_to_people(analysis: AnalysisResult) -> list[Person]:
     )
 
     # Build lookup and attach claims to people
-    claim_lookup = {c.text: c for c in analysis.claims}
+    claim_lookup = {c.text: c for c in claims}
     for assignment in assignments.assignments:
-        for person in analysis.people:
+        for person in people:
             if person.name.lower() == assignment.person_name.lower():
                 person.claims = [
                     claim_lookup[t] for t in assignment.claim_texts if t in claim_lookup
                 ]
 
-    return analysis.people
+    return people
 
 
-@task
 async def store_and_summarize(people: list[Person]) -> str:
-    """Store DataPoints in graph + vector DBs, then return a summary."""
+    """Store DataPoints in graph + vector DBs, then print and return a summary."""
 
     # add_data_points persists nodes and edges to graph DB,
     # and indexes embeddable fields in vector DB
@@ -121,14 +156,16 @@ async def store_and_summarize(people: list[Person]) -> str:
                 lines.append(f"  - {claim.text} [confidence: {claim.confidence}]")
         else:
             lines.append("  (no claims linked)")
-    return "\n".join(lines)
+
+    summary = "\n".join(lines)
+    print(summary)
+    return summary
 
 
 # -- Run --
 
 
 async def main():
-    import cognee
     from cognee.infrastructure.databases.relational.create_db_and_tables import (
         create_db_and_tables,
     )
@@ -145,24 +182,29 @@ async def main():
         "Niels Bohr proposed the atomic model with quantized electron orbits in 1913."
     )
 
-    # Run the custom pipeline
-    results = await run_pipeline(
-        [
-            extract_entities(),
-            link_claims_to_people(),
-            store_and_summarize(),
+    # Ingest the text into a dataset first. This creates the dataset, stores the
+    # text as a Data record with a content hash, and is what makes the graph the
+    # custom pipeline builds below both attributable and searchable.
+    await cognee.add(sample_text, dataset_name=DATASET_NAME)
+
+    # Run the custom pipeline over the dataset's ingested documents. With no
+    # `data` argument the first task receives the dataset's Data records.
+    await cognee.run_custom_pipeline(
+        tasks=[
+            Task(extract_entities),
+            Task(link_claims_to_people),
+            Task(store_and_summarize),
         ],
-        data=sample_text,
+        dataset=DATASET_NAME,
         pipeline_name="entity_extraction",
     )
-
-    print(results[0] if results else "No output")
 
     # Recall from the graph
     print("\n--- Recall: 'Who worked on gravity?' ---")
     answer = await cognee.recall(
         "Who worked on gravity?",
         query_type=cognee.SearchType.GRAPH_COMPLETION,
+        datasets=[DATASET_NAME],
     )
     print(f"  {answer}")
 

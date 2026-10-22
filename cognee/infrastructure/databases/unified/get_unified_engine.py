@@ -7,7 +7,10 @@ from .capabilities import EngineCapability
 from .unified_store_engine import UnifiedStoreEngine
 
 HYBRID_PROVIDERS = {}
-UNIFIED_PROVIDERS = {"pghybrid"}
+# Providers selected by USE_UNIFIED_PROVIDER rather than by the graph/vector
+# provider pair. Empty since the Postgres hybrid adapter moved out of tree —
+# the hook stays so a future unified backend has somewhere to register.
+UNIFIED_PROVIDERS = set()
 
 
 def _is_hybrid_provider(graph_config: dict, vector_config: dict) -> bool:
@@ -25,12 +28,7 @@ def _is_hybrid_provider(graph_config: dict, vector_config: dict) -> bool:
 
 
 async def _create_hybrid_adapter(graph_config: dict, vector_config: dict):
-    """Create a single adapter instance for a hybrid backend.
-
-    For pghybrid, reuses the cached PGVectorAdapter from get_vector_engine_async()
-    (requires VECTOR_DB_PROVIDER=pgvector) so that metadata caches persist
-    across calls.
-    """
+    """Create a single adapter instance for a hybrid backend."""
     import os
 
     unified_provider = os.environ.get("USE_UNIFIED_PROVIDER", "")
@@ -41,7 +39,10 @@ async def _create_hybrid_adapter(graph_config: dict, vector_config: dict):
             NEPTUNE_ANALYTICS_ENDPOINT_URL,
             NeptuneAnalyticsAdapter,
         )
-        from cognee.infrastructure.databases.vector.embeddings import get_embedding_engine
+        from cognee.infrastructure.databases.vector.embeddings import (
+            EmbeddingGateway,
+            get_embedding_engine,
+        )
 
         graph_url = graph_config.get("graph_database_url", "")
         if not graph_url:
@@ -54,33 +55,12 @@ async def _create_hybrid_adapter(graph_config: dict, vector_config: dict):
             )
 
         graph_identifier = graph_url.replace(NEPTUNE_ANALYTICS_ENDPOINT_URL, "")
-        embedding_engine = get_embedding_engine()
+        embedding_engine = EmbeddingGateway(get_embedding_engine())
 
         return NeptuneAnalyticsAdapter(
             graph_id=graph_identifier,
             embedding_engine=embedding_engine,
         )
-
-    # if provider == "pghybrid":
-    #     from cognee.infrastructure.databases.hybrid.postgres.adapter import (
-    #         PostgresHybridAdapter,
-    #     )
-    #     from cognee.infrastructure.databases.graph.postgres_demo.adapter import PostgresDemoAdapter
-    #     from cognee.infrastructure.databases.relational.get_relational_engine import (
-    #         get_relational_engine,
-    #     )
-    #
-    #     # Graph adapter gets its own engine from the relational connection string
-    #     graph_adapter = PostgresDemoAdapter(connection_string=get_relational_engine().db_uri)
-    #
-    #     # Vector adapter: reuse the cached PGVectorAdapter from the
-    #     # vector engine factory. This requires VECTOR_DB_PROVIDER=pgvector.
-    #     vector_adapter = await get_vector_engine_async()
-    #
-    #     return PostgresHybridAdapter(
-    #         graph_adapter=graph_adapter,
-    #         vector_adapter=vector_adapter,
-    #     )
 
     raise OSError(f"Unsupported hybrid provider: {provider}")
 

@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from typing import Any
 
@@ -10,14 +9,13 @@ from pydantic import BaseModel
 from tenacity import (
     before_sleep_log,
     retry,
-    retry_if_not_exception_type,
     stop_after_attempt,
     wait_exponential_jitter,
 )
 
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.config import get_llm_config
-from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError, is_budget_exhausted_error
+from cognee.infrastructure.llm.exceptions import raise_if_budget_exhausted
 from cognee.infrastructure.llm.retry_config import (
     llm_retry_condition,
     llm_retry_stop_condition,
@@ -114,36 +112,28 @@ class MistralAdapter(GenericAPIAdapter):
             - BaseModel: An instance of BaseModel containing the structured response.
         """
         try:
-            messages = [
-                {
-                    "role": "system",
-                    "content": system_prompt,
-                },
-                {
-                    "role": "user",
-                    "content": f"""Use the given format to extract information
-                from the following input: {text_input}""",
-                },
-            ]
             merged_kwargs = {**self.llm_args, **kwargs}
             try:
                 async with llm_rate_limiter_context_manager():
-                    response = await self.aclient.chat.completions.create(
+                    # instructor validates the answer against response_model and returns
+                    # the parsed model, not the raw completion.
+                    return await self.aclient.chat.completions.create(
                         model=self.model,
                         max_retries=2,
-                        messages=messages,
+                        messages=[
+                            {
+                                "role": "system",
+                                "content": system_prompt,
+                            },
+                            {
+                                "role": "user",
+                                "content": f"""Use the given format to extract information
+                from the following input: {text_input}""",
+                            },
+                        ],
                         response_model=response_model,
                         **merged_kwargs,
                     )
-                if (
-                    response.choices
-                    and response.choices[0].message is not None
-                    and response.choices[0].message.content
-                ):
-                    content = response.choices[0].message.content
-                    return response_model.model_validate_json(content)
-                else:
-                    raise ValueError("Failed to get valid response after retries")
             except litellm.exceptions.BadRequestError as e:
                 logger.error(f"Bad request error: {e!s}")
                 raise ValueError(f"Invalid request: {e!s}")
@@ -153,21 +143,15 @@ class MistralAdapter(GenericAPIAdapter):
             logger.debug(f"Raw response: {e.raw_response}")
             raise ValueError(f"Response failed schema validation: {e!s}")
         except Exception as e:
-            if is_budget_exhausted_error(e):
-                raise LLMPaymentRequiredError() from e
+            # Same detail-carrying message as the other adapters.
+            raise_if_budget_exhausted(e)
             raise
 
     @observe(as_type="transcription")
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(2, 128),
-        retry=retry_if_not_exception_type(
-            (
-                litellm.exceptions.NotFoundError,
-                litellm.exceptions.AuthenticationError,
-                asyncio.CancelledError,
-            )
-        ),
+        retry=llm_retry_condition,
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )

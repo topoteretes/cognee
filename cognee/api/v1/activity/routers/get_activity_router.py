@@ -10,6 +10,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 
+from cognee.exceptions import CogneeApiError
 from cognee.modules.users.methods.get_authenticated_user import get_authenticated_user
 from cognee.modules.users.methods.get_visible_user_ids import get_visible_user_ids
 from cognee.modules.users.models import User
@@ -88,7 +89,8 @@ def get_activity_router() -> APIRouter:
         - **operation_name** (str|null): Operation name; for pipeline rows this
           mirrors `pipeline_name`, so it does *not* distinguish the two kinds.
         - **origin** (str|null): Initiating surface — `sdk`/`api`/`cli`/`mcp`/`background`.
-        - **outcome** (str|null): `"succeeded"` / `"failed"`. NULL on non-terminal rows.
+        - **outcome** (str|null): `"succeeded"` / `"failed"` / `"noop"` (the call ran
+          nothing — e.g. an improve that lost its lock claim). NULL on non-terminal rows.
           **Read together with `background`**: when `background` is true, a
           `"succeeded"` outcome means the work was *accepted and started*, not that
           it finished. Treating those rows as completions inflates any success-rate
@@ -96,8 +98,9 @@ def get_activity_router() -> APIRouter:
         - **background** (bool|null): True when the call launched background work.
           NULL means not applicable / not recorded.
         - **error_class** (str|null): Exception class name when `outcome="failed"`.
-        - **tokens_in** / **tokens_out** (int|null): Provider-billed token counts.
+        - **tokens_in** / **tokens_out** (int|null): Provider-billed LLM token counts.
           NULL means *not measured*; `0` means *measured zero* — do not conflate.
+        - **embedding_tokens** (int|null): Embedding token count, same NULL/0 convention.
         - **started_at** / **ended_at** (str|null): ISO-8601 timestamps.
         - **user_id** (str|null): Triggering user.
         - **session_id** (str|null): Session-cache id; joins `session_model_usage`.
@@ -206,6 +209,7 @@ def get_activity_router() -> APIRouter:
                 # distinction the schema deliberately encodes.
                 "tokens_in": run.tokens_in,
                 "tokens_out": run.tokens_out,
+                "embedding_tokens": run.embedding_tokens,
                 "started_at": run.started_at.isoformat() if run.started_at else None,
                 "ended_at": run.ended_at.isoformat() if run.ended_at else None,
                 "user_id": str(run.user_id) if run.user_id else None,
@@ -219,7 +223,11 @@ def get_activity_router() -> APIRouter:
 
     @router.get("/spans")
     async def get_spans(user: User = Depends(get_authenticated_user)):
-        """Return in-memory OTEL spans from the CogneeSpanExporter buffer."""
+        """Return the caller's and their own agents' traces from the in-memory buffer.
+
+        A trace belongs to the users its requests authenticated as
+        (``bind_trace_owner``); one with no owner is returned to nobody.
+        """
         try:
             from cognee.modules.observability.trace_context import is_tracing_enabled
             from cognee.modules.observability.tracing import get_exporter
@@ -232,11 +240,17 @@ def get_activity_router() -> APIRouter:
             if exporter is None:
                 return []
 
-            all_traces = exporter.get_all_traces()
+            visible_ids = {str(user_id) for user_id in await get_visible_user_ids(user.id)}
+            visible_traces = exporter.get_traces_owned_by(visible_ids)
 
             result = []
-            for trace_id, spans in all_traces.items():
-                root = spans[0] if spans else None
+            for trace_id, spans in visible_traces.items():
+                # Spans are buffered as they finish, children before their
+                # parent, so the root is the span without a parent, not spans[0].
+                root = next(
+                    (s for s in spans if s.get("parent_span_id") is None),
+                    min(spans, key=lambda s: s.get("start_time_ns") or 0, default=None),
+                )
                 duration = max((s.get("duration_ms", 0) for s in spans), default=0)
                 result.append(
                     {
@@ -250,6 +264,8 @@ def get_activity_router() -> APIRouter:
                 )
 
             return result
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("Failed to retrieve activity traces")
             return JSONResponse(
@@ -259,32 +275,26 @@ def get_activity_router() -> APIRouter:
 
     @router.get("/users")
     async def get_tenant_users(user: User = Depends(get_authenticated_user)):
-        """Return users in the current tenant (includes agents as API key users)."""
-        try:
-            from cognee.modules.users.tenants.methods import get_users_in_tenant
+        """Return users in the caller's tenant as [{"id", "email", "roles"}].
 
-            users = await get_users_in_tenant(user.tenant_id)
-            return [
-                {
-                    "id": str(u.id),
-                    "email": u.email,
-                    "is_superuser": u.is_superuser,
-                    "created_at": u.created_at.isoformat()
-                    if hasattr(u, "created_at") and u.created_at
-                    else None,
-                }
-                for u in users
-            ]
-        except Exception:
-            logger.debug(
-                "Falling back to [] after error in get_activity_router.get_tenant_users",
-                exc_info=True,
-            )
+        Requires user-management permission in that tenant (tenant owner or an
+        admin role); a denial propagates as 403. A caller outside any tenant
+        (single-user/local mode) has no tenant to list and gets [].
+        """
+        from cognee.modules.users.tenants.methods import get_users_in_tenant
+
+        if user.tenant_id is None:
             return []
+
+        return await get_users_in_tenant(user.tenant_id, user)
 
     @router.get("/agents")
     async def get_agents(user: User = Depends(get_authenticated_user)):
-        """Return registered agents (users with @cognee.agent emails)."""
+        """Return the caller and the agents they own (``parent_user_id == caller``).
+
+        Every query below is scoped to that id set, so nothing about other
+        users — accounts, key counts or activity — is read or returned.
+        """
         from datetime import datetime, timedelta, timezone
 
         from sqlalchemy import func, select
@@ -295,23 +305,29 @@ def get_activity_router() -> APIRouter:
         from cognee.modules.users.models import User
         from cognee.modules.users.models.UserApiKey import UserApiKey
 
+        visible_ids = await get_visible_user_ids(user.id)
+
         db_engine = get_relational_engine()
         async with db_engine.get_async_session() as session:
-            # Get all users (agents have @cognee.agent, but show all non-default)
-            users_q = select(User).filter(User.is_active.is_(True))
+            # The caller plus their agents (agents have @cognee.agent emails)
+            users_q = select(User).filter(User.is_active.is_(True), User.id.in_(visible_ids))
             users_result = await session.execute(users_q)
             all_users = users_result.scalars().all()
 
             # Count API keys per user
-            keys_q = select(UserApiKey.user_id, func.count().label("key_count")).group_by(
-                UserApiKey.user_id
+            keys_q = (
+                select(UserApiKey.user_id, func.count().label("key_count"))
+                .filter(UserApiKey.user_id.in_(visible_ids))
+                .group_by(UserApiKey.user_id)
             )
             keys_result = await session.execute(keys_q)
             key_counts = {str(row.user_id): row.key_count for row in keys_result}
 
             # Get latest data ingestion per user
-            data_created_q = select(Data.owner_id, func.max(Data.created_at).label("ts")).group_by(
-                Data.owner_id
+            data_created_q = (
+                select(Data.owner_id, func.max(Data.created_at).label("ts"))
+                .filter(Data.owner_id.in_(visible_ids))
+                .group_by(Data.owner_id)
             )
             data_created_result = await session.execute(data_created_q)
             last_active_map = {
@@ -321,7 +337,7 @@ def get_activity_router() -> APIRouter:
             # Get latest data access per user
             data_accessed_q = (
                 select(Data.owner_id, func.max(Data.last_accessed).label("ts"))
-                .filter(Data.last_accessed.isnot(None))
+                .filter(Data.last_accessed.isnot(None), Data.owner_id.in_(visible_ids))
                 .group_by(Data.owner_id)
             )
             data_accessed_result = await session.execute(data_accessed_q)
@@ -333,8 +349,10 @@ def get_activity_router() -> APIRouter:
                     last_active_map[uid] = row.ts
 
             # Get latest search query per user
-            search_q = select(Query.user_id, func.max(Query.created_at).label("ts")).group_by(
-                Query.user_id
+            search_q = (
+                select(Query.user_id, func.max(Query.created_at).label("ts"))
+                .filter(Query.user_id.in_(visible_ids))
+                .group_by(Query.user_id)
             )
             search_result = await session.execute(search_q)
             for row in search_result:

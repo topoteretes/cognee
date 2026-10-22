@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from typing import Any
 
 from cognee.context_global_variables import current_dataset_id, session_user
@@ -18,6 +19,7 @@ from cognee.infrastructure.session.session_embeddings import (
 )
 from cognee.infrastructure.session.session_turn import (
     SessionTurnPreparation,
+    acknowledgement_for_turn,
     generate_session_answer,
 )
 from cognee.infrastructure.session.session_turn import (
@@ -216,6 +218,14 @@ class SessionManager:
         """
         Append one agent trace step to the session trace payload.
 
+        ``generate_feedback_with_llm`` asks for a one-line LLM summary of the step's
+        return value as its ``session_feedback``. That call is made only when automatic
+        feedback analysis is enabled (``CACHING`` and ``AUTO_FEEDBACK`` both on); with it
+        off, the step gets the deterministic success/failure line instead. Nothing is
+        lost either way: improve()'s agent-context extraction reads the stored return
+        value directly, and its trace persistence substitutes the return value for
+        steps whose feedback is only the fallback line.
+
         Returns trace_id, or None if cache unavailable.
         """
         session_id = self.resolve_session_id(session_id)
@@ -225,7 +235,7 @@ class SessionManager:
             return None
 
         trace_id = str(uuid.uuid4())
-        if generate_feedback_with_llm:
+        if generate_feedback_with_llm and self.is_auto_feedback_enabled():
             session_feedback = await generate_agent_trace_feedback(
                 origin_function=origin_function,
                 status=status,
@@ -308,13 +318,21 @@ class SessionManager:
         """Return True if session (history + save) is available for completion."""
         if not user_id or not self.is_available:
             return False
-        cache_config = CacheConfig()
-        return bool(cache_config.caching)
+        # Fresh read, not the lru-cached accessor: `import cognee` fills that
+        # cache, and CACHING/AUTO_FEEDBACK are toggled after import (the demo
+        # command, library tests) — the gates must see the live env.
+        return bool(CacheConfig().caching)
 
     def is_auto_feedback_enabled(self) -> bool:
-        """Return True if caching and automatic turn-feedback analysis are both enabled."""
-        cache_config = CacheConfig()
-        return bool(cache_config.caching and cache_config.auto_feedback)
+        """Return True if caching and automatic turn-feedback analysis are both enabled.
+
+        The session layer's auto-feedback gate: retrievers, turn handling and
+        the improve stages all ask here. Delegates to the one implementation in
+        ``feedback_detection`` so the two entry points can never drift.
+        """
+        from cognee.infrastructure.session.feedback_detection import is_auto_feedback_enabled
+
+        return is_auto_feedback_enabled()
 
     async def prepare_session_turn(
         self,
@@ -443,7 +461,7 @@ class SessionManager:
         else:
             # Feedback-only turn: nothing to answer, but we still record the exchange
             # (question + acknowledgement) so it stays in history and vector recall.
-            answer = turn_preparation.response_to_user or "Thanks for your feedback."
+            answer = acknowledgement_for_turn(turn_preparation.response_to_user)
             context_to_store = ""
             used_session_context_ids = None
             graph_elements = None
@@ -488,6 +506,8 @@ class SessionManager:
         formatted: bool = False,
         session_id: str | None = None,
         include_context: bool = True,
+        since: datetime | None = None,
+        lead_in: int = 0,
     ) -> list[SessionQAEntry] | str:
         """
         Get session QAs by (user_id, session_id).
@@ -495,6 +515,9 @@ class SessionManager:
         Args:
             user_id: User identifier.
             last_n: If set, return only the last N entries. Otherwise return all.
+            since: If set, return only the entries stored at or after this time,
+                plus the ``lead_in`` entries just before it. Exclusive with last_n.
+            lead_in: Entries before ``since`` to include. Only with ``since``.
             formatted: If True, return prompt-formatted string; if False, return list of entry dicts.
             session_id: Session identifier. Defaults to default_session_id if None.
             include_context: When formatted=True, include CONTEXT in each entry. Default True.
@@ -506,6 +529,10 @@ class SessionManager:
         """
         session_id = self.resolve_session_id(session_id)
         self._validate_session_params(user_id=user_id, session_id=session_id, last_n=last_n)
+        if since is not None and last_n is not None:
+            raise SessionParameterValidationError(message="since and last_n are exclusive")
+        if lead_in and since is None:
+            raise SessionParameterValidationError(message="lead_in needs since")
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, returning empty session")
             return "" if formatted else []
@@ -516,6 +543,10 @@ class SessionManager:
             if last_n is not None:
                 entries = await self._cache.get_latest_qa_entries(
                     user_id, session_id, last_n=last_n
+                )
+            elif since is not None:
+                entries = await self._cache.get_qa_entries_since(
+                    user_id, session_id, since, lead_in=lead_in
                 )
             else:
                 entries = await self._cache.get_all_qa_entries(user_id, session_id)
@@ -797,13 +828,17 @@ class SessionManager:
         *,
         user_id: str,
         session_id: str | None = None,
+        raise_on_error: bool = False,
     ) -> list[dict]:
         """
         Return all stored session-context entries (both "context" and "feedback" kinds).
 
         Raises SessionParameterValidationError for invalid user_id/session_id.
         Fail-open on infrastructure errors: returns [] when the cache is
-        unavailable or the cache operation fails.
+        unavailable or the cache operation fails. ``raise_on_error=True`` keeps
+        the empty answer for an unavailable cache (nothing can be stored there)
+        but re-raises a failed read, for callers that must not mistake an
+        unreadable session for an empty one (the pinned ``node_set``).
         """
         session_id = self.resolve_session_id(session_id)
         self._validate_session_params(user_id=user_id, session_id=session_id)
@@ -816,6 +851,8 @@ class SessionManager:
             logger.warning(
                 "SessionManager: get_session_context_entries failed: %s", e, exc_info=True
             )
+            if raise_on_error:
+                raise
             return []
 
     async def update_session_context_entry(

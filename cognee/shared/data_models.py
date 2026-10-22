@@ -288,7 +288,7 @@ class SummarizedContent(BaseModel):
         but it is still part of the schema handed to the LLM, so a model is
         free to fill it. Smaller local models routinely answer with a list of
         bullets instead of a string, and strict validation then fails the whole
-        structured-output call -- instructor retries, exhausts, and an entire
+        structured-output call -- the adapter retries, exhausts, and an entire
         cognify run dies on a field nothing reads. Observed nightly on the
         llama-cpp suite:
 

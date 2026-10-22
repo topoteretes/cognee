@@ -4,12 +4,14 @@ Deployment-tunable knobs (alpha, beta, influence) live in ``base_config.py``;
 everything here is structural and not meant to be tuned per deployment.
 """
 
+from cognee.modules.improve.constants import USER_PREFERENCES_NODE_SET
+
 # Relationship name of the weighted edges from a preference node to content nodes.
 PREFERS_RELATIONSHIP = "prefers"
 
 # NodeSet that groups every preference node, so they can be listed,
 # pruned, and deleted together.
-PREFERENCE_NODE_SET = "user_preferences"
+PREFERENCE_NODE_SET = USER_PREFERENCES_NODE_SET
 
 # A prefers-edge weight of exactly this value carries no signal.
 NEUTRAL_WEIGHT = 0.5

@@ -53,7 +53,7 @@
 通过Google Colab <a href="https://colab.research.google.com/drive/1g-Qnx6l_ecHZi0IOw23rg0qC4TYvEvWZ?usp=sharing">笔记本</a>或<a href="https://github.com/topoteretes/cognee-starter">入门项目</a>快速上手
 
 ## 贡献
-您的贡献是使这成为真正开源项目的核心。我们**非常感谢**任何贡献。更多信息请参阅[`CONTRIBUTING.md`](CONTRIBUTING.md)。
+您的贡献是使这成为真正开源项目的核心。我们**非常感谢**任何贡献。更多信息请参阅[`CONTRIBUTING.md`](/CONTRIBUTING.md)。
 
 
 
@@ -75,7 +75,7 @@ pip install cognee
 
 ```
 import os
-os.environ["LLM_API_KEY"] = "YOUR OPENAI_API_KEY"
+os.environ["LLM_API_KEY"] = "YOUR_OPENAI_API_KEY"
 
 ```
 

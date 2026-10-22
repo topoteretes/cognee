@@ -288,9 +288,6 @@ async def _forget_dataset_memory(dataset_ref: str | UUID, user: Any) -> dict:
     from cognee.modules.graph.methods.delete_dataset_nodes_and_edges import (
         delete_dataset_nodes_and_edges,
     )
-    from cognee.modules.pipelines.layers.reset_dataset_pipeline_run_status import (
-        reset_dataset_pipeline_run_status,
-    )
 
     dataset_id = await _resolve_dataset_id(dataset_ref, user)
 
@@ -355,13 +352,6 @@ async def _forget_dataset_memory(dataset_ref: str | UUID, user: Any) -> dict:
                     orm_attributes.flag_modified(data_record, "pipeline_status")
 
             await session.commit()
-
-        # 3. Reset dataset-level pipeline run status so cached cognify runs can execute again.
-        await reset_dataset_pipeline_run_status(
-            dataset_id=dataset_id,
-            user=user,
-            pipeline_names=["cognify_pipeline"],
-        )
 
     logger.info(
         "forget: cleared memory for dataset=%s, user=%s (%d data records reset)",
@@ -484,7 +474,12 @@ async def _resolve_dataset_id(dataset_ref: str | UUID, user: Any) -> UUID:
             raise ValueError(f"Dataset {dataset_ref} not found or not accessible.")
         return dataset.id
 
+    from cognee.modules.data.exceptions import DatasetNotFoundError
     from cognee.modules.data.methods import get_authorized_dataset_by_name
 
     dataset = await get_authorized_dataset_by_name(dataset_ref, user, "delete")
+    if dataset is None:
+        # Same message for missing and unauthorized: the name lookup returns None
+        # for both, and distinguishing them would leak which dataset names exist.
+        raise DatasetNotFoundError(message=f"Dataset '{dataset_ref}' not found or not accessible.")
     return dataset.id

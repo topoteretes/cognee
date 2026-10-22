@@ -1,3 +1,15 @@
+"""Serve the session-feedback lifecycle demo as a FastAPI app over recall, feedback and memify.
+
+POST /demo/init remembers the bundled documents into isolated data/system directories,
+/demo/send answers through GRAPH_COMPLETION recall inside a session, /demo/feedback calls
+cognee.session.add_feedback, and /demo/run_memify_pipeline applies apply_feedback_weights_pipeline.
+/demo/graph, /demo/session and /demo/state feed the frontend served at / on http://127.0.0.1:8765.
+
+Requires: LLM_API_KEY, plus CACHING=true, AUTO_FEEDBACK=true and CACHE_BACKEND=fs (defaulted by
+the script and enforced by the /demo/config_gate check before every mutating call).
+Run: uv run python examples/demos/sessions/session_feedback_lifecycle_demo/backend/app.py
+"""
+
 import json
 import os
 from datetime import datetime, timezone

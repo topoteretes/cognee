@@ -1,3 +1,13 @@
+"""Create a tenant and a role, remember a dataset inside the tenant, and grant the role read access.
+
+user_1 creates the CogneeLab tenant and a Researcher role and adds user_2 to both. With the tenant
+active, user_1 remembers QUANTUM_COGNEE_LAB and grants the role read access; user_2 then recalls
+from that dataset through the role, and the results are printed.
+
+Requires: LLM_API_KEY and ENABLE_BACKEND_ACCESS_CONTROL=True.
+Run: uv run python examples/demos/permissions/tenant_role_setup_example.py
+"""
+
 import cognee
 from cognee import SearchType
 from cognee.modules.engine.operations.setup import setup

@@ -13,6 +13,7 @@ from pydantic import ConfigDict, Field, ValidationError
 from cognee import __version__ as cognee_version
 from cognee.api.DTO import InDTO, OutDTO
 from cognee.api.upload_fields import OptionalUploadFile, UploadFile, drop_blank_uploads
+from cognee.exceptions import CogneeApiError
 from cognee.infrastructure.llm import get_llm_config
 from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
@@ -260,6 +261,8 @@ def get_llm_router() -> APIRouter:
             return JSONResponse(
                 status_code=400, content={"error": "Invalid custom prompt request."}
             )
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("LLM custom prompt generation request failed")
             return JSONResponse(
@@ -393,6 +396,8 @@ def get_llm_router() -> APIRouter:
                     "detail": "The configured LLM token budget is exhausted.",
                 },
             )
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("LLM schema inference failed")
             return JSONResponse(status_code=500, content={"error": "LLM schema inference failed."})

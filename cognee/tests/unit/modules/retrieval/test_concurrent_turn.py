@@ -243,3 +243,30 @@ async def test_analysis_runs_alongside_retrieval_and_commits_after_both():
     assert commit.await_args.kwargs["answer"] == "answer"
     assert commit.await_args.kwargs["used_graph_element_ids"] == {"node_ids": ["n1"]}
     retriever.append_references.assert_awaited_once_with(["answer"], [retrieved_chunk("n1")])
+
+
+@pytest.mark.asyncio
+async def test_empty_context_skips_answer_and_commit():
+    """A retriever that skips on empty context never reaches complete_turn in
+    the concurrent lane, returns no results, and records no QA turn
+    (SDK-270 / gh #3728)."""
+    retriever = CompletionRetriever(session_id="s1", include_references=True)
+    retriever.skip_completion_on_empty_context = True
+    retriever.extract_context_object_ids = lambda objects: {}
+    retriever.get_context_from_objects = AsyncMock(return_value="")
+    order = []
+
+    with (
+        _patched_turn_module(_fake_session_manager(), analysis=SessionTurnAnalysis(), order=order),
+        patch(
+            "cognee.modules.retrieval.session_aware_completion.commit_turn",
+            new_callable=AsyncMock,
+        ) as commit,
+    ):
+        result = await run_concurrent_session_turn(retriever, raw_query="question")
+
+    assert "answer" not in order
+    _retrieved_objects, context, completion = result
+    assert context == ""
+    assert completion == []
+    commit.assert_not_awaited()

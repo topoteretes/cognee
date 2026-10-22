@@ -1,9 +1,9 @@
 """Opt-in cognify task writing the audit-grade provenance ledger.
 
 Pipeline seam: spliced in by ``get_default_tasks`` right after
-``add_data_points`` (node ids are persisted and stable) and before the
-contradiction-detection spread, when the ``provenance_tracking`` CognifyConfig
-flag is on (env ``PROVENANCE_TRACKING``, default off).
+``add_data_points`` (node ids are persisted and stable), when the
+``provenance_tracking`` CognifyConfig flag is on (env ``PROVENANCE_TRACKING``,
+default off).
 
 For every item this ingestion produced it appends document -> chunk -> entity
 -> relationship lineage entries to the relational ``provenance_entries``
@@ -23,10 +23,10 @@ made_from/is_part_of/contains shape are covered by a generic fallback that
 walks the model with ``get_graph_from_model`` (the same traversal
 ``add_data_points`` uses) and records every node and edge.
 
-Hard constraints, mirroring ``detect_contradictions``: the task returns its
-input unchanged and swallows all of its own errors — provenance can never
-break ingestion. Missing ctx, missing dataset/data ids, or raw items with no
-document degrade to entries with ``source_ref_key=None``, never a raise.
+The task returns its input unchanged and swallows all of its own errors —
+provenance can never break ingestion. Missing ctx, missing dataset/data ids,
+or raw items with no document degrade to entries with ``source_ref_key=None``,
+never a raise.
 """
 
 from cognee.infrastructure.databases.provenance import data_item_id, make_source_ref_key
@@ -74,6 +74,10 @@ def _scope_from_ctx(ctx: PipelineContext | None) -> str | None:
 
 def _entity_type_name(entity) -> str | None:
     is_a = getattr(entity, "is_a", None)
+    if isinstance(is_a, tuple) and len(is_a) == 2:
+        # Entity.is_a may carry edge text as (Edge, EntityType); the type is
+        # the second element. Without this the name falls back to "Entity".
+        is_a = is_a[1]
     name = getattr(is_a, "name", None) if is_a is not None else None
     return name or type(entity).__name__
 
@@ -219,7 +223,7 @@ async def record_provenance(
                 )
 
             for entry in getattr(chunk, "contains", None) or []:
-                # ``contains`` entries are Entity/Event nodes or (Edge, node) tuples.
+                # ``contains`` entries are Entity/Timestamp nodes or (Edge, node) tuples.
                 edge = entry[0] if isinstance(entry, tuple) else None
                 entity = entry[1] if isinstance(entry, tuple) else entry
                 entity_id = getattr(entity, "id", None)

@@ -6,6 +6,7 @@ from cognee.base_config import get_base_config
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.modules.chunking.models.DltRow import DltRow
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.graph.exceptions.exceptions import EntityNotFoundError
@@ -64,7 +65,14 @@ async def get_memory_fragment(
         properties_to_project = ["id", "description", "name", "type", "text", "importance_weight"]
 
     node_properties_to_project = list(properties_to_project)
-    edge_properties_to_project = ["relationship_name", "edge_text", "edge_object_id"]
+    edge_properties_to_project = [
+        "relationship_name",
+        "edge_text",
+        "edge_object_id",
+        "conflict_marks",
+        "conflict_marks_json",
+        "effective_date",
+    ]
 
     if feedback_influence > 0.0:
         if "feedback_weight" not in node_properties_to_project:
@@ -170,37 +178,36 @@ async def _get_top_triplet_importances(
             neighborhood_seed_top_k=neighborhood_seed_top_k,
         )
 
-        # Re-score expansion nodes discovered via neighborhood traversal.
-        # These nodes have no vector scores yet — run an ID-filtered vector
-        # search so they participate in triplet ranking instead of getting
-        # the default penalty score.
+        # Score only newly discovered IDs; node_name filters NodeSet membership,
+        # not node IDs. This path is single-query only (batch mode has no seed IDs).
         if (
             neighborhood_depth is not None
             and relevant_node_ids
             and vector_search.query_vector is not None
         ):
-            seed_set = set(relevant_node_ids)
-            expansion_ids = [nid for nid in memory_fragment.nodes if nid not in seed_set]
-            if expansion_ids:
-                for collection_name in list(vector_search.node_distances.keys()):
+            seed_set = {str(node_id) for node_id in relevant_node_ids}
+            expansion_ids = list(
+                dict.fromkeys(
+                    str(node_id)
+                    for node_id in memory_fragment.nodes
+                    if str(node_id) not in seed_set
+                )
+            )
+            score_by_ids = getattr(vector_search.vector_engine, "score_by_ids", None)
+            if expansion_ids and score_by_ids is not None:
+                for collection_name, distances in vector_search.node_distances.items():
                     try:
-                        extra_scores = await vector_search.vector_engine.search(
+                        extra_scores = await score_by_ids(
                             collection_name=collection_name,
+                            data_point_ids=expansion_ids,
                             query_vector=vector_search.query_vector,
-                            limit=len(expansion_ids),
-                            node_name=expansion_ids,
                         )
-                        if extra_scores:
-                            if vector_search.query_list_length is None:
-                                vector_search.node_distances[collection_name].extend(extra_scores)
-                            else:
-                                for qi, per_query in enumerate(extra_scores):
-                                    if qi < len(vector_search.node_distances[collection_name]):
-                                        vector_search.node_distances[collection_name][qi].extend(
-                                            per_query
-                                        )
                     except CollectionNotFoundError:
-                        pass
+                        continue
+                    except NotImplementedError:
+                        logger.debug("Vector adapter does not support neighborhood ID scoring")
+                        break
+                    distances.extend(extra_scores)
 
     await memory_fragment.map_vector_distances_to_graph_nodes(
         node_distances=vector_search.node_distances, query_list_length=query_list_length
@@ -297,7 +304,7 @@ async def brute_force_triplet_search(
                 "DocumentChunk_text",
                 # DLT rows live in their own collection — chunk search
                 # is documents-only, but graph completion covers row text too.
-                "DltRow_text",
+                DltRow.vector_collection(),
             ]
         else:
             # Copy so the caller's list is never mutated. Callers such as

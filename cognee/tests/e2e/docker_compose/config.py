@@ -35,8 +35,14 @@ class E2EConfig:
     username: str = field(
         default_factory=lambda: os.getenv("COGNEE_DEFAULT_USER", "default_user@example.com")
     )
+    # DEFAULT_USER_PASSWORD is what the server was started with; the default
+    # user has no loginable password unless it is set, so fall back to it
+    # before the historical literal.
     password: str = field(
-        default_factory=lambda: os.getenv("COGNEE_DEFAULT_PASSWORD", "default_password")
+        default_factory=lambda: (
+            os.getenv("COGNEE_DEFAULT_PASSWORD")
+            or os.getenv("DEFAULT_USER_PASSWORD", "default_password")
+        )
     )
 
     # How long to wait for a freshly-started service to report healthy.

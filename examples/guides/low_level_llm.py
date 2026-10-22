@@ -1,3 +1,12 @@
+"""Call LLMGateway.acreate_structured_output directly to get a Pydantic model back from the LLM.
+
+No graph or database is involved: one sentence is parsed into a MiniGraph of typed entities and
+the model instance is printed.
+
+Requires: LLM_API_KEY.
+Run: uv run python examples/guides/low_level_llm.py
+"""
+
 import asyncio
 
 from pydantic import BaseModel

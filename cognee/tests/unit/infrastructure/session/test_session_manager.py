@@ -9,28 +9,20 @@ from cognee.infrastructure.session.feedback_models import (
     FeedbackDetectionResult,
 )
 from cognee.infrastructure.session.session_manager import SessionManager
-from cognee.infrastructure.session.session_turn import compose_session_prompt
 
 
-class TestComposeSessionPrompt:
-    """Characterization tests pinning the exact prompt assembly extracted from the
-    inner completion method. These must stay byte-identical to the pre-extraction
-    behavior, so changing them means deliberately changing every session prompt."""
+@pytest.fixture(autouse=True)
+def _deterministic_cache_env(monkeypatch):
+    """Pin the cache flags to their defaults for every test in this module.
 
-    def test_block_precedes_history(self):
-        result = compose_session_prompt("BLOCK", "HISTORY")
-        assert result == "BLOCK\n\nHISTORY"
-
-    def test_history_only(self):
-        assert compose_session_prompt("", "HISTORY") == "HISTORY"
-
-    def test_empty_history_keeps_trailing_separators(self):
-        # Pre-extraction behavior prepended onto a possibly-empty history, leaving a
-        # trailing "\n\n" when history is empty. Preserved exactly.
-        assert compose_session_prompt("BLOCK", "") == "BLOCK\n\n"
-
-    def test_all_empty(self):
-        assert compose_session_prompt("", "") == ""
+    The gates deliberately read the LIVE env now (fresh CacheConfig, not the
+    import-time lru cache), so CACHING/AUTO_FEEDBACK leakage from earlier tests
+    in a full-suite run would flip behavior these tests pin. Tests that need
+    other values patch CacheConfig or set the env themselves — both override
+    this pin.
+    """
+    monkeypatch.setenv("CACHING", "true")
+    monkeypatch.setenv("AUTO_FEEDBACK", "true")
 
 
 class TestValidateSessionParams:
@@ -283,8 +275,11 @@ class TestSessionManager:
         pending_spy.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_add_agent_trace_step_returns_trace_id_and_feedback(self, sm, mock_cache):
+    async def test_add_agent_trace_step_returns_trace_id_and_feedback(
+        self, sm, mock_cache, monkeypatch
+    ):
         """add_agent_trace_step returns generated trace_id and persists generated feedback."""
+        monkeypatch.setattr(sm, "is_auto_feedback_enabled", lambda: True)
         with (
             patch(
                 "cognee.infrastructure.session.session_agent_trace.read_query_prompt",
@@ -321,8 +316,11 @@ class TestSessionManager:
         assert call_kw["session_feedback"] == "Trip plan created successfully."
 
     @pytest.mark.asyncio
-    async def test_add_agent_trace_step_falls_back_when_summary_is_empty(self, sm, mock_cache):
+    async def test_add_agent_trace_step_falls_back_when_summary_is_empty(
+        self, sm, mock_cache, monkeypatch
+    ):
         """Empty LLM summaries fall back to the deterministic feedback string."""
+        monkeypatch.setattr(sm, "is_auto_feedback_enabled", lambda: True)
         with (
             patch(
                 "cognee.infrastructure.session.session_agent_trace.read_query_prompt",
@@ -347,8 +345,11 @@ class TestSessionManager:
         assert call_kw["session_feedback"] == "book_hotel failed. Reason: No availability."
 
     @pytest.mark.asyncio
-    async def test_add_agent_trace_step_falls_back_when_llm_raises(self, sm, mock_cache):
+    async def test_add_agent_trace_step_falls_back_when_llm_raises(
+        self, sm, mock_cache, monkeypatch
+    ):
         """LLM failures do not block trace writes and use deterministic fallback feedback."""
+        monkeypatch.setattr(sm, "is_auto_feedback_enabled", lambda: True)
         with (
             patch(
                 "cognee.infrastructure.session.session_agent_trace.read_query_prompt",
@@ -373,8 +374,11 @@ class TestSessionManager:
         assert call_kw["session_feedback"] == "book_hotel failed. Reason: No availability."
 
     @pytest.mark.asyncio
-    async def test_add_agent_trace_step_falls_back_when_prompt_missing(self, sm, mock_cache):
+    async def test_add_agent_trace_step_falls_back_when_prompt_missing(
+        self, sm, mock_cache, monkeypatch
+    ):
         """Missing trace feedback prompt uses deterministic fallback feedback."""
+        monkeypatch.setattr(sm, "is_auto_feedback_enabled", lambda: True)
         with (
             patch(
                 "cognee.infrastructure.session.session_agent_trace.read_query_prompt",
@@ -400,9 +404,10 @@ class TestSessionManager:
 
     @pytest.mark.asyncio
     async def test_add_agent_trace_step_falls_back_when_llm_returns_wrong_type(
-        self, sm, mock_cache
+        self, sm, mock_cache, monkeypatch
     ):
         """Unexpected LLM result types use deterministic fallback feedback."""
+        monkeypatch.setattr(sm, "is_auto_feedback_enabled", lambda: True)
         with (
             patch(
                 "cognee.infrastructure.session.session_agent_trace.read_query_prompt",
@@ -428,9 +433,10 @@ class TestSessionManager:
 
     @pytest.mark.asyncio
     async def test_add_agent_trace_step_method_return_value_none_uses_fallback_without_llm(
-        self, sm, mock_cache
+        self, sm, mock_cache, monkeypatch
     ):
         """None return values skip LLM generation and use deterministic fallback feedback."""
+        monkeypatch.setattr(sm, "is_auto_feedback_enabled", lambda: True)
         with patch(
             "cognee.infrastructure.session.session_agent_trace.LLMGateway.acreate_structured_output",
             new_callable=AsyncMock,
@@ -468,6 +474,72 @@ class TestSessionManager:
         mock_llm.assert_not_awaited()
         call_kw = mock_cache.append_agent_trace_step.call_args.kwargs
         assert call_kw["session_feedback"] == "plan_trip succeeded."
+
+    @pytest.mark.asyncio
+    async def test_add_agent_trace_step_skips_llm_summary_when_auto_feedback_is_off(
+        self, sm, mock_cache, monkeypatch
+    ):
+        """Plan C7: the per-step LLM summary runs only under AUTO_FEEDBACK.
+
+        Even when the caller asks for it, a disabled automatic-feedback layer means
+        the step records the deterministic line and the LLM is never touched.
+        """
+        monkeypatch.setattr(sm, "is_auto_feedback_enabled", lambda: False)
+        with (
+            patch(
+                "cognee.infrastructure.session.session_agent_trace.read_query_prompt",
+                return_value="summarize this",
+            ),
+            patch(
+                "cognee.infrastructure.session.session_agent_trace.LLMGateway.acreate_structured_output",
+                new_callable=AsyncMock,
+            ) as mock_llm,
+        ):
+            trace_id = await sm.add_agent_trace_step(
+                user_id="u1",
+                origin_function="plan_trip",
+                status="success",
+                session_id="s1",
+                method_return_value="Plan created",
+                generate_feedback_with_llm=True,
+            )
+
+        assert trace_id is not None
+        mock_llm.assert_not_awaited()
+        call_kw = mock_cache.append_agent_trace_step.call_args.kwargs
+        assert call_kw["session_feedback"] == "plan_trip succeeded."
+        assert call_kw["method_return_value"] == "Plan created"
+
+    @pytest.mark.asyncio
+    async def test_add_agent_trace_step_llm_summary_needs_both_the_request_and_auto_feedback(
+        self, sm, mock_cache, monkeypatch
+    ):
+        """The LLM summary is made only when requested *and* AUTO_FEEDBACK is on."""
+        monkeypatch.setattr(sm, "is_auto_feedback_enabled", lambda: True)
+        with (
+            patch(
+                "cognee.infrastructure.session.session_agent_trace.read_query_prompt",
+                return_value="summarize this",
+            ),
+            patch(
+                "cognee.infrastructure.session.session_agent_trace.LLMGateway.acreate_structured_output",
+                new_callable=AsyncMock,
+                return_value=AgentTraceFeedbackSummary(session_feedback="Summarized."),
+            ) as mock_llm,
+        ):
+            await sm.add_agent_trace_step(
+                user_id="u1",
+                origin_function="plan_trip",
+                status="success",
+                session_id="s1",
+                method_return_value="Plan created",
+                generate_feedback_with_llm=True,
+            )
+
+        mock_llm.assert_awaited_once()
+        assert mock_cache.append_agent_trace_step.call_args.kwargs["session_feedback"] == (
+            "Summarized."
+        )
 
     @pytest.mark.asyncio
     async def test_add_agent_trace_step_unavailable_returns_none(self, sm_unavailable):
@@ -511,6 +583,29 @@ class TestSessionManager:
         assert len(entries) == 1
         assert entries[0]["question"] == "Q"
         mock_cache.get_all_qa_entries.assert_called_once_with("u1", "s1")
+
+    @pytest.mark.asyncio
+    async def test_get_session_since_calls_the_bounded_read(self, sm, mock_cache):
+        from datetime import datetime, timezone
+
+        since = datetime(2026, 6, 11, tzinfo=timezone.utc)
+        mock_cache.get_qa_entries_since = AsyncMock(return_value=[])
+
+        await sm.get_session(user_id="u1", session_id="s1", since=since, lead_in=1)
+
+        mock_cache.get_qa_entries_since.assert_called_once_with("u1", "s1", since, lead_in=1)
+        mock_cache.get_all_qa_entries.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_get_session_since_is_exclusive_with_last_n(self, sm):
+        from datetime import datetime, timezone
+
+        with pytest.raises(SessionParameterValidationError):
+            await sm.get_session(
+                user_id="u1", session_id="s1", since=datetime.now(timezone.utc), last_n=3
+            )
+        with pytest.raises(SessionParameterValidationError):
+            await sm.get_session(user_id="u1", session_id="s1", lead_in=1)
 
     @pytest.mark.asyncio
     async def test_get_session_formatted(self, sm, mock_cache):
@@ -1324,3 +1419,78 @@ class TestSessionContextEntryValidation:
             )
         with pytest.raises(SessionParameterValidationError):
             await sm.delete_session_context(user_id=" ", session_id="s1")
+
+
+class TestAutoFeedbackPredicate:
+    """is_auto_feedback_enabled is the one gate; it must read the live env, not a cache."""
+
+    @pytest.mark.parametrize(
+        ("caching", "auto_feedback", "expected"),
+        [(True, True, True), (True, False, False), (False, True, False), (False, False, False)],
+    )
+    def test_reads_a_fresh_cache_config(self, caching, auto_feedback, expected):
+        # The manager delegates to feedback_detection's single implementation.
+        sm = SessionManager(cache_engine=MagicMock())
+        with patch(
+            "cognee.infrastructure.session.feedback_detection.CacheConfig",
+            return_value=MagicMock(caching=caching, auto_feedback=auto_feedback),
+        ) as config_cls:
+            assert sm.is_auto_feedback_enabled() is expected
+        config_cls.assert_called_once_with()
+
+    def test_gate_tracks_env_changes_after_import(self, monkeypatch):
+        """The lru-cached accessor is filled during `import cognee`; the gate must
+        not use it — AUTO_FEEDBACK is toggled after import (demo command, library
+        tests) and the gate has to see the flip."""
+        sm = SessionManager(cache_engine=MagicMock())
+        monkeypatch.setenv("CACHING", "true")
+        monkeypatch.setenv("AUTO_FEEDBACK", "true")
+        assert sm.is_auto_feedback_enabled() is True
+        monkeypatch.setenv("AUTO_FEEDBACK", "false")
+        assert sm.is_auto_feedback_enabled() is False
+
+
+class TestContextEntryReadFailOpen:
+    """The context-entry read fails open by default; ``raise_on_error`` re-raises."""
+
+    @staticmethod
+    def _manager(read_error: Exception | None = None) -> SessionManager:
+        cache = MagicMock()
+        cache.get_session_context_entries = AsyncMock(
+            side_effect=read_error, return_value=[{"id": "row", "kind": "context"}]
+        )
+        return SessionManager(cache_engine=cache)
+
+    @pytest.mark.asyncio
+    async def test_a_failed_read_answers_empty_by_default(self):
+        sm = self._manager(ConnectionError("down"))
+
+        assert await sm.get_session_context_entries(user_id="u", session_id="s") == []
+
+    @pytest.mark.asyncio
+    async def test_raise_on_error_re_raises_a_failed_read(self):
+        sm = self._manager(ConnectionError("down"))
+
+        with pytest.raises(ConnectionError):
+            await sm.get_session_context_entries(user_id="u", session_id="s", raise_on_error=True)
+
+    @pytest.mark.asyncio
+    async def test_raise_on_error_still_answers_empty_for_an_unavailable_cache(self):
+        """No cache means nothing could have been stored; that is not a read failure."""
+        sm = SessionManager(cache_engine=None)
+
+        assert (
+            await sm.get_session_context_entries(user_id="u", session_id="s", raise_on_error=True)
+            == []
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_successful_read_is_unchanged_either_way(self):
+        sm = self._manager()
+
+        rows = await sm.get_session_context_entries(user_id="u", session_id="s")
+        strict = await sm.get_session_context_entries(
+            user_id="u", session_id="s", raise_on_error=True
+        )
+
+        assert rows == strict == [{"id": "row", "kind": "context"}]

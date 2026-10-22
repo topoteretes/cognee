@@ -46,6 +46,13 @@ class _Dedup:
         return f"Dedup({self.description!r})" if self.description else "Dedup()"
 
 
+class _FromIdentity:
+    """Marker: the LLM answers this nested node by its identity field, not as an object."""
+
+    def __repr__(self) -> str:
+        return "FromIdentity()"
+
+
 def Embeddable(description: str = "Embedded in vector DB for semantic search") -> _Embeddable:
     """Mark a field as embedded in the vector database.
 
@@ -83,3 +90,13 @@ def Dedup(description: str = "Used for entity deduplication") -> _Dedup:
             name: Annotated[str, Dedup()] = ""
     """
     return _Dedup(description)
+
+
+def FromIdentity() -> _FromIdentity:
+    """Mark a nested DataPoint field that the LLM should answer by identity string.
+
+    Example:
+        class Person(DataPoint):
+            is_a: Annotated[Role, FromIdentity()]
+    """
+    return _FromIdentity()

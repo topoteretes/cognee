@@ -11,7 +11,9 @@ from cognee.infrastructure.databases.exceptions import (
     MutuallyExclusiveQueryParametersError,
 )
 from cognee.infrastructure.databases.graph.neptune_driver.adapter import NeptuneGraphDB
-from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingGateway import (
+    EmbeddingGateway,
+)
 from cognee.infrastructure.databases.vector.models.PayloadSchema import PayloadSchema
 from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
 from cognee.infrastructure.databases.vector.vector_db_interface import VectorDBInterface
@@ -46,6 +48,9 @@ class IndexSchema(DataPoint):
     chunk_index: int | None = None
     source_chunk_id: str | None = None
     importance_weight: float | None = 0.5
+    # Document external_metadata as JSON text, copied onto chunks at ingest so
+    # hybrid retrieval can surface allowlisted keys straight from the payload.
+    external_metadata: str | None = None
     belongs_to_set: list[str] = []
     metadata: dict = {"index_fields": ["text"]}
 
@@ -70,7 +75,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
     def __init__(
         self,
         graph_id: str,
-        embedding_engine: EmbeddingEngine | None = None,
+        embedding_engine: EmbeddingGateway | None = None,
         region: str | None = None,
         aws_access_key_id: str | None = None,
         aws_secret_access_key: str | None = None,
@@ -82,7 +87,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         Parameters:
         -----------
             - graph_id (str): The Neptune Analytics graph identifier
-            - embedding_engine(Optional[EmbeddingEngine]): The embedding engine instance to translate text to vector.
+            - embedding_engine(Optional[EmbeddingGateway]): The embedding engine instance to translate text to vector.
             - region (Optional[str]): AWS region where the graph is located (default: us-east-1)
             - aws_access_key_id (Optional[str]): AWS access key ID
             - aws_secret_access_key (Optional[str]): AWS secret access key
@@ -487,6 +492,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
                     chunk_index=getattr(data_point, "chunk_index", None),
                     source_chunk_id=getattr(data_point, "source_chunk_id", None),
                     importance_weight=getattr(data_point, "importance_weight", None),
+                    external_metadata=getattr(data_point, "external_metadata", None),
                 )
                 for data_point in data_points
             ],

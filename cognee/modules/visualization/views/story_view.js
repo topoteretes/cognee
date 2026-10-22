@@ -1032,7 +1032,20 @@ function inspectorOverviewLine(n){
     return parts.join(", ")+".";
   }
   if(stage==="type"){
-    return "Entity type. Groups "+children+" entit"+(children===1?"y":"ies")+".";
+    // Members are Entities linked via incoming is_a (Entity → EntityType),
+    // not structural children leaving the type node.
+    var memberCount=0;
+    for(var li3=0;li3<links.length;li3++){
+      var l3=links[li3];
+      var sid3=l3.source.id||l3.source;
+      var tid3=l3.target.id||l3.target;
+      if(tid3!==n.id)continue;
+      var rel3=l3.relation||(l3.edge_info&&l3.edge_info.relationship_name);
+      if(rel3!=="is_a")continue;
+      var srcNode=nodesById[sid3];
+      if(srcNode&&srcNode.type==="Entity")memberCount++;
+    }
+    return "Entity type. Groups "+memberCount+" entit"+(memberCount===1?"y":"ies")+".";
   }
   if(stage==="summary"){
     return "Summary built by the summarization task.";

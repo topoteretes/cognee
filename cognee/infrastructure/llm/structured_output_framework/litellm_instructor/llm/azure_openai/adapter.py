@@ -21,10 +21,13 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
+from cognee.infrastructure.llm.azure_identity import (
+    get_azure_ad_token_provider,
+    require_azure_endpoint,
+)
 from cognee.infrastructure.llm.exceptions import (
     ContentPolicyFilterError,
-    LLMPaymentRequiredError,
-    is_budget_exhausted_error,
+    raise_if_budget_exhausted,
 )
 from cognee.infrastructure.llm.retry_config import (
     llm_retry_condition,
@@ -57,6 +60,7 @@ class AzureOpenAIAdapter(OpenAIAdapter):
         endpoint: str | None = None,
         api_version: str | None = None,
         transcription_model: str | None = None,
+        image_transcribe_model: str | None = None,
         instructor_mode: str | None = None,
         streaming: bool = False,
         fallback_model: str | None = None,
@@ -72,6 +76,7 @@ class AzureOpenAIAdapter(OpenAIAdapter):
                 endpoint=endpoint,
                 api_version=api_version,
                 transcription_model=transcription_model,
+                image_transcribe_model=image_transcribe_model,
                 instructor_mode=instructor_mode,
                 streaming=streaming,
                 fallback_model=fallback_model,
@@ -87,6 +92,7 @@ class AzureOpenAIAdapter(OpenAIAdapter):
                 endpoint=endpoint,
                 api_version=api_version,
                 transcription_model=transcription_model,
+                image_transcribe_model=image_transcribe_model,
                 instructor_mode=instructor_mode,
                 streaming=streaming,
                 fallback_model=fallback_model,
@@ -110,6 +116,7 @@ class AzureOpenAIAdapter(OpenAIAdapter):
         endpoint: str | None,
         api_version: str | None,
         transcription_model: str | None,
+        image_transcribe_model: str | None,
         instructor_mode: str | None,
         streaming: bool,
         fallback_model: str | None,
@@ -118,30 +125,11 @@ class AzureOpenAIAdapter(OpenAIAdapter):
         llm_args: dict[str, Any] | None,
     ) -> None:
         """Initialize using Azure managed identity (DefaultAzureCredential)."""
-        try:
-            from azure.identity import (  # ty:ignore[unresolved-import]
-                DefaultAzureCredential,
-                get_bearer_token_provider,
-            )
-        except ImportError:
-            raise ImportError(
-                "azure-identity is required for managed identity authentication. "
-                "Install it with: pip install azure-identity"
-            )
-
         logger.info("Attempting to use Azure managed identity")
 
-        credential = DefaultAzureCredential()
-        token_provider = get_bearer_token_provider(
-            credential,
-            "https://cognitiveservices.azure.com/.default",
-        )
-
-        if not endpoint:
-            raise ValueError(
-                "LLM_ENDPOINT must be set to your Azure OpenAI endpoint "
-                "(e.g. https://YOUR-RESOURCE.openai.azure.com) when using Azure provider."
-            )
+        # The same process-wide provider the litellm_native path uses.
+        token_provider = get_azure_ad_token_provider()
+        endpoint = require_azure_endpoint(endpoint)
 
         # Set instance attributes directly (skip parent __init__ to avoid litellm client setup)
         self.name = "AzureOpenAI"
@@ -151,7 +139,7 @@ class AzureOpenAIAdapter(OpenAIAdapter):
         self.endpoint = endpoint
         self.max_completion_tokens = max_completion_tokens
         self.transcription_model = transcription_model or model
-        self.image_transcribe_model = model
+        self.image_transcribe_model = image_transcribe_model or model
         self.fallback_model = fallback_model
         self.fallback_api_key = fallback_api_key
         self.fallback_endpoint = fallback_endpoint
@@ -231,14 +219,22 @@ class AzureOpenAIAdapter(OpenAIAdapter):
                     ],
                     response_model=response_model,
                     max_retries=self.MAX_RETRIES,
-                    **merged_kwargs,  # ty: ignore[invalid-argument-type]
+                    **merged_kwargs,
                 )
         except (
             ContentFilterFinishReasonError,
             ContentPolicyViolationError,
             InstructorRetryException,
-        ):
+        ) as error:
             if not (self.fallback_model and self.fallback_api_key):
+                # Nothing left to try, so classify here: the handler further down
+                # is unreachable once this clause matches. A budget rejection with
+                # a configured fallback is deliberately NOT classified at this
+                # point — the fallback carries a different key, so a per-key spend
+                # cap is precisely the case the fallback exists for. Classifying
+                # earlier would silently remove that failover. A fallback that
+                # caps out in turn is classified by the nested handler below.
+                raise_if_budget_exhausted(error)
                 raise
             # Fall back to litellm for fallback model
             try:
@@ -266,6 +262,12 @@ class AzureOpenAIAdapter(OpenAIAdapter):
                 ContentPolicyViolationError,
                 InstructorRetryException,
             ) as error:
+                # The fallback capped out too. Checked before the content-policy
+                # branch because the model's partial completion is rendered into
+                # str(error), so a budget rejection whose completion happens to
+                # mention a content policy would otherwise be misclassified.
+                raise_if_budget_exhausted(error)
+
                 if (
                     isinstance(error, InstructorRetryException)
                     and "content management policy" not in str(error).lower()
@@ -276,6 +278,6 @@ class AzureOpenAIAdapter(OpenAIAdapter):
                         f"The provided input contains content that is not aligned with our content policy: {text_input}"
                     ) from error
         except Exception as e:
-            if is_budget_exhausted_error(e):
-                raise LLMPaymentRequiredError() from e
+            # Same detail-carrying message as the wrapped-error paths above.
+            raise_if_budget_exhausted(e)
             raise

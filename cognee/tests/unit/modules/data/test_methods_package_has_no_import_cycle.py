@@ -32,6 +32,7 @@ REEXPORTED_CALLABLES = (
     "load_or_create_datasets",
     "get_authorized_existing_datasets",
     "check_dataset_name",
+    "get_dataset_processing_status",
 )
 
 

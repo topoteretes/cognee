@@ -1,10 +1,9 @@
 """Adapter for Generic API LLM provider API"""
 
-import asyncio
 import base64
 import logging
 import mimetypes
-from typing import Any
+from typing import Any, cast
 
 import instructor
 import litellm
@@ -15,7 +14,6 @@ from pydantic import BaseModel
 from tenacity import (
     before_sleep_log,
     retry,
-    retry_if_not_exception_type,
     stop_after_attempt,
     wait_exponential_jitter,
 )
@@ -173,6 +171,9 @@ class GenericAPIAdapter(LLMInterface):
                 api_version=self.api_version,
                 **merged_kwargs,
             )
+            # litellm types acompletion() as ModelResponse | CustomStreamWrapper whatever
+            # `stream` is; a call without stream=True returns a ModelResponse.
+            response = cast(litellm.ModelResponse, response)
         # Guarded for the same reason the streaming loop is: content-filter
         # refusals and some proxy error envelopes come back with choices == [],
         # and a bare IndexError is not retryable and says nothing useful.
@@ -333,13 +334,7 @@ class GenericAPIAdapter(LLMInterface):
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(2, 128),
-        retry=retry_if_not_exception_type(
-            (
-                litellm.exceptions.NotFoundError,
-                litellm.exceptions.AuthenticationError,
-                asyncio.CancelledError,
-            )
-        ),
+        retry=llm_retry_condition,
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
@@ -386,22 +381,17 @@ class GenericAPIAdapter(LLMInterface):
             api_base=self.endpoint,
             max_retries=self.MAX_RETRIES,
         )
+        response = cast(litellm.ModelResponse, response)
 
         if not response.choices or response.choices[0].message is None:
             raise ValueError("Transcription failed. No response received.")
-        return TranscriptionReturnType(response.choices[0].message.content, response)
+        return TranscriptionReturnType(response.choices[0].message.content or "", response)
 
     @observe(as_type="transcribe_image")
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(2, 128),
-        retry=retry_if_not_exception_type(
-            (
-                litellm.exceptions.NotFoundError,
-                litellm.exceptions.AuthenticationError,
-                asyncio.CancelledError,
-            )
-        ),
+        retry=llm_retry_condition,
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
@@ -437,7 +427,7 @@ class GenericAPIAdapter(LLMInterface):
             raise ValueError(
                 f"Could not determine MIME type for image file: {input}. Is the extension correct?"
             )
-        response: litellm.ModelResponse = await litellm.acompletion(
+        response = await litellm.acompletion(
             model=self.image_transcribe_model,
             messages=[
                 {
@@ -465,4 +455,4 @@ class GenericAPIAdapter(LLMInterface):
             reasoning_effort=reasoning_effort,
             drop_params=True,
         )
-        return response
+        return cast(litellm.ModelResponse, response)

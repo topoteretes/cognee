@@ -2,10 +2,23 @@
 
 This document summarizes how to work with the cognee repository: how it’s organized, how to build, test, lint, and contribute. It mirrors our actual tooling and CI while providing quick commands for local development.
 
+## Design Principles
+
+1. **Don't overengineer**: Simple beats complex.
+2. **No fallbacks**: One correct path, no alternatives.
+3. **One way**: One way to do things, not many.
+4. **Throw errors**: Fail fast when the operation's preconditions aren't met. Observability (telemetry, logging) is best-effort and never changes the outcome of the operation.
+5. **No backups**: Trust the primary mechanism.
+6. **Separation of concerns**: Each function has a single responsibility.
+7. **Be concise but informative**: No essays, but the docstrings and comments a reader needs.
+8. **No invented limits**: Never add a cutoff (`max_n`, `[:k]`, "older than X") or an expiry (TTL, cooldown, eviction) the task did not ask for — both are silent data loss. If you believe one is unavoidable, stop and ask, stating what would be dropped and why; never add it first and justify it afterwards. Existing bounds (lock leases, recovery floors, batch caps) are deliberate: removing or changing one is the same question.
+
+**Methodology**: surgical changes only; evidence-based debugging (minimal, targeted logging); fix root causes, not symptoms. Debug like a detective: form the theory of the crime, collect evidence, and change code only once the evidence proves it.
+
 ## Project Structure & Module Organization
 
 - `cognee/`: Core Python library and API.
-  - `api/`: FastAPI application and versioned routers (add, cognify, memify, search, delete, users, datasets, responses, visualize, settings, sync, update, checks).
+  - `api/`: FastAPI application and versioned routers under `api/v1/` — memory API (`remember`, `recall`, `improve`, `forget`), low-level operations (`add`, `cognify`, `search`, `delete`, `update`), and supporting routers (`datasets`, `users`, `permissions`, `settings`, `sync`, `visualize`, `health`, `skills`, `sessions`, …). Each router package has a `routers/` folder; `api/client.py` registers them.
   - `cli/`: CLI entry points and subcommands invoked via `cognee` / `cognee-cli`.
   - `infrastructure/`: Databases, LLM providers, embeddings, loaders, and storage adapters.
   - `modules/`: Domain logic (graph, retrieval, ontology, users, processing, observability, etc.).
@@ -19,7 +32,9 @@ This document summarizes how to work with the cognee repository: how it’s orga
 - `distributed/deploy/`: One-click deployment templates (Modal, Fly.io, Railway, Render, Daytona).
 - `examples/`: Example scripts demonstrating the public APIs and features (graph, code graph, multimodal, permissions, etc.).
 - `notebooks/`: Jupyter notebooks for demos and tutorials.
-- `alembic/`: Database migrations for relational backends.
+- `.agents/skills/`: Task-specific agent skills. This is the only copy; add and edit skills here (Codex reads this folder directly).
+- `.claude/skills/`: Symlink to `../.agents/skills` so Claude Code finds the same skills. On Windows clones without symlink support, the SessionStart hook in `.claude/settings.json` (`.claude/hooks/link-skills.sh`) replaces it with a directory junction automatically; no manual step is needed. That hook marks the path skip-worktree, so on those clones only, a later change to the `.claude/skills` entry itself makes git refuse to update it — run `git update-index --no-skip-worktree .claude/skills && git checkout -- .claude/skills`, then start a new session.
+- `cognee/alembic/`: Relational (Alembic) schema migrations; `alembic.ini` is in `cognee/`. Graph/vector data migrations live in `cognee/modules/migrations/`.
 
 Notes:
 - Co-locate feature-specific helpers under their respective package (`modules/`, `infrastructure/`, or `tasks/`).
@@ -27,18 +42,20 @@ Notes:
 
 ## Build, Test, and Development Commands
 
-Python (root) – requires Python >= 3.10 and < 3.14. We recommend `uv` for speed and reproducibility.
+Python (root) – requires Python >= 3.10 and < 3.15 (i.e. 3.10–3.14, see `pyproject.toml`). We recommend `uv` for speed and reproducibility.
 
 - Create/refresh env and install dev deps:
 ```bash
 uv sync --dev --all-extras --reinstall
 ```
 
-- Run the CLI (examples):
+- Run the CLI (examples). The memory commands are the primary surface; `add`/`cognify`/`search` are the low-level stages they call underneath:
 ```bash
-uv run cognee-cli add "Cognee turns documents into AI memory."
-uv run cognee-cli cognify
-uv run cognee-cli search "What does cognee do?"
+uv run cognee-cli remember "Cognee turns documents into AI memory."   # add + cognify (+ improve)
+uv run cognee-cli recall "What does cognee do?"
+uv run cognee-cli improve -d main_dataset   # enrich / index the graph
+uv run cognee-cli forget --all              # NOTE: no confirmation prompt
+uv run cognee-cli add "..." && uv run cognee-cli cognify && uv run cognee-cli search "..."   # low level
 uv run cognee-cli -ui   # Launches UI, backend API, and MCP server together
 ```
 
@@ -124,7 +141,19 @@ graph and vector databases. Backend support (source of truth:
 - Vector — supported: LanceDB (default), PGVector, Turso. Unsupported: Neptune
   Analytics and community adapters (unless they register a handler via
   `use_dataset_database_handler()`).
-- Relational (SQLite/Postgres) is always a single shared DB (users, ACLs, registry).
+- Relational (SQLite/Postgres/Turso) is always a single shared DB (users, ACLs, registry).
+- Turso: the three layers and the session cache (`CACHE_BACKEND=turso`) can run on the Turso
+  rewrite engine (`pyturso`, local files only);
+  setup, journal modes and engine limits are in `docs/turso-local.md`.
+
+Each provider has a default handler derived from it, so no handler setting is needed
+normally. Setting `GRAPH_DATASET_DATABASE_HANDLER` / `VECTOR_DATASET_DATABASE_HANDLER`
+explicitly is never overwritten by that derivation, and is how you select the alternates:
+`neo4j_community` (one Docker container per dataset, for Community edition, which serves
+one database per server), `neo4j_aura_dev` (one Aura instance per dataset; dev/PoC only),
+`postgres_graph_shared` and `pgvector_shared` (a schema per dataset in cognee's main
+Postgres database, so no `CREATE DATABASE` privilege is needed). Each requires its
+matching provider. See CLAUDE.md for the full matrix.
 
 Both graph and vector must be supported, or cognee raises `EnvironmentError` — an
 unsupported backend with the flag on is a hard error, not a fallback to shared DBs;
@@ -149,7 +178,7 @@ MCP server and Frontend:
   - CLI tests: `cognee/tests/cli_tests/`
 - Name test files `test_*.py`. Use `pytest.mark.asyncio` for async tests.
 - Avoid external state; rely on test fixtures and the CI-provided env vars when LLM/embedding providers are required. See CI workflows under `.github/workflows/` for expected environment variables.
-- When adding public APIs, provide/update targeted examples under `examples/python/`.
+- When adding public APIs, provide/update a targeted example under `examples/guides/` and list it in `examples/README.md` (see its "Contributing a new example" section).
 
 ## Commit & Pull Request Guidelines
 

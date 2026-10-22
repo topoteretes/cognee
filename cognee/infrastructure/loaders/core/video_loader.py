@@ -11,6 +11,7 @@ from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadat
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface, LoaderResult
 from cognee.infrastructure.loaders.store_derived_text import store_derived_text
+from cognee.infrastructure.loaders.utils.require_llm import require_llm_for_media
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger(__name__)
@@ -135,6 +136,10 @@ class VideoLoader(LoaderInterface):
         """
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File not found: {file_path}")
+
+        require_llm_for_media(
+            "Video", "cognee transcribes the video's audio track with the LLM before indexing it"
+        )
 
         with open(file_path, "rb") as f:
             file_metadata = await get_file_metadata(f)

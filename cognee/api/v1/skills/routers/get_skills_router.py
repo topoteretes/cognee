@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from cognee import __version__ as cognee_version
+from cognee.exceptions import CogneeApiError
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.users.exceptions import PermissionDeniedError
@@ -134,6 +135,8 @@ def get_skills_router() -> APIRouter:
                 **({"dataset_id": payload.dataset_id} if payload.dataset_id else {}),
             )
             return jsonable_encoder(result.to_dict())
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("ingest skill failed")
             return JSONResponse(status_code=409, content={"error": "Failed to ingest skill"})
@@ -193,6 +196,8 @@ def get_skills_router() -> APIRouter:
             return JSONResponse(
                 status_code=403, content={"error": "Not authorized for this dataset"}
             )
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("list skills failed")
             return JSONResponse(status_code=409, content={"error": "Failed to list skills"})
@@ -231,6 +236,8 @@ def get_skills_router() -> APIRouter:
             return JSONResponse(
                 status_code=403, content={"error": "Not authorized for this dataset"}
             )
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("get skill failed")
             return JSONResponse(status_code=409, content={"error": "Failed to fetch skill"})
@@ -269,6 +276,8 @@ def get_skills_router() -> APIRouter:
             return JSONResponse(
                 status_code=403, content={"error": "Not authorized for this dataset"}
             )
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("delete skill failed")
             return JSONResponse(status_code=409, content={"error": "Failed to delete skill"})
