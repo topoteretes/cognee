@@ -360,10 +360,11 @@ def _apply_key_hints(schema: dict, key_hints: dict[str, dict]) -> None:
     Postgres names tables "<dataset>.<table>", so a foreign key's target gets the
     same prefix to match the row lookup.
 
-    A foreign key to a table this run did not load (a single-table ``query``) is
-    dropped: neither its rows nor its table node exist. Every other foreign key is
-    kept, so the table describes all its keys; which of them can find a row is
-    decided per row by ``_resolve_fk_references``.
+    Every foreign key is kept, so the table describes all its keys, including one
+    to a table this run did not load (a single-table ``query``, or an empty table
+    dlt wrote no job for). Which of them can find a row is decided per row by
+    ``_resolve_fk_references``; a key whose target has no loaded rows creates no
+    edge and is reported there.
 
     A table without a hint keeps its reflected keys: a missing hint must never fail
     the add.
@@ -376,19 +377,9 @@ def _apply_key_hints(schema: dict, key_hints: dict[str, dict]) -> None:
             continue
         if hints["primary_key"]:
             table_info["primary_key"] = hints["primary_key"]
-        foreign_keys = []
-        for fk in hints["foreign_keys"]:
-            ref_table = prefix + fk["ref_table"]
-            if ref_table not in schema:
-                logger.info(
-                    "Foreign key %s.%s -> %s is skipped: that table was not loaded.",
-                    qualified_name,
-                    fk["column"],
-                    ref_table,
-                )
-                continue
-            foreign_keys.append({**fk, "ref_table": ref_table})
-        table_info["foreign_keys"] = foreign_keys
+        table_info["foreign_keys"] = [
+            {**fk, "ref_table": prefix + fk["ref_table"]} for fk in hints["foreign_keys"]
+        ]
 
 
 def _is_dlt_column(name: str) -> bool:

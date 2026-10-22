@@ -79,10 +79,11 @@ def test_a_composite_key_resolves_to_all_its_columns():
     assert _key_value({"order_id": 7, "n": 2, "qty": 5}, ["order_id", "n"]) == "7:2"
 
 
-def test_only_keys_to_unloaded_tables_are_dropped():
-    # A key to a unique non-primary column is kept: which rows it finds is decided
-    # at resolve time. A key to a table this run did not load has nothing to point at.
-    kept = {"column": "employee_no", "ref_table": "users", "ref_column": "employee_no"}
+def test_every_key_is_kept_even_to_an_unloaded_table():
+    # Which rows a key finds is decided at resolve time: a key to a unique
+    # non-primary column, or to a table this run did not load (a single-table query,
+    # an empty table), stays on the table so it describes all its keys.
+    unique = {"column": "employee_no", "ref_table": "users", "ref_column": "employee_no"}
     unloaded = {"column": "carrier_id", "ref_table": "carriers", "ref_column": "id"}
     schema = {
         "shipment": {"primary_key": None, "foreign_keys": []},
@@ -90,10 +91,10 @@ def test_only_keys_to_unloaded_tables_are_dropped():
     }
 
     _apply_key_hints(
-        schema, {"shipment": {"primary_key": ["id"], "foreign_keys": [kept, unloaded]}}
+        schema, {"shipment": {"primary_key": ["id"], "foreign_keys": [unique, unloaded]}}
     )
 
-    assert schema["shipment"]["foreign_keys"] == [kept]
+    assert schema["shipment"]["foreign_keys"] == [unique, unloaded]
 
 
 def test_hints_come_from_this_runs_resources_not_the_shared_schema():
