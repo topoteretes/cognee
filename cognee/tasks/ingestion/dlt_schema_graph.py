@@ -42,8 +42,10 @@ async def emit_dlt_schema_graph(
 
     Args:
         tables: {key: {"schema_info", "foreign_keys", "primary_key", "row_count"}}, each
-            optionally with "name" (the table name, else the key) and "scope" (its
-            source document id, see ``_table_node_id``)
+            optionally with "name" (the table name, else the key), "scope" (its
+            source document id, see ``_table_node_id``; the table gets an
+            ``is_table_of`` edge to that document) and "source_label" (the database
+            it was read from, named in its description)
         row_records: [{"source_id": str, "table_name": str, "scope": str, "fk_references": [...],
             "column_values": {column: value}, "timestamps": {column: str}}] —
             column_values is optional and produces one shared ColumnValue node
@@ -92,6 +94,7 @@ async def emit_dlt_schema_graph(
     for table_key, table_meta in tables.items():
         table_name = table_meta.get("name", table_key)
         scope = table_meta.get("scope", "")
+        source_label = table_meta.get("source_label")
         schema_info = table_meta["schema_info"]
         columns_str = (
             json.dumps(schema_info, default=str) if isinstance(schema_info, (list, dict)) else "[]"
@@ -107,12 +110,27 @@ async def emit_dlt_schema_graph(
             sample_rows="[]",
             row_count_estimate=table_meta["row_count"],
             description=(
-                f"Relational table '{table_name}' with {table_meta['row_count']} rows, "
-                "loaded through dlt."
+                f"Relational table '{table_name}'"
+                + (f" from {source_label}" if source_label else "")
+                + f" with {table_meta['row_count']} rows, loaded through dlt."
             ),
         )
         schema_nodes.append(table_node)
         table_node_ids[(scope, table_name)] = table_node.id
+        # The table belongs to the source document (the database) it was read from.
+        if scope:
+            schema_edges.append(
+                (
+                    table_node.id,
+                    UUID(scope),
+                    "is_table_of",
+                    {
+                        "source_node_id": str(table_node.id),
+                        "target_node_id": scope,
+                        "relationship_name": "is_table_of",
+                    },
+                )
+            )
 
     # SchemaRelationship nodes for each FK definition
     relationship_count = 0

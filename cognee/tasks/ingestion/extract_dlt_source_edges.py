@@ -87,6 +87,7 @@ async def extract_dlt_source_edges(
                 tables[f"{doc_id}:{table_name}"] = {
                     "name": table_name,
                     "scope": doc_id,
+                    "source_label": manifest.get("source_label"),
                     "schema_info": table_meta.get("schema_info"),
                     "foreign_keys": table_meta.get("foreign_keys", []),
                     "primary_key": rows_of[table_name][0]["primary_key_column"],

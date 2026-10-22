@@ -143,14 +143,26 @@ async def test_emit_passes_uuid_node_ids_in_edge_tuples(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_tables_of_one_name_from_two_sources_are_separate_nodes(monkeypatch):
-    """Each source's table node keeps its own keys, and its rows point at it."""
+    """Each source's table node keeps its own keys, names its database, links to
+    that database's source document, and its rows point at it."""
     graph = SimpleNamespace(add_nodes=AsyncMock(), add_edges=AsyncMock())
     _wire(monkeypatch, graph, {"source_ref_key": None, "pipeline_run_id": None})
     shop, crm = str(uuid4()), str(uuid4())
     orders = _tables()["orders"]
     tables = {
-        f"{shop}:orders": {**orders, "name": "orders", "scope": shop},
-        f"{crm}:orders": {**orders, "name": "orders", "scope": crm, "foreign_keys": []},
+        f"{shop}:orders": {
+            **orders,
+            "name": "orders",
+            "scope": shop,
+            "source_label": "shop.sqlite",
+        },
+        f"{crm}:orders": {
+            **orders,
+            "name": "orders",
+            "scope": crm,
+            "source_label": "crm",
+            "foreign_keys": [],
+        },
     }
     shop_row, crm_row = str(uuid4()), str(uuid4())
     row_records = [
@@ -166,10 +178,13 @@ async def test_tables_of_one_name_from_two_sources_are_separate_nodes(monkeypatc
     crm_table = schema_graph_module._table_node_id("orders", crm)
     assert set(table_nodes) == {shop_table, crm_table}
     assert table_nodes[shop_table].foreign_keys != table_nodes[crm_table].foreign_keys
+    assert table_nodes[shop_table].description == (
+        "Relational table 'orders' from shop.sqlite with 1 rows, loaded through dlt."
+    )
+    assert "from crm with" in table_nodes[crm_table].description
 
-    row_of = {
-        (str(source), target)
-        for source, target, name, _ in graph.add_edges.await_args.args[0]
-        if name == "is_row_of"
-    }
+    edges = graph.add_edges.await_args.args[0]
+    row_of = {(str(source), target) for source, target, name, _ in edges if name == "is_row_of"}
     assert row_of == {(shop_row, shop_table), (crm_row, crm_table)}
+    table_of = {(source, str(target)) for source, target, name, _ in edges if name == "is_table_of"}
+    assert table_of == {(shop_table, shop), (crm_table, crm)}

@@ -1,11 +1,14 @@
-"""A row's foreign keys find their target rows by the whole key the target is keyed on."""
+"""A row's foreign keys find their target rows: by the whole key the target is keyed on,
+or, for a key to a UNIQUE column, by the one row holding the referenced value."""
 
 from types import SimpleNamespace
 
-from cognee.tasks.ingestion.resolve_dlt_sources import _resolve_fk_references
+from cognee.tasks.ingestion.resolve_dlt_sources import _column_index, _resolve_fk_references
 
 LINE_12 = "11111111-1111-1111-1111-111111111111"
 LINE_21 = "22222222-2222-2222-2222-222222222222"
+ANN = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+BOB = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
 
 
 def _row(table_name, foreign_keys, row_data):
@@ -28,10 +31,10 @@ def test_a_composite_key_finds_its_row_by_all_its_columns():
         {"ship_order": 1, "ship_line": 2},
     )
     lookup = {("order_lines", "1:2"): LINE_12, ("order_lines", "2:1"): LINE_21}
-    missing, unkeyed = [], set()
+    missing, ambiguous = [], set()
 
     refs = _resolve_fk_references(
-        row, lookup, missing, {"order_lines": ["order_id", "line_no"]}, unkeyed
+        row, lookup, missing, {"order_lines": ["order_id", "line_no"]}, None, ambiguous
     )
 
     assert refs == [
@@ -44,7 +47,7 @@ def test_a_composite_key_finds_its_row_by_all_its_columns():
             "relationship_name": "ship_order_ship_line_references_order_lines",
         }
     ]
-    assert missing == [] and unkeyed == set()
+    assert missing == [] and ambiguous == set()
 
 
 def test_two_composite_keys_to_one_table_stay_apart():
@@ -61,7 +64,7 @@ def test_two_composite_keys_to_one_table_stay_apart():
     )
     lookup = {("order_lines", "1:2"): LINE_12, ("order_lines", "2:1"): LINE_21}
 
-    refs = _resolve_fk_references(row, lookup, [], {"order_lines": ["order_id", "line_no"]}, set())
+    refs = _resolve_fk_references(row, lookup, [], {"order_lines": ["order_id", "line_no"]})
 
     assert _edges(refs) == {
         ("o_l_references_order_lines", LINE_12),
@@ -69,15 +72,63 @@ def test_two_composite_keys_to_one_table_stay_apart():
     }
 
 
-def test_a_key_to_a_column_the_target_is_not_keyed_on_creates_no_edge():
-    # users rows are keyed on id: looking employee_no up by id would find the wrong user.
+def _lookup(rows_of):
+    """column_lookup over target rows given as {table: [(row_data, node_id), ...]}."""
+    return lambda table, columns: _column_index(
+        [(SimpleNamespace(row_data=data), node_id) for data, node_id in rows_of.get(table, [])],
+        columns,
+    )
+
+
+def test_a_key_to_a_unique_column_finds_the_row_holding_that_value():
+    # users rows are keyed on id; looking employee_no 2 up by id would find Bob.
     row = _row("badges", [_fk("employee_no", "users", "employee_no")], {"employee_no": 2})
-    unkeyed = set()
+    users = [({"id": 1, "employee_no": 2}, ANN), ({"id": 2, "employee_no": 7}, BOB)]
+    missing, ambiguous = [], set()
 
-    refs = _resolve_fk_references(row, {("users", "2"): LINE_21}, [], {"users": ["id"]}, unkeyed)
+    refs = _resolve_fk_references(
+        row,
+        {("users", "1"): ANN, ("users", "2"): BOB},
+        missing,
+        {"users": ["id"]},
+        _lookup({"users": users}),
+        ambiguous,
+    )
 
-    assert refs == []
-    assert unkeyed == {("badges", "employee_no", "users", "employee_no", "id")}
+    assert refs == [
+        {
+            "column": "employee_no",
+            "target_table": "users",
+            "target_column": "employee_no",
+            "target_pk_value": "2",
+            "target_node_id": ANN,
+            "relationship_name": "employee_no_references_users",
+        }
+    ]
+    assert missing == [] and ambiguous == set()
+
+
+def test_a_unique_value_several_rows_hold_creates_no_edge():
+    row = _row("badges", [_fk("employee_no", "users", "employee_no")], {"employee_no": 2})
+    users = [({"id": 1, "employee_no": 2}, ANN), ({"id": 2, "employee_no": 2}, BOB)]
+    missing, ambiguous = [], set()
+
+    refs = _resolve_fk_references(
+        row, {}, missing, {"users": ["id"]}, _lookup({"users": users}), ambiguous
+    )
+
+    assert refs == [] and missing == []
+    assert ambiguous == {("badges", "employee_no", "users", "employee_no")}
+
+
+def test_a_composite_unique_key_finds_its_row_by_all_its_columns():
+    # x alone is held by both rows; only (x, y) names one.
+    row = _row("refs", [_fk("a", "pairs", "x"), _fk("b", "pairs", "y")], {"a": 1, "b": 2})
+    pairs = [({"id": 10, "x": 1, "y": 1}, LINE_12), ({"id": 11, "x": 1, "y": 2}, LINE_21)]
+
+    refs = _resolve_fk_references(row, {}, [], {"pairs": ["id"]}, _lookup({"pairs": pairs}), set())
+
+    assert _edges(refs) == {("a_b_references_pairs", LINE_21)}
 
 
 def test_a_composite_key_with_a_null_column_is_no_reference():
@@ -86,30 +137,33 @@ def test_a_composite_key_with_a_null_column_is_no_reference():
         [_fk("o", "order_lines", "order_id"), _fk("l", "order_lines", "line_no")],
         {"o": 1, "l": None},
     )
-    missing, unkeyed = [], set()
+    missing, ambiguous = [], set()
 
     refs = _resolve_fk_references(
-        row, {}, missing, {"order_lines": ["order_id", "line_no"]}, unkeyed
+        row, {}, missing, {"order_lines": ["order_id", "line_no"]}, None, ambiguous
     )
 
-    assert refs == [] and missing == [] and unkeyed == set()
+    assert refs == [] and missing == [] and ambiguous == set()
 
 
-def test_an_incomplete_composite_key_is_reported_once():
+def test_a_key_to_part_of_a_composite_key_needs_a_value_one_row_holds():
+    # order_id alone is held by two order lines, so it names neither.
     row = _row(
         "shipments",
         [_fk("o", "order_lines", "order_id"), _fk("other", "users", "id")],
         {"o": 1, "other": 5},
     )
-    unkeyed = set()
+    lines = [({"order_id": 1, "line_no": 1}, LINE_12), ({"order_id": 1, "line_no": 2}, LINE_21)]
+    ambiguous = set()
 
     refs = _resolve_fk_references(
         row,
-        {("users", "5"): LINE_21},
+        {("users", "5"): ANN},
         [],
         {"order_lines": ["order_id", "line_no"], "users": ["id"]},
-        unkeyed,
+        _lookup({"order_lines": lines}),
+        ambiguous,
     )
 
-    assert _edges(refs) == {("other_references_users", LINE_21)}
-    assert unkeyed == {("shipments", "o", "order_lines", "order_id", "order_id, line_no")}
+    assert _edges(refs) == {("other_references_users", ANN)}
+    assert ambiguous == {("shipments", "o", "order_lines", "order_id")}

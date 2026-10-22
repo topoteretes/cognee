@@ -236,12 +236,12 @@ async def _table_foreign_keys() -> dict[str, list[dict]]:
 
 
 @pytest.mark.asyncio
-async def test_each_foreign_key_finds_its_row_by_the_key_rows_are_keyed_on(clean_env):
+async def test_each_foreign_key_finds_the_row_it_references(clean_env):
     """A composite foreign key finds its row by all its columns, whatever their
     declared order. A table without a declared primary key is keyed on ``id``, and a
-    foreign key to it finds its row. A key to a unique
-    non-primary column would match an unrelated row (badge 100 to Bob), so it
-    creates no edge, but its table still describes it."""
+    foreign key to it finds its row. A key to a unique non-primary column finds the
+    row holding that value (badge 100 to Ann, whose employee_no is 2), not the row
+    whose id equals it (Bob)."""
     source_db = _write_source_db(clean_env / "keys.sqlite", KEY_SHAPES_SQL)
 
     await cognee.add(f"sqlite:///{source_db}", dataset_name="shop")
@@ -250,11 +250,30 @@ async def test_each_foreign_key_finds_its_row_by_the_key_rows_are_keyed_on(clean
     assert await _row_edges(KEY_SHAPES_TABLES) == {
         ("shipments:10", "ship_order_ship_line_references_order_lines", "order_lines:1:2"),
         ("badges:100", "owner_id_references_people", "people:1"),
+        ("badges:100", "employee_no_references_people", "people:1"),
         ("members:5", "team_id_references_teams", "teams:2"),
     }
     table_foreign_keys = await _table_foreign_keys()
     assert {fk["column"] for fk in table_foreign_keys["shipments"]} == {"ship_line", "ship_order"}
     assert {fk["column"] for fk in table_foreign_keys["badges"]} == {"employee_no", "owner_id"}
+
+
+@pytest.mark.asyncio
+async def test_each_table_names_and_links_the_database_it_came_from(clean_env):
+    from cognee.infrastructure.databases.graph import get_graph_engine
+
+    source_db = _write_source_db(clean_env / "shop.sqlite")
+    await cognee.add(f"sqlite:///{source_db}", dataset_name="shop")
+    await cognee.cognify(datasets=["shop"])
+
+    nodes, edges = await (await get_graph_engine()).get_graph_data()
+    types = {str(node_id): props.get("type") for node_id, props in nodes}
+    tables = {str(i): p for i, p in nodes if p.get("type") == "SchemaTable"}
+    assert {p["name"] for p in tables.values()} == SOURCE_TABLES
+    for props in tables.values():
+        assert f"'{props['name']}' from shop.sqlite with" in props["description"]
+    table_of = {str(s): types[str(t)] for s, t, name, *_ in edges if name == "is_table_of"}
+    assert table_of == dict.fromkeys(tables, "DltSourceDocument")
 
 
 LINKED_SQL = """

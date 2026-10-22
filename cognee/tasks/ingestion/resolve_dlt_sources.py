@@ -34,7 +34,13 @@ from .create_dlt_source import (
 from .data_item import DataItem
 from .dlt_row_data import DltRowData
 from .dlt_temporal import temporal_cells
-from .dlt_utils import NODE_SET_COLUMN, STRUCTURE_COLUMN, column_selected, document_source_tag
+from .dlt_utils import (
+    NODE_SET_COLUMN,
+    SOURCE_LABEL_ATTR,
+    STRUCTURE_COLUMN,
+    column_selected,
+    document_source_tag,
+)
 from .ingest_dlt_source import ingest_dlt_source
 
 logger = get_logger("resolve_dlt_sources")
@@ -252,6 +258,7 @@ async def resolve_dlt_sources(
             user,
             column_value_columns=column_value_columns,
             temporal_columns=temporal_columns,
+            source_label=getattr(dlt_item, SOURCE_LABEL_ATTR, None),
         )
         if item is not None:
             if item.data_id in manifest_data_ids:
@@ -376,8 +383,13 @@ async def _build_source_manifest_item(
     user: User,
     column_value_columns: dict | None = None,
     temporal_columns: dict | None = None,
+    source_label: str | None = None,
 ) -> DataItem | None:
     """Build a single manifest DataItem describing a whole DLT source.
+
+    ``source_label`` names the database a connection-string source reads
+    (``SOURCE_LABEL_ATTR``); the manifest records it so the source's table nodes
+    can name it.
 
     Rows are deduplicated by identity (table, pk_value, content_hash) — DLT
     child tables can contain rows that are byte-identical once dlt bookkeeping
@@ -426,18 +438,29 @@ async def _build_source_manifest_item(
             table_name,
             count,
         )
-    # The columns each table's rows are keyed on: an FK finds its target row only
-    # through that whole key.
+    # The columns each table's rows are keyed on: an FK to those finds its target
+    # row through fk_lookup; an FK to other columns through an index of their values.
     key_columns = {row.table_name: row.primary_key_columns for row in unique_rows.values()}
+    rows_of: dict[str, list[tuple[DltRowData, UUID]]] = {}
+    for key, row in unique_rows.items():
+        rows_of.setdefault(row.table_name, []).append((row, node_ids[key]))
+    column_indexes: dict[tuple[str, tuple[str, ...]], dict] = {}
+
+    def column_lookup(table_name: str, columns: tuple[str, ...]) -> dict:
+        if (table_name, columns) not in column_indexes:
+            column_indexes[(table_name, columns)] = _column_index(
+                rows_of.get(table_name, []), columns
+            )
+        return column_indexes[(table_name, columns)]
 
     tables: dict[str, dict] = {}
     manifest_rows: list[dict] = []
     # (source_table, fk_column, ref_table, fk_value) for FKs whose target row
     # was not loaded — collected here and reported once after the loop.
     missing_fk_targets: list[tuple[str, str, str, str]] = []
-    # (source_table, fk_columns, ref_table, ref_columns, key_columns) for FKs that
-    # form no key their target's rows are keyed on.
-    unkeyed_fks: set[tuple[str, str, str, str, str]] = set()
+    # (source_table, fk_columns, ref_table, ref_columns) for FKs to a UNIQUE column
+    # whose value several loaded rows hold.
+    ambiguous_fks: set[tuple[str, str, str, str]] = set()
     for key, row in unique_rows.items():
         if row.table_name not in tables:
             tables[row.table_name] = {
@@ -454,7 +477,7 @@ async def _build_source_manifest_item(
             "content_hash": row.content_hash,
             "text": _build_schema_context_text(row),
             "fk_references": _resolve_fk_references(
-                row, fk_lookup, missing_fk_targets, key_columns, unkeyed_fks
+                row, fk_lookup, missing_fk_targets, key_columns, column_lookup, ambiguous_fks
             ),
         }
         column_values = _selected_column_values(row, column_value_columns)
@@ -477,17 +500,15 @@ async def _build_source_manifest_item(
             len(missing_fk_targets),
             sample,
         )
-    for src, col, ref, ref_col, key_col in sorted(unkeyed_fks):
+    for src, col, ref, ref_col in sorted(ambiguous_fks):
         logger.warning(
-            "Foreign key %s.%s -> %s.%s creates no edges: rows of '%s' are keyed on "
-            "'%s', not '%s'.",
+            "Foreign key %s.%s -> %s.%s skipped values that several rows of '%s' hold; "
+            "a foreign key must reference a unique column, so none of them is linked.",
             src,
             col,
             ref,
             ref_col,
             ref,
-            key_col,
-            ref_col,
         )
 
     # Deterministic ordering so the manifest content hash is stable across
@@ -500,6 +521,8 @@ async def _build_source_manifest_item(
         "tables": tables,
         "rows": manifest_rows,
     }
+    if source_label:
+        manifest["source_label"] = source_label
     manifest_text = json.dumps(manifest, sort_keys=True, separators=(",", ":"), default=str)
 
     # The data_id is STABLE — seeded from (dataset, source name) with no
@@ -881,13 +904,17 @@ def _resolve_fk_references(
     row_id_lookup: dict,
     missing_targets: list | None = None,
     key_columns: dict[str, list[str]] | None = None,
-    unkeyed_fks: set | None = None,
+    column_lookup=None,
+    ambiguous_fks: set | None = None,
 ) -> list:
     """Resolve foreign key columns to target row node ids for graph edge creation.
 
     Returns a list of dicts:
-    [{"column": "dept_id", "target_table": "departments", "target_pk_value": "10",
-      "target_node_id": "uuid-string", "relationship_name": "dept_id_references_departments"}]
+    [{"column": "dept_id", "target_table": "departments", "target_column": "id",
+      "target_pk_value": "10", "target_node_id": "uuid-string",
+      "relationship_name": "dept_id_references_departments"}]
+    ``target_pk_value`` is the referenced value, which is the target's key value
+    unless the FK references a UNIQUE column.
 
     When ``missing_targets`` is provided, FK references whose target row was not
     loaded are appended to it as ``(source_table, column, ref_table, value)`` so
@@ -896,36 +923,35 @@ def _resolve_fk_references(
     ``row_id_lookup`` finds a row by the whole key its table is keyed on, given per
     table in ``key_columns``, so the row's per-column FKs are first grouped into the
     keys they form (``_fk_keys``): a composite FK finds its row by all its columns,
-    in the target's key order. An FK that references any other column would match
-    an unrelated row, so it creates no edge and is recorded in ``unkeyed_fks`` as
-    ``(source_table, columns, ref_table, ref_columns, key_columns)``, each joined
-    by ", ".
+    in the target's key order. An FK that references other columns (a UNIQUE
+    column) finds its row through ``column_lookup(ref_table, ref_columns)``, a
+    ``_column_index`` of the target's rows. A value several rows hold creates no
+    edge and is recorded in ``ambiguous_fks`` as
+    ``(source_table, columns, ref_table, ref_columns)``, each joined by ", ".
     """
     references = []
     key_columns = key_columns or {}
     for ref_table, pairs, target_key_columns in _fk_keys(dlt_row.foreign_keys, key_columns):
-        if target_key_columns is None:
-            if unkeyed_fks is not None:
-                unkeyed_fks.add(
-                    (
-                        dlt_row.table_name,
-                        ", ".join(column for column, _ in pairs),
-                        ref_table,
-                        ", ".join(ref_column for _, ref_column in pairs),
-                        ", ".join(key_columns[ref_table]),
-                    )
-                )
-            continue
-
         fk_columns = [column for column, _ in pairs]
+        ref_columns = [ref_column for _, ref_column in pairs]
         fk_values = [dlt_row.row_data.get(column) for column in fk_columns]
         if any(value is None for value in fk_values):
             continue
 
         # Joined like the target's primary_key_value (see _key_value).
         fk_value_str = ":".join(str(value) for value in fk_values)
-        target_node_id = row_id_lookup.get((ref_table, fk_value_str))
         fk_column = ", ".join(fk_columns)
+        if target_key_columns is not None:
+            target_node_id = row_id_lookup.get((ref_table, fk_value_str))
+        else:
+            index = column_lookup(ref_table, tuple(ref_columns)) if column_lookup else {}
+            target_node_id = index.get(fk_value_str)
+            if target_node_id is None and fk_value_str in index:
+                if ambiguous_fks is not None:
+                    ambiguous_fks.add(
+                        (dlt_row.table_name, fk_column, ref_table, ", ".join(ref_columns))
+                    )
+                continue
 
         if target_node_id is not None:
             # The bare table name, so Postgres' "<dataset>.<table>" names the edge as SQLite does.
@@ -934,7 +960,7 @@ def _resolve_fk_references(
                 {
                     "column": fk_column,
                     "target_table": ref_table,
-                    "target_column": ", ".join(target_key_columns),
+                    "target_column": ", ".join(target_key_columns or ref_columns),
                     "target_pk_value": fk_value_str,
                     "target_node_id": str(target_node_id),
                     "relationship_name": relationship_name,
@@ -953,15 +979,22 @@ def _fk_keys(foreign_keys: list, key_columns: dict[str, list[str]]):
     columns next to each other, so consecutive pairs to one table that together
     cover the target's key columns are one FK. Yields
     ``(ref_table, [(column, ref_column), ...], target_key_columns)`` with the pairs
-    in the target's key order. ``target_key_columns`` is None for pairs that form
-    no key of the target (a non-key column, or part of a composite key); they
-    cannot find a row. A target with no loaded rows has no known key, and its
-    pairs are taken one column each, to be reported as unresolved.
+    in the target's key order.
+
+    ``target_key_columns`` is None for pairs that reference columns the target's
+    rows are not keyed on (a UNIQUE column, or part of a composite key); the row
+    is then found by those columns' values (``_column_index``). Consecutive such
+    pairs to one table are one group, the way dlt lists a composite UNIQUE key.
+    dlt's merged hints cannot tell that from separate single-column FKs that sit
+    next to each other; matching them together only finds fewer rows, never a
+    wrong one. A target with no loaded rows has no known key, and its pairs are
+    taken one column each, to be reported as unresolved.
     """
     open_keys: dict[str, list[tuple[str, str]]] = {}
+    open_columns: dict[str, list[tuple[str, str]]] = {}
 
-    def close(ref_table):
-        pairs = open_keys.pop(ref_table, None)
+    def close(groups, ref_table):
+        pairs = groups.pop(ref_table, None)
         if pairs:
             yield ref_table, pairs, None
 
@@ -977,12 +1010,15 @@ def _fk_keys(foreign_keys: list, key_columns: dict[str, list[str]]):
         # A reflected FK without a referenced column names its table's single key.
         ref_column = fk.get("ref_column") or (key[0] if len(key) == 1 else "")
         if ref_column not in key:
-            yield from close(ref_table)
-            yield ref_table, [(column, ref_column)], None
+            yield from close(open_keys, ref_table)
+            if any(ref_column == taken for _, taken in open_columns.get(ref_table, [])):
+                yield from close(open_columns, ref_table)
+            open_columns.setdefault(ref_table, []).append((column, ref_column))
             continue
+        yield from close(open_columns, ref_table)
         pairs = open_keys.setdefault(ref_table, [])
         if any(ref_column == taken for _, taken in pairs):
-            yield from close(ref_table)
+            yield from close(open_keys, ref_table)
             pairs = open_keys.setdefault(ref_table, [])
         pairs.append((column, ref_column))
         if len(pairs) == len(key):
@@ -990,8 +1026,27 @@ def _fk_keys(foreign_keys: list, key_columns: dict[str, list[str]]):
             by_key_column = {taken: column for column, taken in pairs}
             yield ref_table, [(by_key_column[k], k) for k in key], key
 
-    for ref_table in list(open_keys):
-        yield from close(ref_table)
+    for groups in (open_keys, open_columns):
+        for ref_table in list(groups):
+            yield from close(groups, ref_table)
+
+
+def _column_index(rows: list[tuple[DltRowData, UUID]], columns: tuple[str, ...]) -> dict:
+    """Each value of ``columns`` among ``rows``, joined like a key value, to its row's
+    node id, or to None when several rows hold it.
+
+    A foreign key may only reference a primary key or a UNIQUE column set, so one
+    loaded row holding the value is the referenced row. Several means the data
+    breaks that constraint, and no row is the right one.
+    """
+    index: dict[str, UUID | None] = {}
+    for row, node_id in rows:
+        values = [row.row_data.get(column) for column in columns]
+        if any(value is None for value in values):
+            continue
+        value = ":".join(str(v) for v in values)
+        index[value] = None if value in index else node_id
+    return index
 
 
 async def _delete_dlt_orphans(
