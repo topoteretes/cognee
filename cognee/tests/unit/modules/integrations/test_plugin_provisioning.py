@@ -1,7 +1,7 @@
 """Unit tests for the /plugins/{plugin_key} routes in get_integrations_router.
 
 Agent plugins (claude-code, codex, ...) are not OAuth providers — each
-connected plugin gets its own agent sub-user + labeled API key. These tests
+connected plugin gets its own agent sub-user, with one API key per machine. These tests
 exercise the router's provisioning logic (idempotent get-or-create, one
 added key per provision, unknown-plugin 404, disconnect-revokes-keys) with
 the DB-facing collaborators mocked at module level, the same way
@@ -208,7 +208,6 @@ def test_second_provision_adds_a_key_to_the_same_agent_and_revokes_nothing(clien
                 return_value=[_fake_agent_info("codex", codex_agent_id), _fake_agent_info()]
             ),
         ),
-        patch.object(_router_module, "delete_api_key", new=AsyncMock()) as delete_key,
         patch.object(
             _router_module,
             "add_plugin_agent_key",
@@ -227,9 +226,8 @@ def test_second_provision_adds_a_key_to_the_same_agent_and_revokes_nothing(clien
     assert body["agentId"] == str(AGENT_ID)
     assert body["apiKey"] == "added-key"
 
-    # One key added to the claude-code agent (never the codex one), none revoked.
+    # One key added to the claude-code agent, never the codex one.
     add_key.assert_awaited_once_with(AGENT_ID, "claude-code")
-    delete_key.assert_not_awaited()
 
 
 def test_provision_race_integrity_error_takes_the_add_path(client):
@@ -334,21 +332,21 @@ def test_reprovision_preserves_original_provisioned_at(client):
 
 
 def test_disconnect_revokes_keys_and_deactivates_connection(client):
-    keys = [SimpleNamespace(id=uuid4()), SimpleNamespace(id=uuid4())]
     with (
         patch.object(
             _router_module,
             "list_agents",
             new=AsyncMock(return_value=[_fake_agent_info()]),
         ),
-        patch.object(_router_module, "get_api_keys", new=AsyncMock(return_value=keys)),
-        patch.object(_router_module, "delete_api_key", new=AsyncMock()) as delete_key,
+        patch.object(
+            _router_module, "revoke_plugin_agent_keys", new=AsyncMock(return_value=2)
+        ) as revoke_keys,
         patch.object(_router_module, "deactivate_agent_connection", new=AsyncMock()) as deactivate,
     ):
         response = client.delete("/api/v1/integrations/plugins/claude-code")
 
     assert response.json() == {"disconnected": True}
-    assert delete_key.await_count == 2
+    revoke_keys.assert_awaited_once_with(AGENT_ID)
     expected_connection_id = build_agent_connection_id(
         agent_session_name="plugin:claude-code", user_id=str(AGENT_ID)
     )
