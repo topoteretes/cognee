@@ -50,8 +50,7 @@ import statistics
 import sys
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FutureTimeoutError
+from concurrent.futures import ThreadPoolExecutor, wait
 from pathlib import Path
 
 import httpx
@@ -95,8 +94,13 @@ KILL_PYTHON = (
     "done; true"
 )
 ATTEMPT_DEADLINE = 240  # seconds per attempt: create + seed + grade + LLM + grade + delete
+UPLOAD_TIMEOUT = 60  # seconds per file upload (the SDK's default is 30 minutes)
 MEMORY_PORT = 8000
 POLICY_MODEL = LLM_MODEL  # the host-side policy; cognee inside the memory sandbox uses the same
+
+
+class AttemptAborted(Exception):
+    """An attempt stopped between steps: past its deadline, or its group gave up on it."""
 
 
 def labels(run_id: str, role: str) -> dict[str, str]:
@@ -281,31 +285,54 @@ class Rollouts:
     def __init__(self, daytona: Daytona, run_id: str, parallel: int):
         self.daytona = daytona
         self.run_id = run_id
+        self.parallel = parallel
         self.slots = threading.Semaphore(parallel)
         self.lock = threading.Lock()
         self.timings: list[float] = []
 
-    def attempt(self, variant_id: str, index: int, lessons: str) -> dict:
-        """One episode: seed, grade, prompt the policy, write its answer, grade again."""
+    def attempt(self, variant_id: str, index: int, lessons: str, cancel: threading.Event) -> dict:
+        """One episode: seed, grade, prompt the policy, write its answer, grade again.
+
+        The deadline starts once the attempt holds a parallel slot, so waiting
+        for one is not counted against it. Between steps it checks the deadline
+        and ``cancel`` (set when its group stops waiting) and raises
+        AttemptAborted, which deletes its sandbox and frees the slot instead of
+        running the remaining calls for nothing.
+        """
         with self.slots:
             t0 = time.time()
+            deadline = time.monotonic() + ATTEMPT_DEADLINE
+
+            def check() -> None:
+                if cancel.is_set():
+                    raise AttemptAborted("its group stopped waiting")
+                if time.monotonic() > deadline:
+                    raise AttemptAborted(f"past its {ATTEMPT_DEADLINE}s deadline")
+
+            check()  # the group may have given up while this attempt waited for a slot
             sandbox = self._create(f"cognee-rl-{variant_id.lower()}-{index}")
             try:
+                check()
                 home = sandbox.get_user_home_dir()
                 ws = f"{home}/{env.WORKSPACE}"
                 run_in_quiet(sandbox, f"mkdir -p {ws}")
                 files = env.seed(variant_id)
                 for name, text in files.items():
-                    sandbox.fs.upload_file(text.encode(), f"{ws}/{name}")
+                    sandbox.fs.upload_file(text.encode(), f"{ws}/{name}", timeout=UPLOAD_TIMEOUT)
+                check()
                 before = grade(sandbox, ws)
                 failing = env.failing_tests(before)
                 prompt = env.task_prompt(variant_id, files[env.SOURCE_FILE], failing, lessons)
+                check()
                 answer = policy(prompt)
                 source = env.extract_source(answer)
                 if source is None:
                     after, reward = "no python block in the answer", 0
                 else:
-                    sandbox.fs.upload_file(source.encode(), f"{ws}/{env.SOURCE_FILE}")
+                    check()
+                    sandbox.fs.upload_file(
+                        source.encode(), f"{ws}/{env.SOURCE_FILE}", timeout=UPLOAD_TIMEOUT
+                    )
                     after = grade(sandbox, ws)
                     reward = int(env.passed(after))
             finally:
@@ -326,27 +353,39 @@ class Rollouts:
             "output": after,
             "reward": reward,
             "seconds": elapsed,
+            "timed_out": False,
         }
 
     def group(self, variant_id: str, size: int, lessons: str) -> list[dict]:
-        """``size`` attempts in parallel, each under a deadline; stragglers count as reward 0.
+        """``size`` attempts in parallel under one deadline for the group.
 
         A sandbox call or an LLM call can hang on a dropped connection; a group
-        must not. Timed-out attempts are reported as failed, and any rollout
-        sandbox of this run still alive after the group is deleted by label.
+        must not. The group waits at most one attempt deadline per wave of
+        ``parallel`` attempts, then tells the stragglers to stop. Attempts that
+        timed out are marked ``timed_out`` so the run reports them apart from
+        the policy's failures; any rollout sandbox of this run still alive
+        afterwards is deleted by label.
         """
+        cancel = threading.Event()
+        waves = -(-size // self.parallel)  # ceil: attempts run `parallel` at a time
+        group_deadline = ATTEMPT_DEADLINE * waves
         pool = ThreadPoolExecutor(max_workers=size)
-        futures = [pool.submit(self.attempt, variant_id, i, lessons) for i in range(size)]
+        futures = [pool.submit(self.attempt, variant_id, i, lessons, cancel) for i in range(size)]
+        done, _ = wait(futures, timeout=group_deadline)
+        cancel.set()
         results = []
         for i, future in enumerate(futures):
-            try:
-                results.append(future.result(timeout=ATTEMPT_DEADLINE))
-            # concurrent.futures.TimeoutError is the builtin only from Python 3.11.
-            except (FutureTimeoutError, TimeoutError):
-                print(f"    attempt {i} timed out after {ATTEMPT_DEADLINE}s; counted as reward 0")
-                results.append(
-                    self._failed(variant_id, i, "attempt timed out", float(ATTEMPT_DEADLINE))
+            if future not in done:
+                print(
+                    f"    attempt {i} still running after the group's {group_deadline}s; timed out"
                 )
+                results.append(self._timed_out(variant_id, i, float(group_deadline)))
+                continue
+            try:
+                results.append(future.result())
+            except AttemptAborted as err:
+                print(f"    attempt {i} stopped: {err}; timed out")
+                results.append(self._timed_out(variant_id, i, float(ATTEMPT_DEADLINE)))
             except (OpenAIError, DaytonaError, RuntimeError, httpx.HTTPError, OSError) as err:
                 # One attempt's LLM error (every litellm error is an OpenAIError;
                 # a 429 under 4 parallel calls), sandbox error, or failed
@@ -372,19 +411,38 @@ class Rollouts:
             "output": output,
             "reward": 0,
             "seconds": seconds,
+            "timed_out": False,
         }
 
+    @classmethod
+    def _timed_out(cls, variant_id: str, index: int, seconds: float) -> dict:
+        """An attempt the infrastructure did not finish in time: reward 0, reported apart."""
+        return {**cls._failed(variant_id, index, "attempt timed out", seconds), "timed_out": True}
+
     def sweep(self) -> None:
-        """Delete rollout sandboxes of this run that an attempt did not get to delete."""
+        """Delete rollout sandboxes of this run that an attempt did not get to delete.
+
+        Each delete stands alone: the sweep races the attempts' own deletes, so
+        a sandbox already on its way out must not end the sweep for the rest.
+        """
         try:
-            for sandbox in self.daytona.list(
-                ListSandboxesQuery(labels={"demo": "rl", "run": self.run_id, "role": "rollout"})
-            ):
-                if not sandbox.name.startswith("DESTROYED"):
-                    self.daytona.delete(sandbox)
-                    print(f"    swept leftover sandbox {sandbox.name}")
+            leftovers = list(
+                self.daytona.list(
+                    ListSandboxesQuery(labels={"demo": "rl", "run": self.run_id, "role": "rollout"})
+                )
+            )
         except DaytonaError as err:
-            print(f"    sweep failed: {err}", file=sys.stderr)
+            print(f"    sweep failed to list sandboxes: {err}", file=sys.stderr)
+            return
+        for sandbox in leftovers:
+            state = getattr(sandbox.state, "value", sandbox.state)
+            if state in ("destroying", "destroyed"):
+                continue
+            try:
+                self.daytona.delete(sandbox)
+                print(f"    swept leftover sandbox {sandbox.name}")
+            except DaytonaError as err:
+                print(f"    could not sweep {sandbox.name}: {err}", file=sys.stderr)
 
     def _create(self, name: str) -> Sandbox:
         """A create that retries: at scale a small share of creates fail (the cookbook saw ~1%)."""
@@ -488,10 +546,12 @@ def run_group(
     results = rollouts.group(variant_id, size, lessons)
     rewards = [r["reward"] for r in results]
     passes = sum(rewards)
+    timed_out = sum(r["timed_out"] for r in results)
     learnable = 0 < passes < size
     mean_s = statistics.mean(r["seconds"] for r in results)
     print(
-        f"    [{variant_id} {family}] rewards {' '.join(map(str, rewards))}  pass {passes}/{size}  "
+        f"    [{variant_id} {family}] rewards {' '.join(map(str, rewards))}  pass {passes}/{size}"
+        f"{timed_out_note(timed_out)}  "
         f"{'mixed (learnable)' if learnable else 'uniform (no gradient)'}  {mean_s:.0f}s/attempt",
         flush=True,
     )
@@ -503,10 +563,17 @@ def run_group(
         "variant": variant_id,
         "family": family,
         "rewards": rewards,
+        "timed_out": timed_out,
         "learnable": learnable,
         "lessons": lessons,
         "results": results,
     }
+
+
+def timed_out_note(count: int) -> str:
+    """Timed-out attempts are scored 0 but are an infrastructure stall, not the policy's
+    failure: say how many next to a pass count, so a rate is not misread. Empty when none."""
+    return f" ({count} timed out)" if count else ""
 
 
 def run_improve(memory: Memory, session: str, step: int) -> None:
@@ -562,7 +629,8 @@ def main() -> None:
             groups = [run_group(rollouts, memory, v, args.group, session) for v in variants]
             total = sum(sum(g["rewards"]) for g in groups)
             print(
-                f"    step {step}: pass {total}/{args.group * len(variants)}, "
+                f"    step {step}: pass {total}/{args.group * len(variants)}"
+                f"{timed_out_note(sum(g['timed_out'] for g in groups))}, "
                 f"{sum(g['learnable'] for g in groups)}/{len(groups)} groups learnable"
             )
             report["steps"].append({"step": step, "session": session, "groups": groups})
@@ -576,8 +644,12 @@ def main() -> None:
         for condition, mem in (("memory off", None), ("memory on", memory)):
             groups = [run_group(rollouts, mem, v, args.eval_attempts, None) for v in env.HELD_OUT]
             total = sum(sum(g["rewards"]) for g in groups)
-            evaluation[condition] = {"groups": groups, "total": total}
-            print(f"    {condition}: pass {total}/{args.eval_attempts * len(env.HELD_OUT)}")
+            timed_out = sum(g["timed_out"] for g in groups)
+            evaluation[condition] = {"groups": groups, "total": total, "timed_out": timed_out}
+            print(
+                f"    {condition}: pass {total}/{args.eval_attempts * len(env.HELD_OUT)}"
+                f"{timed_out_note(timed_out)}"
+            )
         report["evaluation"] = evaluation
 
         (out_dir / f"report-{run_id}.json").write_text(json.dumps(report, indent=2))
@@ -619,7 +691,8 @@ def main() -> None:
         for s in report["steps"]:
             n = args.group * len(s["groups"])
             print(
-                f"    step {s['step']}: pass {sum(sum(g['rewards']) for g in s['groups'])}/{n}, "
+                f"    step {s['step']}: pass {sum(sum(g['rewards']) for g in s['groups'])}/{n}"
+                f"{timed_out_note(sum(g['timed_out'] for g in s['groups']))}, "
                 f"learnable groups {sum(g['learnable'] for g in s['groups'])}/{len(s['groups'])}"
             )
         n_eval = args.eval_attempts * len(env.HELD_OUT)
@@ -627,7 +700,10 @@ def main() -> None:
             per = " ".join(
                 f"{g['variant']} {sum(g['rewards'])}/{args.eval_attempts}" for g in data["groups"]
             )
-            print(f"    held-out {condition}: {data['total']}/{n_eval}  ({per})")
+            print(
+                f"    held-out {condition}: {data['total']}/{n_eval}"
+                f"{timed_out_note(data['timed_out'])}  ({per})"
+            )
         print(f"    rollouts: {len(rollouts.timings)}, {mean_attempt:.0f}s per attempt")
         print(f"    report: {out_dir / f'report-{run_id}.json'}")
     finally:

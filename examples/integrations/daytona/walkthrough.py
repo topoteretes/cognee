@@ -394,8 +394,11 @@ def explain_step(block: Block) -> list[str]:
             f"{m.group(4)} attempts each, every attempt in its own fresh sandbox. Before a group, "
             "one recall fetches the family's lessons; 'none yet' means the memory is still empty."
         )
+    # rl_loop appends " (N timed out)" to a pass count when attempts timed out.
     groups = re.findall(
-        r"\[(\w+) (\w+)\] rewards ([01 ]+)  pass (\d+)/(\d+)  (mixed|uniform)", block.text
+        r"\[(\w+) (\w+)\] rewards ([01 ]+)  pass (\d+)/(\d+)(?: \(\d+ timed out\))?  "
+        r"(mixed|uniform)",
+        block.text,
     )
     if groups:
         mixed = [g[0] for g in groups if g[5] == "mixed"]
@@ -406,7 +409,9 @@ def explain_step(block: Block) -> list[str]:
             + (f" Mixed here: {', '.join(mixed)}." if mixed else " No mixed group here.")
             + (f" Uniform: {', '.join(uniform)}." if uniform else "")
         )
-    m = block.find(r"step \d+: pass (\d+)/(\d+), (\d+)/(\d+) groups learnable")
+    m = block.find(
+        r"step \d+: pass (\d+)/(\d+)(?: \(\d+ timed out\))?, (\d+)/(\d+) groups learnable"
+    )
     if m:
         out.append(
             f"Step total {m.group(1)}/{m.group(2)} passed, {m.group(3)}/{m.group(4)} groups "

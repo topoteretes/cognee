@@ -412,10 +412,25 @@ def task_prompt(variant_id: str, source: str, failing: list[str], lessons: str) 
     )
 
 
+# Fence tags that mean "this is the module": python, python3 or py in any case,
+# or none. Other languages (diff, text, bash) are not.
+_PYTHON_TAGS = {"", "python", "python3", "py"}
+
+
 def extract_source(answer: str) -> str | None:
-    """The python block from the model's answer, or None."""
-    if "```" not in answer:
-        return None
-    body = answer.split("```", 2)[1]
-    body = body.removeprefix("python")
-    return body.lstrip("\n")
+    """The module from the model's answer: its longest python block, or None.
+
+    Longest, not first: a model that shows a snippet or a diff before the full
+    file would otherwise have the snippet graded as the whole module, and a
+    parsing slip would be scored as the policy's failure. Fences are taken in
+    pairs, so one block's closing fence is never read as the next one's opening.
+    """
+    blocks = []
+    # Odd segments between fences are block contents: tag line, then body. With
+    # an odd number of fences the last one is unclosed and its tail still counts,
+    # as an answer that omits the closing fence would otherwise yield nothing.
+    for segment in answer.split("```")[1::2]:
+        tag, newline, body = segment.partition("\n")
+        if newline and tag.strip().lower() in _PYTHON_TAGS:
+            blocks.append(body)
+    return max(blocks, key=len) if blocks else None
