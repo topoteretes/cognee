@@ -400,13 +400,24 @@ async def cognify(
                 "summary_method is not supported while connected to a remote Cognee "
                 "instance. Call cognee.disconnect() to choose the summary method locally."
             )
-        return await client.cognify(
-            datasets,
+        if ontology_file_path is not None:
+            # Remote cognify has no ontology upload; an explicit path would be
+            # silently ignored and the server would use its default ontology.
+            raise ValueError(
+                "ontology_file_path is not supported while connected to a remote Cognee "
+                "instance. Call cognee.disconnect() to use a local ontology file."
+            )
+        cognify_kwargs = dict(
             chunk_size=chunk_size,
             chunks_per_batch=chunks_per_batch,
             custom_prompt=custom_prompt,
             run_in_background=run_in_background,
         )
+        if graph_model is not KnowledgeGraph:
+            from cognee.shared.graph_model_utils import graph_model_to_graph_schema
+
+            cognify_kwargs["graph_model"] = graph_model_to_graph_schema(graph_model)
+        return await client.cognify(datasets, **cognify_kwargs)
 
     # After the argument checks and the remote route: a cognify that raises above,
     # or runs remotely, must not install anything locally. Awaited, so the pipeline
