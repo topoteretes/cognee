@@ -557,10 +557,11 @@ def render_markdown(blocks: list[Block]) -> str:
         title = block.header.strip("= ").strip()
         out += [f"## {title}", "", "```text"]
         for stamp, text in block.lines:
-            out.append((f"[{stamp:7.1f}s] " if stamp is not None else "") + text)
+            out.append(((f"[{stamp:7.1f}s] " if stamp is not None else "") + text).rstrip())
         out += ["```", ""]
         out += [p + "\n" for p in explain(block)]
-    return "\n".join(out)
+    # One final newline (print adds it): what the repo's end-of-file hook expects.
+    return "\n".join(out).rstrip("\n")
 
 
 # --------------------------------------------------------------------------- sources
@@ -591,7 +592,9 @@ def live_lines(script: Path, extra: list[str], record: Path | None):
                 # and keep showing what it prints while it does.
                 proc.send_signal(signal.SIGINT)
                 continue
-            stamped = f"[{time.time() - t0:7.1f}s] {ANSI.sub('', raw)}"
+            # Trailing spaces stripped so a recorded transcript passes the
+            # repo's trailing-whitespace hook as written.
+            stamped = f"[{time.time() - t0:7.1f}s] {ANSI.sub('', raw).rstrip()}\n"
             if sink:
                 sink.write(stamped)
                 sink.flush()

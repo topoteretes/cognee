@@ -4,7 +4,7 @@
 [    1.2s]     this organization's tier sets network policy for every sandbox; the
 [    1.2s]     sandbox-level allow list (api.openai.com,extension.ladybugdb.com) was rejected. Running behind
 [    1.2s]     the organization tier policy (essential services only) instead.
-[    4.9s] 
+[    4.9s]
 [    4.9s] === sandbox: cognee-supervisor-58de37 (phase: brief) ===
 [   52.9s]     sync_operations table already exists, skipping creation
 [   52.9s]     principal_configuration table already exists, skipping creation
@@ -14,7 +14,7 @@
 [   52.9s]     [supervisor] remembering handover briefing (dataset 'handover')...
 [   52.9s]     [supervisor] granting worker READ + WRITE on the handover dataset...
 [   52.9s]     [supervisor] handover token issued -> handover-out/handover_token.json: {"dataset_id": "993feb18-2e1f-5c9e-93f6-e923947f53f7"}
-[   52.9s] 
+[   52.9s]
 [   52.9s] === security check inside cognee-supervisor-58de37 (network wall: organization tier policy (essential services only)) ===
 [   53.0s]     credential wall: LLM_API_KEY inside the sandbox is the placeholder
 [   54.8s]     credential wall: api.openai.com via proxy path: 200 (key substituted in transit)
@@ -38,19 +38,19 @@
 [  100.3s]     [cogx] grant restored: supervisor@handover.demo -> read, write, delete, share
 [  100.3s]     [cogx] grant restored: worker@handover.demo -> read, write
 [  100.3s]     [cogx] token re-issued: dataset 993feb18-2e1f-5c9e-93f6-e923947f53f7 is 398a2f4d-27cf-5156-a26a-51c5595a3de7 here (restored accounts have new ids, and a dataset id derives from its owner's)
-[  100.5s] 
+[  100.5s]
 [  100.5s] === sandbox: cognee-worker-58de37 (phase: work) ===
 [  137.1s]     [worker] recalling the briefing from the shared dataset (by UUID)...
-[  137.1s]     
+[  137.1s]
 [  137.1s]     2026-10-20T17:59:42.775762 [error    ] PermissionDeniedError raised (Status code: 403): Request owner does not have necessary permission: [read] for all datasets requested. [cognee.shared.logging_utils]
-[  137.1s]     
+[  137.1s]
 [  137.1s]     2026-10-20T17:59:42.788597 [error    ] DatasetNotFoundError raised (Status code: 404): Dataset(s) not found: 'handover'. Dataset names resolve only among the datasets you own in the current tenant; pass dataset_ids for datasets shared with you. [cognee.shared.logging_utils]
-[  137.1s]     
+[  137.1s]
 [  137.1s]     Give Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new
 [  137.1s]     LiteLLM.Info: If you need to debug this error, use `litellm.turn_on_debug()'.
-[  137.1s]     
+[  137.1s]
 [  137.1s]     [worker] briefing recalled: Your task is to migrate the payments service to the v2 billing API and confirm the retry policy with the SRE team.
-[  137.1s]     
+[  137.1s]
 [  137.1s]     Deployment:
 [  137.1s]     - Merge changes to the `dev` branch for automatic staging deployment.
 [  137.1s]     - After contract tests pass, run `make deploy-prod` for production.
@@ -76,15 +76,15 @@
 [  189.5s]     [cogx] grant restored: supervisor@handover.demo -> read, write, delete, share
 [  189.5s]     [cogx] grant restored: worker@handover.demo -> read, write
 [  189.5s]     [cogx] token re-issued: dataset 398a2f4d-27cf-5156-a26a-51c5595a3de7 is a45afa1d-23eb-5b59-aa40-af9894261c71 here (restored accounts have new ids, and a dataset id derives from its owner's)
-[  189.6s] 
+[  189.6s]
 [  189.6s] === sandbox: cognee-review-58de37 (phase: review) ===
 [  210.0s]     [supervisor] recalling the worker's report...
-[  210.0s]     
+[  210.0s]
 [  210.0s]     Give Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new
 [  210.0s]     LiteLLM.Info: If you need to debug this error, use `litellm.turn_on_debug()'.
-[  210.0s]     
+[  210.0s]
 [  210.0s]     [supervisor] report recalled: The worker reported that the payments service was migrated to the v2 billing API, and the retry policy was confirmed as exponential backoff with up to 5 attempts. Yes, it was deployed to production with `make deploy-prod` after the contract tests passed.
-[  210.7s] 
+[  210.7s]
 [  210.7s] Handover round trip passed across three Daytona sandboxes.
 [  210.7s] Handover:     cogx
 [  210.7s] Network wall: organization tier policy (essential services only)

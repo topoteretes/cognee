@@ -171,7 +171,7 @@ def render(report: dict) -> str:
             f'font-variant-numeric="tabular-nums">{totals[ci]}/{sizes[ci]}</text>'
         )
     parts.append("</svg>")
-    return "\n".join(parts)
+    return "\n".join(parts) + "\n"
 
 
 def main() -> None:
