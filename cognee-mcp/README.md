@@ -45,7 +45,7 @@ Build memory for Agents and query from any client that speaks MCP – in your t
 - Session-aware memory – store fast session cache entries or permanent graph memory through one `remember` tool
 - Focused recall – query memory through one `recall` tool with optional session and search controls
 - **Code graph search** – inspect indexed symbols, dependencies, architecture, and change impact with `code_search`
-- Simple deletion – remove a dataset or all owned memory through one `forget` tool
+- Simple deletion – remove one data item, a dataset, or all owned memory through one `forget` tool
 
 Please refer to our documentation [here](https://docs.cognee.ai/how-to-guides/deployment/mcp) for further information.
 
@@ -532,7 +532,7 @@ The MCP server exposes four tools (three memory tools pinned in `tools/list`, pl
 
 - **remember**: Store data in memory. Pass `data` for text, or `filename` + `content_base64` to ingest an uploaded file (up to 10 MB). With `session_id`: fast session cache (text only). Without `session_id`: permanent graph memory
 - **recall**: Search memory with auto-routing. Searches session cache first when `session_id` is provided, then falls through to the permanent graph
-- **forget**: Delete memory by dataset name or id, a single data item by `data_id`, or delete all owned memory with `everything=True`
+- **forget**: Delete memory by dataset name or id, a single data item by `data_id` (paired with its `dataset_id`, both shown by `recall` with `include_references=True`), or delete all owned memory with `everything=True`
 - **cognify_status**: Check the progress of background ingestion started by `remember(background=True)`. Unadvertised by default; discoverable via `search_tools` and callable by name
 
 ### Recall result summaries
@@ -652,7 +652,26 @@ recall(query="What changed in the MCP server?", session_id="agent-session-1")
 
 # Delete one dataset
 forget(dataset="main_dataset")
+
+# Forget one item: recall it with references, then forget it by its ids
+recall(query="What is the vault recovery phrase?", include_references=True)
+# -> [graph] amber-falcon-42
+#
+#    Evidence:
+#    - chunk 1 of document text_<hash> (data_id: <uuid>, chunk_id: <uuid>): "The vault recovery phrase is ..."
+#      dataset: main_dataset (dataset_id=<uuid>)
+forget(data_id="<uuid>", dataset_id="<uuid>")
 ```
+
+`include_references=True` shows the ids `forget` needs; without it the output is
+unchanged. The default answer cites its sources in an `Evidence:` block (best
+match first) and gets a `dataset:` line. CHUNKS, SUMMARIES, RAG and
+graph-completion hits get `refs: data_id=..., dataset_id=..., document=...`
+lines instead (at most five per hit, best match first). A chunk hit names the
+one item its text came from, while a graph-completion answer lists every item
+in its context, so use the default type or `search_type="CHUNKS"` to find one
+fact. Session hits are not stored data and carry no ids. With backend access
+control off, ids are only shown when recall is scoped to a single dataset.
 
 `self_improvement` defaults to `True`; only an explicit `False` is forwarded, so
 `True` leaves the core default in charge. In permanent mode, `False` disables
