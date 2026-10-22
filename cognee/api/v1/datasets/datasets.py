@@ -272,6 +272,7 @@ class datasets:
     @staticmethod
     async def empty_dataset(dataset_id: UUID, user: User | None = None):
         from cognee.modules.data.methods import delete_data, delete_dataset
+        from cognee.modules.search.operations import delete_dataset_search_history
 
         if not user:
             user = await get_default_user()
@@ -287,6 +288,11 @@ class datasets:
             dataset_lock(dataset.id),
             set_database_global_context_variables(dataset.id, dataset.owner_id),
         ):
+            # Every user's search history on the dataset keeps answer text that
+            # can quote its chunks. Purged first and not caught: if it fails,
+            # nothing is deleted yet and the same delete can be retried.
+            await delete_dataset_search_history(dataset.id)
+
             deleted_elements = await delete_dataset_nodes_and_edges(dataset_id, user.id)
 
             # Session memory derived from this dataset would keep asserting
@@ -315,6 +321,7 @@ class datasets:
             "delete", user=user, dataset_id=dataset_id
         ) as operation_context:
             from cognee.modules.data.methods import delete_data, delete_dataset, get_data
+            from cognee.modules.search.operations import delete_dataset_search_history
 
             if not user:
                 user = await get_default_user()
@@ -357,6 +364,8 @@ class datasets:
 
                         dataset_data = await get_dataset_data(dataset.id)
                         if not dataset_data and delete_dataset_if_empty:
+                            # As in empty_dataset: history first, then the dataset.
+                            await delete_dataset_search_history(dataset.id)
                             await delete_dataset(dataset)
 
                     return {"status": "success"}
@@ -397,6 +406,8 @@ class datasets:
 
                     dataset_data = await get_dataset_data(dataset.id)
                     if not dataset_data and delete_dataset_if_empty:
+                        # As in empty_dataset: history first, then the dataset.
+                        await delete_dataset_search_history(dataset.id)
                         await delete_dataset(dataset)
 
             return {"status": "success"}

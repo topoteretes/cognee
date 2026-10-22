@@ -199,8 +199,11 @@ cognee/cache/
 # Account credentials for the cookbooks (examples/cookbooks/)
 examples/cookbooks/**/credentials.json
 examples/cookbooks/**/token.json
+examples/cookbooks/**/*_token.json
 # Sample data each cookbook's setup.py writes
 examples/cookbooks/**/sample/
+# Session files the import-agent-sessions cookbook renders from ~/.claude and ~/.codex
+examples/cookbooks/import_agent_sessions/sessions/
 .artifacts/
 .anon_id
 
