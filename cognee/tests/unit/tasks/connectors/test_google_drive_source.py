@@ -42,7 +42,7 @@ class _FakeRequest:
         self._result = result
         self._error = error
 
-    def execute(self):
+    def execute(self, num_retries=0):
         # Real googleapiclient raises HttpError from .execute(), not from the
         # request-builder call — mirror that here.
         if self._error is not None:
@@ -385,6 +385,7 @@ def test_shared_drive_backfill_and_incremental_changes_use_the_same_corpus():
     assert service.start_drive_ids == ["team-drive"]
     assert service.list_calls == ["trashed=false"]
 
+    shared["modifiedTime"] = "2026-02-01T00:00:00Z"
     service.changes_by_token["t0"] = {
         "changes": [{"fileId": "shared-file"}],
         "newStartPageToken": "t1",
@@ -431,13 +432,14 @@ def test_file_diagnostics_report_reasons_and_retry_failed_extraction(monkeypatch
     content = {"good": "hello", "empty": " ", "failed": None}
     monkeypatch.setattr(gd_source, "extract_file_content", lambda _, fid, *_args: content[fid])
     state, stats = {}, {}
-    rows = list(gd_source._iter_rows(service, _config(), state, stats))
-    assert [row["id"] for row in rows] == ["good"]
+    rows = list(gd_source._iter_rows(service, _config(max_file_size_mb=25), state, stats))
+    assert [row["id"] for row in rows] == ["good", "large"]
+    assert rows[1] == {"id": "large", "_deleted": True}  # over the limit: forgotten
     assert stats == {
         "scanned": 5,
         "skipped": 3,
         "failed": 1,
-        "deleted": 0,
+        "deleted": 1,
         "skipped_unsupported_type": 1,
         "skipped_too_large": 1,
         "skipped_empty_content": 1,
@@ -446,10 +448,195 @@ def test_file_diagnostics_report_reasons_and_retry_failed_extraction(monkeypatch
     assert "page_token" not in state
 
     content["failed"] = "recovered"
-    assert {row["id"] for row in gd_source._iter_rows(service, _config(), state, stats)} == {
-        "good",
+    # Only the failed file is fetched again: the rest was fetched at this version.
+    config = _config(max_file_size_mb=25)
+    assert [row["id"] for row in gd_source._iter_rows(service, config, state, stats)] == [
+        "large",
         "failed",
-    }
+    ]
     assert stats["failed"] == 0
     assert stats["scanned"] == 5
+    assert stats["unchanged"] == 3  # "large" is never recorded as fetched
     assert state["page_token"] == "t0"
+
+
+def _many_files(count):
+    files = [_file_meta(f"f{index:03d}") for index in range(count)]
+    return files, FakeDriveService({"root": files}, {item["id"]: item for item in files})
+
+
+def test_parallel_fetch_keeps_order_and_gives_each_thread_its_own_client(monkeypatch):
+    import threading
+
+    files, service = _many_files(40)
+    clients, seen = [], set()
+    lock = threading.Lock()
+
+    def factory():
+        client = FakeDriveService(service.files_by_folder, service.file_by_id)
+        with lock:
+            clients.append(client)
+        return client
+
+    def fake_extract(client, file_id, mime_type, name):
+        with lock:
+            seen.add((id(client), threading.get_ident()))
+        return f"content::{file_id}"
+
+    monkeypatch.setattr(gd_source, "extract_file_content", fake_extract)
+    state = {}
+    rows = list(
+        gd_source._iter_rows(service, _config(max_workers=4), state, service_factory=factory)
+    )
+
+    assert [row["id"] for row in rows] == [item["id"] for item in files]
+    assert 1 < len(clients) <= 4
+    assert len({thread for _, thread in seen}) == len({client for client, _ in seen})
+    assert state["page_token"] == "token-0"
+    assert set(state["versions"]) == {item["id"] for item in files}
+
+
+def test_parallel_fetch_without_factory_runs_inline_on_the_given_service(monkeypatch):
+    import threading
+
+    _, service = _many_files(5)
+    threads, clients = set(), set()
+
+    def fake_extract(client, file_id, *_args):
+        threads.add(threading.get_ident())
+        clients.add(id(client))
+        return "x"
+
+    monkeypatch.setattr(gd_source, "extract_file_content", fake_extract)
+    list(gd_source._iter_rows(service, _config(max_workers=4), {}))
+    assert threads == {threading.get_ident()}
+    assert clients == {id(service)}
+
+
+def test_failure_in_one_worker_surfaces_and_stops_the_rest(monkeypatch):
+    _, service = _many_files(30)
+    started = []
+
+    def fake_extract(client, file_id, *_args):
+        started.append(file_id)
+        if file_id == "f001":
+            raise AssertionError("boom")  # not an extraction failure: must surface
+        return "x"
+
+    monkeypatch.setattr(gd_source, "extract_file_content", fake_extract)
+    # extract_file_content swallowing is bypassed by the fake, so the error escapes.
+    with pytest.raises(AssertionError):
+        list(
+            gd_source._iter_rows(
+                service, _config(max_workers=2), {}, service_factory=lambda: service
+            )
+        )
+    assert len(started) < 30
+
+
+def test_full_rescan_after_failure_refetches_only_changed_and_failed_files(monkeypatch):
+    _, service = _many_files(4)
+    fetched = []
+    broken = {"f003"}
+
+    def fake_extract(client, file_id, *_args):
+        fetched.append(file_id)
+        return None if file_id in broken else "x"
+
+    monkeypatch.setattr(gd_source, "extract_file_content", fake_extract)
+    state = {}
+    list(gd_source._iter_rows(service, _config(), state))
+    assert "page_token" not in state
+    assert sorted(state["versions"]) == ["f000", "f001", "f002"]
+
+    fetched.clear()
+    broken.clear()
+    service.file_by_id["f001"]["modifiedTime"] = "2026-02-01T00:00:00Z"  # edited meanwhile
+    list(gd_source._iter_rows(service, _config(), state))
+    assert sorted(fetched) == ["f001", "f003"]
+    assert state["page_token"] == "token-0"
+
+
+def test_changed_file_at_a_fetched_version_is_not_downloaded_again(fake_content_extraction):
+    file_a = _file_meta("fileA")
+    service = FakeDriveService({"root": [file_a]}, {"fileA": file_a})
+    service.changes_by_token["t0"] = {
+        "changes": [{"fileId": "fileA", "removed": False}],
+        "newStartPageToken": "t1",
+    }
+    state = {"page_token": "t0", "versions": {"fileA": file_a["modifiedTime"]}}
+    assert list(gd_source._iter_rows(service, _config(), state)) == []
+    assert fake_content_extraction == []
+    assert state["page_token"] == "t1"
+
+
+def test_deleted_file_forgets_its_version(fake_content_extraction):
+    service = FakeDriveService({"root": []}, {})
+    service.changes_by_token["t0"] = {
+        "changes": [{"fileId": "fileA", "removed": True}],
+        "newStartPageToken": "t1",
+    }
+    state = {"page_token": "t0", "versions": {"fileA": "v", "fileB": "v"}}
+    list(gd_source._iter_rows(service, _config(), state))
+    assert state["versions"] == {"fileB": "v"}
+
+
+def test_max_workers_must_be_positive():
+    pytest.importorskip("dlt")
+    with pytest.raises(ValueError, match="max_workers"):
+        gd_source.google_drive_source(folder_id="root", service=object(), max_workers=0)
+
+
+def test_no_size_limit_by_default(monkeypatch):
+    monkeypatch.delenv("GOOGLE_DRIVE_MAX_FILE_SIZE_MB", raising=False)
+    assert gd_source._env_max_file_size_mb() is None
+    monkeypatch.setenv("GOOGLE_DRIVE_MAX_FILE_SIZE_MB", "10")
+    assert gd_source._env_max_file_size_mb() == 10
+    huge = dict(_file_meta("huge"), size=str(5 * 1024 * 1024 * 1024))
+    service = FakeDriveService({"root": [huge]}, {"huge": huge})
+    config = _config(max_file_size_mb=None)
+    assert [row["id"] for row in gd_source._iter_rows(service, config, {})] == ["huge"]
+
+
+def test_raised_size_limit_fetches_the_file_again(fake_content_extraction):
+    big = dict(_file_meta("big"), size=str(30 * 1024 * 1024))
+    service = FakeDriveService({"root": [big]}, {"big": big})
+    state = {}
+    first = list(gd_source._iter_rows(service, _config(max_file_size_mb=25), state))
+    assert first == [{"id": "big", "_deleted": True}]
+    assert fake_content_extraction == []
+    state.pop("page_token")
+    second = list(gd_source._iter_rows(service, _config(max_file_size_mb=None), state))
+    assert [row["id"] for row in second] == ["big"]
+    assert second[0]["_deleted"] is False
+
+
+def test_changed_file_grown_over_the_limit_is_forgotten(fake_content_extraction):
+    big = dict(_file_meta("big"), size=str(30 * 1024 * 1024))
+    service = FakeDriveService({"root": [big]}, {"big": big})
+    service.changes_by_token["t0"] = {
+        "changes": [{"fileId": "big", "removed": False}],
+        "newStartPageToken": "t1",
+    }
+    state = {"page_token": "t0", "known_ids": ["big"], "versions": {"big": "old"}}
+    rows = list(gd_source._iter_rows(service, _config(max_file_size_mb=25), state))
+    assert rows == [{"id": "big", "_deleted": True}]
+    assert "big" not in state["versions"]
+    assert state["page_token"] == "t1"
+
+
+def test_export_over_the_google_limit_fails_the_run_with_its_reason(monkeypatch):
+    doc = _file_meta("doc")
+    service = FakeDriveService({"root": [doc]}, {"doc": doc})
+
+    def too_large(*_args):
+        raise gd_source.ExportTooLargeError("doc")
+
+    monkeypatch.setattr(gd_source, "extract_file_content", too_large)
+    state, stats = {}, {}
+    assert list(gd_source._iter_rows(service, _config(), state, stats)) == []
+    assert stats["failed"] == 1
+    assert stats["failed_export_too_large"] == 1
+    assert "failed_content_extraction" not in stats
+    assert "page_token" not in state
+    assert "doc" not in state["versions"]

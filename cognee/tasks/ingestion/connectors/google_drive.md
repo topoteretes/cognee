@@ -60,6 +60,43 @@ purges them from the graph, vector, and relational stores. Google Docs/Sheets ex
 text/CSV, PDFs are parsed with cognee's core `pypdf`, and plain text/markdown/CSV download as-is;
 an unparseable file is skipped with a warning.
 
+The first run fetches file content on `max_workers` threads (default 8, env
+`GOOGLE_DRIVE_MAX_WORKERS`), each with its own Drive client, and retries rate-limit and server
+errors with backoff. The sync state also records each fetched file's `modifiedTime`, so when a
+run ends with a failed file (the Changes cursor is then not advanced) the next run downloads
+only the failed and the changed files, not the whole folder again. A host that passes its own
+`service` gets sequential fetching; pass `service_factory` (a callable returning a fresh
+client) to parallelise.
+
+## Which files are not ingested, and how each is reported
+
+There is no file size limit by default. A download is streamed to a temporary file, so memory
+depends on the extracted text, not on the file size (the text itself is held in memory by the
+staging load, roughly twelve times its size in a measurement with 25 to 300 MB of text).
+`max_file_size_mb` (or `GOOGLE_DRIVE_MAX_FILE_SIZE_MB`) is an opt-in limit: a file over it is
+counted as `skipped_too_large` and forgotten if an earlier run stored it, like a file that left
+the folder. Raising the limit fetches the file again.
+
+Formats read: Google Docs (text), Sheets (CSV, first sheet only) and Slides (text), PDF, every
+`text/*` file plus JSON and XML, and Office and document files (`.docx`, `.xlsx`, `.pptx`, `.odt`,
+`.ods`, `.odp`, `.rtf`, `.html`, `.epub`). The Office and document files go through cognee's loader
+engine, the same loaders `add()` uses, so they need the `docling` (or `unstructured`) extra. Images,
+audio and video are not read.
+
+Other files are counted in `cognee_sync_stats`, and the log names each one:
+
+| Count | Meaning | Counts as failure |
+|---|---|---|
+| `skipped_unsupported_type` | Drawings, Forms, images, audio, video, archives, legacy `.doc`/`.xls`/`.ppt` | no |
+| `skipped_empty_content` | the extracted text is empty | no |
+| `skipped_too_large` | over the `max_file_size_mb` you set | no |
+| `failed_loader_unavailable` | an Office or document file and no loader installed (install `cognee[docling]`) | yes |
+| `failed_export_too_large` | a Google Doc or Sheet over Google's export limit (about 10 MB) | yes |
+| `failed_content_extraction` | corrupt file, download or parse error | yes |
+
+A failure keeps the Changes cursor where it was; the next run fetches only the failed and the
+changed files.
+
 When syncing multiple folders into one dataset, assign each a stable, distinct
 `resource_name`. It isolates both the Changes API cursor and cleanup scope.
 Previously ingested documents without a table provenance stamp are retained
