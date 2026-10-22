@@ -52,9 +52,11 @@ Design
   token, ``seen`` and task gids stay, its row, its tasks and the tasks of it that were queued
   for a read or a retry are kept, and every other project syncs. A 403 and a 404 are told apart
   in the log and treated alike for everything else.
-* **A task that cannot be read** (403, 404, 5xx or no answer after the retries) while it is
-  still listed keeps its old document and is asked again on the next run, after every fresh
-  task. It is never tombstoned and never blocks another task.
+* **A task that cannot be read** (403, 404, 5xx or no answer after the retries, or a 200 of the
+  wrong shape in the task, its comments or its subtasks) while it is still listed keeps its old
+  document and is asked again on the next run, after every fresh task. It is never tombstoned
+  and never blocks another task. A 200 of the wrong shape in a listing, the events feed, a
+  project read or the check of a missing task raises instead.
 * **A run is bounded and resumable.** On a rate limit, a spent request budget, an outage (three
   tasks in a row answering 5xx or nothing, counted apart in the fresh tasks, in the retry tail
   and in the checks of missing tasks) or a rejected token after rows were emitted, the source stops cleanly, keeps what it
@@ -195,7 +197,9 @@ class AsanaSyncTokenExpiredError(AsanaAPIError):
 class AsanaResponseError(AsanaSourceError):
     """Asana answered ``200`` with a body that is not of the expected shape.
 
-    Never read as an empty listing or a skippable task: it aborts the run.
+    Never read as an empty listing or a skippable task. In a listing, the events feed, a project
+    read or a check of a missing task it raises and aborts the run. In the read of one task (the
+    task, its comments or its subtasks) the task is kept for a retry and the run goes on.
     """
 
 
@@ -211,7 +215,8 @@ class AsanaClient:
     """Minimal synchronous REST client for Asana.
 
     ``request`` returns the JSON object of a ``200`` answer. Tests and hosts can pass any
-    object with the same ``request`` method instead.
+    object with the same ``request`` method instead, one that takes ``check_active`` and calls it
+    before each attempt it makes.
     """
 
     def __init__(self, access_token: str, *, sleep: Callable[[float], None] = time.sleep):
@@ -231,12 +236,27 @@ class AsanaClient:
     def __repr__(self) -> str:
         return "AsanaClient(access_token=<redacted>)"
 
-    def request(self, method: str, path: str, *, params: dict[str, Any] | None = None) -> dict:
+    def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        check_active: Callable[[], None] | None = None,
+    ) -> dict:
+        """The JSON object of a ``200`` answer, retrying a 5xx or a network error.
+
+        ``check_active`` is called before each attempt, a retry included, and before its backoff
+        sleep, so a host that has revoked the run does not wait out the retries. What it raises
+        propagates as it is: it is no network error, so it is neither retried nor wrapped.
+        """
         import requests  # lazy: importing the connectors package loads no client library
 
         headers = {"Authorization": f"Bearer {self._access_token}", "Accept": "application/json"}
         response = None
         for attempt in range(_RETRIES):
+            if check_active is not None:
+                check_active()
             if attempt:
                 self._sleep(2 ** (attempt - 1))
             try:
@@ -285,7 +305,12 @@ class AsanaClient:
 
 
 def build_asana_service(access_token: str) -> AsanaClient:
-    """Wrap a host-owned access token in a client, the way Linear and Apollo do."""
+    """Wrap a host-owned access token in a client, the way Linear and Apollo do.
+
+    A ``service`` handed to :func:`asana_source` instead must offer
+    ``request(method, path, *, params, check_active)`` and call ``check_active`` before each
+    attempt it makes.
+    """
     return AsanaClient(access_token)
 
 
@@ -307,12 +332,25 @@ def _instant(stamp: str) -> datetime:
     return datetime.fromisoformat(stamp.replace("Z", "+00:00"))
 
 
+def _stamp(moment: datetime) -> str:
+    """``moment`` in Asana's format: UTC, three decimals, ``Z`` (``2026-10-09T19:14:27.123Z``).
+
+    Timestamps are compared and stored as strings, which orders them only in this one form, so
+    every ``modified_at`` goes through here (``_stamp(_instant(value))``) before it is used.
+    A moment without an offset raises ``ValueError``: it has no UTC instant, and ``astimezone``
+    would read it as the machine's local time.
+    """
+    if moment.tzinfo is None:
+        raise ValueError("a timestamp without an offset")
+    moment = moment.astimezone(timezone.utc)
+    return moment.strftime("%Y-%m-%dT%H:%M:%S.") + f"{moment.microsecond // 1000:03d}Z"
+
+
 def _overlap_start(cursor: str) -> str:
     """The timestamp ``_OVERLAP_SECONDS`` before ``cursor``, in Asana's format; empty for none."""
     if not cursor:
         return ""
-    start = (_instant(cursor) - timedelta(seconds=_OVERLAP_SECONDS)).astimezone(timezone.utc)
-    return start.strftime("%Y-%m-%dT%H:%M:%S.") + f"{start.microsecond // 1000:03d}Z"
+    return _stamp(_instant(cursor) - timedelta(seconds=_OVERLAP_SECONDS))
 
 
 # ---------------------------------------------------------------------------
@@ -645,10 +683,9 @@ class _Walker:
         """One request, counted against ``max_requests`` (the listing's and the reads' alike).
 
         A run that spends its budget inside the listing keeps the progress it made, so a small
-        budget cannot make a run start over at the same place.
+        budget cannot make a run start over at the same place. The client asks ``check_active``
+        before each attempt, so a request the budget refuses is not sent and asks nothing.
         """
-        if self.check_active is not None:
-            self.check_active()
         if self.used >= self.max_requests:
             self.stats["failed"] += 1  # the request the run could not afford
             raise _CutShort("budget")
@@ -656,7 +693,7 @@ class _Walker:
         # A call the client retries on a 5xx or a network error still counts once.
         self.stats["requests"] += 1
         try:
-            return self.client.request("GET", path, params=params)
+            return self.client.request("GET", path, params=params, check_active=self.check_active)
         except AsanaRateLimitedError:
             self.stats["failed"] += 1
             raise _CutShort("rate_limit") from None
@@ -715,8 +752,11 @@ class _Walker:
         ``progress["token"]`` is the sync token to ask next, ``events`` the task gids named so
         far and ``renamed`` whether a project or section rename was among them. ``gap`` is set
         when the feed has one: Asana answers 412 (with a fresh token) when no token is sent or
-        the stored one is too old. ``polled`` is set when the feed is read.
+        the stored one is too old. ``polled`` is set when the feed is read. The sync tokens this
+        call has seen are remembered: one that comes back twice while the feed says there is
+        more raises instead of looping.
         """
+        seen: set[str | None] = {progress["token"]}
         while not progress["polled"]:
             token = progress["token"]
             params = {"resource": project_gid, "opt_fields": _EVENT_FIELDS}
@@ -732,8 +772,9 @@ class _Walker:
                 raise AsanaResponseError("Asana /events: no sync token")
             events = _data(body, list, "/events")
             more = bool(body.get("has_more"))
-            if more and next_token == token:
-                raise AsanaResponseError("Asana /events: the sync token did not advance")
+            if more and next_token in seen:
+                raise AsanaResponseError("Asana /events: a sync token came back twice")
+            seen.add(next_token)
             progress["events"] = sorted({*progress["events"], *_event_task_gids(events)})
             progress["renamed"] = progress["renamed"] or _renamed(events)
             progress.update(token=next_token, polled=not more)
@@ -751,8 +792,8 @@ class _Walker:
                 if not isinstance(gid, str) or not _GID.fullmatch(gid):
                     raise AsanaResponseError("Asana /tasks: a task without a usable gid")
                 try:
-                    _instant(when)
-                except (AttributeError, ValueError):
+                    when = _stamp(_instant(when))
+                except (AttributeError, ValueError, OverflowError):
                     raise AsanaResponseError(
                         "Asana /tasks: a task without a usable modified_at"
                     ) from None
@@ -904,9 +945,11 @@ class _Walker:
         (its project's events or listing render it on a later pass). An answer of 5xx or nothing
         is unknown, not gone: the task stays known and counts in ``failed`` like a read that
         failed, and toward the outage streak, so a hung Asana does not spend the budget on
-        checks either. Any other error raises, a 200 whose ``memberships`` is malformed (see
-        ``_memberships``; entries without a project are skipped) raises ``AsanaResponseError``,
-        and a 429 or a spent budget raises ``_CutShort``.
+        checks either. Any other error raises, a 200 of the wrong shape (or whose ``memberships``
+        is malformed, see ``_memberships``; entries without a project are skipped) raises
+        ``AsanaResponseError``, and a 429 or a spent budget raises ``_CutShort``. This differs
+        from a task read, which keeps its task for a retry on such a body: the check decides
+        whether a task is forgotten, so a body it cannot read raises instead of being guessed at.
         """
         if not row_id.startswith("task:"):
             return False
@@ -936,7 +979,12 @@ class _Walker:
 
     # -- 2. Render ---------------------------------------------------------
     def _fetch_task(self, gid: str) -> tuple[dict, list[dict], list[dict]]:
-        """``(task, comments, subtasks)`` of one task. Errors propagate."""
+        """``(task, comments, subtasks)`` of one task.
+
+        Raises ``AsanaAPIError`` for a failing answer and ``AsanaResponseError`` for a 200 of the
+        wrong shape (the task, a comment or a subtask that is not an object, a bad pagination);
+        ``rows`` keeps the task for a retry on either.
+        """
         path = f"/tasks/{gid}"
         task = _data(self._call(path, {"opt_fields": _TASK_FIELDS}), dict, "/tasks/{gid}")
         stories = self._list_all(f"{path}/stories", {"opt_fields": _STORY_FIELDS})
@@ -997,7 +1045,7 @@ class _Walker:
                 self.outage = 0
             try:
                 task, comments, subtasks = self._fetch_task(gid)
-            except AsanaAPIError as exc:
+            except (AsanaAPIError, AsanaResponseError) as exc:
                 self._failed(gid, exc)
                 continue
             self.outage = 0
@@ -1008,8 +1056,8 @@ class _Walker:
                     render_task(gid, task, comments, subtasks, self.projects) if selected else None
                 )
             except AsanaResponseError as exc:
-                # A body of the wrong shape is a task Asana did not answer properly: kept for
-                # a retry like any unreadable task, never skipped silently, never raising.
+                # A body of the wrong shape is a task Asana did not answer properly, like the
+                # read above: kept for a retry, never skipped silently, never raising.
                 self._failed(gid, exc)
                 continue
             if row is None:
@@ -1254,8 +1302,10 @@ def asana_source(
         access_token: Asana personal access token or OAuth access token. Used to build the
             client when ``service`` is omitted. Never read from the environment.
         service: Pre-built client (see :func:`build_asana_service`). Mainly an injection point
-            for tests and hosts.
-        check_active: Optional host authorization checkpoint, called before each request.
+            for tests and hosts. It must accept ``request(method, path, *, params,
+            check_active)`` and call ``check_active`` before each attempt it makes.
+        check_active: Optional host authorization checkpoint, called before each attempt of each
+            request, a retry included. What it raises stops the run as it is.
         max_requests: Budget of the requests of one run, the listing's and the task reads' (a
             call the client retries counts once), so at least 3 (a task costs three). A run cut
             by it inside the listing keeps its progress and the next run continues there;
