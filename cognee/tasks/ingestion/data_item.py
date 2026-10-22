@@ -20,6 +20,10 @@ class DataItem:
     # Data.system_metadata — never merged with user external_metadata.
     system_metadata: dict | None = field(default=None)
     data_id: UUID | None = None
+    # Item-level node_set (e.g. a document-mode dlt row's own labels). Unioned
+    # with the call-level node_set in ingest_data, not merged here — this
+    # field only carries the item's own contribution.
+    node_set: list[str] | None = None
     # When True, ``data`` (a str) is stored verbatim as a text document and
     # never interpreted as an http(s) URL, an s3:// path, or a local file
     # path. Set this on any DataItem whose text came from a field the caller

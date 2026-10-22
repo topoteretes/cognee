@@ -79,11 +79,20 @@ candidates (name + a short preview) before deleting.
 | One document's memory only | `forget(dataset="name", data_id=..., memory_only=True)` | That document's raw file and row |
 | Every dataset the user can delete | `forget(everything=True)` | Nothing, in any dataset the user has `delete` on in the current tenant (shared ones included). Only on explicit request (see the hard limits) |
 
-Return values: `{"data_id", "dataset_id", "status"}` for a document,
-`{"dataset_id", "status"}` for a dataset (plus `data_records_reset` with
-`memory_only`), `{"datasets_removed", "status"}` for everything
-(`datasets_removed` counts the datasets the user can *read*, not the delete
-set).
+Return values: `{"data_id", "dataset_id", "search_history_removed", "status"}`
+for a document, `{"dataset_id", "search_history_removed", "status"}` for a
+dataset (plus `data_records_reset` with `memory_only`), `{"datasets_removed",
+"search_history_removed", "status"}` for everything (`datasets_removed`
+counts the datasets the user can *read*, not the delete set).
+`search_history_removed` is `True` for a dataset or everything forget: every
+recorded question and answer for the deleted datasets is gone, whoever asked.
+It does not cover rows saved without a dataset (history from before cognee
+1.5.0, or a search over several datasets with access control off): a dataset
+forget leaves them, and an everything forget removes only the caller's own.
+It is `False` for a document forget, which never purges history (rows are
+recorded per dataset, so answers that quoted the document stay until the
+dataset itself is forgotten). If the history purge fails, the forget raises
+before any data is deleted, so retry the same forget.
 
 **HTTP:** `POST /api/v1/forget` with a JSON body; camelCase and snake_case
 keys both work: `{"datasetId": "...", "dataId": "..."}`,

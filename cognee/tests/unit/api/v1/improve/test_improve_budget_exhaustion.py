@@ -427,7 +427,7 @@ class _FakeSessionManager:
     async def get_session(self, *, user_id, session_id=None, formatted=False, **_):
         return list(self.qa.get((user_id, session_id), []))
 
-    async def get_session_context_entries(self, *, user_id, session_id=None):
+    async def get_session_context_entries(self, *, user_id, session_id=None, raise_on_error=False):
         return list(self.context.get((user_id, session_id), []))
 
     async def update_session_context_entry(self, *, user_id, entry_id, merge, session_id=None):
@@ -475,10 +475,10 @@ def session_bridge(harness, monkeypatch):
     # The packages re-export functions under their module names, so the module
     # objects have to come from sys.modules, not from a dotted attribute walk.
     importlib.import_module("cognee.memify_pipelines.persist_sessions_in_knowledge_graph")
-    importlib.import_module("cognee.modules.memify.memify")
+    importlib.import_module("cognee.modules.memify.run_memify_tasks")
     importlib.import_module("cognee.modules.pipelines.operations.pipeline")
     persist_module = sys.modules["cognee.memify_pipelines.persist_sessions_in_knowledge_graph"]
-    memify_module = sys.modules["cognee.modules.memify.memify"]
+    memify_module = sys.modules["cognee.modules.memify.run_memify_tasks"]
     pipeline_module = sys.modules["cognee.modules.pipelines.operations.pipeline"]
     run_tasks_module = sys.modules["cognee.modules.pipelines.operations.run_tasks"]
     migrations_module = importlib.import_module("cognee.modules.migrations.startup")

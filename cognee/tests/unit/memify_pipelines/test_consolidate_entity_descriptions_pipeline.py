@@ -1291,7 +1291,12 @@ async def test_pipeline_wires_memify_tasks_dataset_and_user():
     user = MagicMock()
     module = "cognee.memify_pipelines.consolidate_entity_descriptions"
 
-    with patch(f"{module}.memify", new=AsyncMock(return_value={"status": "ok"})) as memify_mock:
+    with (
+        patch(
+            f"{module}.run_memify_tasks", new=AsyncMock(return_value={"status": "ok"})
+        ) as memify_mock,
+        pytest.warns(DeprecationWarning, match="review_conflicts"),
+    ):
         result = await consolidate_entity_descriptions_pipeline(user=user, dataset="ds-1")
 
     assert result == {"status": "ok"}
@@ -1307,7 +1312,9 @@ async def test_pipeline_wires_memify_tasks_dataset_and_user():
 async def test_pipeline_forwards_defaults_to_memify():
     module = "cognee.memify_pipelines.consolidate_entity_descriptions"
 
-    with patch(f"{module}.memify", new=AsyncMock(return_value={"status": "ok"})) as memify_mock:
+    with patch(
+        f"{module}.run_memify_tasks", new=AsyncMock(return_value={"status": "ok"})
+    ) as memify_mock:
         await consolidate_entity_descriptions_pipeline()
 
     kwargs = memify_mock.call_args.kwargs
@@ -1318,7 +1325,9 @@ async def test_pipeline_forwards_defaults_to_memify():
 @pytest.mark.asyncio
 async def test_pipeline_forwards_tuning_parameter_overrides_to_tasks():
     module = "cognee.memify_pipelines.consolidate_entity_descriptions"
-    with patch(f"{module}.memify", new=AsyncMock(return_value={"status": "ok"})) as memify_mock:
+    with patch(
+        f"{module}.run_memify_tasks", new=AsyncMock(return_value={"status": "ok"})
+    ) as memify_mock:
         await consolidate_entity_descriptions_pipeline(
             entity_max_concurrent_calls=1,
             entity_max_neighbor_lines=2,

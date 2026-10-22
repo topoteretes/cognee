@@ -8,6 +8,7 @@ from botocore.config import Config
 
 from cognee.infrastructure.databases.graph.graph_db_interface import (
     EdgeData,
+    EdgeIdentity,
     GraphDBInterface,
     Node,
     NodeData,
@@ -650,6 +651,31 @@ class NeptuneGraphDB(GraphDBInterface):
                 f"Failed to add {len(failed_edges)} of {len(edges)} edges after bulk fallback"
             ) from failed_edges[0][1]
 
+    async def delete_edge_triples(self, edges: list[EdgeIdentity]) -> None:
+        if not edges:
+            return
+        # DELETE r (not DETACH DELETE) removes only the matched relationships and
+        # preserves the endpoint nodes.
+        await self.query(
+            f"""
+            UNWIND $edges AS edge
+            MATCH (source:{self._GRAPH_NODE_LABEL})-[r]->(target:{self._GRAPH_NODE_LABEL})
+            WHERE id(source) = edge.source AND id(target) = edge.target
+                AND type(r) = edge.relationship
+            DELETE r
+            """,
+            {
+                "edges": [
+                    {
+                        "source": str(edge.source_id),
+                        "target": str(edge.target_id),
+                        "relationship": edge.relationship_name,
+                    }
+                    for edge in edges
+                ]
+            },
+        )
+
     async def delete_graph(self) -> None:
         """
         Delete all nodes and edges from the graph database.
@@ -803,6 +829,10 @@ class NeptuneGraphDB(GraphDBInterface):
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to check if graph is empty: {error_msg}")
             raise RuntimeError(f"Failed to check if graph is empty: {error_msg}") from e
+
+    async def get_graph_counts(self) -> tuple[int, int]:
+        """Count nodes and edges with one aggregation query."""
+        return await self._get_model_independent_graph_data()
 
     async def get_graph_metrics(self, include_optional: bool = False) -> dict[str, Any]:
         """

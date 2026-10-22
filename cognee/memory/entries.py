@@ -21,7 +21,41 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("memory.entries")
 
 
-class QAEntry(BaseModel):
+class SessionNodeSetEntry(BaseModel):
+    """Base for the session entries that can carry a ``node_set``.
+
+    The first entry that carries one pins it on the session, later entries must
+    repeat it or omit it, and a different set is rejected with HTTP 409
+    (``SessionNodeSetConflictError``). ``improve()`` appends the pinned set to
+    the node set of everything it bridges from the session into the graph, so a
+    ``node_name``-scoped recall sees it. Like the call-level ``node_set`` on
+    ``remember()``, ``add()`` and ``update()``, the list is not size-limited.
+
+    Validation and normalization are ``normalize_node_set``'s, the rule every
+    session node-set input shares: a list of non-blank names, stored sorted
+    and deduplicated; a bare string or a blank name is refused.
+    """
+
+    node_set: list[str] | None = Field(
+        default=None,
+        description=(
+            "Optional node set pinned on the session; kept on the graph nodes "
+            "improve() builds from it. Immutable once set for a session. A list of "
+            "non-empty names, stored sorted and deduplicated."
+        ),
+    )
+
+    @field_validator("node_set", mode="before")
+    @classmethod
+    def _normalize_node_set(cls, value):
+        # Imported here: entries.py is loaded by ``import cognee`` before the
+        # session infrastructure, and the rule must stay in one place.
+        from cognee.infrastructure.session.session_node_set import normalize_node_set
+
+        return normalize_node_set(value)
+
+
+class QAEntry(SessionNodeSetEntry):
     """A Q&A turn stored in the session cache.
 
     Represents a user question + assistant answer with optional
@@ -37,7 +71,7 @@ class QAEntry(BaseModel):
     used_graph_element_ids: dict | None = None
 
 
-class TraceEntry(BaseModel):
+class TraceEntry(SessionNodeSetEntry):
     """One step of an agent trace.
 
     Structured representation of a tool/function call — origin,
