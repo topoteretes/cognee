@@ -451,9 +451,6 @@ def test_a_kind_that_is_a_list_or_an_object_is_a_malformed_line(tmp_path, enola_
     "undecodable, error",
     [
         pytest.param(
-            _nested_past_the_recursion_limit(), RecursionError, id="nested-past-the-recursion-limit"
-        ),
-        pytest.param(
             '{"line": ' + "1" * (INT_DIGIT_LIMIT + 1) + "}",
             ValueError,
             id="integer-past-the-digit-limit",
@@ -466,14 +463,38 @@ def test_a_kind_that_is_a_list_or_an_object_is_a_malformed_line(tmp_path, enola_
 def test_a_line_json_cannot_decode_is_a_malformed_line_not_a_failure(
     tmp_path, enola_logger, undecodable, error
 ):
-    """json.loads raises more than JSONDecodeError: RecursionError on nesting too deep, a
-    plain ValueError on an integer too long to convert. Out of the reader, either would
-    end the code docs of every repository in the run."""
+    """json.loads raises more than JSONDecodeError: a plain ValueError on an integer too
+    long to convert. Out of the reader, it would end the code docs of every repository in
+    the run."""
     # The line fails json.loads the way the case is named for.
     with pytest.raises(error) as decoding:
         json.loads(undecodable)
     assert type(decoding.value) is error
     _snapshot_with_docs_bytes(tmp_path, _jsonl(PACKAGE, undecodable, TOTAL))
+
+    docs = read_enola_docs(tmp_path)
+
+    assert docs.lines == (PACKAGE, TOTAL)
+    enola_logger.warning.assert_called_once()
+    assert enola_logger.warning.call_args.args[1:] == (1, tmp_path / DOCS_ARTIFACT)
+
+
+def test_a_line_nested_too_deep_is_a_malformed_line_not_a_failure(
+    tmp_path, enola_logger, monkeypatch
+):
+    """json.loads raises RecursionError on nesting deeper than the stack holds; how deep
+    that is depends on the machine (Python 3.14 measures the stack), so json.loads is
+    made to raise it here."""
+    loads = json.loads
+    nested = "[[[]]]"
+
+    def loads_past_the_stack(text, *args, **kwargs):
+        if text == nested:
+            raise RecursionError("maximum recursion depth exceeded")
+        return loads(text, *args, **kwargs)
+
+    monkeypatch.setattr(json, "loads", loads_past_the_stack)
+    _snapshot_with_docs_bytes(tmp_path, _jsonl(PACKAGE, nested, TOTAL))
 
     docs = read_enola_docs(tmp_path)
 

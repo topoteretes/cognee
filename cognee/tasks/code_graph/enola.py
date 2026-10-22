@@ -19,6 +19,7 @@ import os
 import platform
 import re
 import shutil
+import stat
 import sysconfig
 from dataclasses import dataclass
 from pathlib import Path
@@ -318,8 +319,11 @@ def read_enola_docs(snapshot_dir: str | Path) -> EnolaDocs:
     break a line at.
     """
     snapshot_dir = Path(snapshot_dir)
+    # stat, not is_dir: since Python 3.14 is_dir answers False when the check itself fails.
     try:
-        is_directory = snapshot_dir.is_dir()
+        is_directory = stat.S_ISDIR(snapshot_dir.stat().st_mode)
+    except (FileNotFoundError, NotADirectoryError):
+        is_directory = False
     except OSError as error:
         raise EnolaDocsUnavailable(f"could not read '{snapshot_dir}': {error}") from None
     if not is_directory:
