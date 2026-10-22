@@ -428,6 +428,50 @@ jobs:
           DB_HOST: ${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}
         run: uv run python ./cognee/tests/test_deduplication.py
 
+  run-pgvector-live-tests:
+    name: PGVector Live Adapter Tests
+    runs-on: ubuntu-latest
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    defaults:
+      run:
+        shell: bash
+    services:
+      postgres:
+        image: ghcr.io/topoteretes/pgvector:pg17
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          POSTGRES_USER: cognee
+          POSTGRES_PASSWORD: cognee
+          POSTGRES_DB: cognee_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+          extra-dependencies: "postgres"
+
+      # No LLM or embedding calls: both suites stub the embedding engine.
+      - name: Run live PGVector adapter tests
+        env:
+          ENV: 'dev'
+          TEST_PGVECTOR_URL: postgresql+asyncpg://cognee:cognee@${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}:5432/cognee_db
+        run: >-
+          uv run pytest -v
+          cognee/tests/integration/test_pgvector_hnsw_live.py
+          cognee/tests/integration/test_belongs_to_set_pgvector.py
+
   run-dlt-mixed-input-test:
     name: DLT Mixed Input E2E Test
     runs-on: ubuntu-22.04

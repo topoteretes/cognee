@@ -1,6 +1,6 @@
 # Adapted from topoteretes/cognee-community (Apache-2.0), PR #304, commit 83a980e.
 # Modified to ship in the Cognee SDK with SDK-local imports and test paths.
-"""A stored Apollo document is replaced only when its rendered text changes.
+"""A stored Apollo document is replaced only when its rendered text or node set changes.
 
 The source runs through the real cognee.add() pipeline with the API faked. ``remember()`` runs
 this same add() step first and then cognify(), which needs an LLM, so this stops at the Data
@@ -13,14 +13,12 @@ import pytest
 import cognee
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
+from cognee.modules.data.models import Data
 from cognee.modules.users.methods import get_default_user
+from cognee.tasks.ingestion.connectors import apollo as apollo_module
 from cognee.tasks.ingestion.connectors import apollo_source
-from cognee.tasks.ingestion.connectors.apollo import (
-    BASE_URL,
-    ApolloNotFoundError,
-    ApolloRateLimitedError,
-)
-from cognee.tests.unit.tasks.connectors.fake_apollo import FakeApollo
+from cognee.tasks.ingestion.connectors.apollo import ApolloRateLimitedError
+from cognee.tests.unit.tasks.connectors.fake_apollo import FakeApollo, serve_over_http
 
 DATASET = "apollo_integration_test"
 TABLE = "apollo_test"
@@ -56,18 +54,27 @@ async def _sync(fake: FakeApollo, resource_name: str = TABLE, **kwargs):
     return source
 
 
-async def _documents() -> dict[str, object]:
+async def _rows() -> list[Data]:
+    """Every Apollo Data row of the dataset, with no collapsing of two rows for one record."""
     user = await get_default_user()
     datasets = await get_authorized_existing_datasets(
         user=user, permission_type="write", datasets=[DATASET]
     )
     if not datasets:
-        return {}
-    return {
-        data.system_metadata["external_id"]: data
+        return []
+    return [
+        data
         for data in await get_dataset_data(datasets[0].id)
         if isinstance(data.system_metadata, dict) and data.system_metadata.get("source") == "apollo"
-    }
+    ]
+
+
+async def _documents() -> dict[str, Data]:
+    return {str(data.system_metadata["external_id"]): data for data in await _rows()}
+
+
+def _node_set(document: Data) -> list[str] | None:
+    return (document.external_metadata or {}).get("node_set")
 
 
 def _stored_text(document) -> str:
@@ -85,10 +92,38 @@ async def test_a_first_sync_stores_tagged_documents_and_a_quiet_one_changes_noth
 
     assert set(first) == {"sequence:s1", "account:a1", "contact:c1", "contact:c2"}
     assert {doc.system_metadata["table_name"] for doc in first.values()} == {TABLE}
+    # One node set per kind, namespaced once: a second "apollo:" prefix would mean core stopped
+    # seeing the name as already namespaced.
+    assert {key: _node_set(doc) for key, doc in first.items()} == {
+        "sequence:s1": ["apollo:team1:sequences"],
+        "account:a1": ["apollo:team1:accounts"],
+        "contact:c1": ["apollo:team1:contacts"],
+        "contact:c2": ["apollo:team1:contacts"],
+    }
 
     quiet = await _sync(fake)
     assert quiet.cognee_sync_stats["skipped"] == 4
     assert {k: d.id for k, d in (await _documents()).items()} == {k: d.id for k, d in first.items()}
+
+
+@pytest.mark.asyncio
+async def test_a_different_node_set_gives_every_document_a_new_id(clean_environment, monkeypatch):
+    """The node set is hashed into a document's identity. That is why it is fixed before the
+    first release: a later change re-extracts every record on the tenant's own LLM key."""
+    fake = _workspace()
+    await _sync(fake)
+    before = {k: d.id for k, d in (await _documents()).items()}
+
+    monkeypatch.setattr(
+        apollo_module, "_node_set", lambda team_id, kind: [f"apollo:{team_id}:{kind}:v2"]
+    )
+    await _sync(fake)
+    after = {k: d.id for k, d in (await _documents()).items()}
+
+    assert set(after) == set(before)
+    assert all(after[key] != before[key] for key in before)
+    # _documents() keeps one row per record, so count the rows: the old ones are gone.
+    assert len(await _rows()) == len(before)
 
 
 @pytest.mark.asyncio
@@ -150,36 +185,12 @@ async def test_a_rate_limited_first_sync_resumes_without_losing_documents(clean_
     assert set(await _documents()) == {"sequence:s1", "account:a1", "contact:c1", "contact:c2"}
 
 
-class _HTTPResponse:
-    def __init__(self, status: int, payload):
-        self.status_code = status
-        self._payload = payload
-        self.headers = {"x-minute-requests-left": "49", "x-hourly-requests-left": "199"}
-
-    def json(self):
-        return self._payload
-
-
-def _serve(fake: FakeApollo, keys: list[str]):
-    """Route requests.request into the fake, the way the real HTTP API would answer."""
-
-    def request(method, url, *, json=None, params=None, headers=None, timeout=None):
-        keys.append(headers["x-api-key"])
-        try:
-            payload = fake.request(method, url.removeprefix(BASE_URL), body=json, params=params)
-        except ApolloNotFoundError:
-            return _HTTPResponse(422, {"error": "This contact has been deleted."})
-        return _HTTPResponse(200, payload)
-
-    return request
-
-
 @pytest.mark.asyncio
 async def test_the_real_client_syncs_and_the_api_key_never_reaches_stored_documents(
     clean_environment, monkeypatch
 ):
     fake, keys = _workspace(), []
-    monkeypatch.setattr("requests.request", _serve(fake, keys))
+    monkeypatch.setattr("requests.request", serve_over_http(fake, keys=keys))
     source = apollo_source(api_key=KEY, resource_name=TABLE)
     assert KEY not in repr(source)
 
