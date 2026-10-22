@@ -19,6 +19,10 @@ dependencies = [
     "mcp>=1.24.0,<2.0.0",
     "uv>=0.6.3,<1.0.0",
     "httpx>=0.27.0,<1.0.0",
+    # Same floor as cognee core, declared here until a cognee release that
+    # carries it is pinned above: earlier bundles still trust the eMudhra
+    # intermediates whose private keys are recoverable (ENG-28).
+    "certifi>=2026.10.19",
     # Declared explicitly (already pulled in transitively via cognee[docs] ->
     # unstructured) so the [tool.uv.sources] CPU-index redirect below actually
     # binds — uv only applies source overrides to direct dependencies.
