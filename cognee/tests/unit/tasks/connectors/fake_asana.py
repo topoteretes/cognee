@@ -56,6 +56,8 @@ class FakeAsana:
         self.served = 0  # requests served in the current window
         self.answers: dict[str, object] = {}  # path -> body answered with 200 instead
         self.stuck_offset: str | None = None  # every page names this offset as the next one
+        # (sync token, has_more) the next events pages answer, in order, to any token sent
+        self.event_feed: list[tuple[str, bool]] = []
         # issued offset token -> (the listing it belongs to, the position it stands for)
         self._offsets: dict[str, tuple[str, int]] = {}
         self.events_page_size = 100
@@ -267,6 +269,9 @@ class FakeAsana:
         project_gid = params["resource"]
         assert "resource.target.gid" in params["opt_fields"], "edited comments need the target"
         assert "change.field" in params["opt_fields"], "renames are told apart by change.field"
+        if self.event_feed and params.get("sync") is not None:
+            token, more = self.event_feed.pop(0)
+            return Resp(200, {"data": [], "sync": token, "has_more": more})
         fresh = self._new_token(project_gid)
         if params.get("sync") is None or params["sync"] != self.tokens.get(project_gid):
             # Missing or stale token: the events so far are lost and a new token is issued.

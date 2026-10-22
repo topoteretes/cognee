@@ -145,7 +145,9 @@ sync token per project: a comment that was added or edited (Asana leaves `modifi
 both), a subtask that was renamed or removed (the parent is found through a subtask-to-parent
 index), and the name of a project or a section that changed, which re-reads every task of that
 project. An expired or missing sync token (HTTP 412) also re-reads the whole project, as does
-the very first run. Events are followed page by page until Asana says there are no more.
+the very first run. Events are followed page by page until Asana says there are no more. A sync
+token that comes back twice in one read of the feed while it says there are more raises instead
+of looping, as a pagination offset that comes back twice does.
 
 **Reading a task** costs three requests: the task, one page of comments and one page of
 subtasks (more pages cost more). Fresh tasks are read first, sorted by gid as text, then the tasks
@@ -206,9 +208,11 @@ pagination offset Asana rejects (HTTP 400, see "Known gaps"). A task read or a c
 list in a listing, the events feed or a project read raises `AsanaResponseError`, so does a check
 of a missing task whose body is of the wrong shape or whose `memberships` is malformed: none of
 these is read as an empty project. Only the read of one task keeps the task instead, see "A task
-that cannot be read". A budget the run spent without any progress raises
-`AsanaSourceError` too, see "A budget too small". dlt drops the state of a run that raises, so the
-next run starts from the last good state and forgets nothing.
+that cannot be read". A pagination offset that comes back twice in one listing and a sync token
+that comes back twice in one read of the events feed raise `AsanaResponseError` as well. A budget
+the run spent without any progress raises `AsanaSourceError` too, see "A budget too small". dlt
+drops the state of a run that raises, so the next run starts from the last good state and forgets
+nothing.
 
 **A listing cut by a rate limit or the budget.** The listing is a pass over the selected
 projects, and a pass can take several runs. When a run is cut inside it (HTTP 429 or a spent

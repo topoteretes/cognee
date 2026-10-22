@@ -719,8 +719,11 @@ class _Walker:
         ``progress["token"]`` is the sync token to ask next, ``events`` the task gids named so
         far and ``renamed`` whether a project or section rename was among them. ``gap`` is set
         when the feed has one: Asana answers 412 (with a fresh token) when no token is sent or
-        the stored one is too old. ``polled`` is set when the feed is read.
+        the stored one is too old. ``polled`` is set when the feed is read. The sync tokens this
+        call has seen are remembered: one that comes back twice while the feed says there is
+        more raises instead of looping.
         """
+        seen: set[str | None] = {progress["token"]}
         while not progress["polled"]:
             token = progress["token"]
             params = {"resource": project_gid, "opt_fields": _EVENT_FIELDS}
@@ -736,8 +739,9 @@ class _Walker:
                 raise AsanaResponseError("Asana /events: no sync token")
             events = _data(body, list, "/events")
             more = bool(body.get("has_more"))
-            if more and next_token == token:
-                raise AsanaResponseError("Asana /events: the sync token did not advance")
+            if more and next_token in seen:
+                raise AsanaResponseError("Asana /events: a sync token came back twice")
+            seen.add(next_token)
             progress["events"] = sorted({*progress["events"], *_event_task_gids(events)})
             progress["renamed"] = progress["renamed"] or _renamed(events)
             progress.update(token=next_token, polled=not more)

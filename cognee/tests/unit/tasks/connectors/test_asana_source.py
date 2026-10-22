@@ -617,13 +617,67 @@ def test_an_events_answer_without_a_sync_token_is_an_error():
         _sync(fake, {})
 
 
+def _state_with_sync(fake: FakeAsana, token: str) -> dict:
+    return {"projects": {"P1": {"cursor": fake.stamp(), "sync": token, "seen": {}}}}
+
+
 def test_an_events_feed_whose_token_does_not_advance_raises_instead_of_looping():
     fake = _workspace()
     fake.answers["/events"] = {"data": [], "sync": "same", "has_more": True}
-    state = {"projects": {"P1": {"cursor": fake.stamp(), "sync": "same", "seen": {}}}}
+    state = _state_with_sync(fake, "same")
 
-    with pytest.raises(AsanaResponseError, match="did not advance"):
+    with pytest.raises(AsanaResponseError, match="sync token came back twice"):
         _sync(fake, state)
+
+
+def test_an_events_feed_whose_first_token_is_the_stored_one_raises():
+    fake = _workspace()
+    fake.event_feed = [("S", True), ("A", False)]
+    state = _state_with_sync(fake, "S")
+
+    with pytest.raises(AsanaResponseError, match="sync token came back twice"):
+        _sync(fake, state)
+
+    assert len(fake.requested("/events")) == 1
+
+
+@pytest.mark.parametrize(
+    ("cycle", "requests"), [(["A", "B"], 3), (["A", "B", "C"], 4)], ids=["A-B-A", "A-B-C-A"]
+)
+def test_an_events_feed_that_cycles_through_its_tokens_raises_instead_of_looping(cycle, requests):
+    """Each page's token differs from the one before it, so only remembering them all finds it."""
+    fake = _workspace()
+    fake.event_feed = [(token, True) for token in cycle * 100]
+    state = _state_with_sync(fake, "S")
+    before = copy.deepcopy(state)
+
+    with pytest.raises(AsanaResponseError, match="Asana /events: a sync token came back twice"):
+        _sync(fake, state)
+
+    assert len(fake.requested("/events")) == requests
+    assert state == before
+
+
+def test_an_events_feed_of_many_distinct_tokens_is_read_in_full():
+    fake = _workspace()
+    fake.event_feed = [(f"t{n}", True) for n in range(49)] + [("end", False)]
+    state = _state_with_sync(fake, "S")
+
+    _sync(fake, state)
+
+    assert len(fake.requested("/events")) == 50
+    assert state["projects"]["P1"]["sync"] == "end"
+
+
+def test_a_last_page_that_repeats_the_token_is_not_a_cycle():
+    """A quiet feed answers its own token with nothing more to read."""
+    fake = _workspace()
+    fake.event_feed = [("S", False)]
+    state = _state_with_sync(fake, "S")
+
+    _sync(fake, state)
+
+    assert state["projects"]["P1"]["sync"] == "S"
 
 
 def test_a_task_in_two_selected_projects_is_one_document_naming_both():
