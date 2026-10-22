@@ -6,9 +6,10 @@ listing ever forgets one.
 The walk is driven with a plain dict as dlt resource state, and then through a real ``dlt``
 pipeline into SQLite. What a task that cannot be read does is the heart of it: while it is still
 listed it keeps its old document, is asked again on the next run after every fresh task, never
-counts toward an outage and never stops another task. A run that stops (a rejected token after
-rows, a rate limit, a spent budget, an outage) keeps what it emitted, queues the rest and
-forgets nothing; a 429 is never waited out.
+counts toward an outage and never stops another task. So does a 200 of the wrong shape in its own
+read, while one in a listing, the events feed, a project read or a check raises. A run that stops
+(a rejected token after rows, a rate limit, a spent budget, an outage) keeps what it emitted,
+queues the rest and forgets nothing; a 429 is never waited out.
 """
 
 import copy
@@ -2239,27 +2240,159 @@ def test_a_repeated_pagination_offset_raises_instead_of_looping():
         _sync(fake, {})
 
 
+def _malformed_task_workspace(path: str, answer) -> tuple[FakeAsana, dict, dict]:
+    """Three synced tasks, all edited, with ``answer`` (a 200) served for ``path`` of task 2."""
+    fake = _workspace()
+    state: dict = {}
+    _sync(fake, state)
+    before = copy.deepcopy(state)
+    fake.edit_task("1")
+    fake.edit_task("2", notes="Rewritten.")
+    fake.edit_task("3")
+    fake.answers[path] = answer
+    return fake, state, before
+
+
+def _assert_task_2_kept_and_recovers(fake: FakeAsana, state: dict, before: dict, path: str):
+    rows, stats = _sync(fake, state)
+
+    assert set(_tasks(rows)) == {"task:1", "task:3"}, "the other tasks of the run are rendered"
+    assert _tombstones(rows) == set() and stats["deleted"] == 0, "the old document stays"
+    assert "task:2" in state["known_ids"]
+    assert (stats["failed"], stats["kept"]) == (1, 1)
+    assert _reasons(stats) == set(), "a malformed body is no outage and no stopped run"
+    assert state["retry"] == ["2"] and state["pending"] == []
+    assert state["projects"]["P1"]["cursor"] > before["projects"]["P1"]["cursor"], "committed"
+
+    del fake.answers[path]
+    rows, stats = _sync(fake, state)
+
+    assert "Rewritten." in _tasks(rows)["task:2"]["content"]
+    assert (stats["failed"], stats["kept"], state["retry"]) == (0, 0, [])
+
+
 @pytest.mark.parametrize("answer", [{}, {"data": []}, {"data": "x"}])
-def test_a_task_answer_of_the_wrong_shape_aborts_the_run(answer):
+def test_a_task_answer_of_the_wrong_shape_keeps_the_task_and_the_run_goes_on(answer):
+    fake, state, before = _malformed_task_workspace("/tasks/2", answer)
+
+    _assert_task_2_kept_and_recovers(fake, state, before, "/tasks/2")
+
+
+@pytest.mark.parametrize("answer", [{"data": [1, 2]}, {"data": "x"}, {}])
+def test_a_comment_listing_of_the_wrong_shape_keeps_the_task_and_the_run_goes_on(answer):
+    fake, state, before = _malformed_task_workspace("/tasks/2/stories", answer)
+
+    _assert_task_2_kept_and_recovers(fake, state, before, "/tasks/2/stories")
+
+
+@pytest.mark.parametrize("answer", [{"data": [1]}, {"data": [{"gid": "s"}, "x"]}, {"data": None}])
+def test_a_subtask_listing_of_the_wrong_shape_keeps_the_task_and_the_run_goes_on(answer):
+    fake, state, before = _malformed_task_workspace("/tasks/2/subtasks", answer)
+
+    _assert_task_2_kept_and_recovers(fake, state, before, "/tasks/2/subtasks")
+
+
+@pytest.mark.parametrize("listing", ["stories", "subtasks"])
+@pytest.mark.parametrize(
+    "next_page",
+    [{}, {"offset": ""}, {"offset": 5}, "x"],
+    ids=["no offset", "empty offset", "offset not a string", "not an object"],
+)
+def test_a_next_page_without_a_usable_offset_inside_a_task_keeps_the_task(listing, next_page):
+    path = f"/tasks/2/{listing}"
+    fake, state, before = _malformed_task_workspace(path, {"data": [], "next_page": next_page})
+
+    _assert_task_2_kept_and_recovers(fake, state, before, path)
+
+
+@pytest.mark.parametrize("listing", ["stories", "subtasks"])
+def test_a_repeated_pagination_offset_inside_a_task_keeps_the_task_instead_of_looping(listing):
+    path = f"/tasks/2/{listing}"
+    # The same page, and so the same next offset, comes back every time it is asked for.
+    fake, state, before = _malformed_task_workspace(
+        path, {"data": [], "next_page": {"offset": "again"}}
+    )
+
+    _assert_task_2_kept_and_recovers(fake, state, before, path)
+
+
+def test_a_malformed_task_never_stops_the_run_not_even_three_in_a_row_across_runs():
+    fake = _workspace(tasks=6)
+    fake.answers["/tasks/2"] = {"data": "x"}
+    fake.answers["/tasks/3/stories"] = {"data": [1]}
+    fake.answers["/tasks/4/subtasks"] = {"data": [1]}
+    state: dict = {}
+
+    rows, stats = _sync(fake, state)
+
+    assert set(_tasks(rows)) == {"task:1", "task:5", "task:6"}, "the tasks after them are read"
+    assert (stats["failed"], stats["kept"], stats["scanned"]) == (3, 3, 6)
+    assert _reasons(stats) == set(), "three malformed bodies in a row are no outage"
+    assert state["retry"] == ["2", "3", "4"] and state["pending"] == []
+    assert state["known_ids"] == ["project:P1", "task:1", "task:5", "task:6"], "never ingested"
+
+    for run in range(3):
+        fake.add_task(f"9{run}")
+        fake.edit_task("5", notes=f"Edit {run}.")
+        fake.calls.clear()
+        rows, stats = _sync(fake, state)
+
+        assert set(_tasks(rows)) == {"task:5", f"task:9{run}"}, "fresh tasks never wait for them"
+        assert _fetched(fake) == ["5", f"9{run}", "2", "3", "4"], "the retries go last, once each"
+        assert (stats["failed"], _reasons(stats)) == (3, set()), "no outage in the retry tail"
+        assert state["retry"] == ["2", "3", "4"]
+
+    fake.answers.clear()
+    rows, stats = _sync(fake, state)
+
+    assert {"task:2", "task:3", "task:4"} <= set(_tasks(rows)) and state["retry"] == []
+    assert (stats["failed"], stats["kept"]) == (0, 0)
+
+
+def test_a_malformed_task_neither_counts_nor_resets_the_streak_of_tasks_answering_5xx():
+    fake = _workspace(tasks=6)
+    fake.fail("/tasks/1", 500)
+    fake.fail("/tasks/2", 500)
+    fake.answers["/tasks/3"] = {"data": "x"}
+    fake.fail("/tasks/4", 500)
+    state: dict = {}
+
+    _, stats = _sync(fake, state)
+
+    assert (stats["failed"], _reasons(stats)) == (4, {"failed_unavailable"})
+    assert _fetched(fake) == ["1", "2", "3", "4"], "the third 5xx in a row stops the run"
+
+
+def test_a_project_listing_answer_of_the_wrong_shape_still_raises_though_a_task_answer_is_kept():
     fake = _workspace()
     state: dict = {}
     _sync(fake, state)
     fake.edit_task("2")
+    fake.answers["/tasks/2"] = {"data": "x"}
+    _sync(fake, state)
     before = copy.deepcopy(state)
+    fake.answers["/tasks"] = {"data": "x"}
+
+    with pytest.raises(AsanaResponseError):
+        _sync(fake, state)
+
+    assert state == before and state["retry"] == ["2"], "the kept task is still queued"
+
+
+@pytest.mark.parametrize("answer", [{}, {"data": []}, {"data": "x"}])
+def test_a_check_answer_of_the_wrong_shape_raises_and_forgets_nothing(answer):
+    """Unlike a task read, a check decides about forgetting: it raises, it never guesses."""
+    fake = _workspace(tasks=2)
+    state: dict = {}
+    _sync(fake, state)
+    fake.delete_task("2")
     fake.answers["/tasks/2"] = answer
+    before = copy.deepcopy(state)
 
     with pytest.raises(AsanaResponseError):
         _sync(fake, state)
 
     assert state == before
-
-
-def test_a_comment_listing_of_the_wrong_shape_aborts_the_run():
-    fake = _workspace()
-    fake.answers["/tasks/1/stories"] = {"data": [1, 2]}
-
-    with pytest.raises(AsanaResponseError, match="not an object"):
-        _sync(fake, {})
 
 
 # --- a task that cannot be read ---
@@ -3020,6 +3153,26 @@ def test_unreadable_tasks_never_block_new_ones_across_real_runs(tmp_path):
     fake.heal()
     staged = _run(tmp_path, _source(fake))
     assert {"task:2", "task:3", "task:4"} <= set(staged)
+
+
+def test_a_malformed_task_keeps_its_document_and_never_blocks_new_ones_across_real_runs(tmp_path):
+    fake = _workspace()
+    _run(tmp_path, _source(fake))
+    fake.edit_task("2", notes="Rewritten.")
+    fake.answers["/tasks/2/stories"] = {"data": [1]}
+
+    for run in range(3):
+        fake.add_task(f"9{run}")
+        source = _source(fake)
+        staged = _run(tmp_path, source)
+        assert f"task:9{run}" in staged, "a new task is ingested whatever the others do"
+        assert "Body 2." in staged["task:2"], "the old document stays"
+        assert (source.cognee_sync_stats["failed"], source.cognee_sync_stats["kept"]) == (1, 1)
+        assert _reasons(source.cognee_sync_stats) == set()
+
+    del fake.answers["/tasks/2/stories"]
+    staged = _run(tmp_path, _source(fake))
+    assert "Rewritten." in staged["task:2"]
 
 
 def test_an_ingested_task_that_cannot_be_read_keeps_its_document_until_it_leaves(tmp_path):

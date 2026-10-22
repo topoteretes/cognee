@@ -158,18 +158,21 @@ removes the row on `merge`, and cognee's orphan cleanup removes the document, gr
 vectors. A run that fails, or is cut inside the listing, forgets nothing.
 
 **A task that cannot be read.** A task that is still listed but answers 403, 404, a 5xx or
-nothing (after three attempts, backing off 1 s then 2 s) keeps its **old document**. It is kept
-for a retry (`state["retry"]`), asked again at the end of the next run's order, never forgotten
-and never given up on; it fails at most once per run. A task answering 403 or 404 never stops
-another task from being read and never counts toward an outage. An answer of 5xx or nothing
-counts in the streak of its own part of the run (the retry tail for a retried task) and, three
-in a row, stops the run, see "A run that stops" and "Known gaps". A body whose
-`memberships` is malformed (see below), or whose `custom_fields` is not a list of fields, is told
-the same way: the task is counted in `failed`, kept for a retry and never skipped silently, and the
-run does not raise. Only a task that leaves a complete listing and is confirmed gone is
-forgotten. Known gap: a task Asana will not show you keeps a stale document
-for as long as it stays listed, and one that becomes readable again is read again with no change
-to `modified_at`.
+nothing (after three attempts, backing off 1 s then 2 s), or a 200 of the wrong shape, keeps its
+**old document**. It is kept for a retry (`state["retry"]`), asked again at the end of the next
+run's order, never forgotten and never given up on; it fails at most once per run. A task
+answering 403 or 404 never stops another task from being read and never counts toward an outage.
+An answer of 5xx or nothing counts in the streak of its own part of the run (the retry tail for a
+retried task) and, three in a row, stops the run, see "A run that stops" and "Known gaps". A 200
+of the wrong shape is told the same way and never counts toward an outage: a task body that is not
+an object, a comment or a subtask that is not an object, a broken pagination of those two lists
+(`next_page` without an offset, an offset that comes back twice), a `memberships` that is
+malformed (see below) or a `custom_fields` that is not a list of fields. The task is counted in
+`failed`, kept for a retry and never skipped silently, and the run does not raise, so one
+malformed task never blocks the others. Only a task that leaves a complete listing and is
+confirmed gone is forgotten. Known gap: a task Asana will not show you, or keeps answering with a
+body of the wrong shape, keeps a stale document for as long as it stays listed, and one that
+becomes readable again is read again with no change to `modified_at`.
 
 **A task that left the selection** between the listing and its read (it was moved to a project
 you did not select) is not rendered: no document is built for it. It stays known until the next
@@ -200,8 +203,10 @@ unanswered request after the retries in the listing, the events feed or a projec
 project read other than 403 or 404, a task check other than 403, 404, 5xx or nothing, and a
 pagination offset Asana rejects (HTTP 400, see "Known gaps"). A task read or a check answering
 5xx or nothing is kept instead, as described above. A 200 that is not the expected object or
-list raises `AsanaResponseError`, so does a check whose `memberships` is malformed: none of these is read as an
-empty project. A budget the run spent without any progress raises
+list in a listing, the events feed or a project read raises `AsanaResponseError`, so does a check
+of a missing task whose body is of the wrong shape or whose `memberships` is malformed: none of
+these is read as an empty project. Only the read of one task keeps the task instead, see "A task
+that cannot be read". A budget the run spent without any progress raises
 `AsanaSourceError` too, see "A budget too small". dlt drops the state of a run that raises, so the
 next run starts from the last good state and forgets nothing.
 
@@ -232,12 +237,14 @@ and its project's events or listing render it on a later pass. An answer of 5xx 
 unknown, not gone: the task stays known, it counts in `failed` like a read that failed and in
 the outage streak (three in a row stop the run cleanly with `failed_unavailable`, so a hung
 Asana does not spend the budget on checks); one such task alone never stops the others. A 200
-whose `memberships` is malformed raises `AsanaResponseError` instead of being read as "no
-project": that is a `memberships` that is not a list, an entry that is not an object, a `project`
-that is not an object, or a project without a string gid. An entry with no `project` (absent or
-null, for example a task on someone's My Tasks list) is not a project membership and is skipped:
-a task with one selected project and one such entry is selected, and a task with such entries
-only is in no project (a render read does not build a document for it, a check forgets it).
+of the wrong shape raises `AsanaResponseError`, and so does one whose `memberships` is malformed,
+instead of being read as "no project": unlike a task read, a check does not keep the task and go
+on, because it decides whether a task is forgotten. A malformed `memberships` is one that is not
+a list, an entry that is not an object, a `project` that is not an object, or a project without a
+string gid. An entry with no `project` (absent or null, for example a task on someone's My Tasks
+list) is not a project membership and is skipped: a task with one selected project and one such
+entry is selected, and a task with such entries only is in no project (a render read does not
+build a document for it, a check forgets it).
 A confirmed-live task is not remembered: the next pass lists again and finds it in the fresh
 listing, and only a pass that misses it again asks again.
 
