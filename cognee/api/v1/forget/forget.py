@@ -197,22 +197,27 @@ async def _forget_everything(user: Any) -> dict:
     - Vector DB (embeddings): yes
     - Session cache (Redis/FS): yes (full prune)
     - Search history (queries/results rows): yes — every user's rows on each
-      deleted dataset (delete_all removes shared datasets too, so other users'
-      answers from them must go as well), plus every row this user owns. Other
-      users' rows saved without a dataset stay (see _forget_search_history)
+      deleted dataset, shared ones included (inside datasets.empty_dataset),
+      plus every row this user owns, including rows saved without a dataset
+      (before cognee 1.5.0, or a search over several datasets with backend
+      access control off). Other users' rows without a dataset stay
     """
     from cognee.api.v1.datasets.datasets import datasets
-    from cognee.modules.data.methods import get_authorized_existing_datasets
+    from cognee.modules.search.operations import delete_user_search_history
 
     user_datasets = await datasets.list_datasets(user=user)
     count = len(user_datasets)
 
-    # The same list delete_all is about to remove; taken before it does.
-    deleted_dataset_ids = [
-        dataset.id for dataset in await get_authorized_existing_datasets([], "delete", user)
-    ]
-
-    await _forget_search_history(user, deleted_dataset_ids, everything=True)
+    # Before the data, and not caught, as in empty_dataset: if it fails,
+    # nothing is deleted yet and the forget can be retried.
+    removed = await delete_user_search_history(user.id)
+    if removed["queries_deleted"] or removed["results_deleted"]:
+        logger.info(
+            "forget: removed %d search history queries and %d results for user=%s",
+            removed["queries_deleted"],
+            removed["results_deleted"],
+            user.id,
+        )
 
     await datasets.delete_all(user=user)
 
@@ -237,48 +242,6 @@ async def _forget_everything(user: Any) -> dict:
     }
 
 
-async def _forget_search_history(
-    user: Any, dataset_ids: list[UUID], *, everything: bool = False
-) -> None:
-    """Drop the recorded questions and answers that refer to the data being deleted.
-
-    Every user's rows on each of ``dataset_ids`` go (the datasets are gone for
-    everyone they were shared with); with ``everything`` every row this user
-    owns goes too. Search history keeps the answer text, which can quote chunk
-    text, so a forget that leaves it behind has not removed the content.
-
-    Rows saved without a dataset are matched only by owner: rows written
-    before history recorded datasets (cognee < 1.5.0), and searches over
-    several datasets with backend access control off. A dataset forget leaves
-    them; ``everything`` removes the caller's own and nobody else's.
-
-    Runs before the data is deleted, and raises if it fails: the data is
-    still there then, so the same forget can simply be retried. Run after the
-    delete, a failure could not be retried, because the dataset would no
-    longer resolve.
-    """
-    from cognee.modules.search.operations import (
-        delete_dataset_search_history,
-        delete_user_search_history,
-    )
-
-    removed = []
-    for dataset_id in dataset_ids:
-        removed.append(await delete_dataset_search_history(dataset_id))
-    if everything:
-        removed.append(await delete_user_search_history(user.id))
-
-    queries = sum(counts["queries_deleted"] for counts in removed)
-    results = sum(counts["results_deleted"] for counts in removed)
-    if queries or results:
-        logger.info(
-            "forget: removed %d search history queries and %d results for user=%s",
-            queries,
-            results,
-            user.id,
-        )
-
-
 async def _forget_dataset(dataset_ref: str | UUID, user: Any) -> dict:
     """Delete an entire dataset by name or UUID.
 
@@ -289,15 +252,14 @@ async def _forget_dataset(dataset_ref: str | UUID, user: Any) -> dict:
     - Session cache: yes — sessions attributed to the dataset (via
       session_records.dataset_id or the per-dataset default session id)
       are deleted inside datasets.empty_dataset (non-fatal, best-effort)
-    - Search history: yes, every user's rows recorded for this dataset — the
-      dataset is gone for everyone it was shared with. Rows saved without a
-      dataset stay (see _forget_search_history)
+    - Search history: yes, every user's rows recorded for this dataset, inside
+      datasets.empty_dataset — the dataset is gone for everyone it was shared
+      with. Rows saved without a dataset stay (see _forget_everything)
     """
     from cognee.api.v1.datasets.datasets import datasets
 
     dataset_id = await _resolve_dataset_id(dataset_ref, user)
 
-    await _forget_search_history(user, [dataset_id])
     await datasets.empty_dataset(dataset_id, user=user)
 
     logger.info("forget: deleted dataset=%s for user=%s", dataset_id, user.id)
