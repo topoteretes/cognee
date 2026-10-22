@@ -34,3 +34,21 @@ class ExternalSchemaReferenceError(CogneeValidationError):
         status_code: int = status.HTTP_400_BAD_REQUEST,
     ) -> None:
         super().__init__(message, name, status_code)
+
+
+class ReservedGraphModelTitleError(CogneeValidationError):
+    """A graph model schema named a type that collides with a cognee DataPoint subclass.
+
+    A schema title becomes the generated class name, which cognee persists as the
+    graph node ``type``. Several components resolve nodes by type (tools, skills),
+    so a user-supplied title matching a first-party model would let the schema mint
+    nodes indistinguishable from cognee's own.
+    """
+
+    def __init__(
+        self,
+        message: str = "graph_model title collides with a registered cognee DataPoint type.",
+        name: str = "ReservedGraphModelTitleError",
+        status_code: int = status.HTTP_400_BAD_REQUEST,
+    ) -> None:
+        super().__init__(message, name, status_code)
