@@ -718,19 +718,21 @@ async def recall(
                     )
 
                     # Authorize caller-supplied dataset ids *before* probing —
-                    # the same check authorized_search performs — so the guard
+                    # the same check authorized_search performs, with every
+                    # permission the search type requires (write as well as
+                    # read for CYPHER and NATURAL_LANGUAGE) — so the guard
                     # can neither leak other tenants' processing state nor
                     # mask the PermissionDeniedError authorized_search would
                     # raise for unpermitted or nonexistent ids. Infrastructure
                     # errors fail open (skip the guard): authorized_search
                     # then performs the authoritative check as before.
                     try:
-                        probe_dataset_ids = [
-                            dataset.id
-                            for dataset in await get_specific_user_permission_datasets(
-                                user.id, "read", dataset_ids
+                        probe_datasets = None
+                        for permission_type in local_query_type.required_permissions:
+                            probe_datasets = await get_specific_user_permission_datasets(
+                                user.id, permission_type, dataset_ids
                             )
-                        ]
+                        probe_dataset_ids = [dataset.id for dataset in probe_datasets or []]
                     except PermissionDeniedError:
                         raise
                     except Exception as error:
