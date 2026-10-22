@@ -195,28 +195,13 @@ def _evidence_rank(reference: Any) -> tuple[bool, int]:
     return (True, 0)
 
 
-def recall_item_dataset(item: Any) -> str | None:
-    """The dataset line for a hit whose data ids are cited in its text, not in refs.
-
-    The default hybrid answer lists its sources' data_ids in an ``Evidence:``
-    block inside the answer; ``forget`` also needs the dataset, which only the
-    hit itself carries.
-    """
-    dataset_id = _get_field(item, "dataset_id")
-    if not dataset_id:
-        return None
-    name = _get_field(item, "dataset_name")
-    if name:
-        return f"dataset: {' '.join(str(name).split())[:60]} (dataset_id={dataset_id})"
-    return f"dataset: dataset_id={dataset_id}"
-
-
 def recall_item_refs(item: Any) -> list[dict[str, str]]:
     """Forgettable data items behind one recall hit, as (data_id, dataset_id) pairs.
 
     Two places carry them: a chunk/summary hit names its own document in
-    ``metadata.data_id``, and a completion hit lists the segments it drew on in
-    ``metadata.evidence`` (only with ``include_references``). Graph-node, edge
+    ``metadata.data_id``, and a completion hit lists the segments its answer is
+    grounded in (the default answer) or drew on in ``metadata.evidence`` (only
+    with ``include_references``). Graph-node, edge
     and triplet references name no document and are skipped. A reference
     without its own ``dataset_id`` takes the hit's, since ``forget`` needs both.
     Evidence is taken best match first (lowest ``rank``; unranked last), so the
@@ -262,9 +247,8 @@ def format_recall_body(
     """Render recall results, including normalized response envelopes.
 
     With ``include_references``, each hit backed by stored data gets one
-    ``refs:`` line per data item, carrying the ids ``forget`` takes. A hit with
-    no structured refs (the default hybrid answer cites data_ids in its text)
-    gets one ``dataset:`` line instead, so the cited ids can be paired with it.
+    ``refs:`` line per data item, carrying the ids ``forget`` takes, read from
+    the hit's structured references (never from its text).
     """
     results = _unwrap_results(results)
     if not results:
@@ -285,9 +269,6 @@ def format_recall_body(
             refs = recall_item_refs(result)
             for ref in refs:
                 line += "\n  refs: " + ", ".join(f"{key}={value}" for key, value in ref.items())
-            dataset = None if refs else recall_item_dataset(result)
-            if dataset:
-                line += f"\n  {dataset}"
         lines.append(line)
 
     return "\n\n".join(lines)
