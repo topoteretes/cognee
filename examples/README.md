@@ -71,7 +71,7 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 | [`custom_tasks_and_pipelines.py`](guides/custom_tasks_and_pipelines.py) | Authoring tasks and composing a pipeline |
 | [`ontology_quickstart.py`](guides/ontology_quickstart.py) | Grounding extraction in an OWL ontology |
 | [`entity_deduplication.py`](guides/entity_deduplication.py) | Merging duplicate entities (dry-run, then real) |
-| [`consolidate_entity_descriptions_example.py`](guides/consolidate_entity_descriptions_example.py) | Deprecated: use `review_conflicts.py` for Entity descriptions |
+| [`consolidate_entity_descriptions_example.py`](guides/consolidate_entity_descriptions_example.py) | Deprecated: `review_conflicts.py` reviews facts instead and leaves descriptions as extracted |
 | [`low_level_llm.py`](guides/low_level_llm.py) | Direct LLM-gateway structured output |
 
 ### Ingestion
