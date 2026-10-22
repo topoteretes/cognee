@@ -2,6 +2,7 @@ import os
 
 from fastapi import Depends, HTTPException, Request
 
+from cognee.modules.observability.tracing import bind_trace_owner
 from cognee.shared.logging_utils import get_logger
 
 from ..get_fastapi_users import get_fastapi_users
@@ -116,5 +117,9 @@ async def get_authenticated_user(
     # context, reads it to attribute error telemetry.
     if request is not None:
         request.state.user = user
+
+    # Who owns the spans this request finishes, so GET /activity/spans returns
+    # a caller only their own traces.
+    bind_trace_owner(user)
 
     return user
