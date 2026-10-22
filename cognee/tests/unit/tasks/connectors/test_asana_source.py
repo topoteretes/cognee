@@ -27,6 +27,7 @@ from cognee.tasks.ingestion.connectors.asana import (
     AsanaAuthError,
     AsanaClient,
     AsanaResponseError,
+    AsanaSourceError,
     _documents_for,
     _event_task_gids,
     _iter_rows,
@@ -77,8 +78,21 @@ def _tombstones(rows: list[dict]) -> set[str]:
 
 
 def _fetched(fake: FakeAsana) -> list[str]:
-    """The gids of the tasks read, in the order their task answers were asked for."""
-    return [p.split("/")[2] for p, _ in fake.calls if re.fullmatch(r"/tasks/\w+", p)]
+    """The gids of the tasks read to render them, in the order their task answers were asked for."""
+    return [
+        path.split("/")[2]
+        for path, params in fake.calls
+        if re.fullmatch(r"/tasks/\w+", path) and "name" in params["opt_fields"]
+    ]
+
+
+def _checked(fake: FakeAsana) -> list[str]:
+    """The gids of the missing tasks asked for their memberships, in order."""
+    return [
+        path.split("/")[2]
+        for path, params in fake.calls
+        if re.fullmatch(r"/tasks/\w+", path) and params["opt_fields"] == "memberships.project.gid"
+    ]
 
 
 def _reasons(stats: dict) -> set[str]:
@@ -186,7 +200,13 @@ def test_shuffled_collections_render_the_same_text():
 
 
 def test_nothing_volatile_reaches_the_text():
-    base = {"name": "T", "notes": "body", "modified_at": "2026-10-01T00:00:00.000Z", "num_likes": 0}
+    base = {
+        "name": "T",
+        "notes": "body",
+        "memberships": [],
+        "modified_at": "2026-10-01T00:00:00.000Z",
+        "num_likes": 0,
+    }
     later = {**base, "modified_at": "2026-10-09T00:00:00.000Z", "num_likes": 7}
 
     assert render_task("1", base, [], [], []) == render_task("1", later, [], [], [])
@@ -206,7 +226,7 @@ def test_only_selected_projects_are_named_in_a_task():
 
 
 def test_a_task_with_nothing_set_is_still_a_document():
-    row = render_task("1", {"completed": True}, [], [], [])
+    row = render_task("1", {"memberships": [], "completed": True}, [], [], [])
 
     assert (row["title"], row["content"]) == ("Untitled task", "Completed: yes")
 
@@ -290,16 +310,18 @@ def test_a_task_in_no_selected_project_has_an_empty_node_set_that_core_does_not_
     ],
 )
 def test_a_completed_task_names_the_utc_day_it_was_completed_and_never_the_time(completed_at, line):
-    row = render_task("1", {"completed": True, "completed_at": completed_at}, [], [], [])
+    row = render_task(
+        "1", {"memberships": [], "completed": True, "completed_at": completed_at}, [], [], []
+    )
 
     assert row["content"] == f"Completed: yes\n{line}"
 
 
 def test_an_open_task_renders_no_completion_day_even_if_asana_still_sends_one():
     """Reopening a task changes its text, which is right: the line goes with ``Completed: yes``."""
-    done = {"completed": True, "completed_at": "2026-10-09T19:14:27.123Z"}
-    reopened = {"completed": False, "completed_at": None}
-    stale = {"completed": False, "completed_at": "2026-10-09T19:14:27.123Z"}
+    done = {"memberships": [], "completed": True, "completed_at": "2026-10-09T19:14:27.123Z"}
+    reopened = {"memberships": [], "completed": False, "completed_at": None}
+    stale = {"memberships": [], "completed": False, "completed_at": "2026-10-09T19:14:27.123Z"}
 
     assert "Completed on" in render_task("1", done, [], [], [])["content"]
     assert render_task("1", reopened, [], [], [])["content"] == "Completed: no"
@@ -311,13 +333,18 @@ def test_an_open_task_renders_no_completion_day_even_if_asana_still_sends_one():
     [None, "", "yesterday", "2026-13-45T00:00:00.000Z", 20261009, ["2026-10-09"], "2026-10-09"],
 )
 def test_a_completed_at_that_cannot_be_read_renders_no_line_and_never_raises(completed_at):
-    row = render_task("1", {"completed": True, "completed_at": completed_at}, [], [], [])
+    row = render_task(
+        "1", {"memberships": [], "completed": True, "completed_at": completed_at}, [], [], []
+    )
 
     assert row["content"] == "Completed: yes"
 
 
 def test_a_completed_task_without_completed_at_renders_no_line():
-    assert render_task("1", {"completed": True}, [], [], [])["content"] == "Completed: yes"
+    assert (
+        render_task("1", {"memberships": [], "completed": True}, [], [], [])["content"]
+        == "Completed: yes"
+    )
 
 
 # --- events to documents ---
@@ -757,7 +784,7 @@ def test_a_rate_limit_inside_the_listing_keeps_the_projects_already_listed():
     assert (stats["failed"], stats["failed_rate_limit"], stats["deleted"]) == (1, 1, 0)
     assert state["listing"]["selection"] == ["P1", "P2", "P3"]
     assert sorted(state["listing"]["done"]) == ["P1", "P2"]
-    assert state["listing"]["done"]["P1"]["tasks"] == ["11", "12"]
+    assert state["listing"]["done"]["P1"]["next"]["tasks"] == ["11", "12"]
     assert state["known_ids"] == ["project:P1", "project:P2"]
     # nothing but the listing moved: the pass is not complete
     assert not {"projects", "selection", "pending", "retry"} & state.keys()
@@ -821,7 +848,7 @@ def test_a_pass_cut_inside_the_listing_renders_no_task_even_one_a_finished_proje
 
 def test_a_run_cut_before_it_finished_any_project_moves_nothing():
     fake = _three_projects()
-    fake.fail("/tasks", 429)
+    fake.fail("/projects", 429)
     state: dict = {}
 
     rows, stats = _sync(fake, state, **SELECTION)
@@ -897,6 +924,1243 @@ def test_a_complete_listing_in_one_run_leaves_no_listing_state_and_costs_what_it
     assert [row["id"] for row in rows][:3] == ["project:P1", "project:P2", "project:P3"]
 
 
+# --- a task the listing lacks is forgotten only when Asana says it is gone ---
+
+
+def _two_projects_with_x() -> FakeAsana:
+    """A=P1 holds task a1; B=P2 holds task X and b1."""
+    fake = FakeAsana()
+    fake.add_project("P1", "A")
+    fake.add_project("P2", "B")
+    fake.add_task("a1", "In A", projects=("P1",))
+    fake.add_task("X", "Mover", projects=("P2",))
+    fake.add_task("b1", "In B", projects=("P2",))
+    return fake
+
+
+BOTH = {"project_gids": ["P1", "P2"]}
+
+
+def _cut_after_a(tmp_path, fake: FakeAsana) -> None:
+    """A synced pass, then a run that lists A and is cut on B's listing."""
+    _run(tmp_path, _source(fake, **BOTH))
+    fake.fail("/tasks", 429, after=1)
+    cut = _source(fake, **BOTH)
+    _run(tmp_path, cut)
+    assert cut.cognee_sync_stats["failed_rate_limit"] == 1
+    fake.heal()
+    fake.calls.clear()
+
+
+def test_a_task_that_moves_between_the_cut_run_and_the_resuming_run_is_never_forgotten(tmp_path):
+    """X leaves B for A after A was listed (old list: no X) and before B is listed (fresh list:
+    no X). It is in neither, yet it exists: it is asked for its memberships, and kept."""
+    fake = _two_projects_with_x()
+    _cut_after_a(tmp_path, fake)
+    fake.move_task("X", ["P1"])
+
+    source = _source(fake, **BOTH)
+    staged = _run(tmp_path, source)
+
+    assert "task:X" in staged and source.cognee_sync_stats["deleted"] == 0
+    assert _checked(fake) == ["X"]
+    # and the move reaches the text on the next pass, through A's events
+    again = _run(tmp_path, _source(fake, **BOTH))
+    assert "Project: A" in again["task:X"] and "Project: B" not in again["task:X"]
+
+
+def test_a_task_deleted_in_the_cut_pass_is_forgotten_because_asana_says_404(tmp_path):
+    fake = _two_projects_with_x()
+    _cut_after_a(tmp_path, fake)
+    fake.delete_task("X")
+
+    source = _source(fake, **BOTH)
+    staged = _run(tmp_path, source)
+
+    assert _checked(fake) == ["X"], "the listing alone is not enough to forget it"
+    assert "task:X" not in staged and source.cognee_sync_stats["deleted"] == 1
+    assert {"task:a1", "task:b1"} <= set(staged)
+
+
+def test_a_task_that_left_the_selection_is_forgotten_because_no_project_is_selected():
+    fake = _two_projects_with_x()
+    fake.add_project("P9", "Elsewhere")
+    state: dict = {}
+    _sync(fake, state, **BOTH)
+    fake.move_task("X", ["P9"])
+    fake.calls.clear()
+
+    rows, _ = _sync(fake, state, **BOTH)
+
+    assert _tombstones(rows) == {"task:X"} and _checked(fake) == ["X"]
+
+
+def test_a_check_cut_by_a_rate_limit_forgets_nothing_and_a_later_pass_does():
+    fake = _two_projects_with_x()
+    state: dict = {}
+    _sync(fake, state, **BOTH)
+    fake.delete_task("X")
+    fake.fail("/tasks/X", 429)
+
+    rows, stats = _sync(fake, state, **BOTH)
+
+    assert _tombstones(rows) == set() and stats["failed_rate_limit"] == 1
+    assert "task:X" in state["known_ids"]
+    fake.heal()
+
+    rows, stats = _sync(fake, state, **BOTH)
+
+    assert _tombstones(rows) == {"task:X"} and stats["failed"] == 0
+
+
+def test_a_check_cut_by_the_budget_keeps_the_task_known_and_a_later_run_forgets_it():
+    fake = _workspace(tasks=3)
+    state: dict = {}
+    _sync(fake, state)
+    fake.delete_task("2")
+
+    # the listing is the whole budget: the check of task 2 is the request it cannot pay
+    rows, stats = _sync(fake, state, max_requests=LISTING_REQUESTS)
+
+    assert _tombstones(rows) == set() and stats["failed_budget"] == 1
+    assert "task:2" in state["known_ids"]
+
+    rows, stats = _sync(fake, state, max_requests=LISTING_REQUESTS)
+
+    assert _tombstones(rows) == {"task:2"} and stats["failed"] == 0
+    assert "task:2" not in state["known_ids"]
+
+
+def test_a_resumed_pass_with_no_missing_task_makes_no_extra_request(tmp_path):
+    fake = _two_projects_with_x()
+    _cut_after_a(tmp_path, fake)
+
+    source = _source(fake, **BOTH)
+    _run(tmp_path, source)
+
+    assert _checked(fake) == [] and source.cognee_sync_stats["deleted"] == 0
+    assert len([1 for path, _ in fake.calls if path == "/tasks"]) == 1, "only B is listed"
+
+
+def test_a_missing_task_is_checked_in_a_pass_listed_in_one_run_too():
+    fake = _two_projects_with_x()
+    state: dict = {}
+    _sync(fake, state, **BOTH)
+    fake.delete_task("X")
+    fake.calls.clear()
+
+    rows, _ = _sync(fake, state, **BOTH)
+
+    assert _tombstones(rows) == {"task:X"} and _checked(fake) == ["X"]
+
+
+def test_a_task_that_moves_while_the_pass_is_listing_is_not_forgotten():
+    """X is in B when A is listed and in A when B is listed: the listing never shows it."""
+    fake = _two_projects_with_x()
+    state: dict = {}
+    _sync(fake, state, **BOTH)
+    original, listings = fake.respond, []
+
+    def respond(path, params=None):
+        answer = original(path, params)
+        if path == "/tasks":
+            listings.append(params["project"])
+            if len(listings) == 1:  # A has just been listed
+                fake.move_task("X", ["P1"])
+        return answer
+
+    fake.respond = respond
+    rows, _ = _sync(fake, state, **BOTH)
+
+    assert listings == ["P1", "P2"] and _tombstones(rows) == set()
+    assert _checked(fake) == ["X"] and "task:X" in state["known_ids"]
+    rows, _ = _sync(fake, state, **BOTH)
+    assert "task:X" in _tasks(rows), "A's events render the moved task on the next pass"
+
+
+def test_the_check_of_a_live_task_is_a_request_of_the_budget_too():
+    """Two tasks move while the pass lists: the listing is six requests, so a budget of seven
+    pays for one check and stops at the other, which stays unasked."""
+    fake = _two_projects_with_x()
+    fake.add_task("Y", "Second mover", projects=("P2",))
+    state: dict = {}
+    _sync(fake, state, **BOTH)
+    original, listings = fake.respond, []
+
+    def respond(path, params=None):
+        answer = original(path, params)
+        if path == "/tasks":
+            listings.append(params["project"])
+            if len(listings) == 1:
+                fake.move_task("X", ["P1"])
+                fake.move_task("Y", ["P1"])
+        return answer
+
+    fake.respond = respond
+    fake.calls.clear()
+
+    rows, stats = _sync(fake, state, max_requests=2 * LISTING_REQUESTS + 1, **BOTH)
+
+    assert _tombstones(rows) == set() and stats["failed_budget"] == 1
+    assert stats["requests"] == 2 * LISTING_REQUESTS + 1 and len(_checked(fake)) == 1
+
+
+def test_a_page_that_shifts_on_resume_does_not_make_a_live_task_look_gone():
+    """The offset stands for a position: a task removed from the first page while the run was cut
+    moves every later one up, and the resumed pages skip one that is still there."""
+    fake = _long_project(tasks=6, page_size=2)
+    state: dict = {}
+    _sync(fake, state)
+    fake.fail("/tasks", 429, after=1)  # page 1 is listed, page 2 is cut
+    _sync(fake, state)
+    fake.heal()
+    fake.delete_task("1")
+    fake.calls.clear()
+
+    rows, _ = _sync(fake, state)
+
+    assert "task:3" not in _tombstones(rows) and "task:3" in state["known_ids"]
+    assert "3" in _checked(fake), "task 3 was skipped by the shifted page and asked for"
+    # task 1 was already listed on the first page, so only the next pass forgets it
+    rows, _ = _sync(fake, state)
+    assert _tombstones(rows) == {"task:1"}
+
+
+def test_a_task_dragged_to_the_top_of_the_project_list_is_not_forgotten():
+    fake = _long_project(tasks=6, page_size=2)
+    state: dict = {}
+    _sync(fake, state)
+    fake.fail("/tasks", 429, after=1)
+    _sync(fake, state)
+    fake.heal()
+    # task 5 is moved to the front: every task before it shifts one place down
+    fake.tasks = {"5": fake.tasks["5"], **{k: v for k, v in fake.tasks.items() if k != "5"}}
+    fake.calls.clear()
+
+    rows, _ = _sync(fake, state)
+
+    assert _tombstones(rows) == set()
+    assert _checked(fake), "a task the shifted pages skipped is asked for, not assumed gone"
+    assert set(state["known_ids"]) >= {f"task:{n}" for n in range(1, 7)}
+
+
+def test_a_listed_project_is_not_read_again_and_a_404_on_the_one_left_does_not_raise():
+    """P2 is kept as listed by a cut run, so its 404 meets nothing. P3, the project the run was
+    cut in, is read again and answers 404: unresolved, and the pass completes."""
+    fake = _three_projects()
+    fake.fail("/tasks", 429, after=2)  # P1 and P2 list, P3 is cut
+    state: dict = {}
+    _sync(fake, state, **SELECTION)
+    fake.heal()
+    fake.fail("/projects/P2", 404)
+    fake.fail("/projects/P3", 404)
+    fake.calls.clear()
+
+    _, stats = _sync(fake, state, **SELECTION)
+
+    assert stats["unresolved"] == 1 and stats["failed"] == 0 and "listing" not in state
+    assert [path for path, _ in fake.calls if path == "/projects/P2"] == []
+    assert {"task:21", "task:22"} <= set(state["known_ids"])
+
+
+def test_checks_are_requests_of_the_budget():
+    fake = _workspace(tasks=3)
+    state: dict = {}
+    _sync(fake, state)
+    fake.delete_task("1")
+    fake.delete_task("2")
+    fake.calls.clear()
+
+    rows, stats = _sync(fake, state, max_requests=LISTING_REQUESTS + 1)
+
+    assert _tombstones(rows) == {"task:1"} and stats["failed_budget"] == 1
+    assert stats["requests"] == LISTING_REQUESTS + 1 and _checked(fake) == ["1"]
+    assert "task:2" in state["known_ids"], "the check it could not pay for stays known"
+
+
+@pytest.mark.parametrize(("budget", "runs_needed"), [(3, 5), (8, 2), (10, 2), (11, 1)])
+def test_a_deleted_task_is_forgotten_after_the_runs_the_budget_needs(budget, runs_needed):
+    """Two projects of six tasks (five listing requests each at two a page, ten a pass, then one
+    check): the listing and the check are both paid from the budget, so the runs it takes are
+    pinned. At 3 the pass spans runs and the check gets its own; at 10 the listing is the whole
+    budget and the next run starts at the check; at 11 one run does it all."""
+    fake = FakeAsana(page_size=2)
+    for number in (1, 2):
+        fake.add_project(f"P{number}", f"Project {number}")
+        for n in range(1, 7):
+            fake.add_task(f"{number}{n}", projects=(f"P{number}",))
+    state: dict = {}
+    both = {"project_gids": ["P1", "P2"]}
+    for _ in range(40):
+        _sync(fake, state, max_requests=100, **both)
+        if "listing" not in state:
+            break
+    fake.delete_task("23")
+    forgotten: set[str] = set()
+
+    for runs in range(1, 60):
+        rows, stats = _sync(fake, state, max_requests=budget, **both)
+        assert stats["requests"] <= budget
+        forgotten |= _tombstones(rows)
+        if forgotten:
+            break
+
+    assert forgotten == {"task:23"} and runs == runs_needed
+
+
+def test_forgetting_more_tasks_than_one_run_can_check_takes_several_runs():
+    """Deselecting a project makes all its tasks missing: each is checked, and every verdict that
+    was reached stays, so the work is spread over runs instead of starting over. Thirteen tasks
+    at nine requests a run (six of them the listing) take five runs."""
+    fake = _three_projects(tasks_each=13)
+    state: dict = {}
+    _sync(fake, state, **SELECTION)
+    forgotten: set[str] = set()
+
+    for runs in range(1, 40):
+        rows, stats = _sync(fake, state, max_requests=9, project_gids=["P1", "P2"])
+        forgotten |= _tombstones(rows)
+        if stats["failed"] == 0:
+            break
+
+    assert forgotten == {"project:P3"} | {f"task:3{n}" for n in range(1, 14)}
+    assert runs == 5 and stats["failed"] == 0
+
+
+# --- many tasks moved at once: every answer counts as progress ---
+
+
+def _bulk_move(movers: int, budget: int) -> tuple[FakeAsana, dict]:
+    """PB holds ``movers`` tasks and ``zdead``, PA holds ``a``. A synced pass, then a run cut
+    after PA was listed; then the movers go PB to PA, ``zdead`` is deleted and ``LATER`` is new."""
+    fake = FakeAsana()
+    fake.add_project("PA")
+    fake.add_project("PB")
+    fake.add_task("a", projects=("PA",))
+    gids = [f"m{n:04d}" for n in range(movers)]
+    for gid in gids:
+        fake.add_task(gid, projects=("PB",))
+    fake.add_task("zdead", projects=("PB",))
+    state: dict = {}
+    _sync(fake, state, max_requests=100_000, project_gids=["PA", "PB"])
+    fake.fail("/projects/PB", 429, times=1)
+    _sync(fake, state, max_requests=budget, project_gids=["PA", "PB"])
+    assert list(state["listing"]["done"]) == ["PA"]
+    for gid in gids:
+        fake.move_task(gid, ["PA"])
+    fake.delete_task("zdead")
+    fake.add_task("LATER", projects=("PA",))
+    return fake, state
+
+
+@pytest.mark.parametrize(("movers", "budget", "runs_bound"), [(12, 10, 40), (1500, 1500, 8)])
+def test_tasks_moved_in_bulk_settle_and_later_changes_still_arrive(movers, budget, runs_bound):
+    """Each move is a live task the listing lacks, so each costs a check that answers 'still
+    selected'. That answer is progress: a run that only made such checks used to repeat them
+    for ever, forgetting nothing and ingesting nothing."""
+    fake, state = _bulk_move(movers, budget)
+    forgotten: set[str] = set()
+    ingested: set[str] = set()
+
+    for runs in range(1, runs_bound + 1):
+        rows, stats = _sync(fake, state, max_requests=budget, project_gids=["PA", "PB"])
+        forgotten |= _tombstones(rows)
+        ingested |= set(_tasks(rows))
+        if stats["failed"] == 0 and "listing" not in state:
+            break
+
+    assert stats["failed"] == 0 and runs < runs_bound, "the sync settles"
+    assert forgotten == {"task:zdead"} and "task:LATER" in ingested
+    assert "task:zdead" not in state["known_ids"] and "task:LATER" in state["known_ids"]
+
+
+def test_a_task_that_left_the_selection_unread_counts_as_progress_too():
+    """Fetched and then skipped (no selected project) is an answer as well: a kept listing whose
+    tasks all left the selection must not be kept again and again."""
+    fake = _three_projects(tasks_each=3)
+    fake.add_project("P9", "Elsewhere")
+    state: dict = {}
+    _sync(fake, state, **SELECTION)
+    for gid in ("11", "12", "13"):
+        fake.edit_task(gid)
+    fake.fail("/tasks", 429, after=1)
+    _sync(fake, state, max_requests=100, **SELECTION)  # P1 lists, P2 is cut
+    fake.heal()
+    for gid in ("11", "12", "13"):
+        fake.move_task(gid, ["P9"])  # P1's kept listing still names them
+    forgotten: set[str] = set()
+
+    for runs in range(1, 11):
+        rows, stats = _sync(fake, state, max_requests=LISTING_REQUESTS * 2, **SELECTION)
+        forgotten |= _tombstones(rows)
+        if stats["failed"] == 0:
+            break
+
+    assert stats["failed"] == 0 and runs < 10, "the run that skips them does not repeat for ever"
+    assert forgotten == {"task:11", "task:12", "task:13"}
+
+
+# --- a check that cannot be answered ---
+
+
+@pytest.mark.parametrize("failure", [503, None])
+def test_a_check_answering_5xx_or_nothing_keeps_the_task_and_stops_nothing_else(failure):
+    fake = _workspace(tasks=4)
+    state: dict = {}
+    _sync(fake, state)
+    fake.edit_task("1", notes="Rewritten.")
+    fake.delete_task("2")
+    fake.delete_task("3")
+    fake.fail("/tasks/2", failure)
+
+    rows, stats = _sync(fake, state)
+
+    assert set(_tasks(rows)) == {"task:1"}, "the other tasks of the run still render"
+    assert _tombstones(rows) == {"task:3"} and "task:2" in state["known_ids"]
+    assert (stats["failed"], _reasons(stats)) == (1, set())
+    fake.heal()
+
+    rows, stats = _sync(fake, state)
+
+    assert _tombstones(rows) == {"task:2"} and stats["failed"] == 0
+
+
+def test_three_checks_in_a_row_answering_5xx_stop_the_run_cleanly():
+    """A hung Asana would spend the budget on checks as it would on reads."""
+    fake = _workspace(tasks=6)
+    state: dict = {}
+    _sync(fake, state)
+    for gid in "2345":
+        fake.delete_task(gid)
+        fake.fail(f"/tasks/{gid}", 500)
+    fake.delete_task("6")
+
+    rows, stats = _sync(fake, state)
+
+    assert _tombstones(rows) == set() and stats["failed_unavailable"] == 1
+    assert stats["failed"] == 3, "the fourth check is never asked"
+    assert {f"task:{n}" for n in range(2, 7)} <= set(state["known_ids"])
+    # the three answers were progress, so the run committed instead of keeping the listing
+    assert "listing" not in state and state["selection"] == ["P1"] and state["pending"] == []
+
+
+def test_a_403_between_checks_answering_5xx_neither_counts_nor_resets_the_streak():
+    fake = _workspace(tasks=6)
+    state: dict = {}
+    _sync(fake, state)
+    for gid in "2345":
+        fake.delete_task(gid)
+    fake.fail("/tasks/2", 500)
+    fake.fail("/tasks/3", 403)
+    fake.fail("/tasks/4", 500)
+    fake.fail("/tasks/5", 500)
+
+    rows, stats = _sync(fake, state)
+
+    assert stats["failed"] == 3 and stats["failed_unavailable"] == 1
+    assert _tombstones(rows) == {"task:3"}, "the 403 is an answer: gone"
+
+
+def test_the_checks_count_their_own_streak_apart_from_the_task_reads():
+    """Two reads and two checks answering 5xx are four, but never three in a row of one kind."""
+    fake = _workspace(tasks=5)
+    state: dict = {}
+    _sync(fake, state)
+    for gid in "12":
+        fake.edit_task(gid)
+        fake.fail(f"/tasks/{gid}", 500)
+    for gid in "45":
+        fake.delete_task(gid)
+        fake.fail(f"/tasks/{gid}", 500)
+
+    _, stats = _sync(fake, state)
+
+    assert stats["failed"] == 4 and _reasons(stats) == set()
+
+
+def test_a_check_that_answers_resets_the_streak_of_checks_that_do_not():
+    fake = FakeAsana()
+    fake.add_project("P1")
+    fake.add_project("P2")
+    fake.add_task("a", projects=("P1",))
+    for gid in "bcde":
+        fake.add_task(gid, projects=("P2",))
+    both = {"project_gids": ["P1", "P2"]}
+    state: dict = {}
+    _sync(fake, state, **both)
+    original, listings = fake.respond, []
+
+    def respond(path, params=None):
+        answer = original(path, params)
+        if path == "/tasks":
+            listings.append(params["project"])
+            if len(listings) == 1:  # P1 is listed: d moves there, b, c and e are deleted
+                fake.move_task("d", ["P1"])
+                for gid in "bce":
+                    fake.delete_task(gid)
+        return answer
+
+    fake.respond = respond
+    for gid in "bce":
+        fake.fail(f"/tasks/{gid}", 500)
+
+    _, stats = _sync(fake, state, **both)
+
+    assert stats["failed"] == 3 and _reasons(stats) == set(), "b, c, then d answers, then e"
+    assert _checked(fake) == ["b", "c", "d", "e"]
+
+
+@pytest.mark.parametrize("data", [{}, {"memberships": None}, {"memberships": "P1"}])
+def test_a_check_answer_without_a_memberships_list_raises_and_forgets_nothing(data):
+    fake = _workspace(tasks=2)
+    state: dict = {}
+    _sync(fake, state)
+    fake.delete_task("2")
+    fake.answers["/tasks/2"] = {"data": data}
+    before = copy.deepcopy(state)
+
+    with pytest.raises(AsanaResponseError, match="memberships"):
+        list(_iter_rows(fake, state, new_stats(), project_gids=["P1"]))
+
+    assert state == before
+
+
+def test_an_empty_memberships_list_is_a_real_answer_the_task_is_in_no_project():
+    fake = _workspace(tasks=2)
+    state: dict = {}
+    _sync(fake, state)
+    fake.delete_task("2")
+    fake.answers["/tasks/2"] = {"data": {"memberships": []}}
+
+    rows, _ = _sync(fake, state)
+
+    assert _tombstones(rows) == {"task:2"}
+
+
+# --- what a cut run queues ---
+
+
+def test_a_cut_in_the_check_phase_queues_no_task_that_was_rendered():
+    fake = _workspace(tasks=3)
+    state: dict = {}
+    _sync(fake, state)
+    fake.edit_task("1")
+    fake.edit_task("2")
+    fake.delete_task("3")
+    fake.fail("/tasks/3", 429)
+
+    rows, stats = _sync(fake, state)
+
+    assert set(_tasks(rows)) == {"task:1", "task:2"} and stats["failed_rate_limit"] == 1
+    assert state["pending"] == [] and stats["pending"] == 0
+
+
+def test_a_queued_task_that_a_resolved_project_lists_is_read_and_leaves_the_queue():
+    """Task x is in P1 and in the unresolved P2: P1 lists it, so it is read, not held."""
+    fake = FakeAsana()
+    fake.add_project("P1")
+    fake.add_project("P2")
+    fake.add_task("a", projects=("P1",))
+    fake.add_task("x", projects=("P1", "P2"))
+    both = {"project_gids": ["P1", "P2"]}
+    state: dict = {}
+    _sync(fake, state, **both)
+    fake.edit_task("a")
+    fake.edit_task("x")
+    _sync(fake, state, max_requests=2 * LISTING_REQUESTS + TASK_REQUESTS, **both)
+    assert state["pending"] == ["x"]
+    fake.fail("/projects/P2", 403)
+
+    rows, _ = _sync(fake, state, **both)
+
+    assert "task:x" in _tasks(rows) and state["pending"] == []
+
+
+def test_the_stored_progress_of_an_unresolved_project_is_not_touched_by_a_queue():
+    fake = _three_projects()
+    state: dict = {}
+    _sync(fake, state, **SELECTION)
+    state["retry"] = ["21"]  # a task of P2 sits in the retry queue
+    stored = copy.deepcopy(state["projects"]["P2"])
+    assert "21" in stored["seen"]
+    fake.fail("/projects/P2", 403)
+
+    _sync(fake, state, **SELECTION)
+
+    assert state["projects"]["P2"] == stored and state["retry"] == ["21"]
+
+
+# --- a rejected offset ---
+
+
+def test_an_offset_asana_rejects_raises_on_every_run_and_leaves_the_state_alone():
+    fake = _long_project(tasks=6, page_size=2)
+    fake.fail("/tasks", 429, after=1)
+    state: dict = {}
+    _sync(fake, state)
+    fake.heal()
+    state["listing"]["partial"]["P1"]["offset"] = "never-issued"
+    before = copy.deepcopy(state)
+
+    for _ in range(2):
+        with pytest.raises(AsanaAPIError) as raised:
+            list(_iter_rows(fake, state, new_stats(), project_gids=["P1"]))
+        assert raised.value.status == 400 and state == before
+
+
+def test_an_offset_issued_for_another_listing_is_rejected_too():
+    fake = _long_project(tasks=6, page_size=2)
+    fake.add_project("P2")
+    for n in range(1, 5):
+        fake.add_task(f"2{n}", projects=("P2",))
+    fake.page_size = 2
+    fake.fail("/tasks", 429, after=1)
+    state: dict = {}
+    _sync(fake, state, project_gids=["P1", "P2"])
+    fake.heal()
+    foreign = fake.respond("/tasks", {"project": "P2", "opt_fields": "modified_at", "limit": 2})
+    token = foreign.json()["next_page"]["offset"]
+    state["listing"]["partial"]["P1"]["offset"] = token
+
+    with pytest.raises(AsanaAPIError) as raised:
+        list(_iter_rows(fake, state, new_stats(), project_gids=["P1", "P2"]))
+
+    assert raised.value.status == 400
+
+
+# --- a budget that cannot make progress raises ---
+
+
+def _unresolved_workspace_one() -> tuple[FakeAsana, dict, dict]:
+    """P0 will answer 403; P1 holds ``a`` (edited later) and ``b`` (deleted later)."""
+    fake = FakeAsana()
+    fake.add_project("P0")
+    fake.add_project("P1")
+    fake.add_task("u", projects=("P0",))
+    fake.add_task("a", projects=("P1",))
+    fake.add_task("b", projects=("P1",))
+    kwargs = {"project_gids": ["P0", "P1"]}
+    state: dict = {}
+    _sync(fake, state, **kwargs)
+    fake.fail("/projects/P0", 403)
+    fake.edit_task("a", notes="Edited.")
+    fake.delete_task("b")
+    return fake, state, kwargs
+
+
+def _unresolved_workspace_two() -> tuple[FakeAsana, dict, dict]:
+    fake = FakeAsana()
+    for gid in ("P0", "P0b", "P1"):
+        fake.add_project(gid)
+    fake.add_task("u", projects=("P0",))
+    fake.add_task("v", projects=("P0b",))
+    fake.add_task("a", projects=("P1",))
+    kwargs = {"project_gids": ["P0", "P0b", "P1"]}
+    state: dict = {}
+    _sync(fake, state, **kwargs)
+    fake.fail("/projects/P0", 403)
+    fake.fail("/projects/P0b", 404)
+    fake.edit_task("a", notes="Edited.")
+    return fake, state, kwargs
+
+
+def _big_comments_workspace() -> tuple[FakeAsana, dict, dict]:
+    """Task ``big`` has 350 comments: its task read, four story pages and the subtasks are six
+    requests, and ``z`` waits behind it."""
+    fake = FakeAsana()
+    fake.add_project("P1")
+    for gid in ("a", "big", "z"):
+        fake.add_task(gid)
+    state: dict = {}
+    _sync(fake, state)
+    for n in range(350):
+        fake.add_comment("big", "Grace", f"comment {n}")
+    for gid in ("big", "z", "a"):
+        fake.edit_task(gid, notes="Edited.")
+    return fake, state, {}
+
+
+STUCK = [
+    ("one unresolved project", _unresolved_workspace_one, 3, 10),
+    ("two unresolved projects", _unresolved_workspace_two, 4, 12),
+    ("a task of four story pages", _big_comments_workspace, 5, 12),
+]
+
+
+@pytest.mark.parametrize(("name", "build", "small", "enough"), STUCK, ids=[c[0] for c in STUCK])
+def test_a_budget_that_cannot_make_progress_raises_naming_max_requests(name, build, small, enough):
+    """Every run would spend the same requests the same way and stop at the same place. It makes
+    progress while it can (the listing is kept page by page); on the first run that cannot, it
+    raises instead of looping, and the raise leaves the state as it was."""
+    fake, state, kwargs = build()
+    raised = None
+
+    for _ in range(6):
+        before = copy.deepcopy(state)
+        try:
+            _sync(fake, state, max_requests=small, **kwargs)
+        except AsanaSourceError as exc:
+            raised = exc
+            break
+
+    assert raised is not None, "a run that can only repeat itself must not end cleanly"
+    assert f"max_requests={small}" in str(raised) and "Raise max_requests" in str(raised)
+    assert state == before
+    assert not isinstance(raised, AsanaAPIError)
+
+
+@pytest.mark.parametrize(("name", "build", "small", "enough"), STUCK, ids=[c[0] for c in STUCK])
+def test_the_same_selection_with_enough_budget_does_not_raise(name, build, small, enough):
+    fake, state, kwargs = build()
+
+    for _ in range(8):
+        _, stats = _sync(fake, state, max_requests=enough, **kwargs)
+        if stats["failed"] == 0:
+            break
+
+    assert stats["failed"] == 0
+
+
+def test_a_rate_limit_cut_that_makes_no_progress_is_a_clean_stop_not_an_error():
+    """A 429 is the provider's limit and clears with time, so unlike a spent budget it is never
+    an error, however often it repeats."""
+    fake = _workspace(tasks=2)
+    state: dict = {}
+    _sync(fake, state)
+    fake.edit_task("1")
+    fake.edit_task("2")
+    fake.fail("/tasks/1", 429, times=1)
+    _sync(fake, state)  # lists, then is cut at the first read: the listing is kept
+
+    for _ in range(3):
+        fake.fail("/tasks/1", 429, times=1)
+        before = copy.deepcopy(state)
+        rows, stats = _sync(fake, state)
+        assert rows == [] and stats["failed_rate_limit"] == 1 and state == before
+
+
+# --- an answer of the wrong shape is told, never read as a task that left the selection ---
+
+_MISSING = object()
+BAD_MEMBERSHIPS = {
+    "a null entry": [None],
+    "a gid that is a list": [{"project": {"gid": ["P1"]}}],
+    "a gid that is a number": [{"project": {"gid": 5}}],
+    "a project without a gid": [{"project": {"name": "Website"}}],
+    "a project that is a string": [{"project": "P1"}],
+    "a project that is a list": [{"project": ["P1"]}],
+    "a good entry then a null entry": [
+        {"project": {"gid": "P1", "name": "Website"}},
+        None,
+    ],
+    "null": None,
+    "missing": _MISSING,
+}
+GOOD_MEMBERSHIPS = [{"project": {"gid": "P1", "name": "Website launch"}, "section": None}]
+
+
+def _body(**fields) -> dict:
+    return {"data": {key: value for key, value in fields.items() if value is not _MISSING}}
+
+
+PROJECTLESS_ENTRIES = {
+    "no project key": {"section": {"name": "My Tasks"}},
+    "a null project": {"project": None, "section": None},
+}
+
+
+@pytest.mark.parametrize("entry", PROJECTLESS_ENTRIES.values(), ids=PROJECTLESS_ENTRIES.keys())
+def test_an_entry_without_a_project_is_skipped_and_the_task_is_still_selected(entry):
+    """A task on someone's My Tasks list carries a membership that is not a project."""
+    fake = _workspace(tasks=2)
+    state: dict = {}
+    _sync(fake, state)
+    fake.edit_task("1", notes="Edited.")
+    fake.delete_task("2")
+    fake.answers["/tasks/1"] = _body(
+        gid="1", name="Task 1", notes="Edited.", memberships=[entry, *GOOD_MEMBERSHIPS, entry]
+    )
+    fake.answers["/tasks/2"] = _body(gid="2", memberships=[entry, *GOOD_MEMBERSHIPS])
+
+    rows, stats = _sync(fake, state)
+
+    task = _tasks(rows)["task:1"]
+    assert "Project: Website launch" in task["content"] and task[NODE_SET_COLUMN] == ["asana:P1"]
+    assert (stats["failed"], state["retry"]) == (0, []), "the render read is not an error"
+    assert _tombstones(rows) == set() and "task:2" in state["known_ids"], "the check keeps task 2"
+
+
+@pytest.mark.parametrize("entry", PROJECTLESS_ENTRIES.values(), ids=PROJECTLESS_ENTRIES.keys())
+def test_a_task_with_only_projectless_entries_is_in_no_project(entry):
+    """Like an empty list: a render read builds no document for it (it left the selection, no
+    error, no retry) and a check forgets it."""
+    fake = _workspace(tasks=2)
+    state: dict = {}
+    _sync(fake, state)
+    fake.edit_task("1", notes="Edited.")
+    fake.delete_task("2")
+    fake.answers["/tasks/1"] = _body(gid="1", name="Task 1", memberships=[entry])
+    fake.answers["/tasks/2"] = _body(gid="2", memberships=[entry, entry])
+
+    rows, stats = _sync(fake, state)
+
+    assert "task:1" not in _tasks(rows) and (stats["failed"], state["retry"]) == (0, [])
+    assert "task:1" in state["known_ids"]
+    assert _tombstones(rows) == {"task:2"}
+
+
+def test_a_projectless_entry_adds_no_project_line_and_no_node_set():
+    task = {"memberships": [{"project": None}, {"section": {"name": "My Tasks"}}]}
+
+    row = render_task("1", task, [], [], ["P1"])
+
+    assert row["content"] == "Completed: no" and row[NODE_SET_COLUMN] == []
+
+
+@pytest.mark.parametrize("shape", BAD_MEMBERSHIPS.values(), ids=BAD_MEMBERSHIPS.keys())
+def test_a_render_read_with_bad_memberships_keeps_the_task_for_a_retry_and_never_raises(shape):
+    fake = _workspace(tasks=2)
+    state: dict = {}
+    _sync(fake, state)
+    fake.edit_task("1", notes="Edited.")
+    fake.answers["/tasks/1"] = _body(gid="1", name="Task 1", memberships=shape)
+
+    rows, stats = _sync(fake, state)
+
+    assert "task:1" not in _tasks(rows), "no document is built from it"
+    assert (stats["failed"], state["retry"]) == (1, ["1"]), "told like any unreadable task"
+    assert stats["kept"] == 1 and _reasons(stats) == set()
+
+
+@pytest.mark.parametrize("shape", BAD_MEMBERSHIPS.values(), ids=BAD_MEMBERSHIPS.keys())
+def test_a_check_with_bad_memberships_raises_and_forgets_nothing(shape):
+    fake = _workspace(tasks=2)
+    state: dict = {}
+    _sync(fake, state)
+    fake.delete_task("2")
+    fake.answers["/tasks/2"] = _body(gid="2", memberships=shape)
+    before = copy.deepcopy(state)
+
+    with pytest.raises(AsanaResponseError, match="memberships|membership"):
+        list(_iter_rows(fake, state, new_stats(), project_gids=["P1"]))
+
+    assert state == before
+
+
+@pytest.mark.parametrize("fields", ["oops", ["oops"], [{"name": 5}], [{"display_value": ["x"]}]])
+def test_a_render_read_with_bad_custom_fields_keeps_the_task_for_a_retry(fields):
+    fake = _workspace(tasks=2)
+    state: dict = {}
+    _sync(fake, state)
+    fake.edit_task("1", notes="Edited.")
+    fake.answers["/tasks/1"] = _body(
+        gid="1", name="Task 1", memberships=GOOD_MEMBERSHIPS, custom_fields=fields
+    )
+
+    rows, stats = _sync(fake, state)
+
+    assert "task:1" not in _tasks(rows)
+    assert (stats["failed"], state["retry"]) == (1, ["1"])
+
+
+def test_custom_fields_that_are_null_or_have_null_values_are_no_fields():
+    row = render_task(
+        "1",
+        {
+            "memberships": GOOD_MEMBERSHIPS,
+            "custom_fields": [{"name": "Priority", "display_value": None}, {"name": None}],
+        },
+        [],
+        [],
+        ["P1"],
+    )
+    assert row["content"] == "Completed: no\nProject: Website launch"
+    assert render_task("1", {"memberships": [], "custom_fields": None}, [], [], [])["content"]
+
+
+def test_a_task_read_that_stays_malformed_never_makes_the_run_raise_across_runs():
+    fake = _workspace(tasks=2)
+    state: dict = {}
+    _sync(fake, state)
+    fake.edit_task("1", notes="Edited.")
+    fake.answers["/tasks/1"] = _body(gid="1", name="Task 1", memberships=[None])
+
+    for _ in range(3):
+        rows, stats = _sync(fake, state)
+        assert stats["failed"] == 1 and state["retry"] == ["1"] and "task:1" not in _tasks(rows)
+    del fake.answers["/tasks/1"]
+
+    rows, stats = _sync(fake, state)
+
+    assert "task:1" in _tasks(rows) and state["retry"] == [] and stats["failed"] == 0
+
+
+# --- inside a project: the page offset ---
+
+
+def _long_project(tasks: int = 7, page_size: int = 2) -> FakeAsana:
+    fake = FakeAsana(page_size=page_size)
+    fake.add_project("P1")
+    for n in range(1, tasks + 1):
+        fake.add_task(str(n), f"Task {n}", projects=("P1",))
+    return fake
+
+
+def _task_pages(fake: FakeAsana) -> list[str | None]:
+    """The offset of every request of the project's task listing, in order."""
+    return [params.get("offset") for path, params in fake.calls if path == "/tasks"]
+
+
+def test_a_429_inside_a_project_resumes_at_the_page_it_stopped_at():
+    fake = _long_project()
+    fake.fail("/tasks", 429, after=2)  # pages 1 and 2 are served, page 3 is cut
+    state: dict = {}
+
+    rows, stats = _sync(fake, state)
+
+    assert _tasks(rows) == {} and stats["failed_rate_limit"] == 1
+    progress = state["listing"]["partial"]["P1"]
+    assert fake.offset_position(progress["offset"]) == 4
+    assert sorted(progress["listed"]) == ["1", "2", "3", "4"]
+    assert state["listing"]["done"] == {}
+    fake.heal()
+    fake.calls.clear()
+
+    rows, stats = _sync(fake, state)
+
+    pages = _task_pages(fake)
+    assert [fake.offset_position(token) for token in pages] == [4, 6], "pages 1, 2 not read again"
+    assert set(_tasks(rows)) == {f"task:{n}" for n in range(1, 8)}
+    assert stats["scanned"] == 7 and "listing" not in state
+
+
+def test_the_offset_is_cleared_when_the_project_finishes_and_holds_no_text():
+    fake = _long_project()
+    fake.fail("/tasks", 429, after=1)
+    state: dict = {}
+    _sync(fake, state)
+    kept = json.dumps(state["listing"])
+
+    assert "Task" not in kept and "Project" not in kept
+    fake.heal()
+    _sync(fake, state, max_requests=LISTING_REQUESTS + 2)
+
+    # the project finished: its progress moved into the done entry and the offset with it
+    assert state["listing"]["partial"] == {} and sorted(state["listing"]["done"]) == ["P1"]
+
+
+def test_a_changed_selection_drops_the_offset_of_a_cut_project():
+    fake = _long_project()
+    fake.add_project("P2")
+    fake.fail("/tasks", 429, after=1)
+    state: dict = {}
+    _sync(fake, state)
+    assert fake.offset_position(state["listing"]["partial"]["P1"]["offset"]) == 2
+    fake.heal()
+    fake.calls.clear()
+
+    _sync(fake, state, project_gids=["P1", "P2"])
+
+    assert _task_pages(fake)[0] is None, "the new pass starts P1 at its first page"
+
+
+def test_a_project_with_more_pages_than_fit_between_two_429s_completes_over_runs(tmp_path):
+    """Four requests a window: the project read, the events and two pages, so a project of three
+    pages could never be listed if every run began at its first page."""
+    fake = _long_project(tasks=3, page_size=1)
+    fake.rate_limit(4)
+    staged: dict[str, str] = {}
+    first_offsets: list[str | None] = []
+
+    for _ in range(30):
+        fake.new_window()
+        fake.calls.clear()
+        source = _source(fake, project_gids=["P1"])
+        staged = _run(tmp_path, source, nothing_staged_yet=True)
+        first_offsets.append(next(iter(_task_pages(fake)), "none"))
+        if source.cognee_sync_stats["failed"] == 0:
+            break
+
+    assert source.cognee_sync_stats["failed"] == 0
+    assert set(staged) == {"project:P1", "task:1", "task:2", "task:3"}
+    assert first_offsets[0] is None and fake.offset_position(first_offsets[1]) == 2
+
+
+@pytest.mark.parametrize(
+    ("change", "rendered"),
+    [
+        ("comment", {"task:2"}),
+        ("rename", {"task:1", "task:2", "task:3"}),
+        ("token", {"task:1", "task:2", "task:3"}),
+    ],
+)
+def test_what_the_events_said_before_a_cut_survives_the_resume(change, rendered):
+    """The run reads the feed and is cut on the first task page. The feed is consumed: only what
+    was kept can tell the resuming run which tasks changed (a comment, a rename, a feed gap)."""
+    fake = _workspace(tasks=3)
+    state: dict = {}
+    _sync(fake, state)
+    if change == "comment":
+        fake.add_comment("2", "Grace", "new comment")
+    elif change == "rename":
+        fake.rename("project", "P1", "Relaunch")
+    else:
+        fake.expire_token("P1")
+    fake.fail("/tasks", 429, after=0, times=1)
+
+    rows, stats = _sync(fake, state)
+
+    assert _tasks(rows) == {} and stats["failed_rate_limit"] == 1
+    kept = state["listing"]["partial"]["P1"]
+    assert (
+        kept["polled"]
+        and (kept["events"], kept["renamed"], kept["gap"])
+        == {
+            "comment": (["2"], False, False),
+            "rename": ([], True, False),
+            "token": ([], False, True),
+        }[change]
+    )
+
+    rows, _ = _sync(fake, state)
+
+    assert set(_tasks(rows)) == rendered
+
+
+def test_an_unresolved_project_loses_its_progress_inside_the_pass_and_starts_over():
+    fake = _long_project(tasks=6, page_size=2)
+    fake.add_project("P2")
+    fake.fail("/tasks", 429, after=1)  # P1's second page is cut
+    state: dict = {}
+    _sync(fake, state, project_gids=["P1", "P2"])
+    assert "P1" in state["listing"]["partial"]
+    fake.heal()
+    fake.fail("/projects/P1", 403)
+    fake.fail("/tasks", 429)  # P2 is cut on its first page
+
+    _sync(fake, state, project_gids=["P1", "P2"])
+
+    assert "P1" not in state["listing"]["partial"] and "P2" in state["listing"]["partial"]
+    fake.heal()
+    fake.calls.clear()
+
+    _sync(fake, state, project_gids=["P1", "P2"])
+
+    assert _task_pages(fake)[0] is None, "P1 starts at its first page when it returns"
+
+
+def test_a_task_that_left_the_selection_before_it_was_read_builds_no_document():
+    fake = _workspace(tasks=2)
+    fake.add_project("P9", "Elsewhere")
+    state: dict = {}
+    _sync(fake, state)
+    fake.edit_task("2", notes="Changed.")
+    original, listed = fake.respond, []
+
+    def respond(path, params=None):
+        answer = original(path, params)
+        if path == "/tasks":
+            listed.append(path)
+            fake.move_task("2", ["P9"])  # after the listing, before the read
+        return answer
+
+    fake.respond = respond
+
+    rows, _ = _sync(fake, state)
+
+    assert _tasks(rows) == {} and "task:2" in state["known_ids"]
+    fake.respond = original
+    rows, _ = _sync(fake, state)
+    assert _tombstones(rows) == {"task:2"}
+
+
+def test_a_pass_cut_before_its_first_task_keeps_the_pending_of_the_last_one_and_reports_none():
+    """``pending`` counts what this run queued: a run kept before it rendered anything queued
+    nothing, and the state still holds what the run before it left."""
+    fake = _workspace(tasks=3)
+    state: dict = {}
+    _sync(fake, state)
+    for gid in "123":
+        fake.edit_task(gid)
+    _sync(fake, state, max_requests=LISTING_REQUESTS + TASK_REQUESTS)
+    assert state["pending"] == ["2", "3"]
+
+    rows, stats = _sync(fake, state, max_requests=LISTING_REQUESTS)
+
+    assert _tasks(rows) == {} and stats["failed_budget"] == 1
+    assert stats["pending"] == 0 and state["pending"] == ["2", "3"]
+
+
+# --- a project Asana will not show ---
+
+
+def test_a_403_and_a_404_project_do_not_stop_the_other_projects():
+    fake = _three_projects()
+    fake.fail("/projects/P1", 403)
+    fake.fail("/projects/P2", 404)
+    state: dict = {}
+
+    rows, stats = _sync(fake, state, **SELECTION)
+
+    assert [row["id"] for row in rows if row["id"].startswith("project:")] == ["project:P3"]
+    assert set(_tasks(rows)) == {"task:31", "task:32"}
+    assert (stats["unresolved"], stats["failed"], stats["deleted"]) == (2, 0, 0)
+    assert sorted(state["projects"]) == ["P3"], "an unresolved project has no stored progress yet"
+    assert state["known_ids"] == ["project:P3", "task:31", "task:32"], "no row never emitted"
+
+
+def test_an_unresolved_project_keeps_its_row_and_its_tasks_across_runs():
+    fake = _three_projects()
+    state: dict = {}
+    _sync(fake, state, **SELECTION)
+    stored = copy.deepcopy(state["projects"]["P2"])
+    fake.fail("/projects/P2", 403)
+
+    for run in range(3):
+        fake.edit_task("11", notes=f"Rewritten {run}.")
+        if run == 0:
+            fake.delete_task("32")
+        rows, stats = _sync(fake, state, **SELECTION)
+        assert not {"project:P2", "task:21", "task:22"} & _tombstones(rows)
+        assert stats["unresolved"] == 1 and "task:11" in _tasks(rows)
+        assert {"project:P2", "task:21", "task:22"} <= set(state["known_ids"])
+        assert state["projects"]["P2"] == stored, "cursor, token, seen and tasks are untouched"
+
+    assert "task:32" not in state["known_ids"], "a task of a resolved project is still forgotten"
+
+
+def test_the_tasks_of_an_unresolved_project_are_protected_and_never_checked():
+    fake = _three_projects()
+    state: dict = {}
+    _sync(fake, state, **SELECTION)
+    fake.fail("/projects/P2", 403)
+    fake.delete_task("12")
+    fake.calls.clear()
+
+    rows, _ = _sync(fake, state, **SELECTION)
+
+    assert _checked(fake) == ["12"], "task 12 is missing and asked for; P2's tasks are not"
+    assert _tombstones(rows) == {"task:12"}
+    assert {"project:P2", "task:21", "task:22"} <= set(state["known_ids"])
+    assert "/projects/P2" in [path for path, _ in fake.calls], "it is asked again every run"
+
+
+def test_a_task_kept_for_a_retry_stays_queued_while_its_project_is_unresolved():
+    """``kept`` is the retry queue the run committed: the task carried over from the unresolved
+    project counts although this run did not queue it itself."""
+    fake = _workspace(tasks=2)
+    state: dict = {}
+    _sync(fake, state)
+    fake.edit_task("2")
+    fake.fail("/tasks/2", 403)
+    _sync(fake, state)
+    assert state["retry"] == ["2"]
+    fake.heal()
+    fake.fail("/projects/P1", 403)
+
+    _, stats = _sync(fake, state)
+
+    assert stats["unresolved"] == 1 and state["retry"] == ["2"] and stats["kept"] == 1
+    fake.heal()
+
+    rows, _ = _sync(fake, state)
+
+    assert "task:2" in _tasks(rows) and state["retry"] == []
+
+
+def test_each_cause_of_an_unresolved_project_gets_its_own_warning_without_a_gid(caplog):
+    fake = _three_projects()
+    fake.fail("/projects/P1", 403)
+    fake.fail("/projects/P2", 404)
+
+    _sync(fake, {}, **SELECTION)
+
+    warnings = [r for r in caplog.messages if "answered" in r]
+    assert any("1 project(s) answered 403" in m for m in warnings)
+    assert any("1 project(s) answered 404" in m for m in warnings)
+    assert not any("P1" in m or "P2" in m for m in warnings)
+
+
+def test_an_unresolved_project_syncs_again_when_access_returns():
+    fake = _three_projects()
+    state: dict = {}
+    _sync(fake, state, **SELECTION)
+    fake.fail("/projects/P2", 404)
+    fake.edit_task("21", notes="Edited meanwhile.")
+    _sync(fake, state, **SELECTION)
+    fake.heal()
+
+    rows, stats = _sync(fake, state, **SELECTION)
+
+    assert stats["unresolved"] == 0
+    assert "project:P2" in [row["id"] for row in rows]
+    assert "Edited meanwhile." in _tasks(rows)["task:21"]["content"]
+    assert set(_tasks(rows)) == {"task:21"}, "only what changed while it was out of reach"
+
+
+def test_a_401_on_a_project_still_raises():
+    fake = _three_projects()
+    fake.fail("/projects/P2", 401)
+    stats = new_stats()
+
+    with pytest.raises(AsanaAuthError):
+        list(_iter_rows(fake, {}, stats, project_gids=["P1", "P2", "P3"]))
+
+    assert stats["unresolved"] == 0 and stats["failed_auth"] == 1
+
+
+def test_deselecting_an_unresolved_project_forgets_it_and_its_tasks():
+    fake = _three_projects()
+    state: dict = {}
+    _sync(fake, state, **SELECTION)
+    fake.fail("/projects/P2", 403)
+    _sync(fake, state, **SELECTION)
+
+    rows, stats = _sync(fake, state, project_gids=["P1", "P3"])
+
+    assert _tombstones(rows) == {"project:P2", "task:21", "task:22"}
+    assert stats["unresolved"] == 0 and sorted(state["projects"]) == ["P1", "P3"]
+
+
+def test_a_run_where_every_project_is_unresolved_ends_cleanly_and_forgets_nothing():
+    fake = _three_projects()
+    state: dict = {}
+    _sync(fake, state, **SELECTION)
+    known = list(state["known_ids"])
+    fake.fail("/projects", 403)
+
+    rows, stats = _sync(fake, state, **SELECTION)
+
+    assert rows == [] and stats["unresolved"] == 3 and stats["failed"] == 0
+    assert state["known_ids"] == known
+    assert _reasons(stats) == set() and _checked(fake) == []
+
+
+def test_a_first_run_where_every_project_is_unresolved_emits_nothing():
+    fake = _three_projects()
+    fake.fail("/projects", 404)
+    state: dict = {}
+
+    rows, stats = _sync(fake, state, **SELECTION)
+
+    assert rows == [] and stats["unresolved"] == 3 and stats["scanned"] == 0
+    assert state["known_ids"] == [], "a project row that was never emitted is not known"
+
+
+def test_an_unresolved_project_resolves_through_a_real_dlt_run(tmp_path):
+    fake = _three_projects()
+    _run(tmp_path, _source(fake, **SELECTION))
+    fake.fail("/projects/P2", 403)
+    fake.edit_task("11", notes="Rewritten.")
+
+    source = _source(fake, **SELECTION)
+    staged = _run(tmp_path, source)
+
+    assert source.cognee_sync_stats["unresolved"] == 1
+    assert {"project:P2", "task:21", "task:22"} <= set(staged), "nothing of it is forgotten"
+    assert "Rewritten." in staged["task:11"]
+
+
 # --- forgetting ---
 
 
@@ -913,7 +2177,8 @@ def test_a_task_missing_from_a_complete_listing_is_tombstoned():
 
 
 @pytest.mark.parametrize(
-    ("prefix", "status"), [("/tasks", 500), ("/events", 403), ("/projects/P1", 404)]
+    ("prefix", "status"),
+    [("/tasks", 500), ("/events", 403), ("/events", 404), ("/projects/P1", 500)],
 )
 def test_a_listing_that_fails_forgets_nothing_and_moves_no_state(prefix, status):
     fake = _workspace()
@@ -968,7 +2233,7 @@ def test_a_listing_answer_of_the_wrong_shape_raises_and_is_not_read_as_empty(ans
 def test_a_repeated_pagination_offset_raises_instead_of_looping():
     fake = _workspace(tasks=5)
     fake.page_size = 2
-    fake.stuck_offset = "offset:2"
+    fake.stuck_offset = "stuck"
 
     with pytest.raises(AsanaResponseError, match="offset came back twice"):
         _sync(fake, {})
@@ -1289,7 +2554,10 @@ def test_a_rate_limit_while_listing_stops_cleanly_with_nothing_moved():
 
     rows, stats = _sync(fake, state)
 
+    # the events the run read are kept for the page it was cut on; nothing else moved
+    kept = state.pop("listing")
     assert rows == [] and state == before
+    assert kept["done"] == {} and kept["partial"]["P1"]["polled"] is True
     assert (stats["failed"], stats["failed_rate_limit"], stats["deleted"]) == (1, 1, 0)
 
 
@@ -1318,20 +2586,22 @@ def test_a_rate_limit_stops_cleanly_without_sleeping_whatever_retry_after_says(
         assert _tasks(rows).keys() == {"task:1"}
         assert state["pending"] == ["2", "3"]
     else:
-        assert rows == [] and state == {}
+        # only the listing's progress is kept, never a task or a forgotten id
+        assert rows == [] and set(state) == {"v", "known_ids", "listing"}
+        assert state["listing"]["done"] == {}
 
 
 def test_a_spent_budget_stops_cleanly_and_the_next_run_finishes():
     fake = _workspace(tasks=4)
     state: dict = {}
-    budget = TASK_REQUESTS
+    budget = LISTING_REQUESTS + TASK_REQUESTS
 
     rows, stats = _sync(fake, state, max_requests=budget)
 
     assert set(_tasks(rows)) == {"task:1"}
-    # the budget counts the requests that read tasks; the listing is on top of it
+    # the budget counts the listing's requests and the reads' alike
     assert (stats["failed"], stats["failed_budget"]) == (1, 1)
-    assert stats["requests"] == LISTING_REQUESTS + budget
+    assert stats["requests"] == budget
     assert state["pending"] == ["2", "3", "4"]
     rows, stats = _sync(fake, state)
     assert set(_tasks(rows)) == {"task:2", "task:3", "task:4"} and stats["failed"] == 0
@@ -1342,24 +2612,41 @@ def test_a_budget_spent_in_the_middle_of_a_task_leaves_that_task_pending():
     state: dict = {}
 
     # one task and the task read of the next: its comments are the request the budget cannot pay
-    rows, stats = _sync(fake, state, max_requests=TASK_REQUESTS + 1)
+    rows, stats = _sync(fake, state, max_requests=LISTING_REQUESTS + TASK_REQUESTS + 1)
 
     assert set(_tasks(rows)) == {"task:1"} and stats["failed_budget"] == 1
     assert state["pending"] == ["2"] and state["known_ids"] == ["project:P1", "task:1"]
 
 
-def test_the_budget_never_stops_a_run_before_it_has_listed():
-    """The listing is not budgeted: a run that stopped before it listed would commit nothing and
-    start over at the same place for ever."""
-    fake = _workspace()
+def test_a_run_that_spends_its_whole_budget_inside_the_listing_keeps_its_progress():
+    """The listing counts against the budget, so progress is kept per page: a run that stopped
+    before it listed everything and committed nothing would start over at the same place."""
+    fake = _three_projects()
     state: dict = {}
 
-    rows, stats = _sync(fake, state, max_requests=TASK_REQUESTS)
+    rows, stats = _sync(fake, state, max_requests=LISTING_REQUESTS + 1, **SELECTION)
 
-    assert [row["id"] for row in rows] == ["project:P1", "task:1"]
-    assert state["v"] == 1 and state["pending"] == ["2", "3"]
-    assert (stats["failed_budget"], stats["pending"]) == (1, 2)
-    assert stats["requests"] == LISTING_REQUESTS + TASK_REQUESTS
+    assert [row["id"] for row in rows] == ["project:P1"]
+    assert (stats["failed_budget"], stats["requests"]) == (1, LISTING_REQUESTS + 1)
+    assert sorted(state["listing"]["done"]) == ["P1"] and state["known_ids"] == ["project:P1"]
+    assert _tasks(rows) == {} and "pending" not in state, "rendering waits for a complete pass"
+
+
+def test_every_request_counts_against_the_budget_and_the_listing_finishes_over_runs():
+    fake = _three_projects(tasks_each=1)
+    state: dict = {}
+    seen: list[dict] = []
+
+    for _ in range(20):
+        fake.calls.clear()
+        rows, stats = _sync(fake, state, max_requests=LISTING_REQUESTS + 1, **SELECTION)
+        assert stats["requests"] <= LISTING_REQUESTS + 1
+        seen += rows
+        if stats["failed"] == 0:
+            break
+
+    assert stats["failed"] == 0 and "listing" not in state
+    assert {"task:11", "task:21", "task:31"} <= set(_tasks(seen))
 
 
 def test_a_stopped_run_forgets_nothing_and_a_later_complete_one_does():
@@ -1638,13 +2925,24 @@ def _source(service, name: str = TABLE, **kwargs):
     return asana_source(service=service, resource_name=name, **kwargs)
 
 
-def _run(tmp_path, source) -> dict[str, str]:
-    """Run ``source`` the way ingest_dlt_source does; return the staged ``id -> content``."""
+def _run(tmp_path, source, *, nothing_staged_yet: bool = False) -> dict[str, str]:
+    """Run ``source`` the way ingest_dlt_source does; return the staged ``id -> content``.
+
+    A run cut before its first row creates no table: only a test that says
+    ``nothing_staged_yet`` may meet that, and gets ``{}``.
+    """
+    from dlt.destinations.exceptions import DatabaseUndefinedRelation
+
     pipeline = _pipeline(tmp_path)
     pipeline.run(source, columns=DOCUMENT_COLUMN_HINTS)
     query = f'SELECT id, content FROM "{source.name}" ORDER BY id'
-    with pipeline.sql_client() as sql, sql.execute_query(query) as cursor:
-        return {row[0]: row[1] for row in cursor.fetchall()}
+    try:
+        with pipeline.sql_client() as sql, sql.execute_query(query) as cursor:
+            return {row[0]: row[1] for row in cursor.fetchall()}
+    except DatabaseUndefinedRelation:
+        if nothing_staged_yet:
+            return {}
+        raise
 
 
 def test_edits_and_deletes_survive_between_real_dlt_runs(tmp_path):
@@ -1905,6 +3203,30 @@ def test_a_run_through_the_real_client_leaks_the_token_nowhere(monkeypatch, capl
     assert TOKEN not in everything
 
 
+def test_a_task_queued_for_a_read_survives_its_project_being_unresolved_for_a_run(tmp_path):
+    """Task 2 is edited early and task 1 much later, so the cursor moves past task 2: only its
+    place in ``pending`` can bring its edit in once the project answers again."""
+    fake = _workspace(tasks=2)
+    _run(tmp_path, _source(fake))
+    fake.edit_task("2", notes="Rewritten early.")
+    fake._clock += 1000
+    fake.edit_task("1", notes="Rewritten late.")
+    cut = _source(fake, max_requests=LISTING_REQUESTS + TASK_REQUESTS)
+    staged = _run(tmp_path, cut)
+    assert "Rewritten late." in staged["task:1"] and "Rewritten early." not in staged["task:2"]
+
+    fake.fail("/projects/P1", 403)
+    out = _source(fake)
+    _run(tmp_path, out)
+    assert out.cognee_sync_stats["unresolved"] == 1
+    fake.heal()
+
+    back = _source(fake)
+    staged = _run(tmp_path, back)
+
+    assert "Rewritten early." in staged["task:2"]
+
+
 def test_a_small_rate_limit_still_lists_a_selection_over_several_real_runs(tmp_path):
     """Each project costs three listing requests and the window serves seven: a run lists two
     projects and is cut inside the third, and the next run continues there. Before, every run
@@ -1980,10 +3302,10 @@ def test_a_dlt_resource_whose_selection_changes_mid_pass_starts_the_pass_over(tm
 
 
 def test_a_big_listing_makes_progress_in_every_run_and_finishes_over_several(tmp_path):
-    """600 projects with one task each cost 1800 listing requests a run: more than the budget. The
-    listing is not budgeted, so each run still lists in full, renders what the budget allows and
-    commits, and the next run continues. With the listing inside the budget every run stopped
-    at the same place, committed nothing and rendered nothing, for ever."""
+    """600 projects with one task each cost 1800 listing requests, more than one run's 1500. The
+    listing is budgeted and keeps its progress, so the first run only lists 500 projects, the
+    second lists the rest and renders what is left of its budget, and a later pass renders more
+    until everything is staged."""
     fake = FakeAsana()
     gids = [f"P{n}" for n in range(600)]
     for n, gid in enumerate(gids):
@@ -1992,19 +3314,18 @@ def test_a_big_listing_makes_progress_in_every_run_and_finishes_over_several(tmp
 
     first = _source(fake, project_gids=gids)
     staged = _run(tmp_path, first)
-    tasks = {key for key in staged if key.startswith("task:")}
-    assert len(tasks) == 500, "1500 task requests, three a task"
-    assert (first.cognee_sync_stats["failed_budget"], first.cognee_sync_stats["pending"]) == (
-        1,
-        100,
-    )
-    assert first.cognee_sync_stats["requests"] == 1800 + 1500
+    assert len([key for key in staged if key.startswith("project:")]) == 500
+    assert not [key for key in staged if key.startswith("task:")], "rendering waits"
+    assert first.cognee_sync_stats["requests"] == 1500
 
-    second = _source(fake, project_gids=gids)
-    staged = _run(tmp_path, second)
+    for _ in range(5):
+        source = _source(fake, project_gids=gids)
+        staged = _run(tmp_path, source)
+        if len({key for key in staged if key.startswith("task:")}) == 600:
+            break
 
     assert len({key for key in staged if key.startswith("task:")}) == 600
-    assert second.cognee_sync_stats["pending"] == 0 and second.cognee_sync_stats["failed"] == 0
+    assert source.cognee_sync_stats["pending"] == 0
 
 
 @pytest.mark.parametrize("bad", [0, -5, True, False, 1.5, "10", None])

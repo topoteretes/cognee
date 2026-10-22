@@ -3,7 +3,9 @@
 """In-memory stand-in for the Asana REST API, shaped like its real answers.
 
 It models what was observed against a real workspace: ``/events`` answers 412 with a fresh sync
-token when the token is missing or stale, a listing pages through ``next_page.offset``, and an
+token when the token is missing or stale, a listing pages through ``next_page.offset`` (an
+opaque token that stands for a position in the list as it is when the page is asked for, so
+items added or removed meanwhile shift it, and one the fake never issued answers 400), and an
 edited comment (or a new one) leaves the task's ``modified_at`` alone: it arrives only as a story
 event, an edited one with ``parent: null`` and the task under ``resource.target``. An endpoint
 the connector does not use is not answered: a call to it raises ``AssertionError``.
@@ -54,6 +56,8 @@ class FakeAsana:
         self.served = 0  # requests served in the current window
         self.answers: dict[str, object] = {}  # path -> body answered with 200 instead
         self.stuck_offset: str | None = None  # every page names this offset as the next one
+        # issued offset token -> (the listing it belongs to, the position it stands for)
+        self._offsets: dict[str, tuple[str, int]] = {}
         self.events_page_size = 100
         self._clock = 0
         self._counter = 0
@@ -246,12 +250,13 @@ class FakeAsana:
         if parts[0] == "tasks" and parts[1] not in self.tasks:
             return _error(404, "task: Unknown object")
         if parts[0] == "tasks" and len(parts) == 2:
-            assert "completed_at" in params["opt_fields"], "the completion day needs completed_at"
+            if "name" in params["opt_fields"]:  # the read that renders the task
+                assert "completed_at" in params["opt_fields"], "the completion day needs it"
             return Resp(200, {"data": self._task_detail(parts[1])})
         if parts[0] == "tasks" and parts[2] == "stories":
-            return self._page(self._stories(parts[1]), params)
+            return self._page(self._stories(parts[1]), params, f"stories:{parts[1]}")
         if parts[0] == "tasks" and parts[2] == "subtasks":
-            return self._page(self._subtasks(parts[1]), params)
+            return self._page(self._subtasks(parts[1]), params, f"subtasks:{parts[1]}")
         raise AssertionError(f"unexpected path: {path}")
 
     def _new_token(self, project_gid: str) -> str:
@@ -285,7 +290,7 @@ class FakeAsana:
             for gid, task in self.tasks.items()
             if params["project"] in task["projects"]
         ]
-        return self._page(items, params)
+        return self._page(items, params, f"tasks:{params['project']}")
 
     def _task_detail(self, gid: str) -> dict:
         task = self.tasks[gid]
@@ -337,11 +342,28 @@ class FakeAsana:
             if task["parent"] == gid
         ]
 
-    def _page(self, items: list[dict], params: dict) -> Resp:
+    def _issue_offset(self, scope: str, position: int) -> str:
+        token = f"tok{len(self._offsets)}-{position * 7919 % 10007}"
+        self._offsets[token] = (scope, position)
+        return token
+
+    def offset_position(self, token: str) -> int:
+        """The position an issued offset token stands for, for tests to read."""
+        return self._offsets[token][1]
+
+    def _page(self, items: list[dict], params: dict, scope: str) -> Resp:
         limit = min(int(params.get("limit", 20)), self.page_size)
-        start = int(params["offset"].split(":")[1]) if params.get("offset") else 0
+        offset = params.get("offset")
+        issued = self._offsets.get(offset)
+        if (
+            offset is not None
+            and offset != self.stuck_offset
+            and (issued is None or issued[0] != scope)
+        ):
+            return _error(400, "offset: Invalid offset")
+        start = issued[1] if issued else 0
         end = start + limit
-        next_page = {"offset": f"offset:{end}"} if end < len(items) else None
+        next_page = {"offset": self._issue_offset(scope, end)} if end < len(items) else None
         if self.stuck_offset is not None and next_page is not None:
             next_page = {"offset": self.stuck_offset}
         return Resp(200, {"data": items[start:end], "next_page": next_page})

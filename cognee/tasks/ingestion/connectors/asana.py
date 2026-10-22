@@ -39,28 +39,42 @@ Design
   ``modified_at`` does not show (a comment edit, a subtask change, a rename of a project or a
   section) arrives through the Events API, kept as one sync token per project. An expired token
   (HTTP 412) re-renders the project.
-* **Forget-on-delete.** A task is tombstoned only when it is missing from a complete listing.
-  A run that stops, fails or is cut forgets nothing. Deselecting a project forgets the tasks
-  that were only in it.
+* **Forget-on-delete.** Only a complete listing forgets, and a task it lacks is forgotten only
+  when Asana confirms it is gone: a known task missing from the listing is asked for its
+  memberships (one request, counted in ``max_requests``), and a 403, a 404 or no selected
+  project forgets it, while a selected project keeps it (a listing can miss a live task that
+  moved between projects, or on a page that shifted), and so does an answer of 5xx or nothing,
+  which is unknown, not gone. Each check settles its own task, so a run cut inside the listing,
+  or failing, forgets nothing, while a run cut between two checks keeps the tombstones already
+  emitted. Deselecting a project forgets the tasks that were only in it, one check each.
+* **A project Asana will not show** (403 or 404 on its own read) is unresolved: skipped, tried
+  again every run, counted in ``cognee_sync_stats["unresolved"]``. Its stored cursor, sync
+  token, ``seen`` and task gids stay, its row, its tasks and the tasks of it that were queued
+  for a read or a retry are kept, and every other project syncs. A 403 and a 404 are told apart
+  in the log and treated alike for everything else.
 * **A task that cannot be read** (403, 404, 5xx or no answer after the retries) while it is
   still listed keeps its old document and is asked again on the next run, after every fresh
   task. It is never tombstoned and never blocks another task.
 * **A run is bounded and resumable.** On a rate limit, a spent request budget, an outage (three
-  tasks in a row answering 5xx or nothing, counted apart in the fresh tasks and in the retry
-  tail) or a rejected token after rows were emitted, the source stops cleanly, keeps what it
+  tasks in a row answering 5xx or nothing, counted apart in the fresh tasks, in the retry tail
+  and in the checks of missing tasks) or a rejected token after rows were emitted, the source stops cleanly, keeps what it
   emitted, queues the tasks it did not reach in ``state["pending"]`` and reports the reason in
   ``cognee_sync_stats`` (``failed_rate_limit``, ``failed_budget``, ``failed_unavailable``,
   ``failed_auth``). It never sleeps on a 429: ``dlt`` rolls back the state of a failed run and
   the walk holds the process-wide staging lock.
-* **The listing resumes per project.** A project whose listing finished is kept in
-  ``state["listing"]`` (ids and timestamps) and its row is emitted at once. A run cut inside the
-  listing (a 429) renders nothing and forgets nothing; the next run lists only the projects
-  left, and the pass completes, renders and forgets only when every selected project is listed.
-  A changed selection starts the pass over. The listing has no budget, deadline or cap: a run
-  holds the staging lock for as long as its part of the listing takes.
-* **Budget.** ``max_requests`` bounds the requests that read tasks (a task costs three, so at
-  least three), and a run renders about ``max_requests / 3`` tasks. The listing is not
-  budgeted: it costs ``projects x (1 + events + ceil(tasks / 100))`` requests a pass.
+* **The listing is a pass that can span runs.** A project whose listing finished, and the events
+  and page offset of one cut inside, are kept in ``state["listing"]`` (ids, timestamps and
+  offsets, never text) and the finished projects' rows are emitted at once. A run cut inside the
+  listing (a 429 or a spent budget) renders nothing and forgets nothing; the next run continues
+  at the page it stopped at, and the pass completes, renders and forgets only when every
+  selected project is listed. A changed selection starts the pass over.
+* **Budget.** ``max_requests`` bounds every request of a run, the listing's and the reads' (a
+  task costs three, so at least three), so a run holds the staging lock for at most that many
+  requests plus the client's retries of each (``_RETRIES``); there is no deadline or other
+  limit. The listing costs ``projects x (1 + events + ceil(tasks / 100))`` requests a pass, and
+  rendering waits for a complete pass. The budget must cover the re-read of every unresolved
+  project plus one task read or one check; a run cut by it that kept nothing raises
+  ``AsanaSourceError``. Retries are bounded by ``_RETRIES`` alone.
 * **Token** is a plain access token (personal access token or an OAuth access token). It lives
   in the client object only; errors carry statuses and endpoints, never the token, a task id or
   Asana's own explanation (that is an attribute of the error, and is not logged).
@@ -74,6 +88,7 @@ providers, and anyone with read access to the target dataset can see it. Email a
 never requested, but people type them into comments and descriptions.
 """
 
+import copy
 import re
 import time
 from collections.abc import Callable, Iterable, Iterator
@@ -89,9 +104,8 @@ logger = get_logger("asana_connector")
 BASE_URL = "https://app.asana.com/api/1.0"
 # Asana's largest ``limit`` on the list endpoints used here.
 PAGE_SIZE = 100
-# Budget of the task-reading requests of one run (the listing is not counted). Our own choice,
-# not an API limit: Asana documents only per-minute limits, and a task costs three requests, so
-# a run reads about 500 tasks.
+# Budget of the requests of one run, the listing's and the reads'. Our own choice, not an API
+# limit: Asana documents only per-minute limits. A task costs three requests.
 DEFAULT_MAX_REQUESTS = 1500
 # Version of the resource state; a later release reads it to migrate an older layout.
 STATE_VERSION = 1
@@ -118,6 +132,8 @@ _TASK_FIELDS = (
     "memberships.project.gid,memberships.project.name,memberships.section.name,"
     "custom_fields.name,custom_fields.display_value"
 )
+# The custom field keys that must be text (or null) in an answer.
+_FIELD_TEXTS = ("name", "display_value")
 _STORY_FIELDS = "resource_subtype,text,created_by.name,created_at"
 _SUBTASK_FIELDS = "name,completed,assignee.name,due_on,notes"
 _PROJECT_FIELDS = "name,notes,permalink_url"
@@ -387,11 +403,55 @@ def _gid_order(item: dict) -> tuple[int, str]:
     return len(gid), gid
 
 
+def _memberships(task: dict) -> list[dict]:
+    """The memberships of a task that are in a project, checked.
+
+    An entry with no ``project`` (absent or null) is not a project membership, for example a
+    task on someone's My Tasks list, and is skipped. A malformed answer raises
+    ``AsanaResponseError``: ``memberships`` that is not a list, an entry that is not an object,
+    a ``project`` that is not an object, or a project without a string gid. So a malformed body
+    is never read as "no project" and never escapes as a raw ``AttributeError`` or ``TypeError``.
+    An empty list, or one of projectless entries only, is a real answer: the task is in no
+    project.
+    """
+    memberships = task.get("memberships")
+    if not isinstance(memberships, list):
+        raise AsanaResponseError("Asana /tasks/{gid}: memberships is not a list")
+    in_a_project = []
+    for membership in memberships:
+        if not isinstance(membership, dict):
+            raise AsanaResponseError("Asana /tasks/{gid}: a membership is not an object")
+        project = membership.get("project")
+        if project is None:
+            continue
+        if not isinstance(project, dict) or not isinstance(project.get("gid"), str):
+            raise AsanaResponseError("Asana /tasks/{gid}: a membership project has no gid")
+        in_a_project.append(membership)
+    return in_a_project
+
+
+def _custom_fields(task: dict) -> list[dict]:
+    """A task's ``custom_fields``, checked: a list of objects with a text or null name and value.
+
+    A missing or null list is no fields. Anything else of the wrong shape raises
+    ``AsanaResponseError``.
+    """
+    fields = task.get("custom_fields")
+    if fields is None:
+        return []
+    if not isinstance(fields, list) or not all(
+        isinstance(field, dict)
+        and all(field.get(key) is None or isinstance(field[key], str) for key in _FIELD_TEXTS)
+        for field in fields
+    ):
+        raise AsanaResponseError("Asana /tasks/{gid}: custom_fields is not a list of fields")
+    return fields
+
+
 def _selected_gids(task: dict, selected: Iterable[str]) -> list[str]:
     """The selected projects a task is in, as sorted gids."""
     return sorted(
-        {_ref(membership.get("project")).get("gid") for membership in task.get("memberships") or []}
-        & set(selected)
+        {membership["project"]["gid"] for membership in _memberships(task)} & set(selected)
     )
 
 
@@ -459,10 +519,10 @@ def render_task(
         lines.append(f"Assignee: {_name(task['assignee'])}")
     if task.get("due_on"):
         lines.append(f"Due: {task['due_on']}")
-    lines.extend(_membership_lines(task.get("memberships") or [], selected_projects))
+    lines.extend(_membership_lines(_memberships(task), selected_projects))
     fields = sorted(
         (_text(field.get("name")), _text(field.get("display_value")))
-        for field in task.get("custom_fields") or []
+        for field in _custom_fields(task)
         if _text(field.get("name")) and _text(field.get("display_value"))
     )
     lines.extend(f"{name}: {value}" for name, value in fields)
@@ -524,10 +584,10 @@ class _Walker:
     (subtask gid -> the task document it is folded into), ``multi`` (task gid -> the selected
     projects of a task that is in more than one), ``selection`` (the selected project gids),
     ``retry`` (tasks kept after a failure), ``pending`` (tasks a stopped run did not reach),
-    ``listing`` (only while a listing pass is unfinished: its selection and the result of each
-    project listed so far) and, per project, the ``cursor``, the tasks ``seen`` near it and the
-    Events ``sync`` token. Only the final commit (or ``commit_listing``) writes it, so a run that
-    raises leaves it as it was.
+    ``listing`` (only while a listing pass is unfinished: its selection, the result of each
+    project listed so far and the progress inside the ones cut) and, per project, the ``cursor``,
+    the tasks ``seen`` near it, the Events ``sync`` token and the ``tasks`` last listed. Only the
+    final commit (or ``commit_listing``) writes it, so a run that raises leaves it as it was.
     """
 
     def __init__(
@@ -547,7 +607,7 @@ class _Walker:
         self.max_requests = max_requests
         self.check_active = check_active
         self.emitted = 0
-        self.render_requests = 0  # the budgeted requests of this run
+        self.used = 0  # the requests of this run, counted against ``max_requests``
         self.known: set[str] = set(state.get("known_ids", []))
         self.subtask_parents: dict[str, str] = dict(state.get("subtasks", {}))
         # parent -> its subtasks, so replacing one task's entries is not a scan of them all
@@ -557,33 +617,42 @@ class _Walker:
         self.multi: dict[str, list[str]] = dict(state.get("multi", {}))
         self.retry: set[str] = set(state.get("retry", []))
         self.swept: set[str] = set()  # the gid of every listed task
+        self.protected: set[str] = set()  # tasks last listed by a project that is unresolved now
+        # Tasks of an unresolved project that wait in ``pending`` or ``retry``: they are not
+        # listed this pass, so they are carried over instead of dropped.
+        self.held_pending: set[str] = set()
+        self.held_retry: set[str] = set()
         self.listing: dict[str, dict] = {}  # project gid -> its ``_list_project`` result
-        self.finished: list[str] = []  # the projects this run listed
+        self.partial: dict[str, dict] = {}  # project gid -> the progress inside a cut project
+        self.unresolved: dict[str, int] = {}  # project gid -> the 403 or 404 Asana answered
         self.next_projects: dict[str, dict[str, Any]] = {}
         self.project_rows: list[dict[str, Any]] = []  # of the projects this run listed
         self.order: list[str] = []  # tasks to render: fresh first, then the retries
         self.position = 0  # index in ``order`` of the task being rendered
         self.tail_start = 0  # index in ``order`` where the retries begin
         self.rendered: set[str] = set()
+        self.tombstoned: set[str] = set()  # the ids this run forgot
+        # A task read or a check of a missing id got an answer after the listing. A run without
+        # one made no progress past the listing, see ``commit_progress``.
+        self.settled = False
         self.kept: set[str] = set()  # tasks that failed this run and are asked again
         # Tasks in a row that answered 5xx or nothing; the retry tail starts its own count.
         self.outage = 0
         self.listed = False
 
     # -- requests ----------------------------------------------------------
-    def _call(self, path: str, params: dict[str, Any] | None = None, *, budgeted: bool = False):
-        """One request. Only the requests that read a task are ``budgeted``.
+    def _call(self, path: str, params: dict[str, Any] | None = None):
+        """One request, counted against ``max_requests`` (the listing's and the reads' alike).
 
-        The listing is not: it costs a fixed amount per project that no budget could shorten
-        without a run that stops before it lists, commits nothing and starts over next run.
+        A run that spends its budget inside the listing keeps the progress it made, so a small
+        budget cannot make a run start over at the same place.
         """
         if self.check_active is not None:
             self.check_active()
-        if budgeted:
-            if self.render_requests >= self.max_requests:
-                self.stats["failed"] += 1  # the request the run could not afford
-                raise _CutShort("budget")
-            self.render_requests += 1
+        if self.used >= self.max_requests:
+            self.stats["failed"] += 1  # the request the run could not afford
+            raise _CutShort("budget")
+        self.used += 1
         # A call the client retries on a 5xx or a network error still counts once.
         self.stats["requests"] += 1
         try:
@@ -592,115 +661,171 @@ class _Walker:
             self.stats["failed"] += 1
             raise _CutShort("rate_limit") from None
         except AsanaAuthError:
-            # Project rows go out before any task is read, so a rejection with no row emitted
-            # can only come from the listing: the token is bad, not expired mid-run.
+            # A rejection before any row left this run raises: the token is bad. Project rows go
+            # out right after the listing, so one in the listing always raises; later it stops
+            # the run cleanly (the token expired mid-run) only if a row already went out, which
+            # a run resuming a pass whose projects earlier runs listed has not.
             if self.emitted:
                 self.stats["failed"] += 1
                 raise _CutShort("auth") from None
             raise
 
-    def _list_all(self, path: str, params: dict[str, Any], *, budgeted: bool = False) -> list[dict]:
-        """Every item of a paginated collection. Never a partial list."""
+    def _pages(
+        self, path: str, params: dict[str, Any], *, offset: str | None = None
+    ) -> Iterator[tuple[list[dict], str | None]]:
+        """Each page of a paginated collection as ``(items, next_offset)``, from ``offset``.
+
+        ``next_offset`` is ``None`` after the last page. The offsets of the pages this call has
+        read are remembered: one that comes back twice raises instead of looping.
+        """
         endpoint = _endpoint(path)
-        items: list[dict] = []
         offsets: set[str] = set()
-        page_params = {**params, "limit": PAGE_SIZE}
         while True:
-            body = self._call(path, page_params, budgeted=budgeted)
+            page_params = {**params, "limit": PAGE_SIZE}
+            if offset:
+                page_params["offset"] = offset
+            body = self._call(path, page_params)
             page = _data(body, list, endpoint)
             if not all(isinstance(item, dict) for item in page):
                 raise AsanaResponseError(f"Asana {endpoint}: a listed item is not an object")
-            items.extend(page)
             next_page = body.get("next_page")
             if next_page is None:
-                return items
-            offset = next_page.get("offset") if isinstance(next_page, dict) else None
-            if not isinstance(offset, str) or not offset:
-                raise AsanaResponseError(f"Asana {endpoint}: next_page carries no offset")
-            if offset in offsets:
-                raise AsanaResponseError(f"Asana {endpoint}: a pagination offset came back twice")
-            offsets.add(offset)
-            page_params = {**params, "limit": PAGE_SIZE, "offset": offset}
+                offset = None
+            else:
+                offset = next_page.get("offset") if isinstance(next_page, dict) else None
+                if not isinstance(offset, str) or not offset:
+                    raise AsanaResponseError(f"Asana {endpoint}: next_page carries no offset")
+                if offset in offsets:
+                    raise AsanaResponseError(
+                        f"Asana {endpoint}: a pagination offset came back twice"
+                    )
+                offsets.add(offset)
+            yield page, offset
+            if offset is None:
+                return
+
+    def _list_all(self, path: str, params: dict[str, Any]) -> list[dict]:
+        """Every item of a paginated collection. Never a partial list."""
+        return [item for page, _ in self._pages(path, params) for item in page]
 
     # -- 1. List -----------------------------------------------------------
-    def _poll_events(
-        self, project_gid: str, sync_token: str | None
-    ) -> tuple[list[dict] | None, str]:
-        """``(events, next_sync_token)`` of a project since ``sync_token``.
+    def _poll_events(self, project_gid: str, progress: dict) -> None:
+        """Read a project's Events feed into ``progress``, one page at a time.
 
-        ``events`` is ``None`` when the feed has a gap: Asana answers 412 (with a fresh token)
-        when no token is sent or the stored one is too old.
+        ``progress["token"]`` is the sync token to ask next, ``events`` the task gids named so
+        far and ``renamed`` whether a project or section rename was among them. ``gap`` is set
+        when the feed has one: Asana answers 412 (with a fresh token) when no token is sent or
+        the stored one is too old. ``polled`` is set when the feed is read.
         """
-        events: list[dict] = []
-        while True:
+        while not progress["polled"]:
+            token = progress["token"]
             params = {"resource": project_gid, "opt_fields": _EVENT_FIELDS}
-            if sync_token:
-                params["sync"] = sync_token
+            if token:
+                params["sync"] = token
             try:
                 body = self._call("/events", params)
             except AsanaSyncTokenExpiredError as expired:
-                return None, expired.sync_token
+                progress.update(gap=True, token=expired.sync_token, polled=True)
+                return
             next_token = body.get("sync")
             if not isinstance(next_token, str) or not next_token:
                 raise AsanaResponseError("Asana /events: no sync token")
-            events.extend(_data(body, list, "/events"))
-            if not body.get("has_more"):
-                return events, next_token
-            if next_token == sync_token:
+            events = _data(body, list, "/events")
+            more = bool(body.get("has_more"))
+            if more and next_token == token:
                 raise AsanaResponseError("Asana /events: the sync token did not advance")
-            sync_token = next_token
+            progress["events"] = sorted({*progress["events"], *_event_task_gids(events)})
+            progress["renamed"] = progress["renamed"] or _renamed(events)
+            progress.update(token=next_token, polled=not more)
 
-    def _listed_tasks(self, project_gid: str) -> dict[str, str]:
-        """``gid -> modified_at`` of every task in a project."""
-        listed = {}
-        for task in self._list_all("/tasks", {"project": project_gid, "opt_fields": "modified_at"}):
-            gid, when = task.get("gid"), task.get("modified_at")
-            if not isinstance(gid, str) or not _GID.fullmatch(gid):
-                raise AsanaResponseError("Asana /tasks: a task without a usable gid")
-            try:
-                _instant(when)
-            except (AttributeError, ValueError):
-                raise AsanaResponseError(
-                    "Asana /tasks: a task without a usable modified_at"
-                ) from None
-            listed[gid] = when
-        return listed
+    def _read_task_pages(self, project_gid: str, progress: dict) -> None:
+        """List a project's tasks page by page into ``progress["listed"]`` (gid -> modified_at).
 
-    def _list_project(self, project_gid: str, project_state: dict) -> dict[str, Any]:
+        ``progress["offset"]`` is where the next page starts, saved after every page, so a run
+        cut inside a project resumes at the page it stopped at.
+        """
+        params = {"project": project_gid, "opt_fields": "modified_at"}
+        for page, offset in self._pages("/tasks", params, offset=progress["offset"]):
+            for task in page:
+                gid, when = task.get("gid"), task.get("modified_at")
+                if not isinstance(gid, str) or not _GID.fullmatch(gid):
+                    raise AsanaResponseError("Asana /tasks: a task without a usable gid")
+                try:
+                    _instant(when)
+                except (AttributeError, ValueError):
+                    raise AsanaResponseError(
+                        "Asana /tasks: a task without a usable modified_at"
+                    ) from None
+                progress["listed"][gid] = when
+            progress["offset"] = offset
+
+    def _read_project(self, project_gid: str) -> dict | None:
+        """The project, or ``None`` when Asana answers 403 or 404: it is then unresolved.
+
+        The answer is kept in ``self.unresolved``, so a log can tell the two apart; everything
+        else treats them alike, because Asana's answer does not say whether the token has no
+        access or the project is gone. Only this call does so. A 401 and any other error raise.
+        """
+        try:
+            body = self._call(f"/projects/{project_gid}", {"opt_fields": _PROJECT_FIELDS})
+        except AsanaAPIError as exc:
+            if exc.status in (403, 404):
+                self.unresolved[project_gid] = exc.status
+                return None
+            raise
+        return _data(body, dict, "/projects")
+
+    def _list_project(self, project_gid: str, project_state: dict) -> dict[str, Any] | None:
         """List one project and return what the pass keeps of it: ids and timestamps, no text.
 
-        The result is ``tasks`` (every listed gid), ``changed`` (the tasks its window or a full
-        read flags), ``events`` (the task gids its events name) and ``next`` (the project's
-        next ``cursor``, ``sync`` token and ``seen``). Its row goes to ``project_rows`` only once
-        the project is listed, so a cut inside it leaves nothing of it behind.
+        The result is ``changed`` (the tasks its window or a full read flags), ``events`` (the
+        task gids its events name) and ``next`` (the project's next ``cursor``, ``sync`` token,
+        ``seen`` and ``tasks``, the gids listed). ``None`` means the project is unresolved. A
+        run cut inside the project leaves its progress in ``self.partial``; the project's row
+        goes to ``project_rows`` only once it is listed.
         """
-        path = f"/projects/{project_gid}"
-        project = _data(self._call(path, {"opt_fields": _PROJECT_FIELDS}), dict, "/projects")
-        cursor: str = project_state.get("cursor", "")
+        project = self._read_project(project_gid)
+        if project is None:
+            return None
+        progress = self.partial.setdefault(
+            project_gid,
+            {
+                "token": project_state.get("sync"),
+                "polled": False,
+                "events": [],
+                "renamed": False,
+                "gap": False,
+                "offset": None,
+                "listed": {},
+            },
+        )
         # Events first: the new token then covers what happens during the listing.
-        events, sync_token = self._poll_events(project_gid, project_state.get("sync"))
+        self._poll_events(project_gid, progress)
+        self._read_task_pages(project_gid, progress)
+        listed: dict[str, str] = progress["listed"]
+        cursor: str = project_state.get("cursor", "")
         # No cursor yet, a gap in the feed or a rename: anything may have changed.
-        full = events is None or not cursor or _renamed(events)
-        listed = self._listed_tasks(project_gid)
+        full = progress["gap"] or not cursor or progress["renamed"]
         # The window starts a little before the cursor, and ``seen`` (gid -> modified_at inside
         # the previous window) tells a task already rendered from one that moved.
         start = _overlap_start(cursor)
         seen: dict[str, str] = project_state.get("seen", {})
         newest = max([cursor, *listed.values()])
         window = _overlap_start(newest)
+        del self.partial[project_gid]
         self.project_rows.append(render_project(project_gid, project))
         return {
-            "tasks": sorted(listed),
             "changed": sorted(
                 gid
                 for gid, when in listed.items()
                 if full or (when >= start and seen.get(gid) != when)
             ),
-            "events": sorted(_event_task_gids(events or [])),
+            "events": progress["events"],
             "next": {
                 "cursor": newest,
-                "sync": sync_token,
+                "sync": progress["token"],
                 "seen": {gid: when for gid, when in listed.items() if when >= window},
+                "tasks": sorted(listed),
             },
         }
 
@@ -708,25 +833,41 @@ class _Walker:
         """Read what the run needs before it renders a task.
 
         The listing is a pass over the selected projects that can span runs. A project listed by
-        an earlier run of the same pass is not listed again (``state["listing"]``, see
-        ``commit_listing``), unless the selection changed since: then the pass starts over. A
-        run cut inside the listing raises ``_CutShort`` and keeps the projects it finished.
+        an earlier run of the same pass is not listed again, and one cut inside resumes at its
+        page (``state["listing"]``, see ``commit_listing``), unless the selection changed since:
+        then the pass starts over. A run cut inside the listing raises ``_CutShort`` and keeps
+        its progress. A project Asana will not show (403, 404) is unresolved: skipped, tried
+        again every run, and its stored tasks stay current.
         """
         previous: dict = self.state.get("projects") or {}
         kept: dict = self.state.get("listing") or {}
-        # A copy: a run that raises later must leave the state as it was.
-        self.listing = dict(kept["done"]) if kept.get("selection") == self.projects else {}
+        resumed = kept.get("selection") == self.projects
+        # Copies: a run that raises later must leave the state as it was.
+        self.listing = dict(kept["done"]) if resumed else {}
+        self.partial = copy.deepcopy(kept["partial"]) if resumed else {}
         for project_gid in self.projects:
-            if project_gid not in self.listing:
-                self.listing[project_gid] = self._list_project(
-                    project_gid, previous.get(project_gid) or {}
-                )
-                self.finished.append(project_gid)
+            if project_gid in self.listing:
+                continue
+            entry = self._list_project(project_gid, previous.get(project_gid) or {})
+            if entry is None:
+                self.stats["unresolved"] += 1
+                # Whatever it had listed goes: it starts at its first page when it returns.
+                self.partial.pop(project_gid, None)
+                continue
+            self.listing[project_gid] = entry
 
         changed: set[str] = set()
         event_gids: set[str] = set()
-        for project_gid, entry in self.listing.items():
-            self.swept.update(entry["tasks"])
+        for project_gid in self.projects:
+            if project_gid in self.unresolved:
+                stored = previous.get(project_gid)
+                if stored:
+                    # Untouched: its cursor, sync token and seen wait for the project to return.
+                    self.next_projects[project_gid] = copy.deepcopy(stored)
+                    self.protected.update(stored.get("tasks", []))
+                continue
+            entry = self.listing[project_gid]
+            self.swept.update(entry["next"]["tasks"])
             changed.update(entry["changed"])
             event_gids.update(entry["events"])
             self.next_projects[project_gid] = entry["next"]
@@ -740,7 +881,11 @@ class _Walker:
         # under the other, with a stale line, so it is rendered again.
         removed = set(self.state.get("selection") or []) - set(self.projects)
         changed |= {gid for gid, names in self.multi.items() if removed & set(names)}
-        # Only listed tasks are rendered, so every emitted id can be tombstoned later.
+        # Only listed tasks are rendered, so every emitted id can be tombstoned later. A queued
+        # task of an unresolved project is not listed now, and is held for when it returns.
+        queued_pending = set(self.state.get("pending", []))
+        self.held_pending = (queued_pending & self.protected) - swept
+        self.held_retry = (self.retry & self.protected) - swept
         self.retry &= swept
         fresh = sorted((changed & swept) - self.retry)
         self.order = fresh + sorted(self.retry)
@@ -749,22 +894,58 @@ class _Walker:
         self.stats["skipped"] = len(swept) - len(self.order)
         self.listed = True
 
+    def _still_selected(self, row_id: str) -> bool:
+        """Whether a known id the listing lacks is kept: a task that still has a selected project.
+
+        A listing can miss a live task: it moved between projects while the pass ran or between
+        the runs that made it, or a page shifted on resume. So a missing task is asked for its
+        memberships (one request, counted in ``max_requests``): a 403 or 404, or no selected
+        project, means it is gone and the caller forgets it; a selected project keeps it known
+        (its project's events or listing render it on a later pass). An answer of 5xx or nothing
+        is unknown, not gone: the task stays known and counts in ``failed`` like a read that
+        failed, and toward the outage streak, so a hung Asana does not spend the budget on
+        checks either. Any other error raises, a 200 whose ``memberships`` is malformed (see
+        ``_memberships``; entries without a project are skipped) raises ``AsanaResponseError``,
+        and a 429 or a spent budget raises ``_CutShort``.
+        """
+        if not row_id.startswith("task:"):
+            return False
+        path = f"/tasks/{row_id.removeprefix('task:')}"
+        try:
+            body = self._call(path, {"opt_fields": "memberships.project.gid"})
+        except AsanaAPIError as exc:
+            if exc.status in (403, 404):
+                return False
+            if exc.status == 0 or exc.status >= 500:
+                self.stats["failed"] += 1
+                self._count_outage()
+                return True
+            raise
+        self.outage = 0
+        return bool(_selected_gids(_data(body, dict, "/tasks/{gid}"), self.projects))
+
+    def _count_outage(self) -> None:
+        """Count an answer of 5xx or nothing toward the outage streak; three in a row stop the run."""
+        self.outage += 1
+        if self.outage >= _OUTAGE_STREAK:
+            raise _CutShort("unavailable")
+
+    def _current_ids(self) -> set[str]:
+        tasks = self.swept | self.protected
+        return {f"task:{gid}" for gid in tasks} | {f"project:{g}" for g in self.projects}
+
     # -- 2. Render ---------------------------------------------------------
     def _fetch_task(self, gid: str) -> tuple[dict, list[dict], list[dict]]:
         """``(task, comments, subtasks)`` of one task. Errors propagate."""
         path = f"/tasks/{gid}"
-        task = _data(
-            self._call(path, {"opt_fields": _TASK_FIELDS}, budgeted=True), dict, "/tasks/{gid}"
-        )
-        stories = self._list_all(f"{path}/stories", {"opt_fields": _STORY_FIELDS}, budgeted=True)
-        subtasks = self._list_all(
-            f"{path}/subtasks", {"opt_fields": _SUBTASK_FIELDS}, budgeted=True
-        )
+        task = _data(self._call(path, {"opt_fields": _TASK_FIELDS}), dict, "/tasks/{gid}")
+        stories = self._list_all(f"{path}/stories", {"opt_fields": _STORY_FIELDS})
+        subtasks = self._list_all(f"{path}/subtasks", {"opt_fields": _SUBTASK_FIELDS})
         # The stories feed also holds system entries ("added to project", ...).
         comments = [story for story in stories if story.get("resource_subtype") == "comment_added"]
         return task, comments, subtasks
 
-    def _failed(self, gid: str, exc: AsanaAPIError) -> None:
+    def _failed(self, gid: str, exc: AsanaSourceError) -> None:
         """Keep a task that could not be read, and stop if Asana as a whole is failing.
 
         The task is still listed, so it is not gone: its old document stays and it is asked
@@ -776,10 +957,8 @@ class _Walker:
         self.kept.add(gid)
         # The status and the endpoint, never Asana's explanation and never the task's gid.
         logger.debug("Asana: a task was kept for a retry next run (%s).", exc)
-        if exc.status == 0 or exc.status >= 500:
-            self.outage += 1
-            if self.outage >= _OUTAGE_STREAK:
-                raise _CutShort("unavailable")
+        if isinstance(exc, AsanaAPIError) and (exc.status == 0 or exc.status >= 500):
+            self._count_outage()
 
     def _remember(self, gid: str, task: dict, subtasks: list[dict]) -> None:
         """Replace this task's subtask entries and note whether it is in several projects."""
@@ -822,59 +1001,101 @@ class _Walker:
                 self._failed(gid, exc)
                 continue
             self.outage = 0
+            self.settled = True
+            try:
+                selected = _selected_gids(task, self.projects)
+                row = (
+                    render_task(gid, task, comments, subtasks, self.projects) if selected else None
+                )
+            except AsanaResponseError as exc:
+                # A body of the wrong shape is a task Asana did not answer properly: kept for
+                # a retry like any unreadable task, never skipped silently, never raising.
+                self._failed(gid, exc)
+                continue
+            if row is None:
+                # It left the selection since the listing: no document is worth building. It
+                # stays known, and the next pass finds it missing and forgets it.
+                continue
             self._remember(gid, task, subtasks)
             self.rendered.add(gid)
             self.emitted += 1
-            yield render_task(gid, task, comments, subtasks, self.projects)
+            yield row
 
         # The listing is complete: only now may a row that is no longer listed be forgotten.
-        current = {f"task:{gid}" for gid in self.swept} | {f"project:{g}" for g in self.projects}
-        deleted = sorted(self.known - current)
-        for row_id in deleted:
+        # Each missing id is settled on its own, so a check cut short keeps the tombstones
+        # already out and the rest stay known for the next pass.
+        self.position = len(self.order)
+        self.outage = 0  # the checks count their own streak
+        for row_id in sorted(self.known - self._current_ids()):
+            verdict = self._still_selected(row_id)
+            self.settled = True
+            if verdict:
+                continue
+            self.tombstoned.add(row_id)
             self.stats["deleted"] += 1
             yield {"id": row_id, "_deleted": True}
-        self._commit(self.known & current | self._emitted_ids(), [], self.kept)
+        self._commit(self.known - self.tombstoned | self._emitted_ids(), [], self.kept)
 
     # -- 3. Commit ---------------------------------------------------------
     def _emitted_ids(self) -> set[str]:
-        return {f"task:{gid}" for gid in self.rendered} | {f"project:{g}" for g in self.projects}
+        projects = set(self.projects) - set(self.unresolved)
+        return {f"task:{gid}" for gid in self.rendered} | {f"project:{g}" for g in projects}
 
-    def commit_progress(self) -> None:
+    def commit_progress(self) -> bool:
         """After a clean stop: keep what was rendered, queue what was not, delete nothing.
 
+        Returns whether the state changed: a stop that kept only a listing that is already kept
+        changed nothing, and the next run would stop at the same place.
+
         The cursors and sync tokens advance, because every task they covered is either rendered
-        or queued. A stop inside the listing renders nothing and only keeps the projects it
-        finished, see ``commit_listing``.
+        or queued. A stop inside the listing, or before any task read or check got an answer,
+        only keeps the listing, see ``commit_listing``.
         """
-        if not self.listed:
-            self.commit_listing()
-            return
+        if not (self.settled or self.kept):
+            # Nothing past the listing got an answer (or the listing itself was cut): the pass
+            # keeps its listing, complete or not, and the next run starts from it. Committing
+            # instead would list again first, and a budget or rate limit that the listing alone
+            # uses up would never leave room for a task or a check.
+            return self.commit_listing()
         rest = self.order[self.position :]
         retry = self.kept | (self.retry & set(rest))
         pending = [gid for gid in rest if gid not in retry]
-        self._commit(self.known | self._emitted_ids(), pending, retry)
+        self._commit(self.known - self.tombstoned | self._emitted_ids(), pending, retry)
+        return True
 
-    def commit_listing(self) -> None:
-        """After a stop inside the listing: keep the projects it finished, move nothing else.
+    def commit_listing(self) -> bool:
+        """After a stop before the pass is rendered: keep its listing, move nothing else.
 
-        ``state["listing"]`` holds the selection of the pass and, per finished project, the ids
-        and timestamps ``_list_project`` returned: no text, and no more ids than the corpus
-        already stores. The next run of the same selection lists only the other projects. The
-        project rows of this run are out, so their ids join ``known_ids`` (a later deselection
-        then forgets them). Nothing is rendered, forgotten or advanced (``selection``, the
-        cursors and the sync tokens stay as the last complete pass left them), because a pass that
-        has not listed every project knows neither which task left nor what is left to render.
-        ``_commit`` clears it when the pass completes.
+        ``state["listing"]`` holds the selection of the pass, per finished project the ids and
+        timestamps ``_list_project`` returned, and per project cut inside its progress so far
+        (events, task gids with their timestamps, page offset): never text. The ids can exceed
+        ``known_ids`` until the pass completes. The next run of the same selection lists only
+        what is left. The project rows of this run are out, so their ids join ``known_ids`` (a
+        later deselection then forgets them). Nothing is rendered, forgotten or advanced
+        (``selection``, the cursors and the sync tokens stay as the last complete pass left
+        them), because a pass that has not listed every project knows neither which task left
+        nor what is left to render. ``_commit`` clears it when the pass completes. A run that
+        added nothing to what the state holds leaves it as it is, and returns ``False``.
         """
-        if not self.finished:
-            return
+        kept: dict = self.state.get("listing") or {}
+        if self.listing == kept.get("done", {}) and self.partial == kept.get("partial", {}):
+            return False
         self.state["v"] = STATE_VERSION
         self.state["known_ids"] = sorted(self.known | set(self._project_row_ids()))
-        self.state["listing"] = {"selection": list(self.projects), "done": self.listing}
+        self.state["listing"] = {
+            "selection": list(self.projects),
+            "done": self.listing,
+            "partial": self.partial,
+        }
+        return True
 
     def _commit(self, known: set[str], pending: list[str], retry: set[str]) -> None:
+        retry = retry | self.held_retry
+        pending = pending + sorted(self.held_pending - set(pending))
         unsettled = retry | set(pending)
-        for project_state in self.next_projects.values():
+        for project_gid, project_state in self.next_projects.items():
+            if project_gid in self.unresolved:
+                continue
             # A task not rendered must not look settled inside the overlap window.
             project_state["seen"] = {
                 gid: when for gid, when in project_state["seen"].items() if gid not in unsettled
@@ -903,11 +1124,12 @@ class _Walker:
 def new_stats() -> dict[str, int]:
     """The counts of a run, every key present from its start so a host finds them on any exit.
 
-    A reason key (``failed_rate_limit``, ``failed_budget``, ``failed_unavailable``,
-    ``failed_auth``) joins them only when a run stops for it.
+    ``unresolved`` counts the projects Asana would not show this run. A reason key
+    (``failed_rate_limit``, ``failed_budget``, ``failed_unavailable``, ``failed_auth``) joins them
+    only when a run stops for it.
     """
     return dict.fromkeys(
-        ("scanned", "skipped", "deleted", "failed", "kept", "pending", "requests"), 0
+        ("scanned", "skipped", "deleted", "failed", "kept", "pending", "requests", "unresolved"), 0
     )
 
 
@@ -932,9 +1154,20 @@ def _iter_rows(
     try:
         yield from walker.rows()
     except _CutShort as cut:
-        walker.commit_progress()
+        changed = walker.commit_progress()
         stats[f"failed_{cut.reason}"] = 1
         logger.warning("Asana sync stopped early (%s); it resumes on the next run.", cut.reason)
+        if cut.reason == "budget" and not changed:
+            # Nothing was kept, so the next run starts at the same place and spends the same
+            # budget the same way: the budget cannot cover this selection. A 429 is not this,
+            # it is the provider's own limit and clears with time.
+            raise AsanaSourceError(
+                f"Asana: max_requests={max_requests} is too small for this selection. The run "
+                f"spent {walker.used} requests, {len(walker.unresolved)} of them re-reading "
+                "projects Asana would not show, and the budget ran out before one task read "
+                f"({_TASK_REQUESTS} requests) or one check of a missing task (1 request) could "
+                "answer, so the next run would stop at the same place. Raise max_requests."
+            ) from None
     except AsanaSourceError as exc:
         # The run raises: dlt drops its state, not this object, and a host reads these counts
         # after the raise.
@@ -943,6 +1176,20 @@ def _iter_rows(
             stats["failed_auth"] = 1
         raise
     finally:
+        # Counts only, no gids: a token's reach is not for a log.
+        forbidden = sum(status == 403 for status in walker.unresolved.values())
+        if forbidden:
+            logger.warning(
+                "Asana: %d project(s) answered 403, the token may not reach them; they are "
+                "skipped and asked again next run.",
+                forbidden,
+            )
+        if len(walker.unresolved) > forbidden:
+            logger.warning(
+                "Asana: %d project(s) answered 404, they are deleted or the gid is wrong; they "
+                "are skipped and asked again next run.",
+                len(walker.unresolved) - forbidden,
+            )
         if walker.kept:
             # A task Asana will not show is an expected state, so one line a run, with no ids.
             logger.warning(
@@ -1009,11 +1256,10 @@ def asana_source(
         service: Pre-built client (see :func:`build_asana_service`). Mainly an injection point
             for tests and hosts.
         check_active: Optional host authorization checkpoint, called before each request.
-        max_requests: Budget of the requests that read tasks in one run (a task costs three; a
-            call the client retries counts once), so at least 3. The listing (per project one
-            request for the project, one or more for its events, ``ceil(tasks / 100)`` for the
-            task listing) is not budgeted. A rate limit during it keeps the projects already
-            listed and the next run continues with the others.
+        max_requests: Budget of the requests of one run, the listing's and the task reads' (a
+            call the client retries counts once), so at least 3 (a task costs three). A run cut
+            by it inside the listing keeps its progress and the next run continues there;
+            rendering waits for a complete listing.
 
     Returns:
         A ``dlt`` resource configured with ``primary_key="id"``, ``write_disposition="merge"``
