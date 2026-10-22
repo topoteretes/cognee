@@ -132,7 +132,7 @@ async def ingest_dlt_source(
             raise DLTIngestionError(
                 message=f"DLT pipeline execution failed for dataset '{original_dataset_name}': {e}"
             ) from e
-        key_hints = _dlt_key_hints(_loaded_schema(pipeline, dlt_source))
+        key_hints = _dlt_key_hints(_source_tables(pipeline, dlt_source))
 
         # An incremental source can emit no rows (or only update its cursor),
         # so its load package need not contain a table job. Its previously
@@ -280,35 +280,94 @@ def _loaded_schema(pipeline, dlt_source):
     return pipeline.default_schema
 
 
-def _dlt_key_hints(schema) -> dict[str, dict]:
-    """Each data table's primary and foreign keys, as dlt's schema records them.
+def _source_tables(pipeline, dlt_source) -> list:
+    """The table hints of the resources this run loaded, named as dlt staged them.
+
+    Read from the resources, never from the pipeline's schema: unscoped sources
+    share one pipeline, and dlt merges each run's tables into its schema without
+    ever removing a reference, so that schema still holds the keys of every source
+    an earlier run staged under the same table name.
+
+    Resource hints carry the source's own spelling; the loaded schema's naming
+    convention gives the names the staging tables and columns were created with.
+    A resource whose table name depends on its items has no static hints.
+    """
+    from dlt.common.schema.utils import normalize_table_identifiers
+    from dlt.extract.source import DltSource
+
+    if isinstance(dlt_source, DltSource):
+        resources = list(dlt_source.resources.selected.values())
+    else:
+        resources = [dlt_source]
+    naming = _loaded_schema(pipeline, dlt_source).naming
+
+    tables = []
+    for resource in resources:
+        try:
+            table = resource.compute_table_schema()
+        except Exception:
+            logger.debug("No static table hints for resource %r", resource.name, exc_info=True)
+            continue
+        if table.get("name"):
+            tables.append(normalize_table_identifiers(table, naming))
+    return tables
+
+
+def _dlt_key_hints(tables) -> dict[str, dict]:
+    """Each table's primary and foreign keys, as dlt's table hints record them.
 
     dlt creates its staging tables without key constraints, so reflecting them finds
-    none; the source's keys survive only as schema hints. ``references`` holds one
-    entry per referenced table, merging every foreign key to it into two aligned
-    column lists, which are paired back into one entry per column.
+    none; the source's keys survive only as hints. ``references`` holds one entry
+    per referenced table, merging every foreign key to it into two aligned column
+    lists, which are paired back into one entry per column, in order. A composite
+    key's columns stay next to each other; ``_resolve_fk_references`` groups them.
     """
     return {
         table["name"]: {
             "primary_key": [
-                name for name, column in table["columns"].items() if column.get("primary_key")
+                name
+                for name, column in table.get("columns", {}).items()
+                if column.get("primary_key")
             ],
             "foreign_keys": [
                 {"column": column, "ref_table": ref["referenced_table"], "ref_column": ref_column}
-                for ref in table.get("references", [])
+                for ref in table.get("references") or []
+                if _aligned_reference(table["name"], ref)
                 for column, ref_column in zip(ref["columns"], ref["referenced_columns"])
             ],
         }
-        for table in schema.data_tables()
+        for table in tables
     }
+
+
+def _aligned_reference(table_name: str, ref: dict) -> bool:
+    """Whether a reference pairs each of its columns with one referenced column."""
+    if len(ref["columns"]) == len(ref["referenced_columns"]):
+        return True
+    logger.warning(
+        "Foreign key hint %s(%s) -> %s(%s) is skipped: its column lists differ in length.",
+        table_name,
+        ", ".join(ref["columns"]),
+        ref["referenced_table"],
+        ", ".join(ref["referenced_columns"]),
+    )
+    return False
 
 
 def _apply_key_hints(schema: dict, key_hints: dict[str, dict]) -> None:
     """Set each reflected table's keys from dlt's hints.
 
     Postgres names tables "<dataset>.<table>", so a foreign key's target gets the
-    same prefix to match the row lookup. A table without a hint keeps its reflected
-    keys: a missing hint must never fail the add.
+    same prefix to match the row lookup.
+
+    Every foreign key is kept, so the table describes all its keys, including one
+    to a table this run did not load (a single-table ``query``, or an empty table
+    dlt wrote no job for). Which of them can find a row is decided per row by
+    ``_resolve_fk_references``; a key whose target has no loaded rows creates no
+    edge and is reported there.
+
+    A table without a hint keeps its reflected keys: a missing hint must never fail
+    the add.
     """
     for qualified_name, table_info in schema.items():
         table_name = qualified_name.split(".")[-1]

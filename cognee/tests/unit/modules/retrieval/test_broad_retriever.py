@@ -256,3 +256,48 @@ async def test_a_dataset_over_store_mb_is_represented_by_its_most_similar_parts(
     assert found.route == "sql" and found.rows == [(3, "b")]  # only b's three lines were loaded
     assert "1 parts of the dataset most similar" in found.coverage
     assert "over the 1 parts of the dataset most similar" in found.note
+
+
+class _SchemaGraph:
+    """SchemaTable nodes only, as the DLT route writes them."""
+
+    def __init__(self, tables: list[tuple[str, str]]):
+        self.nodes = [
+            (f"t{n}", {"type": "SchemaTable", "name": name, "foreign_keys": foreign_keys})
+            for n, (name, foreign_keys) in enumerate(tables)
+        ]
+
+    async def get_filtered_graph_data(self, filters):
+        return [node for node in self.nodes if node[1]["type"] in filters[0]["type"]], []
+
+
+@pytest.mark.asyncio
+async def test_dlt_foreign_keys_are_shown_with_their_table():
+    """Keys of every table of one name are listed together; unreadable ones are skipped."""
+    from cognee.modules.retrieval.broad_store import RecordStore
+
+    orders_fk = '[{"column": "customer_id", "ref_table": "customers", "ref_column": "id"}]'
+    other_orders_fk = '[{"column": "shop_id", "ref_table": "shops", "ref_column": "id"}]'
+    graph = _SchemaGraph(
+        [
+            ("orders", orders_fk),
+            ("orders", other_orders_fk),
+            ("orders", orders_fk),
+            ("broken", "not json"),
+            ("partial", '[{"column": "a"}]'),
+        ]
+    )
+    foreign_keys = await BroadRetriever().dlt_foreign_keys(graph)
+    assert foreign_keys == {
+        "orders": ["customer_id references customers.id", "shop_id references shops.id"]
+    }
+
+    store = RecordStore()
+    try:
+        store.add_dlt_tables(foreign_keys)
+        store.add_dlt_rows(["Table: orders\nRow Data:\n  id: 7\n  customer_id: 3"])
+        assert "customer_id references customers.id; shop_id references shops.id" in (
+            store.describe("orders")
+        )
+    finally:
+        store.close()
