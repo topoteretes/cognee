@@ -55,6 +55,15 @@ def make_dist(root, name, metadata="", files=None):
         ("GPL-3.0-with-GCC-exception", set()),
         ("GPL-2.0-with-classpath-exception", set()),
         ("GPL-compatible", set()),
+        # Brackets bind first, then AND, then OR.
+        ("(MIT OR Apache-2.0) AND GPL-3.0-only", {"GPL"}),
+        ("(MIT OR GPL-2.0-only) AND GPL-3.0-only", {"GPL"}),
+        ("(GPL-2.0-only OR MIT) AND AGPL-3.0-only", {"AGPL"}),
+        ("MIT AND (Apache-2.0 OR GPL-2.0-only)", set()),
+        ("(MIT OR Apache-2.0) AND Unicode-3.0", set()),
+        ("GPL-2.0-only OR (MIT AND LicenseRef-Commercial)", {"GPL"}),
+        ("GPL-2.0-only OR (MIT AND BSD-3-Clause)", set()),
+        ("((MIT OR GPL-2.0-only)) AND GPL-3.0-only)", {"GPL"}),
         ("MPL-2.0", set()),
         ("Apache-2.0", set()),
         ("LicenseRef-NVIDIA-Proprietary", set()),
@@ -113,6 +122,13 @@ def test_classifiers(classifiers, expected):
             "terms listed in the NOTICE file shipped with this distribution\n",
             {},
             id="license-field-long-name",
+        ),
+        pytest.param(
+            # A one-line field is checked in full, however long.
+            "License: BSD-3-Clause for the Python bindings; the bundled libfoo C library is "
+            "licensed under the GNU General Public License v2\n",
+            {},
+            id="license-field-gpl-past-100-chars",
         ),
         pytest.param(
             "License: BSD-3-Clause\n",

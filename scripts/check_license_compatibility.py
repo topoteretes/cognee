@@ -90,8 +90,9 @@ OPEN_ALTERNATIVE = re.compile(
 # A license line inside a bundled license manifest ("License: GPL-2.0-only").
 MANIFEST_LICENSE_LINE = re.compile(r"^\s*LICENSE:\s*(.+)$", re.IGNORECASE | re.MULTILINE)
 
-# A License field longer than this is license text, not a license name.
-MAX_LICENSE_NAME = 100
+# The brackets and operators of a license expression. An operator needs
+# whitespace on both sides, so "GPL-2.0-or-later" stays one license.
+EXPRESSION_TOKEN = re.compile(r"(\(|\)|\s+(?:AND|OR)\s+)")
 
 # Magic numbers of native binaries: ELF, Mach-O (thin and fat), PE.
 NATIVE = (
@@ -118,20 +119,80 @@ def strong_copyleft(alternatives: list[str]) -> set[str]:
     Empty when some alternative carries a linking exception or is a recognised
     open license (``OPEN_ALTERNATIVE``) free of strong copyleft. An alternative
     that is neither -- a commercial license, ``LicenseRef-*``, unknown text --
-    excuses nothing. Each alternative may itself be an ``OR`` expression.
+    excuses nothing. Each alternative may itself be an expression: brackets
+    bind first, then ``AND``, then ``OR``, so in ``(MIT OR Apache-2.0) AND
+    GPL-3.0-only`` the GPL applies whichever bracketed license is chosen.
     """
-    required: set[str] = set()
-    for expression in alternatives:
-        for alternative in re.split(r"\s+OR\s+", expression.upper()):
-            if LINKING_EXCEPTION.search(alternative):
-                return set()
-            terms = set(GNU_ID.findall(alternative))
-            terms |= {name for title, name in TITLES.items() if title in alternative}
-            if terms & STRONG_COPYLEFT:
-                required |= terms & STRONG_COPYLEFT
-            elif OPEN_ALTERNATIVE.search(alternative):
-                return set()
-    return required
+    results = [evaluate(expression.upper()) for expression in alternatives]
+    if any(is_open for _, is_open in results):
+        return set()
+    return set().union(*(required for required, _ in results))
+
+
+def evaluate(expression: str) -> tuple[set[str], bool]:
+    """One license expression: (strong copyleft that applies, whether it is open).
+
+    Open means an Apache-2.0 distribution can take it as an alternative to
+    strong copyleft. Unmatched closing brackets are ignored.
+    """
+    tokens, depth = [], 0
+    for token in EXPRESSION_TOKEN.split(expression):
+        token = token.strip()
+        if token == ")":
+            if not depth:
+                continue
+            depth -= 1
+        elif token == "(":
+            depth += 1
+        if token:
+            tokens.append(token)
+    result, _ = parse_or(tokens, 0)
+    return result
+
+
+def parse_or(tokens: list[str], i: int) -> tuple[tuple[set[str], bool], int]:
+    """``OR`` from ``tokens[i]``: an open branch excuses the others, else all apply."""
+    branches = []
+    while True:
+        branch, i = parse_and(tokens, i)
+        branches.append(branch)
+        if i < len(tokens) and tokens[i] == "OR":
+            i += 1
+        else:
+            break
+    if any(is_open for _, is_open in branches):
+        return (set(), True), i
+    return (set().union(*(required for required, _ in branches)), False), i
+
+
+def parse_and(tokens: list[str], i: int) -> tuple[tuple[set[str], bool], int]:
+    """``AND`` from ``tokens[i]``, and terms written side by side ("GPL v3 (GPLv3)"):
+    every term applies, and the whole is open only when every term is."""
+    terms = []
+    while i < len(tokens) and tokens[i] not in ("OR", ")"):
+        if tokens[i] == "AND":
+            i += 1
+        elif tokens[i] == "(":
+            term, i = parse_or(tokens, i + 1)
+            if i < len(tokens):
+                i += 1  # the closing bracket
+            terms.append(term)
+        else:
+            terms.append(license_term(tokens[i]))
+            i += 1
+    required = set().union(*(required for required, _ in terms))
+    return (required, bool(terms) and all(is_open for _, is_open in terms)), i
+
+
+def license_term(text: str) -> tuple[set[str], bool]:
+    """A single license, without brackets or operators: (strong copyleft, whether open)."""
+    if LINKING_EXCEPTION.search(text):
+        return set(), True
+    names = set(GNU_ID.findall(text))
+    names |= {name for title, name in TITLES.items() if title in text}
+    if names & STRONG_COPYLEFT:
+        return names & STRONG_COPYLEFT, False
+    return set(), bool(OPEN_ALTERNATIVE.search(text))
 
 
 def is_vendored_library(path: Path) -> bool:
@@ -171,10 +232,10 @@ def declared_licenses(dist: Distribution) -> list[tuple[str, list[str]]]:
     """The distribution's declared license sources: (where, alternatives)."""
     metadata = dist.metadata
     license_field = (metadata.get("License") or "").strip()
-    if "\n" in license_field or len(license_field) > MAX_LICENSE_NAME:
+    if "\n" in license_field:
         # License text, not a name. A text starts with its own title, and only
         # its later lines mention the GPL in passing.
-        license_field = license_field.split("\n", 1)[0].strip()[:MAX_LICENSE_NAME]
+        license_field = license_field.split("\n", 1)[0].strip()
     classifiers = [
         c.split(" :: ", 1)[1]
         for c in metadata.get_all("Classifier") or []
@@ -233,9 +294,8 @@ def canonical(name: str) -> str:
 
 
 def has_license_metadata(dist: Distribution) -> bool:
-    """Whether the distribution declares a license name anywhere (a License field
-    holding full license text instead of a name does not count, see
-    ``declared_licenses``)."""
+    """Whether the distribution declares a license name anywhere (for a License
+    field holding full license text, its first line, see ``declared_licenses``)."""
     return any(alternatives and all(alternatives) for _, alternatives in declared_licenses(dist))
 
 
