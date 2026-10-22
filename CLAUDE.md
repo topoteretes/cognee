@@ -139,7 +139,7 @@ As of cognee 1.x the memory API is the primary surface. All functions are async.
 1. **remember()** - Store data in memory. Without `session_id` it runs `add()` + `cognify()` and then `improve()` (`self_improvement=True` by default); with `session_id` it writes to the fast session cache and bridges into the graph in the background.
 2. **recall()** - Query memory. Auto-routes to a search strategy unless `query_type` is passed (`auto_route=False` falls back to `HYBRID_COMPLETION`). A `session_id` reads the session cache first and falls through to the graph.
 3. **improve()** - Run the self-improvement stages over a dataset: with `session_ids`, bridge session Q&A, agent traces, distilled learnings and user preferences into the permanent graph and apply feedback weights; always, opt-in conflict review and global context indexing. Returns an `ImproveResult` with one `StageResult` per stage (see "IMPROVE: the orchestrator" below).
-4. **forget()** - Unified deletion (`data_id` / `dataset` / `dataset_id` / `everything=True`, plus `memory_only=True` to drop graph+vectors but keep raw files).
+4. **forget()** - Unified deletion (`data_id` / `dataset` / `dataset_id` / `everything=True`, plus `memory_only=True` to drop graph+vectors but keep raw files; a search that finds nothing after `memory_only` does not mean the data is gone). Every mode removes records and memory, not bytes: LanceDB keeps deleted rows in its fragments until compaction, which rewrites a fragment only once enough of it is deleted, and the embedded graph file has no user-facing compaction, so a byte-level erasure guarantee needs the engine's own compaction/vacuum or a new store.
 
 #### Low level operations: add → cognify → search
 
