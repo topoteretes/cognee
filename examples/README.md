@@ -128,6 +128,7 @@ with `remember()`, then runs one agent over that memory with `recall()`.
 | [`personalized_email/`](cookbooks/personalized_email/) | Granola + Gmail memory and a draft agent that answers an email with what you discussed, what you promised, and in your own tone |
 | [`company_brain/follow_up_agent/`](cookbooks/company_brain/follow_up_agent/) | Granola + Gmail + Linear memory and an agent that turns your latest call into next steps (owner, team, deadline, tracked issue) and posts them to Slack |
 | [`self_hosted_companion/`](cookbooks/self_hosted_companion/) | A chat companion that remembers your notes folder and every earlier chat |
+| [`import_agent_sessions/`](cookbooks/import_agent_sessions/) | Your Claude Code and Codex session history in one memory, answered over every agent at once and over each alone |
 | [`google_workspace_memory/`](cookbooks/google_workspace_memory/) | Google Calendar + Gmail + Drive memory and an agent that prepares your client meetings: which orders are late or at risk, why, and what to say |
 
 ### [`company_brain/`](cookbooks/company_brain/) — one memory for a whole company
