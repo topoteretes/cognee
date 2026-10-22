@@ -25,7 +25,9 @@ from cognee.modules.search.models.Result import Result
 # The module object: the routers package re-exports the function under the
 # module's own name, so a plain import would hand back the function.
 router_module = importlib.import_module("cognee.api.v1.search.routers.get_search_router")
-delete_history_module = importlib.import_module("cognee.modules.search.operations.delete_history")
+delete_history_module = importlib.import_module(
+    "cognee.modules.search.operations.delete_search_history"
+)
 get_history_module = importlib.import_module("cognee.modules.search.operations.get_history")
 
 

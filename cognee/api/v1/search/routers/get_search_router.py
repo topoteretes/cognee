@@ -10,7 +10,7 @@ from pydantic import Field
 from cognee import __version__ as cognee_version
 from cognee.api.DTO import ErrorResponse, InDTO, OutDTO
 from cognee.exceptions import CogneeApiError
-from cognee.modules.search.operations import delete_history, get_history
+from cognee.modules.search.operations import delete_user_search_history, get_history
 from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
@@ -183,7 +183,7 @@ def get_search_router() -> APIRouter:
                 "cognee_version": cognee_version,
             },
         )
-        return await delete_history(user.id)
+        return await delete_user_search_history(user.id)
 
     @router.get(
         "",
