@@ -84,12 +84,15 @@ for a document, `{"dataset_id", "search_history_removed", "status"}` for a
 dataset (plus `data_records_reset` with `memory_only`), `{"datasets_removed",
 "search_history_removed", "status"}` for everything (`datasets_removed`
 counts the datasets the user can *read*, not the delete set).
-`search_history_removed` is `False` when the recorded questions and answers
-were not purged even though the data is gone: a dataset or everything forget
-whose history cleanup failed (retry the forget or clear the history yourself),
-or any document forget, which never purges history (rows are attributed per
-dataset, so answers that quoted the document stay until the dataset itself is
-forgotten).
+`search_history_removed` is `True` for a dataset or everything forget: every
+recorded question and answer for the deleted datasets is gone, whoever asked.
+It does not cover rows saved without a dataset (history from before cognee
+1.5.0, or a search over several datasets with access control off): a dataset
+forget leaves them, and an everything forget removes only the caller's own.
+It is `False` for a document forget, which never purges history (rows are
+recorded per dataset, so answers that quoted the document stay until the
+dataset itself is forgotten). If the history purge fails, the forget raises
+before any data is deleted, so retry the same forget.
 
 **HTTP:** `POST /api/v1/forget` with a JSON body; camelCase and snake_case
 keys both work: `{"datasetId": "...", "dataId": "..."}`,

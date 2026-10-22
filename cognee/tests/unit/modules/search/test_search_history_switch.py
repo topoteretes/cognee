@@ -38,6 +38,8 @@ forget_mod = importlib.import_module("cognee.api.v1.forget.forget")
 # Patch the module object instead, which works on every version.
 datasets_mod = importlib.import_module("cognee.api.v1.datasets.datasets")
 
+COUNTS = {"queries_deleted": 1, "results_deleted": 1}
+
 
 @pytest_asyncio.fixture
 async def history_engine(tmp_path, monkeypatch):
@@ -134,7 +136,7 @@ async def test_delete_history_for_dataset_leaves_other_rows(history_engine, monk
 
     removed = await delete_history_mod.delete_dataset_search_history(dataset_a)
 
-    assert removed == 2
+    assert removed == {"queries_deleted": 1, "results_deleted": 1}
     remaining = await get_history_mod.get_history(user_id, limit=0)
     assert {row["dataset_id"] for row in remaining} == {dataset_b, None}
 
@@ -156,7 +158,7 @@ async def test_delete_history_for_dataset_covers_every_user(history_engine, monk
 
     removed = await delete_history_mod.delete_dataset_search_history(shared)
 
-    assert removed == 4
+    assert removed == {"queries_deleted": 2, "results_deleted": 2}
     assert await get_history_mod.get_history(owner, limit=0) == []
     remaining = await get_history_mod.get_history(reader, limit=0)
     assert {row["dataset_id"] for row in remaining} == {readers_own}
@@ -172,7 +174,7 @@ async def test_delete_history_for_user_removes_unattributed_rows(history_engine,
 
     removed = await delete_history_mod.delete_user_search_history(user_id)
 
-    assert removed == 4
+    assert removed == {"queries_deleted": 2, "results_deleted": 2}
     assert await get_history_mod.get_history(user_id, limit=0) == []
 
 
@@ -185,7 +187,10 @@ async def test_delete_history_ignores_the_logging_flag(history_engine, monkeypat
     await log_result_mod.log_result(query.id, "a", user_id)
 
     monkeypatch.setenv("COGNEE_LOG_SEARCH_HISTORY", "false")
-    assert await delete_history_mod.delete_user_search_history(user_id) == 2
+    assert await delete_history_mod.delete_user_search_history(user_id) == {
+        "queries_deleted": 1,
+        "results_deleted": 1,
+    }
 
 
 @pytest.mark.asyncio
@@ -193,16 +198,20 @@ async def test_forget_everything_purges_every_deleted_datasets_history():
     """Bob shares D with Alice (delete granted); Alice searched D; Bob forgets everything.
 
     delete_all removes D for Alice too, so Alice's rows on D must go with it:
-    the purge is per deleted dataset, shared ones included, plus Bob's own rows.
+    the purge is per deleted dataset, shared ones included, plus Bob's own rows,
+    and it runs before the data goes (see test_history_cleanup_failure_*).
     """
     user = SimpleNamespace(id=uuid4())
     own, shared = SimpleNamespace(id=uuid4()), SimpleNamespace(id=uuid4())
+    calls = []
     fake_datasets = SimpleNamespace(
         list_datasets=AsyncMock(return_value=[object(), object()]),
-        delete_all=AsyncMock(),
+        delete_all=AsyncMock(side_effect=lambda **_: calls.append("delete_all")),
     )
-    delete_dataset_history = AsyncMock(return_value=2)
-    delete_user_history = AsyncMock(return_value=3)
+    delete_dataset_history = AsyncMock(
+        side_effect=lambda _: calls.append("dataset_history") or COUNTS
+    )
+    delete_user_history = AsyncMock(side_effect=lambda _: calls.append("user_history") or COUNTS)
 
     with (
         patch.object(datasets_mod, "datasets", fake_datasets),
@@ -233,15 +242,21 @@ async def test_forget_everything_purges_every_deleted_datasets_history():
     authorized.assert_awaited_once_with([], "delete", user)
     assert [c.args for c in delete_dataset_history.await_args_list] == [(own.id,), (shared.id,)]
     delete_user_history.assert_awaited_once_with(user.id)
+    assert calls == ["dataset_history", "dataset_history", "user_history", "delete_all"]
 
 
 @pytest.mark.asyncio
 async def test_forget_dataset_purges_that_dataset_history():
     user = SimpleNamespace(id=uuid4())
     dataset_id = uuid4()
-    fake_datasets = SimpleNamespace(empty_dataset=AsyncMock())
-    delete_dataset_history = AsyncMock(return_value=1)
-    delete_user_history = AsyncMock(return_value=0)
+    calls = []
+    fake_datasets = SimpleNamespace(
+        empty_dataset=AsyncMock(side_effect=lambda *_, **__: calls.append("empty_dataset"))
+    )
+    delete_dataset_history = AsyncMock(
+        side_effect=lambda _: calls.append("dataset_history") or COUNTS
+    )
+    delete_user_history = AsyncMock(return_value=COUNTS)
 
     with (
         patch.object(datasets_mod, "datasets", fake_datasets),
@@ -266,6 +281,7 @@ async def test_forget_dataset_purges_that_dataset_history():
     delete_dataset_history.assert_awaited_once_with(dataset_id)
     # A dataset forget must not touch the user's history on other datasets.
     delete_user_history.assert_not_awaited()
+    assert calls == ["dataset_history", "empty_dataset"]
 
 
 @pytest.mark.asyncio
@@ -295,10 +311,11 @@ async def test_forget_data_item_reports_history_kept():
 
 
 @pytest.mark.asyncio
-async def test_history_cleanup_failure_does_not_fail_forget():
-    """The data is already gone; an unreachable history table is logged, not raised.
+async def test_history_cleanup_failure_fails_forget_before_the_data_goes():
+    """A history table that cannot be written fails the forget, and the dataset is kept.
 
-    The result still says so, so a caller with retention duties can retry.
+    The purge runs first, so the same forget can be retried; run after the
+    delete, a retry could no longer resolve the dataset.
     """
     user = SimpleNamespace(id=uuid4())
     dataset_id = uuid4()
@@ -311,8 +328,32 @@ async def test_history_cleanup_failure_does_not_fail_forget():
             "cognee.modules.search.operations.delete_dataset_search_history",
             AsyncMock(side_effect=RuntimeError("history table missing")),
         ),
+        pytest.raises(RuntimeError, match="history table missing"),
     ):
-        result = await forget_mod._forget_dataset(dataset_id, user)
+        await forget_mod._forget_dataset(dataset_id, user)
 
-    assert result["status"] == "success"
-    assert result["search_history_removed"] is False
+    fake_datasets.empty_dataset.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_history_cleanup_failure_fails_forget_everything_before_the_data_goes():
+    user = SimpleNamespace(id=uuid4())
+    fake_datasets = SimpleNamespace(
+        list_datasets=AsyncMock(return_value=[]), delete_all=AsyncMock()
+    )
+
+    with (
+        patch.object(datasets_mod, "datasets", fake_datasets),
+        patch(
+            "cognee.modules.data.methods.get_authorized_existing_datasets",
+            AsyncMock(return_value=[]),
+        ),
+        patch(
+            "cognee.modules.search.operations.delete_user_search_history",
+            AsyncMock(side_effect=RuntimeError("history table missing")),
+        ),
+        pytest.raises(RuntimeError, match="history table missing"),
+    ):
+        await forget_mod._forget_everything(user)
+
+    fake_datasets.delete_all.assert_not_awaited()
