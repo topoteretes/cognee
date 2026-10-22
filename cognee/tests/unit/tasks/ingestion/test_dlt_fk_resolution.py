@@ -167,3 +167,29 @@ def test_a_key_to_part_of_a_composite_key_needs_a_value_one_row_holds():
 
     assert _edges(refs) == {("other_references_users", ANN)}
     assert ambiguous == {("shipments", "o", "order_lines", "order_id")}
+
+
+def test_a_key_to_a_table_this_add_did_not_load_gets_its_own_warning(monkeypatch):
+    # badges -> people found no row because no people were loaded by this add();
+    # shipments -> order_lines missed one row of a table that was loaded.
+    from importlib import import_module
+    from unittest.mock import MagicMock
+
+    # The package re-exports a function of the same name, so import the module itself.
+    module = import_module("cognee.tasks.ingestion.resolve_dlt_sources")
+
+    logger = MagicMock()
+    monkeypatch.setattr(module, "logger", logger)
+    missing = [
+        ("badges", "employee_no", "people", "2"),
+        ("badges", "employee_no", "people", "7"),
+        ("shipments", "order_id, line_no", "order_lines", "9:1"),
+    ]
+
+    module._report_missing_fk_targets(missing, {"badges", "shipments", "order_lines"})
+
+    unloaded, unresolved = logger.warning.call_args_list
+    assert unloaded.args[1:5] == ("badges", "employee_no", "people", 2)
+    assert "only within one add()" in unloaded.args[0]
+    assert unresolved.args[1:] == (1, "shipments.order_id, line_no -> order_lines:9:1")
+    assert "max_rows_per_table" in unresolved.args[0]

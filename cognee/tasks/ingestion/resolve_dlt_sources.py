@@ -488,18 +488,7 @@ async def _build_source_manifest_item(
             manifest_row["timestamps"] = timestamps
         manifest_rows.append(manifest_row)
 
-    if missing_fk_targets:
-        sample = ", ".join(
-            f"{src}.{col} -> {ref}:{val}" for src, col, ref, val in missing_fk_targets[:5]
-        )
-        logger.warning(
-            "%d foreign key reference(s) could not be resolved to a loaded row "
-            "and were dropped (no edge created). The target row was likely not "
-            "ingested (e.g. it is beyond max_rows_per_table). "
-            "Sample (source_table.column -> ref_table:value): %s",
-            len(missing_fk_targets),
-            sample,
-        )
+    _report_missing_fk_targets(missing_fk_targets, set(key_columns))
     for src, col, ref, ref_col in sorted(ambiguous_fks):
         logger.warning(
             "Foreign key %s.%s -> %s.%s skipped values that several rows of '%s' hold; "
@@ -978,6 +967,49 @@ def _resolve_fk_references(
             missing_targets.append((dlt_row.table_name, fk_column, ref_table, fk_value_str))
 
     return references
+
+
+def _report_missing_fk_targets(missing_targets: list, loaded_tables: set[str]) -> None:
+    """Warn about FK references that found no target row, by why they missed.
+
+    ``missing_targets`` holds ``(source_table, column, ref_table, value)`` tuples
+    from ``_resolve_fk_references``; ``loaded_tables`` are the tables with rows in
+    this manifest. A key whose target table has no rows here gets one warning of
+    its own: edges are made only within one ``add()``, so loading that table in a
+    separate one never links these rows (see ``_resolve_fk_references``). Misses
+    against a table that was loaded keep the row-limit hint, where it can apply.
+    """
+    unloaded: dict[tuple[str, str, str], int] = {}
+    unresolved = []
+    for src, col, ref, val in missing_targets:
+        if ref in loaded_tables:
+            unresolved.append((src, col, ref, val))
+        else:
+            unloaded[(src, col, ref)] = unloaded.get((src, col, ref), 0) + 1
+
+    for (src, col, ref), count in sorted(unloaded.items()):
+        logger.warning(
+            "Foreign key %s.%s -> %s: %d row(s) get no edge, because this add() loaded "
+            "no rows of '%s'. Foreign keys link rows only within one add(): load '%s' "
+            "in the same add() as '%s' to link them.",
+            src,
+            col,
+            ref,
+            count,
+            ref,
+            ref,
+            src,
+        )
+    if unresolved:
+        sample = ", ".join(f"{src}.{col} -> {ref}:{val}" for src, col, ref, val in unresolved[:5])
+        logger.warning(
+            "%d foreign key reference(s) could not be resolved to a loaded row "
+            "and were dropped (no edge created). The target row was likely not "
+            "ingested (e.g. it is beyond max_rows_per_table). "
+            "Sample (source_table.column -> ref_table:value): %s",
+            len(unresolved),
+            sample,
+        )
 
 
 def _fk_keys(foreign_keys: list, key_columns: dict[str, list[str]]):
