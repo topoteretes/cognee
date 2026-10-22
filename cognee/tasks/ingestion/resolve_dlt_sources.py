@@ -19,7 +19,11 @@ from urllib.parse import urlparse
 from urllib.request import url2pathname
 from uuid import UUID
 
-from cognee.modules.data.methods.get_unique_data_id import get_unique_data_id
+from cognee.modules.data.methods.get_existing_data_ids import (
+    DATA_ID_BATCH_SIZE,
+    get_existing_data_ids,
+)
+from cognee.modules.data.methods.get_unique_data_id import get_unique_data_id, get_unique_data_ids
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -405,12 +409,14 @@ async def _build_source_manifest_item(
     # Stable per-row node ids via the shared identifier formula. FK lookup
     # maps (table, pk_value) → node_id; when multiple rows share a PK value,
     # the last one wins (best-effort).
-    # TODO: add a batch variant of get_unique_data_id (one query per source
-    # instead of one per row) after the incremental load PR reshapes it.
-    node_ids: dict[tuple[str, str, str], UUID] = {
-        key: await get_unique_data_id(_dlt_row_identifier(row), user)
-        for key, row in unique_rows.items()
-    }
+    node_ids: dict[tuple[str, str, str], UUID] = dict(
+        zip(
+            unique_rows,
+            await get_unique_data_ids(
+                [_dlt_row_identifier(row) for row in unique_rows.values()], user
+            ),
+        )
+    )
 
     fk_lookup: dict[tuple[str, str], UUID] = {}
     for key, row in unique_rows.items():
@@ -595,28 +601,15 @@ async def _stable_row_ids(rows: list[DltRowData], user: User, dataset_id: UUID) 
     if not rows:
         return []
 
-    new_ids = [await get_unique_data_id(_dlt_row_identifier(row), user, dataset_id) for row in rows]
-    old_ids = [await get_unique_data_id(_dlt_row_identifier(row), user) for row in rows]
-
-    from sqlalchemy import select
-
     from cognee.infrastructure.databases.relational import get_relational_engine
-    from cognee.modules.data.models import Data
 
+    identifiers = [_dlt_row_identifier(row) for row in rows]
     engine = get_relational_engine()
     async with engine.get_async_session() as session:
-        adopted = set(
-            (
-                await session.execute(
-                    select(Data.id).filter(Data.id.in_(old_ids), Data.dataset_id == dataset_id)
-                )
-            ).scalars()
-        )
+        new_ids = await get_unique_data_ids(identifiers, user, dataset_id, session)
+        old_ids = await get_unique_data_ids(identifiers, user, session=session)
+        adopted = await get_existing_data_ids(session, old_ids, dataset_id)
     return [old_id if old_id in adopted else new_id for old_id, new_id in zip(old_ids, new_ids)]
-
-
-# Within SQLite's bind-parameter limit.
-_STRUCTURE_REFRESH_BATCH = 500
 
 
 async def _refresh_row_structure(items: list[DataItem], dataset_id: UUID) -> None:
@@ -638,10 +631,10 @@ async def _refresh_row_structure(items: list[DataItem], dataset_id: UUID) -> Non
 
     ids = list(wanted)
     async with get_relational_engine().get_async_session() as session:
-        for start in range(0, len(ids), _STRUCTURE_REFRESH_BATCH):
+        for start in range(0, len(ids), DATA_ID_BATCH_SIZE):
             rows = await session.execute(
                 select(Data).filter(
-                    Data.id.in_(ids[start : start + _STRUCTURE_REFRESH_BATCH]),
+                    Data.id.in_(ids[start : start + DATA_ID_BATCH_SIZE]),
                     Data.dataset_id == dataset_id,
                 )
             )
