@@ -576,9 +576,15 @@ def live_lines(script: Path, extra: list[str], record: Path | None):
         stderr=subprocess.STDOUT,
         text=True,
         cwd=script.parent,
+        # Its own session, so a terminal Ctrl-C reaches only this process and
+        # the script gets exactly the one SIGINT forwarded below. In the
+        # terminal's process group it would get a second one from us while
+        # its finally is deleting sandboxes, and abort that cleanup.
+        start_new_session=True,
     )
     t0 = time.time()
     sink = record.open("w") if record else None
+    interrupts = 0
     try:
         assert proc.stdout is not None
         lines = iter(proc.stdout)
@@ -588,9 +594,14 @@ def live_lines(script: Path, extra: list[str], record: Path | None):
             except StopIteration:
                 break
             except KeyboardInterrupt:
-                # Ctrl-C: let the script clean up (its finally deletes sandboxes)
-                # and keep showing what it prints while it does.
-                proc.send_signal(signal.SIGINT)
+                # First Ctrl-C: let the script clean up (its finally deletes
+                # sandboxes) and keep showing what it prints while it does.
+                # A second one is the user insisting: stop it outright.
+                interrupts += 1
+                if interrupts == 1:
+                    proc.send_signal(signal.SIGINT)
+                else:
+                    proc.terminate()
                 continue
             # Trailing spaces stripped so a recorded transcript passes the
             # repo's trailing-whitespace hook as written.

@@ -51,6 +51,7 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from pathlib import Path
 
 import httpx
@@ -66,6 +67,7 @@ from daytona import (  # type: ignore[import-untyped]
     Sandbox,
     SessionExecuteRequest,
 )
+from openai import OpenAIError  # litellm's errors subclass it; openai comes with litellm
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))  # ledger_env
@@ -193,8 +195,12 @@ class Memory:
                 "system_prompt": LESSONS_SYSTEM_PROMPT,
             },
         )
-        if r.status_code >= 400:
+        if r.status_code == 404:
             return ""  # no dataset yet on the first step
+        # Anything else (a 500, a 422, a 502 from the preview proxy) must fail
+        # loudly: read as "no lessons", it would make the memory-on evaluation
+        # quietly run without memory.
+        r.raise_for_status()
         items = r.json()
         text = "\n".join(str(i.get("text", "")) for i in items if isinstance(i, dict)).strip()
         return "" if _is_non_answer(text) else text
@@ -335,24 +341,38 @@ class Rollouts:
         for i, future in enumerate(futures):
             try:
                 results.append(future.result(timeout=ATTEMPT_DEADLINE))
-            except TimeoutError:
+            # concurrent.futures.TimeoutError is the builtin only from Python 3.11.
+            except (FutureTimeoutError, TimeoutError):
                 print(f"    attempt {i} timed out after {ATTEMPT_DEADLINE}s; counted as reward 0")
                 results.append(
-                    {
-                        "variant": variant_id,
-                        "index": i,
-                        "failing_before": [],
-                        "seeded": env.seed(variant_id)[env.SOURCE_FILE],
-                        "prompt": "",
-                        "answer": "",
-                        "output": "attempt timed out",
-                        "reward": 0,
-                        "seconds": float(ATTEMPT_DEADLINE),
-                    }
+                    self._failed(variant_id, i, "attempt timed out", float(ATTEMPT_DEADLINE))
+                )
+            except (OpenAIError, DaytonaError, RuntimeError, httpx.HTTPError, OSError) as err:
+                # One attempt's LLM error (every litellm error is an OpenAIError;
+                # a 429 under 4 parallel calls), sandbox error, or failed
+                # command (run_in raises RuntimeError) must not end the whole run.
+                print(f"    attempt {i} failed ({type(err).__name__}); counted as reward 0")
+                results.append(
+                    self._failed(variant_id, i, f"attempt failed: {type(err).__name__}: {err}", 0.0)
                 )
         pool.shutdown(wait=False, cancel_futures=True)
         self.sweep()
         return results
+
+    @staticmethod
+    def _failed(variant_id: str, index: int, output: str, seconds: float) -> dict:
+        """The result of an attempt that produced no answer: reward 0."""
+        return {
+            "variant": variant_id,
+            "index": index,
+            "failing_before": [],
+            "seeded": env.seed(variant_id)[env.SOURCE_FILE],
+            "prompt": "",
+            "answer": "",
+            "output": output,
+            "reward": 0,
+            "seconds": seconds,
+        }
 
     def sweep(self) -> None:
         """Delete rollout sandboxes of this run that an attempt did not get to delete."""
