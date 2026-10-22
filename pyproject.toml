@@ -79,12 +79,12 @@ dependencies = [
     # Local CPU embeddings (onnxruntime, ~65 MB): the embedder cognee runs on when no
     # LLM key and no EMBEDDING_* settings are configured, so a bare install can ingest.
     "fastembed<=0.8.0",
-    # onnxruntime 1.23.2 only ships wheels through cp313; cp314 wheels start
-    # at onnxruntime 1.24.1. Split by python_version so existing 3.10–3.13
-    # users keep the pinned version and 3.14 picks up the first cp314-capable
-    # release.
-    "onnxruntime<=1.23.2 ; python_version < '3.14'",
-    "onnxruntime>=1.24.1 ; python_version >= '3.14'",
+    # onnxruntime 1.23.2 is the last release with cp310 wheels, so 3.10 stays
+    # there. 3.11+ needs >=1.25.0: the patched unstructured (0.24.1, see the docs
+    # extra) pulls unstructured-inference>=1.6.12, which requires it. cp314
+    # wheels start at 1.24.1, so this also covers 3.14.
+    "onnxruntime<=1.23.2 ; python_version < '3.11'",
+    "onnxruntime>=1.25.0 ; python_version >= '3.11'",
     "structlog>=25.2.0,<26",
     "pympler>=1.1,<2.0.0",
     "pylance>=12.0.0,<12.1.0",  # same Lance release line as lancedb, see above
@@ -135,11 +135,9 @@ scraping = [
     "tavily-python>=0.7.12",
     "beautifulsoup4>=4.13.1",
     "playwright>=1.9.0",
-    "lxml>=4.9.3,<5 ; python_version < '3.13'",
-    "lxml>=5,<6 ; python_version >= '3.13' and python_version < '3.14'",
-    # cp314 wheels start at lxml 6.0.1; without this 3.14 falls back to a
-    # source build that requires libxml2/libxslt headers (CI doesn't have them).
-    "lxml>=6.0.1,<7 ; python_version >= '3.14'",
+    # GHSA-vfmq-68hx-4jfw is fixed in lxml 6.1.0, which ships wheels for every
+    # supported CPython (3.10-3.14), so one floor replaces the old per-version split.
+    "lxml>=6.1.0,<7",
     "protego>=0.1",
     "APScheduler>=3.10.0,<=3.11.0"
 ]
@@ -163,7 +161,8 @@ turso = ["pyturso>=0.7.2,<0.8"]
 notebook = ["notebook>=7.1.0,<8"]
 langchain = [
     "langsmith>=0.2.3,<1.0.0",
-    "langchain_text_splitters>=0.3.2,<1.0.0",
+    # GHSA-fv5p-p927-qmxr is fixed in 1.1.2; 1.x pairs with the langchain-core 1.x floor below.
+    "langchain_text_splitters>=1.1.2,<2",
     "langchain-core>=1.2.5"
 ]
 llama-index = ["llama-index-core>=0.14.20,<0.15"]
@@ -177,11 +176,13 @@ posthog = ["posthog>=3.5.0,<4"]
 groq = ["groq>=0.8.0,<1.0.0"]
 llama-cpp = ["llama-cpp-python[server]>=0.3.0,<1.0.0"]
 docs = [
-    "lxml>=4.9.3,<5 ; python_version < '3.13'",
-    "lxml>=5,<6 ; python_version >= '3.13' and python_version < '3.14'",
-    # cp314 wheels start at lxml 6.0.1.
-    "lxml>=6.0.1,<7 ; python_version >= '3.14'",
-    "unstructured[csv, doc, docx, epub, md, odt, org, ppt, pptx, rst, rtf, tsv, xlsx, pdf]>=0.18.1,<19",
+    # GHSA-vfmq-68hx-4jfw is fixed in lxml 6.1.0 (see the scraping extra).
+    "lxml>=6.1.0,<7",
+    # GHSA-4mvj-m6j5-pmf7 (critical) and GHSA-v5mq-3xhg-98m9 are fixed in 0.24.1.
+    # 0.24.1's pdf extra needs unstructured-inference>=1.6.12 -> onnxruntime>=1.25.0,
+    # which has no cp310 wheel, so Python 3.10 keeps the older line (see onnxruntime above).
+    "unstructured[csv, doc, docx, epub, md, odt, org, ppt, pptx, rst, rtf, tsv, xlsx, pdf]>=0.24.1,<1 ; python_version >= '3.11'",
+    "unstructured[csv, doc, docx, epub, md, odt, org, ppt, pptx, rst, rtf, tsv, xlsx, pdf]>=0.18.1,<1 ; python_version < '3.11'",
     "nltk>=3.9.3,<4", # TODO: Remove when unstructured is above v0.21.0 as it won't use nltk anymore
 ]
 # enola-cli is a core dependency. The empty extra keeps `cognee[codegraph]` installable.
@@ -228,7 +229,6 @@ dev = [
     "notebook>=7.1.0,<8",
     "deptry>=0.20.0,<0.21",
     "ruff>=0.9.2,<=0.16.6",
-    "tweepy>=4.14.0,<5.0.0",
     "gitpython>=3.1.43,<4",
     "mkdocs-material>=9.5.42,<10",
     "mkdocs-minify-plugin>=0.8.0,<0.9",
