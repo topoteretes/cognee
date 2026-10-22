@@ -504,6 +504,8 @@ class CloudClient:
             payload["chunk_size"] = kwargs["chunk_size"]
         if kwargs.get("chunks_per_batch") is not None:
             payload["chunks_per_batch"] = kwargs["chunks_per_batch"]
+        if kwargs.get("graph_model") is not None:
+            payload["graph_model"] = kwargs["graph_model"]
 
         async with session.post(
             f"{self.service_url}/api/v1/cognify",
