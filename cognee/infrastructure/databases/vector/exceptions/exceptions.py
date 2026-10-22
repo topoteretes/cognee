@@ -8,7 +8,11 @@ class SharedDatabasePruneError(RuntimeError):
 
 
 class EmbeddingDimensionMismatchError(CogneeValidationError):
-    """The configured embedding model produces a different vector width than the one that built a dataset."""
+    """The configured embedding model is not the one that built a dataset.
+
+    Raised for a different vector width, and for a different model of the same
+    width: equal widths do not put two models' vectors in one space.
+    """
 
     def __init__(
         self,
@@ -31,6 +35,11 @@ class EmbeddingDimensionMismatchError(CogneeValidationError):
             if stored_model
             else f"an earlier embedding model ({stored_dimensions} dimensions)"
         )
+        configured = (
+            f"is '{configured_model}'"
+            if stored_dimensions == configured_dimensions
+            else f"'{configured_model}' produces {configured_dimensions}"
+        )
         keep_using = (
             f"Set EMBEDDING_MODEL back to '{stored_model}'"
             if stored_model
@@ -39,7 +48,7 @@ class EmbeddingDimensionMismatchError(CogneeValidationError):
         super().__init__(
             message=(
                 f"Dataset {dataset_id} was embedded with {built_with}, but the configured "
-                f"embedding model '{configured_model}' produces {configured_dimensions}. "
+                f"embedding model {configured}. "
                 "A dataset's vectors must all come from one model."
             ),
             name=name,
