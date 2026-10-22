@@ -13,6 +13,7 @@ from src.server_utils import (
     MAX_RECALL_REFS,
     format_recall_body,
     format_recall_results,
+    recall_item_dataset,
     recall_item_refs,
 )
 
@@ -135,6 +136,45 @@ def test_body_with_references_puts_refs_under_each_hit():
     )
     rendered = format_recall_results(payload, include_references=True)
     assert rendered.splitlines()[0] == "3 memories found (2 from main_dataset, 1 from sessions)"
+
+
+def test_evidence_is_taken_best_rank_first():
+    ids = [f"{i:08d}-0000-0000-0000-000000000000" for i in range(4)]
+    evidence = [
+        {**_segment(ids[0]), "rank": 3},
+        {**_segment(ids[1]), "rank": None},
+        {**_segment(ids[2]), "rank": 0},
+        {**_segment(ids[3]), "rank": 1},
+    ]
+    hit = {"text": "x", "dataset_id": DATASET, "metadata": {"evidence": evidence}}
+    assert [ref["data_id"] for ref in recall_item_refs(hit)] == [ids[2], ids[3], ids[0], ids[1]]
+
+
+def _hybrid_hit(dataset_id: str | None = DATASET) -> dict:
+    # The default hybrid answer: no structured evidence, data_ids cited in the text.
+    return {
+        "source": "graph",
+        "kind": "graph_completion",
+        "text": f'amber-falcon-42\n\nEvidence:\n- chunk 1 of document t (data_id: {DATA_A}): "..."',
+        "dataset_id": dataset_id,
+        "dataset_name": "main_dataset",
+        "metadata": {},
+    }
+
+
+def test_hit_without_refs_gets_a_dataset_line():
+    hit = _hybrid_hit()
+    assert recall_item_dataset(hit) == f"dataset: main_dataset (dataset_id={DATASET})"
+    body = format_recall_body([hit], include_references=True)
+    assert body == f"[graph] {hit['text']}\n  dataset: main_dataset (dataset_id={DATASET})"
+    assert format_recall_body([hit]) == f"[graph] {hit['text']}"
+
+
+def test_no_dataset_line_without_a_dataset_id():
+    # Access control off and an unscoped recall: search knows no dataset.
+    hit = _hybrid_hit(dataset_id=None)
+    assert recall_item_dataset(hit) is None
+    assert format_recall_body([hit], include_references=True) == f"[graph] {hit['text']}"
 
 
 @pytest.mark.asyncio

@@ -4,6 +4,7 @@
 import asyncio
 import logging
 import os
+import re
 from contextlib import asynccontextmanager
 from uuid import uuid4
 
@@ -176,25 +177,51 @@ class CogneeTestClient:
             print(f"FAIL memory tools: {e}")
 
     @staticmethod
-    def _refs_under_hit(recall_text: str, needle: str) -> dict[str, str]:
-        """Parse the first `refs:` line under the recall hit whose text contains needle."""
-        for block in recall_text.split("\n\n"):
-            if needle not in block:
-                continue
-            for line in block.splitlines():
-                line = line.strip()
-                if line.startswith("refs: "):
-                    return dict(part.split("=", 1) for part in line[len("refs: ") :].split(", "))
-        raise AssertionError(f"No refs line under the hit containing {needle!r}: {recall_text}")
+    def _forget_ids(recall_text: str, needle: str) -> dict[str, str]:
+        """The data_id and dataset_id recall printed for the hit that contains needle.
 
-    async def test_forget_one_memory(self):
+        A chunk hit carries both on a `refs:` line under it. The default answer
+        cites the data_id in its `Evidence:` line and the dataset_id on the
+        `dataset:` line that ends the hit.
+        """
+        lines = recall_text.splitlines()
+        for index, line in enumerate(lines):
+            if needle not in line:
+                continue
+            ids = {}
+            cited = re.search(r"data_id: ([0-9a-f-]{36})", line)
+            if cited:
+                ids["data_id"] = cited.group(1)
+            for following in lines[index + 1 :]:
+                following = following.strip()
+                if following.startswith("["):
+                    break
+                if following.startswith("refs: "):
+                    return dict(
+                        part.split("=", 1) for part in following[len("refs: ") :].split(", ")
+                    )
+                dataset = re.search(r"^dataset: .*dataset_id=([0-9a-f-]{36})\)?$", following)
+                if dataset and "data_id" in ids:
+                    return {**ids, "dataset_id": dataset.group(1)}
+        raise AssertionError(f"No forget ids for the hit containing {needle!r}: {recall_text}")
+
+    async def test_forget_one_memory(self, search_type: str | None):
         """Recall one item with references, forget it by id, and keep the other."""
-        print("\nTesting forget of a single recalled memory...")
+        mode = search_type or "default"
+        name = f"forget_one_memory_{mode.lower()}"
+        print(f"\nTesting forget of a single recalled memory ({mode} recall)...")
 
         tag = uuid4().hex[:12]
         dataset = f"mcp_forget_{tag}"
         secret = f"The vault recovery phrase for {tag} is amber-falcon-42."
         keep = f"The {tag} team has lunch together every Friday."
+        # The check after forget lists chunks, so it sees every stored item.
+        chunks_args = {
+            "query": f"vault recovery phrase {tag}",
+            "datasets": dataset,
+            "search_type": "CHUNKS",
+            "top_k": 5,
+        }
 
         try:
             async with self.mcp_server_session() as session:
@@ -211,28 +238,27 @@ class CogneeTestClient:
                         raise AssertionError(f"remember failed: {self._content_text(result)}")
 
                 recall_args = {
-                    "query": f"vault recovery phrase {tag}",
+                    "query": f"What is the vault recovery phrase for {tag}?",
                     "datasets": dataset,
-                    "search_type": "CHUNKS",
-                    "top_k": 5,
+                    "include_references": True,
                 }
+                if search_type:
+                    recall_args = {**chunks_args, "include_references": True}
                 before = self._content_text(
-                    await session.call_tool(
-                        "recall", arguments={**recall_args, "include_references": True}
-                    )
+                    await session.call_tool("recall", arguments=recall_args)
                 )
-                refs = self._refs_under_hit(before, "amber-falcon-42")
+                ids = self._forget_ids(before, "amber-falcon-42")
 
                 forgotten = self._content_text(
                     await session.call_tool(
                         "forget",
-                        arguments={"data_id": refs["data_id"], "dataset_id": refs["dataset_id"]},
+                        arguments={"data_id": ids["data_id"], "dataset_id": ids["dataset_id"]},
                     )
                 )
-                if f"Data item '{refs['data_id']}' deleted" not in forgotten:
+                if f"Data item '{ids['data_id']}' deleted" not in forgotten:
                     raise AssertionError(f"Unexpected forget response: {forgotten}")
 
-                after = self._content_text(await session.call_tool("recall", arguments=recall_args))
+                after = self._content_text(await session.call_tool("recall", arguments=chunks_args))
                 await session.call_tool("forget", arguments={"dataset": dataset})
 
             if "amber-falcon-42" in after:
@@ -240,21 +266,21 @@ class CogneeTestClient:
             if "lunch together every Friday" not in after:
                 raise AssertionError(f"The other memory was lost too: {after}")
 
-            self.test_results["forget_one_memory"] = {
+            self.test_results[name] = {
                 "status": "PASS",
-                "message": "recall references led forget to exactly one item",
+                "message": f"{mode} recall references led forget to exactly one item",
             }
-            print("PASS forget one memory")
+            print(f"PASS forget one memory ({mode} recall)")
         except Exception as e:
             logger.debug(
                 "Ignoring exception in CogneeTestClient.test_forget_one_memory", exc_info=True
             )
-            self.test_results["forget_one_memory"] = {
+            self.test_results[name] = {
                 "status": "FAIL",
                 "error": str(e),
-                "message": "Forget-one-memory test failed",
+                "message": f"Forget-one-memory test failed ({mode} recall)",
             }
-            print(f"FAIL forget one memory: {e}")
+            print(f"FAIL forget one memory ({mode} recall): {e}")
 
     async def run_all_tests(self):
         """Run the MCP smoke test suite."""
@@ -264,7 +290,8 @@ class CogneeTestClient:
         await self.test_tool_discovery()
         await self.test_hidden_tool_is_still_callable()
         await self.test_memory_tools()
-        await self.test_forget_one_memory()
+        await self.test_forget_one_memory(search_type=None)
+        await self.test_forget_one_memory(search_type="CHUNKS")
         self.print_test_summary()
 
     def print_test_summary(self):

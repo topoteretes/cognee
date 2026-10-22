@@ -188,6 +188,29 @@ def _format_completion_results(
 MAX_RECALL_REFS = 5
 
 
+def _evidence_rank(reference: Any) -> tuple[bool, int]:
+    rank = reference.get("rank") if isinstance(reference, dict) else None
+    if isinstance(rank, int) and not isinstance(rank, bool):
+        return (False, rank)
+    return (True, 0)
+
+
+def recall_item_dataset(item: Any) -> str | None:
+    """The dataset line for a hit whose data ids are cited in its text, not in refs.
+
+    The default hybrid answer lists its sources' data_ids in an ``Evidence:``
+    block inside the answer; ``forget`` also needs the dataset, which only the
+    hit itself carries.
+    """
+    dataset_id = _get_field(item, "dataset_id")
+    if not dataset_id:
+        return None
+    name = _get_field(item, "dataset_name")
+    if name:
+        return f"dataset: {' '.join(str(name).split())[:60]} (dataset_id={dataset_id})"
+    return f"dataset: dataset_id={dataset_id}"
+
+
 def recall_item_refs(item: Any) -> list[dict[str, str]]:
     """Forgettable data items behind one recall hit, as (data_id, dataset_id) pairs.
 
@@ -196,12 +219,16 @@ def recall_item_refs(item: Any) -> list[dict[str, str]]:
     ``metadata.evidence`` (only with ``include_references``). Graph-node, edge
     and triplet references name no document and are skipped. A reference
     without its own ``dataset_id`` takes the hit's, since ``forget`` needs both.
+    Evidence is taken best match first (lowest ``rank``; unranked last), so the
+    cap keeps the most relevant items.
     """
     metadata = _model_dump(_get_field(item, "metadata"))
     if not isinstance(metadata, dict):
         return []
     hit_dataset_id = _get_field(item, "dataset_id")
-    candidates = [metadata, *(metadata.get("evidence") or [])]
+    evidence = [_model_dump(reference) for reference in metadata.get("evidence") or []]
+    evidence.sort(key=_evidence_rank)
+    candidates = [metadata, *evidence]
 
     refs: list[dict[str, str]] = []
     seen: set[tuple[str, str]] = set()
@@ -235,7 +262,9 @@ def format_recall_body(
     """Render recall results, including normalized response envelopes.
 
     With ``include_references``, each hit backed by stored data gets one
-    ``refs:`` line per data item, carrying the ids ``forget`` takes.
+    ``refs:`` line per data item, carrying the ids ``forget`` takes. A hit with
+    no structured refs (the default hybrid answer cites data_ids in its text)
+    gets one ``dataset:`` line instead, so the cited ids can be paired with it.
     """
     results = _unwrap_results(results)
     if not results:
@@ -253,8 +282,12 @@ def format_recall_body(
         prefix = f"[{source}] " if source else ""
         line = f"{prefix}{rendered}"
         if include_references:
-            for ref in recall_item_refs(result):
+            refs = recall_item_refs(result)
+            for ref in refs:
                 line += "\n  refs: " + ", ".join(f"{key}={value}" for key, value in ref.items())
+            dataset = None if refs else recall_item_dataset(result)
+            if dataset:
+                line += f"\n  {dataset}"
         lines.append(line)
 
     return "\n\n".join(lines)
