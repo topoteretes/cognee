@@ -47,8 +47,11 @@ class FakeAsana:
         self.events: dict[str, list[dict]] = {}  # per project: events not yet delivered
         self.tokens: dict[str, str] = {}  # per project: the sync token Asana accepts
         self.calls: list[tuple[str, dict]] = []  # (path, params) of every request
-        # (path prefix, status or None for a network error, headers, message, times left or None)
+        # (path prefix, status or None for a network error, headers, message, times left or None,
+        # matching requests to let through first)
         self.failures: list[list] = []
+        self.quota: int | None = None  # requests a rate-limit window serves before it answers 429
+        self.served = 0  # requests served in the current window
         self.answers: dict[str, object] = {}  # path -> body answered with 200 instead
         self.stuck_offset: str | None = None  # every page names this offset as the next one
         self.events_page_size = 100
@@ -160,13 +163,29 @@ class FakeAsana:
         self.tokens[project_gid] = self._new_token(project_gid)
 
     def fail(
-        self, prefix: str, status: int | None, *, headers=None, message="Not allowed", times=None
+        self,
+        prefix: str,
+        status: int | None,
+        *,
+        headers=None,
+        message="Not allowed",
+        times=None,
+        after: int = 0,
     ):
         """Answer every request for ``prefix`` or a path below it with an error.
 
-        ``status`` None is a network failure; ``times`` limits how often (None: for good).
+        ``status`` None is a network failure; ``times`` limits how often (None: for good);
+        ``after`` lets that many matching requests through first.
         """
-        self.failures.append([prefix, status, headers or {}, message, times])
+        self.failures.append([prefix, status, headers or {}, message, times, after])
+
+    def rate_limit(self, requests: int) -> None:
+        """Serve ``requests`` requests per window, then answer 429 until ``new_window()``."""
+        self.quota = requests
+        self.served = 0
+
+    def new_window(self) -> None:
+        self.served = 0
 
     def heal(self, prefix: str | None = None) -> None:
         self.failures = [f for f in self.failures if prefix is not None and f[0] != prefix]
@@ -187,9 +206,16 @@ class FakeAsana:
     def respond(self, path: str, params=None) -> Resp:
         params = dict(params or {})
         self.calls.append((path, params))
+        if self.quota is not None:
+            if self.served >= self.quota:
+                return Resp(429, {"errors": [{"message": "Rate limit"}]})
+            self.served += 1
         for failure in self.failures:
-            prefix, status, headers, message, times = failure
+            prefix, status, headers, message, times, after = failure
             if not (path == prefix or path.startswith(f"{prefix}/")) or times == 0:
+                continue
+            if after:
+                failure[5] = after - 1
                 continue
             if times is not None:
                 failure[4] = times - 1

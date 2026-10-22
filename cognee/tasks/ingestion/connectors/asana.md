@@ -66,7 +66,7 @@ Run the same `remember` call again whenever you want to sync.
 | `resource_name` | Names this connection: it names the staging table and keys the sync state. A non-blank string that does not start with `_dlt_` (dlt's own tables) | required, one per connection |
 | `project_gids` | The projects to sync: a non-empty list or tuple of gid strings | required |
 | `access_token` | Asana personal access token or OAuth access token. Never read from the environment | needed unless `service` is given |
-| `max_requests` | Budget of the requests that read tasks in one run (three a task); the listing is not counted. A positive int | 1500 |
+| `max_requests` | Budget of the requests that read tasks in one run (three a task); the listing is not counted. An int of at least 3 | 1500 |
 | `check_active` | Host checkpoint, called before every request | none |
 | `service` | Pre-built client, from `build_asana_service(access_token)` | built from `access_token` |
 
@@ -154,19 +154,22 @@ kept for a retry.
 from a complete listing of the selected projects: deleted in Asana, moved out of the selected
 projects, or its project deselected. dlt removes the row on `merge`, and cognee's orphan cleanup
 removes the document, graph content and vectors. A run that stops early, fails or is cut forgets
-nothing: the tombstones are only computed after every project was listed in full.
+nothing: the tombstones are only computed when every selected project was listed in full in the
+same pass (see "A listing cut by a rate limit").
 
 **A task that cannot be read.** A task that is still listed but answers 403, 404, a 5xx or
 nothing (after three attempts, backing off 1 s then 2 s) keeps its **old document**. It is kept
 for a retry (`state["retry"]`), asked again at the end of the next run's order, never forgotten
 and never given up on; it fails at most once per run. It can never stop another task from being
-read, and it does not count toward an outage. Only a task that leaves a complete listing is
+read. A 403 or 404 never counts toward an outage; an answer of 5xx or nothing counts in the retry
+tail's own streak (see "A run that stops"). Only a task that leaves a complete listing is
 forgotten. Known gap: a task Asana will not show you keeps a stale document for as long as it
 stays listed, and one that becomes readable again is read again with no change to `modified_at`.
 
 **A run that stops.** On a rate limit (HTTP 429), a spent request budget, an **outage** (three
-fresh tasks in a row answering 5xx or nothing; a retry task never counts and a success resets the
-streak) or a rejected token after rows were emitted, the run ends cleanly: what it emitted is
+tasks in a row answering 5xx or nothing; the fresh tasks and the retry tail each count their own
+streak, a success resets it, and a 403 or 404 never counts, so a task that is permanently
+unreadable never stops a run) or a rejected token after rows were emitted, the run ends cleanly: what it emitted is
 committed, the tasks it did not reach go to `state["pending"]` and are read on the next run
 (before the retry tasks, sorted by gid with the tasks that changed), the cursors and sync tokens advance, and nothing is forgotten. It never sleeps on a 429: it
 does not read `Retry-After`, because the walk holds cognee's process-wide staging lock and dlt
@@ -175,6 +178,19 @@ rolls back the state of a failed run. A rejected token before any row (HTTP 401)
 does not exist), a pagination offset Asana rejects, or an answer of the wrong shape (a 200 that is
 not the expected object or list): none of these is read as an empty project. dlt drops the state
 of a run that raises, so the next run starts from the last good state and forgets nothing.
+
+**A listing cut by a rate limit.** The listing is a pass over the selected projects, and a pass
+can take several runs. When a run is cut inside it (HTTP 429), the projects it finished stay in
+`state["listing"]` (ids and timestamps only: each project's task gids, the gids its window or
+events flagged, and its next cursor, sync token and `seen`) and their project rows are emitted at
+once. The next run lists only the projects left. A run cut inside the listing reads no task and
+forgets nothing, and neither cursors nor sync tokens nor the stored selection move: the pass
+renders, forgets and advances only when every selected project is listed, and only then is
+`state["listing"]` cleared. A changed selection starts the pass over, because what was kept
+described another set of projects. A run that raises keeps the state it started with. A project
+cut after its events were read is read in full on the next run (its stored token is stale): more
+than needed, never less. An unchanged complete listing in one run behaves as before and keeps no
+`listing`.
 
 **Changing the selection.** The selection is stored. A project you add is read in full. A project
 you remove forgets the tasks that were only in it and its project document, and the tasks that
@@ -198,26 +214,38 @@ and exactly one reason key when a run stopped or raised for one: `failed_rate_li
 `failed_budget`, `failed_unavailable` or `failed_auth`.
 
 State (version 1, `state["v"]`): `selection`, `known_ids`, `subtasks`, `multi`, `retry`,
-`pending` and, per project, `cursor`, `seen` and `sync`. It holds ids and timestamps, never text.
-`known_ids` grows with the number of rows.
+`pending`, `listing` (only while a listing pass is unfinished) and, per project, `cursor`, `seen`
+and `sync`. It holds ids and timestamps, never text. `known_ids` grows with the number of rows;
+`listing` holds at most the ids of the listed tasks again.
 
 ## Limits
 
 - **Budget.** A run costs the **listing** plus at most `max_requests` **task-reading** requests.
-  The listing is `projects x (1 + events pages + ceil(tasks / 100))` requests and is not
-  budgeted: a run that stopped before it had listed would commit nothing and start over at the
-  same place for ever, so the listing always completes. The budget bounds how many tasks a run
-  renders, the part that costs time and LLM money. 1500 by default is a choice, not an Asana
-  limit (Asana documents per-minute limits); a task costs three, so a run reads about 500 tasks
-  and a bigger selection finishes over several runs, each resuming from `pending`. Size it by
-  tasks per run times three, and expect the listing on top: 600 one-task projects list in about
-  1800 requests every run. Below 3 no task can be read. A first sync of N tasks costs about `3N`
-  plus the listing; 3,000 tasks in one project is about 9,000 task requests, six runs.
-- **Project rows** are emitted again, unchanged, on every run. They cost no request (read during
+  The listing is `projects x (1 + events pages + ceil(tasks / 100))` requests a pass and is not
+  budgeted, so it has no cap, deadline or limit of projects or pages. A run cut inside it by a
+  rate limit resumes at the next unfinished project, see "A listing cut by a rate limit". The
+  budget bounds how many tasks a run renders, the part that costs time and LLM money. 1500 by
+  default is a choice, not an Asana limit (Asana documents per-minute limits); a task costs three
+  requests, so the minimum is 3 and a run reads about 500 tasks by default. A bigger selection
+  finishes over several runs, each resuming from `pending`. Size it by tasks per run times
+  three, and expect the listing on top: 600 one-task projects list in about 1800 requests a
+  pass. A first sync of N tasks costs about `3N` plus the listing; 3,000 tasks in one project
+  is about 9,000 task requests, six runs.
+- **Lock hold time.** A run holds cognee's process-wide staging lock while it walks, and the
+  listing is not bounded: a run's hold time grows with the part of the listing it does, plus the
+  tasks it reads. Only a rate limit cuts a listing short. A rate-limit window smaller than a
+  whole pass plus three requests lists over several runs and reads tasks only in a run that
+  completes the pass with requests to spare, so it syncs slowly (never wrongly).
+- **Renaming a project or a section** changes the text of every task in it (each task names its
+  projects and sections), so each of those tasks is read again (three requests each) and
+  cognified again: LLM extraction and a summary on your key. The node set uses the project gid,
+  so it does not change, and neither does anything else. Rename sparingly in a big project.
+- **Project rows** are emitted again, unchanged, on every pass. They cost no request (read during
   the listing) and no cognify: their content hash is the same, so cognee builds no document.
 - **An unchanged run** costs, per project, the project, the events page(s) and the listing pages.
   An edited task costs three. A renamed project or section, an expired sync token or a changed
-  selection costs three per task of the project that is read again.
+  selection costs three requests per task of the project that is read again, and one more
+  cognify for each.
 - **No sleeping.** A 429 stops the run at once; whatever `Retry-After` says. Asana limits requests
   per minute, so the next run (a minute later) usually continues.
 - Subtasks of subtasks, attachments, task history other than comments, tags, followers and
