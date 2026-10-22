@@ -1,8 +1,33 @@
+from contextlib import contextmanager
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from cognee.modules.retrieval.bm25_retriever import BM25ChunksRetriever
+
+
+@contextmanager
+def _patch_engine(engine):
+    """Serve ``engine`` everywhere a BM25 retrieval resolves the graph engine.
+
+    Two places: the lexical loader, and the conflict annotation it runs over its
+    hits (``attach_chunk_conflicts``). Patching only the first left the second on
+    the real engine cache, so these unit tests opened a real graph database — and
+    waited forever when an earlier test had left that cache with a close still
+    pending on a loop pytest already shut down.
+    """
+    engine.get_neighborhood = AsyncMock(return_value=([], []))
+    with (
+        patch(
+            "cognee.modules.retrieval.lexical_retriever.get_graph_engine",
+            AsyncMock(return_value=engine),
+        ),
+        patch(
+            "cognee.modules.retrieval.utils.conflict_context.get_graph_engine",
+            AsyncMock(return_value=engine),
+        ),
+    ):
+        yield engine
 
 
 def _patch_graph(corpus: dict[str, str]):
@@ -13,10 +38,7 @@ def _patch_graph(corpus: dict[str, str]):
     ]
     engine = AsyncMock()
     engine.get_filtered_graph_data = AsyncMock(return_value=(nodes, {}))
-    return patch(
-        "cognee.modules.retrieval.lexical_retriever.get_graph_engine",
-        AsyncMock(return_value=engine),
-    )
+    return _patch_engine(engine)
 
 
 @pytest.mark.asyncio
@@ -28,10 +50,7 @@ async def test_payloads_carry_id_when_graph_node_payload_omits_it():
     engine.get_filtered_graph_data = AsyncMock(return_value=(nodes, {}))
     retriever = BM25ChunksRetriever(top_k=1, with_scores=True)
 
-    with patch(
-        "cognee.modules.retrieval.lexical_retriever.get_graph_engine",
-        AsyncMock(return_value=engine),
-    ):
+    with _patch_engine(engine):
         results = await retriever.get_retrieved_objects("project")
 
     assert results[0][0]["id"] == "chunk_a"
