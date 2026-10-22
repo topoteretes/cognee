@@ -418,3 +418,28 @@ def test_download_is_chunked_with_retries(monkeypatch):
     assert buffer.getvalue() == b"chunk1;chunk2;chunk3;"
     assert seen["chunksize"] == gd_source.DOWNLOAD_CHUNK_BYTES
     assert seen["retries"] == [gd_source.API_RETRIES] * 3
+
+
+def test_text_is_read_from_a_file_object_that_has_only_read_and_seek(monkeypatch):
+    """Before Python 3.11 a SpooledTemporaryFile has no readable(), so io.TextIOWrapper fails on it."""
+    from contextlib import contextmanager
+
+    class _OnlyReadAndSeek:
+        def __init__(self, data):
+            self._buffer = io.BytesIO(data)
+
+        def read(self, size=-1):
+            return self._buffer.read(size)
+
+        def seek(self, offset, whence=0):
+            return self._buffer.seek(offset, whence)
+
+    @contextmanager
+    def download(_service, _file_id):
+        yield _OnlyReadAndSeek("héllo \xff wörld".encode("latin-1"))
+
+    monkeypatch.setattr(gd_source, "_download_media", download)
+    service = _FakeService(_FakeFiles())
+    assert (
+        extract_file_content(service, "t", "text/plain", "n.txt") == "h\ufffdllo \ufffd w\ufffdrld"
+    )

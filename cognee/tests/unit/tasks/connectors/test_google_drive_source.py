@@ -803,8 +803,7 @@ def test_built_client_is_closed_when_the_source_ends(monkeypatch, tmp_path):
         built.append(client)
         return client
 
-    monkeypatch.setattr(gd_source, "load_drive_credentials", lambda **_kw: object())
-    monkeypatch.setattr(gd_source, "_build_client", fake_build)
+    monkeypatch.setattr(gd_source, "build_drive_service", lambda **_kw: fake_build(None))
     pipeline = dlt.pipeline(
         pipeline_name="drive_close",
         dataset_name="drive",

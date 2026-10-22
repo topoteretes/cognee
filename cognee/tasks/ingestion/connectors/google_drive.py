@@ -40,6 +40,7 @@ Limitations
 """
 
 import asyncio
+import codecs
 import io
 import os
 import tempfile
@@ -453,7 +454,9 @@ def extract_file_content(service: Any, file_id: str, mime_type: str, name: str) 
 
         if _is_plain_text(mime_type):
             with _download_media(service, file_id) as media:
-                return io.TextIOWrapper(media, encoding="utf-8", errors="replace").read()
+                # Not io.TextIOWrapper: before Python 3.11 a SpooledTemporaryFile has no
+                # readable(), which TextIOWrapper needs.
+                return codecs.getreader("utf-8")(media, errors="replace").read()
     except LoaderUnavailableError:
         logger.warning("No loader for Drive file '%s' (%s).", name, file_id)
         raise
@@ -1175,14 +1178,13 @@ def google_drive_source(
     def google_drive_files():
         factory = service_factory
         if service is None and factory is None:
-            credentials = load_drive_credentials(
-                auth_mode=config.auth_mode,
-                credentials_path=config.credentials_path,
-                token_path=config.token_path,
-            )
 
             def factory():
-                return _build_client(credentials)
+                return build_drive_service(
+                    auth_mode=config.auth_mode,
+                    credentials_path=config.credentials_path,
+                    token_path=config.token_path,
+                )
 
         client = service or factory()
         try:
