@@ -49,7 +49,7 @@ from cognee.infrastructure.llm.exceptions import (
     LLMPaymentRequiredError,
     is_budget_exhausted_error,
 )
-from cognee.infrastructure.llm.retry_config import llm_retry_stop_condition
+from cognee.infrastructure.llm.retry_config import llm_retry_condition, llm_retry_stop_condition
 from cognee.infrastructure.llm.streaming.stream_completion import stream_text_completion
 from cognee.infrastructure.llm.streaming.token_sink import get_active_token_sink
 from cognee.infrastructure.llm.types import TranscriptionReturnType
@@ -470,17 +470,10 @@ class NativeLiteLLMAdapter:
     @retry(
         stop=llm_retry_stop_condition,
         wait=wait_exponential_jitter(8, 128),
-        retry=retry_if_not_exception_type(
-            (
-                litellm.exceptions.NotFoundError,
-                litellm.exceptions.AuthenticationError,
-                # Quota/billing exhaustion is terminal (#3643); transient rate
-                # limits still retry with backoff, matching the legacy adapters.
-                LLMPaymentRequiredError,
-                # A cancelled task must propagate, not be retried.
-                asyncio.CancelledError,
-            )
-        ),
+        # The retry policy every other adapter uses: auth/not-found, cancellation,
+        # and budget and quota exhaustion (#3643) are terminal on both the plain-text
+        # and the structured path; transient rate limits still retry with backoff.
+        retry=llm_retry_condition,
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
@@ -493,7 +486,7 @@ class NativeLiteLLMAdapter:
     ) -> BaseModel | str:
         """Return a validated instance of *response_model* (or a plain ``str``).
 
-        Auth errors and quota/budget exhaustion (surfaced as
+        Auth errors, quota exhaustion and budget exhaustion (surfaced as
         ``LLMPaymentRequiredError``) are terminal; transient errors incl. rate
         limits retry with backoff. A content-policy violation retries once on the
         fallback model before raising ``ContentPolicyFilterError``.
