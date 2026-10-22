@@ -549,7 +549,7 @@ async def _owned_chunks(graph_engine, chunk_ids: set[str]) -> dict[tuple[str, st
         return {}
     try:
         delete_data = await graph_engine.get_node_delete_data(sorted(chunk_ids))
-    except (UnsupportedProvenanceCapability, NotImplementedError, AttributeError):
+    except UnsupportedProvenanceCapability:
         return {}
     owned: dict[tuple[str, str], set[str]] = {}
     for chunk_id, data in (delete_data or {}).items():

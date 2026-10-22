@@ -11,8 +11,7 @@ code graph pipeline on it — no LLM call. The file's docstrings (enola's
 docs.jsonl of the staged snapshot) are then stored as DocumentChunks linked to
 its code nodes (``add_code_graph_docs``), the route's only embedding call (the local fastembed model when no key is
 configured, unless a COGNEE_SKIP_* / MOCK_EMBEDDING switch keeps the configured
-provider) and best effort: a tail that fails is logged and the file's code
-graph stays. ``CODE_GRAPH_DOCS=false`` or ``cognify(code_docs=False)`` keeps
+provider); a tail that fails errors the file's item. ``CODE_GRAPH_DOCS=false`` or ``cognify(code_docs=False)`` keeps
 the route graph-only.
 """
 
@@ -118,8 +117,8 @@ async def extract_code_files_graph(
     the stored CodeRepository.path is the previous run's, gone from disk, once
     an unchanged snapshot is skipped. The tail runs with this route's ``ctx``, so
     the chunks belong to the file's data item and forget(data_id) removes them
-    with the code graph; a tail that fails is logged and the file's code graph
-    kept (see add_code_graph_docs).
+    with the code graph; a tail that fails errors the item (see
+    add_code_graph_docs).
     """
     from cognee.infrastructure.files.utils.open_data_file import open_data_file
     from cognee.modules.cognify.config import get_cognify_config, resolve_code_docs

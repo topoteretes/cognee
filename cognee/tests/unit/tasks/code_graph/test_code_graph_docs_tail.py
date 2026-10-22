@@ -13,8 +13,7 @@ the repositories of a multi-repo run), whose docs.jsonl the tail reads in
 place of the stored CodeRepository.path's (stale once a skipped snapshot left
 an earlier run's staging directory on the node), the per-file route calls it
 while the staged snapshot still exists, the ctx handed on is the route's own,
-whose data item owns the code graph, and a tail that fails is logged while
-the route completes with its code graph.
+whose data item owns the code graph, and a tail that fails errors the route.
 """
 
 import importlib
@@ -168,39 +167,17 @@ async def test_repo_route_stores_docstrings_by_default_with_the_route_ctx(
 
 
 @pytest.mark.asyncio
-async def test_failing_tail_is_logged_and_the_route_keeps_its_code_graph(
-    tmp_path, monkeypatch, tail
-):
+async def test_failing_tail_errors_the_route(tmp_path, monkeypatch, tail):
     """No usable embedding provider (keyless with COGNEE_SKIP_CONNECTION_TEST set,
-    say): the tail raises, add_code_graph_docs logs the repository and the two
-    switches that address it, and the item completes -- the run is not errored,
-    so cognify's rollback does not remove the code graph the route just wrote."""
-    logger = MagicMock()
-    monkeypatch.setattr(code_graph_module, "logger", logger)
+    say): the tail's error reaches the route, so the item errors."""
     repo_dir, item = _repo_manifest_item(tmp_path)
     _stub_code_graph(monkeypatch, AsyncMock(return_value=[_repository(path=str(repo_dir))]))
     tail.side_effect = RuntimeError("OpenAIException - Missing credentials")
 
-    assert await extract_code_repo_graph([item], ctx=_ctx(item)) == [item]
+    with pytest.raises(RuntimeError, match="Missing credentials"):
+        await extract_code_repo_graph([item], ctx=_ctx(item))
 
     tail.assert_awaited_once()
-    message, repo = logger.exception.call_args.args
-    assert repo == REPO
-    assert "code graph is kept" in message
-    for switch in ("CODE_GRAPH_DOCS=false", "EMBEDDING_PROVIDER=fastembed"):
-        assert switch in message
-    for env_var in ("COGNEE_SKIP_PREFLIGHT", "COGNEE_SKIP_CONNECTION_TEST", "MOCK_EMBEDDING"):
-        assert env_var in message
-
-    # One repository's failure does not cost the run's other repositories
-    # their docs, and the data points pass through all the same.
-    logger.reset_mock()
-    tail.reset_mock()
-    tail.side_effect = [RuntimeError("still no provider"), {"documents": 1}]
-    run = [_repository("a/one", path="/tmp/shop"), _repository("b/two", path="b/two")]
-    assert await add_code_graph_docs(run, repo_path="/tmp/shop") is run
-    assert [call.kwargs["repo"] for call in tail.await_args_list] == ["a/one", "b/two"]
-    assert logger.exception.call_count == 1 and logger.exception.call_args.args[1] == "a/one"
 
 
 @pytest.mark.asyncio

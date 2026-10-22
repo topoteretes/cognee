@@ -1135,6 +1135,13 @@ async def test_sweep_falls_back_to_the_manual_path_without_usable_provenance(
     await add_code_doc_edges(batch)
     assert _deleted(engine) == [stale_id]
 
+    # An adapter bug is not a missing capability: it raises, nothing is swept.
+    engine = _mock_engine(monkeypatch, nodes, edges)
+    engine.get_node_delete_data.side_effect = AttributeError("adapter bug")
+    with pytest.raises(AttributeError, match="adapter bug"):
+        await add_code_doc_edges(batch)
+    assert _deleted(engine) == []
+
     # A document-scoped ref only, or another chunk's ref: not this chunk's own.
     engine = _mock_engine(monkeypatch, nodes, edges)
     engine.get_node_delete_data.return_value = {
