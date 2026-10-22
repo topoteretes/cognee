@@ -433,3 +433,96 @@ async def test_improve_permission_matrix(permissions_example_env):
     dataset_2_id = (await get_datasets_by_name(["IMPROVE_PERMS_2"], owner.id))[0].id
     with pytest.raises(PermissionDeniedError):
         await run_memify_tasks([Task(passthrough)], [], dataset=dataset_2_id, user=other)
+
+
+async def test_cypher_search_permission_matrix(permissions_example_env):
+    """CYPHER and NATURAL_LANGUAGE run a Cypher statement against the dataset's graph,
+    so they need *write* permission, not just read (SDK-547). The matrix, with real
+    users and ACLs:
+
+    1. no grant, by UUID        -> PermissionDeniedError
+    2. read grant only, by UUID -> PermissionDeniedError for both types, through
+                                   search() and recall() (read is not enough)
+    3. read grant only          -> GRAPH_COMPLETION still runs: nothing changes for
+                                   the read-only search types
+    4. no explicit datasets     -> only the datasets the user can write to are
+                                   searched; the read-only share is left out
+    5. write grant, by UUID     -> allowed, and the search receives exactly the
+                                   authorized dataset
+
+    No LLM involved: denials raise before any retriever runs, and the success paths
+    patch the per-dataset fan-out, which is where the retriever would run.
+    """
+    from cognee.modules.data.methods import get_datasets_by_name
+
+    owner = await create_user("cypher_owner@example.com", "example")
+    other = await create_user("cypher_other@example.com", "example")
+
+    # add() creates the datasets and their owners' ACLs without any LLM work.
+    await cognee.add(["cypher permission fixture text"], dataset_name="CYPHER_PERMS", user=owner)
+    shared_id = (await get_datasets_by_name(["CYPHER_PERMS"], owner.id))[0].id
+    await cognee.add(["the other user's own text"], dataset_name="CYPHER_PERMS_OWN", user=other)
+    own_id = (await get_datasets_by_name(["CYPHER_PERMS_OWN"], other.id))[0].id
+
+    statement = "MATCH (n) DETACH DELETE n"
+
+    def fan_out_patch():
+        """Stand in for the per-dataset fan-out, which is where the retriever would run."""
+        return patch(
+            "cognee.modules.search.methods.search.search_in_datasets_context",
+            new_callable=AsyncMock,
+            return_value=[],
+        )
+
+    def searched_ids(fan_out):
+        return {dataset.id for dataset in fan_out.await_args.kwargs["search_datasets"]}
+
+    # 1. No grant on an existing dataset: refused.
+    with fan_out_patch() as fan_out, pytest.raises(PermissionDeniedError):
+        await cognee.search(
+            query_type=SearchType.CYPHER, query_text=statement, user=other, dataset_ids=[shared_id]
+        )
+    fan_out.assert_not_awaited()
+
+    # 2. Read grant is not enough, for either Cypher-executing type, through search()
+    #    and recall(). The dataset is cold (never cognified), so this also covers
+    #    recall's warm-up guard, which authorizes before it probes.
+    await authorized_give_permission_on_datasets(other.id, [shared_id], "read", owner.id)
+    with fan_out_patch() as fan_out:
+        for query_type in (SearchType.CYPHER, SearchType.NATURAL_LANGUAGE):
+            with pytest.raises(PermissionDeniedError):
+                await cognee.search(
+                    query_type=query_type, query_text=statement, user=other, dataset_ids=[shared_id]
+                )
+            with pytest.raises(PermissionDeniedError):
+                await cognee.recall(
+                    query_type=query_type, query_text=statement, user=other, dataset_ids=[shared_id]
+                )
+    fan_out.assert_not_awaited()
+
+    # 3. The same read grant still serves the read-only search types.
+    with fan_out_patch() as fan_out:
+        await cognee.search(
+            query_type=SearchType.GRAPH_COMPLETION,
+            query_text="What is in the document?",
+            user=other,
+            dataset_ids=[shared_id],
+        )
+    assert searched_ids(fan_out) == {shared_id}
+
+    # 4. With no explicit datasets, Cypher targets only the datasets the user can
+    #    write to: the read-only share is left out, the user's own dataset is in.
+    with fan_out_patch() as fan_out:
+        await cognee.search(query_type=SearchType.CYPHER, query_text=statement, user=other)
+    assert own_id in searched_ids(fan_out)
+    assert shared_id not in searched_ids(fan_out)
+
+    # 5. Write grant allows it, and the search receives exactly the authorized dataset.
+    await authorized_give_permission_on_datasets(other.id, [shared_id], "write", owner.id)
+    with fan_out_patch() as fan_out:
+        await cognee.search(
+            query_type=SearchType.CYPHER, query_text=statement, user=other, dataset_ids=[shared_id]
+        )
+    fan_out.assert_awaited_once()
+    assert searched_ids(fan_out) == {shared_id}
+    assert fan_out.await_args.kwargs["query_type"] is SearchType.CYPHER
