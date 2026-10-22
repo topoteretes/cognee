@@ -19,6 +19,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # A leaf module (no cognee imports), so unlike base_config it is safe here.
 from cognee.root_dir import ensure_absolute_path
 
+# Where records go. ``storage``: gzip'd JSONL under COGNEE_CAPTURE_DIR. ``proxy``:
+# the analytics proxy product telemetry already uses (see proxy_sink.py).
+# ``both``: the two together.
+CAPTURE_SINK_MODES = ("storage", "proxy", "both")
+
 
 class CaptureConfig(BaseSettings):
     """Knobs for the non-blocking eval capture hook.
@@ -35,10 +40,26 @@ class CaptureConfig(BaseSettings):
     owns the same retention and access-control obligations for it as for the
     data root. ``COGNEE_CAPTURE_RETRIEVAL_SAMPLE_RATE`` samples only the
     ``retrieval.*`` payloads; the extraction kinds are always captured in full.
+
+    ``COGNEE_CAPTURE_SINK`` picks where records go. ``storage`` (the default)
+    keeps everything on the machine. ``proxy`` ships them through the analytics
+    proxy product telemetry uses, metadata only: the content kinds leave as
+    counts and type histograms, model settings that are paths as
+    ``local_path``, ids as they are — unless ``COGNEE_CAPTURE_PROXY_CONTENT``
+    is set, which sends the raw chunk graphs and ontology lookups too (derived
+    user content leaving the machine; the proxy must be configured to accept
+    it). The proxy sink also obeys the telemetry kill switches
+    (``TELEMETRY_DISABLED``, ``ENV=test|dev``).
     """
 
     cognee_capture_enabled: bool = False
     cognee_capture_dir: str | None = None
+    cognee_capture_sink: str = "storage"
+    # None: the telemetry proxy's capture route (``proxy_sink.default_proxy_url``).
+    cognee_capture_proxy_url: str | None = None
+    cognee_capture_proxy_content: bool = False
+    # Upper bound on one POST to the proxy, like TELEMETRY_REQUEST_TIMEOUT.
+    cognee_capture_proxy_timeout_s: float = 5.0
     # Must not be a fraction of cognify's default ``chunks_per_batch`` (2000):
     # the per-chunk emit points run over a whole task batch, and a burst past
     # this bound is dropped newest-first. 2048 covers the default batch with the
@@ -91,6 +112,27 @@ class CaptureConfig(BaseSettings):
                 f"got {self.cognee_capture_flush_interval_s}"
             )
 
+        sink = (self.cognee_capture_sink or "").strip().lower()
+        if sink not in CAPTURE_SINK_MODES:
+            raise ValueError(
+                f"COGNEE_CAPTURE_SINK must be one of {', '.join(CAPTURE_SINK_MODES)}, "
+                f"got {self.cognee_capture_sink!r}"
+            )
+        self.cognee_capture_sink = sink
+        if self.cognee_capture_proxy_timeout_s <= 0:
+            raise ValueError(
+                "COGNEE_CAPTURE_PROXY_TIMEOUT_S must be positive, "
+                f"got {self.cognee_capture_proxy_timeout_s}"
+            )
+        if self.cognee_capture_proxy_url is not None:
+            proxy_url = self.cognee_capture_proxy_url.strip()
+            if not proxy_url.startswith(("http://", "https://")):
+                raise ValueError(
+                    "COGNEE_CAPTURE_PROXY_URL must be an http(s) URL, "
+                    f"got {self.cognee_capture_proxy_url!r}"
+                )
+            self.cognee_capture_proxy_url = proxy_url
+
         if not self.cognee_capture_dir:
             # Lazy on purpose — see the module docstring.
             from cognee.base_config import get_base_config
@@ -112,6 +154,10 @@ class CaptureConfig(BaseSettings):
         return {
             "cognee_capture_enabled": self.cognee_capture_enabled,
             "cognee_capture_dir": self.cognee_capture_dir,
+            "cognee_capture_sink": self.cognee_capture_sink,
+            "cognee_capture_proxy_url": self.cognee_capture_proxy_url,
+            "cognee_capture_proxy_content": self.cognee_capture_proxy_content,
+            "cognee_capture_proxy_timeout_s": self.cognee_capture_proxy_timeout_s,
             "cognee_capture_queue_size": self.cognee_capture_queue_size,
             "cognee_capture_batch_size": self.cognee_capture_batch_size,
             "cognee_capture_flush_interval_s": self.cognee_capture_flush_interval_s,

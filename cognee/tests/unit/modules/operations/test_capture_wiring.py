@@ -129,6 +129,50 @@ async def test_set_dataset_reaches_events_flushed_while_the_operation_is_still_r
 
 
 @pytest.mark.asyncio
+async def test_record_operation_stamps_the_user_and_tenant_on_every_record(
+    no_row_writes, fake_capture_sink
+):
+    """The identity product telemetry sends — the cognee user and tenant UUIDs —
+    rides on every record's envelope, so a warehouse row joins to the telemetry
+    rows of the same user. Bound late through ``set_user`` it reaches events
+    buffered before the caller knew its user, like ``set_dataset``."""
+    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+    late_user = SimpleNamespace(id=uuid4(), tenant_id=None)
+
+    async with record_operation_mod.record_operation("search", user=user) as known:
+        capture.emit(KIND_SUMMARY_GENERATED, "known user", payload_kind="text")
+    async with record_operation_mod.record_operation("recall") as late:
+        capture.emit(KIND_SUMMARY_GENERATED, "before set_user", payload_kind="text")
+        late.set_user(late_user)
+    await capture.drain()
+
+    records = fake_capture_sink.records
+    assert len(records) == 4  # two events, two manifests
+    by_run = {str(known.operation_id): user, str(late.operation_id): late_user}
+    for record in records:
+        expected = by_run[record["run_id"]]
+        assert record["user_id"] == str(expected.id)
+        assert record["tenant_id"] == (
+            None if expected.tenant_id is None else str(expected.tenant_id)
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_nested_operation_inherits_the_enclosing_runs_user(fake_capture_sink):
+    pipeline_user, tenant = uuid4(), uuid4()
+    pipeline = capture.run_scope(
+        uuid4(), uuid4(), kind="pipeline", user_id=pipeline_user, tenant_id=tenant
+    )
+    with pipeline, capture.run_scope(uuid4(), kind="operation"):
+        capture.emit(KIND_SUMMARY_GENERATED, "nested", payload_kind="text")
+    await capture.drain()
+
+    [event] = [r for r in fake_capture_sink.records if r["kind"] == KIND_SUMMARY_GENERATED]
+    assert event["user_id"] == str(pipeline_user)
+    assert event["tenant_id"] == str(tenant)
+
+
+@pytest.mark.asyncio
 async def test_record_operation_failure_still_emits_manifest_and_reraises(
     no_row_writes, fake_capture_sink, drain_spy
 ):
@@ -166,6 +210,31 @@ async def _drive(run_tasks_module_, dataset):
     ):
         events.append(event)
     return events
+
+
+@pytest.mark.asyncio
+async def test_run_tasks_stamps_the_pipelines_user_and_tenant_on_every_record(
+    monkeypatch, runner_plumbing, fake_capture_sink
+):
+    dataset = SimpleNamespace(id=uuid4(), name="ds", owner_id=uuid4())
+    runner_plumbing(run_tasks_module, dataset)
+    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+
+    async def fake_item(*args, **kwargs):
+        capture.emit(KIND_SUMMARY_GENERATED, "from a task", payload_kind="text")
+        return {"run_info": "ok"}
+
+    monkeypatch.setattr(run_tasks_module, "run_tasks_data_item", fake_item)
+
+    async for _ in run_tasks_module.run_tasks(
+        tasks=[], dataset_id=dataset.id, data=["a"], user=user, pipeline_name="cognify_pipeline"
+    ):
+        pass
+
+    records = fake_capture_sink.records
+    assert {record["kind"] for record in records} == {KIND_SUMMARY_GENERATED, KIND_RUN_MANIFEST}
+    assert all(record["user_id"] == str(user.id) for record in records)
+    assert all(record["tenant_id"] == str(user.tenant_id) for record in records)
 
 
 @pytest.mark.asyncio

@@ -137,7 +137,7 @@ from .events import (
     CaptureEvent,
 )
 from .setup import setup_diff
-from .sinks import CaptureSink, StorageSink, run_off_loop
+from .sinks import CaptureSink, FanOutSink, StorageSink, run_off_loop
 
 if TYPE_CHECKING:
     from .manifest import RunScope
@@ -346,8 +346,37 @@ def _flush_at_exit() -> None:
         pass
 
 
+def _build_sink(config: CaptureConfig) -> CaptureSink | None:
+    """The sink ``COGNEE_CAPTURE_SINK`` asks for, or ``None`` when nothing can be built.
+
+    ``storage`` is the ``StorageSink`` on ``COGNEE_CAPTURE_DIR``; ``proxy`` the
+    ``ProxySink`` on the analytics proxy; ``both`` a ``FanOutSink`` over the
+    two. The proxy sink obeys the telemetry kill switches: blocked, it is left
+    out with a warning — so ``proxy`` alone leaves capture off, and ``both``
+    degrades to storage only.
+    """
+    sinks: list[CaptureSink] = []
+    mode = config.cognee_capture_sink
+    if mode in ("storage", "both"):
+        # Lazy: keeps this module free of the storage/base_config import chain.
+        from cognee.infrastructure.files.storage import get_file_storage
+
+        sinks.append(StorageSink(get_file_storage(config.cognee_capture_dir)))
+    if mode in ("proxy", "both"):
+        from .proxy_sink import ProxySink, proxy_sink_blocked
+
+        reason = proxy_sink_blocked()
+        if reason is not None:
+            logger.warning("eval capture: proxy sink disabled (%s)", reason)
+        else:
+            sinks.append(ProxySink.from_config(config))
+    if not sinks:
+        return None
+    return sinks[0] if len(sinks) == 1 else FanOutSink(sinks)
+
+
 def _ensure_initialized() -> None:
-    """Read the config once per process and auto-register the storage sink.
+    """Read the config once per process and auto-register the configured sink.
 
     Guarded by ``initialized`` (NOT by ``sink``). This is the ONLY place
     ``get_capture_config()`` is consulted at runtime, and it is reached from
@@ -373,11 +402,9 @@ def _ensure_initialized() -> None:
             config = get_capture_config()
             _load_knobs(config)
             if config.cognee_capture_enabled and runtime.sink is None:
-                # Lazy: keeps this module free of the storage/base_config import chain.
-                from cognee.infrastructure.files.storage import get_file_storage
-
-                runtime.sink = StorageSink(get_file_storage(config.cognee_capture_dir))
-                _register_atexit()
+                runtime.sink = _build_sink(config)
+                if runtime.sink is not None:
+                    _register_atexit()
         except Exception as exc:
             logger.warning("eval capture disabled: initialization failed (%s)", exc)
         finally:
@@ -897,10 +924,13 @@ def _serialize_batch(batch: list[CaptureEvent]) -> list[dict]:
         scope = event.scope
         run_id = event.run_id or (scope.run_id if scope is not None else None)
         # A scope without a dataset of its own (an operation recorded inside a
-        # pipeline task) is attributed to the enclosing run's dataset.
+        # pipeline task) is attributed to the enclosing run's dataset — and to
+        # its user and tenant, the same way.
         dataset_id = event.dataset_id or (
             scope.resolved_dataset_id() if scope is not None else None
         )
+        user_id = scope.resolved_user_id() if scope is not None else None
+        tenant_id = scope.resolved_tenant_id() if scope is not None else None
         records.append(
             {
                 "schema_version": CAPTURE_SCHEMA_VERSION,
@@ -908,6 +938,8 @@ def _serialize_batch(batch: list[CaptureEvent]) -> list[dict]:
                 "kind": event.kind,
                 "run_id": None if run_id is None else str(run_id),
                 "dataset_id": None if dataset_id is None else str(dataset_id),
+                "user_id": None if user_id is None else str(user_id),
+                "tenant_id": None if tenant_id is None else str(tenant_id),
                 "stage": event.stage,
                 "ts": event.ts,
                 "payload": payload,

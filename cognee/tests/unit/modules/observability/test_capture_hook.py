@@ -1177,6 +1177,8 @@ async def test_records_carry_a_schema_version_and_a_sequenced_event_id(fake_capt
         "kind",
         "run_id",
         "dataset_id",
+        "user_id",
+        "tenant_id",
         "stage",
         "ts",
         "payload",

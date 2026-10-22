@@ -164,6 +164,9 @@ async def run_tasks(
                             # cognify's resolved extractor (llm / gliner_demo): part of
                             # the run's setup snapshot, like the telemetry above.
                             graph_extractor=(extras or {}).get("graph_extractor"),
+                            # The identity the telemetry above carries, on every record.
+                            user_id=getattr(user, "id", None),
+                            tenant_id=getattr(user, "tenant_id", None),
                         )
                     )
                     capture_scope.note("pipeline_name", pipeline_name)

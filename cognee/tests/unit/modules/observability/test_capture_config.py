@@ -24,6 +24,10 @@ REPO_ROOT = Path(__file__).resolve().parents[5]
 CAPTURE_ENV_VARS = (
     "COGNEE_CAPTURE_ENABLED",
     "COGNEE_CAPTURE_DIR",
+    "COGNEE_CAPTURE_SINK",
+    "COGNEE_CAPTURE_PROXY_URL",
+    "COGNEE_CAPTURE_PROXY_CONTENT",
+    "COGNEE_CAPTURE_PROXY_TIMEOUT_S",
     "COGNEE_CAPTURE_QUEUE_SIZE",
     "COGNEE_CAPTURE_BATCH_SIZE",
     "COGNEE_CAPTURE_FLUSH_INTERVAL_S",
@@ -47,6 +51,10 @@ def test_defaults_and_derived_dir(clean_capture_env, monkeypatch, tmp_path):
         get_base_config.cache_clear()
 
     assert config.cognee_capture_enabled is False
+    assert config.cognee_capture_sink == "storage"
+    assert config.cognee_capture_proxy_url is None
+    assert config.cognee_capture_proxy_content is False
+    assert config.cognee_capture_proxy_timeout_s == 5.0
     assert config.cognee_capture_queue_size == 2048
     assert config.cognee_capture_batch_size == 64
     assert config.cognee_capture_flush_interval_s == 2.0
@@ -57,6 +65,10 @@ def test_defaults_and_derived_dir(clean_capture_env, monkeypatch, tmp_path):
     assert config.to_dict() == {
         "cognee_capture_enabled": False,
         "cognee_capture_dir": os.path.join(str(tmp_path), "capture"),
+        "cognee_capture_sink": "storage",
+        "cognee_capture_proxy_url": None,
+        "cognee_capture_proxy_content": False,
+        "cognee_capture_proxy_timeout_s": 5.0,
         "cognee_capture_queue_size": 2048,
         "cognee_capture_batch_size": 64,
         "cognee_capture_flush_interval_s": 2.0,
@@ -148,6 +160,35 @@ def test_sink_timeout_must_be_positive(clean_capture_env):
 def test_drain_timeout_must_be_positive(clean_capture_env):
     with pytest.raises(ValueError, match=r"DRAIN_TIMEOUT_S must be positive, got 0\.0"):
         CaptureConfig(cognee_capture_drain_timeout_s=0.0)
+
+
+def test_sink_selection_is_validated_and_normalized(clean_capture_env, monkeypatch, tmp_path):
+    with pytest.raises(
+        ValueError, match=r"COGNEE_CAPTURE_SINK must be one of storage, proxy, both"
+    ):
+        CaptureConfig(cognee_capture_sink="s3", cognee_capture_dir=str(tmp_path))
+
+    config = CaptureConfig(cognee_capture_sink=" Proxy ", cognee_capture_dir=str(tmp_path))
+    assert config.cognee_capture_sink == "proxy"
+
+    monkeypatch.setenv("COGNEE_CAPTURE_SINK", "both")
+    monkeypatch.setenv("COGNEE_CAPTURE_DIR", str(tmp_path))
+    get_capture_config.cache_clear()
+    assert get_capture_config().cognee_capture_sink == "both"
+
+
+def test_proxy_knobs_are_validated(clean_capture_env, tmp_path):
+    with pytest.raises(ValueError, match=r"PROXY_TIMEOUT_S must be positive, got 0\.0"):
+        CaptureConfig(cognee_capture_proxy_timeout_s=0.0, cognee_capture_dir=str(tmp_path))
+    with pytest.raises(ValueError, match=r"PROXY_URL must be an http\(s\) URL"):
+        CaptureConfig(
+            cognee_capture_proxy_url="proxy.test/capture", cognee_capture_dir=str(tmp_path)
+        )
+
+    config = CaptureConfig(
+        cognee_capture_proxy_url=" https://proxy.test/capture ", cognee_capture_dir=str(tmp_path)
+    )
+    assert config.cognee_capture_proxy_url == "https://proxy.test/capture"
 
 
 @pytest.mark.parametrize(

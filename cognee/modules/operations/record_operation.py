@@ -103,11 +103,18 @@ class OperationContext:
         self.run_info = None
 
     def set_user(self, user) -> None:
-        """Bind the triggering user (tolerates None and partial objects)."""
+        """Bind the triggering user (tolerates None and partial objects).
+
+        Forwarded to the eval-capture scope like ``set_dataset``, so records
+        buffered before the caller knew its user still carry it.
+        """
         if user is None:
             return
         self.user_id = getattr(user, "id", None)
         self.tenant_id = getattr(user, "tenant_id", None)
+        capture_scope = self._capture_scope
+        if capture_scope is not None:
+            capture_scope.set_user(self.user_id, self.tenant_id)
 
     def set_dataset(self, dataset_id: UUID | None) -> None:
         """Bind the target dataset, when the operation has exactly one.
@@ -253,7 +260,13 @@ async def record_operation(
         from cognee.modules.observability import capture as eval_capture
 
         capture_scope_cm = (
-            eval_capture.run_scope(context.operation_id, dataset_id, kind="operation")
+            eval_capture.run_scope(
+                context.operation_id,
+                dataset_id,
+                kind="operation",
+                user_id=context.user_id,
+                tenant_id=context.tenant_id,
+            )
             if eval_capture.is_active()
             else nullcontext()
         )

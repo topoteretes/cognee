@@ -8,7 +8,9 @@ turns events into the record shape handed to sinks::
     {
         "schema_version": int,           # CAPTURE_SCHEMA_VERSION
         "event_id": str,                 # "<process>-<seq>", stable across redelivery
-        "kind", "run_id": str|None, "dataset_id": str|None, "stage", "ts", "payload",
+        "kind", "run_id": str|None, "dataset_id": str|None,
+        "user_id": str|None, "tenant_id": str|None,   # the run's cognee user and tenant
+        "stage", "ts", "payload",
     }
 
 where ``payload`` is ``model_dump(mode="json")`` for ``payload_kind="pydantic"``,

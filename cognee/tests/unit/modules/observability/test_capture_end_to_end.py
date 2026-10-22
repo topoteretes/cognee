@@ -628,12 +628,21 @@ async def test_env_enabled_capture_persists_the_run_through_the_storage_sink(
             "kind",
             "run_id",
             "dataset_id",
+            "user_id",
+            "tenant_id",
             "stage",
             "ts",
             "payload",
         }
         assert record["schema_version"] == 1
         assert record["dataset_id"] == dataset
+        # The identity telemetry sends, on disk too: the pipeline run carries its
+        # user; the remember and search operations here are opened without one.
+        if record["run_id"] == str(pipeline_run_id):
+            assert record["user_id"] == str(user.id)
+        else:
+            assert record["user_id"] is None
+        assert record["tenant_id"] is None
         _assert_flat(record["payload"])
 
     pipeline_manifest = persisted[os.path.join(dataset, pipeline_run_id, "manifest.json")][0]

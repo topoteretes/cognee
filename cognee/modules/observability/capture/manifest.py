@@ -49,6 +49,12 @@ class RunScope:
     dataset_id: UUID | str | None = None
     # "operation" | "pipeline"
     kind: str = "operation"
+    # The cognee user and tenant the run belongs to: pseudonymous UUIDs, the
+    # identity product telemetry sends. On every record's envelope, so a
+    # warehouse row joins to the telemetry rows of the same user. Bound late
+    # via set_user() when the caller learns the user after the scope opened.
+    user_id: UUID | str | None = None
+    tenant_id: UUID | str | None = None
     # Decided once at scope entry; retrieval-kind events consult it via should_capture().
     sampled: bool = True
     # The configuration this run started under and its fingerprint (see
@@ -87,10 +93,27 @@ class RunScope:
         knows it; attributing to the parent keeps ``nodataset/`` for runs that
         are genuinely dataset-less.
         """
+        return self._resolved("dataset_id")
+
+    def set_user(self, user_id: UUID | str | None, tenant_id: UUID | str | None) -> None:
+        """Bind the user late; like ``set_dataset``, buffered events pick it up."""
+        self.user_id = user_id
+        self.tenant_id = tenant_id
+
+    def resolved_user_id(self) -> UUID | str | None:
+        """This run's user, or the nearest enclosing run's (see ``resolved_dataset_id``)."""
+        return self._resolved("user_id")
+
+    def resolved_tenant_id(self) -> UUID | str | None:
+        """This run's tenant, or the nearest enclosing run's (see ``resolved_dataset_id``)."""
+        return self._resolved("tenant_id")
+
+    def _resolved(self, attribute: str) -> UUID | str | None:
         scope: RunScope | None = self
         while scope is not None:
-            if scope.dataset_id is not None:
-                return scope.dataset_id
+            value = getattr(scope, attribute)
+            if value is not None:
+                return value
             scope = scope.parent
         return None
 
@@ -186,15 +209,18 @@ def run_scope(
     *,
     kind: str = "operation",
     graph_extractor: str | None = None,
+    user_id: UUID | str | None = None,
+    tenant_id: UUID | str | None = None,
 ) -> Iterator[RunScope]:
     """Bracket one run; enqueue its manifest on exit when the run is sampled.
 
     Sampling is per run: operation scopes roll ``RETRIEVAL_SAMPLE_RATE`` once here,
     pipeline scopes are always sampled. ``graph_extractor`` is cognify's resolved
     extractor for a pipeline run (``llm`` / ``gliner_demo``) and becomes part of
-    the run's setup snapshot. Entry also starts the running loop's
-    flusher so emits from worker threads during the run are flushed on the
-    interval tick even if nothing ever emits on-loop.
+    the run's setup snapshot. ``user_id`` / ``tenant_id`` stamp every record of
+    the run (``RunScope.set_user`` binds them later). Entry also starts the
+    running loop's flusher so emits from worker threads during the run are
+    flushed on the interval tick even if nothing ever emits on-loop.
     """
     # Snapshot the setup first: it describes the run as it starts. Never raises.
     setup = capture_setup(graph_extractor=graph_extractor)
@@ -202,6 +228,8 @@ def run_scope(
         run_id=run_id,
         dataset_id=dataset_id,
         kind=kind,
+        user_id=user_id,
+        tenant_id=tenant_id,
         setup=setup,
         setup_fingerprint=setup_fingerprint(setup),
         sampled=(kind != "operation") or random.random() < hook._runtime.retrieval_sample_rate,

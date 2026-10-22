@@ -3,7 +3,10 @@
 A sink is a bare async callable taking a list of already-serialized records:
 ``async def sink(records: list[dict]) -> None``. Sinks are invoked only from
 the background flusher or from ``drain()``/``shutdown()``, never inline from
-``emit()``.
+``emit()``. Two ship: ``StorageSink`` (gzip'd JSONL under COGNEE_CAPTURE_DIR,
+here) and ``ProxySink`` (the analytics proxy, ``proxy_sink.py``);
+``FanOutSink`` runs several. A sink must never mutate the records it is handed
+— a fan-out hands the same list to every sink.
 
 Contract for implementations: usable from any loop/thread — two flushers on
 different loops (run_sync's thread, the dataset-queue reaper thread) can call a
@@ -48,13 +51,17 @@ import itertools
 import json
 import os
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import TYPE_CHECKING, Any, TypeVar
+
+from cognee.shared.logging_utils import get_logger
 
 from .events import KIND_RUN_MANIFEST
 
 if TYPE_CHECKING:
     from cognee.infrastructure.files.storage import StorageManager
+
+logger = get_logger("eval_capture")
 
 CaptureSink = Callable[[list[dict]], Awaitable[None]]
 
@@ -138,9 +145,9 @@ class StorageSink:
         {dataset or "nodataset"}/{run or "norun"}/manifest.json   (kind run.manifest, pretty JSON)
 
     Every file carries the same record envelope (``schema_version``,
-    ``event_id``, ``kind``, ``run_id``, ``dataset_id``, ``stage``, ``ts``,
-    ``payload``); the manifest's fields live under ``payload``. Nothing is
-    written to the relational DB.
+    ``event_id``, ``kind``, ``run_id``, ``dataset_id``, ``user_id``,
+    ``tenant_id``, ``stage``, ``ts``, ``payload``); the manifest's fields live
+    under ``payload``. Nothing is written to the relational DB.
 
     Runs on the flusher task only, never on an emit path. Each write — the
     encode and the ``store()`` call — runs as one unit on a worker thread
@@ -191,3 +198,34 @@ class StorageSink:
         # Encode and write on the same worker: the encode is pure CPU, the write
         # blocks. BytesIO, not raw bytes, honors the ``BinaryIO | str`` annotation.
         await self._storage.store(path, io.BytesIO(_encode_group(group)), overwrite=True)
+
+
+class FanOutSink:
+    """Deliver every batch to several sinks (``COGNEE_CAPTURE_SINK=both``).
+
+    Sinks run in order, each given the same records. One sink's failure does
+    not starve the next: every sink runs, then the first exception is
+    re-raised so the flusher accounts the batch as dropped. The at-least-once
+    contract therefore holds per batch, not per sink — a batch one sink stored
+    and another lost is counted lost on the run (``events_dropped``), which is
+    the honest reading of "did the warehouse get it".
+    """
+
+    def __init__(self, sinks: Sequence[CaptureSink]) -> None:
+        if not sinks:
+            raise ValueError("FanOutSink needs at least one sink")
+        self.sinks: tuple[CaptureSink, ...] = tuple(sinks)
+
+    async def __call__(self, records: list[dict]) -> None:
+        first_error: Exception | None = None
+        for sink in self.sinks:
+            try:
+                await sink(records)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                if first_error is None:
+                    first_error = exc
+                logger.debug("capture sink %r failed in fan-out (%s)", sink, exc)
+        if first_error is not None:
+            raise first_error

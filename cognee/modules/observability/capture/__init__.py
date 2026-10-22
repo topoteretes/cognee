@@ -59,6 +59,19 @@ the same retention and access-control obligations for this directory as for the
 data root - in particular, forgetting a dataset does not remove its capture
 files. ``COGNEE_CAPTURE_RETRIEVAL_SAMPLE_RATE`` samples only ``retrieval.*``
 payloads; the extraction kinds are always captured in full while capture is on.
+
+Where the records go
+--------------------
+``COGNEE_CAPTURE_SINK`` chooses the sink. ``storage`` (default) is the directory
+above. ``proxy`` ships records through the analytics proxy product telemetry
+uses - a Firehose stream behind it, the MotherDuck warehouse once a day - and
+sends METADATA ONLY unless ``COGNEE_CAPTURE_PROXY_CONTENT`` is set: the content
+kinds leave as counts and type histograms, model settings that are paths as
+``local_path``, run and dataset ids as they are (ids, not content - the rule
+telemetry applies to datasets); every record carries the run's cognee
+``user_id`` and ``tenant_id`` like telemetry does. The
+proxy sink obeys ``TELEMETRY_DISABLED`` and ``ENV=test|dev``. ``both`` runs the
+two. See ``proxy_sink.py``.
 """
 
 from .config import CaptureConfig, get_capture_config
@@ -86,8 +99,9 @@ from .hook import (
 )
 from .manifest import RunScope, bump, current_scope, note, run_scope
 from .prompt_hash import prompt_fingerprint
+from .proxy_sink import ProxySink
 from .setup import SETUP_FIELDS, capture_setup, setup_diff, setup_fingerprint
-from .sinks import CaptureSink, StorageSink
+from .sinks import CaptureSink, FanOutSink, StorageSink
 
 __all__ = [
     "KIND_EXTRACTION_CHUNK_GRAPH",
@@ -103,6 +117,8 @@ __all__ = [
     "CaptureConfig",
     "CaptureEvent",
     "CaptureSink",
+    "FanOutSink",
+    "ProxySink",
     "RunScope",
     "StorageSink",
     "bump",

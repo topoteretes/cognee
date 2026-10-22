@@ -94,7 +94,16 @@ def capture_reset(event_loop, monkeypatch):
 
     # The process .env was loaded at import: a developer's COGNEE_CAPTURE_ENABLED must
     # not flip the off-path tests, which set the environment they need explicitly.
-    monkeypatch.delenv("COGNEE_CAPTURE_ENABLED", raising=False)
+    # Same for the sink selection: a developer pointing capture at the proxy must
+    # not make a test build a ProxySink.
+    for name in (
+        "COGNEE_CAPTURE_ENABLED",
+        "COGNEE_CAPTURE_SINK",
+        "COGNEE_CAPTURE_PROXY_URL",
+        "COGNEE_CAPTURE_PROXY_CONTENT",
+        "COGNEE_CAPTURE_PROXY_TIMEOUT_S",
+    ):
+        monkeypatch.delenv(name, raising=False)
     hook._reset_for_tests()
     yield
     hook._reset_for_tests()
