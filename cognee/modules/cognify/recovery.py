@@ -150,12 +150,10 @@ async def _close_as_abandoned(pipeline_run, dataset) -> None:
         pipeline_id=pipeline_run.pipeline_id,
         pipeline_name=pipeline_run.pipeline_name,
         dataset_id=dataset.id,
-        data=None,
         e=AbandonedPipelineRunError(),
         user_id=pipeline_run.user_id,
         tenant_id=pipeline_run.tenant_id,
         started_at=getattr(pipeline_run, "started_at", None),
-        data_info=(getattr(pipeline_run, "run_info", None) or {}).get("data"),
         origin=getattr(pipeline_run, "origin", None),
         parent_operation_id=getattr(pipeline_run, "parent_operation_id", None),
     )
