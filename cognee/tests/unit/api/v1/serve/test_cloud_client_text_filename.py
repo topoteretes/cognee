@@ -16,7 +16,7 @@ from cognee.modules.ingestion.data_types.TextData import create_text_data
 
 def test_filename_is_content_hash_in_local_ingestion_format():
     text = "a small memory"
-    expected_hash = hashlib.md5(text.encode("utf-8")).hexdigest()
+    expected_hash = hashlib.md5(text.encode("utf-8"), usedforsecurity=False).hexdigest()
     assert _text_upload_filename(text) == f"text_{expected_hash}.txt"
 
 
@@ -38,5 +38,5 @@ def test_identical_texts_share_a_filename():
 
 def test_unicode_text_hashes_utf8_bytes():
     text = "café ☕ разговор"
-    expected_hash = hashlib.md5(text.encode("utf-8")).hexdigest()
+    expected_hash = hashlib.md5(text.encode("utf-8"), usedforsecurity=False).hexdigest()
     assert _text_upload_filename(text) == f"text_{expected_hash}.txt"

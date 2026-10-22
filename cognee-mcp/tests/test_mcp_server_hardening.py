@@ -134,7 +134,7 @@ async def test_cognee_client_api_add_uses_content_addressed_filename():
     client.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
 
     content = "first memory"
-    digest = hashlib.md5(content.encode("utf-8")).hexdigest()
+    digest = hashlib.md5(content.encode("utf-8"), usedforsecurity=False).hexdigest()
 
     try:
         await client.add(content, dataset_name="ds")
@@ -235,7 +235,7 @@ async def test_cognee_client_api_add_keeps_content_addressed_name_for_non_file_t
     client = await _mock_api_client(requests)
 
     content = "/definitely/not/on/disk/notes.md"
-    digest = hashlib.md5(content.encode("utf-8")).hexdigest()
+    digest = hashlib.md5(content.encode("utf-8"), usedforsecurity=False).hexdigest()
 
     try:
         await client.add(content, dataset_name="ds")
@@ -262,8 +262,8 @@ async def test_cognee_client_api_add_keeps_text_upload_for_directories_and_long_
     finally:
         await client.close()
 
-    dir_digest = hashlib.md5(str(tmp_path).encode("utf-8")).hexdigest()
-    text_digest = hashlib.md5(long_text.encode("utf-8")).hexdigest()
+    dir_digest = hashlib.md5(str(tmp_path).encode("utf-8"), usedforsecurity=False).hexdigest()
+    text_digest = hashlib.md5(long_text.encode("utf-8"), usedforsecurity=False).hexdigest()
 
     assert _multipart_filenames(requests[0]) == [f"text_{dir_digest}.txt"]
     assert _multipart_filenames(requests[1]) == [f"text_{text_digest}.txt"]
@@ -315,7 +315,7 @@ async def test_cognee_client_api_upload_honours_allowed_local_file_roots(monkeyp
     finally:
         await client.close()
 
-    digest = hashlib.md5(str(outside).encode("utf-8")).hexdigest()
+    digest = hashlib.md5(str(outside).encode("utf-8"), usedforsecurity=False).hexdigest()
     for request in requests[:2]:
         assert b"PRIVATE KEY MATERIAL" not in request.content
         assert _multipart_filenames(request) == [f"text_{digest}.txt"]

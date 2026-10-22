@@ -314,7 +314,9 @@ def _row_content_hash(row_dict: dict) -> str:
         if key != STRUCTURE_COLUMN
         and not (key == NODE_SET_COLUMN and value in _EMPTY_RESERVED_VALUES)
     }
-    return hashlib.md5(json.dumps(hashable, sort_keys=True, default=str).encode()).hexdigest()
+    return hashlib.md5(
+        json.dumps(hashable, sort_keys=True, default=str).encode(), usedforsecurity=False
+    ).hexdigest()
 
 
 def _compute_schema_hash(schema_info) -> str:
@@ -327,7 +329,9 @@ def _compute_schema_hash(schema_info) -> str:
         normalized = sorted((k, str(v)) for k, v in schema_info.items())
     else:
         normalized = str(schema_info)
-    return hashlib.md5(json.dumps(normalized, sort_keys=True).encode()).hexdigest()
+    return hashlib.md5(
+        json.dumps(normalized, sort_keys=True).encode(), usedforsecurity=False
+    ).hexdigest()
 
 
 async def _read_rows_from_tables(

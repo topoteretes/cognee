@@ -39,7 +39,9 @@ async def test_get_file_content_hash_file():
     import hashlib
 
     try:
-        expected_hash = hashlib.md5(text_content.encode("utf-8")).hexdigest()
+        expected_hash = hashlib.md5(
+            text_content.encode("utf-8"), usedforsecurity=False
+        ).hexdigest()
         result = await get_file_content_hash(temp_file_path)
         assert result == expected_hash
     finally:
@@ -51,7 +53,7 @@ async def test_get_file_content_hash_stream():
     stream = BytesIO(b"test_data")
     import hashlib
 
-    expected_hash = hashlib.md5(b"test_data").hexdigest()
+    expected_hash = hashlib.md5(b"test_data", usedforsecurity=False).hexdigest()
     result = await get_file_content_hash(stream)
     assert result == expected_hash
 

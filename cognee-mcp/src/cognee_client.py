@@ -165,7 +165,7 @@ class CogneeClient:
     def _text_upload(data: Any) -> dict[str, tuple[str, str, str]]:
         """Create a content-addressed text upload for API-mode ingestion."""
         content = str(data)
-        digest = hashlib.md5(content.encode("utf-8")).hexdigest()
+        digest = hashlib.md5(content.encode("utf-8"), usedforsecurity=False).hexdigest()
         return {"data": (f"text_{digest}.txt", content, "text/plain")}
 
     @staticmethod

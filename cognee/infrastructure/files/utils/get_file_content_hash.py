@@ -16,7 +16,7 @@ HASH_CHUNK_SIZE = 1024 * 1024
 
 
 async def get_file_content_hash(file_obj: str | BinaryIO) -> str:
-    h = hashlib.md5()
+    h = hashlib.md5(usedforsecurity=False)
 
     try:
         if isinstance(file_obj, str):

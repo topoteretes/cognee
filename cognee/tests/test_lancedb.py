@@ -25,7 +25,7 @@ async def test_local_file_deletion(data_text, file_location):
     async with engine.get_async_session() as session:
         # Get hash of data contents
         encoded_text = data_text.encode("utf-8")
-        data_hash = hashlib.md5(encoded_text).hexdigest()
+        data_hash = hashlib.md5(encoded_text, usedforsecurity=False).hexdigest()
         # Get data entry from database based on hash contents
         data = (await session.scalars(select(Data).where(Data.content_hash == data_hash))).one()
         assert os.path.isfile(data.raw_data_location.replace("file://", "")), (

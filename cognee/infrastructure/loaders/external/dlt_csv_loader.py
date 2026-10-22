@@ -102,7 +102,9 @@ class DltCsvLoader(LoaderInterface):
 
         manifest_text = manifest_item.data
         storage_file_name = (
-            "dlt_manifest_" + hashlib.md5(manifest_text.encode()).hexdigest() + ".txt"
+            "dlt_manifest_"
+            + hashlib.md5(manifest_text.encode(), usedforsecurity=False).hexdigest()
+            + ".txt"
         )
         storage = get_file_storage(get_storage_config()["data_root_directory"])
         return await store_derived_text(
