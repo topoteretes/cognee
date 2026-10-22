@@ -369,6 +369,12 @@ completes.
   cognify for each.
 - **No sleeping.** A 429 stops the run at once; whatever `Retry-After` says. Asana limits requests
   per minute, so the next run (a minute later) usually continues.
+- **A plan with a low per-minute limit** ends a run at the limit, long before `max_requests`: the
+  run stops with `failed_rate_limit`, keeps what it rendered and the listing it finished, and
+  the next run continues. A first sync of a big selection then takes as many runs as the limit
+  needs (a task costs three requests, and every pass lists its projects again). The connector does
+  not pace its requests, and `max_requests` only bounds a run, it is not tuned to a plan. The
+  per-plan limits are not checked against Asana here.
 - Subtasks of subtasks, attachments, task history other than comments, tags, followers and
   dependencies are not read. A subtask is only part of its parent's document.
 - If the token loses access to every task but the listing still works, a run ends with no reason
