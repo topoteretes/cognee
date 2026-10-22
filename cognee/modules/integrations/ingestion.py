@@ -58,6 +58,12 @@ def _apollo_service(api_key: str) -> Any:
     return build_apollo_service(api_key)
 
 
+def _asana_service(access_token: str) -> Any:
+    from cognee.tasks.ingestion.connectors.asana import build_asana_service
+
+    return build_asana_service(access_token)
+
+
 _PROVIDERS: dict[str, _Provider] = {
     "google_drive": _Provider(
         prefix="google_drive_files",
@@ -89,11 +95,24 @@ _PROVIDERS: dict[str, _Provider] = {
         source_module="cognee.tasks.ingestion.connectors.notion",
         source_name="notion_source",
     ),
+    # No service builder: ``onenote_source`` takes the delegated token itself, and the host
+    # injects any HTTP client through ``service=`` or ``http_client=``.
+    "onenote": _Provider(
+        prefix="onenote",
+        source_module="cognee.tasks.ingestion.connectors.onenote",
+        source_name="onenote_source",
+    ),
     "apollo": _Provider(
         prefix="apollo",
         source_module="cognee.tasks.ingestion.connectors.apollo",
         source_name="apollo_source",
         service_builder=_apollo_service,
+    ),
+    "asana": _Provider(
+        prefix="asana",
+        source_module="cognee.tasks.ingestion.connectors.asana",
+        source_name="asana_source",
+        service_builder=_asana_service,
     ),
 }
 

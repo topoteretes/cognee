@@ -25,9 +25,14 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("improve.graph_changes")
 
+# Operations that only read a dataset.
+READ_OPERATION_NAMES = ("search", "recall")
+
 IMPROVE_OPERATION_NAME = "improve"
 
 REVIEW_WATERMARK_KEY = "review_conflicts"
+# Renaming it makes every dataset rebuild its index once, e.g. after the index text changes.
+GLOBAL_CONTEXT_WATERMARK_KEY = "global_context_index"
 
 
 class ImproveWatermark(NamedTuple):
@@ -90,3 +95,60 @@ async def last_improve_watermark(
     started_at = _stamped_stage_start(row[1], key)
     # _stamped_stage_start accepted it, so row[1][key] is a dict carrying a date.
     return ImproveWatermark(row[0], started_at, row[1][key]) if started_at is not None else None
+
+
+async def has_dataset_changed_since_last_improve(
+    dataset_id: UUID,
+    key: str,
+    *,
+    exclude_operation_id: UUID | None = None,
+    any_dataset: bool = False,
+) -> bool:
+    """True unless the ``key`` stage's stamp exists and only reads ran after it.
+
+    For a stage whose output must not lag the graph: every run row counts,
+    whatever its pipeline or outcome, except a read, a ``noop`` improve and the
+    stamped run's own. A failed run may have written part of its data, a
+    deletion runs no pipeline, add() can drop a source's stale documents, and a
+    writer this module does not know of counts too. ``any_dataset`` counts every
+    dataset's rows, for datasets sharing a graph.
+    """
+    try:
+        from sqlalchemy import func, or_, select
+
+        from cognee.infrastructure.databases.relational import get_relational_engine
+        from cognee.modules.pipelines.models import PipelineRun
+
+        watermark = await last_improve_watermark(
+            dataset_id, key, exclude_operation_id=exclude_operation_id
+        )
+        if watermark is None:
+            return True
+
+        # The stamped run's own row and the runs it started close after the stamp.
+        # A run's start row carries no parent, so its runs are matched by run id.
+        own_runs = select(PipelineRun.pipeline_run_id).where(
+            PipelineRun.parent_operation_id == watermark.operation_id,
+            PipelineRun.pipeline_run_id.is_not(None),  # NOT IN with a NULL matches nothing
+        )
+        conditions = [
+            PipelineRun.created_at > watermark.started_at,
+            PipelineRun.pipeline_run_id != watermark.operation_id,
+            PipelineRun.pipeline_run_id.not_in(own_runs),
+            or_(
+                PipelineRun.operation_name.is_(None),
+                PipelineRun.operation_name.not_in(READ_OPERATION_NAMES),
+            ),
+            # A noop improve ran no stage; a start row's outcome is NULL, which != alone drops.
+            or_(PipelineRun.outcome.is_(None), PipelineRun.outcome != "noop"),
+        ]
+        if not any_dataset:
+            conditions.append(PipelineRun.dataset_id == dataset_id)
+        async with get_relational_engine().get_async_session() as session:
+            changes = await session.execute(select(func.count(PipelineRun.id)).where(*conditions))
+            return bool(changes.scalar_one())
+    except Exception as error:
+        logger.debug(
+            "improve: change check could not decide, running the stage: %s", error, exc_info=True
+        )
+        return True

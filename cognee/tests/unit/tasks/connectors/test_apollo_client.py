@@ -3,7 +3,9 @@
 """The Apollo REST client: request shape, error mapping, retries and key hygiene.
 
 Importing the connectors loads no HTTP client library, so ``requests`` is imported when
-the first request is made. A key never reaches an error message, a repr or a log line.
+the first request is made. A key never reaches an error message, a repr or a log line, and
+never leaves for another host: a redirect is an error. Apollo's rate-limit headers are read
+off every answer that has them and kept per endpoint.
 """
 
 import subprocess
@@ -12,8 +14,10 @@ import textwrap
 
 import pytest
 import requests
+from requests.adapters import HTTPAdapter
 
 from cognee.tasks.ingestion.connectors.apollo import (
+    BASE_URL,
     ApolloAccessError,
     ApolloAPIError,
     ApolloAuthError,
@@ -24,6 +28,13 @@ from cognee.tasks.ingestion.connectors.apollo import (
 )
 
 KEY = "SECRET-apollo-key-123"
+# The headers an answer for one endpoint carries, and the windows the client reads from them.
+WINDOWS_HEADERS = {
+    "x-minute-requests-left": "49",
+    "x-hourly-requests-left": "399",
+    "x-24-hour-requests-left": "1999",
+}
+WINDOWS = {"minute": 49, "hourly": 399, "daily": 1999}
 
 # `import cognee` loads requests, so the script forgets it, and the connectors, first. A
 # `None` entry makes any later `import requests` raise: the import below only succeeds
@@ -78,12 +89,7 @@ def test_importing_the_connector_does_not_load_requests():
 
 
 def test_a_request_sends_the_key_header_and_json_body(monkeypatch):
-    headers = {
-        "x-minute-requests-left": "49",
-        "x-hourly-requests-left": "399",
-        "x-24-hour-requests-left": "1999",
-    }
-    client, calls, _ = _client(monkeypatch, _Response(200, {"contacts": []}, headers))
+    client, calls, _ = _client(monkeypatch, _Response(200, {"contacts": []}, WINDOWS_HEADERS))
 
     assert client.request("POST", "/contacts/search", body={"page": 1}) == {"contacts": []}
 
@@ -91,7 +97,7 @@ def test_a_request_sends_the_key_header_and_json_body(monkeypatch):
     assert (method, url) == ("POST", "https://api.apollo.io/api/v1/contacts/search")
     assert kwargs["headers"]["x-api-key"] == KEY
     assert kwargs["json"] == {"page": 1}
-    assert client.rate_limit == {"minute": 49, "hourly": 399, "daily": 1999}
+    assert client.rate_limit == {"/contacts/search": WINDOWS}
 
 
 @pytest.mark.parametrize(
@@ -207,3 +213,95 @@ def test_a_malformed_key_is_rejected_without_echoing_it(bad):
         ApolloClient(bad)
 
     assert not bad.strip() or bad not in str(raised.value)
+
+
+# --- rate limits are kept per endpoint, and read off an error answer that carries them ---
+
+
+# The client reads the headers off every answer that carries them. That Apollo sends them on
+# an error answer is not confirmed, so this pins only what the client does when it does.
+@pytest.mark.parametrize(
+    ("status", "payload", "error"),
+    [
+        (404, {}, ApolloNotFoundError),
+        (422, {"error": "This contact has been deleted."}, ApolloNotFoundError),
+        (403, {}, ApolloAccessError),
+        (429, {}, ApolloRateLimitedError),
+    ],
+)
+def test_an_error_answer_that_carries_the_windows_is_read_too(monkeypatch, status, payload, error):
+    client, _, _ = _client(monkeypatch, _Response(status, payload, WINDOWS_HEADERS))
+
+    with pytest.raises(error):
+        client.request("GET", "/contacts/c1")
+
+    assert client.rate_limit == {"/contacts/{id}": WINDOWS}
+
+
+def test_the_windows_are_kept_per_endpoint(monkeypatch):
+    other = {**WINDOWS_HEADERS, "x-minute-requests-left": "7"}
+    client, _, _ = _client(
+        monkeypatch,
+        _Response(200, {"contacts": []}, WINDOWS_HEADERS),
+        _Response(200, {"accounts": []}, other),
+    )
+
+    client.request("POST", "/contacts/search", body={})
+    client.request("POST", "/accounts/search", body={})
+
+    assert client.rate_limit == {
+        "/contacts/search": WINDOWS,
+        "/accounts/search": {**WINDOWS, "minute": 7},
+    }
+
+
+def test_an_answer_without_the_headers_keeps_what_is_known_about_its_endpoint(monkeypatch):
+    client, _, _ = _client(
+        monkeypatch,
+        _Response(200, {"contacts": []}, WINDOWS_HEADERS),
+        _Response(200, {"contacts": []}),
+    )
+
+    client.request("POST", "/contacts/search", body={})
+    client.request("POST", "/contacts/search", body={})
+
+    assert client.rate_limit == {"/contacts/search": WINDOWS}
+
+
+# --- a redirect is an error and never carries the key to another host ---
+
+
+def _hops(monkeypatch, *responses):
+    """Answer at the HTTP adapter, below requests' own redirect handling, and record every hop."""
+    sent, queue = [], list(responses)
+
+    def send(self, request, **kwargs):
+        sent.append((request.url, request.headers.get("x-api-key")))
+        status, location = queue.pop(0)
+        response = requests.Response()
+        response.status_code = status
+        response.url = request.url
+        response.request = request
+        response._content = b""
+        if location:
+            response.headers["Location"] = location
+        return response
+
+    monkeypatch.setattr(HTTPAdapter, "send", send)
+    return sent
+
+
+# requests drops Authorization on a hop to another host but keeps any other header, so a
+# followed redirect would hand the key to whoever the Location names.
+@pytest.mark.parametrize("status", [301, 302, 307, 308])
+def test_a_redirect_is_an_error_and_the_key_goes_nowhere_else(monkeypatch, status):
+    sent = _hops(monkeypatch, (status, "https://collector.example.net/steal"), (200, None))
+
+    with pytest.raises(ApolloAPIError) as raised:
+        ApolloClient(KEY).request("GET", "/contacts/c1")
+
+    assert sent == [(f"{BASE_URL}/contacts/c1", KEY)], "no second hop"
+    assert str(raised.value) == (
+        f"Apollo answered /contacts/{{id}} with a redirect (HTTP {status})"
+    )
+    assert "collector" not in str(raised.value)

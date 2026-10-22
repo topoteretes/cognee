@@ -658,6 +658,13 @@ def send_telemetry(
       connected to an instance via ``serve()``: the tenant id it reported and
       the instance host (a ``*.cognee.ai`` host for Cognee Cloud, otherwise
       ``self_hosted`` or ``localhost``). Absent otherwise.
+    - **is_agent** / **agent_owner_id** / **agent_plugin**: Whether ``user``
+      is an agent (a child user with its own API key, such as a provisioned
+      plugin); ``user_id`` is then the agent itself. ``agent_owner_id`` is
+      the human user who owns it and ``agent_plugin`` a known plugin key or
+      ``"custom"``; both ``None`` otherwise. Read off the ``User`` model only:
+      a bare id cannot be told apart from a human's without a database
+      lookup, so pass the model when you hold it.
     """
     if additional_properties is None:
         additional_properties = {}
@@ -681,6 +688,9 @@ def send_telemetry(
     # as the managed cloud set TELEMETRY_ORIGIN (e.g. "cloud") so events can be
     # segmented by origin.
     origin = telemetry_origin()
+    from cognee.modules.integrations.agent_identity import agent_telemetry_properties
+
+    agent_properties = agent_telemetry_properties(user if user is not None else user_id)
     current_time = datetime.now(timezone.utc)
     payload = {
         "anonymous_id": anonymous_id,
@@ -692,6 +702,7 @@ def send_telemetry(
             "api_key_tracking_id": api_key_tracking_id,
             "api_key_hash": api_key_tracking_id,
             **connected_tenant,
+            "is_agent": agent_properties["is_agent"],
         },
         "properties": {
             "time": current_time.strftime("%m/%d/%Y"),
@@ -703,6 +714,7 @@ def send_telemetry(
             "api_key_hash": api_key_tracking_id,
             "telemetry_origin": origin,
             **connected_tenant,
+            **agent_properties,
             **additional_properties,
         },
     }
