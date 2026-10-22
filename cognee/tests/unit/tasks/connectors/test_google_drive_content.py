@@ -19,6 +19,8 @@ from cognee.tasks.ingestion.connectors.google_drive import (
     is_supported_mime_type,
 )
 
+_REAL_STREAM_MEDIA = gd_source._stream_media
+
 
 @pytest.fixture(autouse=True)
 def fake_media_stream(monkeypatch):
@@ -202,9 +204,6 @@ class _FakeLoaderEngine:
     def get_loader(self, file_path, preferred_loaders):
         return object() if self.loader_available else None
 
-    def _no_loader_message(self, file_path):
-        return f"install cognee[docling] for {file_path}"
-
     async def load_file(self, file_path, preferred_loaders=None, **kwargs):
         self.seen = {
             "suffix": pathlib.Path(file_path).suffix,
@@ -245,7 +244,7 @@ def test_office_file_goes_through_the_loader_engine_without_persisting(loader_en
 def test_missing_loader_is_a_named_error_not_a_skip(loader_engine):
     loader_engine.loader_available = False
     service = _FakeService(_FakeFiles(media_result=b"x"))
-    with pytest.raises(LoaderUnavailableError, match="cognee\\[docling\\]"):
+    with pytest.raises(LoaderUnavailableError, match="docling"):
         extract_file_content(service, "d", DOCX, "report.docx")
 
 
@@ -273,3 +272,31 @@ def test_missing_loader_fails_the_file_with_its_reason(loader_engine):
     assert row is None
     assert stats["failed"] == 1
     assert stats["failed_loader_unavailable"] == 1
+
+
+def test_download_is_chunked_with_retries(monkeypatch):
+    import sys
+    import types
+
+    seen = {"retries": []}
+
+    class _Downloader:
+        def __init__(self, buffer, request, chunksize):
+            seen["chunksize"] = chunksize
+            self.buffer, self.calls = buffer, 0
+
+        def next_chunk(self, num_retries=0):
+            seen["retries"].append(num_retries)
+            self.calls += 1
+            self.buffer.write(b"chunk%d;" % self.calls)
+            return None, self.calls == 3
+
+    module = types.ModuleType("googleapiclient.http")
+    module.MediaIoBaseDownload = _Downloader
+    monkeypatch.setitem(sys.modules, "googleapiclient", types.ModuleType("googleapiclient"))
+    monkeypatch.setitem(sys.modules, "googleapiclient.http", module)
+    buffer = io.BytesIO()
+    _REAL_STREAM_MEDIA(object(), buffer)
+    assert buffer.getvalue() == b"chunk1;chunk2;chunk3;"
+    assert seen["chunksize"] == gd_source.DOWNLOAD_CHUNK_BYTES
+    assert seen["retries"] == [gd_source.API_RETRIES] * 3
