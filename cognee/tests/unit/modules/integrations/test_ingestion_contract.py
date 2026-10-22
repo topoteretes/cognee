@@ -66,6 +66,25 @@ def test_apollo_service_is_built_from_the_connections_api_key():
     assert isinstance(ingestion.build_service("apollo", "an-apollo-api-key"), ApolloClient)
 
 
+def test_asana_names_are_pinned_and_a_dlt_table_name():
+    # Same rule as the Apollo pin: the literal is deliberate. One connection is one access token,
+    # so there is no scope, and the Cloud control plane only tracks tables that start with the
+    # provider prefix.
+    name = ingestion.resource_name("asana", CREDENTIAL)
+    assert name == "asana_e8ba1b716982492b069485f8"
+    assert name == name.lower() and set(name) <= set("abcdefghijklmnopqrstuvwxyz0123456789_")
+    assert len(name) <= 63
+    assert ingestion.source_factory("asana").__module__ == (
+        "cognee.tasks.ingestion.connectors.asana"
+    )
+
+
+def test_asana_service_is_built_from_the_connections_access_token():
+    from cognee.tasks.ingestion.connectors.asana import AsanaClient
+
+    assert isinstance(ingestion.build_service("asana", "an-asana-access-token"), AsanaClient)
+
+
 def test_onenote_names_are_pinned_and_a_dlt_table_name():
     # Same rule as the Linear pin: the literal is deliberate. One notebook is one scope, and
     # the Cloud control plane only tracks tables that start with the provider prefix.

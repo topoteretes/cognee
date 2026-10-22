@@ -2,8 +2,8 @@
 
 Connectors pull data from external sources (Gmail, Slack, Notion, Google Drive,
 Google Calendar, Confluence, …) into cognee memory. **Gmail, Google Drive, Google Calendar,
-Linear, Notion, Apollo and OneNote ship in the SDK**; install the Google extras for their client libraries
-and DLT (Linear, Notion, Apollo and OneNote need none). Other connectors are distributed under [topoteretes/cognee-community](https://github.com/topoteretes/cognee-community).
+Linear, Notion, Apollo, Asana and OneNote ship in the SDK**; install the Google extras for their client libraries
+and DLT (Linear, Notion, Apollo, Asana and OneNote need none). Other connectors are distributed under [topoteretes/cognee-community](https://github.com/topoteretes/cognee-community).
 
 Every connector is built on cognee's **DLT ingestion subsystem**, so they all share
 the same guarantees instead of each reinventing ingestion:
@@ -31,6 +31,7 @@ Install from PyPI; you do **not** need to clone the community monorepo to use th
 | Google Calendar | `cognee[google-calendar]` |
 | Linear | bundled, no extra |
 | Apollo | bundled, no extra |
+| Asana | bundled, no extra |
 | OneNote | bundled, no extra |
 
 ## Quickstart (Gmail)
@@ -63,7 +64,8 @@ privacy notes: [Gmail](../../cognee/tasks/ingestion/connectors/gmail.md),
 [Google Calendar](../../cognee/tasks/ingestion/connectors/google_calendar.md),
 [Linear](../../cognee/tasks/ingestion/connectors/linear.md),
 [Notion](../../cognee/tasks/ingestion/connectors/notion.md),
-[Apollo](../../cognee/tasks/ingestion/connectors/apollo.md) and
+[Apollo](../../cognee/tasks/ingestion/connectors/apollo.md),
+[Asana](../../cognee/tasks/ingestion/connectors/asana.md) and
 [OneNote](../../cognee/tasks/ingestion/connectors/onenote.md). The other connectors are documented
 in their community packages.
 
