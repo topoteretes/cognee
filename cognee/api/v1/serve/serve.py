@@ -109,17 +109,32 @@ async def _serve_direct(service_url: str, api_key: str = "") -> CloudClient:
             name="ServeAuthenticationError",
         )
 
-    # Save so subsequent serve() calls reconnect without args. The tenant id
-    # links this install's telemetry to the tenant it connected to (CLO-804).
-    tenant_id = await client._get_tenant_id()
+    # The tenant id links this install's telemetry to the tenant it connected
+    # to (CLO-804); telemetry reads it from the client while connected.
+    client.tenant_id = await client._get_tenant_id()
+    # Save so subsequent serve() calls reconnect without args
     save_credentials(
-        CloudCredentials(service_url=service_url, api_key=api_key, tenant_id=tenant_id)
+        CloudCredentials(service_url=service_url, api_key=api_key, tenant_id=client.tenant_id)
     )
 
     set_remote_client(client)
     mode = "local" if "localhost" in service_url or "127.0.0.1" in service_url else "remote"
     print(f"  Connected to Cognee ({mode}) at {service_url}")
     return client
+
+
+def _save_tenant_id(creds: CloudCredentials, tenant_id: str) -> None:
+    """Record the tenant on a saved connection; optional, so never fails serve()."""
+    from cognee.api.v1.serve.credentials import CloudCredentials, save_credentials
+
+    try:
+        save_credentials(
+            CloudCredentials(
+                service_url=creds.service_url, api_key=creds.api_key, tenant_id=tenant_id
+            )
+        )
+    except Exception:
+        logger.debug("Could not save the tenant id with the saved connection", exc_info=True)
 
 
 async def _serve_saved(creds: CloudCredentials) -> CloudClient:
@@ -136,14 +151,12 @@ async def _serve_saved(creds: CloudCredentials) -> CloudClient:
         # "connect" and fail on the first operation.
         if await client._health_check() and await client._auth_check() not in (401, 403):
             logger.info("Using saved connection to %s", creds.service_url)
-            if not creds.tenant_id:
+            client.tenant_id = creds.tenant_id
+            if not client.tenant_id:
                 # Connections saved before the tenant id was recorded.
-                tenant_id = await client._get_tenant_id()
-                if tenant_id:
-                    from cognee.api.v1.serve.credentials import save_credentials
-
-                    creds.tenant_id = tenant_id
-                    save_credentials(creds)
+                client.tenant_id = await client._get_tenant_id()
+                if client.tenant_id:
+                    _save_tenant_id(creds, client.tenant_id)
             set_remote_client(client)
             print(f"  Connected to Cognee at {creds.service_url}")
             return client
