@@ -62,7 +62,7 @@ async def extract_graph_from_data(
     # Eval capture (SDK-529): snapshot the raw graphs before integrate_chunk_graphs
     # mutates them, so a cascade run's merge-decision events have the
     # extraction.chunk_graph record their chunk_id joins to.
-    capture_chunk_graphs(data_chunks, chunk_graphs)
+    await capture_chunk_graphs(data_chunks, chunk_graphs)
 
     return await integrate_chunk_graphs(
         data_chunks=data_chunks,
