@@ -342,6 +342,129 @@ def test_file_moved_out_of_scope_yields_hard_delete_tombstone(fake_content_extra
     assert fake_content_extraction == []
 
 
+FOLDER_MIME = "application/vnd.google-apps.folder"
+
+
+def _moved_in_folder_service():
+    # "moved" was elsewhere in Drive and is now dragged into the synced folder, with a
+    # nested "deep" folder inside it. Drive's changes feed reports only the moved folder:
+    # the files inside it keep their parents, so they get no change entry of their own.
+    file_a = _file_meta("fileA")
+    file_b = _file_meta("fileB", parents=("moved",))
+    file_c = _file_meta("fileC", parents=("deep",))
+    service = FakeDriveService(
+        files_by_folder={"0Aroot": [file_a], "moved": [file_b], "deep": [file_c]},
+        file_by_id={
+            "fileA": file_a,
+            "fileB": file_b,
+            "fileC": file_c,
+            "moved": _file_meta("moved", mime_type=FOLDER_MIME),
+            "deep": _file_meta("deep", mime_type=FOLDER_MIME, parents=("moved",)),
+        },
+        subfolders={"root": ["moved"], "moved": ["deep"]},
+    )
+    service.changes_by_token["t0"] = {
+        "changes": [{"fileId": "moved", "removed": False}],
+        "newStartPageToken": "t1",
+    }
+    return service
+
+
+def test_folder_moved_into_scope_ingests_the_files_inside_it(fake_content_extraction):
+    service = _moved_in_folder_service()
+    state = {"page_token": "t0", "known_ids": ["fileA"]}
+    stats = {}
+
+    rows = list(gd_source._iter_rows(service, _config(), state, stats))
+
+    assert sorted(row["id"] for row in rows) == ["fileB", "fileC"]
+    assert all(row["_deleted"] is False for row in rows)
+    assert sorted(fake_content_extraction) == ["fileB", "fileC"]
+    assert state["known_ids"] == ["fileA", "fileB", "fileC"]
+    assert sorted(state["versions"]) == ["fileB", "fileC"]
+    assert state["page_token"] == "t1"
+    assert "skipped_unsupported_type" not in stats, "a folder is not an unsupported file"
+
+
+def test_folder_moved_into_scope_is_read_on_the_thread_pool(fake_content_extraction):
+    service = _moved_in_folder_service()
+    state = {"page_token": "t0", "known_ids": ["fileA"]}
+
+    rows = list(
+        gd_source._iter_rows(
+            service, _config(max_workers=2), state, service_factory=lambda: service
+        )
+    )
+
+    assert sorted(row["id"] for row in rows) == ["fileB", "fileC"]
+    assert state["page_token"] == "t1"
+
+
+def test_a_file_reported_with_its_moved_folder_is_read_once(fake_content_extraction):
+    service = _moved_in_folder_service()
+    service.changes_by_token["t0"]["changes"].append({"fileId": "fileB", "removed": False})
+    state = {"page_token": "t0", "known_ids": ["fileA"]}
+
+    rows = list(gd_source._iter_rows(service, _config(), state))
+
+    assert sorted(row["id"] for row in rows) == ["fileB", "fileC"]
+    assert sorted(fake_content_extraction) == ["fileB", "fileC"]
+
+
+def test_folder_moved_within_scope_does_not_reread_synced_files(fake_content_extraction):
+    service = _moved_in_folder_service()
+    state = {"page_token": "t0", "known_ids": ["fileA", "fileB", "fileC"]}
+
+    rows = list(gd_source._iter_rows(service, _config(), state))
+
+    assert rows == []
+    assert fake_content_extraction == []
+    assert state["page_token"] == "t1"
+
+
+def test_folder_moved_into_scope_retries_a_file_that_failed_to_extract(monkeypatch):
+    service = _moved_in_folder_service()
+    monkeypatch.setattr(
+        gd_source,
+        "extract_file_content",
+        lambda service, file_id, *args: None if file_id == "fileC" else f"content::{file_id}",
+    )
+    state = {"page_token": "t0", "known_ids": ["fileA"]}
+
+    assert [row["id"] for row in gd_source._iter_rows(service, _config(), state)] == ["fileB"]
+    assert state["page_token"] == "t0", "the failed file keeps the cursor back for a retry"
+    assert "fileC" not in state["known_ids"]
+
+    monkeypatch.setattr(gd_source, "extract_file_content", lambda *args: "content")
+    assert [row["id"] for row in gd_source._iter_rows(service, _config(), state)] == ["fileC"]
+    assert state["page_token"] == "t1"
+
+
+def test_folder_moved_into_root_is_ignored_without_subfolders(fake_content_extraction):
+    service = _moved_in_folder_service()
+    state = {"page_token": "t0", "known_ids": ["fileA"]}
+
+    rows = list(gd_source._iter_rows(service, _config(include_subfolders=False), state))
+
+    assert rows == []
+    assert fake_content_extraction == []
+
+
+def test_shared_drive_folder_change_is_not_walked(fake_content_extraction):
+    # A shared drive is scoped by driveId, not by a folder walk.
+    service = _moved_in_folder_service()
+    for meta in service.file_by_id.values():
+        meta["driveId"] = "drive1"
+    state = {"page_token": "t0", "known_ids": ["fileA"]}
+
+    rows = list(
+        gd_source._iter_rows(service, _config(folder_id="drive1", shared_drive_id="drive1"), state)
+    )
+
+    assert rows == []
+    assert not any("'moved' in parents" in q for q in service.list_calls)
+
+
 def test_deleted_file_returning_404_on_get_yields_tombstone(fake_content_extraction):
     # Changes API reports a change but the file is already gone by the time
     # we fetch its metadata.

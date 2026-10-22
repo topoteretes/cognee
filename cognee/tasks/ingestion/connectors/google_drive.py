@@ -723,6 +723,7 @@ def _iter_rows(
             row, local = fetch_row(client, file_meta)
             return file_meta, row, local
 
+        changed_folder_ids: list[str] = []
         try:
             scope_folder_ids = _get_scope_folder_ids(service, config)
             if not config.shared_drive_id:
@@ -746,6 +747,11 @@ def _iter_rows(
                     stats["deleted"] += 1
                     yield {"id": file_id, "_deleted": True}
                     continue
+                if file_meta.get("mimeType") == GOOGLE_FOLDER_MIME_TYPE:
+                    # A folder is never a document, so it is not counted as one; the files
+                    # in one moved into scope are read after this loop.
+                    changed_folder_ids.append(file_id)
+                    continue
                 _merge_stats(stats, local)
                 known_ids.add(file_id)
                 if row is not None:
@@ -760,6 +766,37 @@ def _iter_rows(
                 elif not local.get("unchanged"):
                     # No row and nothing forgotten (a failure): no version, as on a full scan.
                     versions.pop(file_id, None)
+
+            # A folder moved into scope is reported on its own: the files inside it keep
+            # their parents, so they get no change entry. Read the ones not synced yet; a
+            # folder moved within scope holds only synced files and costs its listing. A file
+            # with a change of its own was handled above and is in known_ids by now. A
+            # shared drive is scoped by driveId, not by a folder walk, so it is left out.
+            if changed_folder_ids and config.include_subfolders and not config.shared_drive_id:
+                unsynced = {}
+                for folder_id in changed_folder_ids:
+                    for child in _list_files_in_tree(service, folder_id):
+                        if child["id"] not in known_ids:
+                            unsynced.setdefault(child["id"], child)
+                for child, (row, local) in _ordered_map(
+                    fetch_row,
+                    list(unsynced.values()),
+                    service,
+                    service_factory,
+                    config.max_workers,
+                    weight=lambda file_meta: int(file_meta.get("size") or 0),
+                ):
+                    _merge_stats(stats, local)
+                    if row is not None:
+                        known_ids.add(child["id"])
+                        yielded += 1
+                        if child.get("modifiedTime"):
+                            versions[child["id"]] = child["modifiedTime"]
+                        yield row
+                    elif not local.get("failed"):
+                        # Left out for good (empty, too large, unsupported). A failure stays
+                        # unknown, so the next run reads it again from the held-back cursor.
+                        known_ids.add(child["id"])
         except _CutShort as cut:
             # The cursor stays: what was fetched is kept by its version, and the changes
             # feed is read again from the same token on the next run.
@@ -786,7 +823,11 @@ def _get_scope_folder_ids(service, config: _DriveConfig) -> set[str]:
         return {root}
     if not config.include_subfolders:
         return {root}
+    return _folder_tree(service, root)
 
+
+def _folder_tree(service, root: str) -> set[str]:
+    """Return ``root`` and every folder below it."""
     scope_ids = {root}
     queue = [root]
     while queue:
@@ -841,6 +882,12 @@ def _list_files_in_scope(service, config: _DriveConfig):
         return
     for folder_id in _get_scope_folder_ids(service, config):
         yield from _list_files_in_folder(service, folder_id, shared_drive_id=config.shared_drive_id)
+
+
+def _list_files_in_tree(service, folder_id: str):
+    """Yield the files in a My Drive folder and in every folder below it."""
+    for tree_folder_id in _folder_tree(service, folder_id):
+        yield from _list_files_in_folder(service, tree_folder_id)
 
 
 def _list_files_in_folder(
