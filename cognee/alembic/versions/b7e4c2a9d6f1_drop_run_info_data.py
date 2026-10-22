@@ -12,8 +12,7 @@ STARTED row and again on the terminal row, so the table grew with dataset size
 times run rate. Nothing ever read the key. The writers no longer store it;
 this revision removes it from the rows already stored.
 
-Every ``run_info`` holding a ``data`` key (and ``errored_data``, written by a
-pre-release build) loses those keys. Every other key — ``recovery_lock``,
+Every ``run_info`` holding a ``data`` key loses it. Every other key — ``recovery_lock``,
 ``progress``, ``error``, the improve stamps — is kept, and no row is deleted.
 Only rows holding the key are read: SQLite and Postgres filter in SQL, any
 other dialect scans the table in Python. Idempotent, since a second run finds
@@ -35,7 +34,7 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 TABLE_NAME = "pipeline_runs"
-DROPPED_KEYS = ("data", "errored_data")
+DROPPED_KEY = "data"
 BATCH_SIZE = 500
 
 
@@ -44,7 +43,7 @@ def upgrade() -> None:
     if TABLE_NAME not in sa.inspect(bind).get_table_names():
         return
     table = _table()
-    rows = rows_with_dropped_keys(bind, table)
+    rows = rows_with_data_key(bind, table)
     statement = (
         sa.update(table)
         .where(table.c.id == sa.bindparam("row_id"))
@@ -66,34 +65,31 @@ def _table() -> sa.TableClause:
     return sa.table(TABLE_NAME, sa.column("id", sa.Uuid()), sa.column("run_info", sa.JSON()))
 
 
-def dropped_key_filter(dialect_name: str) -> sa.TextClause | None:
-    """SQL predicate for rows whose ``run_info`` holds a key to drop, per dialect.
+def data_key_filter(dialect_name: str) -> sa.TextClause | None:
+    """SQL predicate for rows whose ``run_info`` holds a ``data`` key, per dialect.
 
     ``None`` means the dialect has no known JSON key test, so every row is read
     and filtered in Python.
     """
     if dialect_name == "sqlite":
-        return sa.text(
-            "json_type(run_info, '$.data') IS NOT NULL "
-            "OR json_type(run_info, '$.errored_data') IS NOT NULL"
-        )
+        return sa.text("json_type(run_info, '$.data') IS NOT NULL")
     if dialect_name == "postgresql":
-        return sa.text("run_info::jsonb ?| array['data', 'errored_data']")
+        return sa.text("run_info::jsonb ? 'data'")
     return None
 
 
-def rows_with_dropped_keys(bind, table: sa.TableClause) -> list[tuple[Any, dict]]:
-    """``(id, run_info without the dropped keys)`` for every row holding one."""
+def rows_with_data_key(bind, table: sa.TableClause) -> list[tuple[Any, dict]]:
+    """``(id, run_info without data)`` for every row holding the key."""
     query = sa.select(table.c.id, table.c.run_info)
-    predicate = dropped_key_filter(bind.dialect.name)
+    predicate = data_key_filter(bind.dialect.name)
     if predicate is not None:
         query = query.where(predicate)
     stripped = []
     for row_id, run_info in bind.execute(query):
         # The Python check also guards the dialect filter: a row the SQL predicate
         # let through that holds no such key is left untouched.
-        if isinstance(run_info, dict) and any(key in run_info for key in DROPPED_KEYS):
+        if isinstance(run_info, dict) and DROPPED_KEY in run_info:
             stripped.append(
-                (row_id, {key: value for key, value in run_info.items() if key not in DROPPED_KEYS})
+                (row_id, {key: value for key, value in run_info.items() if key != DROPPED_KEY})
             )
     return stripped

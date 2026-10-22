@@ -1,8 +1,8 @@
 """Tests for migration b7e4c2a9d6f1 (drop the data key from pipeline_runs.run_info).
 
 Run against a real in-memory sqlite database rather than a mocked ``op``, so
-they prove what matters about a data migration: every row holding ``data`` or
-``errored_data`` loses exactly those keys, whatever they held (input text, an
+they prove what matters about a data migration: every row holding ``data``
+loses exactly that key, whatever it held (input text, an
 id list, the literal "None"), every other key of those rows survives, rows
 without the keys are untouched, no text or id list remains in the column, a
 second upgrade is a no-op, a database without the table is a no-op, and the
@@ -41,18 +41,16 @@ SEED = {
     "add_text_truncated": {"data": TRUNCATED, "error": "boom"},
     "empty_input": {"data": "None"},
     "cognify_ids": {"data": ID_LIST, "progress": {"completed_items": 2, "total_items": 2}},
-    "prerelease_ids": {"data": [ID_LIST[0]], "errored_data": [ID_LIST[1]], "error": "boom"},
     "no_data_key": {"error": "AbandonedPipelineRunError"},
     "improve_stamp": {"triplet_enrichment_started_at": "2026-10-01T00:00:00+00:00"},
     "null_run_info": None,
 }
-AFFECTED = {"add_text", "add_text_truncated", "empty_input", "cognify_ids", "prerelease_ids"}
+AFFECTED = {"add_text", "add_text_truncated", "empty_input", "cognify_ids"}
 EXPECTED_AFTER = {
     "add_text": {"recovery_lock": "lock-1"},
     "add_text_truncated": {"error": "boom"},
     "empty_input": {},
     "cognify_ids": {"progress": {"completed_items": 2, "total_items": 2}},
-    "prerelease_ids": {"error": "boom"},
 }
 
 
@@ -102,7 +100,7 @@ def seeded():
         yield connection, ids
 
 
-def test_upgrade_drops_the_keys_and_keeps_the_rest(seeded):
+def test_upgrade_drops_the_key_and_keeps_the_rest(seeded):
     connection, ids = seeded
 
     _run(connection, migration.upgrade)
@@ -159,10 +157,10 @@ def test_python_scan_selects_the_same_rows_as_the_sqlite_predicate(seeded, monke
     """A dialect without a JSON key test reads every row; the result must match."""
     connection, ids = seeded
     table = migration._table()
-    filtered = migration.rows_with_dropped_keys(connection, table)
+    filtered = migration.rows_with_data_key(connection, table)
 
-    monkeypatch.setattr(migration, "dropped_key_filter", lambda dialect_name: None)
-    scanned = migration.rows_with_dropped_keys(connection, table)
+    monkeypatch.setattr(migration, "data_key_filter", lambda dialect_name: None)
+    scanned = migration.rows_with_data_key(connection, table)
 
     assert sorted(scanned, key=repr) == sorted(filtered, key=repr)
     assert {row_id for row_id, _ in scanned} == {ids[name] for name in AFFECTED}
@@ -173,7 +171,7 @@ def test_python_scan_selects_the_same_rows_as_the_sqlite_predicate(seeded, monke
     [("sqlite", True), ("postgresql", True), ("mysql", False), ("mssql", False)],
 )
 def test_predicate_exists_only_for_dialects_with_a_json_key_test(dialect_name, has_predicate):
-    assert (migration.dropped_key_filter(dialect_name) is not None) is has_predicate
+    assert (migration.data_key_filter(dialect_name) is not None) is has_predicate
 
 
 def test_rows_beyond_one_batch_are_all_stripped():
