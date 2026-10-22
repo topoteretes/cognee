@@ -928,6 +928,14 @@ def _resolve_fk_references(
     ``_column_index`` of the target's rows. A value several rows hold creates no
     edge and is recorded in ``ambiguous_fks`` as
     ``(source_table, columns, ref_table, ref_columns)``, each joined by ", ".
+
+    Both lookups hold only the rows of this manifest, so an FK finds its target
+    only when both tables are loaded by the same ``add()``. A target loaded by an
+    earlier or a later ``add()`` is never linked, and nothing revisits this row
+    when it arrives. Loading the tables separately does not help within one dataset
+    either: every connection-string source is named ``sql_database``, so a second
+    ``add()`` of the same database maps to the same manifest id and is skipped as
+    already completed.
     """
     references = []
     key_columns = key_columns or {}
