@@ -42,6 +42,7 @@
   "GET /api/v1/datasets/{dataset_id}/schema",
   "GET /api/v1/integrations/status",
   "GET /api/v1/integrations/{provider}/connection",
+  "GET /api/v1/integrations/{provider}/connections",
   "GET /api/v1/integrations/{provider}/folders",
   "GET /api/v1/integrations/{provider}/labels",
   "GET /api/v1/integrations/{provider}/resources",

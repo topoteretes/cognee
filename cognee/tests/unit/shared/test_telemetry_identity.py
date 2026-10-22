@@ -216,3 +216,110 @@ def test_send_telemetry_emits_despite_detached_user(monkeypatch):
 
     assert payloads[0]["properties"]["user_id"] == "unknown-user"
     assert payloads[0]["properties"]["tenant_id"] == "Single User Tenant"
+
+
+class FakeAgentUser(FakeUser):
+    """An agent: a child user whose email encodes its name and owner."""
+
+    def __init__(self, name="claude-code", tenant_id=None):
+        super().__init__(uuid.uuid4(), tenant_id)
+        self.parent_user_id = uuid.uuid4()
+        self.email = f"{name}+{self.parent_user_id}@cognee.agent"
+
+
+def test_payload_attributes_an_agent_user_model(monkeypatch):
+    payloads = _capture_telemetry(monkeypatch)
+    agent = FakeAgentUser("codex")
+
+    send_telemetry("cognee.remember", agent)
+
+    properties = payloads[0]["properties"]
+    assert properties["is_agent"] is True
+    # The agent is the user: user_id identifies which agent it is.
+    assert properties["user_id"] == str(agent.id)
+    assert "agent_id" not in properties
+    assert properties["agent_owner_id"] == str(agent.parent_user_id)
+    assert properties["agent_plugin"] == "codex"
+    assert payloads[0]["user_properties"]["is_agent"] is True
+
+
+def test_payload_marks_ordinary_users_as_not_agents(monkeypatch):
+    payloads = _capture_telemetry(monkeypatch)
+
+    send_telemetry("cognee.remember", FakeUser(uuid.uuid4(), uuid.uuid4()))
+    send_telemetry("cognee.recall", "sdk")
+
+    for payload in payloads:
+        properties = payload["properties"]
+        assert properties["is_agent"] is False
+        assert properties["agent_owner_id"] is None
+        assert properties["agent_plugin"] is None
+        assert payload["user_properties"]["is_agent"] is False
+
+
+def test_payload_labels_custom_agents_without_their_name(monkeypatch):
+    payloads = _capture_telemetry(monkeypatch)
+
+    send_telemetry("cognee.remember", FakeAgentUser("acme-internal-bot"))
+
+    assert payloads[0]["properties"]["agent_plugin"] == "custom"
+    assert "acme-internal-bot" not in str(payloads[0])
+
+
+def test_payload_survives_a_detached_user_with_agent_fields(monkeypatch):
+    payloads = _capture_telemetry(monkeypatch)
+
+    send_telemetry(
+        "cognee.improve", DetachedUser(broken_attrs=("id", "tenant_id", "parent_user_id"))
+    )
+
+    assert payloads[0]["properties"]["is_agent"] is False
+
+
+def test_a_bare_agent_id_is_not_recognised(monkeypatch):
+    """Documented limit: without the model, an agent's id reads as a human's.
+
+    Telling them apart from a bare id needs a database lookup, which
+    send_telemetry (sync, fire-and-forget) cannot make. Emitters holding the
+    model must pass it; the guard below keeps in-tree emitters doing so.
+    """
+    payloads = _capture_telemetry(monkeypatch)
+    agent = FakeAgentUser("codex")
+
+    send_telemetry("cognee.session.add_qa", agent.id)
+
+    properties = payloads[0]["properties"]
+    assert properties["user_id"] == str(agent.id)
+    assert properties["is_agent"] is False
+
+
+def test_no_emitter_passes_user_id_while_holding_the_user():
+    """``send_telemetry(..., user.id)`` drops the agent and tenant the model carries."""
+    import ast
+    import pathlib
+
+    import cognee
+
+    root = pathlib.Path(cognee.__file__).parent
+    offenders = []
+    for path in root.rglob("*.py"):
+        if "tests" in path.relative_to(root).parts:
+            continue
+        source = path.read_text(encoding="utf-8")
+        if "send_telemetry(" not in source:
+            continue
+        for node in ast.walk(ast.parse(source)):
+            if not (isinstance(node, ast.Call) and len(node.args) >= 2):
+                continue
+            name = getattr(node.func, "id", getattr(node.func, "attr", None))
+            argument = node.args[1]
+            if (
+                name == "send_telemetry"
+                and isinstance(argument, ast.Attribute)
+                and argument.attr == "id"
+                and isinstance(argument.value, ast.Name)
+                and argument.value.id == "user"
+            ):
+                offenders.append(f"{path.relative_to(root)}:{node.lineno}")
+
+    assert offenders == [], f"pass the User model, not user.id: {offenders}"

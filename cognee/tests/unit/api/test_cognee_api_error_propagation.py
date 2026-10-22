@@ -37,8 +37,6 @@ EXEMPT = {
     # A liveness/readiness probe always reports a status; it never 500s.
     ("health/routers/get_health_router.py", "health_check"),
     ("health/routers/get_health_router.py", "detailed_health_check"),
-    # Documented fallback: an unreadable user list degrades to [].
-    ("activity/routers/get_activity_router.py", "get_tenant_users"),
     # The OAuth callback must redirect the browser, never render an error page.
     ("integrations/routers/get_integrations_router.py", "callback"),
 }

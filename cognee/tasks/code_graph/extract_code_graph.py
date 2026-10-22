@@ -29,6 +29,7 @@ from cognee.tasks.code_graph.models import (
     CodeAssociation,
     CodeExtractionAccount,
     CodeFileReference,
+    CodeFlow,
     CodeInsight,
     CodeIntent,
     CodeLintFinding,
@@ -56,11 +57,16 @@ KIND_TO_MODEL = {
     "test_ref": CodeTestReference,
     "file_ref": CodeFileReference,
     "insight": CodeInsight,
+    "flow": CodeFlow,
     "intent": CodeIntent,
     "extraction": CodeExtractionAccount,
     "association": CodeAssociation,
     "lint": CodeLintFinding,
 }
+
+# The prop holding the prose a synthesized kind is described by: an insight's
+# explainer text, a flow's summary.
+_PROSE_PROPS = {"insight": "description", "flow": "summary"}
 
 # receipt.json fields worth keeping on the repository node. repo_path,
 # duration and generated_at-style run specifics that describe the machine
@@ -82,6 +88,12 @@ _RECEIPT_PROJECTION_KEYS = (
 # write-side _WRITE_CHUNK_SIZE convention so no single statement can run past
 # the subprocess engine's per-call deadline.
 _SWEEP_CHUNK_SIZE = 2000
+
+# Version of how cognee maps an enola snapshot onto graph nodes and edges.
+# Bump it whenever that mapping changes, so a repository whose snapshot did not
+# change is still loaded again by the new mapping instead of being skipped.
+# 1: doc fields, CodeFlow nodes and declaration-view resolution (SDK-1119).
+CODE_GRAPH_MAPPING_VERSION = 1
 
 
 def _is_mappable_fact(kind: Any, name: Any) -> bool:
@@ -211,6 +223,10 @@ def map_facts_to_data_points(
         line = fact.get("line")
         end_line = fact.get("end_line")
         enola_id = fact.get("id")
+        doc = props.get("doc")
+        if kind == "insight" or not isinstance(doc, str) or not doc.strip():
+            doc = None
+        prose = props.get(_PROSE_PROPS[kind]) if kind in _PROSE_PROPS else doc
 
         fields: dict[str, Any] = {
             "id": node_id,
@@ -224,15 +240,18 @@ def map_facts_to_data_points(
             "repo": repo,
             "enola_id": enola_id if is_enola_id(enola_id) else None,
             # Insights carry prose from the explainer; use it verbatim instead
-            # of the generic "kind: k=v, ..." property summary.
-            "description": props.get("description")
-            if kind == "insight" and isinstance(props.get("description"), str)
-            else _describe_fact(kind, props),
+            # of the generic "kind: k=v, ..." property summary. So do flows
+            # (their summary) and documented facts (the author's doc comment).
+            "description": prose if isinstance(prose, str) else _describe_fact(kind, props),
             "fact_properties": props,
             "part_of": _get_repository(repo),
         }
         if model is CodeSymbol:
             fields["symbol_kind"] = props.get("symbol_kind")
+        if doc is not None:
+            # Only a documented fact gains the key, so an undocumented fact's
+            # fact_hash stays byte-identical to before docs were read.
+            fields["doc"] = doc
 
         # node_set only enters the hash input when the call is tagged, so an
         # untagged repo's fact_hash stays byte-identical to before node_set
@@ -356,6 +375,40 @@ def _add_client_route_edges(
     return skipped
 
 
+# Fact kinds a framework extractor derives from a declaration and names after
+# it: an ORM model's storage (Eloquent, JPA, ActiveRecord) and a relation
+# method's association. code_retriever resolves names the same way.
+_DECLARATION_VIEW_KINDS = frozenset({"storage", "association"})
+
+
+def _without_declaration_views(
+    candidates: set[tuple[str, str, str]],
+    fact_index: dict[tuple[str, str, str], dict],
+) -> set[tuple[str, str, str]]:
+    """Name candidates minus the views of a symbol that is itself a candidate.
+
+    A view is a storage or association fact carrying the symbol's own name,
+    repo and file. Anything else sharing the name (a fact from another file or
+    repo, a second same-named symbol) stays a rival candidate. When one repo
+    declares the symbol name in several files, the file compared is that of the
+    first such fact, the one its node keeps.
+    """
+
+    def _is_view(candidate: tuple[str, str, str]) -> bool:
+        repo, kind, name = candidate
+        symbol = (repo, "symbol", name)
+        if kind not in _DECLARATION_VIEW_KINDS or symbol not in candidates:
+            return False
+        symbol_file = fact_index[symbol].get("file")
+        return (
+            isinstance(symbol_file, str)
+            and symbol_file != ""
+            and fact_index[candidate].get("file") == symbol_file
+        )
+
+    return {candidate for candidate in candidates if not _is_view(candidate)}
+
+
 def build_code_graph_edges(
     facts: list[dict],
     repo_path: str | Path | None = None,
@@ -366,7 +419,9 @@ def build_code_graph_edges(
     to that fact directly — it is enola's own unambiguous answer. Otherwise
     the target is matched by fact name within the same snapshot; on ambiguity
     same-repo targets are preferred, then the relation is skipped rather than
-    bound to an arbitrary fact. repo_path must be the same value given to
+    bound to an arbitrary fact. A storage or association fact sharing a
+    symbol's name, repo and file is a view of that symbol, not a rival: the
+    name means the symbol. repo_path must be the same value given to
     map_facts_to_data_points so that edge endpoint ids match the node ids.
     Returns (edges, skipped_count).
     """
@@ -386,9 +441,13 @@ def build_code_graph_edges(
             continue
         repo = _fact_repo(fact, fallback_repo)
         valid_facts.append((fact, repo))
-        name_index.setdefault(name, set()).add((repo, kind))
-        for short_form in _short_target_names(name):
-            short_name_index.setdefault(short_form, set()).add((repo, kind, name))
+        if kind != "flow":
+            # No relation targets a flow, and a flow is named after its entry
+            # symbol or route: indexing its name would make those names
+            # ambiguous for every relation that resolves by name.
+            name_index.setdefault(name, set()).add((repo, kind))
+            for short_form in _short_target_names(name):
+                short_name_index.setdefault(short_form, set()).add((repo, kind, name))
         fact_id = fact.get("id")
         if is_enola_id(fact_id):
             # Records sharing an id share (repo, kind, name, file), hence the node.
@@ -418,6 +477,12 @@ def build_code_graph_edges(
             candidates = set(short_name_index.get(target_name, ()))
         if allowed_repos is not None:
             candidates = {candidate for candidate in candidates if candidate[0] in allowed_repos}
+        # A framework extractor may describe one declaration twice under one
+        # name: the class or method as a ``symbol`` and what it stands for (an
+        # ORM model as ``storage``, a relation method as ``association``). The
+        # writer then withholds ``target_id`` (two identities), but the two are
+        # not rival targets: a reference to the name means the declaration.
+        candidates = _without_declaration_views(candidates, fact_index)
         same_repo = {candidate for candidate in candidates if candidate[0] == source_repo}
         if len(same_repo) == 1:
             return next(iter(same_repo))
@@ -644,14 +709,19 @@ async def extract_code_graph(
     if snapshot_id is not None:
         fallback_repo = _resolve_fallback_repo(facts, repo_path)
         try:
-            stored_id, stored_tagged = await _stored_repository_state(fallback_repo)
+            stored_id, stored_version, stored_tagged = await _stored_repository_state(fallback_repo)
         except Exception as error:
             # The skip check is an optimization; never let it break ingestion.
             logger.warning(
                 "Could not read the stored snapshot id (%s); loading fully.", error, exc_info=True
             )
-            stored_id, stored_tagged = None, False
-        if stored_id == snapshot_id and not node_set and not stored_tagged:
+            stored_id, stored_version, stored_tagged = None, None, False
+        if (
+            stored_id == snapshot_id
+            and stored_version == CODE_GRAPH_MAPPING_VERSION
+            and not node_set
+            and not stored_tagged
+        ):
             logger.info(
                 "Code graph for '%s' already matches snapshot %s; skipping load.",
                 fallback_repo,
@@ -688,8 +758,11 @@ def _read_repo_node_property(node: Any, key: str) -> Any:
     return None
 
 
-async def _stored_repository_state(repo: str) -> tuple[str | None, bool]:
-    """(last_snapshot_id, whether it carries a node_set) off the repository node.
+async def _stored_repository_state(repo: str) -> tuple[str | None, int | None, bool]:
+    """(last_snapshot_id, last_mapping_version, whether it carries a node_set).
+
+    Read off the repository node. A node stamped before the mapping version
+    existed has none, so its unchanged snapshot is loaded once more.
 
     The snapshot id lives on the CodeRepository node in the graph itself, not
     in the relational metastore: this pipeline persists no Data row to key it
@@ -700,10 +773,28 @@ async def _stored_repository_state(repo: str) -> tuple[str | None, bool]:
     graph_engine = await get_graph_engine()
     node = await graph_engine.get_node(str(fact_node_id(repo, "repository", repo)))
     stored_id = _read_repo_node_property(node, "last_snapshot_id")
+    stored_version = _read_repo_node_property(node, "last_mapping_version")
     tags = _read_repo_node_property(node, "belongs_to_set")
     if isinstance(tags, str):
         tags = json.loads(tags)
-    return stored_id if isinstance(stored_id, str) and stored_id else None, bool(tags)
+    return (
+        stored_id if isinstance(stored_id, str) and stored_id else None,
+        _as_mapping_version(stored_version),
+        bool(tags),
+    )
+
+
+def _as_mapping_version(value: Any) -> int | None:
+    """The stored mapping version as an int, whatever scalar type the adapter returned."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
 
 
 def _snapshot_repos(facts: list[dict], fallback_repo: str) -> set:
@@ -1201,6 +1292,7 @@ async def _stamp_snapshot_identity(
             name=repo,
             path=str(repo_path) if repo_path and repo == fallback_repo else repo,
             last_snapshot_id=snapshot_id,
+            last_mapping_version=CODE_GRAPH_MAPPING_VERSION,
             last_delta=delta,
             last_receipt=last_receipt,
             belongs_to_set=list(node_set) if node_set else None,
