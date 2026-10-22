@@ -31,8 +31,11 @@ from cognee.tasks.ingestion.connectors.asana import (
     AsanaSourceError,
     _documents_for,
     _event_task_gids,
+    _instant,
     _iter_rows,
+    _overlap_start,
     _renamed,
+    _stamp,
     new_stats,
     render_task,
 )
@@ -474,6 +477,88 @@ def test_a_first_sync_emits_the_project_and_every_task_with_its_comments_and_sub
     assert state["projects"]["P1"]["sync"] == fake.tokens["P1"]
     assert (state["retry"], state["pending"]) == ([], [])
     assert stats == {**new_stats(), "scanned": 2, "requests": LISTING_REQUESTS + 2 * TASK_REQUESTS}
+
+
+# --- timestamp forms ---
+# Timestamps are compared as strings, which orders them only in one form: UTC, three decimals,
+# ``Z``. Asana sends that form; these are the other valid ISO spellings of the same instants.
+_FORMS = {
+    "no milliseconds": lambda sec: f"2026-10-01T09:00:{sec:02d}Z",
+    "microseconds": lambda sec: f"2026-10-01T09:00:{sec:02d}.000000Z",
+    "utc offset": lambda sec: f"2026-10-01T09:00:{sec:02d}.000+00:00",
+    "east offset": lambda sec: f"2026-10-01T11:00:{sec:02d}.000+02:00",
+    "west offset": lambda sec: f"2026-10-01T04:00:{sec:02d}.000-05:00",
+}
+
+
+def _canonical(sec: int) -> str:
+    return f"2026-10-01T09:00:{sec:02d}.000Z"
+
+
+def _stamped_runs(form) -> tuple[dict, dict[str, str], dict, tuple[list[str], int]]:
+    """Three runs over tasks whose ``modified_at`` instants are written in ``form``: a first
+    sync, one after tasks 2 and 4 changed (listing only: no event) and one with no change.
+
+    Returns the state after the first run, the tasks the second run rendered, its state, and
+    what the third rendered with its request count.
+    """
+    fake = FakeAsana()
+    fake.add_project("P1")
+    for gid in range(1, 5):
+        fake.add_task(str(gid), notes=f"Body {gid}.", modified_at=form(gid))
+    state: dict = {}
+    _sync(fake, state)
+    first = copy.deepcopy(state)
+    for gid, sec in (("2", 30), ("4", 31)):
+        fake.tasks[gid].update(notes=f"Edit of {gid}.", modified_at=form(sec))
+    rows, _ = _sync(fake, state)
+    second = copy.deepcopy(state)
+    changed = {gid: row["content"] for gid, row in _tasks(rows).items()}
+    rows, stats = _sync(fake, state)
+    return first, changed, second, (sorted(_tasks(rows)), stats["requests"])
+
+
+@pytest.mark.parametrize("form", _FORMS.values(), ids=_FORMS)
+def test_the_same_instants_in_another_form_give_the_same_state_and_the_same_changes(form):
+    expected = _stamped_runs(_canonical)
+
+    assert _stamped_runs(form) == expected
+
+    first, changed, second, (unchanged, requests) = expected
+    assert first["projects"]["P1"]["cursor"] == _canonical(4)
+    assert second["projects"]["P1"]["cursor"] == _canonical(31)
+    assert second["projects"]["P1"]["seen"] == {
+        gid: _canonical(sec) for gid, sec in (("1", 1), ("2", 30), ("3", 3), ("4", 31))
+    }
+    assert sorted(changed) == ["task:2", "task:4"]
+    assert "Edit of 2." in changed["task:2"] and "Edit of 4." in changed["task:4"]
+    assert (unchanged, requests) == ([], LISTING_REQUESTS), "an unchanged run renders nothing"
+
+
+def test_a_task_changed_inside_the_overlap_window_is_seen_whatever_the_offset_of_its_stamp():
+    """The instant is 09:00:20 UTC, after the window start (08:59:02). Written as 04:00:20-05:00
+    its string sorts before the start, so a string comparison would miss the edit."""
+    fake = FakeAsana()
+    fake.add_project("P1")
+    fake.add_task("1", modified_at=_canonical(1))
+    fake.add_task("2", modified_at=_canonical(2))
+    state: dict = {}
+    _sync(fake, state)
+    fake.tasks["1"].update(notes="Edited.", modified_at=_FORMS["west offset"](20))
+
+    rows, _ = _sync(fake, state)
+
+    assert "Edited." in _tasks(rows)["task:1"]["content"]
+    assert state["projects"]["P1"]["cursor"] == _canonical(20)
+
+
+def test_a_stamp_is_kept_in_asanas_form_and_read_back_unchanged():
+    assert _overlap_start("") == ""
+    assert _stamp(_instant("2026-10-09T19:14:27.123Z")) == "2026-10-09T19:14:27.123Z"
+    assert _stamp(_instant("2026-10-09T21:14:27.123456+02:00")) == "2026-10-09T19:14:27.123Z"
+    assert _overlap_start("2026-10-09T19:14:27.123Z") == "2026-10-09T19:13:27.123Z"
+    with pytest.raises(ValueError, match="without an offset"):
+        _stamp(_instant("2026-10-09T19:14:27"))
 
 
 def test_an_unchanged_second_sync_reads_no_task():
@@ -2263,6 +2348,10 @@ def test_a_listing_that_fails_forgets_nothing_and_moves_no_state(prefix, status)
         {"data": [{"gid": "1"}]},
         {"data": [{"gid": "1", "modified_at": None}]},
         {"data": [{"gid": "1", "modified_at": "yesterday"}]},
+        {"data": [{"gid": "1", "modified_at": ""}]},
+        {"data": [{"gid": "1", "modified_at": 20261001}]},
+        {"data": [{"gid": "1", "modified_at": "2026-10-01T10:00:00"}]},  # no offset: no instant
+        {"data": [{"gid": "1", "modified_at": "0001-01-01T00:00:00+02:00"}]},  # before UTC's year 1
         {"data": [], "next_page": {}},
         {"data": [], "next_page": "x"},
         {"data": [], "next_page": {"offset": ""}},

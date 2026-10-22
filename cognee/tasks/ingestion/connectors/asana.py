@@ -332,12 +332,25 @@ def _instant(stamp: str) -> datetime:
     return datetime.fromisoformat(stamp.replace("Z", "+00:00"))
 
 
+def _stamp(moment: datetime) -> str:
+    """``moment`` in Asana's format: UTC, three decimals, ``Z`` (``2026-10-09T19:14:27.123Z``).
+
+    Timestamps are compared and stored as strings, which orders them only in this one form, so
+    every ``modified_at`` goes through here (``_stamp(_instant(value))``) before it is used.
+    A moment without an offset raises ``ValueError``: it has no UTC instant, and ``astimezone``
+    would read it as the machine's local time.
+    """
+    if moment.tzinfo is None:
+        raise ValueError("a timestamp without an offset")
+    moment = moment.astimezone(timezone.utc)
+    return moment.strftime("%Y-%m-%dT%H:%M:%S.") + f"{moment.microsecond // 1000:03d}Z"
+
+
 def _overlap_start(cursor: str) -> str:
     """The timestamp ``_OVERLAP_SECONDS`` before ``cursor``, in Asana's format; empty for none."""
     if not cursor:
         return ""
-    start = (_instant(cursor) - timedelta(seconds=_OVERLAP_SECONDS)).astimezone(timezone.utc)
-    return start.strftime("%Y-%m-%dT%H:%M:%S.") + f"{start.microsecond // 1000:03d}Z"
+    return _stamp(_instant(cursor) - timedelta(seconds=_OVERLAP_SECONDS))
 
 
 # ---------------------------------------------------------------------------
@@ -779,8 +792,8 @@ class _Walker:
                 if not isinstance(gid, str) or not _GID.fullmatch(gid):
                     raise AsanaResponseError("Asana /tasks: a task without a usable gid")
                 try:
-                    _instant(when)
-                except (AttributeError, ValueError):
+                    when = _stamp(_instant(when))
+                except (AttributeError, ValueError, OverflowError):
                     raise AsanaResponseError(
                         "Asana /tasks: a task without a usable modified_at"
                     ) from None
