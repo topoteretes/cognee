@@ -503,15 +503,21 @@ class NativeLiteLLMAdapter:
 
         # A plain string needs no schema — skip structured output entirely.
         if response_model is str:
-            return await self._acreate_str_output(
-                text_input,
-                system_prompt,
-                model=self.model,
-                api_key=self.api_key,
-                endpoint=self.endpoint,
-                api_version=self.api_version,
-                **primary_kwargs,
-            )
+            try:
+                return await self._acreate_str_output(
+                    text_input,
+                    system_prompt,
+                    model=self.model,
+                    api_key=self.api_key,
+                    endpoint=self.endpoint,
+                    api_version=self.api_version,
+                    **primary_kwargs,
+                )
+            except Exception as error:
+                # Budget exhaustion is terminal; the retry decorator would otherwise back off and resend.
+                if is_budget_exhausted_error(error):
+                    raise LLMPaymentRequiredError() from error
+                raise
 
         structured_model = cast(type[BaseModel], response_model)
         try:
