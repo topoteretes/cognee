@@ -75,7 +75,7 @@ candidates (name + a short preview) before deleting.
 |---|---|---|
 | One document | `forget(data_id=..., dataset_id=...)` (or `dataset="name"`) | Nothing of that document; shared entities stay while another document still references them |
 | A whole dataset | `forget(dataset="name")` or `forget(dataset_id=...)` | The dataset is deleted outright: the record, its data rows, graph and vector stores, and attributed sessions |
-| Rebuild a dataset's graph later | `forget(dataset="name", memory_only=True)` | Raw files and data rows; graph, vectors, sessions and pipeline status are reset, so the data can be re-processed |
+| Rebuild a dataset's graph later | `forget(dataset="name", memory_only=True)` | Raw files and data rows; graph, vectors, sessions and pipeline status are reset, so the data can be re-processed. A search finds nothing afterwards, but the data is not deleted |
 | One document's memory only | `forget(dataset="name", data_id=..., memory_only=True)` | That document's raw file and row |
 | Every dataset the user can delete | `forget(everything=True)` | Nothing, in any dataset the user has `delete` on in the current tenant (shared ones included). Only on explicit request (see the hard limits) |
 
@@ -113,6 +113,17 @@ combinations return 422.
   `data_id` and `memory_only` both need a dataset.
 - **`memory_only` is ignored when `everything=True`** in the SDK (the CLI
   rejects the combination). `everything=True` always deletes everything.
+- **An empty search after `memory_only` is not deletion.** The raw file and
+  the data row are still there and the next cognify re-processes them. Use a
+  plain `forget(dataset=...)` or `forget(data_id=...)` to remove the data.
+- **Deleted bytes can outlive the delete inside the storage engines.** Every
+  mode removes the records and the memory it names; it does not scrub the
+  engines' files. LanceDB keeps deleted rows in its append-only fragments until
+  compaction rewrites them, and it rewrites a fragment only once enough of it
+  is deleted, so a small delete in a large table can stay on disk
+  indefinitely. The embedded graph file has no user-facing compaction. For a
+  byte-level erasure guarantee run the engine's own compaction or vacuum, or
+  start a new store.
 - **Not found and not allowed look the same.** An unknown dataset name and
   one the user cannot delete both raise `DatasetNotFoundError`. Deleting
   needs the `delete` permission on the dataset (see the `cognee-permissions`

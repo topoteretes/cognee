@@ -62,11 +62,22 @@ async def forget(
         memory_only: If True (requires ``dataset`` or ``dataset_id``), delete only memory
             (graph nodes/edges and vector embeddings) and reset pipeline status.
             Raw files and data records are preserved so the dataset can
-            be re-cognified with different settings.
+            be re-cognified with different settings. A search that finds nothing
+            afterwards does not mean the data is gone: the document is still
+            stored and the next cognify processes it again.
         user: User context. Resolved to default user when None.
 
     Returns:
         Dict with deletion summary: items removed, datasets removed.
+
+    What stays on disk:
+        Every mode removes the records and the memory it names; it does not
+        scrub the bytes from the storage engines. LanceDB keeps deleted rows in
+        its append-only fragments until compaction rewrites them, and it
+        rewrites a fragment only once enough of it is deleted, so a small
+        delete in a large table can stay on disk indefinitely. The embedded
+        graph file has no user-facing compaction. A byte-level erasure
+        guarantee needs the engine's own compaction or vacuum, or a new store.
     """
     from cognee import __version__ as cognee_version
     from cognee.shared.utils import send_telemetry
