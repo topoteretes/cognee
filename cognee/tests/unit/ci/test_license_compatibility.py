@@ -49,7 +49,11 @@ def make_dist(root, name, metadata="", files=None):
         ("GPL-3.0-only OR LicenseRef-Commercial", {"GPL"}),
         ("Dual Licensed - GNU AFFERO GPL 3.0 or Artifex Commercial License", {"AGPL"}),
         ("GPL v3", {"GPL"}),
+        ("GPL/Commercial", {"GPL"}),
         ("GPL-3.0-or-later WITH GCC-exception-3.1", set()),
+        # Deprecated SPDX ids for the same exceptions, as numpy 2.2 lists them.
+        ("GPL-3.0-with-GCC-exception", set()),
+        ("GPL-2.0-with-classpath-exception", set()),
         ("GPL-compatible", set()),
         ("MPL-2.0", set()),
         ("Apache-2.0", set()),
@@ -95,6 +99,20 @@ def test_classifiers(classifiers, expected):
             "Classifier: License :: OSI Approved :: GNU General Public License v3 (GPLv3)\n",
             {},
             id="classifier-despite-permissive-field",
+        ),
+        pytest.param(
+            # setuptools' license=open("LICENSE").read(): the field is the full text.
+            "License: GNU GENERAL PUBLIC LICENSE\n"
+            "        Version 3, 29 June 2007\n"
+            "        Everyone is permitted to copy and distribute verbatim copies\n",
+            {},
+            id="license-field-full-text",
+        ),
+        pytest.param(
+            "License: GNU Affero General Public License v3 or later, with the additional "
+            "terms listed in the NOTICE file shipped with this distribution\n",
+            {},
+            id="license-field-long-name",
         ),
         pytest.param(
             "License: BSD-3-Clause\n",
@@ -156,6 +174,22 @@ def test_flags_strong_copyleft(tmp_path, metadata, files):
             id="gcc-runtime-exception",
         ),
         pytest.param(
+            "License: BSD-3-Clause\n",
+            {
+                "pkg-1.0.dist-info/LICENSE.txt": b"Name: libgfortran\n"
+                b"License: GPL-3.0-with-GCC-exception\n"
+            },
+            id="gcc-runtime-exception-deprecated-id",
+        ),
+        pytest.param(
+            # The text's later lines quote the GPL's title.
+            "License: GNU LESSER GENERAL PUBLIC LICENSE\n"
+            "        Version 2.1, February 1999\n"
+            "        the GNU General Public License\n",
+            {},
+            id="license-field-lgpl-full-text",
+        ),
+        pytest.param(
             "License-Expression: MPL-2.0\n",
             {
                 "pkg-1.0.dist-info/licenses/LICENSE": b'"Secondary License" means either '
@@ -205,3 +239,29 @@ def test_main_lists_packages_without_a_license_name_but_passes(tmp_path, monkeyp
     assert check.main() == 0
     out = capsys.readouterr().out
     assert "No license name declared (1): bare-pkg" in out
+
+
+def test_main_lists_vendored_libraries_without_a_license_but_passes(tmp_path, monkeypatch, capsys):
+    unlabelled = make_dist(tmp_path, "bare-lib", "License: MIT\n", {"bare_lib.libs/liba.so": ELF})
+    manifested = make_dist(
+        tmp_path,
+        "listed-lib",
+        "License: MIT\n",
+        {
+            "listed_lib.libs/libb.so": ELF,
+            "listed-lib-1.0.dist-info/licenses/LICENSE": b"Name: libb\nLicense: Zlib\n",
+        },
+    )
+    noticed = make_dist(
+        tmp_path,
+        "notice-lib",
+        "License: MIT\n",
+        {"notice_lib.libs/libc.so": ELF + b"GNU LESSER GENERAL PUBLIC LICENSE"},
+    )
+    monkeypatch.setattr(check, "distributions", lambda: [unlabelled, manifested, noticed])
+
+    assert check.main() == 0
+    out = capsys.readouterr().out
+    assert (
+        "Vendored libraries with no license manifest or notice (1):\n  bare_lib.libs/liba.so" in out
+    )

@@ -13,6 +13,9 @@ installed distribution:
 - The native libraries it vendors into ``<pkg>.libs/`` or ``.dylibs/``
   (auditwheel, delocate, delvewheel): the ``License:`` lines of its bundled
   license manifests, and the license notices embedded in the libraries.
+  Most libraries embed no notice, so this is best-effort: the vendored
+  libraries of a distribution with no manifest line, and no notice of their
+  own, are listed in the output instead of passing silently.
 
 Not flagged, because they leave cognee's license unchanged:
 
@@ -33,6 +36,11 @@ Not flagged, because they leave cognee's license unchanged:
 
 Full license texts are not searched: they mention the GPL in passing
 ("GPL-compatible", MPL's "Secondary License") far more often than they grant it.
+Only their first line, the license's title, is read when a ``License`` field
+holds the full text.
+
+The result covers the one environment it runs in: ``uv.lock`` resolves other
+packages and versions on other Python versions and platforms.
 
 Run it with the interpreter of the environment to check:
 
@@ -55,15 +63,18 @@ TITLES = {
 }
 
 # GNU identifiers as SPDX ids, classifiers and manifests spell them
-# ("GPL-2.0-only", "(AGPLv3)", "GPLv2+"), but not "GPL-compatible", and not
-# the "GPL" inside "AFFERO GPL", which TITLES reports as AGPL.
-GNU_ID = re.compile(r"(?<![A-Z])(?<!AFFERO )(AGPL|LGPL|GPL)(?=V?\d|-\d|[\s)\],;+.]|$)")
+# ("GPL-2.0-only", "(AGPLv3)", "GPLv2+", "GPL/Commercial"), but not
+# "GPL-compatible", and not the "GPL" inside "AFFERO GPL", which TITLES
+# reports as AGPL.
+GNU_ID = re.compile(r"(?<![A-Z])(?<!AFFERO )(AGPL|LGPL|GPL)(?=V?\d|-\d|[\s)\],;+./]|$)")
 
 # The licenses whose terms extend to code that imports or links them.
 STRONG_COPYLEFT = {"GPL", "AGPL"}
 
-# Exceptions that let code under another license link the library.
-LINKING_EXCEPTION = re.compile(r"\bWITH\s+(GCC|LLVM|CLASSPATH)-EXCEPTION")
+# Exceptions that let code under another license link the library, as SPDX
+# expressions ("GPL-3.0-or-later WITH GCC-exception-3.1") and the deprecated
+# SPDX ids numpy 2.2 still lists ("GPL-3.0-with-GCC-exception") spell them.
+LINKING_EXCEPTION = re.compile(r"(\bWITH\s+|-WITH-)(GCC|LLVM|CLASSPATH)-EXCEPTION")
 
 # Open licenses an Apache-2.0 distribution can choose when a package offers
 # them as an ``OR`` alternative to strong copyleft: permissive and weak
@@ -133,12 +144,8 @@ def is_vendored_library(path: Path) -> bool:
         return handle.read(4).startswith(NATIVE)
 
 
-def embedded_strong_copyleft(path: Path) -> set[str]:
-    """Strong copyleft licenses whose title a native library embeds.
-
-    LGPL texts quote the GPL's title ("incorporates ... the GNU General Public
-    License"), so a library that also embeds an LGPL title is weak copyleft.
-    """
+def embedded_licenses(path: Path) -> set[str]:
+    """The licenses whose title a native library embeds."""
     found, tail = set(), b""
     titles = {title.encode(): name for title, name in TITLES.items()}
     overlap = max(len(title) for title in titles)
@@ -147,7 +154,17 @@ def embedded_strong_copyleft(path: Path) -> set[str]:
             window = (tail + chunk).upper()
             found |= {name for title, name in titles.items() if title in window}
             tail = chunk[-overlap:]
-    return set() if "LGPL" in found else found & STRONG_COPYLEFT
+    return found
+
+
+def vendored_libraries(dist: Distribution) -> list[tuple[str, set[str]]]:
+    """The native libraries the distribution vendors: (where, embedded licenses)."""
+    libraries = []
+    for record in dist.files or []:
+        path = Path(dist.locate_file(record))
+        if is_vendored_library(path):
+            libraries.append((str(record), embedded_licenses(path)))
+    return libraries
 
 
 def declared_licenses(dist: Distribution) -> list[tuple[str, list[str]]]:
@@ -155,7 +172,9 @@ def declared_licenses(dist: Distribution) -> list[tuple[str, list[str]]]:
     metadata = dist.metadata
     license_field = (metadata.get("License") or "").strip()
     if "\n" in license_field or len(license_field) > MAX_LICENSE_NAME:
-        license_field = ""
+        # License text, not a name. A text starts with its own title, and only
+        # its later lines mention the GPL in passing.
+        license_field = license_field.split("\n", 1)[0].strip()[:MAX_LICENSE_NAME]
     classifiers = [
         c.split(" :: ", 1)[1]
         for c in metadata.get_all("Classifier") or []
@@ -181,8 +200,13 @@ def manifest_lines(dist: Distribution) -> list[tuple[str, str]]:
     return lines
 
 
-def findings(dist: Distribution) -> list[tuple[str, str]]:
-    """Strong copyleft the distribution declares, lists or vendors: (where, what)."""
+def findings(
+    dist: Distribution, libraries: list[tuple[str, set[str]]] | None = None
+) -> list[tuple[str, str]]:
+    """Strong copyleft the distribution declares, lists or vendors: (where, what).
+
+    ``libraries`` is ``vendored_libraries(dist)`` when the caller already has it.
+    """
     found = []
     for where, alternatives in declared_licenses(dist):
         if alternatives and all(alternatives):
@@ -193,12 +217,13 @@ def findings(dist: Distribution) -> list[tuple[str, str]]:
         terms = strong_copyleft([line])
         if terms:
             found.append((where, f"lists {', '.join(sorted(terms))} ({line[:60]})"))
-    for record in dist.files or []:
-        path = Path(dist.locate_file(record))
-        if is_vendored_library(path):
-            terms = embedded_strong_copyleft(path)
-            if terms:
-                found.append((str(record), f"embeds {', '.join(sorted(terms))}"))
+    for where, embedded in vendored_libraries(dist) if libraries is None else libraries:
+        # LGPL texts quote the GPL's title ("incorporates ... the GNU General
+        # Public License"), so a library that also embeds an LGPL title is weak
+        # copyleft.
+        terms = set() if "LGPL" in embedded else embedded & STRONG_COPYLEFT
+        if terms:
+            found.append((where, f"embeds {', '.join(sorted(terms))}"))
     return found
 
 
@@ -215,19 +240,26 @@ def has_license_metadata(dist: Distribution) -> bool:
 
 
 def main() -> int:
-    checked, flagged, undeclared = 0, set(), []
+    checked, flagged, undeclared, unlabelled = 0, set(), [], []
     for dist in distributions():
         checked += 1
         name = canonical(dist.metadata["Name"])
-        flagged |= {(name, where, what) for where, what in findings(dist)}
+        libraries = vendored_libraries(dist)
+        flagged |= {(name, where, what) for where, what in findings(dist, libraries)}
         if not has_license_metadata(dist):
             undeclared.append(name)
+        if not manifest_lines(dist):
+            unlabelled += [where for where, embedded in libraries if not embedded]
 
     print(f"Checked {checked} installed distributions.", flush=True)
+    # Neither list is a failure: there is nothing to check against. They are
+    # printed so the blind spots are visible in the job output instead of silent.
     if undeclared:
-        # Not a failure: nothing to check against. Listed so the blind spot is
-        # visible in the job output instead of silent.
         print(f"No license name declared ({len(undeclared)}): {', '.join(sorted(undeclared))}")
+    if unlabelled:
+        print(f"Vendored libraries with no license manifest or notice ({len(unlabelled)}):")
+        for where in sorted(unlabelled):
+            print(f"  {where}")
     failures = 0
     for name, where, what in sorted(flagged):
         if name in REVIEWED:
