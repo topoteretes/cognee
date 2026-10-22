@@ -748,7 +748,7 @@ async def _run_incremental_update(
     )
     send_telemetry(
         "Incremental Update Run Started",
-        user.id,
+        user,
         additional_properties={"dataset_id": str(dataset.id), "data_id": str(data_id)},
     )
     try:
@@ -784,7 +784,7 @@ async def _run_incremental_update(
     )
     send_telemetry(
         "Incremental Update Run Completed",
-        user.id,
+        user,
         additional_properties={"dataset_id": str(dataset.id), "data_id": str(data_id), **result},
     )
     return {**result, "pipeline_run_id": pipeline_run.pipeline_run_id}
