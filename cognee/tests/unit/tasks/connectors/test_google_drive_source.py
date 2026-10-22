@@ -194,9 +194,14 @@ def test_initial_sync_yields_all_files_and_advances_state(fake_content_extractio
     assert state["page_token"] == "t0"
 
 
-def test_full_scan_deletes_absent_files_despite_permanently_bad_content(monkeypatch):
+def test_full_scan_saves_cursor_despite_permanently_bad_content(monkeypatch):
+    """A permanently unreadable file must not block the changes cursor (#6235)."""
     good, bad = _file_meta("good"), _file_meta("bad", mime_type=PDF_MIME)
-    service = FakeDriveService({"root": [good, bad]}, {"good": good, "bad": bad})
+    service = FakeDriveService(
+        {"root": [good, bad]},
+        {"good": good, "bad": bad},
+        start_token="t0",
+    )
     monkeypatch.setattr(
         gd_source,
         "extract_file_content",
@@ -204,12 +209,17 @@ def test_full_scan_deletes_absent_files_despite_permanently_bad_content(monkeypa
     )
     state = {}
     assert [row["id"] for row in gd_source._iter_rows(service, _config(), state)] == ["good"]
-    assert "page_token" not in state  # bad PDF still requires a retry
+    assert state["page_token"] == "t0"
+    assert state["known_ids"] == ["bad", "good"]  # failed extraction is not deletion
+
+    # Next run is incremental: without a change event for `good`, removing it
+    # from the folder listing alone must not emit a tombstone (changes API is
+    # the source of truth once the cursor exists).
     service.files_by_folder["root"] = [bad]
-    assert list(gd_source._iter_rows(service, _config(), state)) == [
-        {"id": "good", "_deleted": True}
-    ]
-    assert state["known_ids"] == ["bad"]  # failed extraction is not deletion
+    service.changes_by_token["t0"] = {"changes": [], "newStartPageToken": "t1"}
+    assert list(gd_source._iter_rows(service, _config(), state)) == []
+    assert state["page_token"] == "t1"
+    assert state["known_ids"] == ["bad", "good"]
 
 
 def test_incomplete_full_listing_does_not_reconcile_absence(monkeypatch):
@@ -443,13 +453,17 @@ def test_file_diagnostics_report_reasons_and_retry_failed_extraction(monkeypatch
         "skipped_empty_content": 1,
         "failed_content_extraction": 1,
     }
-    assert "page_token" not in state
+    # Cursor advances even with extraction failures (#6235).
+    assert state["page_token"] == "t0"
 
+    # Recovery happens when Drive reports the file changed again.
     content["failed"] = "recovered"
+    service.changes_by_token["t0"] = {
+        "changes": [{"fileId": "failed", "removed": False}],
+        "newStartPageToken": "t1",
+    }
     assert {row["id"] for row in gd_source._iter_rows(service, _config(), state, stats)} == {
-        "good",
         "failed",
     }
     assert stats["failed"] == 0
-    assert stats["scanned"] == 5
-    assert state["page_token"] == "t0"
+    assert state["page_token"] == "t1"

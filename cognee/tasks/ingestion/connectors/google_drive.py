@@ -293,8 +293,16 @@ def _iter_rows(service, config: _DriveConfig, state: dict, stats: dict[str, int]
             stats["deleted"] += 1
             yield {"id": file_id, "_deleted": True}
         state["known_ids"] = sorted(present_ids)
-        if not stats["failed"]:
-            state["page_token"] = start_token
+        # Always persist the changes cursor. Extraction failures (password PDFs,
+        # exportSizeLimitExceeded, corrupt files) are permanent for many files;
+        # refusing to save the token forces a full folder re-download forever.
+        state["page_token"] = start_token
+        if stats["failed"]:
+            logger.warning(
+                "Google Drive: initial sync had %d extraction failure(s); "
+                "cursor advanced anyway so later runs stay incremental.",
+                stats["failed"],
+            )
         logger.info("Google Drive: initial sync yielded %d file(s).", yielded)
         return
 
@@ -349,11 +357,18 @@ def _iter_rows(service, config: _DriveConfig, state: dict, stats: dict[str, int]
                 yielded += 1
                 yield row
 
-    # Retry transient extraction failures on the next run instead of losing
-    # them behind a successfully advanced changes cursor.
+    # Advance the changes cursor even when some files failed to extract.
+    # Otherwise one permanent failure (password PDF, export size limit) pins
+    # every later sync to re-read the entire change backlog.
     state["known_ids"] = sorted(known_ids)
-    if not stats["failed"]:
-        state["page_token"] = new_page_token
+    state["page_token"] = new_page_token
+    if stats["failed"]:
+        logger.warning(
+            "Google Drive: incremental sync had %d extraction failure(s); "
+            "cursor advanced to %s anyway.",
+            stats["failed"],
+            new_page_token,
+        )
     logger.info(
         "Google Drive: incremental sync yielded %d changed file(s), %d deletion(s).",
         yielded,
