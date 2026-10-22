@@ -46,8 +46,7 @@ from tenacity import (
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.exceptions import (
     ContentPolicyFilterError,
-    LLMPaymentRequiredError,
-    is_budget_exhausted_error,
+    raise_if_budget_exhausted,
 )
 from cognee.infrastructure.llm.retry_config import llm_retry_condition, llm_retry_stop_condition
 from cognee.infrastructure.llm.streaming.stream_completion import stream_text_completion
@@ -510,8 +509,7 @@ class NativeLiteLLMAdapter:
                 # A budget error on the plain-text path must also surface as
                 # LLMPaymentRequiredError (terminal, not retried), same as the
                 # structured path below (#6185).
-                if is_budget_exhausted_error(error):
-                    raise LLMPaymentRequiredError() from error
+                raise_if_budget_exhausted(error)
                 raise
 
         structured_model = cast(type[BaseModel], response_model)
@@ -562,8 +560,7 @@ class NativeLiteLLMAdapter:
         except Exception as error:
             # Surface quota/budget exhaustion as an actionable, non-retryable
             # error, matching the legacy adapters.
-            if is_budget_exhausted_error(error):
-                raise LLMPaymentRequiredError() from error
+            raise_if_budget_exhausted(error)
             raise
 
     @observe(as_type="transcription")
