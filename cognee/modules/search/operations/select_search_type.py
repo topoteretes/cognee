@@ -1,6 +1,7 @@
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.modules.search.types import SearchType
+from cognee.modules.search.types.SearchType import CYPHER_SEARCH_TYPES
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("SearchTypeSelector")
@@ -26,9 +27,7 @@ async def select_search_type(
     # to construct. The Cypher-executing types need write permission on every
     # dataset searched (SearchType.required_permissions), and the datasets were
     # resolved with read only before this selector runs.
-    excluded_search_types = {SearchType.CODE} | {
-        search_type for search_type in SearchType if "write" in search_type.required_permissions
-    }
+    excluded_search_types = {SearchType.CODE, *CYPHER_SEARCH_TYPES}
     system_prompt = read_query_prompt(system_prompt_path)
 
     try:

@@ -92,13 +92,14 @@ Matching is case-insensitive.
 | — | `default` | Anything else | `HYBRID_COMPLETION` |
 
 `CYPHER` is **not** in the table and never will be. The Cypher retriever runs
-the query text verbatim through `graph_engine.query()`, and the whole recall
-path checks read permission only — so a routable `CYPHER` would let anyone who
-can read a dataset destroy it by posting
-`{"query": "MATCH (n) DETACH DELETE n"}`. Reaching `CYPHER` requires an
-explicit `query_type` / `searchType`, which is a deliberate act by the caller
-rather than whatever text arrived in a request body. Pasted Cypher therefore
-routes to `HYBRID_COMPLETION` like any other text.
+the query text verbatim through `graph_engine.query()`. It is off by default
+(`ALLOW_CYPHER_QUERY`) and needs write permission on every dataset it targets,
+but a routable `CYPHER` would still let anyone who can write to a dataset
+destroy it by posting `{"query": "MATCH (n) DETACH DELETE n"}` as an ordinary
+question. Reaching `CYPHER` requires an explicit `query_type` / `searchType`,
+which is a deliberate act by the caller rather than whatever text arrived in a
+request body. Pasted Cypher therefore routes to `HYBRID_COMPLETION` like any
+other text.
 
 The rule for what belongs in the table: **auto-routing may only pick a
 strategy that is at least as good as HYBRID on a default-built graph and does

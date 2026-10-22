@@ -64,8 +64,8 @@ type-to-retriever table is `cognee/modules/retrieval/README.md`.
 | `SUMMARIES` | no | Document summaries |
 | `CODE` | no | Code-graph operations via `code_query={...}`; needs `scope="code"` in recall |
 | `SKILLS` | no | Discover skill playbooks; exactly one dataset |
-| `CYPHER` | no | Raw Cypher. Off by default; `ALLOW_CYPHER_QUERY=true` enables it. It can write, so only pass user-authored queries deliberately |
-| `NATURAL_LANGUAGE` | yes | LLM writes Cypher, then runs it (same flag) |
+| `CYPHER` | no | Raw Cypher. Off by default; `ALLOW_CYPHER_QUERY=true` enables it, and it needs write permission on the dataset. It can write, so only pass user-authored queries deliberately |
+| `NATURAL_LANGUAGE` | yes | LLM writes Cypher, then runs it (same flag and write requirement) |
 | `GRAPH_REPORT` | partly | Graph insight report: hubs, cross-set links, suggested questions |
 | `FEELING_LUCKY` | yes | An LLM picks the type |
 | `AGENTIC_COMPLETION` | yes | Multi-step loop with skills/tools; exactly one dataset. Use `search()` for its parameters |

@@ -37,12 +37,15 @@ class SearchType(str, Enum):
         must not be enough to run one. ``authorized_search`` enforces this and the
         FEELING_LUCKY selector refuses to route to these types.
         """
-        if self in _CYPHER_EXECUTING_SEARCH_TYPES:
+        if self in CYPHER_SEARCH_TYPES:
             return ("read", "write")
         return ("read",)
 
 
-_CYPHER_EXECUTING_SEARCH_TYPES = frozenset({SearchType.CYPHER, SearchType.NATURAL_LANGUAGE})
+# The types that run a Cypher statement against the graph database: the caller's own
+# (CYPHER) or one an LLM wrote from the question (NATURAL_LANGUAGE). Opt-in through
+# ALLOW_CYPHER_QUERY (see get_search_type_retriever_instance) and write-gated above.
+CYPHER_SEARCH_TYPES = frozenset({SearchType.CYPHER, SearchType.NATURAL_LANGUAGE})
 
 # Deprecated search type -> the type that serves it until it is removed.
 DEPRECATED_SEARCH_TYPES: dict[SearchType, SearchType] = {

@@ -150,7 +150,10 @@ async def search(
         Scoping to specific datasets requires ``ENABLE_BACKEND_ACCESS_CONTROL``
         (the default). With ``dataset_ids=None``, datasets the user cannot read
         are skipped (no grants -> ``[]``); an explicit id the user cannot read
-        raises ``PermissionDeniedError``.
+        raises ``PermissionDeniedError``. CYPHER and NATURAL_LANGUAGE need write
+        as well (``SearchType.required_permissions``): with ``dataset_ids=None``
+        only write-granted datasets are searched, and an explicit id without
+        write raises ``PermissionDeniedError``.
     """
     send_telemetry(
         "cognee.search EXECUTION STARTED",
@@ -239,7 +242,8 @@ async def authorized_search(
     embedding_config: EmbeddingConfig | None = None,
 ) -> list[SearchResultPayload]:
     """
-    Verifies access for provided datasets or uses all datasets user has read access for and performs search per dataset.
+    Verifies the permissions ``query_type`` requires on the provided datasets, or uses every
+    dataset the user holds them on, and performs the search per dataset.
     Not to be used outside of active access control mode.
     """
     # Every search type needs read on its datasets; the Cypher-executing types also

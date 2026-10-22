@@ -82,7 +82,8 @@ async def search(
         - **LLM_API_KEY**: Required for GRAPH_COMPLETION and RAG_COMPLETION search types
         - **Data Added**: Must have data previously added via `cognee.add()`
         - **Knowledge Graph Built**: Must have processed data via `cognee.cognify()`
-        - **Dataset Permissions**: User must have 'read' permission on target datasets
+        - **Dataset Permissions**: User must have 'read' permission on target datasets,
+          and 'write' as well for CYPHER and NATURAL_LANGUAGE
         - **Vector Database**: Must be accessible for semantic search functionality
 
     Search Types & Use Cases:
@@ -124,7 +125,8 @@ async def search(
             Best for: Advanced users, specific graph traversals, debugging.
             Returns: Raw graph query results.
             Disabled by default; set ALLOW_CYPHER_QUERY=true to enable it
-            (also covers NATURAL_LANGUAGE).
+            (also covers NATURAL_LANGUAGE). Both need write permission on
+            every targeted dataset; a read-only share is not enough.
 
         **FEELING_LUCKY**:
             Intelligently selects and runs the most appropriate search type.

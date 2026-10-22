@@ -26,8 +26,8 @@ together.
 | `SKILLS` | `SkillsRetriever` | `skills_retriever.py` | no | Metadata-only skill discovery; exactly one dataset |
 | `CODE` | `CodeRetriever` | `code_retriever.py` | no | Deterministic code-graph operations via `code_query` |
 | `CODING_RULES` | `CodingRulesRetriever` | `coding_rules_retriever.py` | no | Returns stored coding rules |
-| `CYPHER` | `CypherSearchRetriever` | `cypher_search_retriever.py` | no | Raw Cypher; disabled by default, enabled by `ALLOW_CYPHER_QUERY=true` |
-| `NATURAL_LANGUAGE` | `NaturalLanguageRetriever` | `natural_language_retriever.py` | yes | LLM writes Cypher, then runs it; same `ALLOW_CYPHER_QUERY` gate |
+| `CYPHER` | `CypherSearchRetriever` | `cypher_search_retriever.py` | no | Raw Cypher; disabled by default, enabled by `ALLOW_CYPHER_QUERY=true`; needs write permission on the dataset |
+| `NATURAL_LANGUAGE` | `NaturalLanguageRetriever` | `natural_language_retriever.py` | yes | LLM writes Cypher, then runs it; same `ALLOW_CYPHER_QUERY` gate and write requirement |
 | `GRAPH_REPORT` | `GraphReportRetriever` | `graph_report_retriever.py` | partly | Hubs, cross-node-set edges, provenance split, LLM-suggested questions |
 | `FEELING_LUCKY` | — | `search/operations/select_search_type.py` | — | An LLM picks one of the types above, then that retriever runs |
 
