@@ -108,8 +108,6 @@ DEFAULT_MAX_WORKERS = 8
 # 4 GB of staging memory at the worst. A file over the bound is not skipped: it is fetched
 # alone, and the pool refills behind it.
 INFLIGHT_FETCH_BYTES = 256 * 1024 * 1024
-# Failures no rerun can cure, so they must not hold the Changes cursor back.
-_PERMANENT_FAILURES = ("failed_export_too_large", "failed_loader_unavailable")
 # A file that produced no row for one of these reasons is forgotten if an earlier run
 # ingested it. ``failed_loader_unavailable`` is not here: it depends on the environment (a
 # missing extra), and a file must not lose its memory because a package is not installed.
@@ -118,6 +116,7 @@ _FORGET_REASONS = (
     "skipped_empty_content",
     "skipped_unsupported_type",
     "failed_export_too_large",
+    "failed_unreadable",
 )
 # A download stays in memory up to this size and spills to a temporary file beyond it, so
 # the memory of a fetch depends on the extracted text, not on the size of the file. Most
@@ -361,6 +360,38 @@ class LoaderUnavailableError(Exception):
     """No cognee loader is installed for this file's format (it needs an optional extra)."""
 
 
+class UnreadableFileError(Exception):
+    """pypdf could not read the downloaded PDF (password protected, corrupt, or a feature it lacks).
+
+    The same bytes give the same answer, so a rerun cannot cure it until the file changes.
+    """
+
+
+# Failures a rerun in the same environment cannot cure, so they must not hold the Changes
+# cursor back. (A missing package is cured by installing it, and the file is then read when
+# it next changes or when the source's state is cleared.)
+_PERMANENT_REASONS = {
+    ExportTooLargeError: "failed_export_too_large",
+    LoaderUnavailableError: "failed_loader_unavailable",
+    UnreadableFileError: "failed_unreadable",
+}
+_PERMANENT_FAILURES = tuple(_PERMANENT_REASONS.values())
+
+
+def _read_pdf(media) -> str:
+    """pypdf works on bytes already downloaded, with no network and no state between calls, so
+    what it raises it raises again. What may pass is the environment: memory, the disk under the
+    spool, and ``cryptography`` for an AES file (pypdf's ``DependencyError``)."""
+    from pypdf.errors import DependencyError
+
+    try:
+        return _extract_pdf_text(media)
+    except (MemoryError, OSError, DependencyError):
+        raise
+    except Exception as exc:
+        raise UnreadableFileError(f"{type(exc).__name__}: {exc}") from exc
+
+
 @contextmanager
 def _download_file(service: Any, file_id: str, suffix: str):
     """Yield the path of a temporary file holding the download, removed on exit.
@@ -385,18 +416,23 @@ def _load_with_loader_engine(path: str) -> str:
             f"No cognee loader for '{os.path.splitext(path)[1]}' files; they need the docling "
             'or unstructured extra (pip install "cognee[docling]").'
         )
-    # Extraction runs on a worker thread without an event loop (see guarded_rows).
-    return asyncio.run(engine.load_file(path, persist=False))
+    # dlt extracts on a worker thread, which has no event loop; a loop already running here
+    # (the inline path called from async code) fails the file as a transient error.
+    coroutine = engine.load_file(path, persist=False)
+    try:
+        return asyncio.run(coroutine)
+    except ImportError as exc:
+        raise LoaderUnavailableError(str(exc)) from exc
+    finally:
+        coroutine.close()  # a loop already running on this thread leaves it unawaited
 
 
 def extract_file_content(service: Any, file_id: str, mime_type: str, name: str) -> str | None:
-    """Return extracted text for a Drive file, or None to skip it.
+    """Return a Drive file's text, or None when reading it failed for a reason that may pass.
 
-    A file that can't be parsed (corrupt PDF, transient per-file hiccup) is logged and
-    skipped rather than aborting the whole folder sync. Genuine auth / connectivity
-    failures surface from the listing calls instead. A Google Doc or Sheet over Google's
-    export limit raises :class:`ExportTooLargeError`, and a format whose cognee loader is
-    not installed raises :class:`LoaderUnavailableError`, so the caller can name the cause.
+    The causes a rerun cannot cure are raised, so the caller can name them:
+    :class:`ExportTooLargeError`, :class:`LoaderUnavailableError` (the format's loader needs an
+    extra) and :class:`UnreadableFileError` (a PDF that pypdf cannot read).
     """
     try:
         if mime_type in _EXPORT_MIME_MAP:
@@ -409,7 +445,7 @@ def extract_file_content(service: Any, file_id: str, mime_type: str, name: str) 
 
         if mime_type == PDF_MIME_TYPE:
             with _download_media(service, file_id) as media:
-                return _extract_pdf_text(media)
+                return _read_pdf(media)
 
         if mime_type in _LOADER_EXTENSIONS:
             with _download_file(service, file_id, _LOADER_EXTENSIONS[mime_type]) as path:
@@ -420,6 +456,9 @@ def extract_file_content(service: Any, file_id: str, mime_type: str, name: str) 
                 return io.TextIOWrapper(media, encoding="utf-8", errors="replace").read()
     except LoaderUnavailableError:
         logger.warning("No loader for Drive file '%s' (%s).", name, file_id)
+        raise
+    except UnreadableFileError as exc:
+        logger.warning("Drive file '%s' (%s) cannot be read: %s", name, file_id, exc)
         raise
     except Exception as exc:
         _raise_if_cut(exc)
@@ -549,17 +588,12 @@ def _iter_rows(
     *,
     service_factory: Callable[[], Any] | None = None,
 ):
-    """Yield one row per in-scope file (full listing on the first run, deltas
-    thereafter), plus hard-delete tombstones for removed files.
+    """Yield one row per in-scope file (full listing on the first run, deltas after) and tombstones.
 
-    Files are fetched on ``config.max_workers`` threads when ``service_factory`` is
-    given (one client per thread), otherwise one by one on ``service``. ``state``
-    keeps ``versions`` (file id to the ``modifiedTime`` fetched without failing), so a
-    run repeated after a failure fetches only what failed or changed.
-
-    Decoupled from dlt's resource-state machinery (which needs an active
-    pipeline context) so it is directly unit-testable with a fake Drive service
-    and a plain dict standing in for dlt's resource state.
+    Files are fetched on ``config.max_workers`` threads with ``service_factory`` (one client per
+    thread), else one by one on ``service``. ``state["versions"]`` maps a file id to the
+    ``modifiedTime`` that produced its row, so a repeated run fetches only what failed or changed.
+    Driven by tests with a plain dict as state and a fake Drive service.
     """
     if stats is None:
         stats = {}
@@ -637,8 +671,9 @@ def _iter_rows(
         return
 
     try:
+        sizes: dict[str, int] = {}
         changed_ids, deleted_ids, new_page_token = _list_changed_file_ids(
-            service, page_token, config.shared_drive_id
+            service, page_token, config.shared_drive_id, sizes
         )
     except _CutShort as cut:
         _record_cut(stats, cut, emitted=False)
@@ -694,7 +729,12 @@ def _iter_rows(
                     _resolve_folder_id(service, config.folder_id)
                 }
             for file_id, (file_meta, row, local) in _ordered_map(
-                fetch_changed, sorted(changed_ids), service, service_factory, config.max_workers
+                fetch_changed,
+                sorted(changed_ids),
+                service,
+                service_factory,
+                config.max_workers,
+                weight=lambda file_id: sizes.get(file_id, 0),
             ):
                 if file_meta is None:
                     known_ids.discard(file_id)
@@ -858,8 +898,15 @@ def _get_start_page_token(service, shared_drive_id: str | None = None) -> str:
 
 
 def _list_changed_file_ids(
-    service, page_token: str, shared_drive_id: str | None = None
+    service,
+    page_token: str,
+    shared_drive_id: str | None = None,
+    sizes: dict[str, int] | None = None,
 ) -> tuple[set[str], set[str], str]:
+    """Return the changed and the deleted file ids since ``page_token``, and the next token.
+
+    ``sizes`` is filled with the size the feed reports for each changed file, if given.
+    """
     # The feed is chronological and may report one file several times (trashed, then
     # restored), so the last change of a file decides its state.
     gone_by_id: dict[str, bool] = {}
@@ -876,7 +923,8 @@ def _list_changed_file_ids(
                 .list(
                     pageToken=current_token,
                     fields=(
-                        "nextPageToken, newStartPageToken, changes(fileId, removed, file(trashed))"
+                        "nextPageToken, newStartPageToken, "
+                        "changes(fileId, removed, file(trashed, size))"
                     ),
                     **params,
                 )
@@ -891,9 +939,10 @@ def _list_changed_file_ids(
             if not file_id:
                 # The account feed also includes shared-drive membership events.
                 continue
-            gone_by_id[file_id] = bool(
-                change.get("removed") or (change.get("file") or {}).get("trashed")
-            )
+            file_resource = change.get("file") or {}
+            gone_by_id[file_id] = bool(change.get("removed") or file_resource.get("trashed"))
+            if sizes is not None:
+                sizes[file_id] = int(file_resource.get("size") or 0)
 
         current_token = response.get("nextPageToken")
         if response.get("newStartPageToken"):
@@ -943,7 +992,7 @@ def _file_to_row(
 
     if not is_supported_mime_type(mime_type):
         _count_skip(stats, "unsupported_type")
-        logger.warning(
+        logger.debug(
             "Skipping unsupported Drive file '%s' (%s): mime type '%s'.", name, file_id, mime_type
         )
         return None
@@ -960,12 +1009,10 @@ def _file_to_row(
 
     try:
         content = extract_file_content(service, file_id, mime_type, name)
-    except (ExportTooLargeError, LoaderUnavailableError) as exc:
-        reason = (
-            "export_too_large" if isinstance(exc, ExportTooLargeError) else "loader_unavailable"
-        )
+    except (ExportTooLargeError, LoaderUnavailableError, UnreadableFileError) as exc:
+        reason = _PERMANENT_REASONS[type(exc)]
         stats["failed"] = stats.get("failed", 0) + 1
-        stats[f"failed_{reason}"] = stats.get(f"failed_{reason}", 0) + 1
+        stats[reason] = stats.get(reason, 0) + 1
         return None
     if content is None:
         stats["failed"] = stats.get("failed", 0) + 1
@@ -992,6 +1039,10 @@ def _count_skip(stats: dict[str, int], reason: str) -> None:
     stats["skipped"] = stats.get("skipped", 0) + 1
     key = f"skipped_{reason}"
     stats[key] = stats.get(key, 0) + 1
+
+
+def _first_set(*values):
+    return next(value for value in values if value is not None)
 
 
 def _env_int(name: str) -> int | None:
@@ -1095,16 +1146,20 @@ def google_drive_source(
             else _env_int("GOOGLE_DRIVE_MAX_FILE_SIZE_MB")
         ),
         shared_drive_id=shared_drive_id,
-        max_workers=(
-            max_workers
-            if max_workers is not None
-            else _env_int("GOOGLE_DRIVE_MAX_WORKERS") or DEFAULT_MAX_WORKERS
+        max_workers=_first_set(
+            max_workers, _env_int("GOOGLE_DRIVE_MAX_WORKERS"), DEFAULT_MAX_WORKERS
         ),
     )
     if config.max_workers < 1:
-        raise ValueError("max_workers must be at least 1.")
+        raise ValueError(
+            f"max_workers must be at least 1, got {config.max_workers} "
+            "(the max_workers argument or GOOGLE_DRIVE_MAX_WORKERS)."
+        )
     if config.max_file_size_mb is not None and config.max_file_size_mb < 1:
-        raise ValueError("max_file_size_mb must be at least 1.")
+        raise ValueError(
+            f"max_file_size_mb must be at least 1, got {config.max_file_size_mb} "
+            "(the max_file_size_mb argument or GOOGLE_DRIVE_MAX_FILE_SIZE_MB)."
+        )
 
     stats: dict[str, int] = {}
 

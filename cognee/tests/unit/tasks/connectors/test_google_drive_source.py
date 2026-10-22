@@ -12,6 +12,7 @@ tests stay focused on the sync state machine.
 
 import re
 
+import drive_pdfs
 import pytest
 
 from cognee.tasks.ingestion.connectors import google_drive as gd_source
@@ -21,6 +22,7 @@ _REAL_EXTRACT = gd_source.extract_file_content  # the autouse fixture replaces i
 
 DOC_MIME = "application/vnd.google-apps.document"
 PDF_MIME = "application/pdf"
+DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 
 def test_refuses_core_without_table_scoped_cleanup(monkeypatch):
@@ -96,6 +98,13 @@ class _FakeFilesResource:
             for meta in self._service.files_by_folder.get(folder_id, [])
             if not meta.get("trashed")
         ]
+        page_size = self._service.page_size
+        if page_size:
+            start = int(pageToken or 0)
+            response = {"files": files[start : start + page_size]}
+            if start + page_size < len(files):
+                response["nextPageToken"] = str(start + page_size)
+            return _FakeRequest(response)
         return _FakeRequest({"files": files})
 
     def get(self, fileId, fields, supportsAllDrives):
@@ -139,6 +148,7 @@ class FakeDriveService:
         self.start_drive_ids = []
         self.change_drive_ids = []
         self.closed = False
+        self.page_size = None  # set to make files.list paginate with nextPageToken
 
     def files(self):
         return _FakeFilesResource(self)
@@ -1165,3 +1175,208 @@ def test_a_failed_file_keeps_no_version_on_either_path(monkeypatch):
     delta = _delta_for(service, "doc")
     list(gd_source._iter_rows(service, _config(), delta))
     assert delta["versions"] == {}
+
+
+@pytest.mark.parametrize(
+    "unreadable",
+    [drive_pdfs.locked_pdf(), *drive_pdfs.CORRUPT_PDFS.values()],
+    ids=["password protected", *drive_pdfs.CORRUPT_PDFS],
+)
+def test_a_pdf_that_can_never_be_read_does_not_pin_the_cursor(monkeypatch, unreadable):
+    """Issue 6235: two readable files and one unreadable PDF, synced three times."""
+    locked = unreadable
+    text = _file_meta("notes", mime_type="text/plain")
+    pdf = _file_meta("locked", mime_type=PDF_MIME)
+    service = FakeDriveService({"root": [text, pdf]}, {"notes": text, "locked": pdf})
+
+    class _Request:
+        def __init__(self, file_id):
+            self.file_id = file_id
+
+        def execute(self, num_retries=0):
+            return locked if self.file_id == "locked" else b"hello"
+
+    class _Files:
+        def get_media(self, fileId, supportsAllDrives):
+            return _Request(fileId)
+
+        def list(self, *args, **kwargs):
+            return _FakeFilesResource(service).list(*args, **kwargs)
+
+        def get(self, *args, **kwargs):
+            return _FakeFilesResource(service).get(*args, **kwargs)
+
+    service.files = _Files
+    downloads = []
+
+    def counting(client, file_id, *args):
+        downloads.append(file_id)
+        return _REAL_EXTRACT(client, file_id, *args)
+
+    monkeypatch.setattr(gd_source, "extract_file_content", counting)
+    monkeypatch.setattr(
+        gd_source, "_stream_media", lambda request, buffer: buffer.write(request.execute())
+    )
+    state, stats = {}, {}
+    rows = list(gd_source._iter_rows(service, _config(), state, stats))
+    assert [row["id"] for row in rows] == ["notes"]
+    assert sorted(downloads) == ["locked", "notes"]
+    assert state["page_token"] == "token-0"  # saved on the first run
+    assert stats["failed"] == 1
+    assert stats["failed_unreadable"] == 1
+    assert "failed_content_extraction" not in stats
+
+    service.changes_by_token["token-0"] = {"changes": [], "newStartPageToken": "token-1"}
+    downloads.clear()
+    assert list(gd_source._iter_rows(service, _config(), state, stats)) == []
+    assert downloads == []  # incremental from here on: nothing is read again
+    assert state["page_token"] == "token-1"
+
+
+def test_file_edited_into_an_unreadable_one_is_forgotten_and_named(monkeypatch):
+    doc = _file_meta("doc")
+    service = FakeDriveService({"root": [doc]}, {"doc": doc})
+
+    def unreadable(*_args):
+        raise gd_source.UnreadableFileError("PdfReadError: broken")
+
+    monkeypatch.setattr(gd_source, "extract_file_content", unreadable)
+    state = _delta_for(service, "doc")
+    stats = {}
+    rows = list(gd_source._iter_rows(service, _config(), state, stats))
+    assert rows == [{"id": "doc", "_deleted": True}]
+    assert stats["failed_unreadable"] == 1
+    assert state["page_token"] == "t1"
+    assert "doc" not in state["versions"]
+
+
+def test_unreadable_files_do_not_free_a_transient_failure(monkeypatch):
+    files = [_file_meta("locked"), _file_meta("flaky")]
+    service = FakeDriveService({"root": files}, {item["id"]: item for item in files})
+
+    def extract(_client, file_id, *_args):
+        if file_id == "locked":
+            raise gd_source.UnreadableFileError("locked")
+
+    monkeypatch.setattr(gd_source, "extract_file_content", extract)
+    state = {}
+    list(gd_source._iter_rows(service, _config(), state, {}))
+    assert "page_token" not in state
+
+
+def test_files_list_pagination_lists_every_file_once(fake_content_extraction):
+    files = [_file_meta(f"f{i}") for i in range(7)]
+    service = FakeDriveService({"root": files}, {item["id"]: item for item in files})
+    service.page_size = 3
+    rows = list(gd_source._iter_rows(service, _config(), {}))
+    assert [row["id"] for row in rows] == [item["id"] for item in files]
+    assert len([q for q in service.list_calls if "mimeType" not in q]) == 3  # three pages
+
+
+def test_a_loader_failure_on_an_ingested_file_keeps_its_memory_and_the_cursor(monkeypatch):
+    import sys
+    from contextlib import contextmanager
+
+    doc = _file_meta("doc", mime_type=DOCX_MIME)
+    service = FakeDriveService({"root": [doc]}, {"doc": doc})
+
+    @contextmanager
+    def fake_download(_service, _file_id, _suffix):
+        yield "/nonexistent/drive_file.docx"
+
+    class _Engine:
+        def get_loader(self, _path, _preferred):
+            return object()
+
+        async def load_file(self, _path, preferred_loaders=None, **_kwargs):
+            raise RuntimeError("Document processing failed: HTTP 503 fetching a model")
+
+    import cognee.infrastructure.loaders.get_loader_engine
+
+    monkeypatch.setattr(
+        sys.modules["cognee.infrastructure.loaders.get_loader_engine"],
+        "get_loader_engine",
+        lambda: _Engine(),
+    )
+    monkeypatch.setattr(gd_source, "extract_file_content", _REAL_EXTRACT)
+    monkeypatch.setattr(gd_source, "_download_file", fake_download)
+    state = _delta_for(service, "doc")
+    stats = {}
+    rows = list(gd_source._iter_rows(service, _config(), state, stats))
+    assert rows == []  # no tombstone: the good document stays
+    assert stats["failed_content_extraction"] == 1
+    assert state["page_token"] == "t0"  # and the file is looked at again on the next run
+    assert state["versions"] == {}
+
+
+def test_the_size_bound_also_holds_on_the_changes_feed(monkeypatch):
+    import threading
+    import time
+
+    monkeypatch.setattr(gd_source, "INFLIGHT_FETCH_BYTES", 100)
+    files = [dict(_file_meta(f"f{i}"), size="60") for i in range(4)]
+    service = FakeDriveService({"root": files}, {item["id"]: item for item in files})
+    service.changes_by_token["t0"] = _feed(
+        *({"fileId": item["id"], "removed": False, "file": {"size": "60"}} for item in files)
+    )
+    running, peak, lock = [0], [0], threading.Lock()
+
+    def extract(_client, _file_id, *_args):
+        with lock:
+            running[0] += 1
+            peak[0] = max(peak[0], running[0])
+        time.sleep(0.02)
+        with lock:
+            running[0] -= 1
+        return "x"
+
+    monkeypatch.setattr(gd_source, "extract_file_content", extract)
+    state = {"page_token": "t0"}
+    rows = list(
+        gd_source._iter_rows(
+            service,
+            _config(max_workers=4, max_file_size_mb=None),
+            state,
+            service_factory=lambda: FakeDriveService(service.files_by_folder, service.file_by_id),
+        )
+    )
+    assert len(rows) == 4
+    assert peak[0] == 1  # 60 + 60 > 100: one at a time, as on a full scan
+
+
+def test_the_feed_sizes_follow_the_last_change_of_each_file():
+    service = FakeDriveService({"root": []}, {})
+    service.changes_by_token["t0"] = _feed(
+        {"fileId": "a", "removed": False, "file": {"size": "10"}},
+        {"fileId": "a", "removed": False, "file": {"size": "30"}},
+        {"fileId": "b", "removed": False, "file": {"trashed": False}},
+    )
+    sizes = {}
+    changed, _, _ = gd_source._list_changed_file_ids(service, "t0", sizes=sizes)
+    assert changed == {"a", "b"}
+    assert sizes == {"a": 30, "b": 0}
+
+
+def test_cut_run_does_not_resurrect_the_version_of_a_file_it_forgot(monkeypatch):
+    files = [_file_meta("gone"), _file_meta("next")]
+    service = FakeDriveService({"root": files}, {item["id"]: item for item in files})
+
+    def extract(_client, file_id, *_args):
+        if file_id == "next":
+            raise gd_source._CutShort("rate_limit")
+        return "   "  # "gone" was edited to blank: forgotten
+
+    monkeypatch.setattr(gd_source, "extract_file_content", extract)
+    state = {"known_ids": ["gone"], "versions": {"gone": "old"}}
+    rows = list(gd_source._iter_rows(service, _config(), state, {}))
+    assert rows == [{"id": "gone", "_deleted": True}]
+    assert "gone" not in state["versions"]
+
+
+def test_zero_workers_from_the_environment_is_an_error_not_the_default(monkeypatch):
+    pytest.importorskip("dlt")
+    monkeypatch.setenv("GOOGLE_DRIVE_MAX_WORKERS", "0")
+    with pytest.raises(ValueError, match="GOOGLE_DRIVE_MAX_WORKERS"):
+        gd_source.google_drive_source(folder_id="root", service=object())
+    monkeypatch.setenv("GOOGLE_DRIVE_MAX_WORKERS", "3")
+    gd_source.google_drive_source(folder_id="root", service=object())

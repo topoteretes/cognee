@@ -5,6 +5,7 @@
 import io
 import pathlib
 
+import drive_pdfs
 import pytest
 from pypdf import PdfWriter
 
@@ -15,6 +16,7 @@ from cognee.tasks.ingestion.connectors.google_drive import (
     PDF_MIME_TYPE,
     ExportTooLargeError,
     LoaderUnavailableError,
+    UnreadableFileError,
     extract_file_content,
     is_supported_mime_type,
 )
@@ -248,13 +250,129 @@ def test_missing_loader_is_a_named_error_not_a_skip(loader_engine):
         extract_file_content(service, "d", DOCX, "report.docx")
 
 
-def test_broken_office_file_is_an_ordinary_skipped_extraction(loader_engine):
+def test_a_loader_failure_is_transient_not_a_verdict_on_the_file(loader_engine):
+    # unstructured re-raises everything, a model download included, as one RuntimeError.
     async def broken(*_args, **_kwargs):
-        raise RuntimeError("corrupt docx")
+        raise RuntimeError("Document processing failed: HTTP 503 fetching a model")
 
     loader_engine.load_file = broken
     service = _FakeService(_FakeFiles(media_result=b"x"))
     assert extract_file_content(service, "d", DOCX, "report.docx") is None
+
+
+def test_the_coroutine_of_a_failed_asyncio_run_is_closed(loader_engine):
+    import asyncio
+    import inspect
+
+    created = []
+    real_load_file = loader_engine.load_file
+
+    def tracking(*args, **kwargs):
+        coroutine = real_load_file(*args, **kwargs)
+        created.append(coroutine)
+        return coroutine
+
+    loader_engine.load_file = tracking
+
+    async def inside_a_loop():
+        service = _FakeService(_FakeFiles(media_result=b"x"))
+        return extract_file_content(service, "d", DOCX, "report.docx")
+
+    assert asyncio.run(inside_a_loop()) is None
+    assert [inspect.getcoroutinestate(coroutine) for coroutine in created] == ["CORO_CLOSED"]
+
+
+@pytest.mark.filterwarnings("ignore::RuntimeWarning")
+def test_a_running_event_loop_is_transient_not_a_verdict_on_the_file(loader_engine):
+    import asyncio
+
+    async def inside_a_loop():
+        service = _FakeService(_FakeFiles(media_result=b"x"))
+        return extract_file_content(service, "d", DOCX, "report.docx")
+
+    assert asyncio.run(inside_a_loop()) is None
+
+
+def test_a_package_the_loader_needs_is_an_environment_problem_not_the_files(loader_engine):
+    async def missing(*_args, **_kwargs):
+        raise ImportError("docling needs torch")
+
+    loader_engine.load_file = missing
+    service = _FakeService(_FakeFiles(media_result=b"x"))
+    with pytest.raises(LoaderUnavailableError, match="torch"):
+        extract_file_content(service, "d", DOCX, "report.docx")
+
+
+def test_password_protected_pdf_is_unreadable():
+    service = _FakeService(_FakeFiles(media_result=drive_pdfs.locked_pdf()))
+    with pytest.raises(UnreadableFileError, match="not been decrypted"):
+        extract_file_content(service, "p", PDF_MIME_TYPE, "locked.pdf")
+
+
+def test_a_pypdf_value_error_is_unreadable(monkeypatch):
+    def refuses(_stream):
+        raise ValueError("bad xref")
+
+    monkeypatch.setattr(gd_source, "_extract_pdf_text", refuses)
+    service = _FakeService(_FakeFiles(media_result=b"x"))
+    with pytest.raises(UnreadableFileError, match="bad xref"):
+        extract_file_content(service, "p", PDF_MIME_TYPE, "a.pdf")
+
+
+@pytest.mark.parametrize("name", list(drive_pdfs.CORRUPT_PDFS))
+def test_corrupt_pdf_on_which_pypdf_raises_its_own_kind_of_error_is_unreadable(name):
+    from pypdf.errors import PyPdfError
+
+    data = drive_pdfs.CORRUPT_PDFS[name]
+    with pytest.raises(Exception) as raised:  # what pypdf itself raises, to keep the case honest
+        drive_pdfs.extract(data)
+    assert not isinstance(raised.value, (PyPdfError, ValueError))
+    service = _FakeService(_FakeFiles(media_result=data))
+    with pytest.raises(UnreadableFileError, match=type(raised.value).__name__):
+        extract_file_content(service, "p", PDF_MIME_TYPE, "broken.pdf")
+
+
+def test_a_valid_hand_built_pdf_is_read():
+    assert drive_pdfs.extract(drive_pdfs.VALID) == "hello"
+    service = _FakeService(_FakeFiles(media_result=drive_pdfs.VALID))
+    assert extract_file_content(service, "p", PDF_MIME_TYPE, "ok.pdf") == "hello"
+
+
+def test_a_missing_cryptography_package_is_the_environment_not_the_file(monkeypatch):
+    from pypdf.errors import DependencyError
+
+    def needs_cryptography(_stream):
+        raise DependencyError("cryptography>=3.1 is required for AES algorithm")
+
+    monkeypatch.setattr(gd_source, "_extract_pdf_text", needs_cryptography)
+    service = _FakeService(_FakeFiles(media_result=b"x"))
+    assert extract_file_content(service, "p", PDF_MIME_TYPE, "aes.pdf") is None
+
+
+def test_corrupt_pdf_is_unreadable():
+    service = _FakeService(_FakeFiles(media_result=b"this is not a pdf at all"))
+    with pytest.raises(UnreadableFileError):
+        extract_file_content(service, "p", PDF_MIME_TYPE, "broken.pdf")
+
+
+def test_a_failed_download_is_transient_not_unreadable(monkeypatch):
+    # Not an OSError on purpose: only where it happens keeps it from being the file's fault.
+    def network_down(request, buffer):
+        raise RuntimeError("connection reset")
+
+    monkeypatch.setattr(gd_source, "_stream_media", network_down)
+    service = _FakeService(_FakeFiles(media_result=b"x"))
+    assert extract_file_content(service, "p", PDF_MIME_TYPE, "a.pdf") is None
+
+
+@pytest.mark.parametrize("error", [MemoryError(), OSError("disk full")])
+def test_resource_exhaustion_in_a_parser_is_not_the_files_fault(monkeypatch, error):
+    def exhausted(_stream):
+        raise error
+
+    monkeypatch.setattr(gd_source, "_extract_pdf_text", exhausted)
+    service = _FakeService(_FakeFiles(media_result=b"x"))
+    assert extract_file_content(service, "p", PDF_MIME_TYPE, "a.pdf") is None
 
 
 def test_missing_loader_fails_the_file_with_its_reason(loader_engine):
