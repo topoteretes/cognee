@@ -175,6 +175,87 @@ class CogneeTestClient:
             }
             print(f"FAIL memory tools: {e}")
 
+    @staticmethod
+    def _refs_under_hit(recall_text: str, needle: str) -> dict[str, str]:
+        """Parse the first `refs:` line under the recall hit whose text contains needle."""
+        for block in recall_text.split("\n\n"):
+            if needle not in block:
+                continue
+            for line in block.splitlines():
+                line = line.strip()
+                if line.startswith("refs: "):
+                    return dict(part.split("=", 1) for part in line[len("refs: ") :].split(", "))
+        raise AssertionError(f"No refs line under the hit containing {needle!r}: {recall_text}")
+
+    async def test_forget_one_memory(self):
+        """Recall one item with references, forget it by id, and keep the other."""
+        print("\nTesting forget of a single recalled memory...")
+
+        tag = uuid4().hex[:12]
+        dataset = f"mcp_forget_{tag}"
+        secret = f"The vault recovery phrase for {tag} is amber-falcon-42."
+        keep = f"The {tag} team has lunch together every Friday."
+
+        try:
+            async with self.mcp_server_session() as session:
+                for text in (secret, keep):
+                    result = await session.call_tool(
+                        "remember",
+                        arguments={
+                            "data": text,
+                            "dataset_name": dataset,
+                            "self_improvement": False,
+                        },
+                    )
+                    if self._content_text(result).startswith("Error"):
+                        raise AssertionError(f"remember failed: {self._content_text(result)}")
+
+                recall_args = {
+                    "query": f"vault recovery phrase {tag}",
+                    "datasets": dataset,
+                    "search_type": "CHUNKS",
+                    "top_k": 5,
+                }
+                before = self._content_text(
+                    await session.call_tool(
+                        "recall", arguments={**recall_args, "include_references": True}
+                    )
+                )
+                refs = self._refs_under_hit(before, "amber-falcon-42")
+
+                forgotten = self._content_text(
+                    await session.call_tool(
+                        "forget",
+                        arguments={"data_id": refs["data_id"], "dataset_id": refs["dataset_id"]},
+                    )
+                )
+                if f"Data item '{refs['data_id']}' deleted" not in forgotten:
+                    raise AssertionError(f"Unexpected forget response: {forgotten}")
+
+                after = self._content_text(await session.call_tool("recall", arguments=recall_args))
+                await session.call_tool("forget", arguments={"dataset": dataset})
+
+            if "amber-falcon-42" in after:
+                raise AssertionError(f"Forgotten memory still recalled: {after}")
+            if "lunch together every Friday" not in after:
+                raise AssertionError(f"The other memory was lost too: {after}")
+
+            self.test_results["forget_one_memory"] = {
+                "status": "PASS",
+                "message": "recall references led forget to exactly one item",
+            }
+            print("PASS forget one memory")
+        except Exception as e:
+            logger.debug(
+                "Ignoring exception in CogneeTestClient.test_forget_one_memory", exc_info=True
+            )
+            self.test_results["forget_one_memory"] = {
+                "status": "FAIL",
+                "error": str(e),
+                "message": "Forget-one-memory test failed",
+            }
+            print(f"FAIL forget one memory: {e}")
+
     async def run_all_tests(self):
         """Run the MCP smoke test suite."""
         print("Starting Cognee MCP memory tool smoke tests")
@@ -183,6 +264,7 @@ class CogneeTestClient:
         await self.test_tool_discovery()
         await self.test_hidden_tool_is_still_callable()
         await self.test_memory_tools()
+        await self.test_forget_one_memory()
         self.print_test_summary()
 
     def print_test_summary(self):

@@ -548,6 +548,7 @@ async def recall(
     top_k: int = 15,
     scope: str | None = None,
     code_query: dict | None = None,
+    include_references: bool = False,
 ) -> list:
     """Search memory with auto-routing and session awareness.
 
@@ -597,6 +598,14 @@ async def recall(
         hubs, ask. When omitted, 'code' scope runs an 'explore' seeded with the
         query text. Most operations take exact node names/IDs or structured
         filters; search and ask take natural-language text.
+    include_references : bool
+        Under each hit backed by stored data, add one line per data item:
+        `refs: data_id=..., dataset_id=..., document=...`. Pass that data_id
+        and dataset_id to `forget` to delete exactly that item. Use it when
+        asked to forget something specific, together with
+        search_type=CHUNKS: each chunk hit shows its own text and the one
+        item it came from, while a completion answer lists every item in its
+        context. Session hits carry no refs.
 
     Returns a one-line memory-hit or empty-state summary followed by the original
     result text. Status markers do not count as hits. Empty-state checks are
@@ -618,6 +627,7 @@ async def recall(
                 top_k=normalized_top_k,
                 scope=scope_list or None,
                 code_query=code_query,
+                include_references=include_references,
             )
             empty_state = recall_marker_state(results)
             items = recall_items(results)
@@ -645,6 +655,7 @@ async def recall(
                         json_encoder=JSONEncoder,
                         items=items,
                         empty_state=empty_state,
+                        include_references=include_references,
                     ),
                     _meta={
                         "cognee/memory": {
@@ -754,7 +765,10 @@ async def forget(
         If true, delete ALL data across all datasets.
     data_id : str, optional
         UUID of a single data item to delete. Must be paired with `dataset`
-        or `dataset_id` so the owning dataset is unambiguous.
+        or `dataset_id` so the owning dataset is unambiguous. To find it, call
+        `recall` with include_references=true and search_type=CHUNKS, then
+        copy the data_id and dataset_id from the `refs:` line under the hit
+        to delete.
     dataset_id : str, optional
         UUID of the dataset to delete entirely, or to scope `data_id`.
     """

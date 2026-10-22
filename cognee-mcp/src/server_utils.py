@@ -185,8 +185,58 @@ def _format_completion_results(
     )
 
 
-def format_recall_body(results: Any, *, json_encoder: type[json.JSONEncoder] | None = None) -> str:
-    """Render recall results, including normalized response envelopes."""
+MAX_RECALL_REFS = 5
+
+
+def recall_item_refs(item: Any) -> list[dict[str, str]]:
+    """Forgettable data items behind one recall hit, as (data_id, dataset_id) pairs.
+
+    Two places carry them: a chunk/summary hit names its own document in
+    ``metadata.data_id``, and a completion hit lists the segments it drew on in
+    ``metadata.evidence`` (only with ``include_references``). Graph-node, edge
+    and triplet references name no document and are skipped. A reference
+    without its own ``dataset_id`` takes the hit's, since ``forget`` needs both.
+    """
+    metadata = _model_dump(_get_field(item, "metadata"))
+    if not isinstance(metadata, dict):
+        return []
+    hit_dataset_id = _get_field(item, "dataset_id")
+    candidates = [metadata, *(metadata.get("evidence") or [])]
+
+    refs: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for candidate in candidates:
+        candidate = _model_dump(candidate)
+        if not isinstance(candidate, dict):
+            continue
+        data_id = candidate.get("data_id")
+        dataset_id = candidate.get("dataset_id") or hit_dataset_id
+        if not data_id or not dataset_id:
+            continue
+        key = (str(data_id), str(dataset_id))
+        if key in seen:
+            continue
+        seen.add(key)
+        ref = {"data_id": key[0], "dataset_id": key[1]}
+        if candidate.get("document_name"):
+            ref["document"] = " ".join(str(candidate["document_name"]).split())[:80]
+        refs.append(ref)
+        if len(refs) == MAX_RECALL_REFS:
+            break
+    return refs
+
+
+def format_recall_body(
+    results: Any,
+    *,
+    json_encoder: type[json.JSONEncoder] | None = None,
+    include_references: bool = False,
+) -> str:
+    """Render recall results, including normalized response envelopes.
+
+    With ``include_references``, each hit backed by stored data gets one
+    ``refs:`` line per data item, carrying the ids ``forget`` takes.
+    """
     results = _unwrap_results(results)
     if not results:
         return "No relevant results found."
@@ -201,7 +251,11 @@ def format_recall_body(results: Any, *, json_encoder: type[json.JSONEncoder] | N
             json_encoder=json_encoder,
         )
         prefix = f"[{source}] " if source else ""
-        lines.append(f"{prefix}{rendered}")
+        line = f"{prefix}{rendered}"
+        if include_references:
+            for ref in recall_item_refs(result):
+                line += "\n  refs: " + ", ".join(f"{key}={value}" for key, value in ref.items())
+        lines.append(line)
 
     return "\n\n".join(lines)
 
@@ -286,6 +340,7 @@ def format_recall_results(
     json_encoder: type[json.JSONEncoder] | None = None,
     empty_state: RecallState | None = None,
     items: list[Any] | None = None,
+    include_references: bool = False,
 ) -> str:
     """Add one summary line; preserve the existing body beneath it.
 
@@ -321,6 +376,10 @@ def format_recall_results(
                 f"still indexing — {state.completed}/{state.total} items processed, retry shortly"
             )
     body = (
-        format_recall_body(results, json_encoder=json_encoder) if _unwrap_results(results) else ""
+        format_recall_body(
+            results, json_encoder=json_encoder, include_references=include_references
+        )
+        if _unwrap_results(results)
+        else ""
     )
     return f"{summary}\n{body}" if body else summary
