@@ -200,9 +200,14 @@ class FakeAsana:
         return [params for path, params in self.calls if path.startswith(prefix)]
 
     # -- the two surfaces ---------------------------------------------------
-    def request(self, method: str, path: str, *, params=None):
-        """The ``service=`` surface: the real client's error mapping over the fake's answers."""
+    def request(self, method: str, path: str, *, params=None, check_active=None):
+        """The ``service=`` surface: the real client's error mapping over the fake's answers.
+
+        A client without retries: ``check_active`` is called once, before the one attempt.
+        """
         assert method == "GET"
+        if check_active is not None:
+            check_active()
         try:
             response = self.respond(path, params)
         except requests.ConnectionError:

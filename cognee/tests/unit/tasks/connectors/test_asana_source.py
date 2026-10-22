@@ -2882,7 +2882,7 @@ def test_check_active_raising_stops_the_run_before_the_next_request():
 
 
 def test_an_oserror_from_check_active_is_not_retried_or_swallowed(monkeypatch):
-    """The checkpoint runs outside the client's retry loop, so a host bridge that fails with an
+    """The checkpoint runs outside the client's try/except, so a host bridge that fails with an
     OSError (a dropped socket) is neither retried like a network error nor read as a failed task."""
     fake = _workspace()
     sleeps: list[float] = []
@@ -2913,6 +2913,63 @@ def test_an_oserror_from_check_active_in_the_middle_of_a_task_is_not_a_failed_ta
     with pytest.raises(OSError):
         _sync(client, state, check_active=flaky)
 
+    assert state == {}
+
+
+def test_a_request_the_budget_refuses_is_not_sent_and_asks_the_host_nothing():
+    fake = _workspace()
+    asked: list[int] = []
+
+    _, stats = _sync(fake, {}, max_requests=3, check_active=lambda: asked.append(1))
+
+    assert stats["failed_budget"] == 1
+    assert len(asked) == len(fake.calls) == 3
+
+
+def test_a_retried_request_asks_the_host_per_attempt_and_counts_once_against_the_budget(
+    monkeypatch,
+):
+    fake = _workspace(tasks=2)
+    monkeypatch.setattr("requests.request", serve_over_http(fake))
+    _, plain = _sync(AsanaClient(TOKEN, sleep=lambda _: None), {})
+    fake.calls.clear()
+    fake.fail("/tasks/2", 500, times=1)
+    asked: list[int] = []
+
+    _, stats = _sync(
+        AsanaClient(TOKEN, sleep=lambda _: None),
+        {},
+        max_requests=plain["requests"],
+        check_active=lambda: asked.append(1),
+    )
+
+    assert stats["requests"] == plain["requests"] and "failed_budget" not in stats
+    assert len(fake.calls) == len(asked) == plain["requests"] + 1
+
+
+def test_a_host_that_revokes_during_a_tasks_retry_stops_the_run_and_loses_that_task(monkeypatch):
+    """The read of task 2 answers 500 once; the host refuses the retry. The run stops with the
+    host's own error, task 2 is not emitted and the state is as the run found it."""
+    fake = _workspace(tasks=2)
+    fake.fail("/tasks/2", 500, times=1)
+    monkeypatch.setattr("requests.request", serve_over_http(fake))
+    sleeps: list[float] = []
+    client = AsanaClient(TOKEN, sleep=sleeps.append)
+    error = PermissionError("access revoked")
+
+    def check():
+        if fake.calls and fake.calls[-1][0] == "/tasks/2":
+            raise error
+
+    state: dict = {}
+    emitted: list[str] = []
+    with pytest.raises(PermissionError) as raised:
+        for row in _iter_rows(client, state, new_stats(), project_gids=["P1"], check_active=check):
+            emitted.append(row["id"])
+
+    assert raised.value is error
+    assert "task:1" in emitted and "task:2" not in emitted
+    assert [path for path, _ in fake.calls].count("/tasks/2") == 1 and sleeps == []
     assert state == {}
 
 

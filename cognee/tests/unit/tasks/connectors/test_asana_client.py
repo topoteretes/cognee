@@ -170,6 +170,84 @@ def test_a_persistent_network_failure_raises_without_the_token(monkeypatch):
     assert raised.value.__context__ is None
 
 
+def _traced(monkeypatch, *responses):
+    """A real client, and one list with every check, send and sleep in the order they happen."""
+    events: list[str] = []
+    queue = list(responses)
+
+    def fake_request(method, url, **kwargs):
+        events.append("send")
+        response = queue.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    monkeypatch.setattr("requests.request", fake_request)
+    return AsanaClient(TOKEN, sleep=lambda seconds: events.append(f"sleep {seconds}")), events
+
+
+def test_the_host_is_asked_before_each_attempt_and_before_each_wait(monkeypatch):
+    """The check comes before the sleep, so a revoked run does not wait out the backoff first."""
+    client, events = _traced(monkeypatch, *[Resp(503, {})] * 3)
+
+    with pytest.raises(AsanaAPIError):
+        client.request("GET", "/projects/1", check_active=lambda: events.append("check"))
+
+    assert events == ["check", "send", "check", "sleep 1", "send", "check", "sleep 2", "send"]
+
+
+def test_a_retried_request_asks_the_host_once_per_attempt(monkeypatch):
+    client, events = _traced(monkeypatch, Resp(500, {}), Resp(200, {"data": {}}))
+
+    client.request("GET", "/projects/1", check_active=lambda: events.append("check"))
+
+    assert events == ["check", "send", "check", "sleep 1", "send"]
+
+
+@pytest.mark.parametrize(
+    ("revoked_at", "sent", "slept"),
+    [(1, 0, []), (2, 1, []), (3, 2, [1])],
+)
+def test_a_revoked_host_stops_the_retries_before_the_attempt_and_the_wait(
+    monkeypatch, revoked_at, sent, slept
+):
+    """The attempt the host refused is never sent, and no wait follows the refusal."""
+    client, events = _traced(monkeypatch, *[Resp(503, {})] * 3)
+    asked = []
+
+    def check():
+        asked.append(1)
+        if len(asked) == revoked_at:
+            raise PermissionError("access revoked")
+
+    with pytest.raises(PermissionError, match="access revoked"):
+        client.request("GET", "/projects/1", check_active=check)
+
+    assert len(asked) == revoked_at
+    assert events.count("send") == sent
+    assert [event for event in events if event.startswith("sleep")] == [
+        f"sleep {seconds}" for seconds in slept
+    ]
+
+
+def test_what_the_host_raises_is_neither_wrapped_nor_retried(monkeypatch):
+    """A host bridge can fail with a requests error: it must not be read as a network failure."""
+    client, events = _traced(monkeypatch, Resp(503, {}), Resp(200, {"data": {}}))
+    error = requests.ConnectionError("host bridge down")
+    asked = []
+
+    def bridge_down():
+        asked.append(1)
+        if len(asked) == 2:
+            raise error
+
+    with pytest.raises(requests.ConnectionError) as raised:
+        client.request("GET", "/projects/1", check_active=bridge_down)
+
+    assert raised.value is error and error.__cause__ is None
+    assert len(asked) == 2 and events == ["send"]
+
+
 @pytest.mark.parametrize("status", [400, 401, 403, 404])
 def test_a_client_error_is_not_retried(monkeypatch, status):
     client, calls, sleeps = _client(monkeypatch, Resp(status, {}), Resp(200, {}))

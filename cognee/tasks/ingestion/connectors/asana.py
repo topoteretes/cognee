@@ -215,7 +215,8 @@ class AsanaClient:
     """Minimal synchronous REST client for Asana.
 
     ``request`` returns the JSON object of a ``200`` answer. Tests and hosts can pass any
-    object with the same ``request`` method instead.
+    object with the same ``request`` method instead, one that takes ``check_active`` and calls it
+    before each attempt it makes.
     """
 
     def __init__(self, access_token: str, *, sleep: Callable[[float], None] = time.sleep):
@@ -235,12 +236,27 @@ class AsanaClient:
     def __repr__(self) -> str:
         return "AsanaClient(access_token=<redacted>)"
 
-    def request(self, method: str, path: str, *, params: dict[str, Any] | None = None) -> dict:
+    def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        check_active: Callable[[], None] | None = None,
+    ) -> dict:
+        """The JSON object of a ``200`` answer, retrying a 5xx or a network error.
+
+        ``check_active`` is called before each attempt, a retry included, and before its backoff
+        sleep, so a host that has revoked the run does not wait out the retries. What it raises
+        propagates as it is: it is no network error, so it is neither retried nor wrapped.
+        """
         import requests  # lazy: importing the connectors package loads no client library
 
         headers = {"Authorization": f"Bearer {self._access_token}", "Accept": "application/json"}
         response = None
         for attempt in range(_RETRIES):
+            if check_active is not None:
+                check_active()
             if attempt:
                 self._sleep(2 ** (attempt - 1))
             try:
@@ -289,7 +305,12 @@ class AsanaClient:
 
 
 def build_asana_service(access_token: str) -> AsanaClient:
-    """Wrap a host-owned access token in a client, the way Linear and Apollo do."""
+    """Wrap a host-owned access token in a client, the way Linear and Apollo do.
+
+    A ``service`` handed to :func:`asana_source` instead must offer
+    ``request(method, path, *, params, check_active)`` and call ``check_active`` before each
+    attempt it makes.
+    """
     return AsanaClient(access_token)
 
 
@@ -649,10 +670,9 @@ class _Walker:
         """One request, counted against ``max_requests`` (the listing's and the reads' alike).
 
         A run that spends its budget inside the listing keeps the progress it made, so a small
-        budget cannot make a run start over at the same place.
+        budget cannot make a run start over at the same place. The client asks ``check_active``
+        before each attempt, so a request the budget refuses is not sent and asks nothing.
         """
-        if self.check_active is not None:
-            self.check_active()
         if self.used >= self.max_requests:
             self.stats["failed"] += 1  # the request the run could not afford
             raise _CutShort("budget")
@@ -660,7 +680,7 @@ class _Walker:
         # A call the client retries on a 5xx or a network error still counts once.
         self.stats["requests"] += 1
         try:
-            return self.client.request("GET", path, params=params)
+            return self.client.request("GET", path, params=params, check_active=self.check_active)
         except AsanaRateLimitedError:
             self.stats["failed"] += 1
             raise _CutShort("rate_limit") from None
@@ -1269,8 +1289,10 @@ def asana_source(
         access_token: Asana personal access token or OAuth access token. Used to build the
             client when ``service`` is omitted. Never read from the environment.
         service: Pre-built client (see :func:`build_asana_service`). Mainly an injection point
-            for tests and hosts.
-        check_active: Optional host authorization checkpoint, called before each request.
+            for tests and hosts. It must accept ``request(method, path, *, params,
+            check_active)`` and call ``check_active`` before each attempt it makes.
+        check_active: Optional host authorization checkpoint, called before each attempt of each
+            request, a retry included. What it raises stops the run as it is.
         max_requests: Budget of the requests of one run, the listing's and the task reads' (a
             call the client retries counts once), so at least 3 (a task costs three). A run cut
             by it inside the listing keeps its progress and the next run continues there;

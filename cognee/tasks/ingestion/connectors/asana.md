@@ -68,8 +68,8 @@ Run the same `remember` call again whenever you want to sync.
 | `project_gids` | The projects to sync: a non-empty list or tuple of gid strings | required |
 | `access_token` | Asana personal access token or OAuth access token. Never read from the environment | needed unless `service` is given |
 | `max_requests` | Budget of all the requests of one run, the listing's and the task reads' (three a task). An int of at least 3 | 1500 |
-| `check_active` | Host checkpoint, called before every request | none |
-| `service` | Pre-built client, from `build_asana_service(access_token)` | built from `access_token` |
+| `check_active` | Host checkpoint, called before each attempt of each request, a retry included. What it raises stops the run as it is | none |
+| `service` | Pre-built client, from `build_asana_service(access_token)`. A client of your own must accept `request(method, path, *, params, check_active)` and call `check_active` before each attempt it makes | built from `access_token` |
 
 `project_gids` is sorted and repeats are dropped, so the same selection in another order is the
 same selection. A bare string, an empty list, a blank gid or a gid with anything but letters and
@@ -356,7 +356,10 @@ completes.
 - **Lock hold time.** A run holds cognee's process-wide staging lock while it walks. The listing
   and the reads share `max_requests`, so a run holds the lock for at most that many requests plus
   the client's retries of each (three attempts, backing off 1 s then 2 s). There is no wall-clock
-  deadline, no cap on projects or pages and no other limit.
+  deadline, no cap on projects or pages and no other limit. `check_active` is called before each
+  attempt and before each backoff, so a host that revokes the run is noticed before the next
+  attempt, not after the retries; a revoked run still finishes the attempt in flight (10 s to
+  connect, 30 s to read) and sends the one that follows a backoff already begun.
 - **Renaming a project or a section** changes the text of every task in it (each task names its
   projects and sections), so each of those tasks is read again (three requests each) and
   cognified again: LLM extraction and a summary on your key. The node set uses the project gid,
