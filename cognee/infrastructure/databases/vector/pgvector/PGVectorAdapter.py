@@ -8,7 +8,7 @@ from asyncpg import DeadlockDetectedError, DuplicateTableError, UniqueViolationE
 from sqlalchemy import JSON, Column, MetaData, Table, cast, delete, exc, func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.engine import make_url
-from sqlalchemy.exc import DBAPIError, ProgrammingError
+from sqlalchemy.exc import DBAPIError, ProgrammingError, SQLAlchemyError
 from sqlalchemy.inspection import inspect
 from sqlalchemy.orm import Mapped, mapped_column
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
@@ -56,6 +56,31 @@ _HNSW_MAX_EF_SEARCH = 1000
 _PG_MAX_IDENTIFIER_BYTES = 63
 
 PgvectorVersion = tuple[int, ...]
+
+# Collection tables in the engine's current schema (the dataset's own schema in
+# shared-database mode): a ``vector`` column of pgvector's ``vector`` type, whose
+# ``atttypmod`` is its declared dimension count (-1 when undeclared).
+_VECTOR_COLLECTIONS_SQL = """
+SELECT c.relname, a.atttypmod
+FROM pg_attribute a
+JOIN pg_class c ON c.oid = a.attrelid
+JOIN pg_namespace n ON n.oid = c.relnamespace
+JOIN pg_type t ON t.oid = a.atttypid
+WHERE n.nspname = current_schema()
+  AND c.relkind = 'r'
+  AND a.attname = 'vector'
+  AND t.typname = 'vector'
+  AND NOT a.attisdropped
+"""
+# An HNSW build is much slower once its graph outgrows maintenance_work_mem (12k
+# 3072-dimensional rows on a 1 CU Neon compute: 22.6 s at its 67 MB default, 12.4 s at
+# 256 MB). Raised for the build's own transaction only, and never lowered.
+_BUILD_MAINTENANCE_WORK_MEM_KB = 256 * 1024
+_RAISE_MAINTENANCE_WORK_MEM_SQL = """
+SELECT set_config('maintenance_work_mem', :target, true)
+FROM pg_settings
+WHERE name = 'maintenance_work_mem' AND setting::bigint < :target_kb
+"""
 
 
 def parse_pgvector_version(version: str | None) -> PgvectorVersion | None:
@@ -1088,5 +1113,43 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         await self.delete_database()
 
     async def run_migrations(self):
-        """Run PGVector adapter migrations (currently no-op)."""
-        return
+        """Build the HNSW index of any collection that is missing it.
+
+        The runner calls this on every cognee version change. The
+        ``pgvector_hnsw_indexes`` migration builds the indexes once, and logs and skips
+        a table whose build fails (a ``statement_timeout``, a full disk), so this is
+        where such a table is retried. ``IF NOT EXISTS`` makes an indexed table a
+        catalog lookup. A failed build is logged and skipped here too: the runner
+        blocks writes to the dataset when this raises, and an unindexed collection is
+        still searched correctly, by a full scan.
+        """
+        async with self.engine.connect() as connection:
+            collections = (await connection.execute(text(_VECTOR_COLLECTIONS_SQL))).all()
+            pgvector_version = await self._pgvector_version(connection)
+
+        indexed, failed = [], []
+        for table_name, dimensions in collections:
+            statement = hnsw_index_statement(table_name, dimensions, pgvector_version)
+            if statement is None:
+                continue
+            try:
+                async with self.engine.begin() as connection:
+                    await connection.execute(
+                        text(_RAISE_MAINTENANCE_WORK_MEM_SQL),
+                        {
+                            "target": f"{_BUILD_MAINTENANCE_WORK_MEM_KB}kB",
+                            "target_kb": _BUILD_MAINTENANCE_WORK_MEM_KB,
+                        },
+                    )
+                    await connection.execute(text(statement))
+                indexed.append(table_name)
+            except SQLAlchemyError as error:
+                failed.append(table_name)
+                logger.warning(
+                    "Could not build the HNSW index on %s (%s); it stays searchable by a "
+                    "full scan and is retried on the next cognee version change: %s",
+                    table_name,
+                    type(error).__name__,
+                    error,
+                )
+        return {"hnsw_index_checked": indexed, "hnsw_index_failed": failed}

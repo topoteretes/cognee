@@ -214,3 +214,61 @@ async def test_the_migration_indexes_collections_created_without_one(shared_sche
 
     await pgvector_hnsw_indexes.downgrade(context)
     assert await _index_names(adapter, collection) == []
+
+
+@pytest.mark.parametrize("shared_schema", [False, True])
+async def test_a_version_change_rebuilds_a_missing_index(shared_schema, cleanup):
+    # The migration logs and skips a table whose build fails; the adapter's storage
+    # sync, which the runner calls on every cognee version change, retries it.
+    from cognee.modules.migrations.versions import adapter_storage_migration
+
+    schema = f"ds_hnsw_{uuid4().hex[:8]}" if shared_schema else ""
+    adapter = _adapter(8, schema=schema)
+    collection = f"HnswRetry_{uuid4().hex[:8]}_text"
+    if schema:
+        async with adapter.engine.begin() as conn:
+            await conn.execute(text(f'CREATE SCHEMA "{schema}"'))
+        cleanup.append((adapter, f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+    else:
+        cleanup.append((adapter, f'DROP TABLE IF EXISTS "{collection}"'))
+
+    await _fill(adapter, collection, 30)
+    async with adapter.engine.begin() as conn:
+        await conn.execute(text(f'DROP INDEX "{hnsw_index_name(collection)}"'))
+
+    await adapter_storage_migration.migrate(SimpleNamespace(vector_engine=adapter))
+    assert await _index_names(adapter, collection) == [hnsw_index_name(collection)]
+
+    # Idempotent: an indexed store is left as it is.
+    result = await adapter.run_migrations()
+    assert result["hnsw_index_failed"] == []
+    assert await _index_names(adapter, collection) == [hnsw_index_name(collection)]
+
+
+async def test_a_failed_build_is_logged_and_the_rest_are_indexed(monkeypatch, cleanup):
+    # The runner blocks writes to a dataset when run_migrations raises, so one table
+    # that cannot be indexed must not stop the others or fail the sync.
+    import cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter as adapter_module
+
+    adapter = _adapter(8)
+    broken, healthy = (f"HnswFail_{uuid4().hex[:8]}_{name}" for name in ("a", "b"))
+    for collection in (broken, healthy):
+        cleanup.append((adapter, f'DROP TABLE IF EXISTS "{collection}"'))
+        await _fill(adapter, collection, 10)
+        async with adapter.engine.begin() as conn:
+            await conn.execute(text(f'DROP INDEX "{hnsw_index_name(collection)}"'))
+
+    real_statement = adapter_module.hnsw_index_statement
+
+    def statement(table_name, dimensions, version):
+        if table_name == broken:
+            return f'CREATE INDEX "{hnsw_index_name(table_name)}" ON "{table_name}" USING nope (vector)'
+        return real_statement(table_name, dimensions, version)
+
+    monkeypatch.setattr(adapter_module, "hnsw_index_statement", statement)
+    result = await adapter.run_migrations()
+
+    assert broken in result["hnsw_index_failed"]
+    assert healthy in result["hnsw_index_checked"]
+    assert await _index_names(adapter, broken) == []
+    assert await _index_names(adapter, healthy) == [hnsw_index_name(healthy)]

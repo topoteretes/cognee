@@ -18,7 +18,10 @@ The index only makes searches faster; a collection without one is still searched
 correctly, by a full scan. So each table is indexed in its own transaction (a build
 blocks writes to that table only, not to the whole store), and a table whose build fails
 (a ``statement_timeout``, a full disk) is logged and skipped rather than failing the
-migration: a failed migration blocks every write to the dataset. On a pgvector older
+migration: a failed migration blocks every write to the dataset.
+``PGVectorAdapter.run_migrations``, which the runner calls on every cognee version
+change, builds any index that is still missing, so a skipped table is retried with the
+next release. On a pgvector older
 than 0.5.0 (no HNSW), or older than 0.7.0 for collections over 2,000 dimensions (no
 halfvec), the collection is skipped the same way the adapter skips it.
 """
@@ -147,7 +150,8 @@ async def migrate(context: MigrationContext) -> None:
                 await conn.execute(text(statement))
         except SQLAlchemyError as error:
             logger.warning(
-                "Could not build the HNSW index on %s (%s); it stays searchable by a full scan: %s",
+                "Could not build the HNSW index on %s (%s); it stays searchable by a full scan "
+                "and is retried on the next cognee version change: %s",
                 table_name,
                 type(error).__name__,
                 error,
