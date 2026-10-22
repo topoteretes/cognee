@@ -49,6 +49,9 @@ class CloudClient:
     def __init__(self, service_url: str, api_key: str):
         self.service_url = service_url.rstrip("/")
         self.api_key = api_key
+        # Tenant /api/v1/users/me reported at connect time; read by telemetry
+        # while this client is the active connection.
+        self.tenant_id = ""
         self._session: aiohttp.ClientSession | None = None
 
     # Default for ordinary API calls: aiohttp's standard 5-minute total,
@@ -60,6 +63,9 @@ class CloudClient:
     # can legitimately exceed any fixed total; per-read inactivity stays
     # bounded instead. Applied per-request, only to archive uploads.
     UPLOAD_TIMEOUT = aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=600)
+    # The tenant lookup only feeds telemetry; a slow instance must not delay
+    # serve(), so it gives up quickly and the connection proceeds without it.
+    TENANT_LOOKUP_TIMEOUT = aiohttp.ClientTimeout(total=5)
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
@@ -116,11 +122,14 @@ class CloudClient:
         ``UserRead``. On a Cloud tenant instance its ``tenant_id`` is the
         control-plane ``tenants.id``; a self-hosted server reports its own
         local tenant. Both are recorded — analytics tells them apart by host.
-        Any failure returns "": this must never fail a connection.
+        Any failure, including a timeout after ``TENANT_LOOKUP_TIMEOUT``,
+        returns "": this must never fail or stall a connection.
         """
         try:
             session = await self._get_session()
-            async with session.get(f"{self.service_url}/api/v1/users/me") as resp:
+            async with session.get(
+                f"{self.service_url}/api/v1/users/me", timeout=self.TENANT_LOOKUP_TIMEOUT
+            ) as resp:
                 if resp.status != 200:
                     return ""
                 data = await resp.json()
