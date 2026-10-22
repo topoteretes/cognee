@@ -557,28 +557,30 @@ def _connected_host_label(service_url: str) -> str:
 
 
 def _get_connected_tenant() -> dict[str, str]:
-    """Return the tenant this install connected to with ``serve()``, if any.
+    """Return the tenant of this process's active ``serve()`` connection, if any.
 
-    ``serve(url=..., api_key=...)`` saves the ``tenant_id`` the instance's
-    ``/api/v1/users/me`` reports. On a Cognee Cloud instance that is the
-    control-plane ``tenants.id``, so analytics can join an install's
-    ``persistent_id`` to its cloud tenant (CLO-804); self-hosted servers report
-    their own local tenant, told apart by ``connected_host``. It is the tenant
-    active at connect time.
+    ``serve(url=..., api_key=...)`` keeps the ``tenant_id`` the instance's
+    ``/api/v1/users/me`` reports on the connected client. On a Cognee Cloud
+    instance that is the control-plane ``tenants.id``, so analytics can join an
+    install's ``persistent_id`` to its cloud tenant (CLO-804); self-hosted
+    servers report their own local tenant, told apart by ``connected_host``.
 
-    Empty when the install never connected. Never sends the API key, and a
-    self-hosted hostname is reduced to ``self_hosted`` / ``localhost``.
+    Read from memory, never from disk: events are tagged only while the
+    process is connected, not after ``disconnect()`` or in a process that never
+    called ``serve()``. Never sends the API key, and a self-hosted hostname is
+    reduced to ``self_hosted`` / ``localhost``.
     """
     try:
-        from cognee.api.v1.serve.credentials import load_credentials
+        from cognee.api.v1.serve.state import peek_remote_client
 
-        creds = load_credentials()
-        if not creds or not creds.tenant_id:
+        client = peek_remote_client()
+        tenant_id = getattr(client, "tenant_id", "") if client is not None else ""
+        if not tenant_id:
             return {}
-        # Parsed inside the guard: a hand-edited URL can raise.
+        # Parsed inside the guard: a malformed URL can raise.
         return {
-            "connected_tenant_id": str(creds.tenant_id),
-            "connected_host": _connected_host_label(creds.service_url),
+            "connected_tenant_id": str(tenant_id),
+            "connected_host": _connected_host_label(client.service_url),
         }
     except Exception:
         logger.debug("Ignoring exception in _get_connected_tenant", exc_info=True)
