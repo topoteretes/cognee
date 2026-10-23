@@ -189,7 +189,7 @@ def test_request_budget_also_caps_legacy_fallback(make_sender):
     sender = make_sender(legacy, limits=TelemetryLimits(requests_per_minute=3))
     with sender._condition:
         for n in range(20):
-            sender.enqueue({"n": n})
+            sender.enqueue({"event_name": "cognee.recall", "n": n})
     sender.close()
     assert len(bodies) == 3  # One probe, at most two singles, not 21 requests.
     assert sender.snapshot()["exported_events"] == 2
@@ -213,15 +213,15 @@ def test_rate_limits_and_refill_without_sleeping(make_sender):
     )
     with sender._condition:
         for n in range(5):
-            sender.enqueue({"n": n})
+            sender.enqueue({"event_name": "cognee.recall", "n": n})
     sender.close()
     assert sender.snapshot()["exported_events"] == 2
     assert sender.snapshot()["dropped_rate"] == 3
     # Reopening doesn't reset the rate budget. A minute of monotonic time refills it.
-    sender.enqueue({"n": 6})
+    sender.enqueue({"event_name": "cognee.recall", "n": 6})
     assert sender.snapshot()["dropped_rate"] == 4
     sender._events.updated -= 60
-    sender.enqueue({"n": 7})
+    sender.enqueue({"event_name": "cognee.recall", "n": 7})
     sender.close()
     assert sender.snapshot()["exported_events"] == 3
 
@@ -232,7 +232,7 @@ def test_wire_byte_budget_counts_retries(make_sender):
         lambda r: (calls.append(r.content), httpx.Response(503))[1],
         limits=TelemetryLimits(bytes_per_minute=100),
     )
-    sender.enqueue({"value": "x" * 40})
+    sender.enqueue({"event_name": "cognee.recall", "value": "x" * 40})
     wait_for(lambda: sender.snapshot()["dropped_rate"] == 1)
     assert len(calls) == 1  # The same payload cannot spend the budget four times.
     assert sender.snapshot()["request_bytes"] <= 100
@@ -334,23 +334,27 @@ def test_payload_preparation_failure_does_not_escape(cloud_sender, monkeypatch):
     assert sender.snapshot()["dropped_internal"] == 1
 
 
-def test_concurrent_preparation_is_dropped_without_waiting(cloud_sender):
+def test_excess_preparation_waits_only_for_a_bounded_time(cloud_sender):
     sender, _ = cloud_sender
-    sender._preparation.acquire()
+    for _ in range(telemetry_sender.PREPARATION_CONCURRENCY):
+        sender._preparation.acquire()
     try:
         started = time.monotonic()
         utils.send_telemetry("Pipeline Run Started")
-        assert time.monotonic() - started < 0.1
+        assert telemetry_sender.ADMISSION_WAIT_SECONDS <= time.monotonic() - started < 0.2
         assert sender.snapshot()["dropped_busy"] == 1
     finally:
-        sender._preparation.release()
+        for _ in range(telemetry_sender.PREPARATION_CONCURRENCY):
+            sender._preparation.release()
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("error", [ValueError("original"), asyncio.CancelledError()])
 async def test_export_failure_cannot_change_product_error_or_cancellation(cloud_sender, error):
     sender, _ = cloud_sender
-    sender._preparation.acquire()  # Force exporter rejection at the product boundary.
+    # Force exporter rejection at the product boundary.
+    for _ in range(telemetry_sender.PREPARATION_CONCURRENCY):
+        sender._preparation.acquire()
 
     @utils.telemetry_on_error("cognee.recall ERRORED")
     async def operation():
@@ -361,7 +365,8 @@ async def test_export_failure_cannot_change_product_error_or_cancellation(cloud_
             await operation()
         assert result.value is error
     finally:
-        sender._preparation.release()
+        for _ in range(telemetry_sender.PREPARATION_CONCURRENCY):
+            sender._preparation.release()
 
 
 def test_serialization_does_not_retain_buffers_without_cyclic_gc():
@@ -379,3 +384,210 @@ def test_serialization_does_not_retain_buffers_without_cyclic_gc():
         tracemalloc.stop()
         if was_enabled:
             gc.enable()
+
+
+_REAL_TRACKING_ID = utils._get_api_key_tracking_id
+
+
+def test_four_simultaneous_product_events_survive_cold_key_derivation(cloud_sender, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+
+    sender, payloads = cloud_sender
+    monkeypatch.setattr(utils, "_get_api_key_tracking_id", _REAL_TRACKING_ID)
+    monkeypatch.setenv("LLM_API_KEY", "synthetic-concurrent-test-key")
+    barrier = threading.Barrier(4)
+
+    def emit(index):
+        barrier.wait(timeout=2)
+        utils.send_telemetry("cognee.recall", additional_properties={"call_index": index})
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        list(pool.map(emit, range(4)))
+    sender.close()
+    assert sorted(p["properties"]["call_index"] for p in payloads) == list(range(4))
+    assert sender.snapshot()["dropped_busy"] == 0
+
+
+def test_sdk_task_burst_cannot_spend_run_outcome_budget(make_sender):
+    payloads = []
+    sender = make_sender(lambda r: (payloads.extend(json.loads(r.content)), httpx.Response(200))[1])
+    with sender._condition:
+        sender.enqueue({"event_name": "Pipeline Run Started", "pipeline_run_id": "run"})
+        for n in range(240):
+            sender.enqueue({"event_name": "extract_graph Task Completed", "n": n})
+        sender.enqueue({"event_name": "Pipeline Run Completed", "pipeline_run_id": "run"})
+    sender.close()
+    assert payloads[0]["event_name"] == "Pipeline Run Started"
+    assert payloads[-1]["event_name"] == "Pipeline Run Completed"
+    assert sender.snapshot()["exported_events"] <= 120
+    assert sender.snapshot()["dropped_rate"] > 0
+
+
+def test_cloud_allowlist_contains_only_wired_emitters():
+    import ast
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[3]
+    emitters = [path for path in root.rglob("*.py") if "tests" not in path.relative_to(root).parts]
+    nodes = [node for path in emitters for node in ast.walk(ast.parse(path.read_text()))]
+    constants = {}
+    for node in nodes:
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and isinstance(node.value.value, str):
+                    constants.setdefault(target.id, set()).add(node.value.value)
+    emitted = set()
+    for node in nodes:
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in ("send_telemetry", "telemetry_on_error")
+            and node.args
+        ):
+            continue
+        first = node.args[0]
+        if isinstance(first, ast.Constant) and isinstance(first.value, str):
+            emitted.add(first.value)
+        elif isinstance(first, ast.Name):
+            emitted.update(constants.get(first.id, ()))
+    assert not (CLOUD_EVENTS - emitted), f"Unwired cloud events: {CLOUD_EVENTS - emitted}"
+
+
+@pytest.mark.parametrize("budget", ["logical_bytes", "wire_bytes", "requests"])
+def test_details_cannot_spend_reserved_run_capacity(make_sender, budget, monkeypatch):
+    payloads = []
+    sender = make_sender(lambda r: (payloads.extend(json.loads(r.content)), httpx.Response(200))[1])
+    with sender._condition:
+        bucket, reserve = {
+            "logical_bytes": (sender._bytes, sender._byte_reserve),
+            "wire_bytes": (sender._wire_bytes, sender._byte_reserve),
+            "requests": (sender._requests, sender._request_reserve),
+        }[budget]
+        bucket.tokens = reserve
+        # Freeze refill: even a 10 ms thread start can refill one small event.
+        available = bucket.available
+        monkeypatch.setattr(
+            bucket, "available", lambda amount, now: available(amount, bucket.updated)
+        )
+        sender.enqueue({"event_name": "Pipeline Item Errored"})
+        sender.enqueue({"event_name": "Pipeline Run Started"})
+        sender.enqueue({"event_name": "Pipeline Run Completed"})
+    sender.close()
+    assert [p["event_name"] for p in payloads] == ["Pipeline Run Started", "Pipeline Run Completed"]
+    assert sender.snapshot()["dropped_rate"] == 1
+    assert sender.snapshot()["request_bytes"] <= sender.limits.bytes_per_minute
+
+
+def test_full_queue_evicts_newest_details_for_run_outcome(make_sender):
+    payloads = []
+    limits = TelemetryLimits(event_bytes=128, queue_bytes=160, batch_bytes=256)
+    sender = make_sender(
+        lambda r: (payloads.extend(json.loads(r.content)), httpx.Response(200))[1], limits=limits
+    )
+    with sender._condition:
+        sender.enqueue({"event_name": "Pipeline Run Started"})
+        sender.enqueue({"event_name": "task", "padding": "x" * 20, "n": 1})
+        sender.enqueue({"event_name": "task", "padding": "x" * 20, "n": 2})
+        sender.enqueue({"event_name": "Pipeline Run Completed"})
+    sender.close()
+    assert [p["event_name"] for p in payloads] == [
+        "Pipeline Run Started",
+        "task",
+        "Pipeline Run Completed",
+    ]
+    assert payloads[1]["n"] == 1
+    assert sender.snapshot()["dropped_queue"] == 1
+    assert sender.snapshot()["peak_queue_bytes"] <= limits.queue_bytes
+
+
+def test_run_only_overload_remains_bounded(make_sender):
+    limits = TelemetryLimits(event_bytes=128, queue_bytes=128, batch_bytes=256)
+    sender = make_sender(lambda _: httpx.Response(200), limits=limits)
+    with sender._condition:
+        for _ in range(10):
+            sender.enqueue({"event_name": "Pipeline Run Completed"})
+    sender.close()
+    assert sender.snapshot()["dropped_queue"] > 0
+    assert sender.snapshot()["peak_queue_bytes"] <= limits.queue_bytes
+
+
+def test_cloud_keeps_item_error_context_but_not_endpoint_census(cloud_sender):
+    sender, payloads = cloud_sender
+    utils.send_telemetry(
+        "Pipeline Item Errored",
+        additional_properties={
+            "pipeline_run_id": "run",
+            "loader": "TextLoader",
+            "extension": ".txt",
+        },
+    )
+    utils.send_telemetry("Cognify API Endpoint Invoked")
+    sender.close()
+    assert [p["event_name"] for p in payloads] == ["Pipeline Item Errored"]
+    assert payloads[0]["properties"]["loader"] == "TextLoader"
+    assert sender.snapshot()["sampled_events"] == 1
+
+
+def test_sanitizable_raw_url_can_exceed_wire_event_cap(cloud_sender):
+    sender, payloads = cloud_sender
+    raw_url = "https://synthetic.invalid/" + "x" * 32_000
+    utils.send_telemetry("cognee.recall", additional_properties={"url": raw_url})
+    sender.close()
+    assert len(payloads) == 1
+    assert len(payloads[0]["properties"]["url"]) < 100
+    assert raw_url not in str(payloads)
+    assert sender.snapshot()["rejected_size"] == 0
+
+
+@pytest.mark.parametrize("key,length", [("padding", 32_000), ("url", 100_000)])
+def test_raw_and_final_property_sizes_stay_bounded(cloud_sender, key, length):
+    sender, payloads = cloud_sender
+    utils.send_telemetry("cognee.recall", additional_properties={key: "x" * length})
+    sender.close()
+    assert payloads == []
+    assert sender.snapshot()["rejected_size"] == 1
+
+
+def test_tracking_id_cache_reuses_warm_value_and_respects_rotation(monkeypatch):
+    import hashlib
+
+    original = hashlib.pbkdf2_hmac
+    calls = []
+
+    def derive(*args, **kwargs):
+        calls.append(1)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(hashlib, "pbkdf2_hmac", derive)
+    monkeypatch.setenv("LLM_API_KEY", "synthetic-cache-test-key")
+    monkeypatch.setenv("TELEMETRY_API_KEY_TRACKING_SALT", "first-salt")
+    utils._derive_api_key_tracking_id.cache_clear()
+    try:
+        first = _REAL_TRACKING_ID()
+        assert _REAL_TRACKING_ID() == first
+        assert len(calls) == 1
+        monkeypatch.setenv("LLM_API_KEY", "synthetic-rotated-key")
+        second = _REAL_TRACKING_ID()
+        assert second != first
+        monkeypatch.setenv("TELEMETRY_API_KEY_TRACKING_SALT", "second-salt")
+        assert _REAL_TRACKING_ID() != second
+        assert len(calls) == 3
+        assert utils._derive_api_key_tracking_id.cache_info().currsize == 1
+    finally:
+        utils._derive_api_key_tracking_id.cache_clear()
+
+
+def test_sender_instances_do_not_accumulate_process_hooks(monkeypatch):
+    import weakref
+
+    monkeypatch.setattr(telemetry_sender.atexit, "register", lambda *_: pytest.fail("extra hook"))
+    monkeypatch.setattr(
+        telemetry_sender.os, "register_at_fork", lambda **_: pytest.fail("extra hook")
+    )
+    references = []
+    for _ in range(10):
+        sender = TelemetrySender("http://proxy.test", 0.1)
+        references.append(weakref.ref(sender))
+    del sender
+    gc.collect()
+    assert all(reference() is None for reference in references)

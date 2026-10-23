@@ -8,8 +8,10 @@ import atexit
 import os
 import threading
 import time
+import weakref
 from collections import deque
 from contextlib import contextmanager
+from typing import NamedTuple
 
 import httpx
 from tenacity import (
@@ -24,10 +26,12 @@ from tenacity import (
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.telemetry_limits import (
     CLOUD_EVENTS,
+    MILESTONE_EVENTS,
     PayloadTooLarge,
     TelemetryLimits,
     TokenBucket,
     bounded_json,
+    reserve,
 )
 
 logger = get_logger()
@@ -35,6 +39,8 @@ BATCH_SIZE = 100
 FLUSH_INTERVAL_SECONDS = 2.0
 QUEUE_CAP = 1_000
 RETRY_ATTEMPTS = 4
+PREPARATION_CONCURRENCY = 4
+ADMISSION_WAIT_SECONDS = 0.025
 _COUNTERS = (
     "accepted_events",
     "exported_events",
@@ -56,8 +62,13 @@ _COUNTERS = (
 )
 
 
+class _QueuedEvent(NamedTuple):
+    body: bytes
+    milestone: bool
+
+
 class TelemetrySender:
-    """Nonblocking admission, serialized byte queue, one network worker, bounded retries."""
+    """Bounded admission, serialized byte queue, one network worker, bounded retries."""
 
     def __init__(
         self,
@@ -72,9 +83,7 @@ class TelemetrySender:
         self._transport = transport
         self.limits = limits or TelemetryLimits.from_env()
         self._reset()
-        if hasattr(os, "register_at_fork"):
-            os.register_at_fork(after_in_child=self._reset)
-        atexit.register(self.close)
+        _senders.add(self)
 
     def count(self, category: str, amount: int = 1) -> None:
         # Fixed categories and saturating integers: no payloads or cardinality growth.
@@ -101,7 +110,7 @@ class TelemetrySender:
             self.count("sampled_events")
             yield False
             return
-        if not self._preparation.acquire(blocking=False):
+        if not self._preparation.acquire(timeout=ADMISSION_WAIT_SECONDS):
             self.count("dropped_busy")
             yield False
             return
@@ -111,7 +120,9 @@ class TelemetrySender:
                 yield False
                 return
             try:
-                bounded_json(properties, self.limits.event_bytes)
+                # Permit bounded raw values that sanitization shrinks to fingerprints.
+                # The complete encoded event still has the smaller wire-size cap.
+                bounded_json(properties, 4 * self.limits.event_bytes)
             except PayloadTooLarge:
                 self.count("rejected_size")
                 yield False
@@ -125,17 +136,21 @@ class TelemetrySender:
             self._preparation.release()
 
     def enqueue(self, payload: dict) -> None:
-        """Snapshot a payload; drop newest on overload, without waiting for queue space."""
-        if not self._admission.acquire(blocking=False):
+        """Snapshot a payload; reserve bounded capacity for run milestones."""
+        if not self._admission.acquire(timeout=ADMISSION_WAIT_SECONDS):
             self.count("dropped_busy")
             return
         try:
+            name = payload.get("event_name") if type(payload) is dict else None
+            milestone = type(name) is str and len(name) <= 256 and name in MILESTONE_EVENTS
+            event_reserve = 0 if milestone else self._event_reserve
+            byte_reserve = 0 if milestone else self._byte_reserve
             if self._closing.is_set():
                 self.count("dropped_shutdown")
                 return
             # Avoid serialization work once the event budget is exhausted.
             with self._condition:
-                if not self._events.available(1, time.monotonic()):
+                if not self._events.available(1 + event_reserve, time.monotonic()):
                     self.count("dropped_rate")
                     return
             try:
@@ -154,18 +169,20 @@ class TelemetrySender:
                     self.count("dropped_shutdown")
                     return
                 now = time.monotonic()
-                if not (self._events.available(1, now) and self._bytes.available(size, now)):
+                if not (
+                    self._events.available(1 + event_reserve, now)
+                    and self._bytes.available(size + byte_reserve, now)
+                ):
                     self.count("dropped_rate")
                     return
-                if (
-                    len(self._queue) >= QUEUE_CAP
-                    or self._queue_bytes + size > self.limits.queue_bytes
-                ):
+                if milestone:
+                    self._make_room_for_milestone(size)
+                if self._queue_full(size):
                     self.count("dropped_queue")
                     return
                 self._events.take(1)
                 self._bytes.take(size)
-                self._queue.append(encoded)
+                self._queue.append(_QueuedEvent(encoded, milestone))
                 self._queue_bytes += size
                 self._peak_queue_bytes = max(self._peak_queue_bytes, self._queue_bytes)
                 self.count("accepted_events")
@@ -200,11 +217,11 @@ class TelemetrySender:
 
     def _reset(self) -> None:
         self._condition = threading.Condition()
-        self._preparation = threading.Lock()
-        self._admission = threading.Lock()
+        self._preparation = threading.BoundedSemaphore(PREPARATION_CONCURRENCY)
+        self._admission = threading.BoundedSemaphore(PREPARATION_CONCURRENCY)
         self._stats_lock = threading.Lock()
         self._counters = dict.fromkeys(_COUNTERS, 0)
-        self._queue: deque[bytes] = deque()
+        self._queue: deque[_QueuedEvent] = deque()
         self._queue_bytes = self._inflight_bytes = 0
         self._peak_queue_bytes = self._peak_inflight_bytes = 0
         self._thread: threading.Thread | None = None
@@ -217,6 +234,31 @@ class TelemetrySender:
         self._bytes = TokenBucket(self.limits.bytes_per_minute, now)
         self._wire_bytes = TokenBucket(self.limits.bytes_per_minute, now)
         self._requests = TokenBucket(self.limits.requests_per_minute, now)
+        self._event_reserve = reserve(self.limits.events_per_minute)
+        self._byte_reserve = reserve(
+            self.limits.bytes_per_minute, 2 * (self.limits.event_bytes + 2)
+        )
+        self._request_reserve = reserve(self.limits.requests_per_minute)
+        self._last_failure: int | str | None = None
+
+    def _queue_full(self, size: int) -> bool:
+        return len(self._queue) >= QUEUE_CAP or self._queue_bytes + size > self.limits.queue_bytes
+
+    def _make_room_for_milestone(self, size: int) -> None:
+        # One bounded pass, newest detail first; preserve FIFO among survivors.
+        if not self._queue_full(size):
+            return
+        kept = deque()
+        count = len(self._queue)
+        for event in reversed(self._queue):
+            full = count >= QUEUE_CAP or self._queue_bytes + size > self.limits.queue_bytes
+            if full and not event.milestone:
+                self._queue_bytes -= len(event.body)
+                count -= 1
+                self.count("dropped_queue")
+            else:
+                kept.appendleft(event)
+        self._queue = kept
 
     def _ensure_thread(self) -> None:
         if self._thread is None:
@@ -249,13 +291,14 @@ class TelemetrySender:
                         )
                         # Deliberately never log event data, responses, URLs or exception text.
                         self.count("dropped_internal", len(batch))
+                        self._last_failure = "internal"
                         answered = False
                     finally:
                         with self._condition:
                             self._inflight_bytes = 0
                     # Release the previous batch before taking another one.
                     del batch
-                    if not answered and self._closing.is_set():
+                    if not answered and self._closing.is_set() and self._last_failure != "budget":
                         with self._condition:
                             self._drop_queue("dropped_shutdown")
         except Exception:
@@ -272,7 +315,7 @@ class TelemetrySender:
                 self._closing.clear()
                 self._deadline = float("inf")
 
-    def _next_batch(self) -> list[bytes] | None:
+    def _next_batch(self) -> list[_QueuedEvent] | None:
         with self._condition:
             while not self._queue and not self._closing.is_set():
                 self._condition.wait()
@@ -293,7 +336,12 @@ class TelemetrySender:
             batch = []
             wire_size = 2
             while self._queue and len(batch) < BATCH_SIZE:
-                size = len(self._queue[0])
+                event = self._queue[0]
+                # Homogeneous batches prevent detail events spending the reserved
+                # wire/request budget by sharing a batch with a run milestone.
+                if batch and event.milestone != batch[0].milestone:
+                    break
+                size = len(event.body)
                 next_size = wire_size + size + bool(batch)
                 if next_size > self.limits.batch_bytes:
                     break
@@ -301,49 +349,45 @@ class TelemetrySender:
                 self._queue_bytes -= size
                 wire_size = next_size
             # Original encoded events + the contiguous HTTP body (including framing).
-            self._inflight_bytes = sum(map(len, batch)) + wire_size
+            self._inflight_bytes = sum(len(event.body) for event in batch) + wire_size
             self._peak_inflight_bytes = max(self._peak_inflight_bytes, self._inflight_bytes)
             return batch
 
-    def _send_batch(self, client: httpx.Client, batch: list[bytes]) -> bool:
+    def _send_batch(self, client: httpx.Client, batch: list[_QueuedEvent]) -> bool:
         if self._batches_supported:
             parts = [b"["]
             for index, event in enumerate(batch):
                 if index:
                     parts.append(b",")
-                parts.append(event)
+                parts.append(event.body)
             parts.append(b"]")
             body = b"".join(parts)
-            status = self._post(client, body)
+            status = self._post(client, body, batch[0].milestone)
             del body, parts
             if status != "legacy":
                 return self._record_result(status, batch)
             self._batches_supported = False
             self.count("legacy_fallbacks")
         for index, payload in enumerate(batch):
-            status = self._post(client, payload)
+            status = self._post(client, payload.body, payload.milestone)
             if not self._record_result(status, [payload]):
                 self.count(
-                    "dropped_shutdown" if self._closing.is_set() else "dropped_http",
+                    _drop_category(status),
                     len(batch) - index - 1,
                 )
                 return False
         return True
 
-    def _record_result(self, status: int | str | None, batch: list[bytes]) -> bool:
+    def _record_result(self, status: int | str | None, batch: list[_QueuedEvent]) -> bool:
         if isinstance(status, int) and 200 <= status < 300:
             self.count("exported_events", len(batch))
-            self.count("exported_bytes", sum(map(len, batch)))
+            self.count("exported_bytes", sum(len(event.body) for event in batch))
             return True
-        category = {
-            None: "dropped_network",
-            "budget": "dropped_rate",
-            "shutdown": "dropped_shutdown",
-        }.get(status, "dropped_http")
-        self.count(category, len(batch))
+        self._last_failure = status
+        self.count(_drop_category(status), len(batch))
         return False
 
-    def _post(self, client: httpx.Client, body: bytes) -> int | str | None:
+    def _post(self, client: httpx.Client, body: bytes, milestone: bool) -> int | str | None:
         retrying = Retrying(
             stop=stop_after_attempt(RETRY_ATTEMPTS) | stop_when_event_set(self._closing),
             wait=wait_exponential_jitter(initial=1, max=4),
@@ -353,19 +397,22 @@ class TelemetrySender:
             ),
             retry_error_callback=_last_status,
         )
-        return retrying(self._post_once, client, body)
+        return retrying(self._post_once, client, body, milestone)
 
     def _sleep(self, seconds: float) -> None:
         self.count("retries")
         self._closing.wait(seconds)
 
-    def _post_once(self, client: httpx.Client, body: bytes) -> int | str | None:
+    def _post_once(self, client: httpx.Client, body: bytes, milestone: bool) -> int | str | None:
         now = time.monotonic()
         with self._condition:
             if now >= self._deadline:
                 return "shutdown"
             if not (
-                self._requests.available(1, now) and self._wire_bytes.available(len(body), now)
+                self._requests.available(1 + (0 if milestone else self._request_reserve), now)
+                and self._wire_bytes.available(
+                    len(body) + (0 if milestone else self._byte_reserve), now
+                )
             ):
                 return "budget"
             self._requests.take(1)
@@ -393,3 +440,30 @@ class TelemetrySender:
 
 def _last_status(state: RetryCallState) -> int | str | None:
     return state.outcome.result() if state.outcome else None
+
+
+def _drop_category(status: int | str | None) -> str:
+    return {
+        None: "dropped_network",
+        "budget": "dropped_rate",
+        "shutdown": "dropped_shutdown",
+    }.get(status, "dropped_http")
+
+
+# One pair of process hooks, not one pair retaining every constructed sender.
+_senders: weakref.WeakSet[TelemetrySender] = weakref.WeakSet()
+
+
+def _close_senders() -> None:
+    for sender in list(_senders):
+        sender.close()
+
+
+def _reset_senders_after_fork() -> None:
+    for sender in list(_senders):
+        sender._reset()
+
+
+atexit.register(_close_senders)
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_reset_senders_after_fork)

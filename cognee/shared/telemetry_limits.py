@@ -23,26 +23,22 @@ CLOUD_EVENTS = frozenset(
         "cognee.forget",
         "cognee.push",
         "cognee.export",
-    }
-    | {
-        f"cognee.{operation} EXECUTION {outcome}"
-        for operation in (
-            "add",
-            "cognify",
-            "memify",
-            "search",
-            "remember",
-            "recall",
-            "improve",
-            "forget",
-            "delete",
-            "update",
-            "push",
-            "export",
-        )
-        for outcome in ("STARTED", "COMPLETED", "ERRORED")
+        "cognee.search EXECUTION STARTED",
+        "cognee.search EXECUTION COMPLETED",
+        "cognee.search EXECUTION ERRORED",
+        "Pipeline Item Errored",
     }
 )
+
+
+# Item failures retain SDK-775's loader/extension diagnostics but cannot spend
+# the milestone reserve: a bad-file storm must not crowd out run outcomes.
+MILESTONE_EVENTS = CLOUD_EVENTS - {"Pipeline Item Errored"}
+
+
+def reserve(capacity: int, minimum: int = 2) -> int:
+    """Keep 10% (at least a start/outcome pair) exclusively for milestones."""
+    return min(capacity, max(minimum, (capacity + 9) // 10))
 
 
 _MAX_LIMITS = {

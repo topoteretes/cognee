@@ -13,7 +13,7 @@ import sys
 import threading
 import time
 import tracemalloc
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 
@@ -34,6 +34,7 @@ def measure(args):
         ("default-burst", 512, False),
         ("large-payload", 15_000, False),
         ("saturated-outage", 15_000, True),
+        ("concurrent-preparation", 32_000, False),
     ):
         limits = TelemetryLimits()
         if unavailable:
@@ -48,6 +49,19 @@ def measure(args):
         sender = TelemetrySender(
             "http://synthetic.invalid", 0.2, httpx.MockTransport(proxy), limits=limits
         )
+        concurrent = scenario == "concurrent-preparation"
+        if concurrent:
+            from cognee.shared import utils
+
+            # Synthetic identity only; never read or transmit the host's credentials.
+            os.environ.pop("TELEMETRY_DISABLED", None)
+            os.environ["ENV"] = "prod"
+            os.environ["TELEMETRY_ORIGIN"] = "sdk"
+            os.environ["LLM_API_KEY"] = "synthetic-benchmark-key"
+            utils._telemetry_sender = sender
+            utils.get_anonymous_id = lambda: "synthetic-project"
+            utils.get_persistent_id = lambda: "synthetic-machine"
+            utils._derive_api_key_tracking_id.cache_clear()
         process = psutil.Process()
         baseline_rss = process.memory_info().rss
         peak_rss = baseline_rss
@@ -65,17 +79,36 @@ def measure(args):
             "event_name": "Pipeline Run Completed",
             "properties": {"count": 1, "padding": "x" * payload_size},
         }
-        latencies = []
-        attempted = 0
-        started = time.monotonic()
-        while time.monotonic() - started < seconds:
-            before = time.monotonic()
-            sender.enqueue(payload)
-            elapsed = time.monotonic() - before
-            # Fixed-size timing sample; measurement cannot itself grow with event volume.
-            if len(latencies) < 1024:
-                latencies.append(elapsed)
-            attempted += 1
+        if concurrent:
+            # Raw properties exceed the wire cap but shrink before final encoding.
+            payload["properties"] = {"url": "https://synthetic.invalid/" + "x" * payload_size}
+        thread_count = 4 if concurrent else 1
+        barrier = threading.Barrier(thread_count)
+
+        def emit(barrier=barrier, concurrent=concurrent, payload=payload, sender=sender):
+            latencies = []
+            attempted = 0
+            barrier.wait()
+            started = time.monotonic()
+            while time.monotonic() - started < seconds:
+                before = time.monotonic()
+                if concurrent:
+                    utils.send_telemetry(
+                        "cognee.recall", additional_properties=payload["properties"]
+                    )
+                else:
+                    sender.enqueue(payload)
+                elapsed = time.monotonic() - before
+                # Fixed-size sample per thread; never grows with sustained volume.
+                if len(latencies) < 1024:
+                    latencies.append(elapsed)
+                attempted += 1
+            return attempted, latencies
+
+        with ThreadPoolExecutor(max_workers=thread_count) as producers:
+            measurements = list(producers.map(lambda _: emit(), range(thread_count)))
+        attempted = sum(count for count, _ in measurements)
+        latencies = [latency for _, sample in measurements for latency in sample]
         close_started = time.monotonic()
         sender.close()
         close_seconds = time.monotonic() - close_started
@@ -91,6 +124,7 @@ def measure(args):
             {
                 "worker": worker_id,
                 "scenario": scenario,
+                "producer_threads": thread_count,
                 "duration_seconds": seconds,
                 "attempted": attempted,
                 "http_requests": requests,

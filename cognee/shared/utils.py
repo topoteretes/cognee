@@ -9,6 +9,7 @@ import socketserver
 import ssl
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from functools import lru_cache
 from threading import Thread
 from typing import Any
 from uuid import NAMESPACE_OID, UUID, uuid4, uuid5
@@ -386,7 +387,7 @@ async def flush_telemetry() -> None:
     """Send queued telemetry and stop the sender thread, waiting at most one request timeout.
 
     Called from the FastAPI lifespan shutdown; scripts are covered by the
-    sender's own ``atexit`` hook. Telemetry sent afterwards starts a new thread.
+    process-wide telemetry ``atexit`` hook. Telemetry sent afterwards starts a new thread.
     """
     # close() blocks; keep the event loop free while it waits.
     await asyncio.to_thread(_telemetry_sender.close)
@@ -402,8 +403,6 @@ def _get_api_key_tracking_id() -> str:
     TELEMETRY_API_KEY_TRACKING_SALT can be set by deployments that want their own
     namespace. A default public namespace keeps tracking stable for local installs.
     """
-    import hashlib
-
     key = os.getenv("LLM_API_KEY", "")
     if not key:
         return ""
@@ -414,6 +413,18 @@ def _get_api_key_tracking_id() -> str:
         if configured_salt
         else _DEFAULT_TELEMETRY_API_KEY_TRACKING_SALT
     )
+    return _derive_api_key_tracking_id(key, salt)
+
+
+@lru_cache(maxsize=1)
+def _derive_api_key_tracking_id(key: str, salt: bytes) -> str:
+    """Bounded last-key cache; rotation of either key or salt invalidates the lookup.
+
+    Cold concurrent callers may compute the same value; no global derivation
+    lock serializes the product threads. Only the most recent pair is retained.
+    """
+    import hashlib
+
     derived = hashlib.pbkdf2_hmac(
         "sha256",
         key.encode("utf-8"),

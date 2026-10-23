@@ -8,13 +8,13 @@ payload, and the whole run costs a handful of requests instead of one per event.
 from __future__ import annotations
 
 import json
-import math
 
 import httpx
 import pytest
 
 import cognee
 from cognee.shared import telemetry_sender, utils
+from cognee.shared.telemetry_limits import MILESTONE_EVENTS, TelemetryLimits
 from cognee.shared.telemetry_sender import TelemetrySender
 
 DATASET = "journey_telemetry"
@@ -39,7 +39,14 @@ async def test_remember_telemetry_arrives_intact_in_few_requests(
     assert len(queued) > 10, f"expected dozens of events, got {len(queued)}"
     posted = [event for body in bodies for event in body]
     assert posted == queued
-    assert len(bodies) == math.ceil(len(queued) / telemetry_sender.BATCH_SIZE)
+    # Milestones and detail events use separate batches to protect the reserve.
+    assert len(bodies) < len(queued)
+    for body in bodies:
+        assert len(body) <= telemetry_sender.BATCH_SIZE
+        assert (
+            len(json.dumps(body, separators=(",", ":")).encode()) <= TelemetryLimits().batch_bytes
+        )
+        assert len({event["event_name"] in MILESTONE_EVENTS for event in body}) == 1
 
 
 def _route_telemetry_to_fake_proxy(monkeypatch) -> tuple[list, list[dict]]:
@@ -48,7 +55,7 @@ def _route_telemetry_to_fake_proxy(monkeypatch) -> tuple[list, list[dict]]:
     monkeypatch.delenv("TELEMETRY_DISABLED", raising=False)
     monkeypatch.setattr(utils, "get_anonymous_id", lambda: "anonymous-test-id")
     monkeypatch.setattr(utils, "get_persistent_id", lambda: "persistent-test-id")
-    # Only full batches and the flush on close send, so the request count is exact.
+    # Buffer this small journey until close; admission limits still apply.
     monkeypatch.setattr(telemetry_sender, "FLUSH_INTERVAL_SECONDS", 3600)
 
     bodies: list = []
