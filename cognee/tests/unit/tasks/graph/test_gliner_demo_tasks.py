@@ -614,7 +614,7 @@ async def test_task_never_calls_llm_extraction_helpers():
     summarize_text_module = importlib.import_module("cognee.tasks.summarization.summarize_text")
     with (
         patch.object(extract_graph_module, "extract_content_graph") as ecg,
-        patch.object(summarize_text_module, "extract_summary") as es,
+        patch.object(summarize_text_module, "extract_summary_with_provenance") as es,
     ):
         await _run_task(extractor, chunks, schema, GlinerRunStats(), AsyncMock())
     ecg.assert_not_called()
@@ -1288,3 +1288,25 @@ async def test_recall_explicit_query_type_wins_without_a_usable_llm(monkeypatch)
         user=user,
     )
     assert captured["query_type"] == SearchType.SUMMARIES
+
+
+@pytest.mark.asyncio
+async def test_task_records_the_local_model_it_ran_on_the_capture_manifest(fake_capture_sink):
+    """Eval capture (SDK-529): the GLiNER path makes no LLM call, so its manifest
+    must name the extractor and the local model it ran — the counterpart of the
+    LLM path's extraction.model — or a GLiNER run and an LLM run on the same
+    configuration would be indistinguishable offline."""
+    from uuid import uuid4
+
+    from cognee.modules.observability import capture
+
+    extractor = FakeExtractor()
+    chunks = [_chunk()]
+    schema = GlinerSchema({"person": ""}, source="caller")
+    with capture.run_scope(uuid4(), kind="pipeline", graph_extractor="gliner_demo") as scope:
+        await _run_task(extractor, chunks, schema, GlinerRunStats(), AsyncMock())
+
+    assert scope.fields["extraction.extractor"] == "gliner_demo"
+    assert scope.fields["extraction.model"] == _options().model_name
+    assert scope.fields["extraction.threshold"] == _options().threshold
+    assert scope.setup["graph_extractor"] == "gliner_demo"

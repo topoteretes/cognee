@@ -60,6 +60,56 @@ def _operation_origin_starts_as_the_sdk():
         yield
 
 
+# How long a test's leftover engine-close tasks get to finish before its loop
+# closes. Closes on a loop finish in milliseconds; the bound only matters when
+# one is wedged, and then the test's own timeout is the real limit.
+PENDING_CLOSE_DRAIN_SECONDS = 30.0
+
+
+@pytest.fixture(autouse=True)
+def _finish_engine_closes_before_the_test_loop_closes(request):
+    """Run an asyncio test's leftover engine-close tasks before its loop closes.
+
+    pytest-asyncio 0.21 closes a test's event loop without cancelling the tasks
+    still on it. An engine close that a test starts as its last act — a
+    ``cache_clear()`` or ``evict()`` in a teardown, the API lifespan's shutdown —
+    is scheduled as a task on that loop (``GRAPH_DATABASE_SUBPROCESS_ENABLED=false``,
+    as CI runs) and never runs. The engine cache's pending-close registry then
+    holds a future nothing will ever resolve, and the next test that creates an
+    engine for the same key waits ``PENDING_CLOSE_WAIT_SECONDS`` on it — 300 s,
+    the suite's per-test timeout — so pytest-timeout kills the shard at whatever
+    test happens to come first. Which test that is depends on how pytest-split
+    balanced the shards, which is why it surfaces as a random hang whenever
+    tests are added.
+
+    Driving those tasks to completion here, while the loop is still open, keeps
+    every asyncio test hermetic in this respect. Sync tests are untouched: the
+    loop fixture is requested only for tests marked ``asyncio``.
+    """
+    loop = None
+    if request.node.get_closest_marker("asyncio") is not None:
+        loop = request.getfixturevalue("event_loop")
+    yield
+    if loop is None or loop.is_closed() or loop.is_running():
+        return
+    try:
+        from cognee.infrastructure.databases.utils.closing_lru_cache import (
+            _PENDING_CLOSE_TASKS,
+        )
+    except Exception:
+        logger.debug("Engine cache unavailable; nothing to finish", exc_info=True)
+        return
+    leftovers = [
+        task for task in list(_PENDING_CLOSE_TASKS) if not task.done() and task.get_loop() is loop
+    ]
+    if not leftovers:
+        return
+    try:
+        loop.run_until_complete(asyncio.wait(leftovers, timeout=PENDING_CLOSE_DRAIN_SECONDS))
+    except Exception:
+        logger.debug("Ignoring exception while finishing engine closes", exc_info=True)
+
+
 @pytest.fixture(autouse=True)
 def _keyless_gates_see_a_usable_llm():
     """Unit tests mock the LLM call itself; the keyless gates must not skip it.

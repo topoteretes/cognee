@@ -1,6 +1,9 @@
 from cognee.base_config import get_base_config
 from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+from cognee.modules.retrieval.utils.brute_force_triplet_search import (
+    DEFAULT_TRIPLET_DISTANCE_PENALTY,
+)
 from cognee.modules.retrieval.utils.completion import summarize_text
 
 
@@ -27,7 +30,7 @@ class GraphSummaryCompletionRetriever(GraphCompletionRetriever):
         node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
         wide_search_top_k: int | None = 100,
-        triplet_distance_penalty: float | None = 6.5,
+        triplet_distance_penalty: float | None = DEFAULT_TRIPLET_DISTANCE_PENALTY,
         feedback_influence: float = get_base_config().default_feedback_influence,
         session_id: str | None = None,
         include_references: bool = False,

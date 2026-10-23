@@ -12,7 +12,10 @@ from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
-from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
+from cognee.modules.retrieval.utils.brute_force_triplet_search import (
+    DEFAULT_TRIPLET_DISTANCE_PENALTY,
+    brute_force_triplet_search,
+)
 from cognee.modules.retrieval.utils.completion import (
     SessionPrompt,
     generate_completion,
@@ -82,7 +85,7 @@ class GraphCompletionRetriever(BaseRetriever):
         node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
         wide_search_top_k: int | None = 100,
-        triplet_distance_penalty: float | None = 6.5,
+        triplet_distance_penalty: float | None = DEFAULT_TRIPLET_DISTANCE_PENALTY,
         feedback_influence: float = get_base_config().default_feedback_influence,
         session_id: str | None = None,
         response_model: type = str,
@@ -102,7 +105,9 @@ class GraphCompletionRetriever(BaseRetriever):
         self.node_name = node_name
         self.node_name_filter_operator = node_name_filter_operator
         self.triplet_distance_penalty = (
-            6.5 if triplet_distance_penalty is None else triplet_distance_penalty
+            DEFAULT_TRIPLET_DISTANCE_PENALTY
+            if triplet_distance_penalty is None
+            else triplet_distance_penalty
         )
         self.feedback_influence = feedback_influence
         # session_id (Optional[str]): Identifier for managing conversation history.

@@ -21,7 +21,7 @@ from typing import Literal
 from cognee.infrastructure.llm.utils import resolve_chunk_size
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.chunking.TextChunker import TextChunker
-from cognee.modules.cognify.config import get_cognify_config
+from cognee.modules.cognify.config import GLINER_DEMO_EXTRACTOR, get_cognify_config
 from cognee.modules.data.processing.document_types.AudioDocument import AudioDocument
 from cognee.modules.data.processing.document_types.Document import Document
 from cognee.modules.data.processing.document_types.ImageDocument import ImageDocument
@@ -170,6 +170,17 @@ async def extract_graph_and_summarize_with_gliner(
     schema = data_chunks[0].is_part_of._gliner_schema
     if schema is None:
         raise RuntimeError("GLiNER schema was not prepared for this document")
+
+    # Eval capture (SDK-529): the model this stage actually ran — the local GLiNER
+    # demo model, no LLM — on the run manifest, where the LLM path records
+    # extraction.model. Lazy import: ``import cognee`` must not load the capture
+    # package; note() is a no-op without a run scope.
+    from cognee.modules.observability import capture as eval_capture
+
+    if eval_capture.is_active():
+        eval_capture.note("extraction.extractor", GLINER_DEMO_EXTRACTOR)
+        eval_capture.note("extraction.model", options.model_name)
+        eval_capture.note("extraction.threshold", options.threshold)
 
     texts = [chunk.text for chunk in data_chunks]
     if schema.is_empty:
