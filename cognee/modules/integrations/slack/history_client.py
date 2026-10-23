@@ -7,6 +7,10 @@ from typing import Any
 import aiohttp
 
 from cognee.modules.integrations.slack.history_models import TIMESTAMP, SlackHistoryError
+from cognee.modules.integrations.sync_progress import (
+    get_current_sync_progress,
+    report_sync_progress,
+)
 
 
 class SlackAPIError(SlackHistoryError):
@@ -57,6 +61,11 @@ class SlackHistoryClient:
                 await asyncio.sleep(2**attempt)
                 continue
             if status == 429 or payload.get("error") == "ratelimited" or status >= 500:
+                reason = (
+                    "rate_limited"
+                    if status == 429 or payload.get("error") == "ratelimited"
+                    else "provider_error"
+                )
                 if attempt == 3:
                     raise SlackHistoryError(
                         "Slack is temporarily rate limited or unavailable. Retry later."
@@ -68,7 +77,14 @@ class SlackHistoryClient:
                 # Never retry earlier than Retry-After; excessive waits fail explicitly.
                 if delay > 300:
                     raise SlackHistoryError(f"Slack requested a {delay}s wait. Retry later.")
-                await asyncio.sleep(delay)
+                reporter = get_current_sync_progress()
+                previous = reporter.snapshot() if reporter is not None else None
+                await report_sync_progress(state="waiting", reason=reason)
+                try:
+                    await asyncio.sleep(delay)
+                finally:
+                    if previous is not None:
+                        await report_sync_progress(state=previous.state, reason=previous.reason)
                 continue
             if status != 200 or not payload.get("ok"):
                 code = payload.get("error", "request_failed")

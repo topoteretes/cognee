@@ -1,5 +1,6 @@
 """Slack selection and native-ingestion boundaries; no live Slack/LLM calls."""
 
+import asyncio
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -86,8 +87,22 @@ def test_window_resolves_days_against_one_instant():
 
 @pytest.fixture
 def harness(monkeypatch):
+    from cognee.modules.integrations.sync_progress import SyncProgressReporter
+
+    observations = []
+
+    original_report = SyncProgressReporter.report
+
+    async def capture(reporter, **kwargs):
+        await original_report(reporter, **kwargs)
+        observations.append(reporter.snapshot())
+
+    monkeypatch.setattr(SyncProgressReporter, "report", capture)
+    monkeypatch.setattr(SyncProgressReporter, "_publish", AsyncMock())
     user = SimpleNamespace(id=uuid4())
     credential = SimpleNamespace(
+        provider="slack",
+        workspace_id=None,
         provider_account_id="T1",
         id=uuid4(),
         user_id=user.id,
@@ -152,6 +167,7 @@ def harness(monkeypatch):
     monkeypatch.setattr(history, "cognify", cognify)
     return SimpleNamespace(
         user=user,
+        observations=observations,
         credential=credential,
         rows=rows,
         client=client,
@@ -360,3 +376,51 @@ async def test_cognee_bot_echoes_are_excluded(harness):
     result = await history.import_slack_history("T1", request(), user=harness.user)
     assert result.messages == 1
     assert "Cognee answer" not in harness.rows[("C1", RECENT)].content
+
+
+@pytest.mark.asyncio
+async def test_history_reports_fetch_processing_and_indexing_separately(harness):
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def indexing(**kwargs):
+        entered.set()
+        await release.wait()
+
+    harness.cognify.side_effect = indexing
+    task = asyncio.create_task(history.import_slack_history("T1", request(), user=harness.user))
+    await entered.wait()
+    progress = harness.observations[-1]
+    assert progress.state == "running"
+    assert progress.phase == "indexing"
+    assert progress.total is None
+    assert progress.completed is None
+    assert any(
+        p.phase == "downloading" and p.completed == 1 and p.total is None
+        for p in harness.observations
+    )
+    assert any(
+        p.phase == "processing" and p.completed == p.total == 1 for p in harness.observations
+    )
+    release.set()
+    await task
+    final = harness.observations[-1]
+    assert final.state == "succeeded"
+    assert final.counts["added"] == 1
+
+
+@pytest.mark.asyncio
+async def test_history_index_failure_never_becomes_success(harness):
+    harness.cognify.side_effect = ValueError("secret")
+    with pytest.raises(ValueError, match="secret"):
+        await history.import_slack_history("T1", request(), user=harness.user)
+    assert harness.observations[-1].state == "failed"
+    assert "secret" not in harness.observations[-1].model_dump_json()
+
+
+@pytest.mark.asyncio
+async def test_history_cancellation_survives_progress_tracking(harness):
+    harness.client.history.side_effect = asyncio.CancelledError
+    with pytest.raises(asyncio.CancelledError):
+        await history.import_slack_history("T1", request(), user=harness.user)
+    assert harness.observations[-1].state == "cancelled"
