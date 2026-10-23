@@ -337,26 +337,23 @@ def test_time_scoped_question_routes_to_temporal(retry_client):
     assert retry_client.logged == ["TEMPORAL"]
 
 
-def test_no_llm_sends_a_time_scoped_question_to_chunks(retry_client, monkeypatch):
+def test_no_llm_sends_a_time_scoped_question_to_hybrid_as_only_context(retry_client, monkeypatch):
     """TEMPORAL's interval extraction is an LLM call; keyless never gets there."""
-    monkeypatch.setattr(
-        importlib.import_module("cognee.api.v1.recall.recall"),
-        "llm_available",
-        lambda _config: False,
-    )
-    retry_client.script[SearchType.CHUNKS] = _GRAPH_HIT
+    _no_llm(monkeypatch)
+    retry_client.script[SearchType.HYBRID_COMPLETION] = _GRAPH_HIT
 
     response = retry_client.client.post(
         "/api/v1/recall", json={"query": "what happened in 2019?", "scope": "graph"}
     )
 
     assert response.status_code == 200, response.text
-    assert retry_client.calls == [SearchType.CHUNKS]
+    assert retry_client.calls == [SearchType.HYBRID_COMPLETION]
+    assert retry_client.only_context_flags == [True]
 
 
-def test_no_llm_still_honours_a_pinned_type(retry_client, monkeypatch):
-    """The constraints shape routing, not explicit choices: a pinned type runs as
-    asked, with the caller's own only_context."""
+def test_no_llm_runs_a_pinned_completion_type_as_only_context(retry_client, monkeypatch):
+    """A pinned type is never rerouted, but with no LLM a completion type runs with
+    only_context=True instead of failing at the answer."""
     _no_llm(monkeypatch)
     retry_client.script[SearchType.RAG_COMPLETION] = _GRAPH_HIT
 
@@ -367,7 +364,7 @@ def test_no_llm_still_honours_a_pinned_type(retry_client, monkeypatch):
 
     assert response.status_code == 200, response.text
     assert retry_client.calls == [SearchType.RAG_COMPLETION]
-    assert retry_client.only_context_flags == [False]
+    assert retry_client.only_context_flags == [True]
 
 
 def test_callers_only_context_is_kept_when_an_llm_is_available(retry_client):

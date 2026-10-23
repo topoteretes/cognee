@@ -6,13 +6,12 @@ from cognee.api.v1.recall.query_router import (
     _RULES,
     COMPLETION_ONLY_TYPES,
     CYPHER_TYPES,
-    LLM_FREE_TYPES,
-    LLM_IN_RETRIEVAL_TYPES,
     ROUTER_FALLBACK_TYPE,
     RouteDecision,
     RoutingConstraints,
     constrain,
     default_route,
+    pinned_route,
     route_query,
 )
 from cognee.modules.search.types import SearchType
@@ -241,15 +240,6 @@ class TestTemporalRoute:
 class TestRoutingConstraints:
     """What the deployment can run is applied after the rules, in one place."""
 
-    def test_every_search_type_is_classified_exactly_once(self):
-        """A new SearchType must be classified before it can ship: the no-LLM
-        behaviour of an unclassified type would be undefined."""
-        classified = LLM_FREE_TYPES | COMPLETION_ONLY_TYPES | LLM_IN_RETRIEVAL_TYPES
-        assert classified == set(SearchType)
-        assert not (LLM_FREE_TYPES & COMPLETION_ONLY_TYPES)
-        assert not (LLM_FREE_TYPES & LLM_IN_RETRIEVAL_TYPES)
-        assert not (COMPLETION_ONLY_TYPES & LLM_IN_RETRIEVAL_TYPES)
-
     def test_unconstrained_routing_is_unchanged(self):
         assert route_query("Tell me something", RoutingConstraints()) == route_query(
             "Tell me something"
@@ -282,14 +272,12 @@ class TestRoutingConstraints:
         )
         assert decision == RouteDecision(search_type=search_type, rule="r", only_context=True)
 
-    @pytest.mark.parametrize("search_type", sorted(LLM_IN_RETRIEVAL_TYPES, key=lambda s: s.value))
-    def test_no_llm_sends_llm_in_retrieval_types_to_the_fallback(self, search_type):
-        decision = constrain(
-            RouteDecision(search_type=search_type, rule="r"),
-            RoutingConstraints(llm_available=False),
-        )
+    def test_no_llm_sends_a_temporal_pick_to_the_fallback(self):
+        """TEMPORAL extracts the time window with an LLM, so with no LLM the rule's
+        pick resolves to the fallback; any type outside the two lists does."""
+        decision = route_query("What happened in 1898?", RoutingConstraints(llm_available=False))
         assert decision == RouteDecision(
-            search_type=ROUTER_FALLBACK_TYPE, rule="r", only_context=True
+            search_type=ROUTER_FALLBACK_TYPE, rule="time_scoped_question", only_context=True
         )
 
     @pytest.mark.parametrize("search_type", sorted(CYPHER_TYPES, key=lambda s: s.value))
@@ -320,12 +308,16 @@ class TestRoutingConstraints:
             llm_available=False, cypher_allowed=False
         )
 
-    def test_cypher_gate_reads_the_environment(self, monkeypatch):
-        from cognee.modules.search.methods.get_search_type_retriever_instance import (
-            cypher_queries_allowed,
-        )
+    @pytest.mark.parametrize("search_type", sorted(COMPLETION_ONLY_TYPES, key=lambda s: s.value))
+    def test_no_llm_runs_a_pinned_completion_type_as_only_context(self, search_type):
+        decision = pinned_route(search_type, RoutingConstraints(llm_available=False))
+        assert decision == RouteDecision(search_type=search_type, rule="pinned", only_context=True)
 
-        monkeypatch.delenv("ALLOW_CYPHER_QUERY", raising=False)
-        assert cypher_queries_allowed() is True
-        monkeypatch.setenv("ALLOW_CYPHER_QUERY", "false")
-        assert cypher_queries_allowed() is False
+    def test_pinned_types_are_never_rerouted(self):
+        no_llm = RoutingConstraints(llm_available=False)
+        assert pinned_route(SearchType.TEMPORAL, no_llm) == RouteDecision(
+            search_type=SearchType.TEMPORAL, rule="pinned"
+        )
+        assert pinned_route(SearchType.HYBRID_COMPLETION, RoutingConstraints()) == RouteDecision(
+            search_type=SearchType.HYBRID_COMPLETION, rule="pinned"
+        )

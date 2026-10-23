@@ -650,17 +650,17 @@ async def recall(
 
                 from cognee.api.v1.recall.query_router import (
                     ROUTER_FALLBACK_TYPE,
-                    RouteDecision,
                     RoutingConstraints,
                     default_route,
+                    pinned_route,
                     route_query,
                 )
 
                 # What this deployment can run: no LLM means only types that work
                 # without one, completion types running with only_context=True;
                 # Cypher off means no Cypher types. Keyed on LLM availability, not on
-                # the extractor that built the graph. Shapes routing and the fallback
-                # only: an explicit query_type is honoured as given.
+                # the extractor that built the graph. An explicit query_type is not
+                # rerouted; with no LLM a completion type runs with only_context=True.
                 constraints = RoutingConstraints.from_config(llm_config)
                 fallback_decision = default_route(constraints)
 
@@ -668,7 +668,7 @@ async def recall(
                 # retry below never second-guesses a pinned type.
                 routed_rule = None
                 if query_type is not None:
-                    decision = RouteDecision(search_type=query_type, rule="pinned")
+                    decision = pinned_route(query_type, constraints)
                 elif auto_route:
                     decision = route_query(query_text, constraints)
                     routed_rule = decision.rule

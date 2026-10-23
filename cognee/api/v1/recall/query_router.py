@@ -23,8 +23,9 @@ routes, but only to types that can execute without one: retrieval-only types
 run as they are, completion types whose single LLM call is the final answer run
 with ``only_context=True`` (recall returns the assembled prompt, the session
 layer is read-only), and types that need an LLM during retrieval resolve to the
-fallback. A pinned ``query_type`` never passes through here; the constraints
-shape routing, not explicit choices.
+fallback. A pinned ``query_type`` is not rerouted: it runs as given, except that
+with no LLM a pinned completion type also runs with ``only_context=True``
+(``pinned_route``).
 """
 
 import re
@@ -105,21 +106,11 @@ _FOR_DATE = (
     rf"|the\s+{_YEAR_AS_OBJECT})"
 )
 
-# Every SearchType belongs to exactly one of these three sets; a test enforces it, so
-# a new type must be classified before it can ship. The split is about WHEN a type
-# calls an LLM, which is what decides whether it can run without one.
-#
-# Never calls an LLM: runs unchanged with no LLM.
+# Routed types that never call an LLM: with no LLM they run as they are. Any other
+# routed type that is not in COMPLETION_ONLY_TYPES resolves to the fallback, so a new
+# LLM-free rule target must be added here to keep its own type on a keyless install.
 LLM_FREE_TYPES: frozenset[SearchType] = frozenset(
-    {
-        SearchType.CHUNKS,
-        SearchType.CHUNKS_LEXICAL,
-        SearchType.SUMMARIES,
-        SearchType.SKILLS,
-        SearchType.CODE,
-        SearchType.CODING_RULES,
-        SearchType.CYPHER,
-    }
+    {SearchType.CHUNKS_LEXICAL, SearchType.CODING_RULES}
 )
 # The only LLM call is the final completion: runs with only_context=True with no LLM,
 # returning the prompt the completion would have received.
@@ -128,23 +119,6 @@ COMPLETION_ONLY_TYPES: frozenset[SearchType] = frozenset(
         SearchType.HYBRID_COMPLETION,
         SearchType.GRAPH_COMPLETION,
         SearchType.RAG_COMPLETION,
-        SearchType.TRIPLET_COMPLETION,
-    }
-)
-# Calls an LLM during retrieval itself (sub-queries, chain-of-thought rounds, context
-# extension, time extraction, summaries, Cypher generation, type selection, the agent
-# loop, report questions): cannot run without one, resolves to the fallback.
-LLM_IN_RETRIEVAL_TYPES: frozenset[SearchType] = frozenset(
-    {
-        SearchType.GRAPH_COMPLETION_COT,
-        SearchType.GRAPH_COMPLETION_DECOMPOSITION,
-        SearchType.GRAPH_COMPLETION_CONTEXT_EXTENSION,
-        SearchType.GRAPH_SUMMARY_COMPLETION,
-        SearchType.TEMPORAL,
-        SearchType.NATURAL_LANGUAGE,
-        SearchType.FEELING_LUCKY,
-        SearchType.AGENTIC_COMPLETION,
-        SearchType.GRAPH_REPORT,
     }
 )
 # Run the query text as Cypher, directly or after an LLM writes it.
@@ -191,6 +165,13 @@ _RULES: tuple[tuple[str, re.Pattern, SearchType], ...] = (
 def default_route(constraints: RoutingConstraints | None = None) -> RouteDecision:
     """The decision for a query no rule matched, under the given constraints."""
     return constrain(RouteDecision(search_type=ROUTER_FALLBACK_TYPE, rule="default"), constraints)
+
+
+def pinned_route(query_type: SearchType, constraints: RoutingConstraints) -> RouteDecision:
+    """The decision for a caller's explicit type: never rerouted, but with no LLM a
+    completion type runs with ``only_context=True`` instead of failing at the answer."""
+    forced = not constraints.llm_available and query_type in COMPLETION_ONLY_TYPES
+    return RouteDecision(search_type=query_type, rule="pinned", only_context=forced)
 
 
 def constrain(
