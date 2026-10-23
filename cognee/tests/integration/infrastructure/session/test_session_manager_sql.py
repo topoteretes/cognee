@@ -430,13 +430,13 @@ async def test_generate_completion_with_session_feedback_only_records_acknowledg
             system_prompt_path="sys.txt",
         )
 
-    assert result == "Thanks for your feedback!"
+    assert result == "Got it."
     entries = await session_manager.get_session(user_id="u1", session_id="s1")
     assert len(entries) == 2
     assert entries[0].qa_id == qa_id
     assert entries[0].question == "What is X?"
     assert entries[1].question == "thanks, that was helpful!"
-    assert entries[1].answer == "Thanks for your feedback!"
+    assert entries[1].answer == "Got it."
     mock_generate.assert_not_awaited()
 
 

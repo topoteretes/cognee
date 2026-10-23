@@ -6,7 +6,7 @@ the four branches:
 
   1. first-turn       -> no served context, empty block, served_ids recorded as None
   2. ordinary question-> active block built + prepended above history, served_ids on new QA
-  3. feedback-only    -> response_to_user returned, QA recorded, counters bumped, candidate applied
+  3. feedback-only    -> fixed acknowledgement returned, QA recorded, counters bumped, candidate applied
   4. feedback+request -> answer request, new QA with served_ids, candidate applied
 
 The whole session-guidance layer is gated on caching and auto_feedback.
@@ -207,7 +207,8 @@ async def test_non_feedback_block_prepended_and_served_ids_recorded(session_mana
 
 @pytest.mark.asyncio
 async def test_feedback_only_returns_thanks_records_qa_and_applies_candidate(session_manager):
-    """Feedback-only turn: response_to_user returned, QA recorded, counter bumped, candidate stored."""
+    """Feedback-only turn: the fixed acknowledgement (not the model's response_to_user,
+    #4296) is returned and recorded, counter bumped, candidate stored."""
     await _seed_context_entry(session_manager, "c-served", "rules", "Be concise.")
     # A previous QA that served c-served, so it can be rated this turn.
     await session_manager.add_qa(
@@ -251,13 +252,13 @@ async def test_feedback_only_returns_thanks_records_qa_and_applies_candidate(ses
             system_prompt_path="sys.txt",
         )
 
-    assert result == "Glad it helped!"
+    assert result == "Got it."
     mock_add_feedback.assert_not_called()
 
     entries = await session_manager.get_session(user_id="owner-1", session_id="s1")
     assert len(entries) == 2
     assert entries[-1].question == "that was great"
-    assert entries[-1].answer == "Glad it helped!"
+    assert entries[-1].answer == "Got it."
     assert entries[-1].used_session_context_ids is None
 
     ctx_entries = await session_manager.get_session_context_entries(
