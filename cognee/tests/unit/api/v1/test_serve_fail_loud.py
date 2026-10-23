@@ -64,8 +64,12 @@ def _patch_probes(monkeypatch, health: bool, auth_status):
     async def auth_check(self):
         return auth_status
 
+    async def get_tenant_id(self):
+        return ""
+
     monkeypatch.setattr(CloudClient, "_health_check", health_check)
     monkeypatch.setattr(CloudClient, "_auth_check", auth_check)
+    monkeypatch.setattr(CloudClient, "_get_tenant_id", get_tenant_id)
 
 
 @pytest.mark.asyncio
