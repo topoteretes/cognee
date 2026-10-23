@@ -52,6 +52,7 @@ from pydantic import Field
 from sqlalchemy.exc import IntegrityError
 
 from cognee.api.DTO import InDTO, OutDTO
+from cognee.api.v1.integrations.routers.get_sync_progress_router import get_sync_progress_router
 from cognee.infrastructure.background_tasks import register_background_task
 from cognee.modules.agents.create_agent import create_agent
 from cognee.modules.agents.list_agents import list_agents
@@ -436,6 +437,7 @@ def _frontend_redirect(integration: OAuthIntegration, outcome: str) -> RedirectR
 
 def get_integrations_router():
     integrations_router = APIRouter(lifespan=linear_resume_lifespan)
+    integrations_router.include_router(get_sync_progress_router())
 
     # ------------------------------------------------------------------ #
     # Aggregate status (fixed /status path — before the {provider} routes)
