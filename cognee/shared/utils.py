@@ -574,12 +574,11 @@ def _get_connected_tenant() -> dict[str, str]:
         from cognee.api.v1.serve.state import peek_remote_client
 
         client = peek_remote_client()
-        tenant_id = getattr(client, "tenant_id", "") if client is not None else ""
-        if not tenant_id:
+        if client is None or not client.tenant_id:
             return {}
         # Parsed inside the guard: a malformed URL can raise.
         return {
-            "connected_tenant_id": str(tenant_id),
+            "connected_tenant_id": str(client.tenant_id),
             "connected_host": _connected_host_label(client.service_url),
         }
     except Exception:
