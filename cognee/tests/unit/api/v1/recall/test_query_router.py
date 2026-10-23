@@ -18,6 +18,8 @@ ROUTABLE_TYPES = {
     SearchType.HYBRID_COMPLETION,
     SearchType.CHUNKS_LEXICAL,
     SearchType.CODING_RULES,
+    SearchType.CODE,
+    SearchType.BROAD,
     SearchType.TEMPORAL,
 }
 
@@ -28,6 +30,42 @@ GOLDEN = [
     ("What coding rules apply to error handling?", SearchType.CODING_RULES),
     ("Show me the code review guidelines", SearchType.CODING_RULES),
     ("What coding rules apply to gate.py?", SearchType.CODING_RULES),
+    # code_question: code phrasing with an identifier right next to the code word
+    ("Where is parse_config defined?", SearchType.CODE),
+    ("WHERE IS parse_config DEFINED?", SearchType.CODE),
+    ("Where is the add_data_points function defined?", SearchType.CODE),
+    ("What calls route_query?", SearchType.CODE),
+    ("Who imports CodeRetriever?", SearchType.CODE),
+    ("Which classes inherit from BaseRetriever?", SearchType.CODE),
+    ("What does getUser depend on?", SearchType.CODE),
+    ("Show the callers of foo()", SearchType.CODE),
+    ("List the usages of DEFAULT_TIMEOUT", SearchType.CODE),
+    # one code signal alone stays on the default
+    ("What calls the billing service?", SearchType.HYBRID_COMPLETION),
+    ("What did Alice say about parse_config?", SearchType.HYBRID_COMPLETION),
+    ("Which customers use acme.com?", SearchType.HYBRID_COMPLETION),
+    # `use` is not code phrasing: brand names look like CamelCase identifiers
+    ("Which teams use PowerPoint?", SearchType.HYBRID_COMPLETION),
+    ("Who uses McDonald's coupons?", SearchType.HYBRID_COMPLETION),
+    # a code word not right next to the identifier is a noun or prose
+    ("What is the call schedule for JohnSmith?", SearchType.HYBRID_COMPLETION),
+    ("Which reference letters mention PayPal?", SearchType.HYBRID_COMPLETION),
+    ("What imports did China make from LinkedIn?", SearchType.HYBRID_COMPLETION),
+    ("Who calls the shots at YouTube?", SearchType.HYBRID_COMPLETION),
+    ("Which customers call support about their MacBook?", SearchType.HYBRID_COMPLETION),
+    # count_question: a count across records
+    ("How many customers churned?", SearchType.BROAD),
+    ("how many rows are in table 2024_sales?", SearchType.BROAD),
+    ("What is the total number of open tickets?", SearchType.BROAD),
+    # aggregate-looking words that are often prose or a stated value stay on the default
+    ("We found a number of issues in the audit", SearchType.HYBRID_COMPLETION),
+    ("How much does the premium plan cost?", SearchType.HYBRID_COMPLETION),
+    ("What is the average response time?", SearchType.HYBRID_COMPLETION),
+    ("Is the whole more than the sum of its parts?", SearchType.HYBRID_COMPLETION),
+    ("Who wrote The Count of Monte Cristo?", SearchType.HYBRID_COMPLETION),
+    # a count phrase that does not open the question is prose or a title
+    ("I don't know how many people came, what did Alice say?", SearchType.HYBRID_COMPLETION),
+    ("Tell me about the movie How Many Kinds of Love", SearchType.HYBRID_COMPLETION),
     # default
     ("Who won Nobel Prizes?", SearchType.HYBRID_COMPLETION),
     ("What did Einstein discover?", SearchType.HYBRID_COMPLETION),
@@ -85,7 +123,6 @@ GOLDEN = [
     ("What was the 1990s policy on remote work?", SearchType.HYBRID_COMPLETION),
     ("Open ticket 2048", SearchType.HYBRID_COMPLETION),
     ("Error 1045 in the logs", SearchType.HYBRID_COMPLETION),
-    ("How many rows are in table 2024_sales?", SearchType.HYBRID_COMPLETION),
     ("Which version shipped in Q4 2024?", SearchType.HYBRID_COMPLETION),
     ("What did Alice say in 2 meetings?", SearchType.HYBRID_COMPLETION),
     ("What is the budget for 2000 users?", SearchType.HYBRID_COMPLETION),
@@ -144,6 +181,16 @@ def test_shape_rules_win_over_intent_rules():
     assert route_query('"coding rules"').rule == "quoted_phrase"
 
 
+def test_code_wins_over_count():
+    """BROAD reads document text and code has none, so a counting code question is CODE's."""
+    assert route_query("How many callers of parse_config are there?").rule == "code_question"
+
+
+def test_count_wins_over_temporal():
+    """TEMPORAL only reranks HYBRID's top results, so a dated count is BROAD's."""
+    assert route_query("How many incidents happened in 2019?").rule == "count_question"
+
+
 class TestRouteDecision:
     def test_default_rule_name(self):
         decision = route_query("Tell me something")
@@ -152,6 +199,15 @@ class TestRouteDecision:
     def test_matching_rule_name(self):
         assert route_query('"polonium and radium"').rule == "quoted_phrase"
         assert route_query("Show me the coding rules").rule == "coding_rules_intent"
+
+    def test_code_route_asks_about_the_identifiers_only(self):
+        decision = route_query("What calls parse_config and getUser?")
+        assert decision.rule == "code_question"
+        assert decision.retriever_config == {"operation": "ask", "question": "parse_config getUser"}
+
+    def test_code_route_asks_about_each_name_once_without_parentheses(self):
+        decision = route_query("Who calls foo() besides the callers of foo()?")
+        assert decision.retriever_config == {"operation": "ask", "question": "foo"}
 
     def test_whitespace_is_ignored(self):
         assert route_query('   "polonium and radium"  ').search_type == SearchType.CHUNKS_LEXICAL
