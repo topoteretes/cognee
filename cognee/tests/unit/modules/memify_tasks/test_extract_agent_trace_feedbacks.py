@@ -19,6 +19,7 @@ from cognee.infrastructure.session.session_persist_watermark import (
     TracePersistWindow,
 )
 from cognee.modules.users.models import User
+from cognee.tasks.ingestion.data_item import DataItem
 from cognee.tasks.memify.extract_agent_trace_feedbacks import (
     extract_agent_trace_feedbacks,
     resolve_trace_window,
@@ -488,7 +489,7 @@ async def test_trace_node_set_survives_pipeline_batching(manager, monkeypatch):
             pass
 
     add.assert_awaited_once_with(
-        "Session ID: s\n\nedit succeeded.",
+        DataItem(data="Session ID: s\n\nedit succeeded.", name="Agent trace s", literal_text=True),
         dataset_id="dataset",
         node_set=["agent_trace_feedbacks", "project-a"],
         user=None,

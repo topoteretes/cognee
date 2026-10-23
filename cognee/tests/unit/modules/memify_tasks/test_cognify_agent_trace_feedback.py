@@ -10,6 +10,7 @@ from cognee.infrastructure.session.session_persist_watermark import (
     TracePersistWindow,
 )
 from cognee.modules.pipelines.exceptions import CognifyFailedError
+from cognee.tasks.ingestion.data_item import DataItem
 from cognee.tasks.memify.cognify_agent_trace_feedback import cognify_agent_trace_feedback
 
 # The module object (not the re-exported function), for patching get_session_manager.
@@ -207,9 +208,17 @@ async def test_window_advances_watermark_after_successful_cognify():
     ):
         await cognify_agent_trace_feedback(window, dataset_id="123", user="user")
 
-    mock_add.assert_called_once_with(
-        window.text, dataset_id="123", node_set=["agent_trace_feedbacks"], user="user"
-    )
+    content = mock_add.call_args.args[0]
+    assert isinstance(content, DataItem)
+    assert content.data == window.text
+    # A window is listed by its session (CLO-1023), not as text_<md5>.
+    assert content.name == f"Agent trace {window.session_id}"
+    assert content.literal_text is True
+    assert mock_add.call_args.kwargs == {
+        "dataset_id": "123",
+        "node_set": ["agent_trace_feedbacks"],
+        "user": "user",
+    }
     assert await TRACE_PERSIST_WATERMARK.read_count(manager, "u", "s") == 5
 
 

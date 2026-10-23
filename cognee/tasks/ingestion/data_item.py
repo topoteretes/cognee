@@ -31,6 +31,16 @@ class DataItem:
     # legitimately be just a URL or an existing path, and reading it as one
     # would fetch or read something the caller never asked to ingest.
     literal_text: bool = False
+    # Document name to store text ``data`` under, e.g. ``"Q3 Plan"`` or
+    # ``"roadmap.docx"``. Without it, raw text is named by its content hash
+    # (``text_<md5>.txt``), which tells a reader nothing about what was
+    # ingested. The name is stored as a ``.txt`` object (text content is
+    # always read back as text, whatever the name's own suffix says) under a
+    # content-addressed key, so two documents sharing a name keep two objects.
+    # Identical text is one document whichever names it was given: ingestion
+    # dedups unpinned items by content hash, and the last name written wins.
+    # Ignored for non-text ``data``: an upload or file carries its own name.
+    name: str | None = None
 
 
 def parse_labels(labels: str | None) -> list[str | None] | None:

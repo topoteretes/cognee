@@ -193,6 +193,43 @@ class TestAddFileDetection:
             assert files_arg[0][1][0] == "text_0.txt"
             assert files_arg[0][1][2] == "text/plain"
 
+    def _posting_client(self):
+        client = CogneeApiClient("http://x")
+        mock_resp = MagicMock(status_code=200)
+        mock_resp.json.return_value = {"status": "ok"}
+        mock_http_client = MagicMock()
+        mock_http_client.post.return_value = mock_resp
+        client._client = mock_http_client
+        return client, mock_http_client
+
+    def test_named_text_is_uploaded_under_its_name(self):
+        """--name replaces the text_<n> default for the one inline text (CLO-1023)."""
+        with patch("cognee.cli.api_client._import_httpx"):
+            client, http = self._posting_client()
+
+            client.add(["hello world"], "ds", name="Q3 plan")
+
+            files_arg = http.post.call_args.kwargs["files"]
+            assert files_arg[0][1][0] == "Q3 plan.txt"
+            assert files_arg[0][1][2] == "text/plain"
+
+    def test_remember_names_text_the_same_way(self):
+        with patch("cognee.cli.api_client._import_httpx"):
+            client, http = self._posting_client()
+
+            client.remember(["hello world"], "ds", name="Q3 plan")
+
+            files_arg = http.post.call_args.kwargs["files"]
+            assert files_arg[0][1][0] == "Q3 plan.txt"
+
+    def test_a_name_with_two_texts_is_refused_before_anything_is_sent(self):
+        with patch("cognee.cli.api_client._import_httpx"):
+            client, http = self._posting_client()
+
+            with pytest.raises(ValueError, match="exactly one inline text item"):
+                client.add(["one", "two"], "ds", name="Q3 plan")
+            http.post.assert_not_called()
+
     def test_real_file_sent_as_upload(self):
         with tempfile.NamedTemporaryFile(suffix=".txt", delete=False, mode="w") as f:
             f.write("file content")

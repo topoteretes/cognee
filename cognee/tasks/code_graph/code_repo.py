@@ -315,6 +315,9 @@ async def resolve_code_repository(
     manifest_item = DataItem(
         data=manifest_text,
         label=f"code_repo:{directory.name}",
+        # The repository is the document: list it under the clone's name
+        # (``github.com-org-repo`` for a URL) rather than a content hash.
+        name=directory.name,
         system_metadata=system_metadata,
         data_id=data_id,
     )

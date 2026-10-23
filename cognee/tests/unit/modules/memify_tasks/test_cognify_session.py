@@ -26,6 +26,16 @@ def _window(text: str, persisted_qa_count: int = 1) -> SessionPersistWindow:
     )
 
 
+def _added_window(mock_add):
+    """The DataItem cognify_session handed to cognee.add, checked for its shape."""
+    from cognee.tasks.ingestion.data_item import DataItem
+
+    content = mock_add.call_args.args[0]
+    assert isinstance(content, DataItem)
+    assert content.literal_text is True
+    return content
+
+
 def _mock_session_manager():
     mock_sm = MagicMock()
     mock_sm.update_session_context_entry = AsyncMock(return_value=True)
@@ -49,12 +59,15 @@ async def test_cognify_session_success():
     ):
         await cognify_session(window, dataset_id="123")
 
-        mock_add.assert_called_once_with(
-            window.text,
-            dataset_id="123",
-            node_set=["user_sessions_from_cache"],
-            user=None,
-        )
+        content = _added_window(mock_add)
+        assert content.data == window.text
+        # Named after the session (CLO-1023), not stored as text_<md5>.
+        assert content.name == "Session test_session"
+        assert mock_add.call_args.kwargs == {
+            "dataset_id": "123",
+            "node_set": ["user_sessions_from_cache"],
+            "user": None,
+        }
         mock_cognify.assert_called_once_with(datasets=["123"], user=None, raise_on_error=False)
         # Watermark advanced after successful cognify.
         mock_sm.update_session_context_entry.assert_called_once()
@@ -324,12 +337,7 @@ async def test_cognify_session_with_special_characters():
     ):
         await cognify_session(window, dataset_id="123")
 
-        mock_add.assert_called_once_with(
-            window.text,
-            dataset_id="123",
-            node_set=["user_sessions_from_cache"],
-            user=None,
-        )
+        assert _added_window(mock_add).data == window.text
         mock_cognify.assert_called_once_with(datasets=["123"], user=None, raise_on_error=False)
 
 
@@ -349,12 +357,8 @@ async def test_cognify_session_passes_user_to_add_and_cognify():
     ):
         await cognify_session(window, dataset_id="123", user=user)
 
-        mock_add.assert_called_once_with(
-            window.text,
-            dataset_id="123",
-            node_set=["user_sessions_from_cache"],
-            user=user,
-        )
+        assert _added_window(mock_add).data == window.text
+        assert mock_add.call_args.kwargs["user"] is user
         mock_cognify.assert_called_once_with(datasets=["123"], user=user, raise_on_error=False)
 
 
@@ -407,3 +411,16 @@ async def test_cognify_session_preserves_last_entry_time_as_source_metadata(monk
     assert content.data == window.text
     assert content.external_metadata == {date_key: window.last_entry_time}
     assert content.literal_text is True
+    # The window's date is part of the name, so one session's windows stay apart.
+    assert content.name == f"Session {window.session_id} {window.last_entry_time[:10]}"
+
+
+def test_session_document_name_adds_the_date_only_when_it_is_one():
+    from cognee.tasks.memify.cognify_session import session_document_name
+
+    assert (
+        session_document_name("claude_abc", "2026-10-14T12:30:00Z")
+        == "Session claude_abc 2026-10-14"
+    )
+    assert session_document_name("claude_abc", None) == "Session claude_abc"
+    assert session_document_name("claude_abc", "yesterday") == "Session claude_abc"

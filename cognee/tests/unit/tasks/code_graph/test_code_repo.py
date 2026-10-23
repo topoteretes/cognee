@@ -99,6 +99,8 @@ async def test_directory_with_project_resolves_to_repo_item_plus_documents(tmp_p
     assert len(manifest_items) == 1
     assert manifest_items[0].system_metadata["source"] == "code_repo"
     assert manifest_items[0].system_metadata["file_count"] == 3
+    # The repository is listed under the clone's name, not text_<md5> (CLO-1023).
+    assert manifest_items[0].name == manifest_items[0].label.removeprefix("code_repo:")
     assert {Path(item).name for item in file_items} == {"README.md", "notes.txt"}
 
 
@@ -324,6 +326,7 @@ async def test_repository_url_is_cloned_and_resolved_like_a_project(
     manifest_items = [item for item in resolved if isinstance(item, DataItem)]
     assert len(manifest_items) == 1
     manifest = manifest_items[0]
+    assert manifest.name == manifest.label.removeprefix("code_repo:")
     assert manifest.system_metadata["source"] == "code_repo"
     assert manifest.system_metadata["repo_path"] == str(clone)
     assert manifest.system_metadata["repo_url"] == "https://github.com/org/repo"

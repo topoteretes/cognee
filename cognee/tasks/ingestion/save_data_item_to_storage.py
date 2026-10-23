@@ -48,6 +48,8 @@ def _resolve_local_file_uri(
 
 async def save_data_item_to_storage_detailed(
     data_item: BinaryIO | str | Any,
+    *,
+    text_name: str | None = None,
 ) -> StoredFile:
     """Put ``data_item`` in cognee storage and describe what landed there.
 
@@ -56,6 +58,9 @@ async def save_data_item_to_storage_detailed(
     while they are in hand, so ingestion never has to read the object back to
     hash it. Items that are already addressable storage (an ``s3://`` URL, a
     local path) are handed through untouched and carry no metadata.
+
+    ``text_name`` names the document when a string ends up stored as text
+    (see ``DataItem.name``); it is ignored for anything that is not text.
     """
     if "llama_index" in str(type(data_item)):
         # Dynamic import is used because the llama_index module is optional.
@@ -127,6 +132,8 @@ async def save_data_item_to_storage_detailed(
             raise IngestionError(message="Local files are not accepted.")
 
         # data is text, save it to data storage and return the file path
+        if text_name:
+            return await save_data_to_file_detailed(data_item, filename=text_name)
         return await save_data_to_file_detailed(data_item)
 
     if isinstance(data_item, DataItem):
@@ -134,8 +141,10 @@ async def save_data_item_to_storage_detailed(
             # Store verbatim: never read this string as a URL, s3 path or local
             # path (see DataItem.literal_text). Every storage path ends here, so
             # the flag holds on add(), its incremental pre-save, and update().
+            if data_item.name:
+                return await save_data_to_file_detailed(data_item.data, filename=data_item.name)
             return await save_data_to_file_detailed(data_item.data)
-        return await save_data_item_to_storage_detailed(data_item.data)
+        return await save_data_item_to_storage_detailed(data_item.data, text_name=data_item.name)
 
     # data is not a supported type
     raise IngestionError(message=f"Data type not supported: {type(data_item)}")

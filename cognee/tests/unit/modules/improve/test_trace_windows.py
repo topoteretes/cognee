@@ -93,6 +93,8 @@ class FakeCognee:
         self.on_cognify = on_cognify
 
     async def add(self, text, **kwargs):
+        # A trace window is added as a named DataItem (CLO-1023); keep its text.
+        text = getattr(text, "data", text)
         self.documents.append(text)
         self.pending.append(text)
 
