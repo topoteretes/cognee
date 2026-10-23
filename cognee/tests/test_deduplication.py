@@ -72,7 +72,10 @@ async def test_deduplication():
         "Rows must be scoped to their own datasets."
     )
     assert result[0]["id"] != result[1]["id"], "Each dataset's document has its own identity."
-    assert all(hashlib.md5(text.encode("utf-8")).hexdigest() in row["name"] for row in result), (
+    assert all(
+        hashlib.md5(text.encode("utf-8"), usedforsecurity=False).hexdigest() in row["name"]
+        for row in result
+    ), (
         "Content hash is not a part of file name."
     )
 

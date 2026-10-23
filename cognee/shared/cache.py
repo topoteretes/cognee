@@ -296,7 +296,7 @@ def get_cache_manager() -> StorageAwareCache:
 def generate_content_hash(url: str, additional_data: str = "") -> str:
     """Generate a content hash from URL and optional additional data."""
     content = f"{url}:{additional_data}"
-    return hashlib.md5(content.encode()).hexdigest()[:12]  # Short hash for readability
+    return hashlib.md5(content.encode(), usedforsecurity=False).hexdigest()[:12]  # Short hash for readability
 
 
 # Async wrapper functions for backward compatibility

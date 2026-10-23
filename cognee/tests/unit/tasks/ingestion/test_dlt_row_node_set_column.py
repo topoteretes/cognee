@@ -39,7 +39,7 @@ async def test_rows_that_never_set_the_column_keep_their_pre_contract_hash(stagi
     rows = await staging("drive_folder_root", [drive_row], tag="google_drive")
 
     legacy_hash = hashlib.md5(
-        json.dumps(drive_row, sort_keys=True, default=str).encode()
+        json.dumps(drive_row, sort_keys=True, default=str).encode(), usedforsecurity=False
     ).hexdigest()
     assert rows[0].content_hash == legacy_hash
     assert _build_document_data_item(rows[0], None, "google_drive").node_set is None

@@ -79,9 +79,11 @@ async def test_passthrough_item_is_hashed_while_its_file_is_open(tmp_path, monke
 
     # The dedup identity was really read from the file — a read attempted after
     # the ``open_data_file`` block closes raises instead of producing this hash.
-    assert seen["content_hash"] == hashlib.md5(CONTENT).hexdigest()
+    assert seen["content_hash"] == hashlib.md5(CONTENT, usedforsecurity=False).hexdigest()
 
     # And the work is handed to ingest_data, so it does not re-read the file.
     carried = ctx.extras[CARRIED_SOURCE_KEY]
-    assert carried.stored.metadata["content_hash"] == hashlib.md5(CONTENT).hexdigest()
+    assert carried.stored.metadata["content_hash"] == hashlib.md5(
+        CONTENT, usedforsecurity=False
+    ).hexdigest()
     assert carried.stored.metadata["file_size"] == len(CONTENT)

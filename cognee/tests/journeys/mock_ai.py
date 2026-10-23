@@ -113,7 +113,7 @@ def hashed_embedding(text: str, dims: int) -> list[float]:
         vector[0] = 1.0
         return vector
     for token in tokens:
-        digest = hashlib.md5(token.encode("utf-8")).digest()
+        digest = hashlib.md5(token.encode("utf-8"), usedforsecurity=False).digest()
         bucket = int.from_bytes(digest[:4], "big") % dims
         sign = 1.0 if digest[4] & 1 else -1.0
         vector[bucket] += sign

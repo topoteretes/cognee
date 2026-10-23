@@ -75,7 +75,7 @@ async def save_data_to_file_detailed(
     async with classified_data.get_data() as payload:
         if "name" not in file_metadata or file_metadata["name"] is None:
             data_contents = payload.encode("utf-8")
-            hash_contents = hashlib.md5(data_contents).hexdigest()
+            hash_contents = hashlib.md5(data_contents, usedforsecurity=False).hexdigest()
             file_metadata["name"] = "text_" + hash_contents + ".txt"
 
         file_name = file_metadata["name"]

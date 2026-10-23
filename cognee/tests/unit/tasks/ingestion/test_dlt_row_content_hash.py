@@ -15,7 +15,9 @@ ROW = {"id": "p1", "title": "T", "content": "C"}
 
 
 def _legacy_hash(row_dict: dict) -> str:
-    return hashlib.md5(json.dumps(row_dict, sort_keys=True, default=str).encode()).hexdigest()
+    return hashlib.md5(
+        json.dumps(row_dict, sort_keys=True, default=str).encode(), usedforsecurity=False
+    ).hexdigest()
 
 
 def test_rows_without_the_column_hash_as_before():

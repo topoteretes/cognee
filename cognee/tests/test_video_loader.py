@@ -165,7 +165,7 @@ async def test_load_persists_timestamped_transcript(
     # The loader describes the text it wrote so ingestion need not read it back.
     assert (
         result.file_metadata["content_hash"]
-        == hashlib.md5(EXPECTED_TRANSCRIPT.encode("utf-8")).hexdigest()
+        == hashlib.md5(EXPECTED_TRANSCRIPT.encode("utf-8"), usedforsecurity=False).hexdigest()
     )
     mock_extract.assert_awaited_once()
     storage_instance.store.assert_awaited_once_with("text_hash123.txt", EXPECTED_TRANSCRIPT)

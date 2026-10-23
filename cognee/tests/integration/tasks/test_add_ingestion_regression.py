@@ -164,7 +164,7 @@ async def test_duplicate_content_in_one_batch_lands_with_one_identity(add_env):
 
     rows = await _rows("reg_batch")
     assert {str(row.content_hash) for row in rows} == {
-        __import__("hashlib").md5(b"batch twin").hexdigest()
+        __import__("hashlib").md5(b"batch twin", usedforsecurity=False).hexdigest()
     }
     assert len(rows) == 2
 
@@ -217,14 +217,14 @@ async def test_pinned_readd_keeps_the_row_untouched(add_env):
 
     (after,) = await _rows("reg_pin")
     assert after.id == pinned_id
-    assert after.content_hash == hashlib.md5(b"pinned v1").hexdigest()
+    assert after.content_hash == hashlib.md5(b"pinned v1", usedforsecurity=False).hexdigest()
 
 
 async def test_plain_text_keeps_the_text_naming_contract(add_env):
     import cognee
 
     text = "a plain note about nothing"
-    digest = hashlib.md5(text.encode("utf-8")).hexdigest()
+    digest = hashlib.md5(text.encode("utf-8"), usedforsecurity=False).hexdigest()
     await cognee.add(text, "reg_text")
 
     (row,) = await _rows("reg_text")
@@ -242,7 +242,7 @@ async def test_row_metadata_golden_values(add_env):
 
     (row,) = await _rows("reg_golden")
     assert row.name == "Golden Fixture"
-    assert row.content_hash == hashlib.md5(content).hexdigest()
+    assert row.content_hash == hashlib.md5(content, usedforsecurity=False).hexdigest()
     assert row.data_size == len(content)
     assert row.original_extension == "txt"
     assert row.original_mime_type == "text/plain"
@@ -293,7 +293,7 @@ async def test_local_path_add_records_the_source_location(add_env):
     await cognee.add([str(source)], "reg_localpath")
 
     (row,) = await _rows("reg_localpath")
-    assert row.content_hash == hashlib.md5(b"local path body").hexdigest()
+    assert row.content_hash == hashlib.md5(b"local path body", usedforsecurity=False).hexdigest()
     assert row.name == "on_disk_note"
     # Pass-through items are not copied into cognee storage: the original
     # location is the user's own file.

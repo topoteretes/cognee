@@ -105,7 +105,7 @@ def _mock_llm():
     async def _out(text_input, system_prompt, response_model, **kw):
         name = getattr(response_model, "__name__", "")
         if name == "KnowledgeGraph":
-            h = hashlib.md5((text_input or "").encode()).hexdigest()[:8]
+            h = hashlib.md5((text_input or "").encode(), usedforsecurity=False).hexdigest()[:8]
             return KnowledgeGraph(
                 nodes=[
                     Node(id=f"c_{h}_a", name=f"c_{h}_a", type="Concept", description="x"),
