@@ -364,6 +364,7 @@ async def remember(
     background: bool = False,
     ontology_key: str | list[str] | None = None,
     self_improvement: bool = True,
+    name: str | None = None,
     node_set: list[str] | None = None,
 ) -> list:
     """Store data in memory.
@@ -388,6 +389,13 @@ async def remember(
     data : str, optional
         The text content to store. Mutually exclusive with
         filename/content_base64.
+    name : str, optional
+        A short, descriptive name for text `data`, e.g. "Alice's working
+        hours" or "Project Atlas decisions". It becomes the stored document's
+        name, so the memory can be recognised in a dataset listing instead
+        of showing up as a content hash (text_<md5>). Pass one whenever the
+        text has an obvious subject. Permanent memory only; a file upload is
+        named by `filename` instead.
     filename : str, optional
         Original filename for a file upload. Used to derive the stored
         document's name. Requires content_base64.
@@ -448,6 +456,20 @@ async def remember(
                 text="Error: file uploads (content_base64) don't support session_id.",
             )
         ]
+    if name and content_base64:
+        return [
+            types.TextContent(
+                type="text",
+                text="Error: `name` is for text `data`; a file upload is named by `filename`.",
+            )
+        ]
+    if name and session_id:
+        return [
+            types.TextContent(
+                type="text",
+                text="Error: `name` is for permanent memory; omit session_id.",
+            )
+        ]
 
     if content_base64:
         try:
@@ -491,11 +513,12 @@ async def remember(
                 custom_prompt=custom_prompt,
                 ontology_key=ontology_key,
                 self_improvement=self_improvement,
+                name=name,
                 node_set=node_set,
             ),
             dataset=dataset_name,
         )
-        queued = f"'{filename}'" if content_base64 else "text"
+        queued = f"'{filename}'" if content_base64 else (f"'{name}'" if name else "text")
         return [
             types.TextContent(
                 type="text",
@@ -519,6 +542,7 @@ async def remember(
                 custom_prompt=custom_prompt,
                 ontology_key=ontology_key,
                 self_improvement=self_improvement,
+                name=name,
                 node_set=node_set,
             )
             status = result.get("status", "completed")
@@ -528,6 +552,11 @@ async def remember(
                 text = (
                     f"Ingested '{filename}' ({len(decoded):,} bytes) into dataset "
                     f"'{dataset_name}' (status={status})."
+                )
+            elif name:
+                text = (
+                    f"Stored '{name}' permanently in knowledge graph "
+                    f"(dataset={dataset_name}, status={status})."
                 )
             else:
                 text = f"Stored permanently in knowledge graph (dataset={dataset_name}, status={status})."
