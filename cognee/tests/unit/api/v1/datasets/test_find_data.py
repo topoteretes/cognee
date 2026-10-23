@@ -145,7 +145,8 @@ async def test_find_data_refuses_strings_add_would_resolve_as_references(local_m
             "https://example.com/page",
             "http://example.com/page",
         ):
-            with pytest.raises(ValueError, match="literal text"):
+            # The message names the escape hatch for a string stored as text.
+            with pytest.raises(ValueError, match=r"literal text.*compute_content_hash"):
                 await datasets_module.datasets.find_data(
                     DATASET_ID, content=reference, user=_user()
                 )
@@ -210,6 +211,37 @@ async def test_find_data_routes_to_the_remote_instance_under_serve(monkeypatch):
     # The local store is never consulted.
     authorize.assert_not_called()
     lookup.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_find_data_under_serve_ignores_files_on_this_machine(monkeypatch, tmp_path):
+    """Under serve(), add() resolved the string on the server, not here.
+
+    A note that happens to name a file on the client was stored as text on the
+    server, so it is hashed as text and sent, not refused.
+    """
+    local_file = tmp_path / "README.md"
+    local_file.write_text("a file on the client")
+    note = str(local_file)
+    client = SimpleNamespace(list_data=AsyncMock(return_value=[]))
+    monkeypatch.setattr(serve_state, "get_remote_client", lambda: client)
+
+    assert await datasets_module.datasets.find_data(DATASET_ID, content=note) == []
+
+    client.list_data.assert_awaited_once_with(DATASET_ID, content_hash=compute_content_hash(note))
+
+
+@pytest.mark.asyncio
+async def test_find_data_under_serve_still_refuses_urls(monkeypatch):
+    """URL schemes are references wherever add() ran, so they stay refused remotely."""
+    client = SimpleNamespace(list_data=AsyncMock())
+    monkeypatch.setattr(serve_state, "get_remote_client", lambda: client)
+
+    for reference in ("https://example.com/page", "s3://bucket/report.pdf"):
+        with pytest.raises(ValueError, match="compute_content_hash"):
+            await datasets_module.datasets.find_data(DATASET_ID, content=reference)
+
+    client.list_data.assert_not_called()
 
 
 # --- HTTP: GET /datasets/{id}/data?content_hash=... ---------------------------
