@@ -5,6 +5,8 @@ import importlib.metadata
 import importlib.util
 import os
 import sys
+import uuid
+import weakref
 from collections import deque
 from contextlib import redirect_stdout
 from datetime import datetime, timezone
@@ -549,6 +551,7 @@ async def recall(
     scope: str | None = None,
     code_query: dict | None = None,
     include_references: bool = False,
+    store: bool = True,
 ) -> list:
     """Search memory with auto-routing and session awareness.
 
@@ -558,6 +561,11 @@ async def recall(
 
     Auto-routing picks the best search strategy when search_type
     is not specified.
+
+    Each call also records the query as a turn of the current MCP
+    conversation (session capture), so improve() can distill what the
+    user asked about. Pass store=False when the user asks not to
+    remember something.
 
     Parameters
     ----------
@@ -613,6 +621,11 @@ async def recall(
         Session hits are not stored data and get neither. With backend
         access control off, ids are only shown when recall is scoped to a
         single dataset.
+    store : bool
+        Record the query in the session cache of the current MCP
+        conversation (default True). The write is best-effort and runs in
+        the background; it never delays or fails the search. False skips
+        it, e.g. when the user asks not to remember the question.
 
     Returns a one-line memory-hit or empty-state summary followed by the original
     result text. Status markers do not count as hits. Empty-state checks are
@@ -625,6 +638,8 @@ async def recall(
             scope_list = parse_csv_list(scope)
             if code_query is not None and not isinstance(code_query, dict):
                 raise ValueError("code_query must be a JSON object (dict).")
+            if store:
+                _capture_turn(query, dataset_list[0] if dataset_list else None)
             results = await cognee_client.recall(
                 query_text=query,
                 search_type=search_type,
@@ -882,6 +897,9 @@ async def improve(
         detected.
     session_ids : str, optional
         Comma-separated session IDs to bridge into the permanent graph.
+        Defaults to the current MCP conversation's captured session (see
+        recall's `store`), so a plain improve() distills this client's
+        conversation.
     build_global_context_index : bool
         Also build the global context index.
     build_truth_subspace : bool
@@ -892,6 +910,9 @@ async def improve(
     with redirect_stdout(sys.stderr):
         try:
             session_list = parse_csv_list(session_ids)
+            if not session_list:
+                derived = _derived_session_id()
+                session_list = [derived] if derived else None
             result = await cognee_client.improve(
                 dataset_name=dataset_name,
                 session_ids=session_list,
@@ -1093,6 +1114,92 @@ def _agent_scoped_default_dataset() -> str:
     except LookupError:
         pass
     return "main_dataset"
+
+
+def _is_session_capture_enabled() -> bool:
+    """Whether recall records each query as a turn of the MCP conversation.
+
+    Controlled by COGNEE_MCP_SESSION_CAPTURE env var (default: 'true').
+    """
+    return os.getenv("COGNEE_MCP_SESSION_CAPTURE", "true").strip().lower() != "false"
+
+
+# One session id per MCP connection without a transport-level id (stdio, SSE).
+# Keyed weakly on the ServerSession so a long-lived HTTP server does not
+# accumulate ids for connections that are gone.
+_connection_session_ids: "weakref.WeakKeyDictionary[object, str]" = weakref.WeakKeyDictionary()
+
+
+def _derived_session_id() -> str | None:
+    """Return the cognee session id of the current MCP conversation, or None.
+
+    MCP clients such as Claude Desktop never pass session_id, so the server
+    derives one from the request context:
+      - streamable HTTP: the transport's `mcp-session-id` header, which is
+        per client connection;
+      - stdio / SSE: a uuid minted once per server session object, which for
+        stdio is the client process's lifetime.
+    Both are prefixed with the sanitized client name (e.g.
+    "claude_desktop_<id>") so session_records can be counted per client.
+    None when capture is disabled or no MCP request is active (a direct
+    call from Python has no conversation to attribute the turn to).
+    """
+    if not _is_session_capture_enabled():
+        return None
+
+    from mcp.server.lowlevel.server import request_ctx
+
+    try:
+        ctx = request_ctx.get()
+    except LookupError:
+        return None
+
+    client = "mcp"
+    params = getattr(ctx.session, "client_params", None)
+    if params and params.clientInfo and params.clientInfo.name:
+        client = _sanitize_client_name(params.clientInfo.name)
+
+    headers = getattr(getattr(ctx, "request", None), "headers", None)
+    transport_id = headers.get("mcp-session-id") if headers else None
+    if transport_id:
+        return f"{client}_{_sanitize_client_name(transport_id)}"
+
+    try:
+        connection_id = _connection_session_ids.get(ctx.session)
+        if connection_id is None:
+            connection_id = uuid.uuid4().hex
+            _connection_session_ids[ctx.session] = connection_id
+    except TypeError:  # session object is not weak-referenceable
+        return None
+    return f"{client}_{connection_id}"
+
+
+def _capture_turn(query: str, dataset_name: str | None) -> None:
+    """Record a recall query in the current conversation's session cache.
+
+    Fire-and-forget: the search never waits on it and a failure only logs.
+    The entry is cache-only (self_improvement=False), so nothing is
+    cognified per turn; improve() bridges the session later. Deliberately
+    not registered under _background_task_datasets, which recall reads to
+    report "still indexing" for an empty result.
+    """
+    session_id = _derived_session_id()
+    if not session_id or not query or not query.strip():
+        return
+    dataset_name = dataset_name or _agent_scoped_default_dataset()
+
+    async def capture():
+        try:
+            await cognee_client.remember(
+                data=query,
+                dataset_name=dataset_name,
+                session_id=session_id,
+                self_improvement=False,
+            )
+        except Exception:
+            logger.debug("Session capture skipped for %s", session_id, exc_info=True)
+
+    _track_background(capture())
 
 
 async def main():

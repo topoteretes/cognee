@@ -615,6 +615,29 @@ COGNEE_MCP_AGENT_SCOPED=false
 
 When disabled, no per-client datasets are autocreated.
 
+### Session capture (conversation turns over MCP)
+
+MCP gives the server no view of the conversation: unlike the Claude Code and Codex plugins, which capture every prompt and answer through host hooks, a client such as Claude Desktop, Cursor or the ChatGPT app only ever reaches cognee through tool calls. So the server records the one call that already happens on every turn: each `recall` stores its `query` as a turn of the current conversation, in the session cache of the dataset being searched. `improve` then defaults to that session, so a plain `improve()` distills what the user asked about instead of skipping with `no_session_ids`.
+
+The session id is derived per client connection and prefixed with the client name, so `session_records` can be counted per client:
+
+| Transport | Session id | Boundary |
+|---|---|---|
+| Streamable HTTP (hosted server, ChatGPT app) | `<client>_<mcp-session-id>` | the transport's own connection id |
+| stdio (Claude Desktop, Cursor) | `<client>_<uuid>` minted once per server process | the client's process lifetime |
+
+What this does and does not capture:
+
+- **Captured:** the user-side question of every turn on which the model calls `recall`. Stored cache-only (`self_improvement=False`), in the background, so recall latency is unchanged and nothing is cognified per turn.
+- **Not captured:** the assistant's answers, and turns on which the model does not call `recall`. MCP has no hook for either; full-fidelity capture needs a host with hooks (the Claude Code / Codex plugins).
+- **Not changed:** an explicit `remember` without `session_id` still writes permanent memory, and the search itself does not get the derived session injected (pass `session_id` for session-first search as before). A long-lived stdio process keeps one session until it restarts.
+
+The model can skip the write for one call with `recall(query=..., store=False)`, e.g. when the user asks not to remember something. To turn capture off for the whole server, set in `.env`:
+
+```bash
+COGNEE_MCP_SESSION_CAPTURE=false
+```
+
 ### Per-dataset isolation (`ENABLE_BACKEND_ACCESS_CONTROL`)
 
 Agent scoping decides which dataset *name* a tool defaults to. Whether two datasets are actually isolated at the storage layer is governed by cognee's `ENABLE_BACKEND_ACCESS_CONTROL` flag:
