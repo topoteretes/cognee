@@ -89,7 +89,7 @@ CamelCase by its capital letters.
 |---|---|---|---|
 | 1 | `quoted_phrase` | The whole query is one `"quoted phrase"` | `CHUNKS_LEXICAL` |
 | 2 | `coding_rules_intent` | `coding rules` / `coding standards` / `coding conventions`, or `code review guidelines` (and the `rules`, `standards`, `checklist`, `conventions` variants) | `CODING_RULES` |
-| 3 | `code_question` | Code phrasing — `where is … defined/declared/implemented`, what/who/which followed by `calls`, `imports`, `references`, `overrides`, `implements`, `inherits from`, `subclasses` or `depends on`, or `callers of` / `call sites of` / `usages of` / `implementations of` — **and** an identifier: snake_case (`parse_config`), CamelCase (`CodeRetriever`, `getUser`) or a call (`foo()`) | `CODE` (`ask` over the identifiers) |
+| 3 | `code_question` | An identifier — snake_case (`parse_config`), CamelCase (`CodeRetriever`, `getUser`) or a call (`foo()`) — right next to code phrasing: what/who/which, up to five words, then `calls`, `imports`, `references`, `overrides`, `implements`, `inherits from`, `subclasses` or `depends on` directly before or after the identifier; `where is`, up to five words, the identifier, at most one word, then `defined`/`declared`/`implemented`; or `callers of` / `call sites of` / `usages of` / `implementations of` directly before it (`the` may precede the identifier) | `CODE` (`ask` over the identifiers) |
 | 4 | `count_question` | `how many` or `total number of` | `BROAD` |
 | 5 | `time_scoped_question` | A time preposition (`in`, `before`, `after`, `since`, `between`, `from`, `on`, `during`, `as of`, …) directly followed by an absolute date — or `for` followed by one that ends the phrase (`scheduled for 2031`, but not `for 2000 users`): a four-digit year (`in 2019`, `in early 2024`), a decade (`in the 1990s`), a month and year (`in July 1969`), a full date (`on 7 November 1867`, `on March 1, 2024`), or an ISO date (`on 2024-03-01`) | `TEMPORAL` |
 | — | `default` | Anything else | `HYBRID_COMPLETION` |
@@ -144,10 +144,11 @@ That is why these are *not* auto-routed, even though they are valid
   the retriever then finds no window and answers as HYBRID. With no LLM
   configured, recall picks `CHUNKS` before the router runs, so a temporal
   question never reaches the interval extraction.
-- `CODE` *is* routed, but only when a question has both code phrasing and an
-  identifier. A wrong guess costs a wasted `CODE` search before the default
-  answers, so one signal alone is not enough: `what calls the billing service?` names no
-  symbol, and `what did Alice say about parse_config?` asks about prose. `use`
+- `CODE` *is* routed, but only when a question has code phrasing with an
+  identifier right next to the code word. A wrong guess costs a wasted `CODE`
+  search before the default answers, so one signal alone is not enough: `what calls the billing service?` names no
+  symbol, `what did Alice say about parse_config?` asks about prose, and in
+  `who calls the shots at YouTube?` the verb is not next to the name. `use`
   is not code phrasing, because brand names look like CamelCase identifiers
   (`which teams use PowerPoint?`), and dotted names are not identifiers,
   because domains and `e.g.` look like them. The route runs `ask` over the

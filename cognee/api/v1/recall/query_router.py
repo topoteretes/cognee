@@ -73,15 +73,15 @@ _FOR_DATE = (
     rf"|the\s+{_YEAR_AS_OBJECT})"
 )
 
-_CODE_PHRASE = (
-    r"(?i:"
-    r"\bwhere\s+(?:is|are)\b.*\b(?:defined|declared|implemented)\b"
-    r"|\b(?:what|who|which)\b.*\b"
-    r"(?:calls?|imports?|references?|overrides?|implements?"
-    r"|inherits?\s+from|subclass(?:es)?|depends?\s+on)\b"
-    r"|\b(?:callers?|call\s+sites?|usages?|implement(?:ation|er|or)s?)\s+of\b"
-    r")"
+_CODE_VERB = (
+    r"(?i:calls?|imports?|references?|overrides?|implements?"
+    r"|inherits?\s+from|subclass(?:es)?|depends?\s+on)"
 )
+# An optional article before an identifier: `the add_data_points function`.
+_THE = r"(?:(?i:the)\s+)?"
+# A gap of up to five words. Bounded, unlike `.*`, so a long query is matched in
+# linear time.
+_AT_MOST_5_WORDS = r"(?:\s+\S+){0,5}?\s+"
 
 _IDENTIFIER = (
     r"(?:"
@@ -92,14 +92,33 @@ _IDENTIFIER = (
     r")"
 )
 
-# The code signal: a question routes to CODE only when it has both code
-# phrasing (`where is … defined`, `what calls …`) and an identifier
-# (`parse_config`, `CodeRetriever`, `foo()`). A wrong guess costs a wasted CODE
-# search before the default answers, so one signal alone is not
-# enough: `what calls the billing service?` has no identifier, and `what did
-# Alice say about parse_config?` has no code phrasing. Case-sensitive, because
-# CamelCase is detected by its capital letters.
-_CODE_QUESTION = re.compile(rf"^(?=.*{_CODE_PHRASE})(?=.*{_IDENTIFIER})")
+# Which functions call resolve_extractor / What does extract_code_docs depend on
+_CODE_VERB_QUESTION = (
+    rf"(?i:\b(?:what|who|which)\b){_AT_MOST_5_WORDS}"
+    rf"(?:\b{_CODE_VERB}\s+{_THE}{_IDENTIFIER}|{_IDENTIFIER}\s+{_CODE_VERB}\b)"
+)
+
+# Where is the add_data_points function defined
+_CODE_DEFINITION = (
+    rf"(?i:\bwhere\s+(?:is|are)\b){_AT_MOST_5_WORDS}"
+    rf"{_IDENTIFIER}(?:\s+\S+)?\s+(?i:defined|declared|implemented)\b"
+)
+
+# callers of authorized_search
+_CODE_USAGE = (
+    r"(?i:\b(?:callers?|call\s+sites?|usages?|implement(?:ation|er|or)s?)\s+of)\s+"
+    rf"{_THE}{_IDENTIFIER}"
+)
+
+# The code signal: a question routes to CODE only when it has code phrasing
+# (`where is … defined`, `what calls …`) with an identifier (`parse_config`,
+# `CodeRetriever`, `foo()`) right next to the code word. A wrong guess costs a
+# wasted CODE search before the default answers, so neither alone is enough:
+# `what calls the billing service?` has no identifier, `what did Alice say about
+# parse_config?` has no code phrasing, and `who calls the shots at YouTube?` has
+# the identifier too far from the verb. Case-sensitive, because CamelCase is
+# detected by its capital letters.
+_CODE_QUESTION = re.compile(rf"{_CODE_VERB_QUESTION}|{_CODE_DEFINITION}|{_CODE_USAGE}")
 
 # (rule name, pattern, search type). Shape rules (what the input looks like) come
 # first and win: a quoted string is handled as what it is, even when its text

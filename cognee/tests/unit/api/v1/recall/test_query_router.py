@@ -30,9 +30,10 @@ GOLDEN = [
     ("What coding rules apply to error handling?", SearchType.CODING_RULES),
     ("Show me the code review guidelines", SearchType.CODING_RULES),
     ("What coding rules apply to gate.py?", SearchType.CODING_RULES),
-    # code_question: code phrasing plus an identifier
+    # code_question: code phrasing with an identifier right next to the code word
     ("Where is parse_config defined?", SearchType.CODE),
     ("WHERE IS parse_config DEFINED?", SearchType.CODE),
+    ("Where is the add_data_points function defined?", SearchType.CODE),
     ("What calls route_query?", SearchType.CODE),
     ("Who imports CodeRetriever?", SearchType.CODE),
     ("Which classes inherit from BaseRetriever?", SearchType.CODE),
@@ -46,6 +47,12 @@ GOLDEN = [
     # `use` is not code phrasing: brand names look like CamelCase identifiers
     ("Which teams use PowerPoint?", SearchType.HYBRID_COMPLETION),
     ("Who uses McDonald's coupons?", SearchType.HYBRID_COMPLETION),
+    # a code word not right next to the identifier is a noun or prose
+    ("What is the call schedule for JohnSmith?", SearchType.HYBRID_COMPLETION),
+    ("Which reference letters mention PayPal?", SearchType.HYBRID_COMPLETION),
+    ("What imports did China make from LinkedIn?", SearchType.HYBRID_COMPLETION),
+    ("Who calls the shots at YouTube?", SearchType.HYBRID_COMPLETION),
+    ("Which customers call support about their MacBook?", SearchType.HYBRID_COMPLETION),
     # count_question: a count across records
     ("How many customers churned?", SearchType.BROAD),
     ("how many rows are in table 2024_sales?", SearchType.BROAD),
