@@ -330,6 +330,8 @@ def test_api_key_and_self_hosted_url_never_reach_the_serialized_event(monkeypatc
     serialized = json.dumps(payloads[0])
     for value in ["ck_live_raw_api_key_value", "acme", "/some/path"]:
         assert value not in serialized
+
+
 class FakeAgentUser(FakeUser):
     """An agent: a child user whose email encodes its name and owner."""
 
