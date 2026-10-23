@@ -18,6 +18,10 @@ from cognee.modules.improve import (
 from cognee.modules.improve.config import ImproveConfig
 from cognee.modules.improve.result import ImproveResult, StageResult
 
+# Datasets in this module are stand-ins that exist in no database; entering their
+# database context (which remember's session writes now do) is stubbed.
+pytestmark = pytest.mark.usefixtures("stub_dataset_context")
+
 remember_module = importlib.import_module("cognee.api.v1.remember.remember")
 debounce_module = importlib.import_module("cognee.api.v1.remember.auto_improve_debounce")
 improve_pkg = importlib.import_module("cognee.api.v1.improve")
@@ -155,7 +159,7 @@ async def test_background_remember_records_improve_error(monkeypatch, permanent_
 
 @pytest.mark.asyncio
 async def test_session_bridge_records_improve_error(monkeypatch):
-    async def fake_add_to_session(session_id, data, user, node_set=None):
+    async def fake_add_to_session(session_id, data, user, node_set=None, dataset_id=None):
         return None
 
     async def failing_improve(**kwargs):
@@ -180,7 +184,7 @@ async def test_session_bridge_records_improve_error(monkeypatch):
 async def test_session_bridge_attaches_improve_result(monkeypatch):
     improve_result = _completed_improve()
 
-    async def fake_add_to_session(session_id, data, user, node_set=None):
+    async def fake_add_to_session(session_id, data, user, node_set=None, dataset_id=None):
         return None
 
     async def fake_improve(**kwargs):
@@ -210,7 +214,7 @@ async def test_auto_enabled_false_disables_both_paths(monkeypatch, permanent_pip
         calls["improve"] += 1
         return _completed_improve()
 
-    async def fake_add_to_session(session_id, data, user, node_set=None):
+    async def fake_add_to_session(session_id, data, user, node_set=None, dataset_id=None):
         return None
 
     monkeypatch.setattr(improve_pkg, "improve", counting_improve)
@@ -240,7 +244,7 @@ async def test_telemetry_never_carries_raw_session_ids(monkeypatch, permanent_pi
     def fake_send_telemetry(event_name, user, additional_properties=None, **kwargs):
         events.append((event_name, dict(additional_properties or {})))
 
-    async def fake_add_to_session(session_id, data, user, node_set=None):
+    async def fake_add_to_session(session_id, data, user, node_set=None, dataset_id=None):
         return None
 
     async def fake_improve(**kwargs):

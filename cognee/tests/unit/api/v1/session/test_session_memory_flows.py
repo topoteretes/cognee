@@ -2,7 +2,7 @@ import asyncio
 import importlib
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
@@ -12,6 +12,10 @@ from cognee.exceptions import CogneeValidationError
 from cognee.modules.recall.types.RecallResponse import ResponseQAEntry
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.types import SearchType
+
+# Datasets in this module are stand-ins that exist in no database; entering their
+# database context (which remember's session writes now do) is stubbed.
+pytestmark = pytest.mark.usefixtures("stub_dataset_context")
 
 # Import actual modules via importlib to avoid __init__.py name shadowing.
 # Several __init__.py files re-export functions with the same name as their
@@ -1031,7 +1035,9 @@ async def test_self_improvement_controls_session_bridge_without_skipping_cache(f
         )
         if result._task is not None:
             await result._task
-    store.assert_awaited_once_with("s1", "memory", user, node_set=None)
+    # The session write carries the dataset it is bound to, so its vectors land in
+    # that dataset's store; the id itself is whatever the resolver minted here.
+    store.assert_awaited_once_with("s1", "memory", user, node_set=None, dataset_id=ANY)
     assert improve.await_count == (0 if flag is False else 1)
     assert result.status == "session_stored"
 
