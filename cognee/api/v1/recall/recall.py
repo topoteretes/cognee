@@ -40,6 +40,9 @@ from cognee.modules.recall.types.RecallResponse import (
     ResponseToolEntry,
 )
 from cognee.modules.recall.types.SearchResultItem import SearchResultItem
+from cognee.modules.retrieval.broad_retriever import BroadLimitError
+from cognee.modules.retrieval.broad_store import BroadQueryError
+from cognee.modules.retrieval.code_retriever import CodeSeedNotFoundError
 from cognee.modules.retrieval.exceptions import SearchTypeNotSupported
 from cognee.modules.search.exceptions import UnsupportedSearchTypeError
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
@@ -56,22 +59,20 @@ logger = get_logger("recall")
 _MIN_WORD_LEN = 2
 
 # Routed types whose empty result means the lane was unavailable — no lexical
-# hits, no rules nodeset — and so is worth retrying as the default. Types the
-# router cannot pick never reach this set: the retry only second-guesses a guess.
-_RETRY_ON_EMPTY = frozenset({SearchType.CHUNKS_LEXICAL, SearchType.CODING_RULES})
+# hits, no rules nodeset, no code symbol or code graph, no BROAD answer — and so
+# is worth retrying as the default. Types the router cannot pick never reach this
+# set: the retry only second-guesses a guess.
+_RETRY_ON_EMPTY = frozenset(
+    {SearchType.CHUNKS_LEXICAL, SearchType.CODING_RULES, SearchType.CODE, SearchType.BROAD}
+)
 
 
 def _code_hits(payloads: list[SearchResultPayload]) -> list[SearchResultPayload]:
     """The routed CODE payloads whose ``ask`` found at least one seed.
 
-    Seed-miss markers (multi-dataset searches) and seedless results are misses.
-    Raises CodeGraphUnavailableError when no searched dataset has a code graph.
+    Seed-miss markers (multi-dataset searches, including datasets without a code
+    graph) and seedless results are misses.
     """
-    from cognee.modules.retrieval.code_retriever import CodeGraphUnavailableError
-
-    if payloads and all((p.completion or {}).get("code") == "no_code_graph" for p in payloads):
-        names = ", ".join(f"'{p.dataset_name}'" for p in payloads)
-        raise CodeGraphUnavailableError(f"No code graph in any searched dataset: {names}.")
     return [
         p for p in payloads if isinstance(p.result_object, dict) and p.result_object.get("seeds")
     ]
@@ -850,13 +851,21 @@ async def recall(
 
                 try:
                     graph_results = await _search(local_query_type, routed_config)
-                except (UnsupportedSearchTypeError, SearchTypeNotSupported) as error:
+                except (
+                    UnsupportedSearchTypeError,
+                    SearchTypeNotSupported,
+                    CodeSeedNotFoundError,
+                    BroadQueryError,
+                    BroadLimitError,
+                ) as error:
                     if not routed_guess:
                         raise
                     # The backend rejected a routed guess — a deployment-level
-                    # choice, not the caller's; the default always substitutes.
+                    # choice, not the caller's — or its lane cannot answer these
+                    # datasets (no code symbol or code graph, no working BROAD
+                    # query, a BROAD limit hit); either way the default substitutes.
                     logger.info(
-                        "Rule %s routed to %s, which the backend rejected (%s); retrying as %s.",
+                        "Rule %s routed to %s, which could not answer (%s); retrying as %s.",
                         routed_rule,
                         local_query_type.value,
                         error,
@@ -864,6 +873,11 @@ async def recall(
                     )
                     local_query_type = ROUTER_FALLBACK_TYPE
                     graph_results = await _search(local_query_type)
+
+                if routed_guess and local_query_type is SearchType.CODE:
+                    # Datasets whose ``ask`` found no symbol, or that have no
+                    # code graph, are misses, so all-miss is an empty result.
+                    graph_results = _code_hits(graph_results)
 
                 if routed_guess and not graph_results and local_query_type in _RETRY_ON_EMPTY:
                     logger.info(
@@ -874,11 +888,6 @@ async def recall(
                     )
                     local_query_type = ROUTER_FALLBACK_TYPE
                     graph_results = await _search(local_query_type)
-
-                if routed_guess and local_query_type is SearchType.CODE:
-                    # A routed CODE search is a hit or nothing; only a search
-                    # where no dataset has a code graph fails, and loudly.
-                    graph_results = _code_hits(graph_results)
 
                 # A fallback above may have changed the type that answered; the
                 # span recorded the routed one before the search ran.

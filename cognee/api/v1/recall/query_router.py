@@ -94,8 +94,8 @@ _IDENTIFIER = (
 
 # The code signal: a question routes to CODE only when it has both code
 # phrasing (`where is … defined`, `what calls …`) and an identifier
-# (`parse_config`, `CodeRetriever`, `foo()`). A routed CODE search does not
-# fall back to the default when it finds nothing, so one signal alone is not
+# (`parse_config`, `CodeRetriever`, `foo()`). A wrong guess costs a wasted CODE
+# search before the default answers, so one signal alone is not
 # enough: `what calls the billing service?` has no identifier, and `what did
 # Alice say about parse_config?` has no code phrasing. Case-sensitive, because
 # CamelCase is detected by its capital letters.

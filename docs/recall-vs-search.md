@@ -145,8 +145,8 @@ That is why these are *not* auto-routed, even though they are valid
   configured, recall picks `CHUNKS` before the router runs, so a temporal
   question never reaches the interval extraction.
 - `CODE` *is* routed, but only when a question has both code phrasing and an
-  identifier. A routed `CODE` search does not fall back to the default, so one
-  signal alone is not enough: `what calls the billing service?` names no
+  identifier. A wrong guess costs a wasted `CODE` search before the default
+  answers, so one signal alone is not enough: `what calls the billing service?` names no
   symbol, and `what did Alice say about parse_config?` asks about prose. `use`
   is not code phrasing, because brand names look like CamelCase identifiers
   (`which teams use PowerPoint?`), and dotted names are not identifiers,
@@ -164,9 +164,9 @@ That is why these are *not* auto-routed, even though they are valid
   the default. A count that is also a code question (`how many callers of
   parse_config`) goes to `CODE`, because `BROAD` reads document text and code
   has none; a count scoped to a date (`how many incidents in 2019`) goes to
-  `BROAD`, because `TEMPORAL` only reranks HYBRID's top results. `BROAD` is
-  not retried: its failures (no working SQL query, a document larger than a
-  batch) reach the caller.
+  `BROAD`, because `TEMPORAL` only reranks HYBRID's top results. When `BROAD`
+  cannot answer (no working SQL query, a document larger than a batch) the
+  question is retried as the default; see below.
 - "Exact"/"verbatim" phrasing does not select `CHUNKS_LEXICAL`. BM25 tokenizes
   the raw query, so the trigger word itself becomes a rare, high-IDF search
   term and skews the ranking it was meant to sharpen. `quoted_phrase` has no
@@ -178,20 +178,22 @@ That is why these are *not* auto-routed, even though they are valid
 ### When a routed strategy comes up empty
 
 A routed type is a guess, so `recall()` does not let one do worse than the
-default — except `CODE` and `BROAD`, below. When the router picked a type **other than the default**, the query is
-retried once as `HYBRID_COMPLETION` in two cases:
+default. When the router picked a type **other than the default**, the query is
+retried once as `HYBRID_COMPLETION` in three cases:
 
-- the backend rejects the type; or
+- the backend rejects the type;
+- the lane cannot answer these datasets — `CODE` with no matching symbol or
+  no code graph (`CodeSeedNotFoundError`, `CodeGraphUnavailableError`),
+  `BROAD` with no working SQL query or a limit hit (`BroadQueryError`,
+  `BroadLimitError`); or
 - the search returns nothing and the empty result means the lane was
   unavailable — `CHUNKS_LEXICAL` with no lexical hits, `CODING_RULES` on a
-  dataset with no rules nodeset.
+  dataset with no rules nodeset, `CODE` when no dataset's `ask` found a
+  symbol, `BROAD` with no answer.
 
-Routed `CODE` and `BROAD` searches are retried only when the backend rejects the type,
-never for their result. A routed `CODE` search returns the datasets whose `ask` found at
-least one symbol, or nothing when none did, and raises `CodeGraphUnavailableError` only
-when no searched dataset has a code graph — with several datasets, one without a code
-graph is skipped, as a dataset without data is. A routed `BROAD` search's failures reach
-the caller.
+A routed `CODE` search keeps only the datasets whose `ask` found at least one
+symbol; a dataset without a code graph counts as a miss. "No data"
+(`NoDataError`) is never retried: the default would find nothing either.
 
 The search history records the type that actually answered. Two things are
 never second-guessed: a type you pinned yourself returns empty or raises as
