@@ -66,7 +66,7 @@ async def test_single_repo_runs_code_graph_pipeline(code_remember_env):
     )
 
     code_remember_env["resolve"].assert_awaited_once_with(
-        "https://github.com/org/repo", credentials=None
+        "https://github.com/org/repo", credentials=None, include_documents=False
     )
     code_remember_env["pipeline"].assert_awaited_once()
     call = code_remember_env["pipeline"].await_args

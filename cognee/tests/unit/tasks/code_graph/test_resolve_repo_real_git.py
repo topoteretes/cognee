@@ -45,6 +45,7 @@ class Origin:
         self.bare = root / "origin.git"
         self.work = root / "work"
         _git(root, "init", "-q", "--bare", "-b", "main", str(self.bare))
+        _git(self.bare, "config", "uploadpack.allowFilter", "true")
         _git(root, "init", "-q", "-b", "main", str(self.work))
         _git(self.work, "remote", "add", "origin", str(self.bare))
         self._commit("main-1")
@@ -110,14 +111,14 @@ def _hermetic_git(tmp_path, monkeypatch):
 @pytest.fixture
 def origin(tmp_path, monkeypatch):
     origin = Origin(tmp_path / "remote")
-    real_run_git = resolve_module._run_git
+    real_exec_git = resolve_module._exec_git
 
-    async def run_git(args, cwd=None, env=None):
+    async def exec_git(args, cwd=None, env=None):
         # A file:// URL, not a path: only then is the clone shallow, like a real remote.
         remote = origin.bare.resolve().as_uri()
-        return await real_run_git([remote if arg == _URL else arg for arg in args], cwd, env)
+        return await real_exec_git([remote if arg == _URL else arg for arg in args], cwd, env)
 
-    monkeypatch.setattr(resolve_module, "_run_git", run_git)
+    monkeypatch.setattr(resolve_module, "_exec_git", exec_git)
     real_origin_url = resolve_module._origin_url
 
     async def origin_url(clone):
@@ -452,3 +453,170 @@ async def test_a_failed_clone_does_not_show_the_server_directory(origin, clones,
 
     assert str(clones) not in error.value.message
     assert str(clones.resolve()) not in error.value.message
+
+
+@pytest.mark.asyncio
+async def test_partial_clone_omits_large_binary_and_pins_commit(origin, clones, monkeypatch):
+    from cognee.tasks.code_graph.repo_resources import disk_usage_bytes
+    from cognee.tasks.code_graph.repo_selection import read_repository_snapshot
+
+    (origin.work / "weights.bin").write_bytes(os.urandom(8 * 1024 * 1024))
+    (origin.work / "app.py").write_text("print('hello')")
+    origin.commit("main", "with-artifact")
+    monkeypatch.setenv("COGNEE_REPOS_MAX_BYTES", str(1024 * 1024))
+
+    target = await _resolve(clones)
+
+    assert (target / "app.py").read_text() == "print('hello')"
+    assert not (target / "weights.bin").exists()
+    assert disk_usage_bytes(clones) < 1024 * 1024
+    snapshot = read_repository_snapshot(target)
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=target, text=True).strip()
+    assert snapshot["commit"] == head
+    assert snapshot["skipped"]["binary"] == 1
+    # The binary is not merely absent from the checkout: it never arrived in .git.
+    blob = subprocess.check_output(
+        ["git", "rev-parse", "HEAD:weights.bin"], cwd=origin.work, text=True
+    ).strip()
+    local_objects = subprocess.check_output(
+        ["git", "cat-file", "--batch-all-objects", "--batch-check=%(objectname)"],
+        cwd=target,
+        text=True,
+    ).splitlines()
+    assert blob not in local_objects
+
+
+@pytest.mark.asyncio
+async def test_document_assets_follow_the_requested_mode_on_refresh(origin, clones):
+    (origin.work / "architecture.png").write_bytes(b"image-document")
+    (origin.work / "README.md").write_text("# architecture")
+    origin.commit("main", "with-documents")
+
+    target = await resolve_module.resolve_repo_source(
+        _URL, clones_dir=clones, include_documents=False
+    )
+    assert not (target / "architecture.png").exists()
+    assert (target / "README.md").exists()  # enola's deterministic markdown extractor
+
+    assert await _resolve(clones) == target
+    assert (target / "architecture.png").read_bytes() == b"image-document"
+    await resolve_module.resolve_repo_source(_URL, clones_dir=clones, include_documents=False)
+    assert not (target / "architecture.png").exists()
+
+
+@pytest.mark.asyncio
+async def test_hidden_configuration_and_custom_extractor_inputs_are_preserved(origin, clones):
+    files = {
+        ".gitignore": "generated/\n",
+        ".github/workflows/check.yml": "name: check\n",
+        "custom/input.unusual": "custom extractor input",
+    }
+    for name, content in files.items():
+        path = origin.work / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+    origin.commit("main", "extractor-config")
+
+    target = await resolve_module.resolve_repo_source(
+        _URL, clones_dir=clones, include_documents=False
+    )
+    for name, content in files.items():
+        assert (target / name).read_text() == content
+
+
+@pytest.mark.asyncio
+async def test_a_server_ignoring_the_filter_is_stopped_and_leaves_no_clone(origin, clones):
+    _git(origin.bare, "config", "uploadpack.allowFilter", "false")
+
+    with pytest.raises(resolve_module.CodeRepositoryError, match="ignored the partial clone"):
+        await _resolve(clones)
+
+    assert _clones_in(clones) == []
+    assert _temporary_clones(clones) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("existing", [False, True])
+async def test_disk_budget_failure_cleans_new_clone_and_failed_refresh(
+    origin, clones, monkeypatch, existing
+):
+    from cognee.tasks.code_graph.repo_resources import RepositoryResourceError
+
+    if existing:
+        await _resolve(clones)
+    (origin.work / "large.py").write_bytes(os.urandom(2 * 1024 * 1024))
+    origin.commit("main", "large-source")
+    monkeypatch.setenv("COGNEE_REPOS_MAX_BYTES", str(1024 * 1024))
+
+    with pytest.raises(RepositoryResourceError):
+        await _resolve(clones)
+
+    assert _temporary_clones(clones) == []
+    assert not resolve_module.clone_dir(_URL, clones_dir=clones).exists()
+
+
+@pytest.mark.asyncio
+async def test_exact_sparse_paths_keep_spaces_and_glob_characters(origin, clones):
+    names = ["space name.py", "[literal].py", "star*.py", "question?.py", "trailing .py"]
+    if os.name == "nt":
+        names = names[:2]  # Windows cannot represent '*' or '?' in a filename.
+    for name in names:
+        (origin.work / name).write_text("# " + name)
+    origin.commit("main", "literal-paths")
+
+    target = await _resolve(clones)
+    for name in names:
+        assert (target / name).read_text() == "# " + name
+
+
+@pytest.mark.asyncio
+async def test_selected_lfs_pointer_fails_without_running_smudge(origin, clones, tmp_path):
+    # A configured smudge filter would write this marker if checkout invoked it.
+    marker = tmp_path / "smudged"
+    _git(origin.work, "config", "filter.lfs.smudge", f"touch {marker}")
+    (origin.work / ".gitattributes").write_text("large.py filter=lfs\n")
+    (origin.work / "large.py").write_text(
+        "version https://git-lfs.github.com/spec/v1\n" + "oid sha256:" + "a" * 64 + "\nsize 123\n"
+    )
+    origin.commit("main", "lfs-pointer")
+    # The config belongs to the Git client, not the clone's remote.
+    _git(origin.work, "config", "--global", "filter.lfs.smudge", f"touch {marker}")
+    _git(origin.work, "config", "--global", "filter.lfs.required", "true")
+
+    with pytest.raises(resolve_module.CodeRepositoryError, match="Git LFS"):
+        await _resolve(clones)
+    assert not marker.exists()
+    assert _temporary_clones(clones) == []
+
+
+@pytest.mark.asyncio
+async def test_submodules_are_recorded_without_recursive_clone(origin, clones):
+    from cognee.tasks.code_graph.repo_selection import read_repository_snapshot
+
+    commit = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=origin.work, text=True
+    ).strip()
+    _git(origin.work, "update-index", "--add", "--cacheinfo", f"160000,{commit},dependency")
+    _git(origin.work, "commit", "-qm", "submodule")
+    _git(origin.work, "push", "-q", "origin", "main")
+    target = await _resolve(clones)
+    assert read_repository_snapshot(target)["skipped"]["submodule"] == 1
+    assert not (target / "dependency" / ".git").exists()
+
+
+@pytest.mark.asyncio
+async def test_incomplete_tree_never_checks_out_or_publishes_clone(origin, clones, monkeypatch):
+    real_exec = resolve_module._exec_git
+    calls = []
+
+    async def truncated_tree(args, cwd=None, env=None):
+        calls.append(args[0])
+        code, stdout, stderr = await real_exec(args, cwd=cwd, env=env)
+        return code, stdout.rstrip("\0") if args[0] == "ls-tree" else stdout, stderr
+
+    monkeypatch.setattr(resolve_module, "_exec_git", truncated_tree)
+    with pytest.raises(resolve_module.CodeRepositoryError, match="tree listing is incomplete"):
+        await _resolve(clones)
+    assert "reset" not in calls
+    assert not resolve_module.clone_dir(_URL, clones_dir=clones).exists()
+    assert _temporary_clones(clones) == []

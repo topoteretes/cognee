@@ -26,6 +26,7 @@ into its hashed directory, and the old directory is left in place.
 import asyncio
 import base64
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -59,6 +60,7 @@ _NAMES_DIR = ".names"
 _FALSEY = {"false", "0", "no", "off"}
 
 _GIT_TIMEOUT_SECONDS = 600
+_FILTER_REFUSED = b"filtering not recognized by server"
 
 # github.com / gitlab.com repository roots are detected by shape; any other
 # host is a repository only when the URL ends in ".git". These are the
@@ -340,6 +342,11 @@ def _noninteractive_env(ssh_command: str | None = None) -> dict:
 # empty credential.helper resets the helper list built from the system, global
 # and repository config, which git reads before the environment's entries.
 _NO_STORED_CREDENTIALS_CONFIG = (("credential.helper", ""), ("core.askPass", ""))
+_NO_LFS_SMUDGE_CONFIG = (
+    ("filter.lfs.process", ""),
+    ("filter.lfs.smudge", ""),
+    ("filter.lfs.required", "false"),
+)
 
 
 def _git_config_entries(env) -> list[tuple[str, str]]:
@@ -373,6 +380,7 @@ def _git_env(env: dict | None = None) -> dict:
         _git_config_entries(os.environ)
         + _git_config_entries(extra)
         + list(_NO_STORED_CREDENTIALS_CONFIG)
+        + list(_NO_LFS_SMUDGE_CONFIG)
     )
     merged = {
         name: value
@@ -382,6 +390,20 @@ def _git_env(env: dict | None = None) -> dict:
     }
     merged["GIT_ASKPASS"] = ""
     merged["SSH_ASKPASS"] = ""
+    # LFS contents are never downloaded implicitly during a sparse checkout.
+    merged["GIT_LFS_SKIP_SMUDGE"] = "1"
+    merged["LC_ALL"] = "C"
+    # A service launched from a Git hook must not write into that hook's index
+    # or object store, outside the measured clone directory.
+    for name in (
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_COMMON_DIR",
+        "GIT_INDEX_FILE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    ):
+        merged.pop(name, None)
     merged["GIT_CONFIG_COUNT"] = str(len(entries))
     for index, (key, value) in enumerate(entries):
         merged[f"GIT_CONFIG_KEY_{index}"] = key
@@ -389,7 +411,7 @@ def _git_env(env: dict | None = None) -> dict:
     return merged
 
 
-async def _finish_cleanup(awaitable):
+async def finish_cleanup(awaitable):
     """Finish cleanup before propagating cancellation, including repeated cancels."""
     task = asyncio.ensure_future(awaitable)
     cancelled = False
@@ -410,8 +432,8 @@ async def _finish_cleanup(awaitable):
     return result
 
 
-async def _stop_git(spawning, communication):
-    """Kill Git and its helpers, then reap Git and drain the inherited pipes."""
+async def stop_process(spawning, communication):
+    """Kill a subprocess and its helpers, then reap it and drain the inherited pipes."""
     process = await spawning
     if os.name == "nt":
         killer = await asyncio.create_subprocess_exec(
@@ -456,21 +478,58 @@ async def _exec_git(args, cwd: Path | None = None, env: dict | None = None) -> t
         )
     )
     communication = None
+    refused = asyncio.Event()
+    refusal = None
+
+    async def read_stderr(stream):
+        chunks = []
+        tail = b""
+        while chunk := await stream.read(65536):
+            chunks.append(chunk)
+            combined = tail + chunk
+            if _FILTER_REFUSED in combined:
+                refused.set()
+            tail = combined[-len(_FILTER_REFUSED) :]
+        return b"".join(chunks)
+
+    async def communicate(process):
+        stdout, stderr = await asyncio.gather(process.stdout.read(), read_stderr(process.stderr))
+        await process.wait()
+        return stdout, stderr
+
     try:
         # Keep the spawn awaitable: cancellation while the subprocess transport
         # is being created must still leave us a process to terminate and reap.
         process = await asyncio.shield(spawning)
-        communication = asyncio.create_task(process.communicate())
-        stdout, stderr = await asyncio.wait_for(
-            asyncio.shield(communication), timeout=_GIT_TIMEOUT_SECONDS
+        communication = asyncio.create_task(communicate(process))
+        refusal = asyncio.create_task(refused.wait())
+        done, _pending = await asyncio.wait(
+            {communication, refusal},
+            timeout=_GIT_TIMEOUT_SECONDS,
+            return_when=asyncio.FIRST_COMPLETED,
         )
-    except asyncio.CancelledError:
-        await _finish_cleanup(_stop_git(spawning, communication))
+        if refused.is_set():
+            raise CodeRepositoryError(
+                message="The Git server ignored the partial clone filter; transfer stopped."
+            )
+        if not done:
+            raise asyncio.TimeoutError
+        stdout, stderr = await communication
+    except (asyncio.CancelledError, CodeRepositoryError):
+        await finish_cleanup(stop_process(spawning, communication))
         raise
     except asyncio.TimeoutError:
-        await _finish_cleanup(_stop_git(spawning, communication))
+        await finish_cleanup(stop_process(spawning, communication))
         raise CodeRepositoryError(message=f"git {args[0]} timed out after {_GIT_TIMEOUT_SECONDS}s.")
-    return process.returncode, stdout.decode(errors="replace"), stderr.decode(errors="replace")
+    finally:
+        if refusal is not None:
+            refusal.cancel()
+            await finish_cleanup(asyncio.gather(refusal, return_exceptions=True))
+    return (
+        process.returncode,
+        stdout.decode(errors="surrogateescape"),
+        stderr.decode(errors="replace"),
+    )
 
 
 async def _run_git(args, cwd: Path | None = None, env: dict | None = None) -> tuple:
@@ -611,6 +670,7 @@ async def resolve_repo_source(
     clones_dir: Path | None = None,
     credentials: str | None = None,
     branch: str | None = None,
+    include_documents: bool = True,
 ) -> Path:
     """Return a local directory for the repo spec, shallow-cloning remote URLs.
 
@@ -631,7 +691,30 @@ async def resolve_repo_source(
     URL — and everything derived from it (slug, remote, logs, errors) —
     never carries a secret. Embedding credentials in the URL userinfo still
     works but is the legacy path.
+
+    Remote clones download trees first, then sparse-checkout selected paths at one
+    commit. ``include_documents=False`` omits binary document assets; text stays
+    available to enola. Disk limits are operator settings COGNEE_REPOS_MAX_BYTES
+    and COGNEE_REPOS_MIN_FREE_BYTES, shared by all clones under ``clones_dir``.
+
+    One clone serves every caller of a URL: a call with the other ``include_documents``
+    mode, or a refresh the budget interrupts, changes or removes it while an earlier
+    caller may still be reading it. Route one URL to one worker, in one mode at a time.
     """
+    from cognee.tasks.code_graph.repo_resources import with_repository_disk_budget
+
+    async def resolve():
+        return await _resolve_repo_source(spec, clones_dir, credentials, branch, include_documents)
+
+    if not is_remote_repo(spec):
+        return await resolve()
+    base = Path(clones_dir) if clones_dir else default_clones_dir()
+    return await with_repository_disk_budget(resolve, base)
+
+
+async def _resolve_repo_source(spec, clones_dir, credentials, branch, include_documents) -> Path:
+    from cognee.tasks.code_graph.repo_resources import RepositoryResourceError
+
     if not is_remote_repo(spec):
         if branch is not None:
             raise CodeRepositoryError(
@@ -729,6 +812,7 @@ async def resolve_repo_source(
     credentialed = has_credentials or bool(credentials)
 
     base = Path(clones_dir) if clones_dir else default_clones_dir()
+    git_env = {**(git_env or {}), "TMPDIR": str(base.resolve())}
     target = clone_dir(clean_url, branch, base)
     # The slug regex already forbids separators and dot-runs; keep an
     # explicit containment check so a clone can never land outside the
@@ -746,7 +830,7 @@ async def resolve_repo_source(
     async with _clone_lock(target):
         # Left by a holder that died mid-clone; nobody else uses them while we hold the lock.
         for leftover in target.parent.glob(f".{target.name}.tmp-*"):
-            await _finish_cleanup(asyncio.to_thread(shutil.rmtree, leftover))
+            await finish_cleanup(asyncio.to_thread(shutil.rmtree, leftover))
 
         if (target / ".git").is_dir():
             # The slug is shared by every caller, so never index a clone of another
@@ -760,15 +844,29 @@ async def resolve_repo_source(
                     "Remove it from the clones directory to clone the repository again."
                 )
             if await _has_commit(target):
-                await _refresh_clone(
-                    target, url, clean_url, branch, has_credentials, credentialed, git_env, _scrub
-                )
+                try:
+                    await _refresh_clone(
+                        target,
+                        url,
+                        clean_url,
+                        branch,
+                        has_credentials,
+                        credentialed,
+                        git_env,
+                        _scrub,
+                        include_documents,
+                    )
+                except (asyncio.CancelledError, RepositoryResourceError):
+                    # A failed refresh can leave packs/index files behind. This is
+                    # an SDK-owned cache; rebuild it on retry rather than accumulating output.
+                    await finish_cleanup(asyncio.to_thread(shutil.rmtree, target))
+                    raise
                 await _claim_graph_name(base, clean_url)
                 return target
             # Interrupted before it had a commit (made before clones were renamed
             # into place): never index it, clone it again instead.
             logger.warning("Replacing the incomplete clone at %s", target)
-            await _finish_cleanup(asyncio.to_thread(shutil.rmtree, target))
+            await finish_cleanup(asyncio.to_thread(shutil.rmtree, target))
 
         if target.exists():
             if target.is_dir() and not any(target.iterdir()):
@@ -805,6 +903,9 @@ async def resolve_repo_source(
                     "core.symlinks=false",
                     "--depth",
                     "1",
+                    "--filter=blob:none",
+                    "--no-checkout",
+                    "--no-recurse-submodules",
                     *branch_args,
                     url,
                     str(partial),
@@ -815,6 +916,7 @@ async def resolve_repo_source(
                 raise CodeRepositoryError(
                     message=f"Failed to clone '{clean_url}': {_scrub(stderr[-1000:])}"
                 )
+            await _checkout_snapshot(partial, "HEAD", include_documents, git_env, _scrub)
             if has_credentials:
                 returncode, stderr = await _run_git(
                     ["remote", "set-url", "origin", clean_url], cwd=partial
@@ -832,7 +934,7 @@ async def resolve_repo_source(
             os.replace(partial, target)
         finally:
             if partial.exists():
-                await _finish_cleanup(asyncio.to_thread(shutil.rmtree, partial))
+                await finish_cleanup(asyncio.to_thread(shutil.rmtree, partial))
         return target
 
 
@@ -854,6 +956,7 @@ async def _refresh_clone(
     credentialed: bool,
     git_env: dict | None,
     scrub,
+    include_documents: bool,
 ) -> None:
     """Bring the existing clone ``target`` up to date; never return stale success."""
     marker = target / ".git" / _CREDENTIALED_MARKER
@@ -866,12 +969,26 @@ async def _refresh_clone(
     remote = url if has_credentials else "origin"
     ref = f"refs/heads/{branch}" if branch is not None else "HEAD"
     returncode, stderr = await _run_git(
-        ["fetch", "--depth", "1", remote, ref], cwd=target, env=git_env
+        ["fetch", "--depth", "1", "--filter=blob:none", "--no-recurse-submodules", remote, ref],
+        cwd=target,
+        env=git_env,
     )
     if returncode != 0 and branch is not None and await _remote_ref_missing(url, branch, git_env):
         raise CodeRepositoryError(message=f"Branch '{branch}' was not found in '{clean_url}'.")
     if returncode == 0:
-        returncode, stderr = await _run_git(["reset", "--hard", "FETCH_HEAD"], cwd=target)
+        checkout_env = dict(git_env or {})
+        if has_credentials:
+            # Lazy blob fetches use origin, even though the initial fetch used the
+            # token URL. Override it only for this process, never in stored config.
+            index = len(_git_config_entries(checkout_env))
+            checkout_env.update(
+                {
+                    "GIT_CONFIG_COUNT": str(index + 1),
+                    f"GIT_CONFIG_KEY_{index}": "remote.origin.url",
+                    f"GIT_CONFIG_VALUE_{index}": url,
+                }
+            )
+        await _checkout_snapshot(target, "FETCH_HEAD", include_documents, checkout_env, scrub)
     if returncode != 0:
         # A clone made with credentials may be private: it is handed out only
         # through a refresh that proves access. Credentials the caller passed
@@ -887,3 +1004,53 @@ async def _refresh_clone(
         )
     elif credentialed:
         marker.touch()
+
+
+async def _checkout_snapshot(
+    repo: Path, ref: str, include_documents: bool, env: dict, scrub
+) -> None:
+    from cognee.tasks.code_graph.repo_resources import check_disk, repository_disk_config
+    from cognee.tasks.code_graph.repo_selection import (
+        check_selected_content,
+        select_tree,
+        write_repository_snapshot,
+        write_sparse_patterns,
+    )
+
+    code, commit, stderr = await _exec_git(
+        ["rev-parse", "--verify", f"{ref}^{{commit}}"], cwd=repo, env=env
+    )
+    commit = commit.strip()
+    if code or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", commit):
+        raise CodeRepositoryError(
+            message=f"Could not resolve repository commit: {scrub(stderr[-500:])}"
+        )
+    code, tree, stderr = await _exec_git(
+        ["ls-tree", "-rz", "--full-tree", commit], cwd=repo, env=env
+    )
+    if code:
+        raise CodeRepositoryError(message=f"Could not list repository tree: {scrub(stderr[-500:])}")
+    paths, skipped = select_tree(tree, include_documents)
+    await asyncio.to_thread(write_sparse_patterns, repo, paths)
+    for args in (
+        ["config", "remote.origin.promisor", "true"],
+        ["config", "remote.origin.partialclonefilter", "blob:none"],
+        ["config", "core.sparseCheckout", "true"],
+        ["config", "core.sparseCheckoutCone", "false"],
+        ["reset", "--hard", commit],
+    ):
+        code, stderr = await _run_git(args, cwd=repo, env=env)
+        if code:
+            raise CodeRepositoryError(
+                message=f"Could not checkout repository: {scrub(stderr[-500:])}"
+            )
+    await asyncio.to_thread(check_selected_content, repo, paths)
+    snapshot = {
+        "commit": commit,
+        "include_documents": include_documents,
+        "selected_files": len(paths),
+        "skipped": skipped,
+    }
+    write_repository_snapshot(repo, snapshot)
+    await asyncio.to_thread(check_disk, repo.parent, repository_disk_config())
+    logger.info("Repository %s: selected %d files; skipped %s", commit, len(paths), skipped)

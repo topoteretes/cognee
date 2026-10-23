@@ -79,7 +79,7 @@ async def test_a_cancelled_cleanup_that_fails_still_cancels():
         await asyncio.sleep(0.05)
         raise RuntimeError("cleanup failed")
 
-    task = asyncio.ensure_future(resolve_module._finish_cleanup(failing_cleanup()))
+    task = asyncio.ensure_future(resolve_module.finish_cleanup(failing_cleanup()))
     await asyncio.sleep(0)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):

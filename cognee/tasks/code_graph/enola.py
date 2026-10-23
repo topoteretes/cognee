@@ -17,6 +17,7 @@ import os
 import platform
 import shutil
 import sysconfig
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -123,6 +124,38 @@ async def run_enola_generate(
     Raises EnolaNotInstalledError when no binary is found; nothing is
     downloaded at runtime (the binary ships with cognee's core dependencies).
     """
+    from cognee.tasks.code_graph.repo_resources import (
+        RepositoryResourceError,
+        with_repository_disk_budget,
+    )
+    from cognee.tasks.code_graph.repo_selection import SNAPSHOT_FILE
+    from cognee.tasks.code_graph.resolve_repo import finish_cleanup
+
+    repo_path = Path(repo_path)
+    if (repo_path / ".git" / SNAPSHOT_FILE).is_file():
+        started = False
+
+        async def generate():
+            nonlocal started
+            started = True
+            return await _run_enola_generate(repo_path, timeout)
+
+        try:
+            return await with_repository_disk_budget(generate, repo_path.parent)
+        except RepositoryResourceError:
+            # The process has been reaped by the guard. Reclaim generated output
+            # so a failed run cannot keep the shared clone root over budget.
+            snapshot = repo_path / ".enola"
+            if started and snapshot.is_dir():
+                await finish_cleanup(asyncio.to_thread(shutil.rmtree, snapshot))
+            raise
+    return await _run_enola_generate(repo_path, timeout)
+
+
+async def _run_enola_generate(repo_path: Path, timeout: float) -> Path:
+    from cognee.tasks.code_graph.repo_selection import SNAPSHOT_FILE
+    from cognee.tasks.code_graph.resolve_repo import finish_cleanup, stop_process
+
     binary = find_enola_binary()
     repo_path = Path(repo_path)
 
@@ -138,22 +171,40 @@ async def run_enola_generate(
 
     logger.info("Running enola: %s (cwd=%s)", " ".join(command), repo_path)
 
-    process = await asyncio.create_subprocess_exec(
-        *command,
-        cwd=str(repo_path),
-        env={**os.environ, **_SUBPROCESS_ENV_OVERRIDES},
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
+    process_env = {**os.environ, **_SUBPROCESS_ENV_OVERRIDES}
+    scratch = None
+    if (repo_path / ".git" / SNAPSHOT_FILE).is_file():
+        # Only a clone cognee manages is measured against the budget; a local checkout
+        # is never written into. Scratch output belongs to the measured clone volume.
+        scratch = tempfile.mkdtemp(prefix="cognee-enola-", dir=(repo_path / ".git").resolve())
+        process_env["TMPDIR"] = scratch
+    spawning = asyncio.create_task(
+        asyncio.create_subprocess_exec(
+            *command,
+            cwd=str(repo_path),
+            env=process_env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            start_new_session=os.name != "nt",
+        )
     )
 
+    communication = None
     try:
-        _stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        process = await asyncio.shield(spawning)
+        communication = asyncio.create_task(process.communicate())
+        _stdout, stderr = await asyncio.wait_for(asyncio.shield(communication), timeout=timeout)
+    except asyncio.CancelledError:
+        await finish_cleanup(stop_process(spawning, communication))
+        raise
     except asyncio.TimeoutError:
-        process.kill()
-        await process.wait()
+        await finish_cleanup(stop_process(spawning, communication))
         raise EnolaSnapshotError(
             message=f"enola timed out after {timeout} seconds on '{repo_path}'."
         )
+    finally:
+        if scratch is not None:
+            await finish_cleanup(asyncio.to_thread(shutil.rmtree, scratch))
 
     stderr_text = stderr.decode(errors="replace") if stderr else ""
     if process.returncode != 0:

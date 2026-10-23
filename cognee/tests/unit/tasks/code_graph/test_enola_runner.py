@@ -3,6 +3,8 @@ import importlib
 
 import pytest
 
+from cognee.tasks.code_graph.repo_selection import SNAPSHOT_FILE
+
 enola_module = importlib.import_module("cognee.tasks.code_graph.enola")
 
 
@@ -147,3 +149,31 @@ async def test_run_enola_generate_returns_snapshot_dir(monkeypatch, tmp_path):
 
     assert snapshot_dir == repo_path / ".enola"
     assert (snapshot_dir / "facts.jsonl").is_file()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("managed_clone", [False, True])
+async def test_enola_scratch_is_only_made_inside_a_managed_clone(
+    monkeypatch, tmp_path, managed_clone
+):
+    """A local checkout is never written into; a managed clone keeps scratch on its volume."""
+    monkeypatch.setenv("ENOLA_PATH", str(_make_fake_binary(tmp_path)))
+    repo_path = tmp_path / "repo"
+    (repo_path / ".git").mkdir(parents=True)
+    if managed_clone:
+        (repo_path / ".git" / SNAPSHOT_FILE).write_text("{}")
+    seen = {}
+
+    async def fake_create_subprocess_exec(*args, **kwargs):
+        seen["env"] = kwargs["env"]
+        seen["entries"] = sorted(p.name for p in (repo_path / ".git").iterdir())
+        return _FakeProcess(returncode=0)
+
+    monkeypatch.setattr(enola_module.asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+
+    with pytest.raises(enola_module.EnolaSnapshotError):  # the fake wrote no facts.jsonl
+        await enola_module.run_enola_generate(repo_path)
+
+    assert any(name.startswith("cognee-enola-") for name in seen["entries"]) is managed_clone
+    assert ("TMPDIR" in seen["env"] and ".git" in seen["env"]["TMPDIR"]) is managed_clone
+    assert not any(p.name.startswith("cognee-enola-") for p in (repo_path / ".git").iterdir())

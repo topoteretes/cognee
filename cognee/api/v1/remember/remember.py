@@ -1722,8 +1722,15 @@ async def _remember_inner(
                 )
 
         async def _run_one_repo(spec, item: dict) -> None:
-            repo_path = await resolve_repo_source(spec, credentials=repo_credentials)
+            repo_path = await resolve_repo_source(
+                spec, credentials=repo_credentials, include_documents=False
+            )
             item["path"] = str(repo_path)
+            from cognee.tasks.code_graph.repo_selection import read_repository_snapshot
+
+            snapshot = read_repository_snapshot(repo_path)
+            if snapshot is not None:
+                item["repository_snapshot"] = snapshot
             # The Data row's stamps are read-modify-written as a whole: holding
             # the dataset lock from the row write to the final stamp keeps a
             # concurrent add()/cognify() of the dataset from overwriting them.
