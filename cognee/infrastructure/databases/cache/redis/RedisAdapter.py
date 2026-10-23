@@ -7,7 +7,10 @@ import redis
 import redis.asyncio as aioredis
 from pydantic import BaseModel, ValidationError
 
-from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInterface
+from cognee.infrastructure.databases.cache.cache_db_interface import (
+    CacheDBInterface,
+    keys_owned_by_user,
+)
 from cognee.infrastructure.databases.cache.models import SessionAgentTraceEntry, SessionQAEntry
 from cognee.infrastructure.databases.exceptions import (
     CacheConnectionError,
@@ -675,6 +678,36 @@ class RedisAdapter(CacheDBInterface):
             raise CacheConnectionError(error_msg) from e
         except Exception as e:
             error_msg = f"Unexpected error while deleting session context from Redis: {e!s}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+
+    async def delete_user_data(self, user_id: str) -> None:
+        """Delete this user's session, trace, context, and usage keys. Other users stay."""
+        try:
+            patterns = (
+                f"agent_sessions:{user_id}:*",
+                f"agent_traces:{user_id}:*",
+                f"session_context:{user_id}:*",
+                f"{self.log_key}:{user_id}",
+            )
+            found = []
+            for pattern in patterns:
+                async for key in self.async_redis.scan_iter(match=pattern, count=200):
+                    if isinstance(key, bytes):
+                        key = key.decode()
+                    found.append(key)
+            usage_key = f"{self.log_key}:{user_id}"
+            owned = keys_owned_by_user(found, user_id)
+            if usage_key in found and usage_key not in owned:
+                owned.append(usage_key)
+            for start in range(0, len(owned), 500):
+                await self.async_redis.delete(*owned[start : start + 500])
+        except (redis.ConnectionError, redis.TimeoutError) as e:
+            error_msg = f"Redis connection error while deleting user cache: {e!s}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+        except Exception as e:
+            error_msg = f"Unexpected error while deleting user cache from Redis: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 

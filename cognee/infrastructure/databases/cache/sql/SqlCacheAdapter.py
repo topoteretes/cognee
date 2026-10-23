@@ -1245,6 +1245,23 @@ class SqlCacheAdapter(CacheDBInterface):
     # Maintenance
     # --------------------------------------------------------------------- #
 
+    async def delete_user_data(self, user_id: str) -> None:
+        """Delete this user's rows. The shared key/value table is not user-scoped and is left intact."""
+        await self._ensure_initialized()
+        try:
+            async with self.sessionmaker() as session, session.begin():
+                for table in (
+                    cache_qa_entries,
+                    cache_trace_entries,
+                    cache_session_context,
+                    cache_usage_logs,
+                ):
+                    await session.execute(delete(table).where(table.c.user_id == user_id))
+        except Exception as error:
+            error_msg = f"Unexpected error while deleting user cache from SQL: {error}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from error
+
     async def prune(self) -> None:
         """
         Empty the cache. Scoped to the four cognee cache tables only — a deliberate,
