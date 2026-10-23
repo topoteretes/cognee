@@ -38,6 +38,7 @@ logger.info(describe_resolution(_env_file))
 # V1 API
 # ---------------------------------------------------------------------------
 from .api.v1.add import add
+from .api.v1.promote import promote, PromotionResult
 from .api.v1.delete import delete
 from .api.v1.cognify import cognify
 from .api.v1.memify import memify  # deprecated (SDK-1115), removed in the next release

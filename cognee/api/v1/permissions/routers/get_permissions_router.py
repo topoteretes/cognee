@@ -161,6 +161,11 @@ def get_permissions_router() -> APIRouter:
         users; and only the tenant they are currently in. Results are always
         narrowed to the caller's current tenant.
 
+        Asking about yourself returns your effective datasets: direct grants plus
+        those held by your tenant, your roles and the agents you created. Asking
+        about any other principal returns its direct grants only, so an admin's
+        view of a user can differ from that user's own.
+
         ## Path Parameters
         - **principal_id** (UUID): The principal UUID — a user, role or tenant.
 

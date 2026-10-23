@@ -168,3 +168,76 @@ async def test_get_user_agents_returns_only_the_users_own_agents():
 
     assert {agent.id for agent in await get_user_agents(parent.id)} == {first.id, second.id}
     assert await get_user_agents(first.id) == []
+
+
+@pytest.mark.asyncio
+async def test_effective_datasets_take_two_queries_and_match_the_per_principal_union(
+    monkeypatch,
+):
+    """The effective set is one membership UNION plus one ACL query, however many
+    principals the user has, and equals the per-principal composition it replaced."""
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.data.models.Dataset import Dataset
+    from cognee.modules.users.models import Role, Tenant, UserRole
+    from cognee.modules.users.permissions.methods import (
+        get_all_user_permission_datasets,
+        get_principal_datasets,
+        give_permission_on_dataset,
+    )
+
+    tenant_id = uuid4()
+    parent = await _user(tenant_id)
+    agents = [await _agent(parent) for _ in range(3)]
+    stranger = await _user(tenant_id)
+    async with get_relational_engine().get_async_session() as session:
+        tenant = await session.get(Tenant, tenant_id)
+        role = Role(id=uuid4(), name=f"r-{uuid4()}", tenant_id=tenant_id)
+        session.add(role)
+        await session.flush()
+        session.add(UserRole(user_id=parent.id, role_id=role.id))
+        granted = {}
+        for key in ("tenant_wide", "role_wide", "stranger_direct", "other_tenant"):
+            dataset = Dataset(
+                id=uuid4(),
+                name=f"{key}-{uuid4()}",
+                owner_id=stranger.id,
+                tenant_id=uuid4() if key == "other_tenant" else tenant_id,
+            )
+            session.add(dataset)
+            granted[key] = dataset.id
+        await session.commit()
+    await give_permission_on_dataset(tenant, granted["tenant_wide"], "read")
+    await give_permission_on_dataset(role, granted["role_wide"], "read")
+    await give_permission_on_dataset(stranger, granted["stranger_direct"], "read")
+    await give_permission_on_dataset(parent, granted["other_tenant"], "read")
+    own = await _dataset_of(parent, f"p-{uuid4()}", tenant_id=tenant_id)
+    agent_datasets = {
+        await _dataset_of(agent, f"a-{uuid4()}", tenant_id=tenant_id) for agent in agents
+    }
+
+    executed = []
+    original_execute = AsyncSession.execute
+
+    async def counting_execute(self, statement, *args, **kwargs):
+        executed.append(statement)
+        return await original_execute(self, statement, *args, **kwargs)
+
+    monkeypatch.setattr(AsyncSession, "execute", counting_execute)
+    effective = {dataset.id for dataset in await get_all_user_permission_datasets(parent, "read")}
+    monkeypatch.undo()
+
+    assert len(executed) == 2
+    assert effective == {own, granted["tenant_wide"], granted["role_wide"], *agent_datasets}
+
+    # Unchanged from the per-principal composition: direct, agents, tenants, roles,
+    # narrowed to the current tenant.
+    principals = [parent, *agents, tenant, role]
+    composed = {
+        dataset.id
+        for principal in principals
+        for dataset in await get_principal_datasets(principal, "read")
+        if dataset.tenant_id == parent.tenant_id
+    }
+    assert effective == composed
