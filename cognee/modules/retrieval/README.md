@@ -49,6 +49,9 @@ Optional hooks: `extract_context_object_ids` (which nodes/edges fed a session an
 `merge_retrieved_objects` (combine the raw-query and rewritten-query lanes of a session
 turn), `append_references` / `get_context_evidence` (`include_references=True`), and the
 class flags `supports_session_turn_preparation` / `supports_prompt_preview`.
+`get_context_evidence` runs after the answer. Most retrievers derive it from
+`retrieved_objects`; `HybridRetriever` reports the chunks its `append_references`
+cited for that answer, so it is empty when no answer was generated.
 
 ## Adding a retriever
 

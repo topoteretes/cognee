@@ -33,10 +33,7 @@ from cognee.modules.retrieval.hybrid.facts import (
     edge_rank_by_id,
 )
 from cognee.modules.retrieval.hybrid.merge import merge_hybrid_results
-from cognee.modules.retrieval.hybrid.references import (
-    cite_hybrid_completions,
-    hybrid_cited_chunks,
-)
+from cognee.modules.retrieval.hybrid.references import cite_hybrid_completions
 from cognee.modules.retrieval.hybrid.truth import build_truth_context
 from cognee.modules.retrieval.utils.completion import (
     SessionPrompt,
@@ -103,8 +100,8 @@ class HybridRetriever(BaseRetriever):
         self.response_model = response_model
         self.include_references = include_references
         # The chunks the last append_references cited; get_context_evidence
-        # reports them. A retriever instance serves one search, so this never
-        # crosses requests.
+        # reports them. Every answer and the empty-context skip reset it, so a
+        # reused instance never reports an earlier call's chunks.
         self._cited_chunks: list = []
         self.user_prompt_path = user_prompt_path
         self.system_prompt_path = system_prompt_path
@@ -309,6 +306,7 @@ class HybridRetriever(BaseRetriever):
             # prelude counts as real grounding, so this only fires when every
             # section came back empty.
             logger.warning("Empty context: skipping LLM completion, returning no results")
+            self._cited_chunks = []
             return []
 
         prompts = {
@@ -353,17 +351,20 @@ class HybridRetriever(BaseRetriever):
         return await self.append_references(completions, retrieved_objects)
 
     async def append_references(self, completions: list[Any], retrieved_objects: Any) -> list[Any]:
-        enabled = self.include_references and self.response_model is str
-        if enabled:
-            self._cited_chunks = hybrid_cited_chunks(completions, retrieved_objects)
-        return cite_hybrid_completions(completions, retrieved_objects, enabled=enabled)
+        if not (self.include_references and self.response_model is str):
+            self._cited_chunks = []
+            return completions
+        completions, self._cited_chunks = cite_hybrid_completions(completions, retrieved_objects)
+        return completions
 
     def get_context_evidence(self, retrieved_objects: Any, dataset_id: Any = None):
         """The chunks the answer's Evidence block cites, as structured evidence.
 
         Only the chunks the answer is grounded in, not every chunk in context,
         so a caller acting on a reference (e.g. forgetting its data_id) acts on
-        the source of the answer. Set by append_references, which runs first.
+        the source of the answer. Reads the chunks append_references stored for
+        the answer just generated, so it must run after that answer; with no
+        answer (only_context, an empty context, an acknowledged turn) it is [].
         """
         return chunk_context_evidence(
             self._cited_chunks, dataset_id=dataset_id, role="supports_assertion"
