@@ -312,6 +312,7 @@ async def resolve_dlt_sources(
                     user,
                     manifest_data_ids,
                     manifest_source_names=ingested_source_names,
+                    dataset_id=dataset_id,
                 )
             if do_document_cleanup:
                 await _delete_dlt_orphans(
@@ -320,6 +321,7 @@ async def resolve_dlt_sources(
                     document_fresh_ids,
                     sources=tuple({source for source, _ in document_scopes}),
                     document_scopes=document_scopes,
+                    dataset_id=dataset_id,
                 )
 
         orphan_cleanup = _cleanup
@@ -947,6 +949,7 @@ async def _delete_dlt_orphans(
     sources: tuple[str, ...] = ("dlt", "dlt_source"),
     manifest_source_names: set[str] | None = None,
     document_scopes: set[tuple[str, str]] | None = None,
+    dataset_id: UUID | None = None,
 ) -> None:
     """Delete dlt-sourced Data records (and their graph/vector artifacts) that
     are no longer present in the freshly-ingested dlt sources.
@@ -954,6 +957,11 @@ async def _delete_dlt_orphans(
     This handles the case where rows are deleted from the upstream database
     and the user re-ingests.  dlt cleans its own staging DB, but cognee's
     relational, graph, and vector stores still hold stale data.
+
+    ``dataset_id`` is the dataset the rows were just written to and is
+    authoritative when given: a name resolves only among the caller's own
+    datasets, so for a shared dataset written by id a name lookup would pick
+    the caller's own same-named dataset (and sweep its rows) or nothing at all.
 
     ``sources`` restricts cleanup to Data whose ``system_metadata["source"]``
     is one of the given tags: the default covers relational manifests and
@@ -978,9 +986,12 @@ async def _delete_dlt_orphans(
     )
 
     # Find the dataset — if it doesn't exist yet this is a first ingestion,
-    # so there can be no orphans.
+    # so there can be no orphans. Prefer the id: add() already resolved and
+    # authorized it, and a name only matches datasets the caller owns.
     existing_datasets = await get_authorized_existing_datasets(
-        user=user, permission_type="write", datasets=[dataset_name]
+        user=user,
+        permission_type="write",
+        datasets=[dataset_id] if dataset_id is not None else [dataset_name],
     )
     if not existing_datasets:
         return
