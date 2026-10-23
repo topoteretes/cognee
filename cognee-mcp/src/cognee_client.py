@@ -950,12 +950,14 @@ class CogneeClient:
         everything: bool = False,
         data_id: UUID | None = None,
         dataset_id: UUID | None = None,
+        clean_history: bool = False,
     ) -> dict[str, Any]:
         """Delete data via forget().
 
         Mirrors cognee.forget()'s targeting options rather than a subset of
-        them: whole-dataset (by name or id), a single data item, or
-        everything.
+        them: whole-dataset (by name or id), a single data item, everything,
+        or the caller's own search history (``clean_history``, alone or with
+        a target).
         """
         if self.use_api:
             endpoint = f"{self.api_url}/api/v1/forget"
@@ -966,6 +968,8 @@ class CogneeClient:
                 payload["data_id"] = str(data_id)
             if dataset_id:
                 payload["dataset_id"] = str(dataset_id)
+            if clean_history:
+                payload["clean_history"] = True
             response = await self.client.post(endpoint, json=payload, headers=self._get_headers())
             response.raise_for_status()
             return response.json()
@@ -976,6 +980,7 @@ class CogneeClient:
                     everything=everything,
                     data_id=data_id,
                     dataset_id=dataset_id,
+                    clean_history=clean_history,
                 )
 
     async def improve(
