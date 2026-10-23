@@ -33,6 +33,7 @@ from cognee.infrastructure.session.get_session_manager import get_session_manage
 from cognee.modules.data.models import Dataset
 from cognee.shared.logging_utils import get_logger
 
+from .metrics import get_session_dataset_id
 from .models import SessionModelUsage, SessionRecord
 
 logger = get_logger("delete_session")
@@ -52,23 +53,14 @@ async def _delete_session_rows(user_id: UUID, session_id: str) -> int:
     return deleted
 
 
-async def _session_dataset_id(user_id: UUID, session_id: str) -> UUID | None:
-    """The dataset the session's record points at, if that dataset still exists."""
+async def _dataset_exists(dataset_id: UUID) -> bool:
+    """Whether the dataset still exists; its own forget() invalidated its sessions already."""
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as db_session:
-        dataset_id = (
-            await db_session.execute(
-                select(SessionRecord.dataset_id).where(
-                    SessionRecord.user_id == user_id, SessionRecord.session_id == session_id
-                )
-            )
-        ).scalar_one_or_none()
-        if dataset_id is None:
-            return None
-        exists = (
+        found = (
             await db_session.execute(select(Dataset.id).where(Dataset.id == dataset_id))
         ).scalar_one_or_none()
-    return dataset_id if exists is not None else None
+    return found is not None
 
 
 async def delete_session(user_id: UUID, session_id: str) -> bool:
@@ -94,7 +86,9 @@ async def delete_session(user_id: UUID, session_id: str) -> bool:
             name="SessionPreconditionError",
         )
 
-    dataset_id = await _session_dataset_id(user_id, session_id)
+    dataset_id = await get_session_dataset_id(user_id=user_id, session_id=session_id)
+    if dataset_id is not None and not await _dataset_exists(dataset_id):
+        dataset_id = None
     # Same context the search turn wrote the Q&A vectors in, so the cleanup
     # reaches the dataset's own vector store under access control.
     database_context = (

@@ -133,10 +133,10 @@ async def test_without_the_dataset_context_the_vectors_survive(isolated_dataset,
     user, dataset = isolated_dataset
     await _answer_turn(user.id, dataset.id, "s2")
 
-    async def no_dataset(user_id, session_id):
+    async def no_dataset(*, user_id, session_id):
         return None
 
-    monkeypatch.setattr(delete_module, "_session_dataset_id", no_dataset)
+    monkeypatch.setattr(delete_module, "get_session_dataset_id", no_dataset)
     # Cache content went, so it reports True; the vectors in the dataset store did not.
     assert await _as_fresh_request(lambda: delete_session(user.id, "s2")) is True
 
