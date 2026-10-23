@@ -765,7 +765,12 @@ class TestForgetCommand:
         with patch.dict(sys.modules, {"cognee": mock_cognee}):
             command = ForgetCommand()
             args = argparse.Namespace(
-                dataset=None, dataset_id=None, data_id=None, everything=True, memory_only=True
+                dataset=None,
+                dataset_id=None,
+                data_id=None,
+                everything=True,
+                memory_only=True,
+                clean_history=False,
             )
             # Should not raise, just print an error and return without calling forget().
             command.execute(args)
@@ -775,7 +780,12 @@ class TestForgetCommand:
     def test_execute_no_forget_target(self):
         command = ForgetCommand()
         args = argparse.Namespace(
-            dataset=None, dataset_id=None, data_id=None, everything=False, memory_only=False
+            dataset=None,
+            dataset_id=None,
+            data_id=None,
+            everything=False,
+            memory_only=False,
+            clean_history=False,
         )
 
         # Should not raise, just print an error and return.

@@ -152,3 +152,67 @@ async def test_clean_history_is_forwarded_to_the_remote_client():
         )
 
     assert remote_client.forget.call_args.kwargs["clean_history"] is True
+
+
+@pytest.mark.asyncio
+async def test_clean_history_alone_deletes_only_the_history():
+    patches, purge, calls = _local()
+    with (
+        patches[0],
+        patches[1],
+        patches[2],
+        patches[3],
+        patches[4],
+        patches[5],
+        patches[6],
+        patches[7],
+    ):
+        result = await forget_module.forget(clean_history=True, user=USER)
+
+    purge.assert_awaited_once_with(USER.id)
+    assert calls == [("history", USER.id)]
+    assert result == {"history_cleaned": True, "status": "success"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "kwargs",
+    [{"memory_only": True}, {"data_id": DATA_ID}],
+    ids=["memory_only_without_dataset", "data_id_without_dataset"],
+)
+async def test_invalid_target_raises_before_the_history_is_touched(kwargs):
+    patches, purge, calls = _local()
+    with (
+        patches[0],
+        patches[1],
+        patches[2],
+        patches[3],
+        patches[4],
+        patches[5],
+        patches[6],
+        patches[7],
+        pytest.raises(ValueError),
+    ):
+        await forget_module.forget(clean_history=True, user=USER, **kwargs)
+
+    purge.assert_not_awaited()
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_no_target_and_no_clean_history_still_raises():
+    patches, purge, _calls = _local()
+    with (
+        patches[0],
+        patches[1],
+        patches[2],
+        patches[3],
+        patches[4],
+        patches[5],
+        patches[6],
+        patches[7],
+        pytest.raises(ValueError, match="clean_history=True"),
+    ):
+        await forget_module.forget(user=USER)
+
+    purge.assert_not_awaited()

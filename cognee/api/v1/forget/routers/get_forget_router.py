@@ -85,6 +85,8 @@ def get_forget_router() -> APIRouter:
           (graph + vector), preserving raw files so the dataset can be re-cognified.
         - Set `dataset`/`datasetId` + `dataId` + `memoryOnly: true` to clear memory
           for a single file only.
+        - Set `cleanHistory: true` alone to delete only your own search and recall
+          history, or with any target to delete it along with the data.
 
         ## Request Parameters
         - **dataId** (Optional[UUID]): UUID of a single data item to remove. Requires
@@ -136,7 +138,7 @@ def get_forget_router() -> APIRouter:
             return JSONResponse(
                 status_code=422,
                 content={
-                    "error": "Invalid request parameters. Specify dataset or dataset_id, data_id+dataset, or everything=True."
+                    "error": "Invalid request parameters. Specify dataset or dataset_id, data_id+dataset, everything=True, or clean_history=True."
                 },
             )
         except CogneeApiError:

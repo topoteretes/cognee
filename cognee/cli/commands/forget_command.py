@@ -55,7 +55,7 @@ records, so the dataset (or item) can be re-cognified later.
             default=False,
             help=(
                 "Also delete your own search and recall history, in every dataset, "
-                "before the data is deleted"
+                "before the data is deleted; alone, delete only the history"
             ),
         )
 
@@ -71,9 +71,16 @@ records, so the dataset (or item) can be re-cognified later.
                 fmt.error("Provide either --dataset or --dataset-id, not both.")
                 return
 
-            if not args.everything and not dataset and not dataset_id and not data_id:
+            if (
+                not args.everything
+                and not dataset
+                and not dataset_id
+                and not data_id
+                and not args.clean_history
+            ):
                 fmt.error(
-                    "Specify --dataset or --dataset-id, --data-id with dataset, or --everything/--all."
+                    "Specify --dataset or --dataset-id, --data-id with dataset, "
+                    "--everything/--all, or --clean-history."
                 )
                 return
 

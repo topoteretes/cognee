@@ -775,7 +775,7 @@ FastAPI application with versioned routes under `/api/v1/` (routers registered i
 - `/users` - Authentication (when `REQUIRE_AUTHENTICATION` is effectively true; see auth posture below)
 - `/visualize` - Graph visualization server
 
-`DELETE /api/v1/search/history` deletes the caller's own search and recall history (the `queries` / `results` rows `GET /api/v1/search` and `GET /api/v1/recall` list); it takes no user parameter, so nobody can delete another user's history. `forget(..., clean_history=True)` removes the same rows as part of a forget; without the flag `forget(data_id=...)` and `prune_system(metadata=False)` leave them.
+`DELETE /api/v1/search/history` deletes the caller's own search and recall history (the `queries` / `results` rows `GET /api/v1/search` and `GET /api/v1/recall` list); it takes no user parameter, so nobody can delete another user's history. `forget(..., clean_history=True)` removes the same rows as part of a forget, and `forget(clean_history=True)` alone removes only them (the SDK/CLI equivalent of the endpoint); without the flag `forget(data_id=...)` and `prune_system(metadata=False)` leave them.
 
 Request bodies accept both snake_case and camelCase (`cognee/api/DTO.py` sets `alias_generator=to_camel` with `populate_by_name=True`). There is no `/feedback` route — feedback is CLI- and SDK-only.
 

@@ -54,6 +54,9 @@ async def forget(
         # Forget one item and the caller's own search history with it
         await cognee.forget(data_id=data_id, dataset_id=dataset_id, clean_history=True)
 
+        # Delete only the caller's own search history, no data
+        await cognee.forget(clean_history=True)
+
     Args:
         data_id: UUID of a specific data item to remove.
             Requires ``dataset`` or ``dataset_id`` to also be set.
@@ -76,7 +79,8 @@ async def forget(
             forget can be retried. Default False: a document forget keeps
             history, because answers are recorded per dataset, not per
             document. A dataset or everything forget purges the deleted
-            datasets' history for every user regardless of this flag.
+            datasets' history for every user regardless of this flag. Alone,
+            with no target, the call deletes only the history.
         user: User context. Resolved to default user when None.
 
     Returns:
@@ -110,6 +114,8 @@ async def forget(
         target = "data_item"
     elif dataset_ref:
         target = "dataset"
+    elif clean_history:
+        target = "search_history"
     else:
         target = "unknown"
 
@@ -165,6 +171,18 @@ async def forget(
                 user = await get_default_user()
             operation_context.set_user(user)
 
+            # Validate the target before any side effect.
+            if dataset_ref is None and not everything:
+                if memory_only:
+                    raise ValueError("memory_only requires dataset or dataset_id.")
+                if data_id is not None:
+                    raise ValueError("data_id requires dataset or dataset_id.")
+                if not clean_history:
+                    raise ValueError(
+                        "Specify dataset, dataset_id, data_id+dataset, everything=True, "
+                        "or clean_history=True."
+                    )
+
             # Before any data is deleted and not caught, like the dataset purges:
             # if it fails nothing is gone yet and the forget can be retried.
             # `everything` removes the caller's history itself (_forget_everything).
@@ -178,6 +196,9 @@ async def forget(
                     removed["queries_deleted"],
                     removed["results_deleted"],
                 )
+                if dataset_ref is None:
+                    # clean_history alone: the history was the whole request.
+                    return {"history_cleaned": True, "status": "success"}
 
             # `everything` deletes across all datasets; the per-dataset DB context is
             # established per-dataset inside datasets.delete_all -> empty_dataset, so we
@@ -194,15 +215,6 @@ async def forget(
                 return result
 
             # All remaining operations are scoped to a single dataset.
-            if dataset_ref is None:
-                if memory_only:
-                    raise ValueError("memory_only requires dataset or dataset_id.")
-                if data_id is not None:
-                    raise ValueError("data_id requires dataset or dataset_id.")
-                raise ValueError(
-                    "Specify dataset, dataset_id, data_id+dataset, or everything=True."
-                )
-
             # Authorize before any dataset database context is entered: context
             # entry provisions per-dataset database registry rows, a write that
             # must never happen for a caller without delete permission (an

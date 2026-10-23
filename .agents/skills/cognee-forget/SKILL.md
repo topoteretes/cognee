@@ -78,6 +78,7 @@ candidates (name + a short preview) before deleting.
 | Rebuild a dataset's graph later | `forget(dataset="name", memory_only=True)` | Raw files and data rows; graph, vectors, sessions and pipeline status are reset, so the data can be re-processed. A search finds nothing afterwards, but the data is not deleted |
 | One document's memory only | `forget(dataset="name", data_id=..., memory_only=True)` | That document's raw file and row |
 | One document and your own search history | `forget(data_id=..., dataset_id=..., clean_history=True)` | Nothing of that document; the caller's recorded questions and answers are gone in every dataset, other users' stay |
+| Only your own search history | `forget(clean_history=True)` | All data; only the caller's recorded questions and answers are deleted |
 | Every dataset the user can delete | `forget(everything=True)` | Nothing, in any dataset the user has `delete` on in the current tenant (shared ones included). Only on explicit request (see the hard limits) |
 
 Return values: `{"data_id", "dataset_id", "search_history_removed", "status"}`
