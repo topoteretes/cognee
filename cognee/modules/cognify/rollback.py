@@ -42,8 +42,9 @@ def _extract_data_ids(data_ingestion_info: Any) -> set[UUID]:
     """
     return {
         data_id
-        for status, data_id in iter_ingestion_entries(data_ingestion_info)
-        if status != "PipelineRunAlreadyCompleted" and data_id is not None
+        for status, entry_data_ids in iter_ingestion_entries(data_ingestion_info)
+        if status != "PipelineRunAlreadyCompleted"
+        for data_id in entry_data_ids
     }
 
 

@@ -55,6 +55,23 @@ def test_data_ids_tolerate_string_ids_duplicates_and_junk_entries():
     assert run.data_ids == [data_id]
 
 
+def test_data_ids_include_every_data_item_an_entry_lists():
+    single, first, second = uuid4(), uuid4(), uuid4()
+    run = _run_info(
+        PipelineRunCompleted,
+        data_ingestion_info=[
+            {"run_info": _run_info(PipelineRunCompleted), "data_id": single},
+            {
+                "run_info": _run_info(PipelineRunCompleted),
+                "data_id": first,
+                "data_ids": [first, second, single],
+            },
+        ],
+    )
+
+    assert run.data_ids == [single, first, second]
+
+
 def test_run_infos_without_per_item_results_have_no_data_ids():
     assert _run_info(PipelineRunStarted, payload=["some text"]).data_ids is None
     assert _run_info(PipelineRunCompleted).data_ids is None

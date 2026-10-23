@@ -990,12 +990,11 @@ class RememberResult:
             ingestion_info = getattr(run_info, "data_ingestion_info", None)
             if ingestion_info and isinstance(ingestion_info, list):
                 processed = 0
-                for status, data_id in iter_ingestion_entries(ingestion_info):
+                for status, entry_data_ids in iter_ingestion_entries(ingestion_info):
                     if status == "PipelineRunErrored":
                         continue
                     processed += 1
-                    if data_id is not None:
-                        self.items.append({"id": str(data_id)})
+                    self.items.extend({"id": str(data_id)} for data_id in entry_data_ids)
                 self.items_processed = processed
 
     def _fail(self, exc: BaseException):

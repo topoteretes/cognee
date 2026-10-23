@@ -19,11 +19,13 @@ def extract_data_ids(data_ingestion_info: Any) -> list[UUID]:
     """
     data_ids: list[UUID] = []
     seen: set[UUID] = set()
-    for status, data_id in iter_ingestion_entries(data_ingestion_info):
-        if status == "PipelineRunErrored" or data_id is None or data_id in seen:
+    for status, entry_data_ids in iter_ingestion_entries(data_ingestion_info):
+        if status == "PipelineRunErrored":
             continue
-        seen.add(data_id)
-        data_ids.append(data_id)
+        for data_id in entry_data_ids:
+            if data_id not in seen:
+                seen.add(data_id)
+                data_ids.append(data_id)
     return data_ids
 
 

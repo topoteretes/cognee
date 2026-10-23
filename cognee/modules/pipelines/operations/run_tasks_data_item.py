@@ -11,6 +11,7 @@ from contextlib import aclosing
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
+from uuid import UUID
 
 from sqlalchemy import or_, select
 
@@ -372,6 +373,15 @@ def _upload_name(data_item: Any) -> str | None:
     return Path(filename).stem if isinstance(filename, str) and filename else None
 
 
+def _collect_data_row_ids(result: Any, data_ids: list[UUID], seen: set[UUID]) -> None:
+    """Append the ids of the ``Data`` rows in one task result, in order, once each."""
+    rows = result if isinstance(result, list) else [result]
+    for row in rows:
+        if isinstance(row, Data) and row.id not in seen:
+            seen.add(row.id)
+            data_ids.append(row.id)
+
+
 async def run_tasks_data_item_regular(
     data_item: Any,
     dataset: Dataset,
@@ -397,8 +407,16 @@ async def run_tasks_data_item_regular(
         user: User performing the operation
 
     Yields:
-        Dict containing run_info for each processing step
+        A ``PipelineRunYield`` per intermediate result, then the item's final
+        ``{"run_info": PipelineRunCompleted, "data_id": ...}`` entry. ``data_id``
+        is the item's own id when it is a ``Data`` row, else the ``Data`` row
+        its tasks returned (``add``'s ``ingest_data``); None when they returned
+        none. An item stored as several rows lists them all under ``data_ids``.
     """
+    item_is_data_row = isinstance(data_item, Data)
+    data_ids: list[UUID] = []
+    seen: set[UUID] = set()
+
     # Process data based on data_item and list of tasks. aclosing closes the
     # telemetry generator as soon as this one is closed early.
     async with aclosing(
@@ -411,6 +429,8 @@ async def run_tasks_data_item_regular(
         )
     ) as results:
         async for result in results:
+            if not item_is_data_row:
+                _collect_data_row_ids(result, data_ids, seen)
             yield PipelineRunYield(
                 pipeline_run_id=pipeline_run_id,
                 dataset_id=dataset.id,
@@ -418,13 +438,19 @@ async def run_tasks_data_item_regular(
                 payload=result,
             )
 
-    yield {
+    if item_is_data_row:
+        data_ids = [data_item.id]
+    item_result: dict[str, Any] = {
         "run_info": PipelineRunCompleted(
             pipeline_run_id=pipeline_run_id,
             dataset_id=dataset.id,
             dataset_name=dataset.name,
-        )
+        ),
+        "data_id": data_ids[0] if data_ids else None,
     }
+    if len(data_ids) > 1:
+        item_result["data_ids"] = data_ids
+    yield item_result
 
 
 async def run_tasks_data_item(
