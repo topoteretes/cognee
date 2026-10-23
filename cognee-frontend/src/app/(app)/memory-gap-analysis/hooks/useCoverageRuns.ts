@@ -6,6 +6,7 @@ import { trackEvent } from "@/modules/analytics";
 import { HttpError } from "@/services/http/errors";
 import { useCogniInstance, useTenant } from "@/modules/tenant/TenantProvider";
 import { useFilter } from "@/ui/layout/FilterContext";
+import isCloudEnvironment from "@/utils/isCloudEnvironment";
 import type { Brain, BrainLoadState, CoverageResult } from "@/app/(app)/memory-gap-analysis/types";
 
 /** Why a "Run analysis" click never became a run, and which brain it was for. */
@@ -140,7 +141,8 @@ export function useCoverageRuns(options: CoverageRunsOptions = {}): CoverageRuns
   // POST, and a duplicate run is minutes of replay against the LLM.
   const startingRef = useRef<string | null>(null);
 
-  const ready = !!cogniInstance && !isInitializing && tenantReady;
+  // The local SDK does not serve the Cloud coverage endpoints.
+  const ready = isCloudEnvironment() && !!cogniInstance && !isInitializing && tenantReady;
 
   // Sliced once and reused below for both the query list and `brains`, rather
   // than calling `.slice(0, limit)` again at each site: two calls in the same
@@ -218,6 +220,7 @@ export function useCoverageRuns(options: CoverageRunsOptions = {}): CoverageRuns
   }, [brains, datasets, runError]);
 
   const refresh = useCallback((): void => {
+    if (!isCloudEnvironment()) return;
     // The dataset list too: when it is the list that failed, the page has no
     // brains at all, and a retry that only refetched coverage would look
     // broken because there was nothing to refetch it for.
@@ -232,6 +235,10 @@ export function useCoverageRuns(options: CoverageRunsOptions = {}): CoverageRuns
 
   const startRun = useCallback(
     async (brainId: string): Promise<void> => {
+      if (!isCloudEnvironment()) {
+        setRunError({ brainId, message: "Memory Coverage is a Cognee Cloud feature." });
+        return;
+      }
       if (startingRef.current !== null) return;
       if (!cogniInstance) {
         // Not a silent return: this window lasts as long as the workspace

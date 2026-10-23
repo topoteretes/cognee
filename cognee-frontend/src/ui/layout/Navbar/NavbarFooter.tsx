@@ -83,9 +83,8 @@ interface NavbarFooterProps {
   railed: boolean;
 }
 
-// Book a call and Feedback are cloud-only: the calendar link and the feedback
-// endpoint do not exist self-hosted, so only Onboarding is shown there.
-export default function NavbarFooter({ railed }: NavbarFooterProps): React.JSX.Element {
+// The local app has no onboarding or Cloud support actions.
+export default function NavbarFooter({ railed }: NavbarFooterProps): React.JSX.Element | null {
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   // Onboarding replay is hidden on production for now. Assume production until
   // the host is known: SSR and first client paint agree (no hydration
@@ -96,6 +95,8 @@ export default function NavbarFooter({ railed }: NavbarFooterProps): React.JSX.E
   useEffect(() => {
     setIsProductionHost(window.location.hostname === PRODUCTION_HOST);
   }, []);
+
+  if (!isCloudEnvironment()) return null;
 
   return (
     <div style={{ padding: 12, borderTop: "1px solid rgba(255,255,255,0.08)", display: "flex", flexDirection: "column", gap: 4 }}>

@@ -84,6 +84,9 @@ export default function DocumentsPanel<T extends DocRow>({
   const scrollRef = useRef<HTMLDivElement>(null);
   const knownTotal = total != null && total >= 0 ? total : null;
   const displayedCount = knownTotal ?? docs.length;
+  const activeUploadProgress = uploadProgress && uploadProgress.stage !== "idle" ? uploadProgress : null;
+  const showProcessingSummary = !activeUploadProgress && !isUploading
+    && (processing || processingFailed || (processingCounts?.total ?? 0) > 0 || displayedCount > 0 || docs.length > 0);
   const dragCounter = useRef(0);
   const [isDragOver, setIsDragOver] = useState(false);
 
@@ -139,15 +142,15 @@ export default function DocumentsPanel<T extends DocRow>({
           )}
         </div>
 
-        {selectedId && (
+        {selectedId && showProcessingSummary && (
           <ProcessingSummary data={processingCounts} error={processingCountsError} failed={processingFailed} running={processing} onRefresh={onRefreshProcessing} />
         )}
 
         {/* Estimate → upload → build all report through one bar (progress.stage);
             gate on the stage, not isUploading, so the estimate phase — which
             runs before the upload leg starts — shows here too. */}
-        {uploadProgress && uploadProgress.stage !== "idle" ? (
-          <UploadProgressBar progress={uploadProgress} />
+        {activeUploadProgress ? (
+          <UploadProgressBar progress={activeUploadProgress} />
         ) : isUploading ? (
           <div style={{ padding: "8px 16px", borderBottom: "1px solid rgba(255,255,255,0.07)", background: "rgba(255,255,255,0.04)", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
             <Loader size={12} color="#6510F4" />

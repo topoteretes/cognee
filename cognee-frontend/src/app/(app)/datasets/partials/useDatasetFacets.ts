@@ -6,6 +6,7 @@ import getDatasetAccess from "@/modules/permissions/getDatasetAccess";
 import getGroupOverview from "@/modules/permissions/getGroupOverview";
 import { useCogniInstance, useTenant } from "@/modules/tenant/TenantProvider";
 import { useCurrentUser } from "@/modules/users/useCurrentUser";
+import isCloudEnvironment from "@/utils/isCloudEnvironment";
 import { buildFacets, type DatasetFacet } from "@/app/(app)/datasets/partials/datasetFacets";
 import type { DatasetAccess, GroupOverview } from "@/modules/permissions/types";
 
@@ -30,7 +31,7 @@ export default function useDatasetFacets(datasetKey: string): DatasetFacets {
   const [groups, setGroups] = useState<GroupOverview[]>([]);
   const { data: me } = useCurrentUser();
   const myEmail = me?.email?.toLowerCase() ?? null;
-  const [status, setStatus] = useState<FacetsStatus>("loading");
+  const [status, setStatus] = useState<FacetsStatus>(isCloudEnvironment() ? "loading" : "ready");
   const requestId = useRef(0);
   // True once a load has actually landed, so a later failure can be told
   // apart from the first one: a refresh that fails has something to fall
@@ -38,6 +39,8 @@ export default function useDatasetFacets(datasetKey: string): DatasetFacets {
   const hasLoaded = useRef(false);
 
   const refresh = useCallback(async (): Promise<void> => {
+    // These overview endpoints belong to the Cloud pod, not the local SDK API.
+    if (!isCloudEnvironment()) return;
     if (!tenant || !cogniInstance) return;
     const id = ++requestId.current;
     try {

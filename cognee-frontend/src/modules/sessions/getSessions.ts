@@ -542,6 +542,7 @@ export async function listSessions(
       };
     })
     .catch((err) => {
+      if (opts.signal?.aborted || (err instanceof Error && err.name === "AbortError")) throw err;
       console.warn("[getSessions] listSessions failed, returning empty page:", err instanceof Error ? err.message : err);
       return FAILED_PAGE;
     });

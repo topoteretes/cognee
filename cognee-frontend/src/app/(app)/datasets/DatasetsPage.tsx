@@ -6,6 +6,7 @@ import { useTenant } from "@/modules/tenant/TenantProvider";
 import ShareAccessModal from "./partials/ShareAccessModal";
 import LowBalanceWarningModal from "@/ui/elements/LowBalanceWarningModal";
 import { decodeFilename } from "@/utils/fileFormat";
+import isCloudEnvironment from "@/utils/isCloudEnvironment";
 import PlusIcon from "@/ui/elements/PlusIcon";
 import EmptyDocIcon from "@/ui/elements/EmptyDocIcon";
 import PageLoading from "@/ui/elements/PageLoading";
@@ -21,6 +22,7 @@ import useDatasetFinderFilters from "./partials/useDatasetFinderFilters";
 import { useBrainsData } from "./useBrainsData";
 
 export default function DatasetsPage() {
+  const showGroups = isCloudEnvironment();
   const {
     processingCounts,
     processingCountsError,
@@ -78,7 +80,7 @@ export default function DatasetsPage() {
   const [sharing, setSharing] = useState(false);
   // Sharing needs `share` on the dataset; the pod enforces it, the button just does not offer it otherwise.
   const selectedAccess = selectedId ? finder.accessFor(selectedId) : undefined;
-  const canShare = Boolean(selectedAccess?.permissions.includes("share"));
+  const canShare = showGroups && Boolean(selectedAccess?.permissions.includes("share"));
 
   if (isLoading) {
     return (
@@ -107,7 +109,7 @@ export default function DatasetsPage() {
             // shares it), so land the view there too — otherwise, viewed from
             // Shared or a group, the new row (and the selection that follows
             // it) would be invisible in the very list the user is looking at.
-            if (await handleCreate(templateKey)) finder.selectFacet(PERSONAL_FACET_ID);
+            if (await handleCreate(templateKey) && showGroups) finder.selectFacet(PERSONAL_FACET_ID);
           }}
           onCancel={() => { setShowCreate(false); setNewName(""); setCreateError(""); }}
         />
@@ -158,7 +160,7 @@ export default function DatasetsPage() {
       <div style={{ padding: "24px 32px 16px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexShrink: 0 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <h1 style={{ fontSize: 20, fontWeight: 300, color: "#EDECEA", margin: 0, fontFamily: '"TWKLausanne", sans-serif' }}>Datasets</h1>
-          <p style={{ fontSize: 14, color: "rgba(237,236,234,0.55)", margin: 0 }}>Upload documents to build searchable knowledge graphs and share them with the teams that need them.</p>
+          <p style={{ fontSize: 14, color: "rgba(237,236,234,0.55)", margin: 0 }}>{showGroups ? "Upload documents to build searchable knowledge graphs and share them with the teams that need them." : "Upload documents to build searchable knowledge graphs."}</p>
         </div>
         <button onClick={handleRefresh} disabled={refreshing}
           className="hover:bg-white/10 cursor-pointer"
@@ -176,7 +178,7 @@ export default function DatasetsPage() {
         <div style={{ flex: 1, minHeight: 0, display: "flex", overflow: "hidden", marginInline: 32, marginBottom: 32, border: "1px solid rgba(255,255,255,0.12)", borderRadius: 12, background: "rgba(0,0,0,0.82)", backdropFilter: "blur(20px)" }}>
 
           {/* Column 1 — Groups: filters over the one dataset list */}
-          <GroupRail facets={finder.facets} selectedId={finder.facetId} status={finder.facetsStatus} allCount={datasets.length} onSelect={finder.selectFacet} />
+          {showGroups && <GroupRail facets={finder.facets} selectedId={finder.facetId} status={finder.facetsStatus} allCount={datasets.length} onSelect={finder.selectFacet} />}
 
           {/* Column 2 — Datasets */}
           <BrainList
