@@ -15,6 +15,29 @@ from unittest.mock import AsyncMock
 import pytest
 
 resolve_module = importlib.import_module("cognee.tasks.code_graph.resolve_repo")
+
+
+@pytest.fixture(autouse=True)
+def _mock_partial_checkout(monkeypatch):
+    """Replace the partial checkout for every test in this module.
+
+    These tests exercise resolver and auth orchestration with fake .git directories.
+    Partial checkout and actual object transfers are covered by the real-Git suite.
+    """
+
+    async def checkout(repo, ref, include_documents, env, scrub):
+        if ref == "FETCH_HEAD":
+            code, stderr = await resolve_module._run_git(
+                ["reset", "--hard", ref], cwd=repo, env=env
+            )
+            if code:
+                raise resolve_module.CodeRepositoryError(
+                    message="Could not checkout repository: " + scrub(stderr)
+                )
+
+    monkeypatch.setattr(resolve_module, "_checkout_snapshot", checkout)
+
+
 ssrf_module = importlib.import_module("cognee.tasks.web_scraper.ssrf_protection")
 
 _TOKEN_URL = "https://x-access-token:tok-SECRET@github.com/org/repo.git"
@@ -84,9 +107,11 @@ async def test_existing_clone_fetches_from_the_credentialed_url(monkeypatch, tmp
     clone_dir = resolve_module.clone_dir(_CLEAN_URL, clones_dir=tmp_path)
     (clone_dir / ".git").mkdir(parents=True)
     git_calls = []
+    environments = []
 
     async def fake_run_git(args, cwd=None, env=None):
         git_calls.append((args, cwd))
+        environments.append(env)
         return 0, ""
 
     monkeypatch.setattr(resolve_module, "_run_git", fake_run_git)
@@ -94,9 +119,23 @@ async def test_existing_clone_fetches_from_the_credentialed_url(monkeypatch, tmp
     resolved = await resolve_module.resolve_repo_source(_TOKEN_URL, clones_dir=tmp_path)
 
     assert resolved == clone_dir
+    # Reset lazily fetches the selected blobs from origin, which is stored without
+    # credentials. The token URL is supplied only through this process's config.
+    assert ("remote.origin.url", _TOKEN_URL) in resolve_module._git_config_entries(environments[-1])
     # Explicit URL argument: the stored remote is credential-free on purpose.
     assert git_calls == [
-        (["fetch", "--depth", "1", _TOKEN_URL, "HEAD"], clone_dir),
+        (
+            [
+                "fetch",
+                "--depth",
+                "1",
+                "--filter=blob:none",
+                "--no-recurse-submodules",
+                _TOKEN_URL,
+                "HEAD",
+            ],
+            clone_dir,
+        ),
         (["reset", "--hard", "FETCH_HEAD"], clone_dir),
     ]
 
@@ -116,7 +155,18 @@ async def test_credential_free_urls_fetch_from_origin(monkeypatch, tmp_path):
     await resolve_module.resolve_repo_source(_CLEAN_URL, clones_dir=tmp_path)
 
     assert git_calls == [
-        (["fetch", "--depth", "1", "origin", "HEAD"], clone_dir),
+        (
+            [
+                "fetch",
+                "--depth",
+                "1",
+                "--filter=blob:none",
+                "--no-recurse-submodules",
+                "origin",
+                "HEAD",
+            ],
+            clone_dir,
+        ),
         (["reset", "--hard", "FETCH_HEAD"], clone_dir),
     ]
 
@@ -150,6 +200,9 @@ async def test_out_of_band_credentials_ride_the_environment(monkeypatch, tmp_pat
         "core.symlinks=false",
         "--depth",
         "1",
+        "--filter=blob:none",
+        "--no-checkout",
+        "--no-recurse-submodules",
         _CLEAN_URL,
         clone_args[-1],
     ]
@@ -177,11 +230,22 @@ async def test_out_of_band_credentials_apply_to_fetches_too(monkeypatch, tmp_pat
         _CLEAN_URL, clones_dir=tmp_path, credentials="tok-SECRET"
     )
 
-    (fetch_args, fetch_cwd, fetch_env), (reset_args, reset_cwd, _) = git_calls
+    (fetch_args, fetch_cwd, fetch_env), (reset_args, reset_cwd, reset_env) = git_calls
     # Fetch against the clean stored remote; auth via the environment.
-    assert fetch_args == ["fetch", "--depth", "1", "origin", "HEAD"]
+    assert fetch_args == [
+        "fetch",
+        "--depth",
+        "1",
+        "--filter=blob:none",
+        "--no-recurse-submodules",
+        "origin",
+        "HEAD",
+    ]
     assert fetch_cwd == reset_cwd == clone_dir
     assert fetch_env["GIT_CONFIG_KEY_0"] == "http.https://github.com/.extraHeader"
+    assert resolve_module._git_config_entries(reset_env) == resolve_module._git_config_entries(
+        fetch_env
+    )
     assert reset_args == ["reset", "--hard", "FETCH_HEAD"]
 
 
@@ -351,6 +415,9 @@ def test_git_runs_without_stored_credentials_or_askpass(monkeypatch):
         ("http.https://github.com/.extraHeader", env["GIT_CONFIG_VALUE_1"]),
         ("credential.helper", ""),
         ("core.askPass", ""),
+        ("filter.lfs.process", ""),
+        ("filter.lfs.smudge", ""),
+        ("filter.lfs.required", "false"),
     ]
     assert env["GIT_CONFIG_VALUE_1"].startswith("Authorization: Basic ")
     assert (env["GIT_ASKPASS"], env["SSH_ASKPASS"], env["GIT_TERMINAL_PROMPT"]) == ("", "", "0")

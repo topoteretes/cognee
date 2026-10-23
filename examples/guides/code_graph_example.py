@@ -20,6 +20,16 @@ runs this same pipeline in a single call (it also accepts a list of
 repositories, and index_vectors=True to enable embeddings). This example
 assembles the pipeline explicitly so each step stays visible.
 
+Remote ingestion checks out selected files from one commit, without downloading
+excluded binary artifacts. Set COGNEE_REPOS_MAX_BYTES and/or
+COGNEE_REPOS_MIN_FREE_BYTES to positive integer byte budgets chosen for the worker.
+They include Git objects and Enola output; leave filesystem headroom. For example:
+
+    result = await cognee.remember("https://github.com/owner/repo", content_type="code")
+
+The repository result includes repository_snapshot (commit and selection counts).
+See docs/remote-repository-ingestion.md for LFS/submodule handling and disk limits.
+
 For cross-repository paths, generate one Enola append/multi-repository snapshot
 and ingest it into one dataset. Repositories indexed in separate datasets are
 searched independently and cannot have graph paths between them.

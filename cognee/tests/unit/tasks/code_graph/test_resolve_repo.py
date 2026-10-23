@@ -9,6 +9,27 @@ resolve_module = importlib.import_module("cognee.tasks.code_graph.resolve_repo")
 
 
 @pytest.fixture(autouse=True)
+def _mock_partial_checkout(monkeypatch):
+    """Replace the partial checkout for every test in this module.
+
+    These tests exercise resolver and auth orchestration with fake .git directories.
+    Partial checkout and actual object transfers are covered by the real-Git suite.
+    """
+
+    async def checkout(repo, ref, include_documents, env, scrub):
+        if ref == "FETCH_HEAD":
+            code, stderr = await resolve_module._run_git(
+                ["reset", "--hard", ref], cwd=repo, env=env
+            )
+            if code:
+                raise resolve_module.CodeRepositoryError(
+                    message="Could not checkout repository: " + scrub(stderr)
+                )
+
+    monkeypatch.setattr(resolve_module, "_checkout_snapshot", checkout)
+
+
+@pytest.fixture(autouse=True)
 def _fake_clones_have_a_commit(monkeypatch):
     """The clones here are fake ``.git`` directories; real git would find no commit in them."""
     monkeypatch.setattr(resolve_module, "_has_commit", AsyncMock(return_value=True))
@@ -125,14 +146,30 @@ async def test_existing_clone_is_fetched_and_reset(monkeypatch, tmp_path):
 
     assert resolved == clone_dir
     assert git_calls == [
-        (["fetch", "--depth", "1", "origin", "HEAD"], clone_dir),
+        (
+            [
+                "fetch",
+                "--depth",
+                "1",
+                "--filter=blob:none",
+                "--no-recurse-submodules",
+                "origin",
+                "HEAD",
+            ],
+            clone_dir,
+        ),
         (["reset", "--hard", "FETCH_HEAD"], clone_dir),
     ]
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failed_command", ["fetch", "reset"])
-async def test_failed_refresh_never_returns_stale_clone(monkeypatch, tmp_path, failed_command):
+@pytest.mark.parametrize(
+    ("failed_command", "message"),
+    [("fetch", "Could not refresh"), ("reset", "Could not checkout")],
+)
+async def test_failed_refresh_never_returns_stale_clone(
+    monkeypatch, tmp_path, failed_command, message
+):
     clone_dir = resolve_module.clone_dir("https://github.com/org/repo", clones_dir=tmp_path)
     (clone_dir / ".git").mkdir(parents=True)
     _origin_is(monkeypatch, "https://github.com/org/repo")
@@ -142,7 +179,7 @@ async def test_failed_refresh_never_returns_stale_clone(monkeypatch, tmp_path, f
 
     monkeypatch.setattr(resolve_module, "_run_git", fake_run_git)
 
-    with pytest.raises(resolve_module.CodeRepositoryError, match="Could not refresh"):
+    with pytest.raises(resolve_module.CodeRepositoryError, match=message):
         await resolve_module.resolve_repo_source("https://github.com/org/repo", clones_dir=tmp_path)
 
 
@@ -312,4 +349,4 @@ async def test_git_never_prompts(monkeypatch):
         )
     assert seen["GIT_SSH_COMMAND"] == "ssh -i ~/.ssh/deploy_key"
     # The caller's config entries come first; the no-stored-credentials ones follow.
-    assert (seen["GIT_CONFIG_COUNT"], seen["GIT_CONFIG_KEY_0"]) == ("3", "a.b")
+    assert (seen["GIT_CONFIG_COUNT"], seen["GIT_CONFIG_KEY_0"]) == ("6", "a.b")

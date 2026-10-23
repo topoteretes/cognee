@@ -331,6 +331,11 @@ async def resolve_code_repository(
     }
     if source_url is not None:
         system_metadata["repo_url"] = source_url
+        from cognee.tasks.code_graph.repo_selection import read_repository_snapshot
+
+        snapshot = read_repository_snapshot(directory)
+        if snapshot is not None:
+            system_metadata["repository_snapshot"] = snapshot
 
     manifest_item = DataItem(
         data=manifest_text,
