@@ -791,7 +791,7 @@ Several security environment variables in `.env`:
 - `ALLOW_CYPHER_QUERY` - Allow raw Cypher queries (default: True)
 - `ENABLE_BACKEND_ACCESS_CONTROL` - Multi-tenant isolation (default: True). When `true`, API auth is required and per-user/dataset DB isolation is enabled. When `false`, single-user mode: shared DBs and auth off unless overridden.
 - `REQUIRE_AUTHENTICATION` - Explicit auth override. Unset (default): follows `ENABLE_BACKEND_ACCESS_CONTROL`. `false` is ignored when `ENABLE_BACKEND_ACCESS_CONTROL=true`. For a single-user deployment with auth off, set `ENABLE_BACKEND_ACCESS_CONTROL=false` (and optionally `REQUIRE_AUTHENTICATION=false`).
-- `AUTH_TOKEN_COOKIE_SECURE` - `Secure` attribute on the auth cookie the login route writes (default: false). The cookie is the session; `Secure` stops a browser sending it over plain http. Set it to `true` on any deployment served over TLS, including behind a TLS-terminating proxy, since cognee itself sees plain http there and cannot infer it. Leave it `false` only for `http://localhost`, where a browser will not store a `Secure` cookie.
+- `AUTH_TOKEN_COOKIE_SECURE` - `Secure` attribute on the auth cookie the login route writes (`true` or `false`, default false; anything else raises at import). The cookie is the session; `Secure` stops a browser sending it over plain http. Set it to `true` on any deployment served over TLS, including behind a TLS-terminating proxy, since cognee itself sees plain http there and cannot infer it. Leave it `false` only for `http://localhost`, where a browser will not store a `Secure` cookie.
 
 For production deployments, review and tighten these settings.
 
