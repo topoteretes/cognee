@@ -1,7 +1,7 @@
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, computed_field, model_serializer
+from pydantic import BaseModel, computed_field
 
 from cognee.modules.data.models.Data import Data
 from cognee.modules.pipelines.utils import iter_ingestion_entries
@@ -48,32 +48,24 @@ class PipelineRunInfo(BaseModel):
         "json_encoders": {Data: lambda d: d.to_json()},
     }
 
-    @computed_field(return_type=list[UUID])
+    @computed_field(return_type=list[UUID] | None, exclude_if=lambda value: value is None)
     @property
-    def data_ids(self) -> list[UUID]:
+    def data_ids(self) -> list[UUID] | None:
         """Ids of the ``Data`` rows this run processed, in result order.
 
         For ``add()`` this is the id of every item that was stored (or already
         existed with the same content — dedup returns the existing row), so a
         caller can key later ``update()`` / ``delete_data()`` / ``find_data``
-        calls on cognee's own ids instead of re-deriving them. Empty for run
-        infos that carry no per-item results (``PipelineRunStarted``,
-        progress ticks) and for items that errored. Serialized with the model,
-        so ``POST /api/v1/add`` responses carry it too.
+        calls on cognee's own ids instead of re-deriving them. Items that
+        errored are left out. ``None`` for run infos that carry no per-item
+        results (``PipelineRunStarted``, progress ticks, the run infos nested
+        in ``data_ingestion_info``), which serialize without the key.
+        Serialized with the model, so ``POST /api/v1/add`` responses carry it
+        too.
         """
+        if self.data_ingestion_info is None:
+            return None
         return extract_data_ids(self.data_ingestion_info)
-
-    # Leave data_ids out of run infos that carry no per-item results, so the
-    # ones nested in data_ingestion_info, progress ticks and runs that just
-    # started don't each carry "data_ids": []. No return annotation on purpose:
-    # with one, pydantic replaces the model's serialization schema (OpenAPI)
-    # with a dict.
-    @model_serializer(mode="wrap")
-    def _omit_data_ids_without_results(self, handler):
-        serialized = handler(self)
-        if self.data_ingestion_info is None and isinstance(serialized, dict):
-            serialized.pop("data_ids", None)
-        return serialized
 
 
 class PipelineRunStarted(PipelineRunInfo):

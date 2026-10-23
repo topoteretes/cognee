@@ -56,8 +56,8 @@ def test_data_ids_tolerate_string_ids_duplicates_and_junk_entries():
 
 
 def test_run_infos_without_per_item_results_have_no_data_ids():
-    assert _run_info(PipelineRunStarted, payload=["some text"]).data_ids == []
-    assert _run_info(PipelineRunCompleted).data_ids == []
+    assert _run_info(PipelineRunStarted, payload=["some text"]).data_ids is None
+    assert _run_info(PipelineRunCompleted).data_ids is None
     assert extract_data_ids(None) == []
     assert extract_data_ids("nonsense") == []
 
@@ -87,7 +87,7 @@ def test_run_infos_without_per_item_results_leave_data_ids_out_of_the_output():
     # Per-item results without ids (incremental_loading=False) still say so.
     no_ids = _run_info(PipelineRunCompleted, data_ingestion_info=[])
     assert json.loads(no_ids.model_dump_json())["data_ids"] == []
-    # The serializer must not hide the computed field from the OpenAPI schema.
+    # Excluding the value must not hide the computed field from the OpenAPI schema.
     assert "data_ids" in PipelineRunInfo.model_json_schema(mode="serialization")["properties"]
 
 
