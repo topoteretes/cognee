@@ -505,6 +505,24 @@ def send_telemetry(
     env = os.getenv("ENV")
     if env in ["test", "dev"]:
         return
+    try:
+        origin = telemetry_origin()
+        with _telemetry_sender.prepare(event_name, origin, additional_properties) as admitted:
+            if admitted:
+                _build_telemetry_payload(
+                    event_name, user, additional_properties, user_id, tenant_id, origin
+                )
+    except Exception:
+        # Log a synthetic exception, never the original content-bearing diagnostic.
+        logger.debug(
+            "Telemetry preparation failed",
+            exc_info=(RuntimeError, RuntimeError("redacted telemetry failure"), None),
+        )
+        # Diagnostics must not change a product result/error/cancellation.
+        _telemetry_sender.count("dropped_internal")
+
+
+def _build_telemetry_payload(event_name, user, additional_properties, user_id, tenant_id, origin):
     additional_properties = _sanitize_nested_properties(
         obj=additional_properties, property_names=TELEMETRY_SANITIZED_PROPERTIES
     )
@@ -517,7 +535,6 @@ def send_telemetry(
     # Where this telemetry event originates. Defaults to "sdk"; deployments such
     # as the managed cloud set TELEMETRY_ORIGIN (e.g. "cloud") so events can be
     # segmented by origin.
-    origin = telemetry_origin()
     current_time = datetime.now(timezone.utc)
     payload = {
         "anonymous_id": anonymous_id,
@@ -540,17 +557,12 @@ def send_telemetry(
             "persistent_id": persistent_id,
             "api_key_tracking_id": api_key_tracking_id,
             "api_key_hash": api_key_tracking_id,
-            "telemetry_origin": origin,
             **additional_properties,
+            "telemetry_origin": origin,
         },
     }
 
-    try:
-        _telemetry_sender.enqueue(payload)
-    except Exception:
-        # Starting the sender thread fails at interpreter shutdown — telemetry is
-        # best-effort; dropping the event is better than crashing the caller.
-        logger.debug("Ignoring exception in send_telemetry", exc_info=True)
+    _telemetry_sender.enqueue(payload)
 
 
 def embed_logo(p: Any, layout_scale: float, logo_alpha: float, position: str):
