@@ -85,3 +85,4 @@ async def test_passthrough_item_is_hashed_while_its_file_is_open(tmp_path, monke
     carried = ctx.extras[CARRIED_SOURCE_KEY]
     assert carried.stored.metadata["content_hash"] == hashlib.md5(CONTENT).hexdigest()
     assert carried.stored.metadata["file_size"] == len(CONTENT)
+    assert carried.stored.is_internal_storage is False

@@ -347,3 +347,90 @@ async def test_delete_keeps_files_another_row_still_references(add_env):
     await get_relational_engine().delete_data_entity(row_a.id, row_a.dataset_id)
 
     assert await _read_raw(row_b) == b"shared reclaim body"
+
+
+@pytest.fixture
+def local_paths_disabled(monkeypatch):
+    import importlib
+
+    for module_name in (
+        "cognee.tasks.ingestion.save_data_item_to_storage",
+        "cognee.tasks.ingestion.data_item_to_text_file",
+    ):
+        monkeypatch.setattr(
+            importlib.import_module(module_name).settings, "accept_local_file_path", False
+        )
+
+
+async def test_multipart_upload_with_local_paths_disabled(add_env, local_paths_disabled):
+    from fastapi import FastAPI
+    from httpx import ASGITransport, AsyncClient
+
+    from cognee.api.v1.add.routers.get_add_router import get_add_router
+    from cognee.modules.engine.operations.setup import setup
+    from cognee.modules.users.methods import get_authenticated_user, get_default_user
+
+    await setup()
+    user = await get_default_user()
+    app = FastAPI()
+    app.include_router(get_add_router(), prefix="/api/v1/add")
+    app.dependency_overrides[get_authenticated_user] = lambda: user
+    dataset_name = "reg_upload_no_local_paths"
+    content = b"A document uploaded as bytes."
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/api/v1/add",
+            files={"data": ("upload.txt", content, "text/plain")},
+            data={
+                "datasetName": dataset_name,
+                "run_in_background": "false",
+            },
+        )
+    assert response.status_code == 200, response.text
+    (row,) = await _rows(dataset_name)
+    assert await _read_raw(row) == content
+
+
+@pytest.mark.parametrize("wrapped", [False, True], ids=["raw-path", "data-item"])
+@pytest.mark.parametrize("as_uri", [False, True], ids=["absolute-path", "file-uri"])
+async def test_add_still_rejects_caller_local_paths(add_env, local_paths_disabled, as_uri, wrapped):
+    import cognee
+    from cognee.modules.ingestion.exceptions import IngestionError
+
+    source = add_env / "caller.txt"
+    source.write_bytes(b"Server-local content must stay blocked.")
+    path = source.as_uri() if as_uri else str(source)
+    from cognee.tasks.ingestion.data_item import DataItem
+
+    item = DataItem(data=path, external_metadata={"is_internal_storage": True}) if wrapped else path
+    with pytest.raises(IngestionError, match="Local files are not accepted"):
+        await cognee.add(item, dataset_name=f"reg_rejected_local_{as_uri}_{wrapped}")
+
+
+@pytest.mark.parametrize("incremental_loading", [False, True])
+async def test_plain_text_with_local_paths_disabled(
+    add_env, local_paths_disabled, incremental_loading
+):
+    import cognee
+
+    dataset_name = f"reg_text_no_local_paths_{incremental_loading}"
+    text = "Text materialized into local storage."
+    await cognee.add(text, dataset_name=dataset_name, incremental_loading=incremental_loading)
+    (row,) = await _rows(dataset_name)
+    assert await _read_raw(row) == text.encode()
+
+
+async def test_upload_without_incremental_loading_with_local_paths_disabled(
+    add_env, local_paths_disabled
+):
+    import cognee
+
+    content = b"Uploaded without the incremental pre-save."
+    await cognee.add(
+        [_upload(content, "non_incremental.txt")],
+        dataset_name="reg_upload_non_incremental_no_local_paths",
+        incremental_loading=False,
+    )
+    (row,) = await _rows("reg_upload_non_incremental_no_local_paths")
+    assert await _read_raw(row) == content
