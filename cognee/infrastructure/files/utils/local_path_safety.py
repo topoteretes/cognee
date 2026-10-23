@@ -45,6 +45,18 @@ def get_allowed_local_file_roots() -> tuple[Path, ...] | None:
     return tuple(Path(os.path.realpath(os.path.expanduser(root))) for root in root_values)
 
 
+def is_cognee_storage_path(path: str | Path) -> bool:
+    """True when ``path`` lies under cognee's own data root.
+
+    Ingestion writes every payload it receives (uploads, text, fetched pages)
+    there before loading it, so a path under that root is cognee's own copy,
+    never a file the caller named on the server.
+    """
+    resolved = os.path.realpath(os.path.expanduser(os.fspath(path)))
+    data_root = os.path.realpath(os.path.expanduser(get_base_config().data_root_directory))
+    return resolved == data_root or resolved.startswith(data_root.rstrip(os.sep) + os.sep)
+
+
 def resolve_local_path(path: str | Path, *, must_exist: bool = False) -> Path:
     # realpath follows symlinks, so a path cannot escape an allowed root through a
     # symlink that points outside it (a lexical abspath check would accept such a

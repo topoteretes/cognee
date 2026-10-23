@@ -805,7 +805,7 @@ All functions are async - use `await` or `asyncio.run()`. See `examples/advanced
 ## Security Considerations
 
 Several security environment variables in `.env`:
-- `ACCEPT_LOCAL_FILE_PATH` - Allow local file paths (default: True)
+- `ACCEPT_LOCAL_FILE_PATH` - Allow a path in `raw_data` to name a file on the machine running cognee. One gate, `local_file_paths_accepted()` in `cognee/tasks/ingestion/save_data_item_to_storage.py`: an explicit value is honoured on every surface; unset, the SDK, CLI and MCP server keep the code default (True) while an API request is refused (the gate reads the call origin the API server stamps on each request, `cognee/modules/operations/origin.py`, which background work started by the request inherits). Uploads and text are unaffected: they are stored under cognee's data root first and loaded from there whatever the gate says
 - `COGNEE_ALLOWED_LOCAL_FILE_ROOTS` - Optional `os.pathsep`-separated allowlist of directories local paths may be read from. Unset (default) means any local path is accepted, so a local repo or document tree can be ingested from anywhere; a path-looking string that does not exist is still ingested as text. When set, paths outside the listed roots are rejected (or ingested as text on the non-strict `add()` path); cognee's own data/system/cache/logs/repos roots are always allowed. Set it for servers reachable by untrusted callers.
 - `ALLOW_HTTP_REQUESTS` - Allow HTTP requests from Cognee (default: True)
 - `ALLOW_CYPHER_QUERY` - Allow raw Cypher queries, the CYPHER and NATURAL_LANGUAGE search types (default: False). Off by default because raw Cypher lets any user with read access run arbitrary queries, up to remote code execution; enable only when all users are trusted
