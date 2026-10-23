@@ -183,7 +183,9 @@ def _retriever_config(search_type: SearchType, query: str) -> dict | None:
     """
     if search_type is not SearchType.CODE:
         return None
-    return {"operation": "ask", "question": " ".join(re.findall(_IDENTIFIER, query))}
+    # `foo()` is asked as `foo`, so it still matches the symbol name exactly.
+    names = dict.fromkeys(name.removesuffix("()") for name in re.findall(_IDENTIFIER, query))
+    return {"operation": "ask", "question": " ".join(names)}
 
 
 def route_query(query: str) -> RouteDecision:

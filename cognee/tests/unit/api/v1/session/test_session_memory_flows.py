@@ -1,7 +1,8 @@
 import asyncio
 import importlib
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
@@ -1021,6 +1022,53 @@ class TestRecallRoutedConfig:
         return results, [call.kwargs for call in authorized_search.await_args_list]
 
     @staticmethod
+    async def _recall_through_search(query: str, failures: dict, monkeypatch, datasets) -> list:
+        """recall()'s results over the real search fan-out, stubbed only at its boundaries.
+
+        A dataset's routed search raises its entry in ``failures`` or answers;
+        every HYBRID search answers with ``_hybrid_payload``.
+        """
+        search_datasets = [
+            SimpleNamespace(id=uuid4(), name=name, tenant_id=uuid4(), owner_id=uuid4())
+            for name in datasets
+        ]
+
+        async def get_retriever_output(query_type, dataset, **_kwargs):
+            if query_type is SearchType.HYBRID_COMPLETION:
+                return TestRecallRoutedConfig._hybrid_payload()
+            if dataset.name in failures:
+                raise failures[dataset.name]
+            return SearchResultPayload(
+                completion="routed answer", search_type=query_type, dataset_name=dataset.name
+            )
+
+        @asynccontextmanager
+        async def dataset_context(*_args, **_kwargs):
+            yield
+
+        graph_engine = MagicMock(is_empty=AsyncMock(return_value=False))
+        search = _mod_search_methods
+        monkeypatch.setattr(
+            search, "get_authorized_existing_datasets", AsyncMock(return_value=search_datasets)
+        )
+        monkeypatch.setattr(search, "set_database_global_context_variables", dataset_context)
+        monkeypatch.setattr(search, "get_graph_engine", AsyncMock(return_value=graph_engine))
+        monkeypatch.setattr(search, "get_retriever_output", get_retriever_output)
+        monkeypatch.setattr(search, "send_telemetry", lambda *args, **kwargs: None)
+        monkeypatch.setattr(search, "backend_access_control_enabled", lambda: True)
+        data_methods = importlib.import_module("cognee.modules.data.methods")
+        monkeypatch.setattr(data_methods, "get_dataset_data", AsyncMock(return_value=["doc"]))
+
+        recall_mod = _get_recall_module()
+        monkeypatch.setattr("cognee.shared.utils.send_telemetry", lambda *args, **kwargs: None)
+        monkeypatch.setattr(recall_mod, "llm_available", MagicMock(return_value=True))
+        monkeypatch.setattr(
+            recall_mod, "get_default_user", AsyncMock(return_value=MagicMock(id=uuid4()))
+        )
+        monkeypatch.setattr(recall_mod, "set_session_user_context_variable", AsyncMock())
+        return await recall_mod.recall(query)
+
+    @staticmethod
     def _ask_payload(dataset: str, seeds=()) -> SearchResultPayload:
         result = {"operation": "ask", "seeds": list(seeds)}
         return SearchResultPayload(
@@ -1116,6 +1164,24 @@ class TestRecallRoutedConfig:
         results, _ = await self._routed_recall(query, error)
 
         assert [result.text for result in results] == ["hybrid answer"]
+
+    @pytest.mark.asyncio
+    async def test_code_question_on_a_docs_only_dataset_answers_with_hybrid(self, monkeypatch):
+        failures = {"docs": CodeGraphUnavailableError("This dataset has no code graph.")}
+        results = await self._recall_through_search(
+            "What calls parse_config?", failures, monkeypatch, datasets=("docs",)
+        )
+
+        assert [result.text for result in results] == ["hybrid answer"]
+
+    @pytest.mark.asyncio
+    async def test_broad_failure_in_one_of_several_datasets_answers_with_hybrid(self, monkeypatch):
+        failures = {"sales": BroadQueryError("BROAD could not write a working query.")}
+        results = await self._recall_through_search(
+            "How many invoices were paid?", failures, monkeypatch, datasets=("sales", "support")
+        )
+
+        assert [result.text for result in results] == ["hybrid answer", "hybrid answer"]
 
     @pytest.mark.asyncio
     async def test_routed_no_data_is_not_retried(self):

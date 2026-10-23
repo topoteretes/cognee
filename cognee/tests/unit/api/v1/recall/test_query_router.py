@@ -205,6 +205,10 @@ class TestRouteDecision:
         assert decision.rule == "code_question"
         assert decision.retriever_config == {"operation": "ask", "question": "parse_config getUser"}
 
+    def test_code_route_asks_about_each_name_once_without_parentheses(self):
+        decision = route_query("Who calls foo() besides the callers of foo()?")
+        assert decision.retriever_config == {"operation": "ask", "question": "foo"}
+
     def test_whitespace_is_ignored(self):
         assert route_query('   "polonium and radium"  ').search_type == SearchType.CHUNKS_LEXICAL
 

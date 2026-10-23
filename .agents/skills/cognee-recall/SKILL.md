@@ -27,18 +27,24 @@ narrow it; that is also faster.
 
 1. An explicit `query_type=SearchType.X` always wins.
 2. Otherwise, with no usable LLM key, `CHUNKS` (plain vector search).
-3. Otherwise the router (`auto_route=True`, the default). It is three regex
+3. Otherwise the router (`auto_route=True`, the default). It is five regex
    rules, first match wins, no LLM call:
    - the whole query is one `"quoted phrase"` → `CHUNKS_LEXICAL`
    - mentions coding rules/standards/conventions or code-review guidelines
      → `CODING_RULES`
+   - code phrasing right next to an identifier (`what calls parse_config`,
+     `where is CodeRetriever defined`, `callers of foo()`) → `CODE`, running
+     its `ask` operation over the identifiers
+   - opens with `how many` / `total number of` → `BROAD`
    - an absolute date behind a time preposition (`in 2019`, `before 1900`,
      `on 7 November 1867`) → `TEMPORAL`
 4. Everything else → `HYBRID_COMPLETION`.
 
 A routed type (never a pinned one) that the backend rejects, or a routed
-`CHUNKS_LEXICAL` / `CODING_RULES` that returns nothing, is retried once as
-`HYBRID_COMPLETION`. The router never picks `CYPHER`.
+`CHUNKS_LEXICAL` / `CODING_RULES` / `CODE` / `BROAD` that returns nothing, is
+retried once as `HYBRID_COMPLETION`. So is a routed `CODE` with no matching
+symbol or no code graph, and a routed `BROAD` that cannot write a working
+query or hits a limit; "no data" is not retried. The router never picks `CYPHER`.
 
 ```python
 from cognee import SearchType
