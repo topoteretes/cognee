@@ -141,7 +141,10 @@ def test_custom_provider_with_openai_model_uses_tiktoken_not_huggingface(caplog,
         tok = resolve_embedding_tokenizer(provider="custom", model=model)
     assert tok.kind == "tiktoken"
     assert tok.kwargs["model"] == "text-embedding-3-large"
-    assert not caplog.records
+    # Only what the resolver itself warned about: once the at_level block has
+    # exited, the capture handler is back at NOTSET and a DEBUG line from an
+    # earlier test's aiosqlite worker thread may land here (seen on Windows CI).
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 
 
 def test_explicit_huggingface_tokenizer_wins_over_openai_model_name():

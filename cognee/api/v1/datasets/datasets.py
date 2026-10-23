@@ -284,6 +284,10 @@ class datasets:
                 if str(data.dataset_id) != str(dataset_id):
                     raise UnauthorizedDataAccessError(f"Data {data_id} not accessible.")
 
+                from cognee.tasks.code_graph.code_repo import is_code_repo_sourced
+
+                was_code_repo = is_code_repo_sourced(data)
+
                 async with set_database_global_context_variables(dataset_id, dataset.owner_id):
                     # Delete mode is exclusive: ledger rows imply the relational-ledger
                     # path; only ledger-free data probes the graph marker to distinguish
@@ -320,6 +324,17 @@ class datasets:
                         # As in empty_dataset: history first, then the dataset.
                         await delete_dataset_search_history(dataset.id)
                         await delete_dataset(dataset)
+                        dataset_data = None
+
+                # A dataset's code repositories are extracted together, so the
+                # ones that remain still describe the deleted one: mark them
+                # for re-extraction by the next cognify() of the dataset.
+                if dataset_data is not None and was_code_repo:
+                    from cognee.tasks.code_graph.cluster import (
+                        mark_dataset_code_repos_for_rebuild,
+                    )
+
+                    await mark_dataset_code_repos_for_rebuild(dataset)
 
             return {"status": "success"}
 
