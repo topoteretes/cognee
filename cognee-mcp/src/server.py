@@ -638,8 +638,6 @@ async def recall(
             scope_list = parse_csv_list(scope)
             if code_query is not None and not isinstance(code_query, dict):
                 raise ValueError("code_query must be a JSON object (dict).")
-            if store:
-                _capture_turn(query, dataset_list[0] if dataset_list else None)
             results = await cognee_client.recall(
                 query_text=query,
                 search_type=search_type,
@@ -669,6 +667,12 @@ async def recall(
                 except Exception:
                     logger.debug("Recall empty-state diagnostics unavailable", exc_info=True)
                     empty_state = RecallState("none")
+            if store:
+                # After the search, not before: on a fresh install the first
+                # search and the first write both create the default user, and
+                # the loser of that race (IntegrityError on users.email) would
+                # drop the turn. The write is still fire-and-forget.
+                _capture_turn(query, dataset_list[0] if dataset_list else None)
             return [
                 types.TextContent(
                     type="text",
@@ -1196,8 +1200,8 @@ def _capture_turn(query: str, dataset_name: str | None) -> None:
                 session_id=session_id,
                 self_improvement=False,
             )
-        except Exception:
-            logger.debug("Session capture skipped for %s", session_id, exc_info=True)
+        except Exception as e:
+            logger.warning("Session capture failed for %s: %s", session_id, e, exc_info=True)
 
     _track_background(capture())
 

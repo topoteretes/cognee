@@ -131,6 +131,42 @@ async def test_recall_stores_query_in_derived_session(monkeypatch, in_request):
 
 
 @pytest.mark.asyncio
+async def test_capture_starts_only_after_the_search_finished(monkeypatch, in_request):
+    """On a fresh install the first search and the first write both create the
+    default user; the loser raises IntegrityError on users.email and the turn is
+    lost (seen end to end over stdio). So the write is scheduled after the search."""
+    fake = _fake_client()
+    remember_scheduled_during_search = []
+
+    async def recall(**kwargs):
+        remember_scheduled_during_search.append(bool(server._background_tasks))
+        return [{"text": "hit"}]
+
+    fake.recall = recall
+    monkeypatch.setattr(server, "cognee_client", fake)
+    in_request(headers={"mcp-session-id": "abc"})
+
+    await server.recall("q")
+    await _drain()
+
+    assert remember_scheduled_during_search == [False]
+    fake.remember.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_failed_search_stores_nothing(monkeypatch, in_request):
+    fake = _fake_client(recall=AsyncMock(side_effect=RuntimeError("search down")))
+    monkeypatch.setattr(server, "cognee_client", fake)
+    in_request(headers={"mcp-session-id": "abc"})
+
+    result = await server.recall("q")
+    await _drain()
+
+    assert "Recall failed" in result[0].text
+    fake.remember.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_recall_stores_into_the_first_requested_dataset(monkeypatch, in_request):
     fake = _fake_client()
     monkeypatch.setattr(server, "cognee_client", fake)
