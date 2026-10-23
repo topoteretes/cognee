@@ -157,7 +157,11 @@ _RULES: tuple[tuple[str, re.Pattern, SearchType], ...] = (
     ),
     (
         "count_question",
-        re.compile(r"\b(?:how\s+many|total\s+number\s+of)\b", re.IGNORECASE),
+        re.compile(
+            r"^\s*(?:how\s+many"
+            r"|(?:what(?:'s|\s+is|\s+was|\s+are)\s+the\s+)?total\s+number\s+of)\b",
+            re.IGNORECASE,
+        ),
         SearchType.BROAD,
     ),
     (

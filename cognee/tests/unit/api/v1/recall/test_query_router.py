@@ -63,6 +63,9 @@ GOLDEN = [
     ("What is the average response time?", SearchType.HYBRID_COMPLETION),
     ("Is the whole more than the sum of its parts?", SearchType.HYBRID_COMPLETION),
     ("Who wrote The Count of Monte Cristo?", SearchType.HYBRID_COMPLETION),
+    # a count phrase that does not open the question is prose or a title
+    ("I don't know how many people came, what did Alice say?", SearchType.HYBRID_COMPLETION),
+    ("Tell me about the movie How Many Kinds of Love", SearchType.HYBRID_COMPLETION),
     # default
     ("Who won Nobel Prizes?", SearchType.HYBRID_COMPLETION),
     ("What did Einstein discover?", SearchType.HYBRID_COMPLETION),

@@ -90,7 +90,7 @@ CamelCase by its capital letters.
 | 1 | `quoted_phrase` | The whole query is one `"quoted phrase"` | `CHUNKS_LEXICAL` |
 | 2 | `coding_rules_intent` | `coding rules` / `coding standards` / `coding conventions`, or `code review guidelines` (and the `rules`, `standards`, `checklist`, `conventions` variants) | `CODING_RULES` |
 | 3 | `code_question` | An identifier — snake_case (`parse_config`), CamelCase (`CodeRetriever`, `getUser`) or a call (`foo()`) — right next to code phrasing: what/who/which, up to five words, then `calls`, `imports`, `references`, `overrides`, `implements`, `inherits from`, `subclasses` or `depends on` directly before or after the identifier; `where is`, up to five words, the identifier, at most one word, then `defined`/`declared`/`implemented`; or `callers of` / `call sites of` / `usages of` / `implementations of` directly before it (`the` may precede the identifier) | `CODE` (`ask` over the identifiers) |
-| 4 | `count_question` | `how many` or `total number of` | `BROAD` |
+| 4 | `count_question` | A question that opens with `how many` or `total number of` (optionally `what's`/`what is`/`what was`/`what are the total number of`) | `BROAD` |
 | 5 | `time_scoped_question` | A time preposition (`in`, `before`, `after`, `since`, `between`, `from`, `on`, `during`, `as of`, …) directly followed by an absolute date — or `for` followed by one that ends the phrase (`scheduled for 2031`, but not `for 2000 users`): a four-digit year (`in 2019`, `in early 2024`), a decade (`in the 1990s`), a month and year (`in July 1969`), a full date (`on 7 November 1867`, `on March 1, 2024`), or an ISO date (`on 2024-03-01`) | `TEMPORAL` |
 | — | `default` | Anything else | `HYBRID_COMPLETION` |
 
@@ -155,9 +155,11 @@ That is why these are *not* auto-routed, even though they are valid
   question's identifiers only, so words like `defined` or `calls` do not
   become search terms. Known limitation: an acronym-led name (`HTTPError`) is
   not recognised as an identifier.
-- `BROAD` *is* routed, but only on `how many` and `total number of`. It reads
-  the whole dataset into a record store on every question and makes at least
-  two LLM calls, so it needs a signal that is a count and nothing else.
+- `BROAD` *is* routed, but only on a question that opens with `how many` or
+  `total number of`. It reads the whole dataset into a record store on every
+  question and makes at least two LLM calls, so it needs a signal that is a
+  count and nothing else; mid-sentence the phrase is often prose (`I don't
+  know how many people came`) or a title.
   `number of` (`a number of issues`), `count of` (`The Count of Monte
   Cristo`), `sum of` (`the sum of its parts`), `average` (`the average
   response time` a report states) and `how much` (`how much does the plan
