@@ -1,10 +1,7 @@
 """Unit tests for telemetry identity helpers."""
 
-import asyncio
-from collections.abc import Coroutine
+from datetime import datetime, timezone
 from typing import Any
-
-import pytest
 
 from cognee.shared import utils
 from cognee.shared.utils import _get_api_key_tracking_id, send_telemetry
@@ -41,30 +38,12 @@ def test_send_telemetry_includes_api_key_tracking_id(monkeypatch):
     """Telemetry payloads expose a pseudonymous API-key ID for analytics grouping."""
     payloads: list[dict[str, Any]] = []
 
-    def capture_payload(payload: dict[str, Any]) -> Coroutine[Any, Any, None]:
-        payloads.append(payload)
-
-        async def noop() -> None:
-            return None
-
-        return noop()
-
-    class FakeTask:
-        def add_done_callback(self, callback) -> None:
-            callback(self)
-
-    class CapturingLoop:
-        def create_task(self, coroutine: Coroutine[Any, Any, None]) -> "FakeTask":
-            coroutine.close()
-            return FakeTask()
-
     monkeypatch.setenv("ENV", "prod")
     monkeypatch.delenv("TELEMETRY_DISABLED", raising=False)
     monkeypatch.setenv("LLM_API_KEY", "provider-prefix-secret-12345")
     monkeypatch.setattr(utils, "get_anonymous_id", lambda: "anonymous-test-id")
     monkeypatch.setattr(utils, "get_persistent_id", lambda: "persistent-test-id")
-    monkeypatch.setattr(utils, "_send_telemetry_request", capture_payload)
-    monkeypatch.setattr(utils.asyncio, "get_running_loop", lambda: CapturingLoop())
+    monkeypatch.setattr(utils._telemetry_sender, "enqueue", payloads.append)
 
     send_telemetry("test_event", "user-123", {"url": "https://example.test/raw"})
 
@@ -85,29 +64,11 @@ def test_send_telemetry_includes_origin_from_env(monkeypatch):
     honored (e.g. "cloud") when set, so events can be segmented by origin."""
     payloads: list[dict[str, Any]] = []
 
-    def capture_payload(payload: dict[str, Any]) -> Coroutine[Any, Any, None]:
-        payloads.append(payload)
-
-        async def noop() -> None:
-            return None
-
-        return noop()
-
-    class FakeTask:
-        def add_done_callback(self, callback) -> None:
-            callback(self)
-
-    class CapturingLoop:
-        def create_task(self, coroutine: Coroutine[Any, Any, None]) -> "FakeTask":
-            coroutine.close()
-            return FakeTask()
-
     monkeypatch.setenv("ENV", "prod")
     monkeypatch.delenv("TELEMETRY_DISABLED", raising=False)
     monkeypatch.setattr(utils, "get_anonymous_id", lambda: "anonymous-test-id")
     monkeypatch.setattr(utils, "get_persistent_id", lambda: "persistent-test-id")
-    monkeypatch.setattr(utils, "_send_telemetry_request", capture_payload)
-    monkeypatch.setattr(utils.asyncio, "get_running_loop", lambda: CapturingLoop())
+    monkeypatch.setattr(utils._telemetry_sender, "enqueue", payloads.append)
 
     # Unset -> defaults to "sdk".
     monkeypatch.delenv("TELEMETRY_ORIGIN", raising=False)
@@ -120,37 +81,16 @@ def test_send_telemetry_includes_origin_from_env(monkeypatch):
     assert payloads[-1]["properties"]["telemetry_origin"] == "cloud"
 
 
-@pytest.mark.asyncio
-async def test_send_telemetry_anchors_task_against_gc(monkeypatch):
-    """The fire-and-forget telemetry task must be strongly referenced until
-    it completes, otherwise asyncio's weak reference lets the gc collect it
-    mid-run (#3231)."""
+def test_send_telemetry_stamps_event_time(monkeypatch):
+    """Batching delays delivery, so the event carries when it happened (SDK-1082)."""
+    payloads: list[dict[str, Any]] = []
     monkeypatch.setenv("ENV", "prod")
     monkeypatch.delenv("TELEMETRY_DISABLED", raising=False)
-    monkeypatch.setattr(utils, "get_anonymous_id", lambda: "anonymous-test-id")
-    monkeypatch.setattr(utils, "get_persistent_id", lambda: "persistent-test-id")
+    monkeypatch.setattr(utils._telemetry_sender, "enqueue", payloads.append)
 
-    async def slow_send(payload: dict[str, Any]) -> None:
-        await asyncio.sleep(0.01)
-
-    monkeypatch.setattr(utils, "_send_telemetry_request", slow_send)
-
-    loop = asyncio.get_running_loop()
-    real_create_task = loop.create_task
-    captured: dict[str, asyncio.Task] = {}
-
-    def spy_create_task(coro, *args, **kwargs):
-        task = real_create_task(coro, *args, **kwargs)
-        captured["task"] = task
-        return task
-
-    monkeypatch.setattr(loop, "create_task", spy_create_task)
-
+    before = datetime.now(timezone.utc)
     send_telemetry("test_event", "user-123")
+    event_time = datetime.fromisoformat(payloads[0]["event_time"])
 
-    task = captured["task"]
-    assert task in utils._TELEMETRY_TASKS
-
-    await task
-
-    assert task not in utils._TELEMETRY_TASKS
+    assert event_time.tzinfo == timezone.utc
+    assert before <= event_time <= datetime.now(timezone.utc)
