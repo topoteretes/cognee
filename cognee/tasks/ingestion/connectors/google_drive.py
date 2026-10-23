@@ -332,11 +332,38 @@ def _iter_rows(service, config: _DriveConfig, state: dict, stats: dict[str, int]
                     f"Google Drive: failed to fetch metadata for file '{file_id}': {e}"
                 ) from e
 
-            if file_meta.get("trashed") or not _is_in_scope(
+            in_scope = not file_meta.get("trashed") and _is_in_scope(
                 file_meta,
                 scope_folder_ids,
                 config.shared_drive_id if config.include_subfolders else None,
-            ):
+            )
+
+            # Folder moves only show up as a change on the folder itself. Expand
+            # to nested files so contents are forgotten or ingested (#6245).
+            if file_meta.get("mimeType") == GOOGLE_FOLDER_MIME_TYPE:
+                nested = list(_iter_files_under_folder(service, file_id, config))
+                if not in_scope:
+                    known_ids.discard(file_id)
+                    for child in nested:
+                        child_id = child["id"]
+                        if child_id not in known_ids:
+                            continue
+                        known_ids.discard(child_id)
+                        tombstoned += 1
+                        stats["deleted"] += 1
+                        yield {"id": child_id, "_deleted": True}
+                    continue
+
+                for child in nested:
+                    child_id = child["id"]
+                    row = _file_to_row(service, child, config, stats)
+                    known_ids.add(child_id)
+                    if row is not None:
+                        yielded += 1
+                        yield row
+                continue
+
+            if not in_scope:
                 known_ids.discard(file_id)
                 tombstoned += 1
                 stats["deleted"] += 1
@@ -467,6 +494,60 @@ def _list_files_in_folder(
         page_token = response.get("nextPageToken")
         if not page_token:
             break
+
+
+
+def _iter_files_under_folder(service, folder_id: str, config: _DriveConfig):
+    """Yield non-folder files under ``folder_id``.
+
+    Used when the Changes API reports a folder move: Drive emits a change for
+    the folder itself, not for each nested file. Recurses when
+    ``include_subfolders`` is on.
+    """
+    yield from _list_files_in_folder(
+        service, folder_id, shared_drive_id=config.shared_drive_id
+    )
+    if not config.include_subfolders:
+        return
+    # Walk immediate child folders the same way _get_scope_folder_ids does.
+    queue = [folder_id]
+    seen = {folder_id}
+    while queue:
+        current = queue.pop(0)
+        page_token = None
+        while True:
+            try:
+                response = (
+                    service.files()
+                    .list(
+                        q=(
+                            f"'{current}' in parents and "
+                            f"mimeType='{GOOGLE_FOLDER_MIME_TYPE}' and trashed=false"
+                        ),
+                        fields="nextPageToken, files(id)",
+                        pageSize=100,
+                        pageToken=page_token,
+                        supportsAllDrives=True,
+                        includeItemsFromAllDrives=True,
+                    )
+                    .execute()
+                )
+            except Exception as e:
+                raise RuntimeError(
+                    f"Google Drive: failed to list subfolders of folder '{current}': {e}"
+                ) from e
+            for child in response.get("files", []):
+                child_id = child["id"]
+                if child_id in seen:
+                    continue
+                seen.add(child_id)
+                queue.append(child_id)
+                yield from _list_files_in_folder(
+                    service, child_id, shared_drive_id=config.shared_drive_id
+                )
+            page_token = response.get("nextPageToken")
+            if not page_token:
+                break
 
 
 def _get_start_page_token(service, shared_drive_id: str | None = None) -> str:

@@ -453,3 +453,54 @@ def test_file_diagnostics_report_reasons_and_retry_failed_extraction(monkeypatch
     assert stats["failed"] == 0
     assert stats["scanned"] == 5
     assert state["page_token"] == "t0"
+
+
+FOLDER_MIME = "application/vnd.google-apps.folder"
+
+
+def test_subfolder_moved_out_tombstones_nested_known_files(fake_content_extraction):
+    """Changes API only reports the folder; nested known files must be forgotten (#6245)."""
+    nested = _file_meta("nested", parents=("sub",))
+    sub = _file_meta("sub", mime_type=FOLDER_MIME, parents=("elsewhere",))
+    service = FakeDriveService(
+        files_by_folder={"root": [], "sub": [nested]},
+        file_by_id={"sub": sub, "nested": nested},
+        subfolders={"sub": []},
+    )
+    service.changes_by_token["t0"] = {
+        "changes": [{"fileId": "sub", "removed": False}],
+        "newStartPageToken": "t1",
+    }
+    state = {"page_token": "t0", "known_ids": ["nested", "rootfile"]}
+
+    rows = list(gd_source._iter_rows(service, _config(), state))
+
+    assert rows == [{"id": "nested", "_deleted": True}]
+    assert "nested" not in state["known_ids"]
+    assert "rootfile" in state["known_ids"]
+    assert state["page_token"] == "t1"
+    assert fake_content_extraction == []
+
+
+def test_subfolder_moved_in_syncs_nested_files(fake_content_extraction):
+    """A folder moved into scope must ingest its contents, not skip the folder mime (#6245)."""
+    nested = _file_meta("nested", parents=("sub",))
+    sub = _file_meta("sub", mime_type=FOLDER_MIME, parents=("root",))
+    service = FakeDriveService(
+        files_by_folder={"root": [], "sub": [nested]},
+        file_by_id={"sub": sub, "nested": nested},
+        subfolders={"root": ["sub"], "sub": []},
+    )
+    service.changes_by_token["t0"] = {
+        "changes": [{"fileId": "sub", "removed": False}],
+        "newStartPageToken": "t1",
+    }
+    state = {"page_token": "t0", "known_ids": []}
+
+    rows = list(gd_source._iter_rows(service, _config(), state))
+
+    assert [row["id"] for row in rows] == ["nested"]
+    assert rows[0]["_deleted"] is False
+    assert state["known_ids"] == ["nested"]
+    assert state["page_token"] == "t1"
+    assert fake_content_extraction == ["nested"]
