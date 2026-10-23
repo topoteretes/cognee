@@ -37,7 +37,7 @@ async def emit_dlt_schema_graph(
     """Build and persist the DLT schema graph for the given tables and rows.
 
     Args:
-        tables: {table_name: {"schema_info", "foreign_keys", "dlt_db_name"}}
+        tables: {table_name: {"schema_info", "foreign_keys", "primary_key", "row_count"}}
         row_records: [{"source_id": str, "table_name": str, "fk_references": [...],
             "column_values": {column: value}, "timestamps": {column: str}}] —
             column_values is optional and produces one shared ColumnValue node
@@ -47,6 +47,8 @@ async def emit_dlt_schema_graph(
             ``dlt_temporal``) becomes a column-named edge from the row to the
             ``Timestamp`` node for that instant — the same node LLM-extracted
             dates resolve to — which is what temporal search anchors on.
+            ``fk_only`` marks a row an earlier batch wrote: only its FK edges
+            are emitted.
         ctx: optional pipeline context for provenance/ledger registration.
         emitted_value_node_ids: set shared across batches of one pipeline run
             (mirrors ``emitted_schema_docs``). Value nodes already in the set
@@ -92,13 +94,13 @@ async def emit_dlt_schema_graph(
             id=_table_node_id(table_name),
             name=table_name,
             columns=columns_str,
-            primary_key=None,
+            primary_key=table_meta["primary_key"],
             foreign_keys=fk_str,
             sample_rows="[]",
-            row_count_estimate=None,
+            row_count_estimate=table_meta["row_count"],
             description=(
-                f"DLT-ingested relational table '{table_name}' "
-                f"from database '{table_meta['dlt_db_name']}'."
+                f"Relational table '{table_name}' with {table_meta['row_count']} rows, "
+                "loaded through dlt."
             ),
         )
         schema_nodes.append(table_node)
@@ -177,7 +179,7 @@ async def emit_dlt_schema_graph(
 
         # Table node ids are deterministic, so the edge target is valid even
         # when the table node was emitted by an earlier batch (tables omitted).
-        if table_name:
+        if table_name and not record.get("fk_only"):
             schema_edges.append(
                 (
                     source_uuid,
