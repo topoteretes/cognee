@@ -30,6 +30,15 @@ function Checkbox({ label, description, ...props }: InputHTMLAttributes<HTMLInpu
   </label>;
 }
 
+// takeOAuthOutcome returns the slug as a string here, and an object carrying
+// the slug once the SaaS frontend's version of oauthOutcome.ts is synced in.
+// Reading either keeps this card building on both sides of that sync.
+function outcomeSlug(taken: unknown): string | null {
+  if (typeof taken === "string") return taken;
+  if (typeof taken === "object" && taken !== null && "outcome" in taken && typeof taken.outcome === "string") return taken.outcome;
+  return null;
+}
+
 export default function GoogleIntegrationCard({ provider, connecting, setConnecting }: {
   provider: GoogleProvider;
   connecting: GoogleProvider | null;
@@ -103,7 +112,7 @@ export default function GoogleIntegrationCard({ provider, connecting, setConnect
       if (!mounted.current || popup.closed) { popup.close(); setConnecting(null); return; }
       popup.location.href = googleAuthorizeUrl(result.authorize_url);
       popupPoll.current = setInterval(() => {
-        const outcome = takeOAuthOutcome(provider)?.outcome ?? null;
+        const outcome = outcomeSlug(takeOAuthOutcome(provider));
         const timedOut = Date.now() - startedAt > 120000;
         if (!outcome && !popup.closed && !timedOut) return;
         if (popupPoll.current) clearInterval(popupPoll.current);
