@@ -191,7 +191,7 @@ def test_saved_creds_from_an_older_release_still_load(monkeypatch, tmp_path):
     creds = creds_mod.load_credentials()
 
     assert creds == creds_mod.CloudCredentials(
-        service_url="http://saved-instance.invalid", api_key="saved-key"
+        service_url="http://saved-instance.invalid", api_key="saved-key", tenant_id="t1"
     )
 
 
