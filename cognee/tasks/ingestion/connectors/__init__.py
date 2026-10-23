@@ -34,3 +34,6 @@ __all__ = [
     "obsidian_source",
     "onenote_source",
 ]
+from .airtable import airtable_source
+
+__all__.append("airtable_source")
