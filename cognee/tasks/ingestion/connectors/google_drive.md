@@ -61,6 +61,13 @@ text/CSV, PDFs are parsed with cognee's core `pypdf`, and text files download as
 are listed below). A PDF that pypdf cannot read (password protected or corrupt) is counted as
 `failed_unreadable`; the other ways a file can fail are in the table below.
 
+Drive reports a folder moved into the synced folder on its own: the files inside it keep their
+parents, so they get no change entry. The sync state therefore also records the folders in scope,
+and with `include_subfolders` a run lists each folder that joined the scope since the last run
+once and reads its files that are not synced yet. A folder that only gained or lost a file, or
+moved within the synced folder, is not listed. This covers My Drive folders; a shared drive is
+scoped by its drive id rather than by its folders, and is not walked.
+
 Every run fetches file content on `max_workers` threads (default 8, env
 `GOOGLE_DRIVE_MAX_WORKERS`), each with its own Drive client, and retries rate-limit and server
 errors with backoff. The sync state also records each fetched file's `modifiedTime`, so when a
