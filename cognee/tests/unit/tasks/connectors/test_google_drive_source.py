@@ -342,7 +342,7 @@ def test_file_moved_out_of_scope_yields_hard_delete_tombstone(fake_content_extra
     assert fake_content_extraction == []
 
 
-FOLDER_MIME = "application/vnd.google-apps.folder"
+FOLDER_MIME = gd_source.GOOGLE_FOLDER_MIME_TYPE
 
 
 def _moved_in_folder_service():
@@ -370,9 +370,19 @@ def _moved_in_folder_service():
     return service
 
 
+def _before_the_move(known_ids=("fileA",)):
+    # The state of the run before "moved" joined the synced folder.
+    return {"page_token": "t0", "known_ids": list(known_ids), "scope_folder_ids": ["root"]}
+
+
+def _file_listings(service):
+    # files.list calls for the files of a folder, not for its subfolders.
+    return [q for q in service.list_calls if "mimeType=" not in q]
+
+
 def test_folder_moved_into_scope_ingests_the_files_inside_it(fake_content_extraction):
     service = _moved_in_folder_service()
-    state = {"page_token": "t0", "known_ids": ["fileA"]}
+    state = _before_the_move()
     stats = {}
 
     rows = list(gd_source._iter_rows(service, _config(), state, stats))
@@ -383,12 +393,94 @@ def test_folder_moved_into_scope_ingests_the_files_inside_it(fake_content_extrac
     assert state["known_ids"] == ["fileA", "fileB", "fileC"]
     assert sorted(state["versions"]) == ["fileB", "fileC"]
     assert state["page_token"] == "t1"
+    assert state["scope_folder_ids"] == ["deep", "moved", "root"]
     assert "skipped_unsupported_type" not in stats, "a folder is not an unsupported file"
+    # Only the two folders new to the scope are listed, each once.
+    assert _file_listings(service) == [
+        "'deep' in parents and trashed=false",
+        "'moved' in parents and trashed=false",
+    ]
+
+
+def test_folder_moved_in_right_after_the_full_scan_is_ingested(fake_content_extraction):
+    file_a = _file_meta("fileA")
+    file_b = _file_meta("fileB", parents=("moved",))
+    service = FakeDriveService(
+        files_by_folder={"root": [file_a], "0Aroot": [file_a], "moved": [file_b]},
+        file_by_id={
+            "fileA": file_a,
+            "fileB": file_b,
+            "moved": _file_meta("moved", mime_type=FOLDER_MIME),
+        },
+        start_token="t0",
+    )
+    state = {}
+    assert [row["id"] for row in gd_source._iter_rows(service, _config(), state)] == ["fileA"]
+    assert state["scope_folder_ids"] == ["root"], "the full scan records the scope it listed"
+
+    service.subfolders["root"] = ["moved"]
+    service.changes_by_token["t0"] = {
+        "changes": [{"fileId": "moved", "removed": False}],
+        "newStartPageToken": "t1",
+    }
+    assert [row["id"] for row in gd_source._iter_rows(service, _config(), state)] == ["fileB"]
+    assert state["scope_folder_ids"] == ["moved", "root"]
+
+
+def test_folder_and_its_subfolder_both_reported_are_listed_once(fake_content_extraction):
+    service = _moved_in_folder_service()
+    service.changes_by_token["t0"]["changes"].append({"fileId": "deep", "removed": False})
+
+    rows = list(gd_source._iter_rows(service, _config(), _before_the_move()))
+
+    assert sorted(row["id"] for row in rows) == ["fileB", "fileC"]
+    assert _file_listings(service) == [
+        "'deep' in parents and trashed=false",
+        "'moved' in parents and trashed=false",
+    ]
+
+
+def test_folder_that_only_gained_a_file_is_not_listed(fake_content_extraction):
+    # Drive also reports a folder when a file is added to it or removed from it. On
+    # root -> A -> B -> C with synced files, that costs the scope walk (4 subfolder listings)
+    # and no listing of the folders' files.
+    synced = {
+        folder: [_file_meta(f"{folder}{index}", parents=(folder,)) for index in range(5)]
+        for folder in ("A", "B", "C")
+    }
+    new_file = _file_meta("A-new", parents=("A",))
+    files_by_id = {meta["id"]: meta for files in synced.values() for meta in files}
+    service = FakeDriveService(
+        files_by_folder={**synced, "A": [*synced["A"], new_file]},
+        file_by_id={
+            **files_by_id,
+            "A-new": new_file,
+            "A": _file_meta("A", mime_type=FOLDER_MIME),
+            "B": _file_meta("B", mime_type=FOLDER_MIME, parents=("A",)),
+            "C": _file_meta("C", mime_type=FOLDER_MIME, parents=("B",)),
+        },
+        subfolders={"root": ["A"], "A": ["B"], "B": ["C"]},
+    )
+    service.changes_by_token["t0"] = {
+        "changes": [{"fileId": "A", "removed": False}, {"fileId": "A-new", "removed": False}],
+        "newStartPageToken": "t1",
+    }
+    state = {
+        "page_token": "t0",
+        "known_ids": sorted(files_by_id),
+        "scope_folder_ids": ["A", "B", "C", "root"],
+    }
+
+    rows = list(gd_source._iter_rows(service, _config(), state))
+
+    assert [row["id"] for row in rows] == ["A-new"]
+    assert len(service.list_calls) == 4
+    assert _file_listings(service) == []
 
 
 def test_folder_moved_into_scope_is_read_on_the_thread_pool(fake_content_extraction):
     service = _moved_in_folder_service()
-    state = {"page_token": "t0", "known_ids": ["fileA"]}
+    state = _before_the_move()
 
     rows = list(
         gd_source._iter_rows(
@@ -403,23 +495,72 @@ def test_folder_moved_into_scope_is_read_on_the_thread_pool(fake_content_extract
 def test_a_file_reported_with_its_moved_folder_is_read_once(fake_content_extraction):
     service = _moved_in_folder_service()
     service.changes_by_token["t0"]["changes"].append({"fileId": "fileB", "removed": False})
-    state = {"page_token": "t0", "known_ids": ["fileA"]}
 
-    rows = list(gd_source._iter_rows(service, _config(), state))
+    rows = list(gd_source._iter_rows(service, _config(), _before_the_move()))
 
     assert sorted(row["id"] for row in rows) == ["fileB", "fileC"]
     assert sorted(fake_content_extraction) == ["fileB", "fileC"]
 
 
-def test_folder_moved_within_scope_does_not_reread_synced_files(fake_content_extraction):
+def test_folder_moved_within_scope_is_not_listed(fake_content_extraction):
     service = _moved_in_folder_service()
-    state = {"page_token": "t0", "known_ids": ["fileA", "fileB", "fileC"]}
+    state = {
+        "page_token": "t0",
+        "known_ids": ["fileA", "fileB", "fileC"],
+        "scope_folder_ids": ["deep", "moved", "root"],
+    }
 
     rows = list(gd_source._iter_rows(service, _config(), state))
 
     assert rows == []
     assert fake_content_extraction == []
+    assert _file_listings(service) == []
     assert state["page_token"] == "t1"
+
+
+def test_state_without_a_recorded_scope_starts_from_this_run(fake_content_extraction):
+    # A state written before the scope was recorded has nothing to compare with, so this
+    # run's scope is the baseline and is recorded for the next run.
+    service = _moved_in_folder_service()
+    state = {"page_token": "t0", "known_ids": ["fileA"]}
+
+    rows = list(gd_source._iter_rows(service, _config(), state))
+
+    assert rows == []
+    assert _file_listings(service) == []
+    assert state["scope_folder_ids"] == ["deep", "moved", "root"]
+
+
+def test_files_left_out_for_good_are_known_and_not_read_again(monkeypatch):
+    service = _moved_in_folder_service()
+    service.files_by_folder["moved"] = [
+        _file_meta("image", mime_type="image/png", parents=("moved",)),
+        _file_meta("blank", parents=("moved",)),
+        _file_meta("locked", mime_type=PDF_MIME, parents=("moved",)),
+        _file_meta("office", mime_type=DOCX_MIME, parents=("moved",)),
+    ]
+    service.files_by_folder["deep"] = []
+
+    def extract(_client, file_id, *_args):
+        if file_id == "locked":
+            raise gd_source.UnreadableFileError("locked")
+        if file_id == "office":
+            raise gd_source.LoaderUnavailableError("docling is not installed")
+        return "   "
+
+    monkeypatch.setattr(gd_source, "extract_file_content", extract)
+    state, stats = _before_the_move(), {}
+
+    assert list(gd_source._iter_rows(service, _config(), state, stats)) == []
+
+    assert stats["skipped_unsupported_type"] == 1
+    assert stats["skipped_empty_content"] == 1
+    assert stats["failed_unreadable"] == 1
+    assert stats["failed_loader_unavailable"] == 1
+    # A missing loader is the environment, not the file: it stays unknown, so the file is
+    # read when it next changes.
+    assert state["known_ids"] == ["blank", "fileA", "image", "locked"]
+    assert state["page_token"] == "t1", "a rerun cannot cure these, so the cursor moves"
 
 
 def test_folder_moved_into_scope_retries_a_file_that_failed_to_extract(monkeypatch):
@@ -429,40 +570,49 @@ def test_folder_moved_into_scope_retries_a_file_that_failed_to_extract(monkeypat
         "extract_file_content",
         lambda service, file_id, *args: None if file_id == "fileC" else f"content::{file_id}",
     )
-    state = {"page_token": "t0", "known_ids": ["fileA"]}
+    state = _before_the_move()
 
     assert [row["id"] for row in gd_source._iter_rows(service, _config(), state)] == ["fileB"]
     assert state["page_token"] == "t0", "the failed file keeps the cursor back for a retry"
+    assert state["scope_folder_ids"] == ["root"], "the scope moves with the cursor"
     assert "fileC" not in state["known_ids"]
 
     monkeypatch.setattr(gd_source, "extract_file_content", lambda *args: "content")
     assert [row["id"] for row in gd_source._iter_rows(service, _config(), state)] == ["fileC"]
     assert state["page_token"] == "t1"
+    assert state["scope_folder_ids"] == ["deep", "moved", "root"]
 
 
 def test_folder_moved_into_root_is_ignored_without_subfolders(fake_content_extraction):
     service = _moved_in_folder_service()
-    state = {"page_token": "t0", "known_ids": ["fileA"]}
+    state = _before_the_move()
+    stats = {}
 
-    rows = list(gd_source._iter_rows(service, _config(include_subfolders=False), state))
+    rows = list(gd_source._iter_rows(service, _config(include_subfolders=False), state, stats))
 
     assert rows == []
     assert fake_content_extraction == []
+    assert _file_listings(service) == []
+    # The folder is not counted as a scanned, unsupported file, nor kept as a known id.
+    assert stats["scanned"] == 0
+    assert "skipped_unsupported_type" not in stats
+    assert state["known_ids"] == ["fileA"]
+    assert state["scope_folder_ids"] == ["root"]
 
 
 def test_shared_drive_folder_change_is_not_walked(fake_content_extraction):
-    # A shared drive is scoped by driveId, not by a folder walk.
+    # A shared drive is scoped by driveId, not by a folder walk, whatever scope the state holds.
     service = _moved_in_folder_service()
     for meta in service.file_by_id.values():
         meta["driveId"] = "drive1"
-    state = {"page_token": "t0", "known_ids": ["fileA"]}
+    state = {"page_token": "t0", "known_ids": ["fileA"], "scope_folder_ids": []}
 
     rows = list(
         gd_source._iter_rows(service, _config(folder_id="drive1", shared_drive_id="drive1"), state)
     )
 
     assert rows == []
-    assert not any("'moved' in parents" in q for q in service.list_calls)
+    assert not any("in parents" in q for q in service.list_calls)
 
 
 def test_deleted_file_returning_404_on_get_yields_tombstone(fake_content_extraction):

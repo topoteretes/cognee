@@ -25,8 +25,9 @@ Design
 * **Cursor**: the first run captures a Changes API token and lists the folder; later runs
   read the changes feed and emit only added/changed files plus ``_deleted`` tombstones.
 * **State**: ``versions`` (file id to ``modifiedTime``, kept only for files that produced a
-  row) lets a rerun fetch just what failed or changed. A run stopped by a rate limit or an
-  expired token keeps its progress and resumes.
+  row) lets a rerun fetch just what failed or changed, and ``scope_folder_ids`` (the folders in
+  scope when the cursor last moved) lets a run find a folder moved into the synced folder. A
+  run stopped by a rate limit or an expired token keeps its progress and resumes.
 * **Content**: see ``google_drive.md`` for the formats, the limits and every reason a file
   is not ingested.
 
@@ -615,9 +616,10 @@ def _iter_rows(
         present_ids = set()
         fetched_versions = {}
         forgotten = set()
+        walked_folder_ids: set[str] = set()
 
         def files_to_fetch():
-            for file_meta in _list_files_in_scope(service, config):
+            for file_meta in _list_files_in_scope(service, config, walked_folder_ids):
                 # Extraction failure does not mean the file disappeared.
                 present_ids.add(file_meta["id"])
                 if _is_unchanged(versions, file_meta, config):
@@ -670,6 +672,7 @@ def _iter_rows(
         state["versions"] = fetched_versions
         if not _blocks_cursor(stats):
             state["page_token"] = start_token
+            state["scope_folder_ids"] = sorted(walked_folder_ids)
         logger.info("Google Drive: initial sync yielded %d file(s).", yielded)
         return
 
@@ -684,6 +687,7 @@ def _iter_rows(
 
     yielded = 0
     tombstoned = 0
+    folder_ids = None
     for file_id in deleted_ids:
         known_ids.discard(file_id)
         versions.pop(file_id, None)
@@ -723,9 +727,12 @@ def _iter_rows(
             row, local = fetch_row(client, file_meta)
             return file_meta, row, local
 
-        changed_folder_ids: list[str] = []
         try:
-            scope_folder_ids = _get_scope_folder_ids(service, config)
+            folder_ids = _get_scope_folder_ids(service, config)
+            # The scope's folders as of the last run that moved the cursor; a state from before
+            # they were recorded starts from this run's scope.
+            known_folder_ids = set(state.get("scope_folder_ids", folder_ids))
+            scope_folder_ids = folder_ids
             if not config.shared_drive_id:
                 # Drive reports a file's parents by real id, never by the "root" alias the
                 # scope may hold, so a file directly in the folder would read as out of scope.
@@ -748,9 +755,8 @@ def _iter_rows(
                     yield {"id": file_id, "_deleted": True}
                     continue
                 if file_meta.get("mimeType") == GOOGLE_FOLDER_MIME_TYPE:
-                    # A folder is never a document, so it is not counted as one; the files
-                    # in one moved into scope are read after this loop.
-                    changed_folder_ids.append(file_id)
+                    # A folder is not a document, so it is neither counted nor known, as on a
+                    # full scan; the files of one new to the scope are read after this loop.
                     continue
                 _merge_stats(stats, local)
                 known_ids.add(file_id)
@@ -768,14 +774,15 @@ def _iter_rows(
                     versions.pop(file_id, None)
 
             # A folder moved into scope is reported on its own: the files inside it keep
-            # their parents, so they get no change entry. Read the ones not synced yet; a
-            # folder moved within scope holds only synced files and costs its listing. A file
-            # with a change of its own was handled above and is in known_ids by now. A
-            # shared drive is scoped by driveId, not by a folder walk, so it is left out.
-            if changed_folder_ids and config.include_subfolders and not config.shared_drive_id:
+            # their parents, so they get no change entry. Each folder that joined the scope
+            # is listed once, and its files not synced yet are read; a file with a change of
+            # its own was handled above and is in known_ids by now. A folder that only gained
+            # or lost a file, or moved within the scope, is not new and is not listed. A shared
+            # drive is scoped by driveId, not by a folder walk, so it is left out.
+            if not config.shared_drive_id:
                 unsynced = {}
-                for folder_id in changed_folder_ids:
-                    for child in _list_files_in_tree(service, folder_id):
+                for folder_id in sorted(folder_ids - known_folder_ids):
+                    for child in _list_files_in_folder(service, folder_id):
                         if child["id"] not in known_ids:
                             unsynced.setdefault(child["id"], child)
                 for child, (row, local) in _ordered_map(
@@ -793,9 +800,11 @@ def _iter_rows(
                         if child.get("modifiedTime"):
                             versions[child["id"]] = child["modifiedTime"]
                         yield row
-                    elif not local.get("failed"):
-                        # Left out for good (empty, too large, unsupported). A failure stays
-                        # unknown, so the next run reads it again from the held-back cursor.
+                    elif _left_out(local):
+                        # Left out for good (unsupported, empty, too large, unreadable, over
+                        # the export limit), so it is not read again. Any other failure stays
+                        # unknown: one a rerun can cure holds the cursor, and the scope with
+                        # it, so the rerun lists the folder and reads the file again.
                         known_ids.add(child["id"])
         except _CutShort as cut:
             # The cursor stays: what was fetched is kept by its version, and the changes
@@ -808,6 +817,8 @@ def _iter_rows(
     state["versions"] = versions
     if not _blocks_cursor(stats):
         state["page_token"] = new_page_token
+        if folder_ids is not None:
+            state["scope_folder_ids"] = sorted(folder_ids)
     logger.info(
         "Google Drive: incremental sync yielded %d changed file(s), %d deletion(s).",
         yielded,
@@ -823,11 +834,7 @@ def _get_scope_folder_ids(service, config: _DriveConfig) -> set[str]:
         return {root}
     if not config.include_subfolders:
         return {root}
-    return _folder_tree(service, root)
 
-
-def _folder_tree(service, root: str) -> set[str]:
-    """Return ``root`` and every folder below it."""
     scope_ids = {root}
     queue = [root]
     while queue:
@@ -868,7 +875,11 @@ def _folder_tree(service, root: str) -> set[str]:
     return scope_ids
 
 
-def _list_files_in_scope(service, config: _DriveConfig):
+def _list_files_in_scope(service, config: _DriveConfig, folder_ids: set[str] | None = None):
+    """Yield the files in scope; ``folder_ids``, when given, receives the scope's folders."""
+    scope_folder_ids = _get_scope_folder_ids(service, config)
+    if folder_ids is not None:
+        folder_ids.update(scope_folder_ids)
     if config.shared_drive_id and config.include_subfolders:
         # A shared-drive root is a corpus, not a normal My Drive folder. The
         # Drive API can enumerate that corpus directly, which also includes
@@ -880,14 +891,8 @@ def _list_files_in_scope(service, config: _DriveConfig):
             all_files=True,
         )
         return
-    for folder_id in _get_scope_folder_ids(service, config):
+    for folder_id in scope_folder_ids:
         yield from _list_files_in_folder(service, folder_id, shared_drive_id=config.shared_drive_id)
-
-
-def _list_files_in_tree(service, folder_id: str):
-    """Yield the files in a My Drive folder and in every folder below it."""
-    for tree_folder_id in _folder_tree(service, folder_id):
-        yield from _list_files_in_folder(service, tree_folder_id)
 
 
 def _list_files_in_folder(
