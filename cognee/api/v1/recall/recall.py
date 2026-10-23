@@ -40,7 +40,7 @@ from cognee.modules.recall.types.RecallResponse import (
     ResponseToolEntry,
 )
 from cognee.modules.recall.types.SearchResultItem import SearchResultItem
-from cognee.modules.retrieval.broad_retriever import BroadLimitError
+from cognee.modules.retrieval.broad_retriever import BroadLimitError, BroadNoTextError
 from cognee.modules.retrieval.broad_store import BroadQueryError
 from cognee.modules.retrieval.code_retriever import CodeSeedNotFoundError
 from cognee.modules.retrieval.exceptions import SearchTypeNotSupported
@@ -857,13 +857,15 @@ async def recall(
                     CodeSeedNotFoundError,
                     BroadQueryError,
                     BroadLimitError,
+                    BroadNoTextError,
                 ) as error:
                     if not routed_guess:
                         raise
                     # The backend rejected a routed guess — a deployment-level
                     # choice, not the caller's — or its lane cannot answer these
                     # datasets (no code symbol or code graph, no working BROAD
-                    # query, a BROAD limit hit); either way the default substitutes.
+                    # query, a BROAD limit hit, no document text); either way the
+                    # default substitutes.
                     logger.info(
                         "Rule %s routed to %s, which could not answer (%s); retrying as %s.",
                         routed_rule,

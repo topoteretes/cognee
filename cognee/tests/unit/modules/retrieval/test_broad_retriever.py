@@ -8,10 +8,12 @@ import pytest
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.modules.retrieval import broad_retriever
 from cognee.modules.retrieval.broad_retriever import (
+    BroadNoTextError,
     BroadRetriever,
     DecisionLarge,
     DecisionSmall,
 )
+from cognee.modules.retrieval.broad_store import BroadQueryError
 
 
 class _Graph:
@@ -130,6 +132,25 @@ async def test_on_a_small_dataset_the_retry_may_answer_instead(monkeypatch):
     found = await BroadRetriever().get_retrieved_objects("How many apples?")
 
     assert (found.route, found.answer) == ("answer", "3")
+
+
+@pytest.mark.asyncio
+async def test_a_decision_with_neither_answer_nor_query_is_a_query_error(monkeypatch):
+    _use(monkeypatch, {"notes": "Three apples."})
+    _llm(monkeypatch, [DecisionSmall()])
+
+    with pytest.raises(BroadQueryError, match="neither an answer nor a query"):
+        await BroadRetriever().get_retrieved_objects("How many apples?")
+
+
+@pytest.mark.asyncio
+async def test_a_dataset_without_document_text_is_a_no_text_error(monkeypatch):
+    _use(monkeypatch, {})
+
+    with pytest.raises(BroadNoTextError) as error:
+        await BroadRetriever().get_retrieved_objects("How many apples?")
+
+    assert error.value.status_code == 404
 
 
 class _Vector:

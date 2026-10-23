@@ -187,16 +187,19 @@ retried once as `HYBRID_COMPLETION` in three cases:
 - the backend rejects the type;
 - the lane cannot answer these datasets — `CODE` with no matching symbol or
   no code graph (`CodeSeedNotFoundError`, `CodeGraphUnavailableError`),
-  `BROAD` with no working SQL query or a limit hit (`BroadQueryError`,
-  `BroadLimitError`); or
+  `BROAD` with no working SQL query, a limit hit or no document text
+  (`BroadQueryError`, `BroadLimitError`, `BroadNoTextError`); or
 - the search returns nothing and the empty result means the lane was
   unavailable — `CHUNKS_LEXICAL` with no lexical hits, `CODING_RULES` on a
   dataset with no rules nodeset, `CODE` when no dataset's `ask` found a
   symbol, `BROAD` with no answer.
 
 A routed `CODE` search keeps only the datasets whose `ask` found at least one
-symbol; a dataset without a code graph counts as a miss. "No data"
-(`NoDataError`) is never retried: the default would find nothing either.
+symbol; a dataset without a code graph counts as a miss. `BroadNoTextError`
+is a narrower "no data" (`NoDataError`): the dataset holds no document text,
+but a graph of code or custom DataPoints can still be answered by the
+default, which raises "no data" only on an empty graph. Any other
+`NoDataError` is not retried.
 
 The search history records the type that actually answered. Two things are
 never second-guessed: a type you pinned yourself returns empty or raises as

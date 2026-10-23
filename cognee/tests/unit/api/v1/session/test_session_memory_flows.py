@@ -11,7 +11,7 @@ import pytest
 from cognee.api.v1.session import SessionQAEntry
 from cognee.exceptions import CogneeValidationError
 from cognee.modules.recall.types.RecallResponse import ResponseQAEntry
-from cognee.modules.retrieval.broad_retriever import BroadLimitError
+from cognee.modules.retrieval.broad_retriever import BroadLimitError, BroadNoTextError
 from cognee.modules.retrieval.broad_store import BroadQueryError
 from cognee.modules.retrieval.code_retriever import CodeGraphUnavailableError, CodeSeedNotFoundError
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
@@ -1158,6 +1158,7 @@ class TestRecallRoutedConfig:
             ("What calls parse_config?", CodeSeedNotFoundError("no such symbol")),
             ("How many invoices were paid?", BroadQueryError("no working query")),
             ("How many invoices were paid?", BroadLimitError("document too large")),
+            ("How many invoices were paid?", BroadNoTextError("no document text")),
         ],
     )
     async def test_routed_lane_failure_retries_as_hybrid(self, query, error):
@@ -1186,7 +1187,7 @@ class TestRecallRoutedConfig:
     @pytest.mark.asyncio
     async def test_routed_no_data_is_not_retried(self):
         with pytest.raises(NoDataError):
-            await self._routed_recall("How many invoices were paid?", NoDataError("no data"))
+            await self._routed_recall("How many invoices were paid?", NoDataError("empty graph"))
 
 
 @pytest.mark.asyncio

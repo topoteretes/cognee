@@ -44,7 +44,8 @@ A routed type (never a pinned one) that the backend rejects, or a routed
 `CHUNKS_LEXICAL` / `CODING_RULES` / `CODE` / `BROAD` that returns nothing, is
 retried once as `HYBRID_COMPLETION`. So is a routed `CODE` with no matching
 symbol or no code graph, and a routed `BROAD` that cannot write a working
-query or hits a limit; "no data" is not retried. The router never picks `CYPHER`.
+query, hits a limit or finds no document text; any other "no data" is not
+retried. The router never picks `CYPHER`.
 
 ```python
 from cognee import SearchType
