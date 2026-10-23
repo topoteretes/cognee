@@ -521,13 +521,18 @@ async def build_brains_summary_payload(user: User | None = None) -> dict:
 
 
 def _as_naive_utc(value: datetime) -> datetime:
-    """Normalize to match the write side.
+    """Normalize to naive UTC so the cutoff and event times share one scale.
 
-    ``SessionQAEntry.time`` is always ``datetime.utcnow().isoformat()`` —
-    naive, UTC. A ``since`` sent with a timezone offset compares fine against
-    another aware datetime, but not against those naive strings once parsed
-    back, so it is converted here rather than left to fail the comparison
-    below with a raised ``TypeError`` at an unexpected place.
+    The cache adapters stamp ``SessionQAEntry.time`` with
+    ``datetime.now(timezone.utc).isoformat()`` — aware, UTC — while entries
+    written before that change hold naive ``utcnow()`` strings, and a client
+    may send ``since`` either way. Python refuses to order a naive datetime
+    against an aware one, so both sides of the comparison in
+    ``get_live_events`` go through here.
+
+    See also ``cogx.parse_timestamp``, ``plugin_status.as_utc`` and
+    ``auto_improve_debounce._parse_timestamp``, which normalize to aware UTC
+    instead; this one stays naive because older cursors are naive.
     """
     if value.tzinfo is not None:
         return value.astimezone(timezone.utc).replace(tzinfo=None)
@@ -539,7 +544,8 @@ def _event_time(event: dict[str, Any]) -> datetime | None:
     if not raw:
         return None
     try:
-        return datetime.fromisoformat(raw)
+        # fromisoformat only accepts a trailing "Z" from Python 3.11 on.
+        return _as_naive_utc(datetime.fromisoformat(raw.replace("Z", "+00:00")))
     except ValueError:
         return None
 
@@ -605,6 +611,7 @@ async def get_live_events(
         ]
 
     if events:
+        # collect_session_events returns events oldest first, so the last is the newest.
         cursor = events[-1]["time"]
     else:
         cursor = since.isoformat() if since is not None else None
