@@ -231,7 +231,8 @@ class LanceDBAdapter(VectorDBInterface):
         # reason compaction was turned off for good, if it was.
         self._compaction_dirty: set[str] = set()
         self._compaction_cursor = 0
-        self._compaction_lock = asyncio.Lock()
+        # Loop-agnostic like VECTOR_DB_LOCK: the adapter is cached across loops.
+        self._compaction_lock = LoopAgnosticLock()
         self._compaction_unsupported: str | None = None
         self._lance_core_checked = False
 

@@ -19,7 +19,7 @@ from cognee.tasks.ingestion.connectors.notion import (
     _resolve_workspace_id,
     notion_source,
 )
-from cognee.tasks.ingestion.dlt_utils import DOCUMENT_SOURCE_ATTR, NODE_SET_COLUMN
+from cognee.tasks.ingestion.dlt_utils import DOCUMENT_SOURCE_ATTR, NODE_SET_COLUMN, STRUCTURE_COLUMN
 
 WORKSPACE_ID = "11111111-1111-1111-1111-111111111111"
 ROOT_PAGE_ID = "page-root"
@@ -27,6 +27,7 @@ CHILD_PAGE_ID = "page-child"
 DB_BLOCK_ID = "db-block"
 DATA_SOURCE_ID = "ds-1"
 ROW_PAGE_ID = "row-1"
+_PAGE_ANCESTOR = {"kind": "page", "id": ROOT_PAGE_ID, "document": True}
 
 
 def _title_prop(text):
@@ -351,6 +352,7 @@ def test_a_page_reached_from_another_root_is_synced_again_under_it():
             "content": "hello child",
             "_deleted": False,
             NODE_SET_COLUMN: [f"notion:{WORKSPACE_ID}:{CHILD_PAGE_ID}"],
+            STRUCTURE_COLUMN: {"ancestors": []},
         },
         {"id": ROOT_PAGE_ID, "_deleted": True},
     ]
@@ -655,7 +657,10 @@ def test_has_more_without_a_cursor_aborts_instead_of_tombstoning():
 def test_check_active_runs_for_every_walked_page_even_when_nothing_changed():
     fake = _basic_tree()
     unchanged = {"last_edited_time": "2024-01-01T00:00:00.000Z", "root_id": ROOT_PAGE_ID}
-    previous = {ROOT_PAGE_ID: unchanged, CHILD_PAGE_ID: unchanged}
+    previous = {
+        ROOT_PAGE_ID: {**unchanged, "ancestors": []},
+        CHILD_PAGE_ID: {**unchanged, "ancestors": [_PAGE_ANCESTOR]},
+    }
     calls = []
     rows = list(
         _iter_rows(
@@ -835,7 +840,11 @@ def test_a_sub_page_below_any_number_of_container_blocks_is_found():
     fake.blocks[CHILD_PAGE_ID] = []
     # The root is unchanged, so only discovery walks the toggles, not rendering.
     previous = {
-        ROOT_PAGE_ID: {"last_edited_time": "2024-01-01T00:00:00.000Z", "root_id": ROOT_PAGE_ID}
+        ROOT_PAGE_ID: {
+            "last_edited_time": "2024-01-01T00:00:00.000Z",
+            "root_id": ROOT_PAGE_ID,
+            "ancestors": [],
+        }
     }
     rows = list(_iter_rows(_client(fake), [ROOT_PAGE_ID], [], WORKSPACE_ID, previous, {}, {}))
     assert {row["id"] for row in rows} == {CHILD_PAGE_ID}
@@ -964,3 +973,80 @@ def test_a_readable_synced_copy_with_an_unreadable_block_inside_still_renders():
     rows = list(_iter_rows(_client(fake), [ROOT_PAGE_ID], [], WORKSPACE_ID, {}, {}, {}))
     assert [row["id"] for row in rows] == [ROOT_PAGE_ID]
     assert "before" in rows[0]["content"]
+
+
+def _structure_by_id(rows):
+    return {row["id"]: row[STRUCTURE_COLUMN]["ancestors"] for row in rows if not row["_deleted"]}
+
+
+def test_a_page_records_its_parent_page_and_a_database_row_its_containers():
+    fake = _tree_with_database()
+    fake.databases[DB_BLOCK_ID]["title"] = [{"plain_text": "Tasks db"}]
+
+    rows = list(_iter_rows(_client(fake), [ROOT_PAGE_ID], [], WORKSPACE_ID, {}, {}, {}))
+
+    assert _structure_by_id(rows) == {
+        ROOT_PAGE_ID: [],
+        CHILD_PAGE_ID: [_PAGE_ANCESTOR],
+        ROW_PAGE_ID: [
+            {"kind": "data_source", "id": DATA_SOURCE_ID, "name": "Tasks"},
+            {"kind": "database", "id": DB_BLOCK_ID, "name": "Tasks db"},
+            _PAGE_ANCESTOR,
+        ],
+    }
+
+
+def test_a_data_source_root_names_the_database_it_belongs_to():
+    fake = FakeNotion()
+    fake.data_sources[DATA_SOURCE_ID] = {
+        "id": DATA_SOURCE_ID,
+        "title": [{"plain_text": "Tasks"}],
+        "parent": {"type": "database_id", "database_id": DB_BLOCK_ID},
+    }
+    fake.databases[DB_BLOCK_ID] = {"title": [{"plain_text": "Tasks db"}], "data_sources": []}
+    fake.data_source_rows[DATA_SOURCE_ID] = [ROW_PAGE_ID]
+    fake.pages[ROW_PAGE_ID] = _page_object(ROW_PAGE_ID, "Row", parent={"type": "data_source_id"})
+    fake.blocks[ROW_PAGE_ID] = []
+
+    rows = list(_iter_rows(_client(fake), [], [DATA_SOURCE_ID], WORKSPACE_ID, {}, {}, {}))
+
+    assert _structure_by_id(rows)[ROW_PAGE_ID] == [
+        {"kind": "data_source", "id": DATA_SOURCE_ID, "name": "Tasks"},
+        {"kind": "database", "id": DB_BLOCK_ID, "name": "Tasks db"},
+    ]
+
+
+def test_a_page_moved_under_another_parent_is_emitted_again_without_an_edit():
+    state: dict = {}
+    list(_iter_rows(_client(_basic_tree()), [ROOT_PAGE_ID], [], WORKSPACE_ID, {}, state, {}))
+    fake = _basic_tree()
+    other_id = "page-other"
+    fake.pages[other_id] = _page_object(
+        other_id, "Other", parent={"type": "page_id", "page_id": ROOT_PAGE_ID}
+    )
+    fake.blocks[other_id] = [fake.blocks[ROOT_PAGE_ID].pop()]
+    fake.blocks[ROOT_PAGE_ID].append(
+        {"id": other_id, "type": "child_page", "has_children": False, "child_page": {}}
+    )
+
+    rows = list(
+        _iter_rows(_client(fake), [ROOT_PAGE_ID], [], WORKSPACE_ID, dict(state["pages"]), {}, {})
+    )
+
+    assert _structure_by_id(rows) == {
+        other_id: [_PAGE_ANCESTOR],
+        CHILD_PAGE_ID: [{"kind": "page", "id": other_id, "document": True}],
+    }
+
+
+def test_state_stored_before_structure_existed_emits_every_page_again():
+    """What an upgrade finds: stored entries without ancestors, so every page is read
+    again once and gets its position, with no edit in Notion."""
+    legacy = {"last_edited_time": "2024-01-01T00:00:00.000Z", "root_id": ROOT_PAGE_ID}
+    previous = {ROOT_PAGE_ID: dict(legacy), CHILD_PAGE_ID: dict(legacy)}
+
+    rows = list(
+        _iter_rows(_client(_basic_tree()), [ROOT_PAGE_ID], [], WORKSPACE_ID, previous, {}, {})
+    )
+
+    assert _structure_by_id(rows) == {ROOT_PAGE_ID: [], CHILD_PAGE_ID: [_PAGE_ANCESTOR]}

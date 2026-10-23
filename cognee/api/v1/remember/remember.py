@@ -1649,6 +1649,7 @@ async def _remember_inner(
         from cognee import __version__ as cognee_version
         from cognee.infrastructure.locks.dataset_lock import dataset_lock
         from cognee.modules.data.methods import mark_data_processed
+        from cognee.modules.integrations.sync_progress import report_sync_progress
         from cognee.modules.run_custom_pipeline import run_custom_pipeline
         from cognee.shared.utils import send_telemetry
         from cognee.tasks.code_graph import get_code_graph_tasks
@@ -1768,6 +1769,12 @@ async def _remember_inner(
                     )
 
         async def _run_repos(isolate_failures: bool) -> None:
+            processed = failed = 0
+            # One phase for the whole batch: a per-repo phase change would reset
+            # the repository counter and its estimate.
+            await report_sync_progress(
+                phase="processing", completed=0, total=len(repo_specs), unit="repositories"
+            )
             for position, spec in enumerate(repo_specs, start=1):
                 # redact: connector-supplied URLs may carry a token in the
                 # userinfo, which must not surface in results or logs. The
@@ -1790,6 +1797,17 @@ async def _remember_inner(
                     )
                     item["status"] = "errored"
                     item["error"] = str(exc)
+                if item.get("status") == "errored":
+                    failed += 1
+                else:
+                    processed += 1
+                await report_sync_progress(
+                    phase="processing",
+                    completed=position,
+                    total=len(repo_specs),
+                    unit="repositories",
+                    counts={"processed": processed, "failed": failed},
+                )
             result.items_processed = len(
                 [item for item in result.items if item.get("status") != "errored"]
             )
