@@ -1,3 +1,4 @@
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
@@ -6,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.models.Data import Data
 from cognee.modules.users.models import User
+
+from .node_set_identity import UNSCOPED, node_set_matches
 
 # SQLite's default SQLITE_MAX_VARIABLE_NUMBER is 999.  Stay safely under it so
 # a large unpinned batch never hits "too many SQL variables".  Postgres has no
@@ -18,6 +21,7 @@ async def identify_many(
     user: User,
     dataset_id: UUID,
     session: AsyncSession | None = None,
+    node_set: Any = UNSCOPED,
 ) -> dict[str, UUID]:
     """Batch version of :func:`identify`: resolve existing ``Data`` rows for
     multiple content hashes in one dataset.
@@ -25,6 +29,10 @@ async def identify_many(
     Returns a mapping ``{content_hash: data_id}`` for every hash that already
     has a row in ``(dataset_id, owner_id, tenant_id)`` scope.  Hashes with no
     existing row are absent from the result (not mapped to ``None``).
+
+    ``node_set`` narrows each hit to the row stored under that scope, like
+    :func:`identify_data_by_hash`: a row holding the same content under another
+    node set does not count, so the content is ingested again for the new scope.
 
     The filter is identical to :func:`identify` — same four predicates — so
     both functions always agree on which row wins for a given hash.  Large
@@ -50,14 +58,16 @@ async def identify_many(
         for start in range(0, len(hashes), _CHUNK_SIZE):
             chunk = hashes[start : start + _CHUNK_SIZE]
             rows = await active_session.execute(
-                select(Data.id, Data.content_hash).filter(
+                select(Data.id, Data.content_hash, Data.node_set).filter(
                     Data.dataset_id == dataset_id,
                     Data.content_hash.in_(chunk),
                     Data.owner_id == user.id,
                     tenant_filter,
                 )
             )
-            for data_id, content_hash in rows.fetchall():
+            for data_id, content_hash, stored_node_set in rows.fetchall():
+                if not node_set_matches(stored_node_set, node_set):
+                    continue
                 # Keep the first hit per hash (matches identify()'s .limit(1)
                 # semantics: if duplicate rows exist, we take whichever the DB
                 # returns first rather than silently picking the last one).

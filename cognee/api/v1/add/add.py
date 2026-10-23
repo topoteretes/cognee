@@ -383,7 +383,10 @@ async def add(
         data_cache=data_cache,
         skip_connection_test=skip_connection_test,
         # run_tasks resolves repository URLs itself, before this task list runs.
-        extras={"repo_branch": branch},
+        # The incremental pre-check resolves each item by content hash; the node
+        # set is part of that identity (same content under another node set is a
+        # new item), and this is the only way the per-item wrapper can know it.
+        extras={"repo_branch": branch, "node_set": node_set},
     )
 
     # run_pipeline_blocking returns {dataset_id: PipelineRunInfo} but callers

@@ -1,7 +1,7 @@
 """ingest_data must actually write the call+item node_set union, not just
 compute it: this exercises the real store_data_to_dataset path (the same
 throwaway-SQLite harness as test_ingest_route_stamp_on_change.py), so a
-regression that computes _union_node_sets correctly but forgets to wire it
+regression that computes union_node_sets correctly but forgets to wire it
 into Data.node_set / external_metadata still gets caught.
 """
 
@@ -21,6 +21,8 @@ from cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter imp
 )
 from cognee.modules.data.models import Data, Dataset
 from cognee.modules.ingestion import StoredFile
+from cognee.modules.ingestion.identify_many import identify_many
+from cognee.modules.ingestion.node_set_identity import node_set_key
 from cognee.tasks.ingestion.data_item import DataItem
 
 ingest_module = importlib.import_module("cognee.tasks.ingestion.ingest_data")
@@ -115,6 +117,54 @@ async def test_call_and_item_node_set_are_unioned_into_the_stored_row():
             row = await session.get(Data, rows[0].id)
             assert _node_set(row) == ["call-level", "notion:ws:root"]
             assert row.external_metadata["node_set"] == ["call-level", "notion:ws:root"]
+    finally:
+        await engine.engine.dispose()
+        os.unlink(db_path)
+
+
+@pytest.mark.asyncio
+async def test_same_content_is_one_row_per_node_set_scope():
+    """The node set is part of the dedup identity: the same bytes under another
+    node set are a new row; under the same one (any spelling) the existing row.
+    Uses the real identify_many against the throwaway engine."""
+    engine, db_path = await _fresh_engine()
+    try:
+        with ExitStack() as stack:
+            _install_mocks(stack, engine, _metadata("h3"))
+            stack.enter_context(patch.object(ingest_module, "identify_many", identify_many))
+
+            add = ingest_module.ingest_data
+            await add(data="plain text", dataset_name="ds", user=USER, node_set=["user:alice"])
+            await add(data="plain text", dataset_name="ds", user=USER, node_set=["user:bob"])
+            await add(data="plain text", dataset_name="ds", user=USER, node_set=["User:Bob"])
+            await add(data="plain text", dataset_name="ds", user=USER)
+            # One add, two items with the same content under two item-level scopes.
+            await add(
+                data=[
+                    DataItem(data="plain text", node_set=["project:x"]),
+                    DataItem(data="plain text", node_set=["project:y"]),
+                    DataItem(data="plain text", node_set=["project:y"]),
+                ],
+                dataset_name="ds",
+                user=USER,
+                node_set=["user:carol"],
+            )
+
+        async with engine.get_async_session() as session:
+            rows = (await session.execute(Data.__table__.select())).fetchall()
+            # Five scopes, five rows; the "User:Bob" re-add hit Bob's row (and,
+            # as any re-add of an existing row does, left its spelling on it).
+            assert len(rows) == 5
+            assert {node_set_key(_node_set(r)) for r in rows} == {
+                node_set_key(ns)
+                for ns in (
+                    ["user:alice"],
+                    ["user:bob"],
+                    None,
+                    ["user:carol", "project:x"],
+                    ["user:carol", "project:y"],
+                )
+            }
     finally:
         await engine.engine.dispose()
         os.unlink(db_path)

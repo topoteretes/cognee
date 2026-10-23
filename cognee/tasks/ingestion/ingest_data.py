@@ -20,9 +20,10 @@ from cognee.modules.data.methods import (
     resolve_data_id,
 )
 from cognee.modules.data.models import Data
-from cognee.modules.engine.models.node_set import NodeSet, validate_node_set_names
+from cognee.modules.engine.models.node_set import validate_node_set_names
 from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.modules.ingestion.identify_many import identify_many
+from cognee.modules.ingestion.node_set_identity import node_set_key, union_node_sets
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
@@ -114,30 +115,6 @@ def _source_uri_from_input(data_item: Any) -> str | None:
         except (OSError, ValueError):
             return None
     return None
-
-
-def _union_node_sets(
-    call_node_set: list[str] | None, item_node_set: list[str] | None
-) -> list[str] | None:
-    """Combine the call-level node_set with a DataItem's own node_set.
-
-    Call-first, order-preserving, deduplicated on the NodeSet id key, so two
-    spellings that map to one graph node keep only the first. With no
-    item-level node_set this returns ``call_node_set`` untouched (not even
-    deduped), exactly as before this field existed. Both sides are already
-    validated by ``ingest_data`` as lists of names.
-    """
-    if not item_node_set:
-        return call_node_set
-
-    seen: set[UUID] = set()
-    combined: list[str] = []
-    for name in (call_node_set or []) + item_node_set:
-        key = NodeSet.id_for(name)
-        if key not in seen:
-            seen.add(key)
-            combined.append(name)
-    return combined or None
 
 
 async def ingest_data(
@@ -232,7 +209,10 @@ async def ingest_data(
         # Dedup is a dataset-scoped LOOKUP batched into a single WHERE-IN query
         # below — instead of one DB connection per file via ingestion.identify().
         precomputed_items = {}
-        unique_content_hashes: set[str] = set()
+        # Content hashes grouped by the node-set scope their items are stored
+        # under (the scope's key -> (its node set, its hashes)), since dedup is
+        # per scope: the same bytes under another node set are a new data item.
+        hashes_by_scope: dict[frozenset[UUID] | None, tuple[list[str] | None, set[str]]] = {}
 
         logger.info(
             "cognee-core store_to_dataset [loop 1/4] starting: save files and compute content hashes (%d items)",
@@ -241,7 +221,13 @@ async def ingest_data(
         _loop1_start = _time.monotonic()
         for data_item in data:
             item_data_id = data_item.data_id if isinstance(data_item, DataItem) else None
+            item_node_set = data_item.node_set if isinstance(data_item, DataItem) else None
             source_uri = _source_uri_from_input(data_item)
+
+            # The scope the row is stored under: the call's node set joined
+            # with the item's own (see node_set_identity).
+            effective_node_set = union_node_sets(node_set, item_node_set)
+            scope_key = node_set_key(effective_node_set)
 
             # The incremental wrapper already saved and hashed this item —
             # match by identity first; a path item whose string the in-chain
@@ -276,8 +262,12 @@ async def ingest_data(
                 "item_data_id": item_data_id,
                 "data_id": None,  # resolved below
                 "source_uri": source_uri,
+                "effective_node_set": effective_node_set,
+                "scope_key": scope_key,
             }
-            unique_content_hashes.add(item_content_hash)
+            hashes_by_scope.setdefault(scope_key, (effective_node_set, set()))[1].add(
+                item_content_hash
+            )
         logger.info(
             "cognee-core store_to_dataset [loop 1/4] finished in %.3f seconds",
             _time.monotonic() - _loop1_start,
@@ -294,23 +284,29 @@ async def ingest_data(
         _loop2_start = _time.monotonic()
         existing_data_map: dict = {}
         async with db_engine.get_async_session() as session:
-            # Single batch query: find existing rows for all content hashes in this
-            # dataset+owner+tenant scope — replaces N per-file identify() calls.
-            # identify_many() shares the exact same filter as identify() and chunks
-            # large inputs to stay within SQLite's bind-parameter limit.
-            existing_by_hash: dict[str, UUID] = await identify_many(
-                list(unique_content_hashes), user, dataset.id, session=session
-            )
+            # One batch query per node-set scope (an add is normally one): find
+            # existing rows for all content hashes in this dataset+owner+tenant
+            # scope — replaces N per-file identify() calls. identify_many()
+            # shares the exact same filter as identify() and chunks large inputs
+            # to stay within SQLite's bind-parameter limit. Scoped by node_set
+            # too: the same content under another node set is a new data item
+            # for that scope, not a hit on this one.
+            existing_by_scope: dict[frozenset[UUID] | None, dict[str, UUID]] = {}
+            for scope_key, (scope_node_set, scope_hashes) in hashes_by_scope.items():
+                existing_by_scope[scope_key] = await identify_many(
+                    list(scope_hashes), user, dataset.id, session=session, node_set=scope_node_set
+                )
 
             # Resolve pinned IDs (items with explicit data_id) — still needs DB for
             # resolve_data_id, but only for the subset that actually has a pinned id.
             # Unpinned items use the batch result above.
-            batch_id_by_hash: dict[str, UUID] = {}
+            batch_id_by_key: dict[tuple[str, frozenset[UUID] | None], UUID] = {}
             data_point_ids = []
             for data_item in data:
                 cached = precomputed_items[id(data_item)]
                 item_data_id = cached["item_data_id"]
                 item_content_hash = cached["item_content_hash"]
+                scope_key = cached["scope_key"]
 
                 if item_data_id is not None:
                     # A pinned id may be one the user held before a fork/update —
@@ -320,11 +316,12 @@ async def ingest_data(
                     resolved_pin = await resolve_data_id(dataset.id, item_data_id)
                     data_id = resolved_pin if resolved_pin is not None else item_data_id
                 else:
-                    # Use batch result; fall back to dedup-within-batch or mint new id
-                    data_id = existing_by_hash.get(item_content_hash)
+                    # Use batch result; fall back to dedup-within-batch (same
+                    # content under the same scope) or mint new id
+                    data_id = existing_by_scope[scope_key].get(item_content_hash)
                     if data_id is None:
-                        data_id = batch_id_by_hash.get(item_content_hash) or uuid4()
-                batch_id_by_hash.setdefault(item_content_hash, data_id)
+                        data_id = batch_id_by_key.get((item_content_hash, scope_key)) or uuid4()
+                batch_id_by_key.setdefault((item_content_hash, scope_key), data_id)
 
                 cached["data_id"] = data_id
                 data_point_ids.append(data_id)
@@ -361,20 +358,17 @@ async def ingest_data(
             item_data_id = None
             item_external_metadata = None
             item_system_metadata = None
-            item_node_set = None
 
             if isinstance(data_item, DataItem):
                 current_label = data_item.label
                 item_data_id = data_item.data_id
                 item_external_metadata = data_item.external_metadata
                 item_system_metadata = data_item.system_metadata
-                item_node_set = data_item.node_set
-
-            effective_node_set = _union_node_sets(node_set, item_node_set)
 
             # Retrieve cached intermediate results from pre-loop to avoid re-processing
             cached = precomputed_items.get(id(data_item), {})
             actual_file_path = cached.get("actual_file_path")
+            effective_node_set = cached.get("effective_node_set")
 
             # Store all input data as text files in Cognee data storage.
             # Ingestion context rides to the loader: loaders that own routing

@@ -14,47 +14,48 @@ import pytest
 
 from cognee.modules.data.processing.document_types.TextDocument import TextDocument
 from cognee.modules.engine.models.node_set import InvalidNodeSetError
+from cognee.modules.ingestion.node_set_identity import union_node_sets
 from cognee.tasks.documents.classify_documents import update_node_set
 from cognee.tasks.ingestion.data_item import DataItem
-from cognee.tasks.ingestion.ingest_data import _union_node_sets, ingest_data
+from cognee.tasks.ingestion.ingest_data import ingest_data
 
 USER = SimpleNamespace(id=uuid4(), tenant_id=None)
 
 
 def test_no_call_and_no_item_node_set_is_none():
-    assert _union_node_sets(None, None) is None
+    assert union_node_sets(None, None) is None
 
 
 def test_call_only_is_returned_unchanged():
     call_node_set = ["a", "b"]
-    assert _union_node_sets(call_node_set, None) is call_node_set
+    assert union_node_sets(call_node_set, None) is call_node_set
 
 
 def test_call_only_duplicates_are_preserved_not_deduped():
     # No item-level node_set: behavior must match pre-existing code exactly,
     # including a caller's own duplicate entries.
     call_node_set = ["a", "a", "b"]
-    assert _union_node_sets(call_node_set, None) == ["a", "a", "b"]
+    assert union_node_sets(call_node_set, None) == ["a", "a", "b"]
 
 
 def test_item_only_is_returned_as_is():
-    assert _union_node_sets(None, ["x"]) == ["x"]
+    assert union_node_sets(None, ["x"]) == ["x"]
 
 
 def test_call_and_item_union_call_first_deduped():
-    assert _union_node_sets(["a", "b"], ["b", "c"]) == ["a", "b", "c"]
+    assert union_node_sets(["a", "b"], ["b", "c"]) == ["a", "b", "c"]
 
 
 def test_empty_item_list_behaves_like_none():
     call_node_set = ["a", "a"]
-    assert _union_node_sets(call_node_set, []) is call_node_set
+    assert union_node_sets(call_node_set, []) is call_node_set
 
 
 def test_the_union_reaches_document_belongs_to_set():
     """End-to-end check of the path ingest_data actually writes: the unioned
     list goes into external_metadata["node_set"], and classify_documents
     reads exactly that key to build the document's NodeSet membership."""
-    effective_node_set = _union_node_sets(["call:x"], ["notion:ws:root"])
+    effective_node_set = union_node_sets(["call:x"], ["notion:ws:root"])
 
     document = TextDocument(
         id=uuid4(),
@@ -70,7 +71,7 @@ def test_the_union_reaches_document_belongs_to_set():
 
 
 def test_union_dedupes_on_the_node_set_id_key():
-    assert _union_node_sets(["notion:A B"], ["notion:a_b", "notion:c"]) == [
+    assert union_node_sets(["notion:A B"], ["notion:a_b", "notion:c"]) == [
         "notion:A B",
         "notion:c",
     ]
