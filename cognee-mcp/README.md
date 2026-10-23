@@ -666,8 +666,9 @@ forget(data_id="<uuid>", dataset_id="<uuid>")
 `include_references=True` shows the ids `forget` needs; without it the output is
 unchanged. Every hit backed by stored data gets
 `refs: data_id=..., dataset_id=..., document=...` lines (at most five per hit,
-best match first), read from the hit's structured references rather than its
-text. The default answer lists only the items it is grounded in (the ones its
+best match first), read from the hit's structured references; against a cognee
+release whose default answer carries none (up to 1.6.5) the data_ids its
+`Evidence:` block cites are used, paired with the hit's dataset. The default answer lists only the items it is grounded in (the ones its
 `Evidence:` block cites) and a chunk hit the one item its text came from, while
 a RAG or graph-completion answer lists every item in its context, so use the
 default type or `search_type="CHUNKS"` to find one fact. Session hits are not

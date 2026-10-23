@@ -149,14 +149,18 @@ def test_evidence_is_taken_best_rank_first():
     assert [ref["data_id"] for ref in recall_item_refs(hit)] == [ids[2], ids[3], ids[0], ids[1]]
 
 
-def _hybrid_hit(evidence: list[dict]) -> dict:
+def _hybrid_hit(evidence: list[dict], dataset_id: str | None = DATASET, cited=(DATA_A,)) -> dict:
     # The default hybrid answer: its Evidence block cites data_ids in the text, and
-    # the same citations arrive as structured segment evidence.
+    # (since SDK-1226) the same citations arrive as structured segment evidence.
+    bullets = "\n".join(
+        f'- chunk {index + 1} of document t {index + 1} (data_id: {data_id}, chunk_id: {DATASET}): "..."'
+        for index, data_id in enumerate(cited)
+    )
     return {
         "source": "graph",
         "kind": "graph_completion",
-        "text": f'amber-falcon-42\n\nEvidence:\n- chunk 1 of document t (data_id: {DATA_A}): "..."',
-        "dataset_id": DATASET,
+        "text": f"amber-falcon-42\n\nEvidence:\n{bullets}",
+        "dataset_id": dataset_id,
         "dataset_name": "main_dataset",
         "metadata": {"evidence": evidence} if evidence else {},
     }
@@ -182,10 +186,38 @@ def test_default_answer_refs_come_from_its_structured_citations():
     assert format_recall_body([hit]) == f"[graph] {hit['text']}"
 
 
-def test_ids_only_in_the_text_are_never_parsed_into_refs():
-    hit = _hybrid_hit([])
+def test_structured_refs_win_over_the_evidence_text():
+    # Text cites A, structured evidence names B: the structured list is the source.
+    hit = _hybrid_hit([{"kind": "segment", "data_id": DATA_B, "dataset_id": DATASET}])
+    assert [ref["data_id"] for ref in recall_item_refs(hit)] == [DATA_B]
+
+
+def test_hit_without_structured_refs_falls_back_to_its_evidence_text():
+    # cognee releases up to 1.6.5: the default answer carries no structured evidence.
+    hit = _hybrid_hit([], cited=(DATA_A, DATA_B, DATA_A))
+    assert recall_item_refs(hit) == [
+        {"data_id": DATA_A, "dataset_id": DATASET, "document": "t 1"},
+        {"data_id": DATA_B, "dataset_id": DATASET, "document": "t 2"},
+    ]
+    body = format_recall_body([hit], include_references=True)
+    assert body.endswith(
+        f"\n  refs: data_id={DATA_A}, dataset_id={DATASET}, document=t 1"
+        f"\n  refs: data_id={DATA_B}, dataset_id={DATASET}, document=t 2"
+    )
+    assert format_recall_body([hit]) == f"[graph] {hit['text']}"
+
+
+def test_evidence_text_fallback_needs_the_hit_dataset():
+    # Access control off and an unscoped recall: no dataset to pair the ids with.
+    hit = _hybrid_hit([], dataset_id=None)
     assert recall_item_refs(hit) == []
     assert format_recall_body([hit], include_references=True) == f"[graph] {hit['text']}"
+
+
+def test_evidence_text_fallback_reads_only_evidence_bullets():
+    hit = _hybrid_hit([], cited=())
+    hit["text"] = f"The id is data_id: {DATA_A} and that is all."
+    assert recall_item_refs(hit) == []
 
 
 @pytest.mark.asyncio
