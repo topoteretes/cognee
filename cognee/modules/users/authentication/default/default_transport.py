@@ -9,8 +9,11 @@ if cookie_domain == "":
     cookie_domain = None
 
 
-def secure_cookie_from_env() -> bool:
-    """Read AUTH_TOKEN_COOKIE_SECURE: "true" or "false" (default), anything else raises."""
+def _secure_cookie_from_env() -> bool:
+    """Whether the auth cookie gets Secure, from AUTH_TOKEN_COOKIE_SECURE.
+
+    Accepts true or false (default false); anything else raises.
+    """
     value = os.getenv("AUTH_TOKEN_COOKIE_SECURE", "false").strip().lower()
     if value not in ("true", "false"):
         raise ValueError(f"AUTH_TOKEN_COOKIE_SECURE must be true or false, got {value!r}")
@@ -26,7 +29,7 @@ default_transport = CookieTransport(
     # because a browser will not store a Secure cookie from http://localhost;
     # set AUTH_TOKEN_COOKIE_SECURE=true behind TLS (cognee itself sees plain
     # http behind a terminating proxy, so it cannot infer this).
-    cookie_secure=secure_cookie_from_env(),
+    cookie_secure=_secure_cookie_from_env(),
     cookie_httponly=True,
     cookie_samesite="Lax",
     cookie_domain=cookie_domain,  # None allows cookie to work on any domain
