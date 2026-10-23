@@ -181,6 +181,20 @@ class datasets:
         return await _fan_out_by_pipeline(dataset_ids, pipeline_names, get_pipeline_progress)
 
     @staticmethod
+    async def get_memory_status(dataset_ids: list[UUID]) -> dict:
+        """The memory state of each dataset: ``{dataset_id: MemoryStatus}``.
+
+        Folds the latest indexing and cognify runs into one answer (``state``,
+        ``search_level``, ``searchable``, ``graph_ready``, ``message``, the
+        per-pipeline statuses and the failure cause); see
+        ``cognee.modules.cognify.memory_status``. Every requested dataset gets
+        an entry, ``empty`` when nothing ran on it.
+        """
+        from cognee.modules.cognify.memory_status import get_memory_status
+
+        return await get_memory_status(dataset_ids)
+
+    @staticmethod
     async def empty_dataset(dataset_id: UUID, user: User | None = None):
         from cognee.modules.data.methods import delete_data, delete_dataset
         from cognee.modules.search.operations import delete_dataset_search_history

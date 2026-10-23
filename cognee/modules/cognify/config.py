@@ -21,6 +21,12 @@ class CognifyConfig(BaseSettings):
     # the chunk's relation texts, one per line, no LLM call.
     summary_method: Literal["llm", "from_extraction"] = "llm"
     chunks_per_batch: int | None = None
+    # Write chunks (and their documents) to the graph and vector stores right
+    # after chunking, before the LLM extraction (env: EARLY_CHUNK_INDEXING).
+    # On (default): chunk-based searches answer while entities are still being
+    # extracted; the final write skips re-embedding those chunks. Off: the
+    # dataset becomes searchable only when the whole pipeline has finished.
+    early_chunk_indexing: bool = True
     # Opt-in audit-grade provenance ledger (env: PROVENANCE_TRACKING). Default
     # OFF so the standard cognify pipeline is unchanged.
     provenance_tracking: bool = False
@@ -49,6 +55,7 @@ class CognifyConfig(BaseSettings):
             "classification_model": self.classification_model,
             "summarization_model": self.summarization_model,
             "chunks_per_batch": self.chunks_per_batch,
+            "early_chunk_indexing": self.early_chunk_indexing,
             "provenance_tracking": self.provenance_tracking,
             "graph_extractor": self.graph_extractor,
             "gliner_auto_install": self.gliner_auto_install,

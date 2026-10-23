@@ -52,6 +52,10 @@ from ..stored_vector_size import choose_stored_vector_size
 from ..vector_db_interface import VectorDBInterface
 
 logger = get_logger("LanceDBAdapter")
+
+# Waits between attempts to open a table another task is still creating
+# (get_collection); about three seconds in all.
+_OPEN_TABLE_RETRY_DELAYS = (0.05, 0.1, 0.2, 0.4, 0.8, 1.6)
 _NO_DEFAULT = object()
 _SIMPLE_TYPE_DEFAULTS = {
     str: "",
@@ -462,6 +466,25 @@ class LanceDBAdapter(VectorDBInterface):
             raise CollectionNotFoundError(f"Collection '{collection_name}' not found!")
 
         connection = await self.get_connection()
+        # has_collection lists table directories, and a concurrent
+        # create_collection (another data item of the same run writing the
+        # same index) makes the directory visible before the first manifest
+        # is committed, so open_table can still answer "not found" for a
+        # moment. Retry instead of waiting on VECTOR_DB_LOCK: callers such as
+        # prune() and create_data_points already hold it, and asyncio.Lock is
+        # not re-entrant. A table that is really gone stops the retries.
+        for delay in _OPEN_TABLE_RETRY_DELAYS:
+            try:
+                return await connection.open_table(collection_name)
+            except Exception as error:
+                if "not found" not in str(error).lower():
+                    raise
+                missing = error
+            await asyncio.sleep(delay)
+            if not await self.has_collection(collection_name):
+                raise CollectionNotFoundError(
+                    f"Collection '{collection_name}' not found!"
+                ) from missing
         return await connection.open_table(collection_name)
 
     async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):

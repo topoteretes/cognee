@@ -46,7 +46,10 @@ Subcommands:
             "--pipelines",
             nargs="+",
             default=None,
-            help=("Optional pipeline names to check (defaults to: cognify_pipeline)"),
+            help=(
+                "Optional pipeline names to check: add_pipeline, indexing_pipeline, "
+                "cognify_pipeline, code_graph_pipeline (defaults to: cognify_pipeline)"
+            ),
         )
 
         # graph
@@ -139,7 +142,8 @@ Subcommands:
 
             ids = [UUID(i) for i in args.dataset_ids]
             statuses = await cognee.datasets.get_status(ids, pipeline_names=args.pipelines)
-            if not statuses:
+            memory = await cognee.datasets.get_memory_status(ids)
+            if not statuses and not memory:
                 fmt.echo("No status information available.")
                 return
             for ds_id, pipeline_statuses in statuses.items():
@@ -153,6 +157,12 @@ Subcommands:
                     fmt.echo(f"{ds_id}: {formatted}")
                 else:
                     fmt.echo(f"{ds_id}: {pipeline_statuses}")
+            # The folded view: what the dataset answers right now, and what improves next.
+            for ds_id, state in memory.items():
+                fmt.echo(
+                    f"{ds_id}: memory={state.state} search_level={state.search_level} "
+                    f"- {state.message}"
+                )
 
         asyncio.run(run())
 
