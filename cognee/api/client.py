@@ -147,6 +147,14 @@ async def lifespan(app: FastAPI):
 
     get_improve_config()
 
+    from cognee.tasks.ingestion.save_data_item_to_storage import local_file_paths_configured
+
+    if not local_file_paths_configured():
+        logger.info(
+            "Server-side file paths in raw_data are refused for HTTP requests "
+            "(set ACCEPT_LOCAL_FILE_PATH=true to allow them)"
+        )
+
     # Emit a clear startup message for docker logs
     logger.info("Backend server has started")
 
