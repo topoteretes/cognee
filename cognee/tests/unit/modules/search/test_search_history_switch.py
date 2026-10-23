@@ -337,6 +337,7 @@ async def test_forget_everything_purges_the_users_own_history_first():
     assert result == {
         "datasets_removed": 2,
         "search_history_removed": True,
+        "history_cleaned": True,
         "status": "success",
     }
     delete_user_history.assert_awaited_once_with(user.id)

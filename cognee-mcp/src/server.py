@@ -757,6 +757,7 @@ async def forget(
     everything: bool = False,
     data_id: str | None = None,
     dataset_id: str | None = None,
+    clean_history: bool = False,
 ) -> list:
     """Delete data from memory.
 
@@ -778,17 +779,30 @@ async def forget(
         `Evidence:` block and the dataset_id from its `dataset:` line.
     dataset_id : str, optional
         UUID of the dataset to delete entirely, or to scope `data_id`.
+    clean_history : bool
+        If true, also delete the user's own search and recall history (in
+        every dataset) before the data is deleted; alone, with no target,
+        delete only the history. Default false: forgetting one item keeps the
+        history; forgetting a dataset or everything purges that data's
+        history regardless.
     """
     with redirect_stdout(sys.stderr):
         try:
-            if not dataset and not everything and not data_id and not dataset_id:
+            if (
+                not dataset
+                and not everything
+                and not data_id
+                and not dataset_id
+                and not clean_history
+            ):
                 return [
                     types.TextContent(
                         type="text",
                         text=(
                             "Error: Specify 'dataset' name or set 'everything' to true. "
                             "To remove a single item, pass 'data_id' with 'dataset' or "
-                            "'dataset_id'."
+                            "'dataset_id'. To delete only your search history, set "
+                            "'clean_history' to true."
                         ),
                     )
                 ]
@@ -816,10 +830,14 @@ async def forget(
                 everything=everything,
                 data_id=parsed_data_id,
                 dataset_id=parsed_dataset_id,
+                clean_history=clean_history,
             )
             status = result.get("status", "unknown") if isinstance(result, dict) else "completed"
             if everything:
                 text = f"All data deleted (status={status})."
+            elif clean_history and not dataset and not parsed_dataset_id:
+                # No target: the guards above let this through only for a history-only call.
+                text = f"Search history deleted (status={status})."
             elif parsed_data_id:
                 text = f"Data item '{data_id}' deleted (status={status})."
             else:
