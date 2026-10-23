@@ -21,6 +21,8 @@ class FakeProxy:
     def handle(self, request: httpx.Request) -> httpx.Response:
         self.bodies.append(json.loads(request.content))
         response = self._responses.pop(0) if self._responses else 200
+        if isinstance(response, httpx.Response):
+            return response
         if isinstance(response, Exception):
             raise response
         return httpx.Response(response)
@@ -104,7 +106,7 @@ def test_sender_restarts_after_close(make_sender):
     assert proxy.bodies == [[{"n": 0}], [{"n": 1}]]
 
 
-def test_full_queue_drops_oldest_events(make_sender, monkeypatch):
+def test_full_queue_drops_newest_events(make_sender, monkeypatch):
     monkeypatch.setattr(telemetry_sender, "FLUSH_INTERVAL_SECONDS", 10)
     monkeypatch.setattr(telemetry_sender, "QUEUE_CAP", 5)
     proxy = FakeProxy()
@@ -114,7 +116,8 @@ def test_full_queue_drops_oldest_events(make_sender, monkeypatch):
         sender.enqueue(event)
     sender.close()
 
-    assert proxy.bodies == [_events(5, start=3)]
+    assert proxy.bodies == [_events(5)]
+    assert sender.snapshot()["dropped_queue"] == 3
 
 
 def test_server_errors_and_network_errors_are_retried(make_sender):
@@ -141,7 +144,7 @@ def test_batch_is_dropped_after_the_last_retry(make_sender):
 
 
 def test_proxy_without_batch_support_gets_single_events(make_sender):
-    proxy = FakeProxy(422)
+    proxy = FakeProxy(httpx.Response(422, headers={"X-Cognee-Telemetry-Batch": "unsupported"}))
     sender = make_sender(proxy)
 
     for event in _events(2):
@@ -158,11 +161,12 @@ def test_client_errors_are_not_retried(make_sender):
     sender = make_sender(proxy)
 
     sender.enqueue({"n": 0})
-    _wait_until(lambda: len(proxy.bodies) == 2)
+    _wait_until(lambda: len(proxy.bodies) == 1)
     sender.enqueue({"n": 1})
-    _wait_until(lambda: len(proxy.bodies) == 3)
+    _wait_until(lambda: len(proxy.bodies) == 2)
 
-    assert proxy.bodies == [[{"n": 0}], {"n": 0}, {"n": 1}]
+    assert proxy.bodies == [[{"n": 0}], [{"n": 1}]]
+    assert sender.snapshot()["exported_events"] == 0
 
 
 def test_close_gives_up_at_the_first_failure(make_sender, monkeypatch):
@@ -170,10 +174,10 @@ def test_close_gives_up_at_the_first_failure(make_sender, monkeypatch):
     proxy = FakeProxy(503)
     sender = make_sender(proxy)
     # Three batches queued before the thread exists, so its first send is already closing.
-    sender._queue.extend(_events(6))
-    sender._closing.set()
     with sender._condition:
-        sender._ensure_thread()
+        for event in _events(6):
+            sender.enqueue(event)
+        sender._closing.set()
 
     sender.close()
 

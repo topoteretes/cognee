@@ -72,12 +72,12 @@ def test_send_telemetry_includes_origin_from_env(monkeypatch):
 
     # Unset -> defaults to "sdk".
     monkeypatch.delenv("TELEMETRY_ORIGIN", raising=False)
-    send_telemetry("test_event", "user-123")
+    send_telemetry("Pipeline Run Started", "user-123")
     assert payloads[-1]["properties"]["telemetry_origin"] == "sdk"
 
     # Set -> honored (the managed cloud sets this to "cloud").
     monkeypatch.setenv("TELEMETRY_ORIGIN", "cloud")
-    send_telemetry("test_event", "user-123")
+    send_telemetry("Pipeline Run Started", "user-123")
     assert payloads[-1]["properties"]["telemetry_origin"] == "cloud"
 
 
@@ -89,7 +89,7 @@ def test_send_telemetry_stamps_event_time(monkeypatch):
     monkeypatch.setattr(utils._telemetry_sender, "enqueue", payloads.append)
 
     before = datetime.now(timezone.utc)
-    send_telemetry("test_event", "user-123")
+    send_telemetry("Pipeline Run Started", "user-123")
     event_time = datetime.fromisoformat(payloads[0]["event_time"])
 
     assert event_time.tzinfo == timezone.utc
