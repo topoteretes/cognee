@@ -14,6 +14,7 @@ serve_state_module = importlib.import_module("cognee.api.v1.serve.state")
 _BASE_SEQUENCE = [
     "classify_documents",
     "extract_chunks_from_documents",
+    "find_indexed_chunks",
     "extract_graph_and_summarize",
     "add_data_points",
 ]
