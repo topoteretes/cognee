@@ -431,3 +431,27 @@ async def test_provider_diagnostic_counters_are_retained(storage, credential):
         await reporter.finish("partial", counts={"failed_ingestion": 2, "requests": 4})
     result = await progress.get_sync_progress(credential)
     assert result.latest.counts == {"failed_ingestion": 2, "requests": 4}
+
+
+@pytest.mark.asyncio
+async def test_updates_within_a_phase_are_throttled_and_changes_publish_at_once(
+    storage, credential, monkeypatch
+):
+    monkeypatch.setattr(progress, "PUBLISH_INTERVAL_SECONDS", 0.2)
+    sink = AsyncMock()
+    async with progress.track_sync("github", credential, sink=sink) as reporter:
+        await reporter.flush()
+        sink.reset_mock()
+        await reporter.report(phase="downloading", completed=0, total=100, unit="files")
+        await reporter.flush()
+        sink.reset_mock()
+        for done in range(1, 50):
+            await reporter.report(completed=done)
+            await asyncio.sleep(0)
+        await reporter.flush()
+        assert sink.await_count <= 2
+        assert sink.call_args.args[0].completed == 49
+        sink.reset_mock()
+        await reporter.report(phase="processing")
+        await reporter.flush()
+        assert sink.call_args.args[0].phase == "processing"

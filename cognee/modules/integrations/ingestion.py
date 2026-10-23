@@ -246,10 +246,18 @@ class _SourceProgress:
         self.check_active()
         if self.reporter is None:
             return
+        # Not awaited: the extraction thread must not wait on the API loop for telemetry.
         try:
-            asyncio.run_coroutine_threadsafe(self.publish_counts(), self.loop).result()
+            asyncio.run_coroutine_threadsafe(self.publish_counts(), self.loop).add_done_callback(
+                self._log_failure
+            )
         except Exception:
             logger.exception("Reporting integration sync progress failed", exc_info=False)
+
+    @staticmethod
+    def _log_failure(future: Any) -> None:
+        if not future.cancelled() and future.exception() is not None:
+            logger.error("Reporting integration sync progress failed")
 
 
 async def retire_resources(

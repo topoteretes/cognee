@@ -44,6 +44,8 @@ SyncReason = Literal[
 ]
 SyncUnit = Literal["items", "files", "bytes", "documents", "channels", "repositories", "scopes"]
 TERMINAL_STATES = frozenset({"succeeded", "partial", "failed", "cancelled", "blocked"})
+# Minimum gap between database writes for observations within one phase and state.
+PUBLISH_INTERVAL_SECONDS = 1.0
 
 
 def _now() -> datetime:
@@ -129,6 +131,9 @@ class SyncProgressReporter:
         self._sample: tuple[int, datetime] | None = None
         self._pending: SyncProgress | None = None
         self._writer: asyncio.Task[None] | None = None
+        self._published: tuple[SyncPhase, SyncState] | None = None
+        self._published_at = 0.0
+        self._urgent = asyncio.Event()
 
     def snapshot(self) -> SyncProgress:
         result = self.progress.model_copy(deep=True)
@@ -222,6 +227,8 @@ class SyncProgressReporter:
                     candidate.phase_percent = None
             self.progress = candidate
             self._pending = self.snapshot()
+            if (candidate.phase, candidate.state) != self._published:
+                self._urgent.set()
             if self._writer is None or self._writer.done():
                 self._writer = asyncio.create_task(self._drain())
 
@@ -256,8 +263,20 @@ class SyncProgressReporter:
     async def _drain(self) -> None:
         # This is a latest-state record, not an event log. Coalescing observations
         # keeps slow telemetry storage off the ingestion path without queuing items.
+        # Within one phase and state, writes are spaced by PUBLISH_INTERVAL_SECONDS; a
+        # phase or state change (terminal ones included) is published at once.
+        loop = asyncio.get_running_loop()
         while self._pending is not None:
+            wait = self._published_at + PUBLISH_INTERVAL_SECONDS - loop.time()
+            if wait > 0 and not self._urgent.is_set():
+                try:
+                    await asyncio.wait_for(self._urgent.wait(), wait)
+                except asyncio.TimeoutError:
+                    pass
+            self._urgent.clear()
             snapshot, self._pending = self._pending, None
+            self._published = (snapshot.phase, snapshot.state)
+            self._published_at = loop.time()
             await self._publish(snapshot)
 
     async def _publish(self, snapshot: SyncProgress | None = None) -> None:
