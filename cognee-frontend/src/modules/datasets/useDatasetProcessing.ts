@@ -10,7 +10,7 @@ export interface DatasetProcessing {
   total: number;
   completed: number;
   pending: number;
-  items: { id: string; name: string; completed: boolean }[];
+  items: { id: string; name: string; repoUrl?: string | null; repoBranch?: string | null; completed: boolean }[];
 }
 
 // Stored item completion survives navigation, connector dialogs, and server

@@ -20,6 +20,23 @@ runs this same pipeline in a single call (it also accepts a list of
 repositories, and index_vectors=True to enable embeddings). This example
 assembles the pipeline explicitly so each step stays visible.
 
+To choose a remote branch (including names containing slashes):
+    await cognee.remember(
+        "https://github.com/topoteretes/cognee.git",
+        content_type="code", branch="dev", dataset_name="cognee_code",
+    )
+Each explicit branch uses its own clone and stored repository row. Changing
+branches retains previous imports; use forget() to remove them explicitly.
+
+For an already connected GitHub App in the local API, list branch names with
+GET /api/v1/integrations/github/repositories/branches?repository=owner/repo,
+then PUT the same path with {"repository": "owner/repo", "branch": "dev"}.
+A null branch follows the repository's default. These routes require the
+current user's authentication and do not grant additional GitHub access.
+POST /api/v1/integrations/github/sync imports the saved selection, and
+GET /api/v1/integrations/github/sync/progress includes resources keyed by
+repository URL, with the branch and completed stages for each repository.
+
 For cross-repository paths, generate one Enola append/multi-repository snapshot
 and ingest it into one dataset. Repositories indexed in separate datasets are
 searched independently and cannot have graph paths between them.

@@ -23,7 +23,16 @@ async def get_dataset_processing_status(
             "total": int,
             "completed": int,
             "pending": int,          # total - completed
-            "items": [{"id": UUID, "name": str, "completed": bool}, ...],
+            "items": [
+                {
+                    "id": UUID,
+                    "name": str,
+                    "repo_url": str | None,      # a cloned repository's credential-free URL
+                    "repo_branch": str | None,   # the branch it was cloned on, None: default
+                    "completed": bool,
+                },
+                ...
+            ],
         }
 
     ``items`` has one entry per data row, in the order ``get_dataset_data``
@@ -45,10 +54,13 @@ async def get_dataset_processing_status(
     items = []
     for item in data_items:
         status_for_pipeline = (item.pipeline_status or {}).get(pipeline_name) or {}
+        system_metadata = item.system_metadata or {}
         items.append(
             {
                 "id": item.id,
                 "name": item.name,
+                "repo_url": system_metadata.get("repo_url"),
+                "repo_branch": system_metadata.get("repo_branch"),
                 "completed": is_data_item_completed(status_for_pipeline.get(dataset_key)),
             }
         )

@@ -191,7 +191,7 @@ async def test_add_code_repository_stores_the_pinned_repo_item(tmp_path, monkeyp
     user = SimpleNamespace(id=uuid4())
     dataset = SimpleNamespace(id=uuid4(), name="my_code")
     pinned_id = uuid4()
-    data_row = SimpleNamespace(id=pinned_id)
+    data_row = SimpleNamespace(id=pinned_id, system_metadata={})
 
     monkeypatch.setattr(unique_id_module, "get_unique_data_id", AsyncMock(return_value=pinned_id))
     calls = []
@@ -218,7 +218,11 @@ async def test_add_code_repository_stores_the_pinned_repo_item(tmp_path, monkeyp
     assert manifest_item.system_metadata["repo_url"] == "https://github.com/org/repo"
     assert add_mock.await_args.kwargs["dataset_id"] == dataset.id
     assert add_mock.await_args.kwargs["user"] is user
-    get_data_mock.assert_awaited_once_with(user.id, pinned_id, dataset.id)
+    # Once before add() (which branch the row holds), once after (the stored row).
+    assert get_data_mock.await_args_list == [
+        ((user.id, pinned_id, dataset.id),),
+        ((user.id, pinned_id, dataset.id),),
+    ]
 
 
 @pytest.mark.asyncio
@@ -249,14 +253,14 @@ async def test_add_code_repository_surfaces_an_errored_ingest(tmp_path, monkeypa
         error_message="disk full",
     )
     monkeypatch.setattr(add_module, "add", AsyncMock(return_value=errored))
-    get_data_mock = AsyncMock()
+    get_data_mock = AsyncMock(return_value=None)
     monkeypatch.setattr(data_methods_module, "get_data", get_data_mock)
 
     with pytest.raises(CodeRepositoryError, match="disk full"):
         await add_code_repository(
             _make_repo(tmp_path), user=SimpleNamespace(id=uuid4()), dataset=dataset
         )
-    get_data_mock.assert_not_awaited()
+    get_data_mock.assert_not_awaited()  # a local repository has no branch row to check
 
 
 @pytest.mark.asyncio
@@ -429,3 +433,66 @@ async def test_resolve_code_repository_url_rejects_non_repository_specs():
 
     with pytest.raises(ValueError, match="not a repository URL"):
         await resolve_code_repository_url("https://github.com/org/repo/blob/main/README.md")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("stored_branch", "new_branch", "replaced"),
+    [
+        (None, None, False),
+        ("dev", "dev", False),
+        (None, "dev", True),
+        ("dev", None, True),
+        ("dev", "release", True),
+    ],
+)
+async def test_storing_another_branch_replaces_the_repository_row(
+    tmp_path, monkeypatch, stored_branch, new_branch, replaced
+):
+    """One row per repository URL: a branch switch forgets the row, with its graph,
+    before storing it again, so the old branch's graph is not kept beside the new one."""
+    import importlib
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from uuid import uuid4
+
+    from cognee.tasks.code_graph.code_repo import add_code_repository
+    from cognee.tasks.code_graph.resolve_repo import clone_dir
+
+    add_module = importlib.import_module("cognee.api.v1.add")
+    forget_module = importlib.import_module("cognee.api.v1.forget")
+    data_methods_module = importlib.import_module("cognee.modules.data.methods")
+    unique_id_module = importlib.import_module("cognee.modules.data.methods.get_unique_data_id")
+
+    user = SimpleNamespace(id=uuid4())
+    dataset = SimpleNamespace(id=uuid4(), name="my_code")
+    pinned_id = uuid4()
+    keys = []
+
+    async def unique_id(identifier, *_args, **_kwargs):
+        keys.append(identifier)
+        return pinned_id
+
+    metadata = {"repo_branch": stored_branch} if stored_branch is not None else {}
+    row = SimpleNamespace(id=pinned_id, system_metadata=metadata)
+    calls = []
+    forget = AsyncMock(side_effect=lambda **_kwargs: calls.append("forget"))
+    monkeypatch.setattr(unique_id_module, "get_unique_data_id", unique_id)
+    monkeypatch.setattr(data_methods_module, "reset_data_pipeline_status", AsyncMock())
+    monkeypatch.setattr(data_methods_module, "get_data", AsyncMock(return_value=row))
+    monkeypatch.setattr(forget_module, "forget", forget)
+    monkeypatch.setattr(
+        add_module, "add", AsyncMock(side_effect=lambda *_args, **_kwargs: calls.append("add"))
+    )
+
+    url = "https://github.com/org/repo"
+    kwargs = {"source_branch": new_branch} if new_branch is not None else {}
+    await add_code_repository(
+        _make_repo(tmp_path), user=user, dataset=dataset, source_url=url, **kwargs
+    )
+
+    # The row is keyed on the repository URL, never on the branch's clone directory.
+    assert keys == [f"code_repo:{clone_dir(url)}"]
+    assert calls == (["forget", "add"] if replaced else ["add"])
+    if replaced:
+        forget.assert_awaited_once_with(data_id=pinned_id, dataset_id=dataset.id, user=user)

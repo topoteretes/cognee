@@ -27,7 +27,8 @@ from cognee.modules.integrations.credentials import (
     get_credential_by_account,
     revoke_credential_by_account,
 )
-from cognee.modules.integrations.github.sync import sync_repositories
+from cognee.modules.integrations.github.sync import REPOSITORY_BRANCHES_KEY, sync_repositories
+from cognee.tasks.code_graph.resolve_repo import check_branch_name
 
 logger = logging.getLogger(__name__)
 
@@ -83,8 +84,20 @@ async def handle_github_event(raw_body: bytes, headers: dict[str, str]) -> None:
     if event == "push":
         repository = payload.get("repository") or {}
         full_name = repository.get("full_name")
-        default_branch = repository.get("default_branch")
-        if not full_name or payload.get("ref") != f"refs/heads/{default_branch}":
+        selected_branches = (credential.provider_metadata or {}).get(REPOSITORY_BRANCHES_KEY) or {}
+        if not isinstance(selected_branches, dict):
+            logger.warning("GitHub branch selection is not a mapping; push ignored")
+            return
+        tracked_branch = selected_branches.get(full_name)
+        if tracked_branch is None:
+            tracked_branch = repository.get("default_branch")
+        else:
+            try:
+                check_branch_name(tracked_branch)
+            except ValueError:
+                logger.warning("GitHub push ignored: the stored branch of %s is invalid", full_name)
+                return
+        if not full_name or payload.get("ref") != f"refs/heads/{tracked_branch}":
             return
         await sync_repositories(credential, [full_name])
         return
