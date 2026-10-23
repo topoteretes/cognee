@@ -41,6 +41,7 @@ def _row(index: int) -> SimpleNamespace:
         label=None,
         external_metadata=None,
         data_size=1024 + index,
+        content_hash=f"{index:032x}",
     )
 
 
