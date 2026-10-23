@@ -42,6 +42,13 @@ class CognifyConfig(BaseSettings):
     # half of torch's thread count, capped by free memory. 1 keeps the
     # single-threaded behaviour. Output is identical at every setting.
     gliner_inference_threads: int = Field(default=0, ge=0)
+    # Whether the code routes (cognify's CODE and CODE_REPO routes, and the
+    # code graph pipeline remember(content_type="code") runs) also store the
+    # repository's docstrings as DocumentChunks linked to the code graph (env:
+    # CODE_GRAPH_DOCS, or cognify(code_docs=...)). Default ON: the chunks are
+    # embedded, with the local fastembed model when no key is configured.
+    # False builds the code graph alone.
+    code_graph_docs: bool = True
     model_config = SettingsConfigDict(extra="allow")
 
     def to_dict(self) -> dict:
@@ -55,6 +62,7 @@ class CognifyConfig(BaseSettings):
             "gliner_torch_index_url": self.gliner_torch_index_url,
             "gliner_inference_threads": self.gliner_inference_threads,
             "summary_method": self.summary_method,
+            "code_graph_docs": self.code_graph_docs,
         }
 
 
@@ -99,6 +107,15 @@ def resolve_summary_method(value: str | None, config: CognifyConfig) -> str:
             f"Unknown summary_method {summary_method!r}; expected 'llm' or 'from_extraction'"
         )
     return summary_method
+
+
+def resolve_code_docs(value: bool | None, config: CognifyConfig) -> bool:
+    """Whether a run's code routes store docstrings: the explicit argument wins over CODE_GRAPH_DOCS."""
+    if value is None:
+        return bool(config.code_graph_docs)
+    if not isinstance(value, bool):
+        raise ValueError(f"code_docs must be True, False or None, got {value!r}")
+    return value
 
 
 LLM_EXTRACTOR = "llm"

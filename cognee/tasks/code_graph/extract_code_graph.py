@@ -17,6 +17,7 @@ from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.code_graph.enola import (
+    EnolaSnapshotError,
     is_enola_id,
     normalize_relation,
     parse_enola_snapshot,
@@ -819,6 +820,31 @@ def _current_code_node_ids(facts: list[dict], fallback_repo: str) -> set:
     return ids
 
 
+def code_graph_repo_labels(
+    data_points: list,
+    repo_path: str | Path | None = None,
+    snapshot_dir: str | Path | None = None,
+) -> list[str]:
+    """The enola repository labels a code graph run covered, sorted.
+
+    Read off the CodeRepository data points the run produced (one per repo in
+    the snapshot, named as enola labels it -- not the directory basename).
+    When extract_code_graph skipped an unchanged snapshot it produced none, so
+    the labels are then resolved from the snapshot (``snapshot_dir``, else
+    ``<repo_path>/.enola``) exactly as map_facts_to_data_points resolves them,
+    so they name the same nodes. No snapshot to read: no labels.
+    """
+    repositories = {point.name for point in data_points if isinstance(point, CodeRepository)}
+    if repositories:
+        return sorted(repositories)
+    if snapshot_dir is None:
+        if repo_path is None:
+            return []
+        snapshot_dir = Path(repo_path) / ".enola"
+    facts, _receipt = parse_enola_snapshot(snapshot_dir)
+    return sorted(_snapshot_repos(facts, _resolve_fallback_repo(facts, repo_path)))
+
+
 def _pipeline_data_id(ctx: Optional["PipelineContext"] = None) -> Any:
     """Return a stable id for a persisted pipeline item, if it has one."""
     data_item = getattr(ctx, "data_item", None)
@@ -1303,19 +1329,83 @@ async def _stamp_snapshot_identity(
     await graph_engine.add_nodes(repositories)
 
 
+async def add_code_graph_docs(
+    data_points: list[DataPoint],
+    ctx: Optional["PipelineContext"] = None,
+    repo_path: str | Path | None = None,
+    snapshot_dir: str | Path | None = None,
+) -> list[DataPoint]:
+    """Store the docstrings of the repositories this run covered, linked to their code nodes.
+
+    The docs tail of every code route (cognify's CODE and CODE_REPO routes and
+    the code graph pipeline): after add_code_graph_edges, ``code_docs_tail``
+    reads each repository's docstrings from the ``docs.jsonl`` enola wrote
+    into the snapshot this run loaded (``snapshot_dir``, else
+    ``<repo_path>/.enola``), stores them as DocumentChunks (embedded -- the
+    only embedding call on these routes; the local fastembed model when no key
+    is configured, unless one of the env vars that disable the preflight --
+    COGNEE_SKIP_PREFLIGHT, COGNEE_SKIP_CONNECTION_TEST, MOCK_EMBEDDING -- is
+    set, which switches that fallback off and leaves the configured provider
+    in charge) and writes the ``describes`` edges. One call per repository
+    label the run produced (see code_graph_repo_labels), so the sweep stays
+    scoped to those repositories; every call reads the same snapshot (a
+    multi-repo snapshot covers all its repositories in one directory), not the
+    stored ``CodeRepository.path``, which a skipped snapshot leaves as an
+    earlier run's; and every call gets the route's ``ctx``, so the documents
+    and chunks are attributed to the data item that owns the code graph and
+    forget(data_id) removes them with it. Runs for an unchanged snapshot too:
+    the tail is idempotent (a docstring edit past its first paragraph changes
+    docs.jsonl but not the snapshot id, and is picked up here), and a
+    repository indexed before docstrings were stored, or with them switched
+    off, gets them on its next sync.
+
+    A tail that fails (no usable embedding provider, say) raises: the item
+    errors and the run is rolled back with the code graph it built.
+    CODE_GRAPH_DOCS=false builds code graphs without docstrings. Passthrough:
+    returns data_points unchanged.
+    """
+    from cognee.tasks.code_docs import code_docs_tail
+
+    if snapshot_dir is None and repo_path is not None:
+        snapshot_dir = Path(repo_path) / ".enola"
+    try:
+        repositories = code_graph_repo_labels(data_points, repo_path, snapshot_dir)
+    except (EnolaSnapshotError, OSError, UnicodeError):
+        # An unchanged graph emits no data points, so resolving its labels
+        # reopens the snapshot. A lost/unreadable snapshot is a docs-tail
+        # failure too; it must not trigger rollback of the existing graph.
+        logger.warning(
+            "Code docs snapshot unavailable while resolving repositories; "
+            "the code graph is kept. Re-run ingestion to retry the docstrings."
+        )
+        return data_points
+    for repo in repositories:
+        counts = await code_docs_tail(repo=repo, ctx=ctx, snapshot_dir=snapshot_dir)
+        logger.info("Code docs stored for repository '%s': %s", repo, counts)
+    return data_points
+
+
 def get_code_graph_tasks(
     repo_path: str | Path,
     snapshot_dir: str | Path | None = None,
     timeout: float = 600.0,
     index_vectors: bool = False,
+    code_docs: bool | None = None,
 ) -> list[Task]:
     """Build the ordered task list for the enola code graph pipeline.
 
     index_vectors is opt-in because SearchType.CODE uses graph indexes only.
     Enable it when the same code facts must also feed semantic/completion
     retrievers, which may require an embedding provider API key.
+
+    code_docs appends the docstring tail (add_code_graph_docs): the explicit
+    argument wins over the CODE_GRAPH_DOCS setting, on by default. The tail
+    embeds the docstring chunks (local fastembed when keyless); False keeps the
+    list graph-only, as before docstrings were stored.
     """
-    return [
+    from cognee.modules.cognify.config import get_cognify_config, resolve_code_docs
+
+    tasks = [
         # EXTRACT: run enola and map its facts to DataPoints
         Task(
             extract_code_graph,
@@ -1328,3 +1418,14 @@ def get_code_graph_tasks(
         # LOAD: persist the typed relations as explicit graph edges
         Task(add_code_graph_edges, repo_path=repo_path, snapshot_dir=snapshot_dir),
     ]
+    if resolve_code_docs(code_docs, get_cognify_config()):
+        # LOAD: the repositories' docstrings as chunks linked to the code nodes
+        tasks.append(
+            Task(
+                add_code_graph_docs,
+                repo_path=repo_path,
+                snapshot_dir=snapshot_dir,
+                needs_llm=False,
+            )
+        )
+    return tasks
