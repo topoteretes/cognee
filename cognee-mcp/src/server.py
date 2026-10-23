@@ -835,7 +835,8 @@ async def forget(
             status = result.get("status", "unknown") if isinstance(result, dict) else "completed"
             if everything:
                 text = f"All data deleted (status={status})."
-            elif not dataset and not parsed_dataset_id:
+            elif clean_history and not dataset and not parsed_dataset_id:
+                # No target: the guards above let this through only for a history-only call.
                 text = f"Search history deleted (status={status})."
             elif parsed_data_id:
                 text = f"Data item '{data_id}' deleted (status={status})."
