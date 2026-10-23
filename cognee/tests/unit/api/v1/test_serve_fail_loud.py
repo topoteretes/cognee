@@ -113,6 +113,7 @@ async def test_serve_direct_accepted_key_connects_and_saves(monkeypatch, tmp_pat
         assert json.loads(creds_file.read_text()) == {
             "service_url": "http://some-instance:8000",
             "api_key": "good-key",
+            "tenant_id": "",
         }
     finally:
         await cognee.disconnect()
