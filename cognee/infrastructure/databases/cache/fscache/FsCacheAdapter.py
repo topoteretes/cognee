@@ -6,7 +6,10 @@ from datetime import datetime, timezone
 import diskcache as dc
 from pydantic import ValidationError
 
-from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInterface
+from cognee.infrastructure.databases.cache.cache_db_interface import (
+    CacheDBInterface,
+    keys_owned_by_user,
+)
 from cognee.infrastructure.databases.cache.models import SessionAgentTraceEntry, SessionQAEntry
 from cognee.infrastructure.databases.exceptions.exceptions import (
     CacheConnectionError,
@@ -538,6 +541,17 @@ class FSCacheAdapter(CacheDBInterface):
             return existed
         except Exception as e:
             error_msg = f"Unexpected error while deleting session context from diskcache: {e!s}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+
+    async def delete_user_data(self, user_id: str) -> None:
+        """Delete this user's session keys. Other users' keys stay in the cache."""
+        try:
+            owned = keys_owned_by_user(list(self.cache.iterkeys()), user_id)
+            for key in owned:
+                self.cache.delete(key)
+        except Exception as e:
+            error_msg = f"Unexpected error while deleting user cache from diskcache: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 

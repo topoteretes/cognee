@@ -6,6 +6,20 @@ from datetime import datetime, timezone
 from cognee.infrastructure.databases.cache.models import SessionAgentTraceEntry, SessionQAEntry
 
 
+# Key shapes shared by the Redis and filesystem adapters.
+_USER_CACHE_PREFIXES = ("agent_sessions:", "agent_traces:", "session_context:")
+
+
+def keys_owned_by_user(keys, user_id: str) -> list[str]:
+    """Return cache keys that belong to ``user_id``.
+
+    A key matches only when the user id is its own path segment, so user ``a``
+    does not match user ``ab``.
+    """
+    prefixes = tuple(f"{prefix}{user_id}:" for prefix in _USER_CACHE_PREFIXES)
+    return [key for key in keys if isinstance(key, str) and key.startswith(prefixes)]
+
+
 def qa_entry_time(entry: SessionQAEntry) -> datetime:
     """The entry's ``time`` as an aware datetime; a naive value is UTC."""
     parsed = datetime.fromisoformat(entry.time)
@@ -313,6 +327,15 @@ class CacheDBInterface(ABC):
         for entry in surviving:
             await self.create_session_context_entry(user_id, session_id, entry)
         return True
+
+    async def delete_user_data(self, user_id: str) -> None:
+        """
+        Delete cache entries owned by one user.
+
+        ``prune`` wipes every tenant. Forgetting one user's data must not do that.
+        Adapters that store per-user sessions override this.
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not implement delete_user_data")
 
     @abstractmethod
     async def prune(self) -> None:

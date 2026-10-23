@@ -195,7 +195,7 @@ async def _forget_everything(user: Any) -> dict:
     - Relational DB (datasets, data records): yes
     - Graph DB (nodes, edges): yes
     - Vector DB (embeddings): yes
-    - Session cache (Redis/FS): yes (full prune)
+    - Session cache (Redis/FS/SQL): yes, limited to this user
     """
     from cognee.api.v1.datasets.datasets import datasets
 
@@ -213,7 +213,7 @@ async def _forget_everything(user: Any) -> dict:
         if cache_config.caching or cache_config.usage_logging:
             cache_engine = get_cache_engine()
             if cache_engine is not None:
-                await cache_engine.prune()
+                await cache_engine.delete_user_data(str(user.id))
     except Exception as e:
         logger.warning("forget: session cache cleanup failed (non-fatal): %s", e, exc_info=True)
 
