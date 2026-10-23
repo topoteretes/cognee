@@ -1654,6 +1654,7 @@ async def _remember_inner(
         from cognee.tasks.code_graph import get_code_graph_tasks
         from cognee.tasks.code_graph.code_repo import add_code_repository
         from cognee.tasks.code_graph.resolve_repo import (
+            clone_repo_name,
             is_remote_repo,
             redact_repo_spec,
             resolve_repo_source,
@@ -1748,7 +1749,13 @@ async def _remember_inner(
                 )
                 item["id"] = str(data.id)
                 pipeline_result = await run_custom_pipeline(
-                    tasks=get_code_graph_tasks(str(repo_path), index_vectors=bool(index_vectors)),
+                    tasks=get_code_graph_tasks(
+                        str(repo_path),
+                        index_vectors=bool(index_vectors),
+                        repo_name=clone_repo_name(item["source"], repo_path)
+                        if is_remote_repo(spec)
+                        else None,
+                    ),
                     data=[data],
                     dataset=dataset.id,
                     user=user,

@@ -402,3 +402,21 @@ async def test_code_route_never_resolves_the_graph_extractor(code_remember_env, 
 
     assert result.status == "completed"
     code_remember_env["pipeline"].assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("index_vectors", [False, True])
+async def test_remote_clone_keeps_legacy_name_in_both_graph_tasks(
+    code_remember_env, tmp_path, index_vectors
+):
+    url = "https://github.com/org/repo"
+    hashed_clone = resolve_module.clone_dir(url, clones_dir=tmp_path)
+    code_remember_env["resolve"].return_value = hashed_clone
+
+    await remember(url, content_type="code", index_vectors=index_vectors)
+
+    tasks = code_remember_env["pipeline"].await_args.kwargs["tasks"]
+    for task in (tasks[0], tasks[2]):
+        assert task.default_params["kwargs"]["repo_name"] == "github.com-org-repo"
+        assert task.default_params["kwargs"]["repo_path"] == str(hashed_clone)
+    assert tasks[1].default_params["kwargs"]["graph_only"] is (not index_vectors)

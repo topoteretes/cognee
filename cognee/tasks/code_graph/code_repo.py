@@ -44,9 +44,10 @@ from cognee.modules.engine.models.node_set import validate_node_set_names
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.code_graph.resolve_repo import (
     CodeRepositoryError,
-    clone_dir,
+    clone_repo_name,
     code_repo_clone_url,
     redact_repo_spec,
+    repo_identity,
     resolve_repo_source,
 )
 from cognee.tasks.ingestion.dlt_utils import metadata_source
@@ -134,6 +135,25 @@ REPO_SKIPPED_MEDIA_EXTENSIONS = frozenset(
 def is_code_repo_sourced(metadata) -> bool:
     """Check whether system_metadata indicates a repo manifest (source == "code_repo")."""
     return metadata_source(metadata) == "code_repo"
+
+
+def manifest_repo_name(data_item, repo_path: Path) -> str | None:
+    """The code-graph name of a cloned repository's manifest, or None for a local directory.
+
+    A clone's directory carries a hash its stored graph never had (see
+    ``resolve_repo.clone_repo_name``); the manifest row's ``repo_url`` says it
+    is a clone and of what. A local directory keeps the name enola gives it.
+    """
+    metadata = getattr(data_item, "system_metadata", None)
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except (json.JSONDecodeError, TypeError):
+            return None
+    repo_url = metadata.get("repo_url") if isinstance(metadata, dict) else None
+    if not isinstance(repo_url, str) or not repo_url:
+        return None
+    return clone_repo_name(redact_repo_spec(repo_url), repo_path)
 
 
 def detect_code_project(directory: Path) -> bool:
@@ -357,9 +377,9 @@ async def resolve_code_repository_url(
         dataset_id=dataset_id,
         source_url=source_url,
         # Keyed on the default branch's clone, as every URL row was before branches:
-        # existing rows keep their ids, and branches of one URL share the row, since
-        # their code graphs share the repository's node ids.
-        identity=clone_dir(source_url),
+        # existing rows keep their ids, and branches of one URL share the row; each
+        # branch's code graph is named after its own clone (see clone_repo_name).
+        identity=repo_identity(source_url),
     )
 
 
@@ -388,6 +408,7 @@ async def add_code_repository(
         dataset_id=dataset.id,
         source_url=source_url,
         include_documents=False,
+        identity=repo_identity(source_url) if source_url is not None else None,
     )
     add_result = await add(
         manifest_item,
@@ -400,8 +421,9 @@ async def add_code_repository(
     # errored run instead of raising; surface its cause, not a missing row.
     errored = get_errored_run_info(add_result)
     if errored is not None:
+        logger.error("Could not store code repository %s", repo_path)
         raise CodeRepositoryError(
-            message=f"Could not store code repository '{repo_path}': "
+            message="Could not store the code repository: "
             f"{errored.error_message or errored.error_class or 'ingestion failed'}"
         )
 
@@ -461,9 +483,14 @@ async def extract_code_repo_graph(
         metadata = decode_external_metadata(data_item.external_metadata)
         node_set = validate_node_set_names(metadata.get("node_set")) if metadata else None
 
-        data_points = await extract_code_graph(repo_path=repo_path, node_set=node_set)
+        repo_name = manifest_repo_name(data_item, repo_path)
+        data_points = await extract_code_graph(
+            repo_path=repo_path, node_set=node_set, repo_name=repo_name
+        )
         state = await add_code_graph_data_points(data_points, ctx=ctx, graph_only=True)
-        await add_code_graph_edges(state, repo_path=repo_path, ctx=ctx, node_set=node_set)
+        await add_code_graph_edges(
+            state, repo_path=repo_path, ctx=ctx, node_set=node_set, repo_name=repo_name
+        )
 
         logger.info("Code repo graph extracted for %s (%s).", repo_path, data_item.id)
 
