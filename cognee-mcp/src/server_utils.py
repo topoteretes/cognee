@@ -195,47 +195,6 @@ def _evidence_rank(reference: Any) -> tuple[bool, int]:
     return (True, 0)
 
 
-# One bullet of the Evidence block cognee appends to a cited answer:
-# "- chunk N of document NAME (data_id: UUID, chunk_id: UUID): "..."".
-_EVIDENCE_BULLET = re.compile(
-    r"^- chunk \d+ of document (?P<document>.+?) \(data_id: (?P<data_id>[0-9a-f-]{36})",
-    re.MULTILINE,
-)
-
-
-def _refs_from_evidence_text(item: Any, hit_dataset_id: Any) -> list[dict[str, str]]:
-    """Refs for a hit whose Evidence block cites data_ids but carries no structured refs.
-
-    cognee releases up to 1.6.5 return no structured evidence for the default
-    (hybrid) answer: the ids its Evidence block cites exist only in the answer
-    text, already best match first, and the dataset is the hit's own. Used only
-    when the structured references are empty, so on releases that fill them
-    the text is never read.
-    """
-    if not hit_dataset_id:
-        return []
-    text = _get_field(item, "answer", "text", "content", "search_result", "result")
-    if not isinstance(text, str):
-        return []
-    refs: list[dict[str, str]] = []
-    seen: set[str] = set()
-    for match in _EVIDENCE_BULLET.finditer(text):
-        data_id = match.group("data_id")
-        if data_id in seen:
-            continue
-        seen.add(data_id)
-        refs.append(
-            {
-                "data_id": data_id,
-                "dataset_id": str(hit_dataset_id),
-                "document": " ".join(match.group("document").split())[:80],
-            }
-        )
-        if len(refs) == MAX_RECALL_REFS:
-            break
-    return refs
-
-
 def recall_item_refs(item: Any) -> list[dict[str, str]]:
     """Forgettable data items behind one recall hit, as (data_id, dataset_id) pairs.
 
@@ -246,8 +205,8 @@ def recall_item_refs(item: Any) -> list[dict[str, str]]:
     and triplet references name no document and are skipped. A reference
     without its own ``dataset_id`` takes the hit's, since ``forget`` needs both.
     Evidence is taken best match first (lowest ``rank``; unranked last), so the
-    cap keeps the most relevant items. A hit with no structured refs falls back
-    to the data_ids its Evidence block cites (:func:`_refs_from_evidence_text`).
+    cap keeps the most relevant items. The answer text is never read: a hit
+    with no structured refs has none.
     """
     metadata = _model_dump(_get_field(item, "metadata"))
     if not isinstance(metadata, dict):
@@ -277,8 +236,6 @@ def recall_item_refs(item: Any) -> list[dict[str, str]]:
         refs.append(ref)
         if len(refs) == MAX_RECALL_REFS:
             break
-    if not refs:
-        refs = _refs_from_evidence_text(item, hit_dataset_id)
     return refs
 
 
@@ -292,8 +249,8 @@ def format_recall_body(
 
     With ``include_references``, each hit backed by stored data gets one
     ``refs:`` line per data item, carrying the ids ``forget`` takes, read from
-    the hit's structured references; a hit without them (older cognee releases)
-    gets the data_ids its Evidence block cites, paired with the hit's dataset.
+    the hit's structured references. A hit without them gets no ``refs:`` line;
+    ids cited only in the answer text are never read.
     """
     results = _unwrap_results(results)
     if not results:

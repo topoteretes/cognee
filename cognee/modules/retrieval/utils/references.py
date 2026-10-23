@@ -3,10 +3,12 @@
 Evidence is grounded in the generated answer, not in whatever happened to be
 retrieved before the LLM was called:
 
-- ``format_chunk_references`` builds an Evidence block from retrieved vector
-  payloads, keeping only chunks that share significant terms with the answer
-  (the ``RAG_COMPLETION`` / chunk path, where candidates are the chunks the
-  LLM actually read).
+- ``select_citations`` picks the chunks of retrieved vector payloads that
+  share significant terms with the answer (candidates are the chunks the LLM
+  actually read); ``render_citations`` writes the Evidence block for them, and
+  ``format_chunk_references`` does both. A caller that also needs the cited
+  objects (the hybrid retriever's structured evidence) selects once and
+  renders from the same selection.
 - ``build_answer_grounded_chunk_references`` is retained as a compatibility
   helper for callers that explicitly request a post-hoc similarity lookup. The
   graph completion path no longer uses it; graph provenance comes directly from
@@ -15,8 +17,9 @@ retrieved before the LLM was called:
   above to a list of completions, one Evidence block per string completion.
 
 All helpers are pure with respect to the LLM (no model calls) so they can be
-unit tested in isolation. All return ``""`` (or the completions unchanged)
-when there is nothing usable, and never raise on backend failures.
+unit tested in isolation. With nothing usable they return ``""``, ``[]``
+from ``select_citations``, or the completions unchanged, and never raise on
+backend failures.
 """
 
 import re
@@ -274,18 +277,6 @@ def _significant_terms(text: str) -> set[str]:
     return {token for token in tokens if len(token) >= 3 and token not in _STOPWORDS}
 
 
-def answer_grounded_chunks(
-    retrieved_objects: Any, answer: str | None = None, limit: int = 5
-) -> list[Any]:
-    """The retrieved chunks an Evidence block cites, in citation order.
-
-    The selection behind :func:`format_chunk_references`, returned as the
-    original retrieved objects so callers can describe the same citations as
-    structured evidence instead of re-reading them from the rendered text.
-    """
-    return [citation[0] for citation in _select_citations(retrieved_objects, answer, limit)]
-
-
 def format_chunk_references(
     retrieved_objects: Any, answer: str | None = None, limit: int = 5
 ) -> str:
@@ -319,7 +310,11 @@ def format_chunk_references(
         A multi-line Evidence block prefixed by an ``Evidence:`` header, or an
         empty string when nothing usable was found.
     """
-    citations = _select_citations(retrieved_objects, answer, limit)
+    return render_citations(select_citations(retrieved_objects, answer, limit))
+
+
+def render_citations(citations: list[tuple[Any, str, int, str, str | None, str | None]]) -> str:
+    """The Evidence block for citations from :func:`select_citations`, or ``""``."""
     if not citations:
         return ""
 
@@ -332,12 +327,15 @@ def format_chunk_references(
     return EVIDENCE_HEADER + "\n" + "\n".join(bullets)
 
 
-def _select_citations(
-    retrieved_objects: Any, answer: str | None, limit: int
+def select_citations(
+    retrieved_objects: Any, answer: str | None = None, limit: int = 5
 ) -> list[tuple[Any, str, int, str, str | None, str | None]]:
     """(obj, document_name, number, text, data_id, chunk_id) per cited chunk, best first.
 
-    See :func:`format_chunk_references` for the selection rules.
+    The selection behind an Evidence block. ``obj`` is the retrieved object
+    itself, so a caller can describe the same citations as structured evidence
+    without reading them back from the rendered text. See
+    :func:`format_chunk_references` for the selection rules.
     """
     if not retrieved_objects:
         return []
