@@ -26,6 +26,7 @@ class FakeLinear:
             "description": f"Body of {key}",
             "url": f"https://linear.app/x/issue/{key}",
             "trashed": False,
+            "archivedAt": None,
             "createdAt": _ts(0),
             "updatedAt": _ts(n),
             "state": {"name": "Todo"},
@@ -58,10 +59,16 @@ class FakeLinear:
             "url": f"https://linear.app/x/project/{key}",
             "startDate": None,
             "targetDate": None,
+            "trashed": False,
+            "archivedAt": None,
             "updatedAt": _ts(n),
             "status": {"name": "Planned"},
             "lead": None,
         }
+
+    def trash(self, items: dict, key: str, n: int):
+        # As Linear does: trashing archives the item and leaves updatedAt alone.
+        items[key].update(trashed=True, archivedAt=_ts(n))
 
     # -- transport ---------------------------------------------------------
     def execute(self, query, variables=None):
@@ -77,12 +84,23 @@ class FakeLinear:
             return {"team": self._projects(variables)}
         if "LinearIssueComments" in query:
             return self._issue_comments(variables)
+        if "LinearTeamArchivedIssues" in query:
+            return {"team": self._archived_issues(variables)}
+        if "LinearTeamArchivedProjects" in query:
+            nodes, info = self._page(list(self.projects.values()), variables)
+            return {"team": {"projects": {"nodes": nodes, "pageInfo": info}}}
         raise AssertionError(query)
 
     @staticmethod
-    def _in_window(item, window):
-        stamp = item["updatedAt"]
-        return stamp >= window.get("gte", "") and stamp <= window.get("lte", "~")
+    def _in_window(item, window, field="updatedAt"):
+        stamp = item[field]
+        return stamp is not None and window.get("gte", "") <= stamp <= window.get("lte", "~")
+
+    @staticmethod
+    def _visible(items, variables):
+        if variables.get("archived", True):
+            return list(items)
+        return [i for i in items if not i["archivedAt"]]
 
     @staticmethod
     def _page(items, variables):
@@ -94,7 +112,7 @@ class FakeLinear:
 
     def _issues(self, variables):
         filter_ = variables.get("filter") or {}
-        items = list(self.issues.values())
+        items = self._visible(self.issues.values(), variables)
         if "id" in filter_:
             items = [i for i in items if i["id"] in filter_["id"]["in"]]
         if "updatedAt" in filter_:
@@ -123,9 +141,16 @@ class FakeLinear:
 
     def _projects(self, variables):
         window = (variables.get("filter") or {}).get("updatedAt", {})
-        items = [p for p in self.projects.values() if self._in_window(p, window)]
+        visible = self._visible(self.projects.values(), variables)
+        items = [p for p in visible if self._in_window(p, window)]
         nodes, info = self._page(items, variables)
         return {"projects": {"nodes": nodes, "pageInfo": info}}
+
+    def _archived_issues(self, variables):
+        window = (variables.get("filter") or {}).get("archivedAt", {})
+        items = [i for i in self.issues.values() if self._in_window(i, window, "archivedAt")]
+        nodes, info = self._page(items, variables)
+        return {"issues": {"nodes": nodes, "pageInfo": info}}
 
     def _issue_comments(self, variables):
         own = sorted(
