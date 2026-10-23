@@ -87,6 +87,8 @@ class DataItemProcessingStatusDTO(OutDTO):
 
     id: UUID
     name: str
+    repo_url: str | None = None
+    repo_branch: str | None = None
     completed: bool
 
 

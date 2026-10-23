@@ -1122,8 +1122,8 @@ async def remember(
         skill_improvement: Internal skill-improvement control dict used with
             ``SkillRunEntry`` or ``content_type="skills"``. ``apply=True``
             requires an existing ``proposal_id``.
-        **kwargs: Additional options -- see ``RememberKwargs``. ``branch`` (without
-            ``content_type``) clones that branch of a repository URL; see ``add()``.
+        **kwargs: Additional options -- see ``RememberKwargs``. ``branch`` clones
+            that branch of a repository URL, including with ``content_type="code"``.
 
     Returns:
         RememberResult or DryRunEstimate: A promise-like object for normal
@@ -1631,12 +1631,9 @@ async def _remember_inner(
         raise ValueError("index_vectors is supported only for content_type='code'.")
     if repo_credentials is not None and content_type != "code":
         raise ValueError("repo_credentials is supported only for content_type='code'.")
-    if kwargs.get("branch") is not None and content_type is not None:
-        # Only the add() route reads it, so a content_type call would drop it silently.
-        raise ValueError(
-            "branch is supported only without content_type: pass the repository URL "
-            "to remember() directly."
-        )
+    if kwargs.get("branch") is not None and content_type not in (None, "code"):
+        # Skills do not consume a repository branch.
+        raise ValueError("branch is not supported for skills.")
     if content_type == "code" and session_id is not None:
         raise ValueError(
             "session_id is not applicable to content_type='code'; code graphs are "
@@ -1649,7 +1646,11 @@ async def _remember_inner(
         from cognee import __version__ as cognee_version
         from cognee.infrastructure.locks.dataset_lock import dataset_lock
         from cognee.modules.data.methods import mark_data_processed
-        from cognee.modules.integrations.sync_progress import report_sync_progress
+        from cognee.modules.integrations.sync_progress import (
+            get_current_sync_progress,
+            report_sync_progress,
+            report_sync_resource,
+        )
         from cognee.modules.run_custom_pipeline import run_custom_pipeline
         from cognee.shared.utils import send_telemetry
         from cognee.tasks.code_graph import get_code_graph_tasks
@@ -1721,8 +1722,24 @@ async def _remember_inner(
                     getattr(run_info, "error_message", None) or "code_graph_pipeline errored"
                 )
 
+        branch = kwargs.pop("branch", None)
+        if branch is not None:
+            from cognee.tasks.code_graph.resolve_repo import check_branch_name
+
+            check_branch_name(branch)
+
         async def _run_one_repo(spec, item: dict) -> None:
-            repo_path = await resolve_repo_source(spec, credentials=repo_credentials)
+            await report_sync_resource(
+                item["source"], branch=branch, phase="downloading", completed=0
+            )
+            repo_path = await resolve_repo_source(
+                spec,
+                credentials=repo_credentials,
+                **({"branch": branch} if branch is not None else {}),
+            )
+            await report_sync_resource(
+                item["source"], branch=branch, phase="processing", completed=1
+            )
             item["path"] = str(repo_path)
             # The Data row's stamps are read-modify-written as a whole: holding
             # the dataset lock from the row write to the final stamp keeps a
@@ -1745,6 +1762,7 @@ async def _remember_inner(
                     user=user,
                     dataset=dataset,
                     source_url=item["source"] if is_remote_repo(spec) else None,
+                    **({"source_branch": branch} if branch is not None else {}),
                     skip_connection_test=skip_connection_test,
                 )
                 item["id"] = str(data.id)
@@ -1758,6 +1776,9 @@ async def _remember_inner(
                 )
                 _apply_code_run_info(item, pipeline_result)
                 if item.get("status") != "errored":
+                    await report_sync_resource(
+                        item["source"], branch=branch, phase="finalizing", completed=2
+                    )
                     # The row's graph is built, exactly as the cognify CODE_REPO
                     # route would build it: stamp cognify completion so a later
                     # cognify() of the dataset does not rerun enola for it, and the
@@ -1770,11 +1791,15 @@ async def _remember_inner(
 
         async def _run_repos(isolate_failures: bool) -> None:
             processed = failed = 0
+            reporter = get_current_sync_progress()
+            # A caller that supplied the repository queue owns the batch counters.
+            owns_batch_progress = reporter is None or not reporter.progress.resources
             # One phase for the whole batch: a per-repo phase change would reset
             # the repository counter and its estimate.
-            await report_sync_progress(
-                phase="processing", completed=0, total=len(repo_specs), unit="repositories"
-            )
+            if owns_batch_progress:
+                await report_sync_progress(
+                    phase="processing", completed=0, total=len(repo_specs), unit="repositories"
+                )
             for position, spec in enumerate(repo_specs, start=1):
                 # redact: connector-supplied URLs may carry a token in the
                 # userinfo, which must not surface in results or logs. The
@@ -1797,17 +1822,25 @@ async def _remember_inner(
                     )
                     item["status"] = "errored"
                     item["error"] = str(exc)
+                await report_sync_resource(
+                    item["source"],
+                    branch=branch,
+                    state="failed" if item.get("status") == "errored" else "succeeded",
+                    phase="failed" if item.get("status") == "errored" else "complete",
+                    completed=None if item.get("status") == "errored" else 3,
+                )
                 if item.get("status") == "errored":
                     failed += 1
                 else:
                     processed += 1
-                await report_sync_progress(
-                    phase="processing",
-                    completed=position,
-                    total=len(repo_specs),
-                    unit="repositories",
-                    counts={"processed": processed, "failed": failed},
-                )
+                if owns_batch_progress:
+                    await report_sync_progress(
+                        phase="processing",
+                        completed=position,
+                        total=len(repo_specs),
+                        unit="repositories",
+                        counts={"processed": processed, "failed": failed},
+                    )
             result.items_processed = len(
                 [item for item in result.items if item.get("status") != "errored"]
             )

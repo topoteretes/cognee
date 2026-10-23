@@ -5,7 +5,7 @@ import { TrackPageView } from "@/modules/analytics";
 import { AGENT_CARDS } from "@/modules/integrations/agentCards";
 import { AUTOMATION_CARDS } from "@/modules/integrations/automationCards";
 import SetupConnectorSection from "./partials/SetupConnectorSection";
-import GoogleIntegrationsSection from "./partials/GoogleIntegrationsSection";
+import SdkIntegrationsSection from "./partials/SdkIntegrationsSection";
 import MoreDataSourcesSection from "./partials/MoreDataSourcesSection";
 import { useAgentConnectionStatus } from "./partials/useAgentConnectionStatus";
 
@@ -13,7 +13,7 @@ import { useAgentConnectionStatus } from "./partials/useAgentConnectionStatus";
  * Open-source integrations page. The hosted page lists connector cards that
  * talk to the cloud control plane; the SDK has no control plane, one user, and
  * its own integrations router, so the data sources here are the ones that
- * router serves (GoogleIntegrationsSection, owned by this repo).
+ * router serves (SdkIntegrationsSection, owned by this repo).
  */
 const PAGE_MAX_WIDTH = 1440;
 
@@ -45,10 +45,10 @@ export default function IntegrationsPage(): ReactElement {
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <div>
             <h2 style={{ fontSize: 18, fontWeight: 700, color: "#EDECEA", margin: "0 0 4px", letterSpacing: "-0.01em" }}>Data sources</h2>
-            <p style={{ fontSize: 14, color: "rgba(237,236,234,0.55)", margin: 0 }}>Connect your Google account to turn Drive and Gmail into searchable memory.</p>
+            <p style={{ fontSize: 14, color: "rgba(237,236,234,0.55)", margin: 0 }}>Connect Google Drive, Gmail, and GitHub to turn your files, email, and code into searchable memory.</p>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16 }}>
-            <GoogleIntegrationsSection />
+            <SdkIntegrationsSection />
           </div>
         </div>
 

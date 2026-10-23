@@ -52,6 +52,7 @@ from pydantic import Field
 from sqlalchemy.exc import IntegrityError
 
 from cognee.api.DTO import InDTO, OutDTO
+from cognee.api.v1.integrations.routers.get_github_branches_router import get_github_branches_router
 from cognee.api.v1.integrations.routers.get_sync_progress_router import get_sync_progress_router
 from cognee.infrastructure.background_tasks import register_background_task
 from cognee.modules.agents.create_agent import create_agent
@@ -438,6 +439,7 @@ def _frontend_redirect(integration: OAuthIntegration, outcome: str) -> RedirectR
 def get_integrations_router():
     integrations_router = APIRouter(lifespan=linear_resume_lifespan)
     integrations_router.include_router(get_sync_progress_router())
+    integrations_router.include_router(get_github_branches_router())
 
     # ------------------------------------------------------------------ #
     # Aggregate status (fixed /status path — before the {provider} routes)
@@ -1003,13 +1005,21 @@ def get_integrations_router():
         credential = await _credential_or_404(user, integration, account_id)
         if credential is None:
             raise HTTPException(status_code=404, detail=f"{provider} is not connected")
-        from cognee.modules.integrations.ingestion import sync_is_running
+        from cognee.modules.integrations.ingestion import release_sync, reserve_sync
 
-        if sync_is_running(provider, credential.provider_account_id):
+        account_id = credential.provider_account_id
+        if not reserve_sync(provider, account_id):
             # The running sync owns the cursor and a second request is dropped, so
             # saying "accepted" would be telling the user a sync started.
             return IntegrationSyncResultDTO(accepted=False)
-        _spawn_background(integration.sync_now(credential), description=f"{provider} manual sync")
+
+        async def run_reserved() -> None:
+            try:
+                await integration.sync_now(credential)
+            finally:
+                release_sync(provider, account_id)
+
+        _spawn_background(run_reserved(), description=f"{provider} manual sync")
         return IntegrationSyncResultDTO(accepted=True)
 
     @integrations_router.delete("/{provider}/connection")

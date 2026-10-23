@@ -444,10 +444,37 @@ async def sync_selected_resources(
 # This local API runs one worker. A multi-worker deployment must replace this
 # process-local guard with a durable job queue / distributed lease.
 _running_syncs: set[tuple[str, str]] = set()
+# Accounts whose manual sync has been accepted but may not have started yet.
+_reserved_syncs: set[tuple[str, str]] = set()
+
+
+def reserve_sync(provider: str, account_id: str) -> bool:
+    """Claim the account for a sync about to be spawned; False if one is on or claimed.
+
+    Taken synchronously, before the task exists, so two requests cannot both be accepted.
+    """
+    if sync_is_running(provider, account_id):
+        return False
+    _reserved_syncs.add((provider, str(account_id)))
+    return True
+
+
+def release_sync(provider: str, account_id: str) -> None:
+    _reserved_syncs.discard((provider, str(account_id)))
 
 
 def sync_is_running(provider: str, account_id: str) -> bool:
-    return (provider, str(account_id)) in _running_syncs
+    """A sync of the account is in flight here, run by ``run_sync`` or tracked directly.
+
+    GitHub syncs do not go through ``run_sync``; they are known by their progress run.
+    """
+    from cognee.modules.integrations.sync_progress import sync_in_progress
+
+    return (
+        (provider, str(account_id)) in _running_syncs
+        or (provider, str(account_id)) in _reserved_syncs
+        or sync_in_progress(provider, account_id)
+    )
 
 
 async def run_sync(provider: str, credential: Any, sync_source: Any) -> None:

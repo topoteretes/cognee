@@ -237,6 +237,20 @@ def build_repo_manifest(directory: Path, covered: list[Path]) -> str:
     )
 
 
+async def _forget_row_of_another_branch(user, dataset_id, data_id, branch: str | None) -> None:
+    """Forget a repository's stored row, with its graph, when it was cloned on another branch.
+
+    A repository URL has one row whatever its branch. Without this, the new branch's
+    graph (named after its own clone directory) would sit beside the old one.
+    """
+    from cognee.api.v1.forget import forget
+    from cognee.modules.data.methods import get_data
+
+    stored = await get_data(user.id, data_id, dataset_id)
+    if stored is not None and (stored.system_metadata or {}).get("repo_branch") != branch:
+        await forget(data_id=data_id, dataset_id=dataset_id, user=user)
+
+
 async def resolve_code_repository(
     directory: Path,
     user=None,
@@ -244,6 +258,7 @@ async def resolve_code_repository(
     source_url: str | None = None,
     include_documents: bool = True,
     identity: Path | None = None,
+    source_branch: str | None = None,
 ):
     """Build the repo-level DataItem (and the document file list) for a project.
 
@@ -255,7 +270,8 @@ async def resolve_code_repository(
     With a pinned id and a dataset, the stored row's add stamp is cleared so
     the re-add reaches ingestion's content comparison (see the reset below).
     ``source_url`` (credential-free) records where a cloned repository came
-    from as ``system_metadata["repo_url"]``.
+    from as ``system_metadata["repo_url"]``, and ``source_branch`` the branch
+    that was cloned as ``system_metadata["repo_branch"]`` (absent: the default).
 
     Without an LLM API key, the project's document files are excluded (logged)
     instead of emitted: their routes need an LLM (images transcribe at add
@@ -291,6 +307,9 @@ async def resolve_code_repository(
 
         data_id = await get_unique_data_id(f"code_repo:{identity or directory}", user, dataset_id)
 
+    if data_id is not None and dataset_id is not None and source_url is not None:
+        await _forget_row_of_another_branch(user, dataset_id, data_id, source_branch)
+
     if data_id is not None and dataset_id is not None:
         from cognee.modules.data.methods import reset_data_pipeline_status
 
@@ -311,6 +330,8 @@ async def resolve_code_repository(
     }
     if source_url is not None:
         system_metadata["repo_url"] = source_url
+    if source_branch is not None:
+        system_metadata["repo_branch"] = source_branch
 
     manifest_item = DataItem(
         data=manifest_text,
@@ -356,9 +377,9 @@ async def resolve_code_repository_url(
         user=user,
         dataset_id=dataset_id,
         source_url=source_url,
+        source_branch=branch,
         # Keyed on the default branch's clone, as every URL row was before branches:
-        # existing rows keep their ids, and branches of one URL share the row, since
-        # their code graphs share the repository's node ids.
+        # existing rows keep their ids, and branches of one URL share the row.
         identity=clone_dir(source_url),
     )
 
@@ -369,6 +390,7 @@ async def add_code_repository(
     dataset,
     source_url: str | None = None,
     skip_connection_test: bool = False,
+    source_branch: str | None = None,
 ):
     """Store a resolved repository as its one code_repo Data row, without cognifying it.
 
@@ -377,6 +399,9 @@ async def add_code_repository(
     its dataset listing. It is the same manifest item ``add(<repo>)`` ingests,
     pinned to the same identity, so both routes keep one record per repository.
     The repository's documents are not ingested. Returns the stored Data row.
+
+    A repository URL has one row whatever its branch, as under ``add()``; storing
+    it on another branch replaces the row and its graph (see ``resolve_code_repository``).
     """
     from cognee.api.v1.add import add
     from cognee.modules.data.methods import get_data
@@ -388,6 +413,8 @@ async def add_code_repository(
         dataset_id=dataset.id,
         source_url=source_url,
         include_documents=False,
+        source_branch=source_branch,
+        identity=clone_dir(source_url) if source_url is not None else None,
     )
     add_result = await add(
         manifest_item,

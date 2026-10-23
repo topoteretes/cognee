@@ -4,10 +4,12 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties, type Butt
 import { Group, Loader, Stack, Text } from "@mantine/core";
 import Link from "next/link";
 import ModalShell from "@/ui/elements/ModalShell";
-import { googleApi, googleAuthorizeUrl, googleError, type GoogleConnection, type GoogleProvider, type GoogleResources } from "@/modules/integrations/googleApi";
+import { sdkApi, sdkAuthorizeUrl, sdkError, type SdkConnection, type SdkProvider, type SdkResources } from "@/modules/integrations/sdkApi";
 import { describeOAuthFailure, isFailureOutcome, takeOAuthOutcome } from "@/modules/integrations/oauthOutcome";
 import SdkSourceCard, { type SdkSourceStatus } from "./SdkSourceCard";
 import ConnectorLogo from "./ConnectorLogo";
+import GitHubRepositories from "./GitHubRepositories";
+import SdkSyncProgress from "./SdkSyncProgress";
 
 // The SDK shell is dark even when Mantine's global scheme is light. Scope the
 // readable text tokens to these cards and the portalled modal body.
@@ -39,21 +41,25 @@ function outcomeSlug(taken: unknown): string | null {
   return null;
 }
 
-export default function GoogleIntegrationCard({ provider, connecting, setConnecting }: {
-  provider: GoogleProvider;
-  connecting: GoogleProvider | null;
-  setConnecting: (provider: GoogleProvider | null) => void;
+export default function SdkIntegrationCard({ provider, connecting, setConnecting }: {
+  provider: SdkProvider;
+  connecting: SdkProvider | null;
+  setConnecting: (provider: SdkProvider | null) => void;
 }) {
   const isDrive = provider === "google_drive";
-  const name = isDrive ? "Google Drive" : "Gmail";
-  const resourceName = isDrive ? "folders and shared drives" : "labels";
-  const [connection, setConnection] = useState<GoogleConnection>();
+  const isGitHub = provider === "github";
+  const name = isGitHub ? "GitHub" : isDrive ? "Google Drive" : "Gmail";
+  const initials = isGitHub ? "GH" : isDrive ? "Dr" : "Gm";
+  const logo = isGitHub ? "github" : isDrive ? "googledrive" : "gmail";
+  const color = isGitHub ? "#181717" : isDrive ? "#4285F4" : "#EA4335";
+  const resourceName = isGitHub ? "repositories" : isDrive ? "folders and shared drives" : "labels";
+  const [connection, setConnection] = useState<SdkConnection>();
   const [statusError, setStatusError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [opened, setOpened] = useState(false);
   const [resourceError, setResourceError] = useState<string | null>(null);
-  const [resources, setResources] = useState<GoogleResources>();
+  const [resources, setResources] = useState<SdkResources>();
   const [selected, setSelected] = useState<string[] | null>([]);
   const [busy, setBusy] = useState(false);
   const [deleteData, setDeleteData] = useState(false);
@@ -64,10 +70,10 @@ export default function GoogleIntegrationCard({ provider, connecting, setConnect
 
   const refreshStatus = useCallback(async () => {
     try {
-      const result = await googleApi.connection(provider);
+      const result = await sdkApi.connection(provider);
       if (mounted.current) { setConnection(result); setStatusError(null); }
     } catch (err) {
-      if (mounted.current) setStatusError(googleError(err));
+      if (mounted.current) setStatusError(sdkError(err));
     }
   }, [provider]);
 
@@ -88,10 +94,10 @@ export default function GoogleIntegrationCard({ provider, connecting, setConnect
     setError(null);
     setResourceError(null);
     try {
-      const result = await googleApi.resources(provider);
+      const result = await sdkApi.resources(provider);
       if (mounted.current) { setResources(result); setSelected(result.selected); }
     } catch (err) {
-      if (mounted.current) { setError(googleError(err)); setResourceError(googleError(err)); }
+      if (mounted.current) { setError(sdkError(err)); setResourceError(sdkError(err)); }
     }
   }, [provider]);
 
@@ -100,7 +106,7 @@ export default function GoogleIntegrationCard({ provider, connecting, setConnect
   }, [opened, connection?.connected, loadResources]);
 
   async function connect() {
-    const popup = window.open("", "cognee-google-oauth", "width=600,height=760");
+    const popup = window.open("", "cognee-sdk-oauth", "width=600,height=760");
     if (!popup) { setError("Allow popups for this site, then try connecting again."); return; }
     popupWindow.current = popup;
     const startedAt = Date.now();
@@ -108,9 +114,9 @@ export default function GoogleIntegrationCard({ provider, connecting, setConnect
     setError(null);
     takeOAuthOutcome(provider);
     try {
-      const result = await googleApi.authorize(provider);
+      const result = await sdkApi.authorize(provider);
       if (!mounted.current || popup.closed) { popup.close(); setConnecting(null); return; }
-      popup.location.href = googleAuthorizeUrl(result.authorize_url);
+      popup.location.href = sdkAuthorizeUrl(provider, result.authorize_url);
       popupPoll.current = setInterval(() => {
         const outcome = outcomeSlug(takeOAuthOutcome(provider));
         const timedOut = Date.now() - startedAt > 120000;
@@ -132,9 +138,9 @@ export default function GoogleIntegrationCard({ provider, connecting, setConnect
       popup.close();
       if (mounted.current) {
         setConnecting(null);
-        const message = googleError(err);
+        const message = sdkError(err);
         setError(message.includes("not configured")
-          ? `${name} connection is unavailable because this server has not been configured for Google sign-in. Contact the server administrator.`
+          ? `${name} connection is unavailable because this server has not been configured for ${isGitHub ? "GitHub" : "Google"} sign-in. Contact the server administrator.`
           : message);
       }
     }
@@ -144,19 +150,19 @@ export default function GoogleIntegrationCard({ provider, connecting, setConnect
     setBusy(true);
     setError(null);
     setNotice(null);
-    try { await action(); } catch (err) { setError(googleError(err)); }
+    try { await action(); } catch (err) { setError(sdkError(err)); }
     finally { if (mounted.current) setBusy(false); }
   }
 
   const syncing = connection?.sync_status === "syncing";
-  const syncIssue = connection?.sync_status === "degraded" || !!resourceError;
-  const syncSummary = syncing ? "Syncing…" : resourceError ? "Folder list unavailable" : syncIssue ? "Sync needs attention" : connection?.stored_items !== undefined ? `${connection.stored_items} items stored` : "Ready to sync";
+  const syncIssue = connection?.sync_status === "degraded" || connection?.sync_activity_unknown || connection?.progress_unavailable || !!resourceError;
+  const syncSummary = syncing ? "Syncing…" : resourceError ? "Resource list unavailable" : syncIssue ? "Sync needs attention" : connection?.stored_items !== undefined ? `${connection.stored_items} ${isGitHub ? "repository snapshots" : "items"} stored` : "Ready to sync";
   const dirty = resources !== undefined && JSON.stringify(selected) !== JSON.stringify(resources.selected);
   const listedIds = new Set(resources?.resources.map((resource) => resource.id));
   // Preserve selected IDs absent from a partial/provider-filtered listing.
   const missingIds = (selected ?? []).filter((id) => !listedIds.has(id));
   const options = [...(resources?.resources ?? []), ...missingIds.map((id) => ({
-    id, name: id, description: "Previously selected; not returned by Google.", selected: true,
+    id, name: id, description: `Previously selected; not returned by ${isGitHub ? "GitHub" : "Google"}.`, selected: true, unavailable: true,
   }))];
   const cancelAuthorization = () => {
     if (popupPoll.current) clearInterval(popupPoll.current);
@@ -174,7 +180,9 @@ export default function GoogleIntegrationCard({ provider, connecting, setConnect
   const openManage = () => {
     setError(null); setNotice(null); setDeleteData(false); setConfirmDisconnect(false); setOpened(true);
   };
-  const permissions = isDrive
+  const permissions = isGitHub
+    ? ["Read code and documentation in the repositories you select on GitHub", "Keep your imported repositories searchable in Cognee"]
+    : isDrive
     ? ["Read files from the folders and shared drives you select", "Keep your imported files searchable in Cognee"]
     : ["Read messages matching the labels you select", "Keep your imported messages searchable in Cognee"];
 
@@ -182,19 +190,19 @@ export default function GoogleIntegrationCard({ provider, connecting, setConnect
     <>
       <SdkSourceCard
         name={name}
-        description={`Read selected ${resourceName} into your Cognee memory.`}
-        initials={isDrive ? "Dr" : "Gm"}
-        logo={isDrive ? "googledrive" : "gmail"}
-        color={isDrive ? "#4285F4" : "#EA4335"}
+        description={isGitHub ? "Turn repository code and docs into searchable memory." : `Read selected ${resourceName} into your Cognee memory.`}
+        initials={initials}
+        logo={logo}
+        color={color}
         status={cardStatus}
         healthText={syncSummary}
         actionLabel={statusError ? "Retry" : connection?.connected ? "Manage" : "Connect"}
         onAction={statusError ? () => void refreshStatus() : openManage}
       />
-      {opened && <ModalShell label={title} width={420} onClose={close}>
+      {opened && <ModalShell label={title} width={isGitHub ? 560 : 420} onClose={close}>
         <div style={{ ...CONTENT_STYLE, display: "flex", flexDirection: "column", gap: 16 }}>
         <div className="flex items-center gap-3">
-          <ConnectorLogo logo={isDrive ? "googledrive" : "gmail"} initials={isDrive ? "Dr" : "Gm"} color={isDrive ? "#4285F4" : "#EA4335"} size={38} />
+          <ConnectorLogo logo={logo} initials={initials} color={color} size={38} />
           <h2 className="m-0 flex-1 text-[16px] font-semibold text-[var(--color-cognee-fg,#EDECEA)]">{title}</h2>
           <button onClick={close} aria-label="Close"
             className="cursor-pointer rounded border-none bg-transparent p-0.5 text-[var(--color-cognee-fg,#EDECEA)]/55 transition-colors hover:text-[var(--color-cognee-fg,#EDECEA)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cognee-lavender/70"
@@ -218,27 +226,51 @@ export default function GoogleIntegrationCard({ provider, connecting, setConnect
           <button disabled={!!connecting} onClick={() => void connect()}
             className="w-full cursor-pointer rounded-lg border-none bg-cognee-purple py-2.5 text-white transition-colors hover:bg-cognee-purple-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cognee-lavender/70 focus-visible:ring-offset-2 focus-visible:ring-offset-black"
             style={{ fontSize: 13, fontWeight: 600 }}>Continue with {name}</button>
-          <p className="m-0 mt-2.5 text-center text-[12px] text-[var(--color-cognee-fg,#EDECEA)]/55">Opens Google’s authorization window — this page stays open</p>
-          <p className="m-0 mt-2.5 text-center text-[12px] text-[var(--color-cognee-fg,#EDECEA)]/55">Nothing is imported until you select {resourceName} and sync. Imported content is processed by your configured Cognee models.</p>
+          <p className="m-0 mt-2.5 text-center text-[12px] text-[var(--color-cognee-fg,#EDECEA)]/55">Opens {isGitHub ? "GitHub’s" : "Google’s"} authorization window — this page stays open</p>
+          <p className="m-0 mt-2.5 text-center text-[12px] text-[var(--color-cognee-fg,#EDECEA)]/55">{isGitHub ? "Select repositories when installing the GitHub App. Import starts after connecting." : `Nothing is imported until you select ${resourceName} and sync.`} Imported content is processed by your configured Cognee models.</p>
         </div>) : <Stack gap="md">
-          <Text size="sm" c="dimmed">{connection.account_label ?? "Google account"}</Text>
-          <section aria-label={isDrive ? "Choose folders" : "Choose labels"}>
-            <Text size="sm" fw={600} mb="sm">Choose {isDrive ? "folders" : "labels"}</Text>
+          <Text size="sm" c="dimmed">{connection.account_label ?? `${isGitHub ? "GitHub" : "Google"} account`}</Text>
+          {isGitHub && <SdkSyncProgress runs={connection.sync_progress ?? []} activityUnknown={connection.sync_activity_unknown && !syncing} />}
+          <section aria-label={isGitHub ? "Choose repositories" : isDrive ? "Choose folders" : "Choose labels"}
+            className={isGitHub ? "rounded-lg border border-cognee-lavender/40 bg-cognee-lavender/5 p-4" : undefined}>
+            <Text size={isGitHub ? "md" : "sm"} fw={600} mb="sm">{isGitHub ? "Select repositories to sync" : `Choose ${isDrive ? "folders" : "labels"}`}</Text>
+            {isGitHub && <Stack gap="xs" mb="sm">
+              <Text size="xs" c="dimmed">Choose what to sync from repositories this GitHub App can access. Missing a repository? Add access on GitHub, then return here.</Text>
+              <Group>
+                <Button variant="light" disabled={!!connecting || busy || syncing || dirty} onClick={() => void connect()}>Add repositories on GitHub</Button>
+                <Button variant="subtle" disabled={!!connecting || busy || dirty} onClick={() => void loadResources()}>Reload list</Button>
+              </Group>
+            </Stack>}
             {!resources ? (resourceError ? <Button variant="light" onClick={() => void loadResources()}>Retry resource list</Button> : <Loader size="sm" color="#BC9BFF" />) : <Stack gap="sm">
-              <Checkbox label={isDrive ? "Entire My Drive and all shared drives" : "Entire mailbox (all labels)"} checked={selected === null} disabled={busy} onChange={(event) => setSelected(event.currentTarget.checked ? null : [])} />
+              <Checkbox label={isGitHub ? "All accessible repositories (including new ones)" : isDrive ? "Entire My Drive and all shared drives" : "Entire mailbox (all labels)"} checked={selected === null} disabled={busy} onChange={(event) => setSelected(event.currentTarget.checked ? null : [])} />
+              {isGitHub ? <GitHubRepositories resources={options} selected={selected} connection={connection} busy={busy}
+                onBusy={setBusy}
+                onSelect={(id, checked) => setSelected(previous => {
+                  const ids = previous ?? options.map(option => option.id);
+                  return checked ? [...ids, id] : ids.filter(value => value !== id);
+                })}
+                onBranchSaved={(id, branch) => setResources(previous => previous && ({
+                  ...previous, resources: previous.resources.map(repo => repo.id === id ? { ...repo, attributes: { ...repo.attributes, branch } } : repo),
+                }))}
+              /> : <>
               <div style={{ maxHeight: 180, overflowY: "auto" }}>
                 <Stack gap="xs">
                   {options.map((resource) => <Checkbox key={resource.id} label={resource.name} description={resource.description} disabled={busy || selected === null} checked={selected === null || selected.includes(resource.id)} onChange={(event) => {
                     const checked = event.currentTarget.checked;
-                    setSelected((previous) => checked ? [...(previous ?? []), resource.id] : (previous ?? []).filter((id) => id !== resource.id));
+                    setSelected((previous) => {
+                      const ids = previous ?? [];
+                      return checked ? [...ids, resource.id] : ids.filter((id) => id !== resource.id);
+                    });
                   }} />)}
                   {!options.length && <Text size="sm" c="dimmed">No {resourceName} found.</Text>}
                 </Stack>
               </div>
-              {!isDrive && <Text size="xs" c="dimmed">Messages must match all selected labels.</Text>}
+              </>}
+              {!isDrive && !isGitHub && <Text size="xs" c="dimmed">Messages must match all selected labels.</Text>}
+              {isGitHub && <Text size="xs" c="dimmed">Save your selection, then Refresh to import. Unselecting a repository stops future syncs; imported data is kept.</Text>}
               <Group>
                 <Button disabled={busy || !dirty} onClick={() => void act(async () => {
-                  const result = await googleApi.select(provider, selected);
+                  const result = await sdkApi.select(provider, selected);
                   setResources({ ...resources, selected: result.selected });
                   setSelected(result.selected);
                   setNotice(syncing ? "Selection saved for the next sync." : "Selection saved.");
@@ -248,21 +280,23 @@ export default function GoogleIntegrationCard({ provider, connecting, setConnect
           </section>
           <section aria-label="Sync status" className="border-t border-white/10 pt-3">
             <Group justify="space-between" mb="xs">
-              <Text size="sm" fw={600}>Sync status: {syncing ? "Syncing…" : connection.sync_status === "ok" ? "Up to date" : syncIssue ? "Needs attention" : "Not synced"}</Text>
-              <Button disabled={busy || syncing || !resources || dirty || selected?.length === 0} onClick={() => void act(async () => {
-                const result = await googleApi.sync(provider);
+              <Text size="sm" fw={600}>Sync status: {syncing ? "Syncing…" : connection.sync_status === "ok" && !connection.progress_unavailable ? "Up to date" : syncIssue ? "Needs attention" : "Not synced"}</Text>
+              <Button disabled={busy || syncing || !!connection.sync_activity_unknown || !!connection.progress_unavailable || (!resources || dirty || selected?.length === 0)} onClick={() => void act(async () => {
+                const result = await sdkApi.sync(provider);
                 if (!result.accepted) throw new Error("The server did not accept the sync request.");
                 await refreshStatus();
                 setNotice("Sync started.");
               })}>Refresh</Button>
             </Group>
             {syncing && <Text size="xs" c="dimmed">Processing in the background. You can close this dialog.</Text>}
+            {connection.sync_activity_unknown && <Text size="xs" c="dimmed">A previous sync has no confirmed completion. Its worker may still be running.</Text>}
+            {connection.progress_unavailable && <Text size="xs" c="dimmed">Sync progress could not be read, so a running sync cannot be ruled out. Refresh is off until it can.</Text>}
             {dirty && <Text size="xs" c="dimmed">Save your selection before refreshing.</Text>}
             {resources && selected?.length === 0 && <Text size="xs" c="dimmed">Select {resourceName} to start syncing.</Text>}
             <Text size="xs" c="dimmed">Last sync: {connection.last_synced_at ? new Date(connection.last_synced_at).toLocaleString() : "Never"}</Text>
-            {connection.stored_items !== undefined && <Text size="xs" c="dimmed">{connection.stored_items} items stored</Text>}
-            {connection.dataset_id && <Link href={`/datasets/${connection.dataset_id}`} className="text-[12px] text-cognee-lavender underline">View in Brain</Link>}
-            {connection.sync_status === "degraded" && <Text c="yellow" size="xs" mt="xs">{connection.sync_counts?.failed_rate_limit ? "Google rate limit reached. Wait a minute, then Refresh." : "Some content could not be processed. Refresh to retry."}</Text>}
+            {connection.stored_items !== undefined && <Text size="xs" c="dimmed">{connection.stored_items} {isGitHub ? "repository snapshots" : "items"} stored</Text>}
+            {!isGitHub && connection.dataset_id && <Link href={`/datasets/${connection.dataset_id}`} className="text-[12px] text-cognee-lavender underline">View in Brain</Link>}
+            {connection.sync_status === "degraded" && <Text c="yellow" size="xs" mt="xs">{connection.sync_counts?.failed_rate_limit ? `${isGitHub ? "GitHub" : "Google"} rate limit reached. Wait a minute, then Refresh.` : "Some content could not be processed. Refresh to retry."}</Text>}
             {connection.sync_counts && <details className="mt-2 text-[12px] text-white/55">
               <summary className="cursor-pointer">Sync details</summary>
               <div aria-label="Sync counts" className="mt-2">
@@ -273,18 +307,18 @@ export default function GoogleIntegrationCard({ provider, connecting, setConnect
           </section>
           <section aria-label="Account actions" className="border-t border-white/10 pt-3">
             {connecting === provider ? <Group justify="space-between">
-              <Text size="xs" role="status">Waiting for Google…</Text>
+              <Text size="xs" role="status">Waiting for {isGitHub ? "GitHub" : "Google"}…</Text>
               <Button variant="subtle" onClick={cancelAuthorization}>Cancel</Button>
             </Group> : !confirmDisconnect ? <Group justify="space-between">
               <Button variant="subtle" disabled={!!connecting || busy || syncing} onClick={() => void connect()}>Reconnect</Button>
               <Button color="red" variant="subtle" disabled={busy || syncing} onClick={() => setConfirmDisconnect(true)}>Disconnect</Button>
             </Group> : <Stack gap="sm">
-              <Text size="sm">Disconnect this account? Imported data is kept unless you choose deletion.</Text>
-              <Checkbox label="Also delete this account’s imported Cognee dataset" checked={deleteData} disabled={busy} onChange={(event) => setDeleteData(event.currentTarget.checked)} />
+              <Text size="sm">Disconnect this account? {isGitHub ? "Imported data is kept." : "Imported data is kept unless you choose deletion."}</Text>
+              {!isGitHub && <Checkbox label="Also delete this account’s imported Cognee dataset" checked={deleteData} disabled={busy} onChange={(event) => setDeleteData(event.currentTarget.checked)} />}
               <Group>
                 <Button color="red" disabled={busy} onClick={() => void act(async () => {
                   try {
-                    await googleApi.disconnect(provider, deleteData);
+                    await sdkApi.disconnect(provider, deleteData);
                     setOpened(false);
                   } finally {
                     await refreshStatus();

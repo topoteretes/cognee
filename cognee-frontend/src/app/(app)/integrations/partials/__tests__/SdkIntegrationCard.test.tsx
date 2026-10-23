@@ -1,17 +1,21 @@
 import { useState } from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MantineProvider } from "@mantine/core";
-import { googleApi } from "@/modules/integrations/googleApi";
+import { sdkApi } from "@/modules/integrations/sdkApi";
 import { stashOAuthOutcome } from "@/modules/integrations/oauthOutcome";
-import GoogleIntegrationCard from "../GoogleIntegrationCard";
+import SdkIntegrationCard from "../SdkIntegrationCard";
 
-jest.mock("@/modules/integrations/googleApi", () => ({
-  ...jest.requireActual("@/modules/integrations/googleApi"),
-  googleApi: { connection: jest.fn(), resources: jest.fn(), authorize: jest.fn(), select: jest.fn(), sync: jest.fn(), disconnect: jest.fn() },
+jest.mock("@/modules/integrations/sdkApi", () => ({
+  ...jest.requireActual("@/modules/integrations/sdkApi"),
+  sdkApi: { connection: jest.fn(), resources: jest.fn(), authorize: jest.fn(), select: jest.fn(), sync: jest.fn(), disconnect: jest.fn() },
 }));
 jest.mock("@/ui/elements/ModalShell", () => ({ __esModule: true, default: ({ children }: { children: React.ReactNode }) => <div role="dialog">{children}</div> }));
 
-const api = jest.mocked(googleApi);
+jest.mock("@/modules/datasets/useDatasetProcessing", () => ({
+  useDatasetProcessing: () => ({ data: undefined, isError: false }),
+}));
+
+const api = jest.mocked(sdkApi);
 const connected = { connected: true, account_label: "tester@example.com", sync_status: "ok", last_synced_at: null };
 
 beforeEach(() => {
@@ -25,11 +29,11 @@ beforeEach(() => {
   api.disconnect.mockResolvedValue({ disconnected: true });
 });
 
-function Harness({ provider }: { provider: "google_drive" | "gmail" }) {
-  const [connecting, setConnecting] = useState<"google_drive" | "gmail" | null>(null);
-  return <GoogleIntegrationCard provider={provider} connecting={connecting} setConnecting={setConnecting} />;
+function Harness({ provider }: { provider: "google_drive" | "gmail" | "github" }) {
+  const [connecting, setConnecting] = useState<"google_drive" | "gmail" | "github" | null>(null);
+  return <SdkIntegrationCard provider={provider} connecting={connecting} setConnecting={setConnecting} />;
 }
-function show(provider: "google_drive" | "gmail" = "google_drive") {
+function show(provider: "google_drive" | "gmail" | "github" = "google_drive") {
   return render(<MantineProvider><Harness provider={provider} /></MantineProvider>);
 }
 
@@ -213,4 +217,163 @@ test("a stalled reconnect can be cancelled without trapping the dialog", async (
   expect(popup.close).toHaveBeenCalled();
   expect(screen.getByRole("button", { name: "Reconnect" })).toBeEnabled();
   expect(screen.getByRole("button", { name: "Close" })).toBeEnabled();
+});
+
+
+test("GitHub selection is saved before sync and disconnect keeps imported data", async () => {
+  show("github");
+  fireEvent.click(await screen.findByRole("button", { name: "Manage GitHub" }));
+  expect(api.connection).toHaveBeenCalledWith("github");
+  await screen.findByLabelText("Test folder");
+  expect(api.resources).toHaveBeenCalledWith("github");
+  expect(screen.getByRole("button", { name: "Refresh" })).toBeDisabled();
+  fireEvent.click(screen.getByLabelText("Test folder"));
+  expect(screen.getByRole("button", { name: "Refresh" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Save selection" }));
+  await screen.findByText("Selection saved.");
+  expect(api.select).toHaveBeenCalledWith("github", ["a"]);
+  fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+  expect(await screen.findByText("Sync started.")).toBeInTheDocument();
+  expect(api.sync).toHaveBeenCalledWith("github");
+  fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
+  expect(screen.queryByLabelText(/Also delete/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Confirm disconnect" }));
+  await waitFor(() => expect(api.disconnect).toHaveBeenCalledWith("github", false));
+});
+
+test("GitHub authorization opens the App installation and handles its outcome", async () => {
+  api.connection.mockResolvedValue({ connected: false });
+  const popup = { closed: false, close: jest.fn(), location: { href: "" } };
+  jest.spyOn(window, "open").mockReturnValueOnce(popup as unknown as Window);
+  api.authorize.mockResolvedValue({ authorize_url: "https://github.com/apps/cognee/installations/new?state=test" });
+  show("github");
+  fireEvent.click(await screen.findByRole("button", { name: "Connect GitHub" }));
+  expect(screen.getByText(/Import starts after connecting/)).toBeInTheDocument();
+  jest.useFakeTimers();
+  try {
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Continue with GitHub" })); });
+    expect(api.authorize).toHaveBeenCalledWith("github");
+    expect(popup.location.href).toBe("https://github.com/apps/cognee/installations/new?state=test");
+    api.connection.mockResolvedValue({ ...connected, account_label: "my-org" });
+    stashOAuthOutcome("github", "connected");
+    await act(async () => { jest.advanceTimersByTime(600); });
+    expect(screen.getByText("GitHub connected")).toBeInTheDocument();
+    expect(screen.getByText("my-org")).toBeInTheDocument();
+    expect(api.resources).toHaveBeenCalledWith("github");
+    expect(popup.close).toHaveBeenCalled();
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+
+test("a completed GitHub import shows repositories only inside the dialog", async () => {
+  api.connection.mockResolvedValue({ ...connected, dataset_id: "repo-dataset", stored_items: 2, last_synced_at: "2026-10-23T15:02:24Z" });
+  show("github");
+  await screen.findByRole("button", { name: "Manage GitHub" });
+  fireEvent.click(screen.getByRole("button", { name: "Manage GitHub" }));
+  expect(screen.getAllByText("2 repository snapshots stored")).toHaveLength(2);
+  expect(await screen.findByRole("region", { name: "Choose repositories" })).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "View in Brain" })).not.toBeInTheDocument();
+  expect(screen.getByText(/Sync status: Up to date/)).toBeInTheDocument();
+  expect(screen.queryByText(/Last sync: Never/)).not.toBeInTheDocument();
+});
+
+test("unknown GitHub worker activity is visible and cannot start a duplicate sync", async () => {
+  api.connection.mockResolvedValue({ ...connected, sync_status: "unknown", sync_activity_unknown: true });
+  show("github");
+  fireEvent.click(await screen.findByRole("button", { name: "Manage GitHub" }));
+  expect(screen.getByText(/worker may still be running/)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Refresh" })).toBeDisabled();
+});
+
+
+test("GitHub can reload newly accessible repositories and preserve saved selection", async () => {
+  api.resources.mockResolvedValueOnce({ resources: [{ id: "org/old", name: "org/old", selected: true }], selected: ["org/old"] });
+  show("github");
+  fireEvent.click(await screen.findByRole("button", { name: "Manage GitHub" }));
+  expect(await screen.findByLabelText("org/old")).toBeChecked();
+  api.resources.mockResolvedValueOnce({ resources: [
+    { id: "org/old", name: "org/old", selected: true },
+    { id: "org/new", name: "org/new", selected: false },
+  ], selected: ["org/old"] });
+  fireEvent.click(screen.getByRole("button", { name: "Reload list" }));
+  expect(await screen.findByLabelText("org/new")).not.toBeChecked();
+  fireEvent.click(screen.getByLabelText("org/new"));
+  expect(screen.getByRole("button", { name: "Reload list" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Save selection" }));
+  await screen.findByText("Selection saved.");
+  expect(api.select).toHaveBeenCalledWith("github", ["org/old", "org/new"]);
+});
+
+test("GitHub access changes use authorization and reload repositories on return", async () => {
+  api.resources.mockResolvedValue({ resources: [], selected: null });
+  show("github");
+  fireEvent.click(await screen.findByRole("button", { name: "Manage GitHub" }));
+  await screen.findByLabelText("All accessible repositories (including new ones)");
+  const popup = { closed: false, close: jest.fn(), location: { href: "" } };
+  jest.spyOn(window, "open").mockReturnValueOnce(popup as unknown as Window);
+  api.authorize.mockResolvedValue({ authorize_url: "https://github.com/apps/cognee/installations/new?state=test" });
+  jest.useFakeTimers();
+  try {
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Add repositories on GitHub" })); });
+    expect(popup.location.href).toBe("https://github.com/apps/cognee/installations/new?state=test");
+    api.resources.mockResolvedValue({ resources: [{ id: "org/new", name: "org/new", selected: true }], selected: null });
+    stashOAuthOutcome("github", "connected");
+    await act(async () => { jest.advanceTimersByTime(600); });
+    expect(screen.getByLabelText("org/new")).toBeChecked();
+    expect(api.resources).toHaveBeenCalledTimes(2);
+    expect(popup.close).toHaveBeenCalled();
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+test("GitHub repository listing errors can be retried and block syncing", async () => {
+  api.resources.mockRejectedValueOnce(new Error("GitHub unavailable"));
+  show("github");
+  fireEvent.click(await screen.findByRole("button", { name: "Manage GitHub" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Retry resource list" }));
+  await screen.findByLabelText("Test folder");
+  expect(screen.getByRole("button", { name: "Refresh" })).toBeDisabled();
+});
+
+test("GitHub can narrow all repositories by unchecking one", async () => {
+  api.resources.mockResolvedValue({ resources: [
+    { id: "org/one", name: "org/one", selected: true },
+    { id: "org/two", name: "org/two", selected: true },
+  ], selected: null });
+  show("github");
+  fireEvent.click(await screen.findByRole("button", { name: "Manage GitHub" }));
+  const first = await screen.findByLabelText("org/one");
+  expect(first).toBeEnabled();
+  fireEvent.click(first);
+  expect(screen.getByLabelText("org/two")).toBeChecked();
+  expect(screen.getByLabelText("All accessible repositories (including new ones)")).not.toBeChecked();
+  fireEvent.click(screen.getByRole("button", { name: "Save selection" }));
+  await screen.findByText("Selection saved.");
+  expect(api.select).toHaveBeenCalledWith("github", ["org/two"]);
+});
+
+test("GitHub modal shows progress above the repository picker", async () => {
+  api.connection.mockResolvedValue({ ...connected, sync_status: "syncing", sync_progress: [{ runId: "run", state: "running", phase: "processing", completed: 1, total: 3, unit: "repositories", endedAt: null, counts: {} }] });
+  show("github");
+  fireEvent.click(await screen.findByRole("button", { name: "Manage GitHub" }));
+  const bar = screen.getByRole("progressbar", { name: "Repository sync progress" });
+  expect(bar).toHaveAttribute("aria-valuenow", "33");
+  const picker = screen.getByRole("region", { name: "Choose repositories" });
+  expect(bar.compareDocumentPosition(picker) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(await screen.findByLabelText("Test folder")).toBeEnabled();
+});
+
+test("unreadable GitHub progress holds Refresh instead of assuming nothing is running", async () => {
+  // Repositories loaded and one selected, so nothing else would hold Refresh off.
+  api.resources.mockResolvedValue({ resources: [{ id: "org/a", name: "org/a", selected: true }], selected: ["org/a"] });
+  api.connection.mockResolvedValue({ ...connected, sync_status: "ok", progress_unavailable: true });
+  show("github");
+  fireEvent.click(await screen.findByRole("button", { name: "Manage GitHub" }));
+  expect(await screen.findByLabelText("org/a")).toBeChecked();
+  expect(screen.getByText(/Sync progress could not be read/)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Refresh" })).toBeDisabled();
+  expect(screen.getByText(/Sync status: Needs attention/)).toBeInTheDocument();
 });
