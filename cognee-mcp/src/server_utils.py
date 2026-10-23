@@ -249,8 +249,8 @@ def format_recall_body(
 
     With ``include_references``, each hit backed by stored data gets one
     ``refs:`` line per data item, carrying the ids ``forget`` takes, read from
-    the hit's structured references; a hit without them (older cognee releases)
-    gets the data_ids its Evidence block cites, paired with the hit's dataset.
+    the hit's structured references. A hit without them gets no ``refs:`` line;
+    ids cited only in the answer text are never read.
     """
     results = _unwrap_results(results)
     if not results:

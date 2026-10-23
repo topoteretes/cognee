@@ -1,8 +1,10 @@
 """Build structured evidence from objects already included in LLM context.
 
-These helpers perform no database, vector, embedding, or LLM calls. They describe
-``used_as_context`` lineage only; they do not claim that every context artifact
-supports a particular statement in the generated answer.
+These helpers perform no database, vector, embedding, or LLM calls. By default they
+describe ``used_as_context`` lineage: they do not claim that every context artifact
+supports a particular statement in the generated answer. ``chunk_context_evidence``
+marks ``supports_assertion`` only when its caller passes the chunks an answer was
+grounded in (the hybrid retriever's cited chunks).
 """
 
 from typing import Any
@@ -48,10 +50,11 @@ def chunk_context_evidence(
     dataset_id: Any = None,
     role: EvidenceRole = "used_as_context",
 ) -> list[EvidenceReference]:
-    """Describe the exact vector chunks that were available to a RAG completion.
+    """Describe the given vector chunks as segment evidence.
 
-    ``role="supports_assertion"`` marks chunks an answer was grounded in rather
-    than everything that was in context.
+    With the default role these are the chunks a completion had in context
+    (RAG). ``role="supports_assertion"`` marks chunks an answer was grounded
+    in rather than everything that was in context.
     """
     if not isinstance(retrieved_objects, (list, tuple)):
         return []

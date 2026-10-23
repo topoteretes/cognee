@@ -604,11 +604,12 @@ async def recall(
         with its dataset_id to `forget`.
         Each hit backed by stored data gets
         `refs: data_id=..., dataset_id=..., document=...` lines, at most 5 per
-        hit, best match first. The default answer lists only the items it is
-        grounded in (the ones its `Evidence:` block cites) and a chunk hit the
-        one item its text came from, while a RAG or graph-completion answer
-        lists every item in its context, so prefer the default type or CHUNKS
-        to find one fact. Session hits are not stored data and get no refs. With backend
+        hit, best match first. A chunk hit lists the one item its text came
+        from, and the default answer the items its `Evidence:` block cites. A
+        RAG or graph-completion answer lists every item in its context, and so
+        does the default answer when it falls back to graph completion (e.g.
+        no chunk index yet). To find one fact, prefer CHUNKS. Session hits
+        are not stored data and get no refs. With backend
         access control off, ids are only shown when recall is scoped to a
         single dataset.
 

@@ -3,10 +3,12 @@
 Evidence is grounded in the generated answer, not in whatever happened to be
 retrieved before the LLM was called:
 
-- ``format_chunk_references`` builds an Evidence block from retrieved vector
-  payloads, keeping only chunks that share significant terms with the answer
-  (the ``RAG_COMPLETION`` / chunk path, where candidates are the chunks the
-  LLM actually read).
+- ``select_citations`` picks the chunks of retrieved vector payloads that
+  share significant terms with the answer (candidates are the chunks the LLM
+  actually read); ``render_citations`` writes the Evidence block for them, and
+  ``format_chunk_references`` does both. A caller that also needs the cited
+  objects (the hybrid retriever's structured evidence) selects once and
+  renders from the same selection.
 - ``build_answer_grounded_chunk_references`` is retained as a compatibility
   helper for callers that explicitly request a post-hoc similarity lookup. The
   graph completion path no longer uses it; graph provenance comes directly from
@@ -15,8 +17,9 @@ retrieved before the LLM was called:
   above to a list of completions, one Evidence block per string completion.
 
 All helpers are pure with respect to the LLM (no model calls) so they can be
-unit tested in isolation. All return ``""`` (or the completions unchanged)
-when there is nothing usable, and never raise on backend failures.
+unit tested in isolation. With nothing usable they return ``""``, ``[]``
+from ``select_citations``, or the completions unchanged, and never raise on
+backend failures.
 """
 
 import re
