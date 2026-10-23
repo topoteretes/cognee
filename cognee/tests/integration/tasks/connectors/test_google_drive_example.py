@@ -40,7 +40,7 @@ class _Req:
     def __init__(self, result):
         self._result = result
 
-    def execute(self):
+    def execute(self, num_retries=0):
         return self._result
 
 
@@ -58,6 +58,8 @@ class _FakeFiles:
         return _Req({"files": files})
 
     def get(self, fileId, fields, supportsAllDrives):
+        if fields == "id":  # resolving the scope folder, as Drive does for the "root" alias
+            return _Req({"id": fileId})
         return _Req(self._service.file_by_id[fileId])
 
 
@@ -88,6 +90,9 @@ class _FakeDriveService:
 
     def changes(self):
         return _FakeChanges(self)
+
+    def close(self):
+        pass
 
 
 def _file_meta(file_id):

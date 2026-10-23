@@ -95,7 +95,7 @@ async def run_tasks(
     with pipeline_run_ownership() as ownership:
         pipeline_id = generate_pipeline_id(user.id, dataset.id, pipeline_name)
         pipeline_run = await log_pipeline_run_start(
-            pipeline_id, pipeline_name, dataset.id, data, user=user, recovery_token=ownership.token
+            pipeline_id, pipeline_name, dataset.id, user=user, recovery_token=ownership.token
         )
         pipeline_run_id = pipeline_run.pipeline_run_id
         # getattr (not attribute access) because unit tests stub
@@ -332,7 +332,6 @@ async def run_tasks(
                     pipeline_id,
                     pipeline_name,
                     dataset.id,
-                    data,
                     user=user,
                     started_at=run_started_at,
                     tokens_in=run_usage.tokens_in if run_usage else 0,
@@ -392,7 +391,6 @@ async def run_tasks(
                     pipeline_id,
                     pipeline_name,
                     dataset.id,
-                    data,
                     root_error,
                     user=user,
                     started_at=run_started_at,

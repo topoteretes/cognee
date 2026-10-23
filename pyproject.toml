@@ -47,6 +47,11 @@ dependencies = [
     "instructor>=1.9.1,<1.15.3",
     "filetype>=1.2.0,<2.0.0",
     "aiohttp>=3.13.5,<4.0.0",
+    # >=2026.10.19: earlier bundles still trust the eMudhra intermediates whose
+    # private keys are recoverable from the public certificates (ENG-28). httpx,
+    # requests and botocore verify against certifi, so installs that never see
+    # our lockfile need the floor.
+    "certifi>=2026.10.19",
     "aiofiles>=23.2.1",
     # AES-256-GCM encryption for stored OAuth integration credentials
     # (cognee/modules/integrations/crypto.py) — unconditionally imported via
@@ -195,10 +200,13 @@ evals = [
     "locust>=2.0.0,<3",
 ]
 
-# s3fs pins fsspec and, through its boto3 extra, an aiobotocore whose botocore range has
-# to admit the boto3 litellm requires (>=1.43.1 since litellm 1.101). Keep it on one
-# fixed, known-compatible release and move it together with litellm.
-aws = ["s3fs[boto3]==2026.9.0"]
+# S3 storage and Bedrock. boto3 and s3fs (through aiobotocore) must share one botocore:
+# aiobotocore admits a narrow botocore window, boto3 a matching one. s3fs expressed that
+# through its [boto3] extra (#809) until s3fs 2026.3 / aiobotocore 3.0 removed it, so both
+# are listed and the resolver picks the compatible pair, as aiobotocore's changelog asks.
+# Keep s3fs on one fixed release (it pins fsspec exactly) and move it together with
+# litellm, whose boto3 floor (>=1.43.1 since litellm 1.101) the window has to admit.
+aws = ["s3fs==2026.9.0", "boto3>=1.43.1,<2"]
 # dlt is a core dependency. The empty extra keeps `cognee[dlt]` installable.
 dlt = []
 gmail = [
