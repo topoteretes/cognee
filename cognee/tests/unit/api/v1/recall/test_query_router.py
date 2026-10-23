@@ -4,8 +4,14 @@ import pytest
 
 from cognee.api.v1.recall.query_router import (
     _RULES,
+    COMPLETION_ONLY_TYPES,
+    CYPHER_TYPES,
     ROUTER_FALLBACK_TYPE,
     RouteDecision,
+    RoutingConstraints,
+    constrain,
+    default_route,
+    pinned_route,
     route_query,
 )
 from cognee.modules.search.types import SearchType
@@ -229,3 +235,89 @@ class TestTemporalRoute:
 
     def test_rule_name(self):
         assert route_query("What happened in 1898?").rule == "time_scoped_question"
+
+
+class TestRoutingConstraints:
+    """What the deployment can run is applied after the rules, in one place."""
+
+    def test_unconstrained_routing_is_unchanged(self):
+        assert route_query("Tell me something", RoutingConstraints()) == route_query(
+            "Tell me something"
+        )
+        assert route_query('"radium"', RoutingConstraints()).only_context is False
+
+    def test_no_llm_default_is_hybrid_with_only_context(self):
+        decision = route_query(
+            "Where was Marie Curie born?", RoutingConstraints(llm_available=False)
+        )
+        assert decision == RouteDecision(
+            search_type=SearchType.HYBRID_COMPLETION, rule="default", only_context=True
+        )
+        assert default_route(RoutingConstraints(llm_available=False)) == decision
+
+    def test_no_llm_keeps_llm_free_rules_as_they_are(self):
+        no_llm = RoutingConstraints(llm_available=False)
+        assert route_query('"polonium and radium"', no_llm) == RouteDecision(
+            search_type=SearchType.CHUNKS_LEXICAL, rule="quoted_phrase"
+        )
+        assert route_query("show me the coding rules", no_llm) == RouteDecision(
+            search_type=SearchType.CODING_RULES, rule="coding_rules_intent"
+        )
+
+    @pytest.mark.parametrize("search_type", sorted(COMPLETION_ONLY_TYPES, key=lambda s: s.value))
+    def test_no_llm_runs_completion_only_types_as_only_context(self, search_type):
+        decision = constrain(
+            RouteDecision(search_type=search_type, rule="r"),
+            RoutingConstraints(llm_available=False),
+        )
+        assert decision == RouteDecision(search_type=search_type, rule="r", only_context=True)
+
+    def test_no_llm_sends_a_temporal_pick_to_the_fallback(self):
+        """TEMPORAL extracts the time window with an LLM, so with no LLM the rule's
+        pick resolves to the fallback; any type outside the two lists does."""
+        decision = route_query("What happened in 1898?", RoutingConstraints(llm_available=False))
+        assert decision == RouteDecision(
+            search_type=ROUTER_FALLBACK_TYPE, rule="time_scoped_question", only_context=True
+        )
+
+    @pytest.mark.parametrize("search_type", sorted(CYPHER_TYPES, key=lambda s: s.value))
+    def test_cypher_disabled_never_emits_a_cypher_type(self, search_type):
+        decision = constrain(
+            RouteDecision(search_type=search_type, rule="r"),
+            RoutingConstraints(cypher_allowed=False),
+        )
+        assert decision == RouteDecision(search_type=ROUTER_FALLBACK_TYPE, rule="r")
+
+    def test_cypher_disabled_and_no_llm_compose(self):
+        decision = constrain(
+            RouteDecision(search_type=SearchType.CYPHER, rule="r"),
+            RoutingConstraints(llm_available=False, cypher_allowed=False),
+        )
+        assert decision == RouteDecision(
+            search_type=ROUTER_FALLBACK_TYPE, rule="r", only_context=True
+        )
+
+    def test_constraints_come_from_the_shared_predicates(self, monkeypatch):
+        from cognee.modules import preflight
+        from cognee.modules.search.methods import get_search_type_retriever_instance as factory
+
+        monkeypatch.setattr(preflight, "llm_available", lambda _config: False)
+        monkeypatch.setattr(factory, "cypher_queries_allowed", lambda: False)
+
+        assert RoutingConstraints.from_config(None) == RoutingConstraints(
+            llm_available=False, cypher_allowed=False
+        )
+
+    @pytest.mark.parametrize("search_type", sorted(COMPLETION_ONLY_TYPES, key=lambda s: s.value))
+    def test_no_llm_runs_a_pinned_completion_type_as_only_context(self, search_type):
+        decision = pinned_route(search_type, RoutingConstraints(llm_available=False))
+        assert decision == RouteDecision(search_type=search_type, rule="pinned", only_context=True)
+
+    def test_pinned_types_are_never_rerouted(self):
+        no_llm = RoutingConstraints(llm_available=False)
+        assert pinned_route(SearchType.TEMPORAL, no_llm) == RouteDecision(
+            search_type=SearchType.TEMPORAL, rule="pinned"
+        )
+        assert pinned_route(SearchType.HYBRID_COMPLETION, RoutingConstraints()) == RouteDecision(
+            search_type=SearchType.HYBRID_COMPLETION, rule="pinned"
+        )
