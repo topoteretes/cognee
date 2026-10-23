@@ -193,7 +193,8 @@ async def test_add_code_repository_stores_the_pinned_repo_item(tmp_path, monkeyp
     pinned_id = uuid4()
     data_row = SimpleNamespace(id=pinned_id)
 
-    monkeypatch.setattr(unique_id_module, "get_unique_data_id", AsyncMock(return_value=pinned_id))
+    unique_id_mock = AsyncMock(return_value=pinned_id)
+    monkeypatch.setattr(unique_id_module, "get_unique_data_id", unique_id_mock)
     calls = []
     reset_mock = AsyncMock(side_effect=lambda *_args, **_kwargs: calls.append("reset"))
     monkeypatch.setattr(data_methods_module, "reset_data_pipeline_status", reset_mock)
@@ -207,6 +208,11 @@ async def test_add_code_repository_stores_the_pinned_repo_item(tmp_path, monkeyp
     )
 
     assert stored is data_row
+    from cognee.tasks.code_graph.resolve_repo import default_clones_dir
+
+    unique_id_mock.assert_awaited_once_with(
+        f"code_repo:{default_clones_dir() / 'github.com-org-repo'}", user, dataset.id
+    )
     # Only the pinned row's add stamp is cleared before add(), or its
     # incremental check would skip a changed repo's manifest as already added;
     # the cognify stamps stay for ingestion's content comparison to decide.
@@ -371,7 +377,7 @@ async def test_a_repository_url_keeps_one_data_row_whatever_the_branch(tmp_path,
     from uuid import uuid4
 
     import cognee.tasks.code_graph.code_repo as code_repo_module
-    from cognee.tasks.code_graph.resolve_repo import clone_dir
+    from cognee.tasks.code_graph.resolve_repo import clone_dir, repo_identity
 
     async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
         directory = tmp_path / (branch or "default")
@@ -401,7 +407,7 @@ async def test_a_repository_url_keeps_one_data_row_whatever_the_branch(tmp_path,
             "https://github.com/org/repo", user=Mock(), dataset_id=uuid4(), branch=branch
         )
 
-    assert keys == [f"code_repo:{clone_dir('https://github.com/org/repo')}"] * 2
+    assert keys == [f"code_repo:{repo_identity('https://github.com/org/repo')}"] * 2
 
 
 @pytest.mark.asyncio
