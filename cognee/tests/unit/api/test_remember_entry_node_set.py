@@ -21,6 +21,10 @@ from cognee.infrastructure.session.session_node_set import (
 )
 from cognee.memory.entries import QAEntry, TraceEntry
 
+# Datasets in this module are stand-ins that exist in no database; entering their
+# database context (which remember's session writes now do) is stubbed.
+pytestmark = pytest.mark.usefixtures("stub_dataset_context")
+
 remember_module = sys.modules["cognee.api.v1.remember.remember"]
 
 
