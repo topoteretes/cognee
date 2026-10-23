@@ -6,7 +6,7 @@ import { Center, Flex } from "@mantine/core";
 export default function LocalLoginPage() {
   return (
     <AuthPageContainer>
-      <Center className="flex-1 flex-col">
+      <Center className="flex-1 flex-col" bg={"primary1.0"}>
         <Flex className="flex-col items-center w-full px-6 lg:w-[50vw] lg:px-0">
           <LocalSignInForm />
         </Flex>

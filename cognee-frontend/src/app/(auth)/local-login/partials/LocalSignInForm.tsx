@@ -2,19 +2,13 @@
 
 import { useState } from "react";
 import { Flex, Text, Title, TextInput, PasswordInput, Button } from "@mantine/core";
-import AuthCard from "@/ui/elements/Auth/AuthCard";
-import { getLocalApiUrl } from "@/modules/users/getLocalApiUrl";
+
+const localApiUrl = process.env.NEXT_PUBLIC_LOCAL_API_URL || "http://localhost:8000";
 
 const DEFAULT_EMAIL = "default_user@example.com";
-// The local dev-stack password: `cognee-cli -ui` and docker-compose.yml set
-// DEFAULT_USER_PASSWORD to this value, so the prefill logs in there and on
-// deployments created before SDK-549. Against a server whose default user has
-// no password it fails until the operator sets DEFAULT_USER_PASSWORD -- the
-// field is editable either way.
 const DEFAULT_PASSWORD = "default_password";
 
 export default function LocalSignInForm() {
-  const localApiUrl = getLocalApiUrl();
   const [email, setEmail] = useState(DEFAULT_EMAIL);
   const [password, setPassword] = useState(DEFAULT_PASSWORD);
   const [error, setError] = useState<string | null>(null);
@@ -68,16 +62,12 @@ export default function LocalSignInForm() {
   }
 
   return (
-    <AuthCard>
-      <Flex className="flex-col gap-[0.75rem] items-center">
-        <Title
-          order={2}
-          className="!text-[2.5rem] !font-light !leading-[1.1] !tracking-[-0.04em] !text-[#EDECEA]"
-          style={{ fontFamily: '"TWKLausanne", sans-serif' }}
-        >
+    <Flex className="flex-col gap-[1.5rem] items-center w-full max-w-[22rem]">
+      <Flex className="flex-col gap-[0.5rem] items-center">
+        <Title order={2} className="!text-[1.75rem] !font-bold">
           Local instance
         </Title>
-        <Text size="sm" className="!text-[#EDECEA]/85 !font-light !text-center">
+        <Text size="sm" className="!text-cognee-muted">
           Sign in to your local Cognee backend
         </Text>
       </Flex>
@@ -85,9 +75,9 @@ export default function LocalSignInForm() {
       {error && (
         <Flex
           className="w-full px-4 py-3 rounded-lg gap-2 items-start"
-          style={{ backgroundColor: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.35)" }}
+          style={{ backgroundColor: "#FEF2F2", border: "1px solid #FECACA" }}
         >
-          <Text size="sm" style={{ color: "#FCA5A5" }}>
+          <Text size="sm" style={{ color: "#991B1B" }}>
             {error}
           </Text>
         </Flex>
@@ -103,11 +93,6 @@ export default function LocalSignInForm() {
           autoComplete="email"
           size="md"
           radius="md"
-          classNames={{
-            label: "!text-[#EDECEA]/85 !font-light",
-            input:
-              "!bg-white/[0.06] !border-white/15 !text-[#EDECEA] focus:!border-[#BC9BFF] focus:!border-2",
-          }}
         />
 
         <PasswordInput
@@ -118,15 +103,9 @@ export default function LocalSignInForm() {
           autoComplete="current-password"
           size="md"
           radius="md"
-          classNames={{
-            label: "!text-[#EDECEA]/85 !font-light",
-            input:
-              "!bg-white/[0.06] !border-white/15 !text-[#EDECEA] focus:!border-[#BC9BFF] focus:!border-2",
-            innerInput: "!text-[#EDECEA]",
-          }}
         />
 
-        <Text size="xs" className="!text-[#EDECEA]/60 !font-light" mt={-4}>
+        <Text size="xs" className="!text-cognee-muted" mt={-4}>
           Default credentials are pre-filled for local development
         </Text>
 
@@ -136,14 +115,12 @@ export default function LocalSignInForm() {
           fullWidth
           h="2.75rem"
           radius="md"
+          color="primary2"
           mt="xs"
-          className="!bg-[#BC9BFF] !text-[#1e1e1c] hover:!bg-[#A87CFF] !transition-colors !border-none"
         >
-          <Text size="sm" fw={500}>
-            Sign in
-          </Text>
+          Sign in
         </Button>
       </form>
-    </AuthCard>
+    </Flex>
   );
 }

@@ -7,6 +7,11 @@ import type { VisualizationPayload } from "../types";
 export interface BusinessLayerContext {
   cogniInstance: CogneeInstance;
   activeDatasetId: string | null;
+  // Whether the live socket is currently pushing growth for the focused
+  // dataset — the content layer turns its own poll off while it is (see
+  // useBrainGraph). Layers that fetch something the socket says nothing
+  // about (governance) ignore it.
+  graphPushActive: boolean;
 }
 
 export interface BusinessLayerResult {
