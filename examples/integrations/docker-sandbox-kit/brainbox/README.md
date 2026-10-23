@@ -44,7 +44,9 @@ Outputs land in `work/<sandbox>/out/` (`architecture.html`, `architecture.mmd`,
   the 404, prints a note, and runs with ACL grants only (`"policy": "unavailable"`
   in its output); the demo still works, there is just one wall fewer to show.
 - the `--read` datasets must be cognified (a dataset with data but no graph
-  answers `404 NoDataError`).
+  answers `200` with empty results and the reason on `error`: "holds N data
+  item(s) but its knowledge graph is empty; run cognify ..." -- the agent sees
+  no memory, not a failure).
 - the kit's network allowlist (PyPI for `uv tool install`, the ladybug extension
   host) holds for the sandbox's whole life, not just setup — the agent can reach
   PyPI at runtime. Bake cognee into a base image to drop those hosts.
