@@ -47,6 +47,8 @@ async def emit_dlt_schema_graph(
             ``dlt_temporal``) becomes a column-named edge from the row to the
             ``Timestamp`` node for that instant — the same node LLM-extracted
             dates resolve to — which is what temporal search anchors on.
+            ``fk_only`` marks a row an earlier batch wrote: only its FK edges
+            are emitted.
         ctx: optional pipeline context for provenance/ledger registration.
         emitted_value_node_ids: set shared across batches of one pipeline run
             (mirrors ``emitted_schema_docs``). Value nodes already in the set
@@ -177,7 +179,7 @@ async def emit_dlt_schema_graph(
 
         # Table node ids are deterministic, so the edge target is valid even
         # when the table node was emitted by an earlier batch (tables omitted).
-        if table_name:
+        if table_name and not record.get("fk_only"):
             schema_edges.append(
                 (
                     source_uuid,

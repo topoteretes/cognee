@@ -45,7 +45,11 @@ def create_dlt_source_from_connection_string(
     connection_string: str,
     query: str | None = None,
 ):
-    """Auto-generate a dlt source from a database connection string with optional SQL query filtering."""
+    """Auto-generate a dlt source from a database connection string with optional SQL query filtering.
+
+    ``resolve_foreign_keys`` makes dlt record the source's foreign keys in its schema;
+    the staging tables dlt creates carry no key constraints to reflect them from.
+    """
     import sqlalchemy
     from dlt.sources.sql_database import sql_database
 
@@ -71,13 +75,14 @@ def create_dlt_source_from_connection_string(
             "credentials": connection_string,
             "table_names": [bare_table_name],
             "query_adapter_callback": query_adapter_callback,
+            "resolve_foreign_keys": True,
         }
         if schema_name:
             source_kwargs["schema"] = schema_name
 
         source = sql_database(**source_kwargs)
     else:
-        source = sql_database(credentials=connection_string)
+        source = sql_database(credentials=connection_string, resolve_foreign_keys=True)
 
     return source
 
