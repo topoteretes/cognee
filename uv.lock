@@ -1348,6 +1348,7 @@ anthropic = [
     { name = "anthropic" },
 ]
 aws = [
+    { name = "boto3" },
     { name = "s3fs" },
 ]
 azure = [
@@ -1523,6 +1524,7 @@ requires-dist = [
     { name = "azure-identity", marker = "extra == 'azure'", specifier = ">=1.15.0,<2" },
     { name = "baml-py", marker = "extra == 'baml'", specifier = "==0.206.0" },
     { name = "beautifulsoup4", marker = "extra == 'scraping'", specifier = ">=4.13.1" },
+    { name = "boto3", marker = "extra == 'aws'", specifier = ">=1.43.1,<2" },
     { name = "cbor2", specifier = ">=5.8.0" },
     { name = "certifi", specifier = ">=2026.10.19" },
     { name = "coverage", marker = "extra == 'dev'", specifier = ">=7.3.2,<8" },
@@ -1630,7 +1632,7 @@ requires-dist = [
     { name = "rdflib", specifier = ">=7.1.4,<7.2.0" },
     { name = "redis", marker = "extra == 'redis'", specifier = ">=5.0.3,<6.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9.2,<=0.16.6" },
-    { name = "s3fs", extras = ["boto3"], marker = "extra == 'aws'", specifier = "==2026.9.0" },
+    { name = "s3fs", marker = "extra == 'aws'", specifier = "==2026.9.0" },
     { name = "scikit-learn", marker = "extra == 'evals'", specifier = ">=1.6.1,<2" },
     { name = "sentencepiece", marker = "extra == 'gliner'", specifier = ">=0.2.0" },
     { name = "sqlalchemy", specifier = ">=2.0.39,<3.0.0" },
