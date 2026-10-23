@@ -4,7 +4,6 @@
 import asyncio
 import logging
 import os
-import re
 from contextlib import asynccontextmanager
 from uuid import uuid4
 
@@ -178,20 +177,11 @@ class CogneeTestClient:
 
     @staticmethod
     def _forget_ids(recall_text: str, needle: str) -> dict[str, str]:
-        """The data_id and dataset_id recall printed for the hit that contains needle.
-
-        A chunk hit carries both on a `refs:` line under it. The default answer
-        cites the data_id in its `Evidence:` line and the dataset_id on the
-        `dataset:` line that ends the hit.
-        """
+        """The data_id and dataset_id on the first `refs:` line of the hit containing needle."""
         lines = recall_text.splitlines()
         for index, line in enumerate(lines):
             if needle not in line:
                 continue
-            ids = {}
-            cited = re.search(r"data_id: ([0-9a-f-]{36})", line)
-            if cited:
-                ids["data_id"] = cited.group(1)
             for following in lines[index + 1 :]:
                 following = following.strip()
                 if following.startswith("["):
@@ -200,9 +190,6 @@ class CogneeTestClient:
                     return dict(
                         part.split("=", 1) for part in following[len("refs: ") :].split(", ")
                     )
-                dataset = re.search(r"^dataset: .*dataset_id=([0-9a-f-]{36})\)?$", following)
-                if dataset and "data_id" in ids:
-                    return {**ids, "dataset_id": dataset.group(1)}
         raise AssertionError(f"No forget ids for the hit containing {needle!r}: {recall_text}")
 
     async def test_forget_one_memory(self, search_type: str | None):

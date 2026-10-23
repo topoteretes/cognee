@@ -10,7 +10,7 @@ from uuid import UUID
 
 from cognee.infrastructure.databases.provenance import make_source_ref_key
 from cognee.modules.engine.utils import generate_edge_object_id
-from cognee.modules.search.models.EvidenceReference import EvidenceReference
+from cognee.modules.search.models.EvidenceReference import EvidenceReference, EvidenceRole
 
 
 def _payload(obj: Any) -> dict:
@@ -46,8 +46,13 @@ def _source_ref_key(dataset_id: Any, data_id: str | None) -> str | None:
 def chunk_context_evidence(
     retrieved_objects: Any,
     dataset_id: Any = None,
+    role: EvidenceRole = "used_as_context",
 ) -> list[EvidenceReference]:
-    """Describe the exact vector chunks that were available to a RAG completion."""
+    """Describe the exact vector chunks that were available to a RAG completion.
+
+    ``role="supports_assertion"`` marks chunks an answer was grounded in rather
+    than everything that was in context.
+    """
     if not isinstance(retrieved_objects, (list, tuple)):
         return []
 
@@ -77,6 +82,7 @@ def chunk_context_evidence(
             EvidenceReference(
                 kind="segment",
                 artifact_id=chunk_id,
+                role=role,
                 dataset_id=normalized_dataset_id,
                 source_ref_key=source_ref_key,
                 data_id=data_id,
