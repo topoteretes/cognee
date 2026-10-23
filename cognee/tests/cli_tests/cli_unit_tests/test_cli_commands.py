@@ -724,6 +724,8 @@ class TestForgetCommand:
         assert "everything" in actions
         assert "memory_only" in actions
         assert actions["memory_only"].default is False
+        assert "clean_history" in actions
+        assert actions["clean_history"].default is False
 
     @patch("cognee.cli.commands.forget_command.asyncio.run", side_effect=_mock_run)
     def test_execute_threads_memory_only_flag(self, mock_asyncio_run):
@@ -741,6 +743,7 @@ class TestForgetCommand:
                 data_id=None,
                 everything=False,
                 memory_only=True,
+                clean_history=False,
             )
             command.execute(args)
 
@@ -750,6 +753,7 @@ class TestForgetCommand:
             dataset_id=None,
             everything=False,
             memory_only=True,
+            clean_history=False,
         )
 
     def test_execute_everything_with_memory_only_errors(self):
@@ -788,6 +792,7 @@ class TestForgetCommand:
             data_id=None,
             everything=False,
             memory_only=False,
+            clean_history=False,
         )
 
         with pytest.raises(CliCommandException):

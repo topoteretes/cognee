@@ -49,6 +49,13 @@ class ForgetPayloadDTO(InDTO):
         "and reset pipeline status — raw files and data records are preserved. "
         "This allows re-cognifying the dataset from scratch.",
     )
+    clean_history: bool = Field(
+        default=False,
+        description="When true, also delete the caller's own search and recall history "
+        "(the rows GET /v1/search and GET /v1/recall list), in every dataset, before the "
+        "data is deleted. Dataset and everything forgets purge the deleted datasets' "
+        "history regardless of this flag.",
+    )
 
 
 def get_forget_router() -> APIRouter:
@@ -88,9 +95,12 @@ def get_forget_router() -> APIRouter:
           user owns (default: false).
         - **memoryOnly** (bool): When true, delete only memory (graph + vector embeddings),
           preserving raw files and data records (default: false).
+        - **cleanHistory** (bool): When true, also delete the caller's own search and
+          recall history before the data is deleted (default: false). Forgetting a dataset
+          or everything purges that data's history regardless.
 
         Provide either `dataset` or `datasetId`, not both. Field names are shown camelCased
-        in the schema; snake_case aliases (`data_id`, `dataset_id`, `memory_only`) are also
+        in the schema; snake_case aliases (`data_id`, `dataset_id`, `memory_only`, `clean_history`) are also
         accepted.
 
         ## Error Codes
@@ -118,6 +128,7 @@ def get_forget_router() -> APIRouter:
                 dataset_id=payload.dataset_id,
                 everything=payload.everything,
                 memory_only=payload.memory_only,
+                clean_history=payload.clean_history,
                 user=user,
             )
             return result

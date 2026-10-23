@@ -49,6 +49,15 @@ records, so the dataset (or item) can be re-cognified later.
                 "re-cognified with different settings"
             ),
         )
+        parser.add_argument(
+            "--clean-history",
+            action="store_true",
+            default=False,
+            help=(
+                "Also delete your own search and recall history, in every dataset, "
+                "before the data is deleted"
+            ),
+        )
 
     def execute(self, args: argparse.Namespace) -> None:
         try:
@@ -88,6 +97,7 @@ records, so the dataset (or item) can be re-cognified later.
                         dataset_id=dataset_id,
                         everything=args.everything,
                         memory_only=args.memory_only,
+                        clean_history=args.clean_history,
                     )
                 except Exception as e:
                     raise CliCommandInnerException(f"Failed to forget: {e!s}") from e

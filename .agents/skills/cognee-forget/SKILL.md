@@ -77,6 +77,7 @@ candidates (name + a short preview) before deleting.
 | A whole dataset | `forget(dataset="name")` or `forget(dataset_id=...)` | The dataset is deleted outright: the record, its data rows, graph and vector stores, and attributed sessions |
 | Rebuild a dataset's graph later | `forget(dataset="name", memory_only=True)` | Raw files and data rows; graph, vectors, sessions and pipeline status are reset, so the data can be re-processed. A search finds nothing afterwards, but the data is not deleted |
 | One document's memory only | `forget(dataset="name", data_id=..., memory_only=True)` | That document's raw file and row |
+| One document and your own search history | `forget(data_id=..., dataset_id=..., clean_history=True)` | Nothing of that document; the caller's recorded questions and answers are gone in every dataset, other users' stay |
 | Every dataset the user can delete | `forget(everything=True)` | Nothing, in any dataset the user has `delete` on in the current tenant (shared ones included). Only on explicit request (see the hard limits) |
 
 Return values: `{"data_id", "dataset_id", "search_history_removed", "status"}`
@@ -91,7 +92,10 @@ It does not cover rows saved without a dataset (history from before cognee
 forget leaves them, and an everything forget removes only the caller's own.
 It is `False` for a document forget, which never purges history (rows are
 recorded per dataset, so answers that quoted the document stay until the
-dataset itself is forgotten). If the history purge fails, the forget raises
+dataset itself is forgotten). `clean_history=True` on any forget deletes the
+caller's own history first (every row this user owns, in any dataset) and
+the result carries `history_cleaned: True`; without it a document forget
+reports `history_cleaned: False`. If a history purge fails, the forget raises
 before any data is deleted, so retry the same forget.
 
 **HTTP:** `POST /api/v1/forget` with a JSON body; camelCase and snake_case

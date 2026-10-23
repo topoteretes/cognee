@@ -757,6 +757,7 @@ async def forget(
     everything: bool = False,
     data_id: str | None = None,
     dataset_id: str | None = None,
+    clean_history: bool = False,
 ) -> list:
     """Delete data from memory.
 
@@ -778,6 +779,11 @@ async def forget(
         `Evidence:` block and the dataset_id from its `dataset:` line.
     dataset_id : str, optional
         UUID of the dataset to delete entirely, or to scope `data_id`.
+    clean_history : bool
+        If true, also delete the user's own search and recall history (in
+        every dataset) before the data is deleted. Default false: forgetting
+        one item keeps the history; forgetting a dataset or everything purges
+        that data's history regardless.
     """
     with redirect_stdout(sys.stderr):
         try:
@@ -816,6 +822,7 @@ async def forget(
                 everything=everything,
                 data_id=parsed_data_id,
                 dataset_id=parsed_dataset_id,
+                clean_history=clean_history,
             )
             status = result.get("status", "unknown") if isinstance(result, dict) else "completed"
             if everything:

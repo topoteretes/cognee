@@ -26,6 +26,7 @@ async def forget(
     dataset_id: UUID | None = None,
     everything: bool = False,
     memory_only: bool = False,
+    clean_history: bool = False,
     user: Any = None,
 ) -> dict:
     """Remove data from the knowledge graph.
@@ -50,6 +51,9 @@ async def forget(
         # Forget only memory for a single file in a dataset
         await cognee.forget(dataset="scientists", data_id=data_id, memory_only=True)
 
+        # Forget one item and the caller's own search history with it
+        await cognee.forget(data_id=data_id, dataset_id=dataset_id, clean_history=True)
+
     Args:
         data_id: UUID of a specific data item to remove.
             Requires ``dataset`` or ``dataset_id`` to also be set.
@@ -65,10 +69,19 @@ async def forget(
             be re-cognified with different settings. A search that finds nothing
             afterwards does not mean the data is gone: the document is still
             stored and the next cognify processes it again.
+        clean_history: If True, also delete the caller's own search and recall
+            history: every ``queries``/``results`` row this user owns, in any
+            dataset, the same rows ``DELETE /api/v1/search/history`` removes.
+            It runs before the data is deleted and raises if it fails, so the
+            forget can be retried. Default False: a document forget keeps
+            history, because answers are recorded per dataset, not per
+            document. A dataset or everything forget purges the deleted
+            datasets' history for every user regardless of this flag.
         user: User context. Resolved to default user when None.
 
     Returns:
-        Dict with deletion summary: items removed, datasets removed.
+        Dict with deletion summary: items removed, datasets removed, and
+        ``history_cleaned`` (whether the caller's own search history was removed).
 
     What stays on disk:
         Every mode removes the records and the memory it names; it does not
@@ -133,6 +146,7 @@ async def forget(
                 dataset_id=dataset_id,
                 everything=everything,
                 memory_only=memory_only,
+                clean_history=clean_history,
             )
             span.set_attribute(
                 COGNEE_RESULT_COUNT,
@@ -150,6 +164,20 @@ async def forget(
             if user is None:
                 user = await get_default_user()
             operation_context.set_user(user)
+
+            # Before any data is deleted and not caught, like the dataset purges:
+            # if it fails nothing is gone yet and the forget can be retried.
+            # `everything` removes the caller's history itself (_forget_everything).
+            if clean_history and not everything:
+                from cognee.modules.search.operations import delete_user_search_history
+
+                removed = await delete_user_search_history(user.id)
+                logger.info(
+                    "forget: cleaned search history for user=%s (%d queries, %d results)",
+                    user.id,
+                    removed["queries_deleted"],
+                    removed["results_deleted"],
+                )
 
             # `everything` deletes across all datasets; the per-dataset DB context is
             # established per-dataset inside datasets.delete_all -> empty_dataset, so we
@@ -188,15 +216,16 @@ async def forget(
             # others via datasets.delete_data/empty_dataset). Entering it first
             # would hold a dataset-queue slot while waiting on the lock —
             # the SDK-483 order inversion (canonical: dataset lock -> queue slot).
-            if memory_only:
-                if data_id is not None:
-                    return await _forget_data_memory(data_id, dataset_ref, user)
-                return await _forget_dataset_memory(dataset_ref, user)
-
-            if data_id is not None:
-                return await _forget_data_item(data_id, dataset_ref, user)
-
-            return await _forget_dataset(dataset_ref, user)
+            if memory_only and data_id is not None:
+                result = await _forget_data_memory(data_id, dataset_ref, user)
+            elif memory_only:
+                result = await _forget_dataset_memory(dataset_ref, user)
+            elif data_id is not None:
+                result = await _forget_data_item(data_id, dataset_ref, user)
+            else:
+                result = await _forget_dataset(dataset_ref, user)
+            result["history_cleaned"] = clean_history
+            return result
 
 
 async def _forget_everything(user: Any) -> dict:
@@ -249,6 +278,7 @@ async def _forget_everything(user: Any) -> dict:
     return {
         "datasets_removed": count,
         "search_history_removed": True,
+        "history_cleaned": True,
         "status": "success",
     }
 
@@ -284,12 +314,13 @@ async def _forget_dataset(dataset_ref: str | UUID, user: Any) -> dict:
 async def _forget_data_item(data_id: UUID, dataset_ref: str | UUID, user: Any) -> dict:
     """Delete a single data item from a dataset.
 
-    Search history is NOT purged here: rows are attributed to a dataset, not
-    to a document, so the only purge available would drop every user's
-    history for the whole dataset because one file went. Answers that quoted
-    this document's chunks therefore stay until ``forget(dataset=...)`` or
-    ``forget(everything=True)``; the result says so with
-    ``search_history_removed: False``.
+    Dataset search history is NOT purged here: rows are attributed to a
+    dataset, not to a document, so the only purge available would drop every
+    user's history for the whole dataset because one file went. Answers that
+    quoted this document's chunks therefore stay until ``forget(dataset=...)``
+    or ``forget(everything=True)``; the result says so with
+    ``search_history_removed: False``. The caller's own rows go when the
+    forget is called with ``clean_history=True`` (handled in ``forget``).
     """
     from cognee.api.v1.datasets.datasets import datasets
 

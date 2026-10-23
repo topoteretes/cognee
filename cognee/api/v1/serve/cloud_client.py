@@ -580,6 +580,8 @@ class CloudClient:
             payload["data_id"] = str(kwargs["data_id"])
         if kwargs.get("memory_only") is not None:
             payload["memory_only"] = bool(kwargs["memory_only"])
+        if kwargs.get("clean_history"):
+            payload["clean_history"] = True
 
         async with session.post(
             f"{self.service_url}/api/v1/forget",
