@@ -1,6 +1,7 @@
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.modules.search.types import SearchType
+from cognee.modules.search.types.SearchType import CYPHER_SEARCH_TYPES
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("SearchTypeSelector")
@@ -21,10 +22,12 @@ async def select_search_type(
         The best search type given by the LLM.
     """
     default_search_type = SearchType.RAG_COMPLETION
-    # Search types that cannot answer a free-form natural-language query on
-    # their own: CODE runs one exact graph operation driven by a structured
-    # code_query, which FEELING_LUCKY has no way to construct.
-    excluded_search_types = {SearchType.CODE}
+    # Search types FEELING_LUCKY must never route to. CODE runs one exact graph
+    # operation driven by a structured code_query, which FEELING_LUCKY has no way
+    # to construct. The Cypher-executing types need write permission on every
+    # dataset searched (SearchType.required_permissions), and the datasets were
+    # resolved with read only before this selector runs.
+    excluded_search_types = {SearchType.CODE, *CYPHER_SEARCH_TYPES}
     system_prompt = read_query_prompt(system_prompt_path)
 
     try:
@@ -38,8 +41,8 @@ async def select_search_type(
             selected_search_type = SearchType(response.upper())
             if selected_search_type in excluded_search_types:
                 logger.info(
-                    f"LLM selected {selected_search_type.value}, which requires structured "
-                    f"arguments; falling back to {default_search_type.value}."
+                    f"LLM selected {selected_search_type.value}, which FEELING_LUCKY cannot "
+                    f"route to; falling back to {default_search_type.value}."
                 )
                 return default_search_type
             logger.info(f"Selected lucky search type: {response.upper()}")

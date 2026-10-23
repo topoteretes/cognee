@@ -27,6 +27,25 @@ class SearchType(str, Enum):
     # answers it. Removed in the next release.
     TRIPLET_COMPLETION = "TRIPLET_COMPLETION"
 
+    @property
+    def required_permissions(self) -> tuple[str, ...]:
+        """Dataset permissions a caller must hold on every dataset this search type touches.
+
+        Every type needs ``read``. The types that execute Cypher, whether the caller
+        wrote it (CYPHER) or an LLM wrote it from the question (NATURAL_LANGUAGE), also
+        need ``write``: nothing restricts the statement to reads, so a read-only share
+        must not be enough to run one. ``authorized_search`` enforces this and the
+        FEELING_LUCKY selector refuses to route to these types.
+        """
+        if self in CYPHER_SEARCH_TYPES:
+            return ("read", "write")
+        return ("read",)
+
+
+# The types that run a Cypher statement against the graph database: the caller's own
+# (CYPHER) or one an LLM wrote from the question (NATURAL_LANGUAGE). Opt-in through
+# ALLOW_CYPHER_QUERY (see get_search_type_retriever_instance) and write-gated above.
+CYPHER_SEARCH_TYPES = frozenset({SearchType.CYPHER, SearchType.NATURAL_LANGUAGE})
 
 # Deprecated search type -> the type that serves it until it is removed.
 DEPRECATED_SEARCH_TYPES: dict[SearchType, SearchType] = {

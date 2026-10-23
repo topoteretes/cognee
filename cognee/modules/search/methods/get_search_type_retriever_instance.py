@@ -42,12 +42,10 @@ from cognee.modules.retrieval.temporal_hybrid_retriever import TemporalHybridRet
 from cognee.modules.search.exceptions import SearchTypeDisabledError, UnsupportedSearchTypeError
 from cognee.modules.search.operations import select_search_type
 from cognee.modules.search.types import SearchType
-from cognee.modules.search.types.SearchType import DEPRECATED_SEARCH_TYPES
+from cognee.modules.search.types.SearchType import CYPHER_SEARCH_TYPES, DEPRECATED_SEARCH_TYPES
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
-
-CYPHER_SEARCH_TYPES = (SearchType.CYPHER, SearchType.NATURAL_LANGUAGE)
 
 # Returned to the caller: says what to change, without detailing the risk.
 CYPHER_DISABLED_MESSAGE = "{search_type} search is disabled by default for security reasons."
@@ -59,7 +57,7 @@ CYPHER_DISABLED_REMEDIATION = (
 # Logged on the server only.
 CYPHER_DISABLED_LOG_MESSAGE = (
     "Rejected a {search_type} search because ALLOW_CYPHER_QUERY is not enabled. Raw Cypher "
-    "lets any user with read access to a dataset run arbitrary queries against the graph "
+    "lets any user with write access to a dataset run arbitrary queries against the graph "
     "database, up to remote code execution on the server. Set ALLOW_CYPHER_QUERY=true only "
     "when every user of this deployment is trusted."
 )

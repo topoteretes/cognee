@@ -150,7 +150,10 @@ async def search(
         Scoping to specific datasets requires ``ENABLE_BACKEND_ACCESS_CONTROL``
         (the default). With ``dataset_ids=None``, datasets the user cannot read
         are skipped (no grants -> ``[]``); an explicit id the user cannot read
-        raises ``PermissionDeniedError``.
+        raises ``PermissionDeniedError``. CYPHER and NATURAL_LANGUAGE need write
+        as well (``SearchType.required_permissions``): with ``dataset_ids=None``
+        only write-granted datasets are searched, and an explicit id without
+        write raises ``PermissionDeniedError``.
     """
     send_telemetry(
         "cognee.search EXECUTION STARTED",
@@ -239,13 +242,25 @@ async def authorized_search(
     embedding_config: EmbeddingConfig | None = None,
 ) -> list[SearchResultPayload]:
     """
-    Verifies access for provided datasets or uses all datasets user has read access for and performs search per dataset.
+    Verifies the permissions ``query_type`` requires on the provided datasets, or uses every
+    dataset the user holds them on, and performs the search per dataset.
     Not to be used outside of active access control mode.
     """
-    # Find datasets user has read access for (if datasets are provided only return them. Provided user has read access)
-    search_datasets = await get_authorized_existing_datasets(
-        datasets=dataset_ids, permission_type="read", user=user
-    )
+    # Every search type needs read on its datasets; the Cypher-executing types also
+    # need write (SearchType.required_permissions). Explicit datasets the user lacks
+    # a required permission on raise PermissionDeniedError inside
+    # get_authorized_existing_datasets. With no explicit datasets, only the datasets
+    # granted every required permission are searched.
+    search_datasets: list[Dataset] | None = None
+    for permission_type in query_type.required_permissions:
+        permitted_datasets = await get_authorized_existing_datasets(
+            datasets=dataset_ids, permission_type=permission_type, user=user
+        )
+        if search_datasets is None:
+            search_datasets = permitted_datasets
+            continue
+        permitted_ids = {dataset.id for dataset in permitted_datasets}
+        search_datasets = [dataset for dataset in search_datasets if dataset.id in permitted_ids]
 
     # Searches all provided datasets and handles setting up of appropriate database context based on permissions
     search_results = await search_in_datasets_context(
