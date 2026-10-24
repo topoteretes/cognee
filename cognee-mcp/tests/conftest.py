@@ -42,12 +42,21 @@ def _isolated_session_capture_state(tmp_path, monkeypatch):
     from src import server
 
     monkeypatch.setenv("COGNEE_MCP_STATE_DIR", str(tmp_path / "mcp_state"))
+    # The documented defaults, whatever the developer's .env or shell says.
+    for name in (
+        "COGNEE_MCP_SESSION_CAPTURE",
+        "COGNEE_MCP_SESSION_IDLE_SECONDS",
+        "IMPROVE_AUTO_ENABLED",
+    ):
+        monkeypatch.delenv(name, raising=False)
     for handle in server._idle_timers.values():
         handle.cancel()
     monkeypatch.setattr(server, "_conversations", {})
     monkeypatch.setattr(server, "_idle_timers", {})
+    monkeypatch.setattr(server, "_running_improves", set())
+    monkeypatch.setattr(server, "_improve_locks", {})
     monkeypatch.setattr(server, "_capture_failures", 0)
-    monkeypatch.setattr(server, "_conversation_state_broken", False)
+    monkeypatch.setattr(server, "_state_failures", 0)
     yield
     for handle in server._idle_timers.values():
         handle.cancel()

@@ -818,14 +818,6 @@ class CogneeClient:
                     "session_id": session_id,
                 }
 
-    async def _default_user(self):
-        """The user direct-mode session writes run as: the default user, after DB setup."""
-        from cognee.modules.engine.operations.setup import setup
-        from cognee.modules.users.methods import get_default_user
-
-        await setup()
-        return await get_default_user()
-
     async def remember_qa(
         self,
         question: str,
@@ -838,7 +830,7 @@ class CogneeClient:
 
         ``remember(text, session_id=...)`` files the text as the *answer* of an
         entry with an empty question; this keeps the two sides apart, so a
-        captured user question is distilled as a question. Typed entries are
+        captured user question is persisted as a question. Typed entries are
         cache-only in both modes (nothing is cognified until improve bridges the
         session) and bind the session to ``dataset_name`` on its first write, so
         its ``session_records`` row names the dataset and a later write to
@@ -859,14 +851,12 @@ class CogneeClient:
         with redirect_stdout(sys.stderr):
             from cognee.memory import QAEntry
 
-            # The typed-entry path needs a user (_dispatch_session_entry refuses
-            # None); the default user is the one the search ran as.
-            user = await self._default_user()
+            # No user is pinned: remember() resolves the default user for a typed
+            # entry itself, the same user the search ran as.
             result = await self.cognee.remember(
                 QAEntry(question=question, answer=answer),
                 dataset_name=dataset_name,
                 session_id=session_id,
-                user=user,
             )
             return {
                 "status": getattr(result, "status", "completed"),

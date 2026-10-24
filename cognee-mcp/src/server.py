@@ -564,10 +564,10 @@ async def recall(
     Auto-routing picks the best search strategy when search_type
     is not specified.
 
-    Each call also records the query as a turn of the current MCP
-    conversation (session capture); once the conversation has been quiet
-    for a while, what was asked about is distilled into memory. Pass
-    store=False when the user asks not to remember something.
+    Unless store=False, session_id or code_query is passed, the call also
+    records the query as a turn of the current MCP conversation (session
+    capture); once the conversation has been quiet for a while, the server
+    persists what was asked about into memory.
 
     Parameters
     ----------
@@ -624,10 +624,13 @@ async def recall(
         access control off, ids are only shown when recall is scoped to a
         single dataset.
     store : bool
-        Record the query in the session cache of the current MCP
-        conversation (default True). The write is best-effort and runs in
-        the background; it never delays or fails the search. False skips
-        it, e.g. when the user asks not to remember the question.
+        Keep the default. Records this query as a turn of the current MCP
+        conversation so it can be persisted into memory later; the write
+        runs in the background and never changes, delays or fails the
+        search. Set False only when the user explicitly asks that this
+        question not be remembered. Nothing is recorded when session_id or
+        code_query is passed, or when the server runs with
+        COGNEE_MCP_SESSION_CAPTURE=false.
 
     Returns a one-line memory-hit or empty-state summary followed by the original
     result text. Status markers do not count as hits. Empty-state checks are
@@ -906,7 +909,7 @@ async def improve(
     session_ids : str, optional
         Comma-separated session IDs to bridge into the permanent graph.
         Defaults to the current MCP conversation's captured session (see
-        recall's `store`), so a plain improve() distills this client's
+        recall's `store`), so a plain improve() persists this client's
         conversation.
     build_global_context_index : bool
         Also build the global context index.
@@ -1133,14 +1136,18 @@ def _is_session_capture_enabled() -> bool:
 
 
 _DEFAULT_SESSION_IDLE_SECONDS = 1800.0
+# How long an improve that lost cognee's dataset lock to another improve waits
+# before it tries again.
+_LOCK_HELD_RETRY_SECONDS = 60.0
 
 
 def _session_idle_seconds() -> float:
     """Silence that ends an MCP conversation and triggers its improve.
 
-    COGNEE_MCP_SESSION_IDLE_SECONDS, default 1800. 0 keeps one conversation per
-    server process and never runs improve by itself; a value that does not
-    parse falls back to the default.
+    COGNEE_MCP_SESSION_IDLE_SECONDS, default 1800. 0 never ends a conversation
+    (one per client, kept across restarts through the state file) and never
+    runs improve by itself; a value that does not parse falls back to the
+    default.
     """
     raw = os.getenv("COGNEE_MCP_SESSION_IDLE_SECONDS", "").strip()
     if not raw:
@@ -1156,11 +1163,25 @@ def _session_idle_seconds() -> float:
         return _DEFAULT_SESSION_IDLE_SECONDS
 
 
-def _conversation_state_dir() -> Path:
-    """Where stdio/SSE conversations are remembered across server restarts.
+def _auto_improve_enabled() -> bool:
+    """Whether the server may improve captured conversations on its own.
 
-    COGNEE_MCP_STATE_DIR, default ~/.cognee/mcp. One file per client, so servers
-    started for different clients never overwrite each other's state.
+    IMPROVE_AUTO_ENABLED is cognee's switch for every automatic improve, and
+    false turns this one off too: turns are still captured, and the first
+    server start after the switch is back on improves them. Read from the
+    environment (cognee loads its .env into it) with cognee's spelling of
+    false, so the two never disagree.
+    """
+    raw = os.getenv("IMPROVE_AUTO_ENABLED", "true").strip().lower()
+    return raw not in ("false", "f", "no", "n", "off", "0")
+
+
+def _conversation_state_dir() -> Path:
+    """Where undistilled conversations are remembered across server restarts.
+
+    COGNEE_MCP_STATE_DIR, default ~/.cognee/mcp. One file per client, shared by
+    every server process started for that client (Claude Code runs one per
+    session, Cursor one per window).
     """
     base = os.getenv("COGNEE_MCP_STATE_DIR") or str(Path.home() / ".cognee" / "mcp")
     return Path(base) / "conversations"
@@ -1169,17 +1190,29 @@ def _conversation_state_dir() -> Path:
 # Wall clock, as a module attribute so tests can move time.
 _now = time.time
 
-# client -> {"session_id", "dataset_name", "last_activity", "distilled"}: the
-# current conversation of each client on a transport without a session id
-# (stdio, SSE), mirrored to one JSON file per client and loaded lazily.
+# client -> the client's conversation file as this process last read or wrote it:
+#   {"session_id": the current stdio/SSE conversation (None for a client that
+#    only connected over HTTP), "dataset_name", "last_activity", "distilled",
+#    "pending": [{"session_id", "dataset_name", "last_activity"}, ...]}
+# ``pending`` holds every other conversation that still has undistilled turns:
+# ended ones whose improve has not succeeded yet, and HTTP sessions inside
+# their idle gap or waiting for a retry. The file is the shared record of all
+# server processes of the client and is re-read before every change; this copy
+# only stands in while the disk is unavailable. A change lost between two
+# processes costs a retry, never a turn: the turns live in cognee's session
+# cache and improve is watermark-gated.
 _conversations: dict[str, dict] = {}
-_conversation_state_broken = False
-# session_id -> the sleeping timer that improves it once the idle gap has passed.
+# Consecutive state-file failures; the first one logs a warning, the rest debug.
+_state_failures = 0
+# session_id -> the sleeping timer that improves it once its delay has passed.
 _idle_timers: dict[str, asyncio.TimerHandle] = {}
-# Conversations whose improve is running right now.
+# Conversations whose improve is running or queued right now.
 _running_improves: set[str] = set()
-# Ended conversations a client may keep waiting for a successful improve.
-_MAX_PENDING_CONVERSATIONS = 10
+# dataset_name -> lock: improves of one dataset run one at a time here, so two
+# conversations of one client never race for cognee's dataset lock.
+_improve_locks: dict[str, asyncio.Lock] = {}
+# Undistilled conversations a client may keep waiting for a successful improve.
+_MAX_PENDING_CONVERSATIONS = 100
 # Consecutive capture failures; the first one logs a warning, the rest debug.
 _capture_failures = 0
 
@@ -1188,101 +1221,150 @@ def _conversation_path(client: str) -> Path:
     return _conversation_state_dir() / f"{client}.json"
 
 
-def _load_conversation(client: str) -> dict | None:
-    global _conversation_state_broken
-    if client in _conversations:
-        return _conversations[client]
+def _note_state_failure(action: str, client: str, error: Exception) -> None:
+    global _state_failures
+    _state_failures += 1
+    log = logger.warning if _state_failures == 1 else logger.debug
+    log(
+        "Cannot %s the MCP conversation state of %s (%d in a row): %s; until the "
+        "state is readable and writable again, conversations are tracked in memory "
+        "only and do not survive a server restart",
+        action,
+        client,
+        _state_failures,
+        error,
+    )
+
+
+def _valid_conversation(entry) -> bool:
+    """The shape this server writes; anything else counts as an unreadable file."""
+
+    def number(value) -> bool:
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+    def optional_str(value) -> bool:
+        return value is None or isinstance(value, str)
+
+    if not isinstance(entry, dict):
+        return False
+    if not optional_str(entry.get("session_id")) or not optional_str(entry.get("dataset_name")):
+        return False
+    if not number(entry.get("last_activity", 0)):
+        return False
+    pending = entry.get("pending", [])
+    return isinstance(pending, list) and all(
+        isinstance(past, dict)
+        and isinstance(past.get("session_id"), str)
+        and isinstance(past.get("dataset_name"), str)
+        and number(past.get("last_activity", 0))
+        for past in pending
+    )
+
+
+def _read_conversation(client: str) -> dict | None:
+    """The client's conversation file, or this process's last copy when the disk fails.
+
+    None when the client has no file yet, or a malformed one (the next write
+    replaces it).
+    """
     try:
         entry = json.loads(_conversation_path(client).read_text())
     except FileNotFoundError:
-        return None
+        return _conversations.get(client)
     except (OSError, ValueError) as error:
-        if not _conversation_state_broken:
-            _conversation_state_broken = True
-            logger.warning("Cannot read the MCP conversation state of %s: %s", client, error)
-        return None
-    if not isinstance(entry, dict) or not isinstance(entry.get("session_id"), str):
-        return None
+        _note_state_failure("read", client, error)
+        return _conversations.get(client)
+    if not _valid_conversation(entry):
+        _note_state_failure("read", client, ValueError("unexpected shape"))
+        return _conversations.get(client)
     _conversations[client] = entry
     return entry
 
 
-def _save_conversation(client: str, entry: dict) -> None:
-    global _conversation_state_broken
+def _write_conversation(client: str, entry: dict) -> None:
+    """Replace the client's file atomically; this process's copy is updated either way."""
+    global _state_failures
     _conversations[client] = entry
     path = _conversation_path(client)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".json.tmp")
+        tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
         tmp.write_text(json.dumps(entry))
         os.replace(tmp, path)
     except OSError as error:
-        if not _conversation_state_broken:
-            _conversation_state_broken = True
-            logger.warning(
-                "Cannot persist the MCP conversation state of %s: %s; "
-                "the conversation will not survive a server restart",
-                client,
-                error,
-            )
+        _note_state_failure("write", client, error)
+        return
+    if _state_failures:
+        logger.info("The MCP conversation state of %s is readable and writable again", client)
+        _state_failures = 0
 
 
-def _conversation_entry_for(session_id: str) -> tuple[str, dict] | None:
-    for client, entry in _conversations.items():
-        if entry.get("session_id") == session_id:
-            return client, entry
-    return None
+def _upsert_pending(
+    pending: list[dict], session_id: str, dataset_name: str, last_activity: float
+) -> list[dict]:
+    kept = [past for past in pending if past.get("session_id") != session_id]
+    kept.append(
+        {"session_id": session_id, "dataset_name": dataset_name, "last_activity": last_activity}
+    )
+    return kept
+
+
+def _cap_pending(client: str, pending: list[dict]) -> list[dict]:
+    if len(pending) <= _MAX_PENDING_CONVERSATIONS:
+        return pending
+    dropped = pending[: len(pending) - _MAX_PENDING_CONVERSATIONS]
+    logger.warning(
+        "Giving up on %d undistilled MCP conversation(s) of %s; only the newest %d are kept: %s",
+        len(dropped),
+        client,
+        _MAX_PENDING_CONVERSATIONS,
+        [past["session_id"] for past in dropped],
+    )
+    return pending[-_MAX_PENDING_CONVERSATIONS:]
 
 
 def _conversation_session_id(client: str, *, touch: bool) -> str | None:
     """The current conversation of ``client`` on a transport without a session id.
 
     A conversation ends after ``_session_idle_seconds()`` of silence. ``touch``
-    is a new turn: a conversation that has ended is replaced, and distilled
-    first when it still holds turns nobody distilled. Without ``touch`` the id
-    of the conversation that just ended is still returned, so a default
-    ``improve()`` after the gap reaches it; None when the client has none yet.
+    is a new turn: a conversation that has ended is replaced, and it joins the
+    client's pending list when it still holds turns nobody distilled. Without
+    ``touch`` the id of the conversation that just ended is still returned, so
+    a default ``improve()`` after the gap reaches it; None when the client has
+    none yet.
     """
-    entry = _load_conversation(client)
+    entry = _read_conversation(client)
     idle = _session_idle_seconds()
     now = _now()
-    if entry is not None:
+    current = entry.get("session_id") if entry else None
+    if current:
         fresh = idle <= 0 or now - float(entry.get("last_activity", 0)) <= idle
         if fresh or not touch:
-            return entry["session_id"]
+            return current
     if not touch:
         return None
 
     pending = list(entry.get("pending") or []) if entry else []
-    if entry is not None and not entry.get("distilled", True) and entry.get("dataset_name"):
-        # The conversation that just ended still holds turns nobody distilled.
-        # It stays on the client's pending list until an improve succeeds, and
-        # is improved now unless the timer already started that improve.
-        pending.append({"session_id": entry["session_id"], "dataset_name": entry["dataset_name"]})
-        if entry["session_id"] not in _running_improves:
-            _schedule_session_improve(entry["session_id"], entry["dataset_name"], delay=0.0)
-    if len(pending) > _MAX_PENDING_CONVERSATIONS:
-        dropped = pending[: len(pending) - _MAX_PENDING_CONVERSATIONS]
-        pending = pending[-_MAX_PENDING_CONVERSATIONS:]
-        logger.warning(
-            "Giving up on %d undistilled MCP conversation(s) of %s that kept failing to improve: %s",
-            len(dropped),
-            client,
-            [past["session_id"] for past in dropped],
+    if current and not entry.get("distilled", True) and entry.get("dataset_name"):
+        pending = _upsert_pending(
+            pending, current, entry["dataset_name"], float(entry.get("last_activity", 0))
         )
     entry = {
         "session_id": f"{client}_{uuid.uuid4().hex}",
         "dataset_name": None,
         "last_activity": now,
         "distilled": True,
-        "pending": pending,
+        "pending": _cap_pending(client, pending),
     }
-    _save_conversation(client, entry)
+    _write_conversation(client, entry)
+    # A conversation boundary is also when every pending conversation of the
+    # client gets another try.
+    _schedule_undistilled(client, entry)
     return entry["session_id"]
 
 
-def _derived_session_id(*, touch: bool = False) -> str | None:
-    """Return the cognee session id of the current MCP conversation, or None.
+def _derived_conversation(*, touch: bool = False) -> tuple[str, str] | None:
+    """Return (client, cognee session id) of the current MCP conversation, or None.
 
     MCP clients such as Claude Desktop never pass session_id, so the server
     derives one from the request context:
@@ -1314,19 +1396,33 @@ def _derived_session_id(*, touch: bool = False) -> str | None:
     headers = getattr(getattr(ctx, "request", None), "headers", None)
     transport_id = headers.get("mcp-session-id") if headers else None
     if transport_id:
-        return f"{client}_{_sanitize_client_name(transport_id)}"
-    return _conversation_session_id(client, touch=touch)
+        return client, f"{client}_{_sanitize_client_name(transport_id)}"
+    session_id = _conversation_session_id(client, touch=touch)
+    return (client, session_id) if session_id else None
 
 
-def _schedule_session_improve(session_id: str, dataset_name: str, *, delay: float) -> None:
-    """Improve ``session_id`` once it has been silent for ``delay`` seconds.
+def _derived_session_id(*, touch: bool = False) -> str | None:
+    """The cognee session id of the current MCP conversation, or None (see _derived_conversation)."""
+    found = _derived_conversation(touch=touch)
+    return found[1] if found else None
+
+
+def _schedule_session_improve(
+    client: str, session_id: str, dataset_name: str, *, delay: float
+) -> None:
+    """Improve ``session_id`` once ``delay`` seconds have passed.
 
     A newer turn restarts the clock. Only the sleeping timer is replaced; an
     improve already running is left alone, and the next timer catches up with
     whatever it missed through the improve watermark. Nothing is scheduled
-    when COGNEE_MCP_SESSION_IDLE_SECONDS is 0.
+    when COGNEE_MCP_SESSION_IDLE_SECONDS is 0 or IMPROVE_AUTO_ENABLED is
+    false: the conversation stays undistilled on disk for a later server
+    start.
     """
     if _session_idle_seconds() <= 0:
+        return
+    if not _auto_improve_enabled():
+        logger.debug("IMPROVE_AUTO_ENABLED is false; not scheduling improve for %s", session_id)
         return
     previous = _idle_timers.pop(session_id, None)
     if previous is not None:
@@ -1339,63 +1435,193 @@ def _schedule_session_improve(session_id: str, dataset_name: str, *, delay: floa
 
     def fire() -> None:
         _idle_timers.pop(session_id, None)
-        _track_background(_improve_session(session_id, dataset_name))
+        _track_background(_improve_session(client, session_id, dataset_name))
 
     _idle_timers[session_id] = loop.call_later(max(0.0, delay), fire)
 
 
-async def _improve_session(session_id: str, dataset_name: str) -> None:
-    """Bridge one captured conversation into the permanent graph; a failure only logs."""
+def _schedule_undistilled(client: str, entry: dict) -> None:
+    """Arm an improve for every conversation of ``client`` that still holds undistilled turns.
+
+    Each runs once the rest of its idle gap has passed (right away for one that
+    ended long ago); a conversation whose improve is already running is left to
+    it.
+    """
+    idle = _session_idle_seconds()
+    now = _now()
+    candidates = list(entry.get("pending") or [])
+    if entry.get("session_id") and not entry.get("distilled", True) and entry.get("dataset_name"):
+        candidates.append(
+            {
+                "session_id": entry["session_id"],
+                "dataset_name": entry["dataset_name"],
+                "last_activity": entry.get("last_activity", 0),
+            }
+        )
+    for past in candidates:
+        if past["session_id"] in _running_improves:
+            continue
+        remaining = idle - (now - float(past.get("last_activity", 0)))
+        _schedule_session_improve(
+            client, past["session_id"], past["dataset_name"], delay=max(0.0, remaining)
+        )
+
+
+def _improve_outcome(result) -> str:
+    """What an improve result means for the conversation it named.
+
+    ``bridged``: persist_session_qa completed, or had nothing new; the turns are
+    in the graph. ``lock_held``: another improve of the dataset held cognee's
+    lock and nothing ran, worth a retry soon. ``failed``: the stage errored or
+    was cut off, worth a retry later. ``skipped``: the stage declined for good
+    (disabled by config, unsupported backend), so a retry would change nothing.
+    A payload without stage details (an older server) counts by its status.
+    """
+    if not isinstance(result, dict):
+        return "bridged"
+    stages = [stage for stage in result.get("stages") or [] if isinstance(stage, dict)]
+    for stage in stages:
+        if stage.get("stage") != "persist_session_qa":
+            continue
+        status, reason = stage.get("status"), stage.get("reason")
+        if status in ("completed", "already_completed"):
+            return "bridged"
+        if status == "skipped" and reason == "lock_held":
+            return "lock_held"
+        if status == "errored" or reason in ("budget_exhausted", "aborted_by_fatal_stage"):
+            return "failed"
+        return "skipped"
+    if stages and all(
+        stage.get("status") == "skipped" and stage.get("reason") == "lock_held" for stage in stages
+    ):
+        return "lock_held"
+    return "skipped" if result.get("status") == "skipped" else "bridged"
+
+
+async def _improve_session(client: str, session_id: str, dataset_name: str) -> None:
+    """Bridge one captured conversation into the permanent graph.
+
+    Improves of one dataset run one at a time, so sibling conversations never
+    race for cognee's dataset lock. The result decides what happens next:
+    bridged turns leave the client's books; a lost lock (another improve of the
+    dataset, such as the one a remember runs) is retried in a minute; a failure
+    leaves the conversation undistilled for the next conversation boundary or
+    server start.
+    """
     _running_improves.add(session_id)
     try:
-        result = await cognee_client.improve(dataset_name=dataset_name, session_ids=[session_id])
-    except Exception as error:
-        logger.warning(
-            "Improve of MCP conversation %s failed: %s", session_id, error, exc_info=True
-        )
-        return
+        async with _improve_locks.setdefault(dataset_name, asyncio.Lock()):
+            started = _now()
+            try:
+                result = await cognee_client.improve(
+                    dataset_name=dataset_name, session_ids=[session_id]
+                )
+            except Exception as error:
+                logger.warning(
+                    "Improve of MCP conversation %s failed: %s", session_id, error, exc_info=True
+                )
+                return
     finally:
         _running_improves.discard(session_id)
-    if session_id not in _idle_timers:
-        # No newer turn arrived while this ran, so the conversation is fully distilled.
-        _mark_distilled(session_id)
+
+    outcome = _improve_outcome(result)
     summary = format_improve_result(result, dataset_name).splitlines()[0]
-    logger.info("Distilled MCP conversation %s: %s", session_id, summary)
+    if outcome == "lock_held":
+        if session_id not in _idle_timers:
+            _schedule_session_improve(
+                client, session_id, dataset_name, delay=_LOCK_HELD_RETRY_SECONDS
+            )
+        logger.info(
+            "Improve of MCP conversation %s waits for another improve of %s; retrying in %.0f s",
+            session_id,
+            dataset_name,
+            _LOCK_HELD_RETRY_SECONDS,
+        )
+        return
+    if outcome == "failed":
+        logger.warning("Improve of MCP conversation %s did not persist it: %s", session_id, summary)
+        return
+    if session_id not in _idle_timers:
+        # No newer turn arrived while this ran (a newer turn's own timer covers it).
+        _mark_distilled(client, session_id, before=started)
+    if outcome == "skipped":
+        logger.warning(
+            "MCP conversation %s cannot be improved under the current settings: %s",
+            session_id,
+            summary,
+        )
+    elif isinstance(result, dict) and result.get("status") == "errored":
+        logger.warning("Improved MCP conversation %s with errors: %s", session_id, summary)
+    else:
+        logger.info("Improved MCP conversation %s: %s", session_id, summary)
 
 
-def _mark_turn_captured(session_id: str, dataset_name: str) -> None:
-    """A turn landed: the conversation has undistilled content and its idle clock restarts."""
-    found = _conversation_entry_for(session_id)
-    if found is not None:
-        client, entry = found
-        entry.update({"dataset_name": dataset_name, "last_activity": _now(), "distilled": False})
-        _save_conversation(client, entry)
-    _schedule_session_improve(session_id, dataset_name, delay=_session_idle_seconds())
+def _mark_turn_captured(client: str, session_id: str, dataset_name: str) -> None:
+    """A turn landed in ``session_id``: it has undistilled content and its idle clock restarts.
+
+    The client's current stdio/SSE conversation is updated in place; any other
+    session (an HTTP session, or a conversation a sibling server process has
+    already ended) goes on the pending list, so a server start finds it.
+    """
+    now = _now()
+    entry = dict(
+        _read_conversation(client)
+        or {
+            "session_id": None,
+            "dataset_name": None,
+            "last_activity": 0.0,
+            "distilled": True,
+            "pending": [],
+        }
+    )
+    if entry.get("session_id") == session_id:
+        entry.update({"dataset_name": dataset_name, "last_activity": now, "distilled": False})
+    else:
+        pending = _upsert_pending(list(entry.get("pending") or []), session_id, dataset_name, now)
+        entry["pending"] = _cap_pending(client, pending)
+    _write_conversation(client, entry)
+    _schedule_session_improve(client, session_id, dataset_name, delay=_session_idle_seconds())
 
 
-def _mark_distilled(session_id: str) -> None:
-    """An improve succeeded: the current conversation is distilled, or an ended one leaves pending."""
-    for client, entry in _conversations.items():
-        changed = False
-        if entry.get("session_id") == session_id and not entry.get("distilled", True):
-            entry["distilled"] = True
-            changed = True
-        pending = entry.get("pending") or []
-        kept = [past for past in pending if past.get("session_id") != session_id]
-        if len(kept) != len(pending):
-            entry["pending"] = kept
-            changed = True
-        if changed:
-            _save_conversation(client, entry)
+def _mark_distilled(client: str, session_id: str, *, before: float) -> None:
+    """An improve bridged ``session_id`` as of ``before``: it leaves the client's books.
+
+    A turn that landed after the improve started keeps it undistilled; that
+    turn's own improve covers it.
+    """
+    entry = _read_conversation(client)
+    if entry is None:
+        return
+    entry = dict(entry)
+    changed = False
+    if (
+        entry.get("session_id") == session_id
+        and not entry.get("distilled", True)
+        and float(entry.get("last_activity", 0)) <= before
+    ):
+        entry["distilled"] = True
+        changed = True
+    pending = entry.get("pending") or []
+    kept = [
+        past
+        for past in pending
+        if past.get("session_id") != session_id or float(past.get("last_activity", 0)) > before
+    ]
+    if len(kept) != len(pending):
+        entry["pending"] = kept
+        changed = True
+    if changed:
+        _write_conversation(client, entry)
 
 
 def _resume_conversations() -> None:
-    """Server start: distill the conversations a previous server left undistilled.
+    """Server start: pick up the conversations a previous server left undistilled.
 
-    A stdio/SSE conversation that ended while no server was running (the app
-    quit before its idle gap) is distilled now, as is every ended conversation
-    whose improve failed before; one still inside its gap waits for the rest
-    of it. Runs inside the event loop, once the client is ready.
+    Every client's file is read: a conversation past its idle gap (the app quit
+    before the gap, or its improve failed) is improved now, one still inside
+    its gap waits out the rest of it. A file this server cannot make sense of
+    is skipped with a warning; booting matters more than one conversation.
+    Runs inside the event loop, once the client is ready.
     """
     if not _is_session_capture_enabled() or _session_idle_seconds() <= 0:
         return
@@ -1404,25 +1630,20 @@ def _resume_conversations() -> None:
     except OSError:
         return
     for path in paths:
-        entry = _load_conversation(path.stem)
-        if not entry:
-            continue
-        for past in entry.get("pending") or []:
-            if past.get("session_id") and past.get("dataset_name"):
-                _schedule_session_improve(past["session_id"], past["dataset_name"], delay=0.0)
-        if entry.get("distilled", True) or not entry.get("dataset_name"):
-            continue
-        silence = _now() - float(entry.get("last_activity", 0))
-        remaining = _session_idle_seconds() - silence
-        _schedule_session_improve(entry["session_id"], entry["dataset_name"], delay=remaining)
+        try:
+            entry = _read_conversation(path.stem)
+            if entry:
+                _schedule_undistilled(path.stem, entry)
+        except Exception:
+            logger.warning("Skipping the MCP conversation state at %s", path, exc_info=True)
 
 
 def _cancel_idle_timers() -> None:
     """Server shutdown: drop the sleeping timers.
 
-    Their conversations stay marked undistilled on disk and are picked up by
-    the next server start; an improve already running is drained with the
-    other background tasks.
+    Their conversations stay undistilled on disk and are picked up by the next
+    server start; an improve already running is drained with the other
+    background tasks.
     """
     for handle in _idle_timers.values():
         handle.cancel()
@@ -1442,13 +1663,19 @@ def _capture_turn(query: str) -> None:
     _background_task_datasets, which recall reads to report "still indexing"
     for an empty result.
     """
+    global _capture_failures
     try:
-        session_id = _derived_session_id(touch=True)
-        if not session_id or not query or not query.strip():
+        found = _derived_conversation(touch=True)
+        if not found or not query or not query.strip():
             return
+        client, session_id = found
         dataset_name = _agent_scoped_default_dataset()
-    except Exception:
-        logger.debug("Session capture skipped: no usable request context", exc_info=True)
+    except Exception as error:
+        _capture_failures += 1
+        if _capture_failures == 1:
+            logger.warning("Session capture skipped: %s", error, exc_info=True)
+        else:
+            logger.debug("Session capture skipped: %s", error, exc_info=True)
         return
 
     async def capture():
@@ -1475,7 +1702,7 @@ def _capture_turn(query: str) -> None:
         if _capture_failures:
             logger.info("Session capture recovered for %s", session_id)
             _capture_failures = 0
-        _mark_turn_captured(session_id, dataset_name)
+        _mark_turn_captured(client, session_id, dataset_name)
 
     _track_background(capture())
 
@@ -1648,7 +1875,10 @@ async def main():
     elif not is_remote:
         logger.info("Skipping DB migrations")
 
-    _resume_conversations()
+    try:
+        _resume_conversations()
+    except Exception:
+        logger.warning("Could not resume MCP conversations", exc_info=True)
 
     try:
         match args.transport.lower():
@@ -1668,7 +1898,7 @@ async def main():
                 # makes a network call on every startup.
                 await mcp.run_stdio_async(show_banner=False)
     finally:
-        # Sleeping idle timers are dropped (their conversations are distilled by
+        # Sleeping idle timers are dropped (their conversations are improved by
         # the next server start); running improves drain with the other tasks.
         _cancel_idle_timers()
         # Drain background tasks with a bounded timeout so a hung cognify can't

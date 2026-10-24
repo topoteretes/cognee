@@ -13,7 +13,7 @@ import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
@@ -180,7 +180,7 @@ async def test_stdio_conversation_ends_after_the_idle_gap(monkeypatch, in_reques
     monkeypatch.setattr(server, "cognee_client", fake)
     in_request()
     first = server._derived_session_id(touch=True)
-    server._mark_turn_captured(first, "claude_desktop_memory")
+    server._mark_turn_captured("claude_desktop", first, "claude_desktop_memory")
 
     clock(100)
     assert server._derived_session_id(touch=True) == first  # at the gap: still the same
@@ -192,7 +192,9 @@ async def test_stdio_conversation_ends_after_the_idle_gap(monkeypatch, in_reques
     assert _state()["session_id"] == second
     # The ended conversation still held undistilled turns: it is improved right away
     # and, once that succeeded, dropped from the client's pending list.
-    assert _state()["pending"] == [{"session_id": first, "dataset_name": "claude_desktop_memory"}]
+    assert _state()["pending"] == [
+        {"session_id": first, "dataset_name": "claude_desktop_memory", "last_activity": T0}
+    ]
     await _let_timers_fire()
     fake.improve.assert_awaited_once_with(dataset_name="claude_desktop_memory", session_ids=[first])
     assert _state()["pending"] == []
@@ -207,9 +209,10 @@ async def test_idle_zero_keeps_one_conversation_and_never_improves(
     monkeypatch.setattr(server, "cognee_client", fake)
     in_request()
     first = server._derived_session_id(touch=True)
-    server._mark_turn_captured(first, "claude_desktop_memory")
+    server._mark_turn_captured("claude_desktop", first, "claude_desktop_memory")
 
     clock(10**6)
+    server._conversations.clear()  # a new server process, long after
 
     assert server._derived_session_id(touch=True) == first
     assert not server._idle_timers
@@ -419,9 +422,9 @@ async def test_a_newer_turn_restarts_the_idle_clock(monkeypatch, idle):
     fake = _fake_client()
     monkeypatch.setattr(server, "cognee_client", fake)
 
-    server._schedule_session_improve("s", "ds", delay=60)
+    server._schedule_session_improve("claude_desktop", "s", "ds", delay=60)
     first = server._idle_timers["s"]
-    server._schedule_session_improve("s", "ds", delay=60)
+    server._schedule_session_improve("claude_desktop", "s", "ds", delay=60)
     second = server._idle_timers["s"]
 
     assert first.cancelled() and second is not first
@@ -476,7 +479,7 @@ async def test_an_ended_conversation_stays_pending_until_an_improve_succeeds(
     monkeypatch.setattr(server, "cognee_client", fake)
     in_request()
     first = server._derived_session_id(touch=True)
-    server._mark_turn_captured(first, "claude_desktop_memory")
+    server._mark_turn_captured("claude_desktop", first, "claude_desktop_memory")
 
     clock(101)
     second = server._derived_session_id(touch=True)  # ends `first`, improves it now
@@ -484,7 +487,9 @@ async def test_an_ended_conversation_stays_pending_until_an_improve_succeeds(
 
     assert second != first
     fake.improve.assert_awaited_once()
-    assert _state()["pending"] == [{"session_id": first, "dataset_name": "claude_desktop_memory"}]
+    assert _state()["pending"] == [
+        {"session_id": first, "dataset_name": "claude_desktop_memory", "last_activity": T0}
+    ]
 
     # The next server start retries it; success takes it off the list.
     fake.improve = AsyncMock(return_value={"status": "completed", "stages": []})
@@ -571,7 +576,9 @@ async def test_server_start_waits_out_the_rest_of_a_live_gap(monkeypatch, clock,
     await _let_timers_fire()
 
     fake.improve.assert_not_awaited()
-    assert "claude_desktop_live" in server._idle_timers
+    handle = server._idle_timers["claude_desktop_live"]
+    remaining = handle.when() - asyncio.get_running_loop().time()
+    assert 85 < remaining <= 90  # 100 s gap, 10 s of it already over
 
 
 @pytest.mark.asyncio
@@ -583,12 +590,13 @@ async def test_shutdown_drops_sleeping_timers_but_keeps_the_conversation_undisti
     monkeypatch.setattr(server, "cognee_client", fake)
     in_request()
     session_id = server._derived_session_id(touch=True)
-    server._mark_turn_captured(session_id, "ds")
-    assert session_id in server._idle_timers
+    server._mark_turn_captured("claude_desktop", session_id, "ds")
+    handle = server._idle_timers[session_id]
 
     server._cancel_idle_timers()
     await _let_timers_fire()
 
+    assert handle.cancelled()
     assert not server._idle_timers
     fake.improve.assert_not_awaited()
     assert _state()["distilled"] is False
@@ -618,7 +626,7 @@ async def test_improve_default_reaches_the_conversation_that_just_ended(
     monkeypatch.setattr(server, "cognee_client", fake)
     in_request()
     session_id = server._derived_session_id(touch=True)
-    server._mark_turn_captured(session_id, "claude_desktop_memory")
+    server._mark_turn_captured("claude_desktop", session_id, "claude_desktop_memory")
     clock(500)
 
     await server.improve()
@@ -728,20 +736,459 @@ async def test_cognee_client_direct_remember_qa_passes_a_qa_entry(monkeypatch):
     from cognee.memory import QAEntry
 
     client = CogneeClient()
-    user = object()
     remember = AsyncMock(return_value=SimpleNamespace(status="session_stored", entry_id="qa-1"))
     monkeypatch.setattr(client, "cognee", SimpleNamespace(remember=remember))
-    monkeypatch.setattr(client, "_default_user", AsyncMock(return_value=user))
 
     result = await client.remember_qa(question="q", dataset_name="ds", session_id="s")
 
     (entry,) = remember.call_args.args
     assert isinstance(entry, QAEntry)
     assert (entry.question, entry.answer) == ("q", "")
-    assert remember.call_args.kwargs == {"dataset_name": "ds", "session_id": "s", "user": user}
+    # remember() resolves the default user for a typed entry itself.
+    assert remember.call_args.kwargs == {"dataset_name": "ds", "session_id": "s"}
     assert result == {
         "status": "session_stored",
         "dataset_name": "ds",
         "session_id": "s",
         "entry_id": "qa-1",
     }
+
+
+# --- the improve result decides what happens next --------------------------------
+
+
+def _lock_held_result(session_id):
+    """What cognee returns (not raises) when another improve holds the dataset lock."""
+    from cognee.modules.improve.registry import stage_names
+    from cognee.modules.improve.result import REASON_LOCK_HELD, ImproveResult
+
+    result = ImproveResult.all_skipped(stage_names(), REASON_LOCK_HELD, session_ids=[session_id])
+    assert result.status == "skipped" and result.lock_held
+    return result.model_dump(mode="json")
+
+
+def _persisted_result():
+    return {
+        "status": "completed",
+        "stages": [{"stage": "persist_session_qa", "status": "completed"}],
+    }
+
+
+def test_improve_outcome_reads_the_persist_stage():
+    assert server._improve_outcome(_lock_held_result("s")) == "lock_held"
+    assert server._improve_outcome(_persisted_result()) == "bridged"
+    assert (
+        server._improve_outcome(
+            {"stages": [{"stage": "persist_session_qa", "status": "already_completed"}]}
+        )
+        == "bridged"
+    )
+    assert (
+        server._improve_outcome(
+            {"stages": [{"stage": "persist_session_qa", "status": "skipped", "reason": "x"}]}
+        )
+        == "skipped"
+    )
+    assert (
+        server._improve_outcome(
+            {
+                "status": "errored",
+                "stages": [{"stage": "persist_session_qa", "status": "errored", "error": "boom"}],
+            }
+        )
+        == "failed"
+    )
+    # Payloads without stage detail (an older server) count by status.
+    assert server._improve_outcome({"status": "completed", "stages": []}) == "bridged"
+    assert server._improve_outcome({"status": "skipped", "stages": []}) == "skipped"
+    assert server._improve_outcome({"status": "completed", "result": "legacy"}) == "bridged"
+    assert server._improve_outcome("not a dict") == "bridged"
+
+
+@pytest.mark.asyncio
+async def test_lock_held_result_keeps_the_conversation_and_retries_soon(
+    monkeypatch, in_request, idle
+):
+    """cognee returns, not raises, when another improve of the dataset holds its lock
+    (the remember tool's own improve, say). Nothing was persisted, so the conversation
+    stays undistilled and is tried again once the lock is likely free."""
+    idle(0.05)
+    monkeypatch.setattr(server, "_LOCK_HELD_RETRY_SECONDS", 0.1)
+    fake = _fake_client()
+    monkeypatch.setattr(server, "cognee_client", fake)
+    monkeypatch.setattr(server, "_agent_scoped_default_dataset", lambda: "ds")
+    in_request()
+
+    await server.recall("q")
+    await _drain()
+    session_id = fake.remember_qa.call_args.kwargs["session_id"]
+    fake.improve.return_value = _lock_held_result(session_id)
+    await _let_timers_fire(0.08)
+
+    fake.improve.assert_awaited_once()
+    assert _state()["distilled"] is False
+    retry = server._idle_timers[session_id]
+    assert 0 < retry.when() - asyncio.get_running_loop().time() <= 0.1
+
+    fake.improve.return_value = _persisted_result()
+    await _let_timers_fire(0.15)
+
+    assert fake.improve.await_count == 2
+    assert _state()["distilled"] is True
+    assert not server._idle_timers
+
+
+@pytest.mark.asyncio
+async def test_ended_conversation_that_loses_the_lock_stays_pending(
+    monkeypatch, in_request, clock, idle
+):
+    idle(100)
+    fake = _fake_client()
+    monkeypatch.setattr(server, "cognee_client", fake)
+    in_request()
+    first = server._derived_session_id(touch=True)
+    server._mark_turn_captured("claude_desktop", first, "claude_desktop_memory")
+    clock(101)
+    fake.improve.return_value = _lock_held_result(first)
+
+    second = server._derived_session_id(touch=True)  # ends `first`, improves it now
+    await _let_timers_fire()
+
+    assert second != first
+    fake.improve.assert_awaited_once()
+    assert [past["session_id"] for past in _state()["pending"]] == [first]
+    assert first in server._idle_timers  # the retry
+
+
+@pytest.mark.asyncio
+async def test_errored_run_that_persisted_the_qa_counts_as_bridged(monkeypatch, in_request, idle):
+    """Only persist_session_qa is fatal; a later stage erroring still leaves the turns
+    in the graph. The conversation is done, and the operator sees the errors."""
+    idle(0.05)
+    fake = _fake_client(
+        improve=AsyncMock(
+            return_value={
+                "status": "errored",
+                "stages": [
+                    {"stage": "persist_session_qa", "status": "completed"},
+                    {"stage": "distill_sessions", "status": "errored", "error": "llm hiccup"},
+                ],
+            }
+        )
+    )
+    monkeypatch.setattr(server, "cognee_client", fake)
+    log = MagicMock()
+    monkeypatch.setattr(server, "logger", log)
+    in_request()
+
+    await server.recall("q")
+    await _drain()
+    await _let_timers_fire(0.3)
+
+    assert _state()["distilled"] is True
+    assert not server._idle_timers
+    assert any("with errors" in call.args[0] for call in log.warning.call_args_list)
+
+
+@pytest.mark.asyncio
+async def test_run_that_did_not_persist_the_qa_leaves_the_conversation_for_later(
+    monkeypatch, in_request, idle
+):
+    """The persist stage was cut off (an LLM budget error before it, say). No timer
+    races the same problem; the next conversation boundary or server start retries."""
+    idle(0.05)
+    fake = _fake_client(
+        improve=AsyncMock(
+            return_value={
+                "status": "errored",
+                "stages": [
+                    {"stage": "feedback_weights", "status": "errored", "error": "402"},
+                    {
+                        "stage": "persist_session_qa",
+                        "status": "skipped",
+                        "reason": "budget_exhausted",
+                    },
+                ],
+            }
+        )
+    )
+    monkeypatch.setattr(server, "cognee_client", fake)
+    in_request()
+
+    await server.recall("q")
+    await _drain()
+    await _let_timers_fire(0.3)
+
+    fake.improve.assert_awaited_once()
+    assert _state()["distilled"] is False
+    assert not server._idle_timers
+
+
+@pytest.mark.asyncio
+async def test_persist_stage_disabled_by_config_is_not_retried(monkeypatch, in_request, idle):
+    """When the operator disabled persist_session_qa, another run would change nothing."""
+    idle(0.05)
+    fake = _fake_client(
+        improve=AsyncMock(
+            return_value={
+                "status": "skipped",
+                "stages": [
+                    {
+                        "stage": "persist_session_qa",
+                        "status": "skipped",
+                        "reason": "disabled_by_config",
+                    }
+                ],
+            }
+        )
+    )
+    monkeypatch.setattr(server, "cognee_client", fake)
+    in_request()
+
+    await server.recall("q")
+    await _drain()
+    await _let_timers_fire(0.3)
+
+    assert _state()["distilled"] is True
+    assert not server._idle_timers
+
+
+@pytest.mark.asyncio
+async def test_improves_of_one_dataset_run_one_at_a_time(monkeypatch, clock, idle):
+    """Several undistilled conversations of one client at server start are all improved,
+    never two at once, so they cannot race for cognee's dataset lock."""
+    idle(100)
+    running = 0
+    peak = 0
+    order = []
+
+    async def improve(**kwargs):
+        nonlocal running, peak
+        running += 1
+        peak = max(peak, running)
+        order.append(kwargs["session_ids"][0])
+        await asyncio.sleep(0.02)
+        running -= 1
+        return _persisted_result()
+
+    fake = _fake_client(improve=AsyncMock(side_effect=improve))
+    monkeypatch.setattr(server, "cognee_client", fake)
+    _state_file().parent.mkdir(parents=True)
+    _state_file().write_text(
+        json.dumps(
+            {
+                "session_id": "claude_desktop_current",
+                "dataset_name": "ds",
+                "last_activity": T0 - 1000,
+                "distilled": False,
+                "pending": [
+                    {
+                        "session_id": "claude_desktop_a",
+                        "dataset_name": "ds",
+                        "last_activity": T0 - 5000,
+                    },
+                    {
+                        "session_id": "claude_desktop_b",
+                        "dataset_name": "ds",
+                        "last_activity": T0 - 4000,
+                    },
+                ],
+            }
+        )
+    )
+
+    server._resume_conversations()
+    await _let_timers_fire(0.2)
+
+    assert sorted(order) == ["claude_desktop_a", "claude_desktop_b", "claude_desktop_current"]
+    assert peak == 1
+    assert _state()["pending"] == [] and _state()["distilled"] is True
+
+
+@pytest.mark.asyncio
+async def test_pending_conversations_are_retried_at_the_next_boundary(
+    monkeypatch, in_request, clock, idle
+):
+    """A conversation whose improve failed waits on the pending list; every later
+    conversation boundary tries it again, not only a server start."""
+    idle(100)
+    fake = _fake_client(improve=AsyncMock(side_effect=RuntimeError("llm down")))
+    monkeypatch.setattr(server, "cognee_client", fake)
+    in_request()
+    first = server._derived_session_id(touch=True)
+    server._mark_turn_captured("claude_desktop", first, "claude_desktop_memory")
+    clock(101)
+    second = server._derived_session_id(touch=True)  # ends `first`; its improve fails
+    await _let_timers_fire()
+    server._mark_turn_captured("claude_desktop", second, "claude_desktop_memory")
+    clock(101)
+    fake.improve = AsyncMock(return_value=_persisted_result())
+
+    third = server._derived_session_id(touch=True)  # ends `second`: both get a try
+    await _let_timers_fire()
+
+    assert len({first, second, third}) == 3
+    improved = sorted(call.kwargs["session_ids"][0] for call in fake.improve.await_args_list)
+    assert improved == sorted([first, second])
+    assert _state()["pending"] == []
+
+
+def test_a_sibling_servers_turn_is_kept_when_it_ended_the_conversation(in_request, clock, idle):
+    """Two server processes of one client (Claude Code starts one per session) share the
+    file. This process still files turns into `first`; the sibling has ended it and
+    started another conversation. The turn is kept for improve, and the next turn here
+    joins the conversation on disk instead of overwriting it."""
+    idle(100)
+    in_request()
+    first = server._derived_session_id(touch=True)
+    sibling = {
+        "session_id": "claude_desktop_other",
+        "dataset_name": "ds",
+        "last_activity": T0,
+        "distilled": False,
+        "pending": [],
+    }
+    _state_file().write_text(json.dumps(sibling))
+
+    server._mark_turn_captured("claude_desktop", first, "ds")
+
+    state = _state()
+    assert state["session_id"] == "claude_desktop_other"
+    assert state["pending"] == [{"session_id": first, "dataset_name": "ds", "last_activity": T0}]
+    assert server._derived_session_id(touch=True) == "claude_desktop_other"
+
+
+@pytest.mark.asyncio
+async def test_http_sessions_are_remembered_for_the_next_server_start(
+    monkeypatch, in_request, clock, idle
+):
+    """An HTTP session is the transport's; the server records it on the client's pending
+    list, so a server restarted inside the session's gap still improves it afterwards."""
+    idle(100)
+    fake = _fake_client()
+    monkeypatch.setattr(server, "cognee_client", fake)
+    monkeypatch.setattr(server, "_agent_scoped_default_dataset", lambda: "chatgpt_memory")
+    in_request(session=_Session("ChatGPT"), headers={"mcp-session-id": "abc"})
+
+    await server.recall("q")
+    await _drain()
+
+    assert _state("chatgpt")["session_id"] is None
+    assert _state("chatgpt")["pending"] == [
+        {"session_id": "chatgpt_abc", "dataset_name": "chatgpt_memory", "last_activity": T0}
+    ]
+
+    server._cancel_idle_timers()  # the server stops ...
+    server._conversations.clear()
+    clock(50)
+    server._resume_conversations()  # ... and starts again inside the gap
+    remaining = server._idle_timers["chatgpt_abc"].when() - asyncio.get_running_loop().time()
+    assert 45 < remaining <= 50
+
+    server._cancel_idle_timers()
+    clock(60)
+    server._resume_conversations()  # or after it
+    await _let_timers_fire()
+
+    fake.improve.assert_awaited_once_with(
+        dataset_name="chatgpt_memory", session_ids=["chatgpt_abc"]
+    )
+    assert _state("chatgpt")["pending"] == []
+
+
+@pytest.mark.asyncio
+async def test_auto_improve_switch_stops_the_idle_improve_but_not_the_capture(
+    monkeypatch, in_request, idle
+):
+    idle(0.05)
+    monkeypatch.setenv("IMPROVE_AUTO_ENABLED", "false")
+    fake = _fake_client()
+    monkeypatch.setattr(server, "cognee_client", fake)
+    in_request()
+
+    await server.recall("q")
+    await _drain()
+    await _let_timers_fire(0.1)
+
+    fake.remember_qa.assert_awaited_once()
+    fake.improve.assert_not_awaited()
+    assert not server._idle_timers
+    assert _state()["distilled"] is False
+
+    monkeypatch.delenv("IMPROVE_AUTO_ENABLED")
+    server._conversations.clear()
+    server._resume_conversations()  # the first start after the switch is back on
+    await _let_timers_fire(0.1)
+
+    fake.improve.assert_awaited_once()
+    assert _state()["distilled"] is True
+
+
+@pytest.mark.asyncio
+async def test_malformed_state_files_neither_abort_startup_nor_capture(
+    monkeypatch, in_request, clock
+):
+    """A hand-edited or foreign file is skipped with a warning and replaced by the next
+    write; the other clients' files are still resumed."""
+    fake = _fake_client()
+    monkeypatch.setattr(server, "cognee_client", fake)
+    _state_file().parent.mkdir(parents=True)
+    _state_file("claude_desktop").write_text(
+        json.dumps({"session_id": "claude_desktop_x", "pending": "oops"})
+    )
+    _state_file("cursor").write_text(
+        json.dumps(
+            {
+                "session_id": "cursor_y",
+                "dataset_name": "ds",
+                "last_activity": "yesterday",
+                "distilled": False,
+            }
+        )
+    )
+    _state_file("zed").write_text(
+        json.dumps(
+            {
+                "session_id": "zed_z",
+                "dataset_name": "ds",
+                "last_activity": T0 - 5000,
+                "distilled": False,
+            }
+        )
+    )
+
+    server._resume_conversations()
+    await _let_timers_fire()
+
+    fake.improve.assert_awaited_once_with(dataset_name="ds", session_ids=["zed_z"])
+    in_request()
+    session_id = server._derived_session_id(touch=True)
+    assert session_id.startswith("claude_desktop_") and session_id != "claude_desktop_x"
+    assert _state()["session_id"] == session_id
+
+
+def test_state_file_failures_quiet_down_and_report_recovery(monkeypatch, tmp_path):
+    blocker = tmp_path / "blocked"
+    blocker.write_text("")  # a file where the state directory should be
+    monkeypatch.setenv("COGNEE_MCP_STATE_DIR", str(blocker))
+    log = MagicMock()
+    monkeypatch.setattr(server, "logger", log)
+    entry = {
+        "session_id": "claude_desktop_s",
+        "dataset_name": "ds",
+        "last_activity": T0,
+        "distilled": False,
+        "pending": [],
+    }
+
+    server._write_conversation("claude_desktop", entry)
+    server._write_conversation("claude_desktop", entry)
+
+    assert (log.warning.call_count, log.debug.call_count) == (1, 1)
+    assert server._read_conversation("claude_desktop") == entry  # the in-memory copy stands in
+
+    monkeypatch.setenv("COGNEE_MCP_STATE_DIR", str(tmp_path / "ok"))
+    server._write_conversation("claude_desktop", entry)
+
+    assert log.info.call_count == 1 and server._state_failures == 0
+    assert _state() == entry

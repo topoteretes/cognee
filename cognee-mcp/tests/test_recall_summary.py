@@ -137,7 +137,9 @@ async def test_diagnostic_failure_does_not_turn_no_results_into_tool_error(monke
 
 @pytest.mark.asyncio
 async def test_mcp_wire_content_stays_text_with_old_body(monkeypatch):
-    fake = SimpleNamespace(recall=AsyncMock(return_value=[{"text": "original answer"}]))
+    fake = SimpleNamespace(
+        recall=AsyncMock(return_value=[{"text": "original answer"}]), remember_qa=AsyncMock()
+    )
     monkeypatch.setattr(server, "cognee_client", fake)
     async with Client(server.mcp) as client:
         response = await client.call_tool("recall", {"query": "question"})
