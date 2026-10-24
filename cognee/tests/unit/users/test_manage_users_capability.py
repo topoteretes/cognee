@@ -143,6 +143,21 @@ async def test_a_plain_member_cannot_create_a_role():
 
 
 @pytest.mark.asyncio
+async def test_creating_a_role_with_a_taken_name_is_a_conflict():
+    """A duplicate name used to escape as a raw IntegrityError, which the API served as a 500."""
+    from cognee.infrastructure.databases.exceptions import EntityAlreadyExistsError
+    from cognee.modules.users.models import Role
+    from cognee.modules.users.roles.methods import create_role
+
+    seed = await _seed()
+
+    with pytest.raises(EntityAlreadyExistsError):
+        await create_role(role_name=f"editors-{seed['role_id']}", owner_id=seed["owner"])
+
+    assert await _count(Role, tenant_id=seed["tenant_id"]) == 1
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("requester", ["owner", "manager"])
 async def test_owner_and_manager_can_assign_a_role(requester):
     from cognee.modules.users.models import UserRole
