@@ -15,7 +15,7 @@ Environment variables (prefix ``IMPROVE_``)::
     IMPROVE_FEEDBACK_ALPHA=0.1         # learning rate for feedback weights, (0, 1]
     IMPROVE_REVIEW_CONFLICTS=false     # review source facts and dated conflicts
     IMPROVE_EFFECTIVE_DATE_KEY=effective_date  # document metadata source-date key
-    IMPROVE_TRACE_WINDOW_STEPS=30      # max agent trace steps per persisted document
+    IMPROVE_TRACE_WINDOW_STEPS=0       # agent trace steps per persisted document; 0 = all pending
     IMPROVE_TRACE_WINDOWS_PER_RUN=0    # max agent trace documents per run; 0 = drain
     IMPROVE_DISTILL_MAX_BATCHES_PER_RUN=0  # curator batches per distill run; 0 = uncapped
 """
@@ -50,9 +50,10 @@ class ImproveConfig(BaseSettings):
     # ``disabled_by_config``. Read as a comma-separated string.
     stages_disabled: Annotated[list[str], NoDecode] = []
     feedback_alpha: float = DEFAULT_FEEDBACK_ALPHA
-    # Agent trace persistence cognifies a session's pending steps in windows of
-    # at most this many steps, so no single LLM call grows with the backlog.
-    trace_window_steps: int = 30
+    # Agent trace persistence cognifies a session's whole pending backlog as one
+    # document (chunking bounds the LLM calls, not the document). A value caps
+    # the steps per document; the rest follows in later passes of the same run.
+    trace_window_steps: int = 0
     # Windows one persist_agent_traces run may cognify. 0 (the default) drains
     # the backlog in one run; with a cap, the rest waits for the next improve().
     trace_windows_per_run: int = 0
@@ -81,9 +82,9 @@ class ImproveConfig(BaseSettings):
 
     @field_validator("trace_window_steps")
     @classmethod
-    def _positive(cls, value: int) -> int:
-        if value < 1:
-            raise ValueError("trace_window_steps must be >= 1")
+    def _window_steps_non_negative(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("trace_window_steps must be >= 0 (0 = all pending steps)")
         return value
 
     @field_validator("trace_windows_per_run")

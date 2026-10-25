@@ -59,14 +59,17 @@ def get_memify_router() -> APIRouter:
         ## Request Parameters
         - **extractionTasks** Optional[List[str]]: Names of built-in Cognee Tasks to execute for graph/data extraction.
               Supported names: extract_subgraph, extract_subgraph_chunks,
-              extract_user_sessions, extract_agent_trace_feedbacks, detect_entity_duplicates.
+              extract_user_sessions, extract_agent_trace_feedbacks, detect_entity_duplicates,
+              extract_code_docs (reads the dataset's code graph itself; no graph is projected for it).
               Unknown names are rejected with 422. Tasks requiring parameters are SDK-only.
         - **enrichmentTasks** Optional[List[str]]: Names of built-in Cognee Tasks to handle enrichment of provided graph/data from extraction tasks.
               Supported names: cognify_session, cognify_agent_trace_feedback, apply_feedback_weights,
-              merge_entity_duplicates, index_data_points.
+              merge_entity_duplicates, index_data_points, cognify_code_doc_chunks, add_data_points,
+              add_code_doc_edges.
         - **data** Optional[List[str]]: The data to ingest. Can be any text data when custom extraction and enrichment tasks are used.
               Data provided here will be forwarded to the first extraction task in the pipeline as input.
-              If no data is provided the whole graph (or subgraph if node_name/node_type is specified) will be forwarded
+              If no data is provided the whole graph (or subgraph if node_name/node_type is specified) will be forwarded,
+              except to an extraction task that reads the graph itself (extract_code_docs), which is seeded with a placeholder.
         - **dataset_name** (Optional[str]): Name of the datasets to memify
         - **dataset_id** (Optional[UUID]): List of UUIDs of an already existing dataset
         - **node_name** (Optional[List[str]]):  Filter graph to specific named entities (for targeted search). Used when no data is provided.

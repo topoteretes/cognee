@@ -6,6 +6,63 @@ This guide lists recommended models, models with known limitations, and troubles
 
 ---
 
+## Self-hosted setup (Ollama / OpenAI-compatible endpoints)
+
+Use these environment variables for local or self-hosted models. Copy them into `.env` (see `.env.template`) or set them before importing `cognee`.
+
+### Ollama (recommended local path)
+
+1. Start Ollama and pull a validated model plus embeddings:
+   ```bash
+   ollama serve
+   ollama pull llama3.1:8b
+   ollama pull nomic-embed-text
+   ```
+2. Configure Cognee:
+   ```bash
+   LLM_PROVIDER=ollama
+   LLM_MODEL=llama3.1:8b
+   LLM_ENDPOINT=http://localhost:11434
+   LLM_API_KEY=ollama
+   LLM_TEMPERATURE=0.0
+
+   EMBEDDING_PROVIDER=ollama
+   EMBEDDING_MODEL=nomic-embed-text
+   EMBEDDING_ENDPOINT=http://localhost:11434/api/embed
+   EMBEDDING_DIMENSIONS=768
+   HUGGINGFACE_TOKENIZER=nomic-ai/nomic-embed-text-v1.5
+   ```
+3. Set `LLM_ENDPOINT` based on `STRUCTURED_OUTPUT_FRAMEWORK` (default is `litellm_native`):
+   - **`litellm_native` (default):** `LLM_ENDPOINT=http://localhost:11434` — LiteLLM appends Ollama's native paths; a `/v1` suffix returns 404.
+   - **`instructor`:** `LLM_ENDPOINT=http://localhost:11434/v1` and `STRUCTURED_OUTPUT_FRAMEWORK=instructor`.
+
+A full runnable script is in [`examples/guides/local_ollama_example.py`](../examples/guides/local_ollama_example.py) (that example uses the OpenAI-compatible `/v1` endpoint — pair it with `STRUCTURED_OUTPUT_FRAMEWORK=instructor`, or change the endpoint to the bare host for the default `litellm_native` framework).
+
+### vLLM or other OpenAI-compatible servers
+
+Point Cognee at any OpenAI-compatible base URL (vLLM, llama.cpp server, LocalAI, etc.):
+
+```bash
+LLM_PROVIDER=openai
+LLM_MODEL=openai/<your-served-model-id>
+LLM_ENDPOINT=http://localhost:8000/v1
+LLM_API_KEY=not-needed   # or whatever the server expects
+LLM_TEMPERATURE=0.0
+
+# Embeddings: keep Ollama / fastembed / a remote embedding API as you prefer
+EMBEDDING_PROVIDER=ollama
+EMBEDDING_MODEL=nomic-embed-text
+EMBEDDING_ENDPOINT=http://localhost:11434/api/embed
+EMBEDDING_DIMENSIONS=768
+```
+
+Notes:
+
+- `LLM_MODEL` must include the provider prefix LiteLLM expects (`openai/...` when `LLM_PROVIDER=openai`).
+- Prefer a model from the recommended matrix below for reliable structured graph extraction.
+- Optional per-stage overrides (`LLM_EXTRACTION_*`, `LLM_SUMMARIZATION_*`, `LLM_QUERY_*`) are documented in `.env.template` if extraction and query should use different endpoints.
+
+
 ## Model Support Matrix
 
 ### 1. Recommended / Validated Models
@@ -35,5 +92,5 @@ If you notice that `cognify()` is running but your final queries yield empty sea
 
 1. **Verify your Model**: Ensure you are using one of the recommended models (e.g., `llama3.1:8b`).
 2. **Check Temperature**: Extraction runs at temperature `0.0` by default on Ollama, for deterministic output formatting. If you set `LLM_TEMPERATURE` to something higher, lower it back to `0.0` in your `.env`.
-3. **Verify API Connection**: Ensure Ollama is running and that `LLM_ENDPOINT` is the bare host, `http://localhost:11434`. The default `litellm_native` framework appends Ollama's own API paths, so the `/v1` form returns a 404. Use `http://localhost:11434/v1` only with `STRUCTURED_OUTPUT_FRAMEWORK="instructor"`.
+3. **Verify API Connection**: Ensure Ollama (or your OpenAI-compatible server) is running and that `LLM_ENDPOINT` matches your `STRUCTURED_OUTPUT_FRAMEWORK` — see [Self-hosted setup](#self-hosted-setup-ollama--openai-compatible-endpoints) above.
 4. **Inspect Logging**: Check the console log outputs. If Cognee catches validation errors during extraction, they will be reported as warnings.

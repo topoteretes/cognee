@@ -27,6 +27,7 @@ REASON_SESSION_MANAGER_UNAVAILABLE = "session_manager_unavailable"
 REASON_AUTO_FEEDBACK_DISABLED = "auto_feedback_disabled"
 REASON_PERSONALIZATION_DISABLED = "personalization_disabled"
 REASON_OPT_IN_DISABLED = "opt_in_disabled"
+REASON_NO_WRITES_SINCE_LAST_IMPROVE = "no_writes_since_last_improve"
 REASON_NO_NEW_SESSION_ENTRIES = "no_new_entries"
 REASON_NO_NEW_TRACE_STEPS = "no_new_trace_steps"
 REASON_EDGE_EVIDENCE_DISABLED = "edge_evidence_disabled"
@@ -208,18 +209,19 @@ class PersistAgentTracesStage(BaseStage):
         if await _watermarks_show_nothing_new(inputs, kind="traces"):
             return _already_completed(self.name, REASON_NO_NEW_TRACE_STEPS)
 
-        # Each pipeline call cognifies the OLDEST trace_window_steps pending steps
-        # of each pending session and advances their watermarks, so a failure
-        # repeats one bounded window, not the whole backlog. The loop drains the
-        # backlog the run started with, unless trace_windows_per_run caps the
-        # run; steps an agent writes meanwhile wait for the next run (the window
-        # is cut at the starting count, persist_up_to), so a live
-        # session cannot keep the run (and the dataset's improve lock) going. A
-        # pass's windows build in one cognify run; a failed build raises with its
-        # cause and ends the run, nothing built, every watermark in place. A pass
-        # takes at most TRACE_SESSIONS_PER_PASS sessions, those with the fewest
-        # windows so far, so the dataset lock is released between passes and
-        # sessions late in the list get their turn before earlier ones drain.
+        # Each pipeline call cognifies every pending step of each pending session
+        # as one document (the OLDEST trace_window_steps of them when that cap is
+        # set) and advances their watermarks, so a long session costs one cognify
+        # run, not one per window. The loop drains the backlog the run started
+        # with, unless trace_windows_per_run caps the run; steps an agent writes
+        # meanwhile wait for the next run (the window is cut at the starting
+        # count, persist_up_to), so a live session cannot keep the run (and the
+        # dataset's improve lock) going. A pass's windows build in one cognify
+        # run; a failed build raises with its cause and ends the run, nothing
+        # built, every watermark in place. A pass takes at most
+        # TRACE_SESSIONS_PER_PASS sessions, those with the fewest windows so far,
+        # so the dataset lock is released between passes and sessions late in
+        # the list get their turn before earlier ones drain.
         config = inputs.config
         max_windows = config.trace_windows_per_run
         sessions = len(inputs.session_ids)
@@ -245,7 +247,7 @@ class PersistAgentTracesStage(BaseStage):
                 dataset=inputs.dataset_id,
                 node_set_name=AGENT_TRACE_FEEDBACKS_NODE_SET,
                 raw_trace_content=False,
-                last_n_steps=config.trace_window_steps,
+                last_n_steps=config.trace_window_steps or None,
                 run_in_background=False,
                 persist_up_to=backlog,
             )
@@ -652,26 +654,55 @@ class LegacyCustomTasksStage(BaseStage):
 
 
 class GlobalContextIndexStage(BaseStage):
-    """Stage 9: build retrieval-ready bucket and root summaries (opt-in)."""
+    """Stage 9: build retrieval-ready bucket and root summaries (opt-in).
+
+    The pipeline's default method counts entities instead of prompting, so this
+    stage runs on the keyless path too. ``already_completed`` when only reads
+    ran on the dataset since its last build, read from ``pipeline_runs``: a
+    build reads the whole dataset.
+    """
 
     name = "global_context_index"
 
     def gate(self, inputs: ImproveRunInputs) -> str | None:
         if not inputs.build_global_context_index:
             return REASON_OPT_IN_DISABLED
-        if not llm_available():
-            return REASON_NO_LLM_CONFIGURED
         return None
 
     async def run(self, inputs: ImproveRunInputs) -> StageResult:
+        from datetime import datetime, timezone
+
+        from cognee.context_global_variables import backend_access_control_enabled
         from cognee.memify_pipelines.global_context_index import global_context_index_pipeline
 
-        result = await global_context_index_pipeline(
-            user=inputs.user,
-            dataset=inputs.dataset_id,
-            run_in_background=False,
-            bucketing_strategy="graph",
-            max_bucket_size=4,
+        from .graph_changes import (
+            GLOBAL_CONTEXT_WATERMARK_KEY,
+            has_dataset_changed_since_last_improve,
+            watermark_stamp,
         )
-        logger.info("improve: global context index updated")
-        return StageResult.from_pipeline_run(self.name, result)
+
+        # Captured before the change check and the build, so a write racing
+        # this run stays visible to the next run's check.
+        started_at = datetime.now(timezone.utc)
+        if await has_dataset_changed_since_last_improve(
+            inputs.dataset_id,
+            GLOBAL_CONTEXT_WATERMARK_KEY,
+            exclude_operation_id=inputs.improve_operation_id,
+            # Without access control datasets share one graph, and relation and
+            # type lines read edges that any of them may write.
+            any_dataset=not backend_access_control_enabled(),
+        ):
+            run_result = await global_context_index_pipeline(
+                user=inputs.user,
+                dataset=inputs.dataset_id,
+                run_in_background=False,
+            )
+            logger.info("improve: global context index updated")
+            result = StageResult.from_pipeline_run(self.name, run_result)
+        else:
+            result = _already_completed(self.name, REASON_NO_WRITES_SINCE_LAST_IMPROVE)
+        if result.status in ("completed", "already_completed"):
+            result._run_info_stamp = watermark_stamp(
+                GLOBAL_CONTEXT_WATERMARK_KEY, result.status, started_at
+            )
+        return result

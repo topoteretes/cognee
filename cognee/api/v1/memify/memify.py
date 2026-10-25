@@ -32,9 +32,29 @@ MEMIFY_DEPRECATION_MESSAGE = (
 # Task names that built triplet embeddings. They no longer exist.
 _REMOVED_TASK_NAMES = frozenset({"get_triplet_datapoints"})
 
+# Extraction tasks that read the dataset's graph through the graph engine
+# themselves and ignore what they are seeded with. run_legacy_memify hands
+# them the ``[{}]`` placeholder the SDK pipelines pass instead of projecting
+# the whole graph into a memory fragment they would discard.
+_GRAPH_READING_EXTRACTION_NAMES = frozenset({"extract_code_docs"})
+
+
+def _reads_the_graph_itself(extraction_tasks: list[Task]) -> bool:
+    return bool(extraction_tasks) and all(
+        getattr(task.executable, "__name__", None) in _GRAPH_READING_EXTRACTION_NAMES
+        for task in extraction_tasks
+    )
+
 
 def _task_factories() -> dict[str, Callable[[], Task]]:
     """Name -> zero-argument factory, for the names the memify API accepted."""
+    from cognee.memify_pipelines.cognify_code_docs import (
+        cognify_chunks_per_batch,
+        cognify_code_doc_chunks,
+    )
+    from cognee.shared.data_models import KnowledgeGraph
+    from cognee.tasks.code_docs.add_code_doc_edges import add_code_doc_edges
+    from cognee.tasks.code_docs.extract_code_docs import extract_code_docs
     from cognee.tasks.memify.apply_feedback_weights import apply_feedback_weights
     from cognee.tasks.memify.cognify_agent_trace_feedback import cognify_agent_trace_feedback
     from cognee.tasks.memify.cognify_session import cognify_session
@@ -46,6 +66,7 @@ def _task_factories() -> dict[str, Callable[[], Task]]:
     from cognee.tasks.memify.extract_subgraph import extract_subgraph
     from cognee.tasks.memify.extract_subgraph_chunks import extract_subgraph_chunks
     from cognee.tasks.memify.extract_user_sessions import extract_user_sessions
+    from cognee.tasks.storage.add_data_points import add_data_points
     from cognee.tasks.storage.index_data_points import index_data_points
 
     return {
@@ -61,6 +82,24 @@ def _task_factories() -> dict[str, Callable[[], Task]]:
         "detect_entity_duplicates": lambda: Task(detect_entity_duplicates),
         "merge_entity_duplicates": lambda: Task(merge_entity_duplicates),
         "index_data_points": lambda: Task(index_data_points, task_config={"batch_size": 100}),
+        # The code docs pipeline (cognee/memify_pipelines/cognify_code_docs.py) by
+        # name: extraction ["extract_code_docs"]; enrichment ["add_data_points",
+        # "add_code_doc_edges"] (embed-only) or ["cognify_code_doc_chunks",
+        # "add_data_points", "add_code_doc_edges"] (cognify's entity extraction
+        # and summaries over the chunks, at cognify's defaults, one cognify
+        # batch at a time).
+        "extract_code_docs": lambda: Task(extract_code_docs, needs_llm=False),
+        "cognify_code_doc_chunks": lambda: Task(
+            cognify_code_doc_chunks,
+            graph_model=KnowledgeGraph,
+            chunks_per_batch=cognify_chunks_per_batch(),
+        ),
+        "add_data_points": lambda: Task(
+            add_data_points,
+            task_config={"batch_size": cognify_chunks_per_batch()},
+            needs_llm=False,
+        ),
+        "add_code_doc_edges": lambda: Task(add_code_doc_edges, needs_llm=False),
     }
 
 
@@ -188,7 +227,9 @@ async def run_legacy_memify(
         )
         return {}
 
-    if not data:
+    if not data and _reads_the_graph_itself(resolved_extraction_tasks):
+        data = [{}]
+    elif not data:
         async with set_database_global_context_variables(
             authorized_dataset.id, authorized_dataset.owner_id
         ):
