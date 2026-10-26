@@ -78,7 +78,8 @@ def merge_existing_row_metadata(
     ``content_metadata``, and ``source_uri`` (where the new content came from) in
     ``_cognee.source_uri``. New content without a ``source_uri`` (an upload, raw
     text) drops the stored one, which described the old content; unchanged
-    content keeps it. Stored metadata or a stored ``_cognee`` that is not a
+    content keeps it. A new row is built the same way, with nothing stored, so
+    every row gets one metadata shape. Stored metadata or a stored ``_cognee`` that is not a
     dict, which older versions could write, counts as empty. Returns
     ``(external_metadata, node_set)`` for the row.
     """
@@ -502,22 +503,8 @@ async def ingest_data(
             data_point = existing_data_map.get(str(data_id))
 
             # TODO: Maybe allow getting of external metadata through ingestion loader?
-            ext_metadata = get_external_metadata_dict(data_item)
-
-            # Merge DataItem.external_metadata if present
-            if item_external_metadata:
-                ext_metadata.update(item_external_metadata)
-
+            content_metadata = get_external_metadata_dict(data_item)
             source_uri = cached.get("source_uri")
-            if source_uri:
-                cognee_metadata = ext_metadata.get("_cognee")
-                if not isinstance(cognee_metadata, dict):
-                    cognee_metadata = {}
-                    ext_metadata["_cognee"] = cognee_metadata
-                cognee_metadata.setdefault("source_uri", source_uri)
-
-            if effective_node_set:
-                ext_metadata["node_set"] = effective_node_set
 
             if data_point is not None:
                 # Content-change detection: reset pipeline_status when content changed
@@ -569,7 +556,7 @@ async def ingest_data(
                 data_point.external_metadata, row_node_set = merge_existing_row_metadata(
                     data_point.external_metadata,
                     data_point.node_set,
-                    get_external_metadata_dict(data_item),
+                    content_metadata,
                     item_external_metadata,
                     requested_node_set,
                     source_uri,
@@ -598,6 +585,16 @@ async def ingest_data(
                 if str(data_id) in dataset_data_map:
                     continue
 
+                # A new row is a re-ingest with nothing stored, so both build
+                # their metadata the same way.
+                ext_metadata, _ = merge_existing_row_metadata(
+                    None,
+                    None,
+                    content_metadata,
+                    item_external_metadata,
+                    effective_node_set,
+                    source_uri,
+                )
                 data_point = Data(
                     id=data_id,
                     dataset_id=dataset.id,

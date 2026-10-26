@@ -157,3 +157,19 @@ def test_stored_node_set_is_read_in_every_shape_a_row_can_hold(stored_node_set, 
     _, node_set = merge_existing_row_metadata({}, stored_node_set, {}, None, None)
 
     assert node_set == expected
+
+
+def test_new_row_and_re_add_resolve_source_uri_the_same_way():
+    """A new row goes through the same helper with nothing stored, so a
+    _cognee.source_uri in the item's own metadata loses to the input's location
+    on both paths."""
+    item_metadata = {"_cognee": {"source_uri": "https://notion.so/p"}}
+
+    new_row, _ = merge_existing_row_metadata(
+        None, None, {}, item_metadata, None, source_uri="file:///tmp/x.md"
+    )
+    re_added, _ = merge_existing_row_metadata(
+        new_row, None, {}, item_metadata, None, source_uri="file:///tmp/x.md"
+    )
+
+    assert new_row == re_added == {"_cognee": {"source_uri": "file:///tmp/x.md"}}
