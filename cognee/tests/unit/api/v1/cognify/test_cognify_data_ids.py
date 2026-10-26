@@ -12,6 +12,7 @@ from uuid import uuid4
 
 import pytest
 
+from cognee.api.v1.serve import state as serve_state
 from cognee.exceptions import CogneeValidationError
 
 cognify_module = importlib.import_module("cognee.api.v1.cognify.cognify")
@@ -129,7 +130,7 @@ async def test_a_misspelled_dataset_name_raises():
 async def test_data_ids_are_refused_while_connected_to_a_remote_instance():
     remote = SimpleNamespace(cognify=AsyncMock())
     with (
-        patch("cognee.api.v1.serve.state.get_remote_client", return_value=remote),
+        patch.object(serve_state, "get_remote_client", return_value=remote),
         pytest.raises(ValueError, match="remote Cognee instance"),
     ):
         await cognify_module.cognify(datasets=["repos"], data_ids=[REPO_A.id])
