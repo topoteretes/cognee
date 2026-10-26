@@ -4,7 +4,7 @@ from collections import deque
 from typing import IO
 
 from rdflib import OWL, RDF, RDFS, Graph, URIRef
-from rdflib.util import guess_format
+from rdflib.util import SUFFIX_FORMAT_MAP, guess_format
 
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.modules.ontology.exceptions import (
@@ -32,6 +32,51 @@ CONTENT_TYPE_FORMATS = {
 }
 
 FALLBACK_FORMATS = ("xml", "turtle", "n3", "nt", "json-ld", "trig", "nquads")
+
+# Every rdflib serialization an uploaded ontology may arrive in. Uploads are
+# admitted when either the filename extension or the MIME type maps onto one
+# of these parser names.
+SUPPORTED_RDF_FORMATS = frozenset(FALLBACK_FORMATS)
+
+
+def normalize_content_type(content_type: str | None) -> str | None:
+    """Strip parameters (e.g. ``; charset=utf-8``) and lowercase a MIME type."""
+    if not content_type:
+        return None
+    return str(content_type).split(";", maxsplit=1)[0].strip().lower()
+
+
+def detect_rdf_format(filename: str | None, content_type: str | None) -> str | None:
+    """Return the rdflib parser name implied by ``filename`` or ``content_type``.
+
+    The extension wins when it is one rdflib knows (``.owl``, ``.ttl``, ...);
+    otherwise the MIME type decides (``text/turtle``, ``application/ld+json``, ...).
+    Returns ``None`` when neither identifies a supported RDF serialization.
+    """
+    if filename:
+        guessed_format = guess_format(str(filename))
+        if guessed_format in SUPPORTED_RDF_FORMATS:
+            return guessed_format
+
+    normalized_content_type = normalize_content_type(content_type)
+    if normalized_content_type:
+        return CONTENT_TYPE_FORMATS.get(normalized_content_type)
+
+    return None
+
+
+def supported_rdf_extensions() -> list[str]:
+    """File extensions (with leading dot) accepted for ontology uploads."""
+    return sorted(
+        f".{suffix}"
+        for suffix, rdf_format in SUFFIX_FORMAT_MAP.items()
+        if rdf_format in SUPPORTED_RDF_FORMATS
+    )
+
+
+def supported_rdf_content_types() -> list[str]:
+    """MIME types accepted for ontology uploads whose filename has no known extension."""
+    return sorted(CONTENT_TYPE_FORMATS)
 
 
 class RDFLibOntologyResolver(BaseOntologyResolver):
@@ -148,11 +193,10 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
         )
 
     def _get_content_type_format(self, file_obj: IO) -> str | None:
-        content_type = getattr(file_obj, "content_type", None)
+        content_type = normalize_content_type(getattr(file_obj, "content_type", None))
         if not content_type:
             return None
 
-        content_type = str(content_type).split(";", maxsplit=1)[0].strip().lower()
         return CONTENT_TYPE_FORMATS.get(content_type)
 
     def _get_candidate_formats(self, file_obj: IO) -> list[str]:
