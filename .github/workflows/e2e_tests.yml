@@ -65,18 +65,8 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
+          keyless-models: "true"
           python-version: '3.11.x'
-
-      # Without secrets the server cognifies with GLiNER, and the test's cognify
-      # request times out after 150s: install the runtime and fetch the model
-      # (~800 MB) before the server starts.
-      - name: Prepare the keyless extractor
-        if: ${{ !inputs.has-secrets }}
-        shell: bash
-        run: |
-          source .github/scripts/keyless_ci_env.sh
-          uv run python -m cognee.tasks.graph.gliner_demo.install
-          uv run python -c "from cognee.tasks.graph.gliner_demo.extractor import load_extractor; load_extractor()"
 
       - name: Run Server Tests
         env:
@@ -338,6 +328,7 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
+          keyless-models: "true"
           python-version: '3.11.x'
 
       - name: Run pipeline error propagation test
@@ -512,6 +503,7 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
+          keyless-models: "true"
           python-version: '3.11.x'
           extra-dependencies: "dlt"
 
@@ -614,6 +606,7 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
+          keyless-models: "true"
           python-version: '3.11.x'
 
       - name: Dependencies already installed
@@ -646,6 +639,7 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
+          keyless-models: "true"
           python-version: '3.11.x'
 
       - name: Run dataset databases handler test
@@ -675,6 +669,7 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
+          keyless-models: "true"
           python-version: '3.11.x'
 
       - name: Run dataset databases deletion test
@@ -704,6 +699,7 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
+          keyless-models: "true"
           python-version: '3.11.x'
 
       - name: Run dataset deletion test
@@ -733,6 +729,7 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
+          keyless-models: "true"
           python-version: '3.11.x'
 
       - name: Dependencies already installed
@@ -796,6 +793,7 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
+          keyless-models: "true"
           python-version: '3.11.x'
 
       - name: Run multi tenancy test
@@ -825,6 +823,7 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
+          keyless-models: "true"
           python-version: '3.11.x'
 
       - name: Run custom data label test
@@ -854,6 +853,7 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
+          keyless-models: "true"
           python-version: '3.11.x'
 
       - name: Run delete persmission test
@@ -1302,6 +1302,7 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
+          keyless-models: "true"
           python-version: '3.11.x'
           extra-dependencies: "postgres redis"
 
@@ -1900,6 +1901,7 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
+          keyless-models: "true"
           python-version: '3.11.x'
 
       - name: Run Test Dataset Queues Test
@@ -1932,6 +1934,7 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
+          keyless-models: "true"
           python-version: '3.11.x'
 
       - name: Run Test Dataset Queue Buildup Test
@@ -1977,6 +1980,7 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
+          keyless-models: "true"
           python-version: '3.11.x'
           extra-dependencies: "redis"
 
@@ -2033,6 +2037,7 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
+          keyless-models: "true"
           python-version: '3.11.x'
 
       - name: Run Conditional Authentication Test
@@ -2068,6 +2073,7 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
+          keyless-models: "true"
           python-version: '3.11.x'
 
       - name: Run Backend Authentication Tests
@@ -2459,6 +2465,7 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
+          keyless-models: "true"
           python-version: '3.11.x'
 
       - name: Dependencies already installed

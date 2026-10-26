@@ -114,6 +114,7 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
+          keyless-models: "true"
           python-version: ${{ inputs.python-version }}
           extra-dependencies: "postgres"
 
@@ -274,6 +275,7 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
+          keyless-models: "true"
           python-version: ${{ inputs.python-version }}
           extra-dependencies: "turso"
 

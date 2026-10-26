@@ -716,6 +716,7 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
+          keyless-models: "true"
           python-version: ${{ matrix.python-version }}
 
       - name: Drop Git for Windows usr\bin from PATH

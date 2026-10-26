@@ -112,6 +112,7 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
+          keyless-models: "true"
           python-version: ${{ inputs.python-version }}
 
       - name: Install Cognee
@@ -150,6 +151,7 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
+          keyless-models: "true"
           python-version: ${{ inputs.python-version }}
 
       - name: Install Cognee

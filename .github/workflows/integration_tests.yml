@@ -84,6 +84,7 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
+          keyless-models: "true"
           python-version: '3.11.x'
           extra-dependencies: "scraping"
 
@@ -121,6 +122,7 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
+          keyless-models: "true"
           python-version: '3.11.x'
           # fastembed so the embedding tokenizer delegation tests can import
           # FastembedEmbeddingEngine.
@@ -198,6 +200,7 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
+          keyless-models: "true"
           python-version: '3.11.x'
           extra-dependencies: "scraping redis"
 
