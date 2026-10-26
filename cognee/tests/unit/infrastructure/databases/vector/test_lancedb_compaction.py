@@ -679,6 +679,21 @@ async def test_pylance_reads_the_tables_lancedb_writes(tmp_path, compaction_sett
     assert dataset.to_table().num_rows == 3
 
 
+@pytest.mark.asyncio
+async def test_open_as_lance_names_the_pylance_fix():
+    from cognee_db_workers.lancedb_compaction import PylanceIncompatibleError, open_as_lance
+
+    class Unreadable:
+        async def to_lance(self):
+            raise ValueError("unsupported manifest version")
+
+    with pytest.raises(PylanceIncompatibleError) as raised:
+        await open_as_lance(Unreadable())
+
+    assert "unsupported manifest version" in str(raised.value)
+    assert "install the pylance release line" in str(raised.value)
+
+
 def _engine_getter(engine):
     async def get_vector_engine_async():
         return engine

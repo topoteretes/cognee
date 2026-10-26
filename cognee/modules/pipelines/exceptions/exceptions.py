@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from fastapi import status
 
 from cognee.exceptions import CogneeSystemError
@@ -72,3 +74,28 @@ class AbandonedPipelineRunError(CogneeSystemError):
         status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR,
     ):
         super().__init__(message, name, status_code)
+
+
+class AfterRunHookError(CogneeSystemError):
+    """The step after a completed pipeline run failed (cognify: the document
+    structure pass or the vector store compaction).
+
+    The runs are recorded as completed and their data is stored; the step runs
+    again on the dataset's next run. ``failures`` holds ``(dataset_id,
+    dataset_name, error)`` for every dataset whose step failed, and
+    ``__cause__`` is the first of those errors.
+    """
+
+    def __init__(self, failures: list[tuple[UUID, str, BaseException]]):
+        from cognee.modules.operations import scrub_error_message
+
+        self.failures = failures
+        described = "; ".join(
+            f"'{dataset_name}' ({type(error).__name__}: {scrub_error_message(error)})"
+            for _dataset_id, dataset_name, error in failures
+        )
+        super().__init__(
+            "The pipeline run completed and its data is stored, but the step after it "
+            f"failed for dataset {described}",
+            "AfterRunHookError",
+        )

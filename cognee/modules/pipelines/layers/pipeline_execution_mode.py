@@ -5,6 +5,7 @@ from typing import Any
 from cognee.modules.data.methods.get_authorized_existing_datasets import (
     get_authorized_existing_datasets,
 )
+from cognee.modules.pipelines.exceptions import AfterRunHookError
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted, PipelineRunErrored
 from cognee.modules.pipelines.queues.pipeline_run_info_queues import push_to_queue
 from cognee.modules.users.methods.get_default_user import get_default_user
@@ -105,8 +106,13 @@ async def run_pipeline_as_background_process(
     async def handle_rest_of_the_run(pipeline_list):
         try:
             for pipeline_run in pipeline_list:
-                async for pipeline_run_info in pipeline_run:
-                    push_to_queue(pipeline_run_info.pipeline_run_id, pipeline_run_info)
+                try:
+                    async for pipeline_run_info in pipeline_run:
+                        push_to_queue(pipeline_run_info.pipeline_run_id, pipeline_run_info)
+                except AfterRunHookError:
+                    # The run completed, so the next datasets still run. Nothing
+                    # awaits this task, so the log is where the failure surfaces.
+                    logger.exception("The step after a completed background pipeline run failed")
         finally:
             await close_runs(pipeline_list)
 
