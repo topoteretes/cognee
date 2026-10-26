@@ -76,13 +76,14 @@ def chunk_by_sentence(
                     word_type_state = word_type
                     break
 
-        if maximum_size and (sentence_size + word_size > maximum_size):
-            cut_type = "sentence_cut" if word_type_state == "word" else word_type_state
-            yield (paragraph_id, sentence, sentence_size, cut_type)
-            sentence = word
-            sentence_size = word_size
+        if maximum_size and sentence and (sentence_size + word_size > maximum_size):
+            # A forced cut always lands mid-sentence; the incoming word is handled below, so a
+            # sentence or paragraph end it carries still closes its sentence.
+            yield (paragraph_id, sentence, sentence_size, "sentence_cut")
+            sentence = ""
+            sentence_size = 0
 
-        elif word_type in ["paragraph_end", "sentence_end"]:
+        if word_type in ["paragraph_end", "sentence_end"]:
             sentence += word
             sentence_size += word_size
             paragraph_id = uuid4() if word_type == "paragraph_end" else paragraph_id

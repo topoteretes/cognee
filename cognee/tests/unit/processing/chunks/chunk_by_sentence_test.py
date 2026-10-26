@@ -1,4 +1,6 @@
+import importlib
 from itertools import product
+from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -7,7 +9,19 @@ from cognee.infrastructure.databases.vector.embeddings import get_embedding_engi
 from cognee.tasks.chunks import chunk_by_sentence
 from cognee.tests.unit.processing.chunks.test_input import INPUT_TEXTS, INPUT_TEXTS_LONGWORDS
 
+# importlib rather than `import ... as`: tasks/chunks/__init__.py re-exports the function
+# under the module's name, so the dotted import resolves to the function.
+_chunk_by_sentence = importlib.import_module("cognee.tasks.chunks.chunk_by_sentence")
+
 maximum_length_vals = [None, 16, 64]
+
+
+def _sentences(text, maximum_size, word_size):
+    with patch.object(_chunk_by_sentence, "get_word_size", side_effect=word_size):
+        return [
+            (sentence, end_type)
+            for _, sentence, _, end_type in chunk_by_sentence(text, maximum_size)
+        ]
 
 
 @pytest.mark.parametrize(
@@ -68,3 +82,28 @@ def test_paragraph_chunk_long_input(input_text, maximum_length):
     assert chunks, "an oversized trailing run must still produce a chunk"
     reconstructed_text = "".join(chunk[1] for chunk in chunks)
     assert reconstructed_text == input_text, "no text may be lost"
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        (
+            "aa bb cc. dd ee.",
+            [("aa bb ", "sentence_cut"), ("cc. ", "sentence_end"), ("dd ee.", "sentence_end")],
+        ),
+        (
+            "aa bb cc.\nDd ee.",
+            [("aa bb ", "sentence_cut"), ("cc.", "paragraph_end"), ("\nDd ee.", "sentence_end")],
+        ),
+    ],
+)
+def test_forced_cut_keeps_the_end_carried_by_the_overflowing_word(text, expected):
+    """The word that overflows the size starts the next sentence; if it ends a sentence or a
+    paragraph, it must still close it instead of merging into the following sentence."""
+    assert _sentences(text, 2, lambda word: 1) == expected
+
+
+def test_oversized_first_word_yields_no_empty_sentence():
+    sentences = _sentences("abcdefgh ij.", 4, len)
+
+    assert sentences == [("abcdefgh ", "sentence_cut"), ("ij.", "sentence_end")]
