@@ -186,6 +186,49 @@ class datasets:
         return await get_dataset_data(dataset.id, order_by="created_at")
 
     @staticmethod
+    async def sparql(
+        dataset_id: UUID,
+        query: str,
+        *,
+        base_iri: str | None = None,
+        limit: int = 1000,
+        user: User | None = None,
+    ) -> dict:
+        """Run a read-only SPARQL query over one dataset's graph.
+
+        Same contract as ``POST /api/v1/datasets/{dataset_id}/sparql``: the
+        dataset graph is materialized into an in-memory RDF store per call and
+        the query runs there. Returns ``{"variables", "rows", "row_count",
+        "truncated"}`` for SELECT, ``{"boolean"}`` for ASK and ``{"turtle"}``
+        for CONSTRUCT/DESCRIBE. Update forms are refused
+        (``SparqlUpdateNotAllowedError``), graphs above
+        ``SPARQL_MAX_GRAPH_NODES`` raise ``SparqlGraphTooLargeError`` and a
+        query over ``SPARQL_QUERY_TIMEOUT_SECONDS`` raises
+        ``SparqlQueryTimeoutError`` (all in ``cognee.modules.graph.rdf``).
+
+        Routes to the remote instance when connected via ``serve()``, like
+        ``list_data``; there the server's limits apply and a refused query
+        surfaces as ``RuntimeError`` carrying the HTTP status.
+        """
+        from cognee.api.v1.serve.state import get_remote_client
+        from cognee.modules.graph.rdf.sparql import query_dataset_sparql
+
+        client = get_remote_client()
+        if client is not None:
+            return await client.sparql(dataset_id, query, base_iri=base_iri, limit=limit)
+
+        if not user:
+            user = await get_default_user()
+
+        dataset = await get_authorized_dataset(user, dataset_id)
+        if not dataset:
+            raise UnauthorizedDataAccessError(f"Dataset {dataset_id} not accessible.")
+
+        return await query_dataset_sparql(
+            dataset.id, dataset.owner_id, query, base_iri=base_iri, limit=limit
+        )
+
+    @staticmethod
     async def find_data(
         dataset_id: UUID,
         *,
