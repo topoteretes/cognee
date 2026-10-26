@@ -4,8 +4,11 @@ import asyncio
 import importlib
 import os
 import sys
+import threading
 import time
-from unittest.mock import AsyncMock
+from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -249,7 +252,7 @@ async def test_the_monitor_pauses_in_proportion_to_a_scan(monkeypatch, tmp_path)
         scans.append(1)
         time.sleep(0.05)
 
-    monkeypatch.setattr(resources, "check_repository_disk", slow_scan)
+    monkeypatch.setattr(resources, "_check_repository_size", slow_scan)
 
     async def operation():
         await asyncio.sleep(0.4)
@@ -378,3 +381,127 @@ async def test_git_filesystem_exhaustion_is_resource_error(monkeypatch, stderr):
         await resolve_repo._exec_git(["clone", "https://example.com/repo.git"])
     assert raised.value.status_code == 507
     assert raised.value.limit_bytes is None
+
+
+@pytest.mark.asyncio
+async def test_free_space_monitor_interrupts_while_size_scan_is_blocked(tmp_path, monkeypatch):
+    """A size scan that is stuck must not delay the free-space check that stops the run."""
+    resources = importlib.import_module("cognee.tasks.code_graph.repo_resources")
+    monkeypatch.setenv("COGNEE_REPOS_MAX_BYTES", "1000000")
+    monkeypatch.setenv("COGNEE_REPOS_MIN_FREE_BYTES", "1024")
+    scanning = threading.Event()
+    release_scan = threading.Event()
+    scan_finished = threading.Event()
+    cleaned = asyncio.Event()
+    free = 2048
+    calls = 0
+
+    def scan(roots, config):
+        nonlocal calls
+        calls += 1
+        if calls > 1:
+            scanning.set()
+            try:
+                assert release_scan.wait(5), "test did not release the size scan"
+            finally:
+                scan_finished.set()
+        return 0
+
+    monkeypatch.setattr(resources, "_check_repository_size", scan)
+    # resources.shutil is the shutil module: this patch is process-wide while the test runs.
+    monkeypatch.setattr(resources.shutil, "disk_usage", lambda _: SimpleNamespace(free=free))
+
+    async def operation():
+        nonlocal free
+        assert await asyncio.to_thread(scanning.wait, 5)
+        free = 512
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cleaned.set()
+
+    try:
+        with pytest.raises(RepositoryResourceError, match="insufficient free disk") as raised:
+            await asyncio.wait_for(with_repository_disk_budget(operation, tmp_path), timeout=3)
+        assert raised.value.free_bytes == 512
+        assert raised.value.status_code == 507
+        assert cleaned.is_set()
+        # The scan only reads, so teardown does not wait for it (a cancelled writer is
+        # waited for, see resolve_repo): it is still blocked here and drained below.
+        assert not scan_finished.is_set()
+    finally:
+        release_scan.set()
+        assert await asyncio.to_thread(scan_finished.wait, 5)
+
+
+def test_free_space_is_checked_before_scanning_size(tmp_path, monkeypatch):
+    """Running out of space is reported first, without paying for a size scan."""
+    resources = importlib.import_module("cognee.tasks.code_graph.repo_resources")
+    scan = Mock()
+    monkeypatch.setattr(resources, "disk_usage_bytes", scan)
+    monkeypatch.setattr(resources.shutil, "disk_usage", lambda _: SimpleNamespace(free=512))
+    with pytest.raises(RepositoryResourceError, match="insufficient free disk"):
+        resources.check_repository_disk(
+            [tmp_path], RepositoryDiskConfig(max_bytes=8192, min_free_bytes=1024)
+        )
+    scan.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_both_monitors_failing_do_not_cancel_cleanup_twice(tmp_path, monkeypatch):
+    """The second monitor failing while the owner cleans up must not cancel it again."""
+    resources = importlib.import_module("cognee.tasks.code_graph.repo_resources")
+    monkeypatch.setenv("COGNEE_REPOS_MAX_BYTES", "8192")
+    monkeypatch.setenv("COGNEE_REPOS_MIN_FREE_BYTES", "1024")
+    writing = threading.Event()
+    cleaned = asyncio.Event()
+
+    def free_space(roots, config):
+        if writing.is_set():
+            raise RepositoryResourceError("test limit reached", 1024, free_bytes=512)
+
+    def size(roots, config):
+        if writing.is_set():
+            # Fails while the owner is cleaning up after the free-space failure.
+            time.sleep(0.05)
+            raise RepositoryResourceError("test limit reached", 1024, free_bytes=512)
+
+    monkeypatch.setattr(resources, "_check_repository_size", size)
+    monkeypatch.setattr(resources, "_check_repository_free_space", free_space)
+
+    async def operation():
+        writing.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            await asyncio.sleep(0.1)
+            cleaned.set()
+
+    with pytest.raises(RepositoryResourceError, match="test limit reached"):
+        await asyncio.wait_for(with_repository_disk_budget(operation, tmp_path), timeout=5)
+    assert cleaned.is_set()
+
+
+@pytest.mark.asyncio
+async def test_free_space_is_checked_even_when_every_executor_thread_is_busy(tmp_path, monkeypatch):
+    """The free-space check runs on the event loop, so blocked threads cannot delay it."""
+    resources = importlib.import_module("cognee.tasks.code_graph.repo_resources")
+    monkeypatch.setenv("COGNEE_REPOS_MIN_FREE_BYTES", "1024")
+    free = 2048
+    monkeypatch.setattr(resources.shutil, "disk_usage", lambda _: SimpleNamespace(free=free))
+    release = threading.Event()
+    pool = ThreadPoolExecutor(max_workers=1)
+
+    async def operation():
+        nonlocal free
+        asyncio.get_running_loop().set_default_executor(pool)
+        pool.submit(release.wait, 5)  # the only worker is now busy
+        free = 512
+        await asyncio.Event().wait()
+
+    try:
+        with pytest.raises(RepositoryResourceError, match="insufficient free disk"):
+            await asyncio.wait_for(with_repository_disk_budget(operation, tmp_path), timeout=3)
+    finally:
+        release.set()
+        pool.shutdown(wait=True)

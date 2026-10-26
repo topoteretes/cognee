@@ -125,8 +125,13 @@ def repository_storage_roots(clone_root: Path) -> list[Path]:
     ]
 
 
-def check_repository_disk(roots: list[Path], config: RepositoryDiskConfig) -> int | None:
-    """Raise when a configured limit is reached; return the bytes used, if measured."""
+def _check_repository_free_space(roots: list[Path], config: RepositoryDiskConfig) -> None:
+    for root in roots:
+        _check_free_space(root, config)
+
+
+def _check_repository_size(roots: list[Path], config: RepositoryDiskConfig) -> int | None:
+    """Scan managed storage and raise when its configured budget is reached."""
     used = None
     if config.max_bytes is not None:
         used = sum(disk_usage_bytes(root) for root in roots)
@@ -134,9 +139,13 @@ def check_repository_disk(roots: list[Path], config: RepositoryDiskConfig) -> in
             raise RepositoryResourceError(
                 "repository storage budget exceeded", config.max_bytes, used_bytes=used
             )
-    for root in roots:
-        _check_free_space(root, config)
     return used
+
+
+def check_repository_disk(roots: list[Path], config: RepositoryDiskConfig) -> int | None:
+    """Check free space first, then return managed bytes used when configured."""
+    _check_repository_free_space(roots, config)
+    return _check_repository_size(roots, config)
 
 
 class DocumentCopyBudget:
@@ -190,8 +199,9 @@ class DocumentCopyBudget:
 # Tasks that already run under a budget: a nested budget must not start a second monitor.
 _ACTIVE_BUDGETS: WeakSet = WeakSet()
 
-# The monitor scans, then waits 10 scan times (at least 0.1 s), so it uses about a tenth of
-# one thread however large the storage is.
+# Size scans pause for 10 scan times (at least 0.1 s), using about a tenth of one thread.
+# Free-space checks run every 0.1 s, on the event loop: they are a few syscalls, and a thread
+# would queue behind blocked scans in the shared executor.
 _MONITOR_MIN_PAUSE_SECONDS = 0.1
 _MONITOR_PAUSE_PER_SCAN = 10
 
@@ -228,21 +238,30 @@ async def _monitored_repository_disk_budget(clone_root: Path):
     _ACTIVE_BUDGETS.add(owner)
     failure = []
 
-    async def monitor():
+    async def monitor(check, *, scan: bool):
         loop = asyncio.get_running_loop()
         while True:
             started = loop.time()
             try:
-                await asyncio.to_thread(check_repository_disk, roots, config)
+                if scan:
+                    await asyncio.to_thread(check, roots, config)
+                else:
+                    check(roots, config)
             except (RepositoryResourceError, OSError) as error:
-                failure.append(error)
-                owner.cancel()
+                if not failure:
+                    failure.append(error)
+                    owner.cancel()
                 return
-            await asyncio.sleep(
-                max(_MONITOR_MIN_PAUSE_SECONDS, _MONITOR_PAUSE_PER_SCAN * (loop.time() - started))
-            )
+            pause = _MONITOR_MIN_PAUSE_SECONDS
+            if scan:
+                pause = max(pause, _MONITOR_PAUSE_PER_SCAN * (loop.time() - started))
+            await asyncio.sleep(pause)
 
-    watcher = asyncio.create_task(monitor())
+    watchers = []
+    if config.min_free_bytes is not None:
+        watchers.append(asyncio.create_task(monitor(_check_repository_free_space, scan=False)))
+    if config.max_bytes is not None:
+        watchers.append(asyncio.create_task(monitor(_check_repository_size, scan=True)))
     try:
         yield
         await asyncio.to_thread(check_repository_disk, roots, config)
@@ -255,5 +274,6 @@ async def _monitored_repository_disk_budget(clone_root: Path):
         raise
     finally:
         _ACTIVE_BUDGETS.discard(owner)
-        watcher.cancel()
-        await finish_cleanup(asyncio.gather(watcher, return_exceptions=True))
+        for watcher in watchers:
+            watcher.cancel()
+        await finish_cleanup(asyncio.gather(*watchers, return_exceptions=True))

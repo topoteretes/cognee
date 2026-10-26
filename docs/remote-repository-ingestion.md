@@ -62,8 +62,10 @@ The HTTP API returns 507 for synchronous failures; background pipeline runs carr
 `RepositoryResourceError` in `error_class`. A caller receiving pipeline results
 must inspect failed runs before reporting ingestion success.
 
-The guard polls while processes run (it pauses ten scan times between scans, at
-least 0.1 s) and waits for owned process cleanup on failure. Polling can overshoot, and unrelated writers can consume free space.
+The guard polls while processes run and waits for owned process cleanup on
+failure. Free space is checked every 0.1 s; the size scan pauses ten scan times
+between scans (at least 0.1 s). Polling can overshoot, and unrelated writers can
+consume free space.
 Configure budgets below the deployment's hard quota with enough headroom. This
 is not a quota reservation system or automatic cache eviction.
 
