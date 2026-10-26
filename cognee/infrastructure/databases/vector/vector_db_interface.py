@@ -297,6 +297,15 @@ class VectorDBInterface(Protocol):
         raise NotImplementedError
 
     # Optional methods that may be implemented by adapters
+    async def compact(self, collection_name: str | None = None):
+        """
+        Reclaim storage the adapter's own writes left behind (merge small
+        fragments, prune superseded versions). Called once at the end of every
+        cognify run; must be cheap when there is nothing to do, bounded in
+        work, and must never raise. Default implementation is a no-op.
+        """
+        return
+
     async def run_migrations(self):
         """
         Run adapter-specific vector storage migrations.

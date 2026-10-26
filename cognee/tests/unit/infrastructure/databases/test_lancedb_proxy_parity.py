@@ -48,18 +48,61 @@ def _methods_called_on(variable_names: set) -> set:
     return called
 
 
+# Table methods the adapter calls only on its local-mode branch (guarded by
+# ``not self._subprocess_mode`` in ``_compact_collection``): in subprocess mode
+# the compaction crosses the boundary as ``compact_fragments`` /
+# ``prune_versions`` and the worker calls these on the real table.
+_LOCAL_ONLY_TABLE_METHODS = {"checkout_latest"}
+
+
 def test_proxy_forwards_every_table_method_the_adapter_calls():
     # The adapter binds an open table to one of these before using it.
     called = _methods_called_on({"collection", "table"})
     assert called, "parsed no table calls — the adapter's naming changed"
 
-    missing = {name for name in called if not hasattr(RemoteLanceDBTable, name)}
+    missing = {
+        name
+        for name in called
+        if name not in _LOCAL_ONLY_TABLE_METHODS and not hasattr(RemoteLanceDBTable, name)
+    }
 
     assert not missing, (
         f"LanceDBAdapter calls {sorted(missing)} on a table, but RemoteLanceDBTable "
         "does not forward it. Subprocess mode is the default, so this raises "
         "AttributeError in normal operation while passing in local mode."
     )
+
+
+def test_optimize_mirrors_lancedb_signature():
+    """``optimize`` is lancedb's method, so the proxy takes exactly its arguments.
+
+    Code calling ``optimize(cleanup_older_than=...)`` must behave the same in
+    local and subprocess mode; cognee's own compaction has separate methods.
+    """
+    import inspect
+
+    lancedb_table = pytest.importorskip("lancedb.table")
+
+    def parameters(method):
+        return [
+            (p.name, p.kind, p.default)
+            for p in inspect.signature(method).parameters.values()
+            if p.name != "self"
+        ]
+
+    assert parameters(RemoteLanceDBTable.optimize) == parameters(lancedb_table.AsyncTable.optimize)
+
+
+def test_compaction_ops_are_wired_end_to_end():
+    from cognee_db_workers.lancedb_protocol import (
+        OP_TABLE_COMPACT_FRAGMENTS,
+        OP_TABLE_OPTIMIZE,
+        OP_TABLE_PRUNE_VERSIONS,
+    )
+    from cognee_db_workers.lancedb_worker import DISPATCH
+
+    for op in (OP_TABLE_OPTIMIZE, OP_TABLE_COMPACT_FRAGMENTS, OP_TABLE_PRUNE_VERSIONS):
+        assert op in DISPATCH
 
 
 def test_schema_is_forwarded():

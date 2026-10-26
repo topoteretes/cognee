@@ -16,6 +16,7 @@ import pytest
 import pytest_asyncio
 
 import cognee
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingResult
 from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
     LiteLLMEmbeddingEngine,
 )
@@ -40,7 +41,7 @@ class _Req:
     def __init__(self, result):
         self._result = result
 
-    def execute(self):
+    def execute(self, num_retries=0):
         return self._result
 
 
@@ -58,6 +59,8 @@ class _FakeFiles:
         return _Req({"files": files})
 
     def get(self, fileId, fields, supportsAllDrives):
+        if fields == "id":  # resolving the scope folder, as Drive does for the "root" alias
+            return _Req({"id": fileId})
         return _Req(self._service.file_by_id[fileId])
 
 
@@ -88,6 +91,9 @@ class _FakeDriveService:
 
     def changes(self):
         return _FakeChanges(self)
+
+    def close(self):
+        pass
 
 
 def _file_meta(file_id):
@@ -146,7 +152,7 @@ async def clean_environment(tmp_path, monkeypatch):
     monkeypatch.setattr(LLMGateway, "acreate_structured_output", _mock_structured_output)
 
     async def _mock_embed_text(self, text):
-        return [[0.0] * self.get_vector_size() for _ in text]
+        return EmbeddingResult(vectors=[[0.0] * self.get_vector_size() for _ in text], tokens=0)
 
     monkeypatch.setattr(LiteLLMEmbeddingEngine, "embed_text", _mock_embed_text)
 

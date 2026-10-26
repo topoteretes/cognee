@@ -475,7 +475,11 @@ async def build_brains_summary_payload(user: User | None = None) -> dict:
           ingested data, sorted; empty for data ingested without node sets.
         - ``node_count``: nodes in the dataset's graph as of its latest cognify
           run (see ``get_datasets_graph_counts``) — the whole graph, not only
-          entity nodes, and 0 for a dataset never cognified.
+          entity nodes, and 0 for a dataset never cognified. A 0 also stands in
+          for a graph that could not be read, and this payload carries nothing
+          to tell the two apart; ``GET /datasets/graph-summary`` exposes
+          ``computedAt``, which is null in the degraded case, when a caller
+          needs to distinguish them.
         - ``node_set_colors``: node set colors from the same
           ``build_node_set_colors`` rule ``/brains`` uses. Same rule and same
           input node sets give the same colors, but the two endpoints do not
@@ -517,13 +521,10 @@ async def build_brains_summary_payload(user: User | None = None) -> dict:
 
 
 def _as_naive_utc(value: datetime) -> datetime:
-    """Normalize to match the write side.
+    """Normalize cursors and event times to UTC for comparison.
 
-    ``SessionQAEntry.time`` is always ``datetime.utcnow().isoformat()`` —
-    naive, UTC. A ``since`` sent with a timezone offset compares fine against
-    another aware datetime, but not against those naive strings once parsed
-    back, so it is converted here rather than left to fail the comparison
-    below with a raised ``TypeError`` at an unexpected place.
+    Events may contain legacy naive UTC timestamps or timezone-aware ones.
+    Normalize both sides without changing the timestamp returned as the cursor.
     """
     if value.tzinfo is not None:
         return value.astimezone(timezone.utc).replace(tzinfo=None)
@@ -535,7 +536,7 @@ def _event_time(event: dict[str, Any]) -> datetime | None:
     if not raw:
         return None
     try:
-        return datetime.fromisoformat(raw)
+        return _as_naive_utc(datetime.fromisoformat(raw))
     except ValueError:
         return None
 

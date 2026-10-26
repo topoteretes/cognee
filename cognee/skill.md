@@ -89,7 +89,7 @@ When helping with Cognee:
 
 ## When to drop to the low-level operations
 
-`add()`, `cognify()`, `search()` and `memify()` still ship; the memory API calls them. Reach for
+`add()`, `cognify()` and `search()` still ship; the memory API calls them. Reach for
 them only when `remember`/`recall` cannot express the job:
 
 - `cognify(datasets=["a", "b"])` or `datasets=None` processes several datasets at once;
@@ -102,7 +102,6 @@ them only when `remember`/`recall` cannot express the job:
 - `prune.prune_system(metadata=True)` also drops the relational DB (users, ACLs, dataset
   registry); `forget()` never touches those. Use prune only for full test teardown.
 
-`memify()` and `improve()` are the same enrichment pipeline; recommend `improve()`.
 `cognee.delete()` is deprecated in favour of `forget()`. Full comparison of the two query
 functions: `docs/recall-vs-search.md`.
 
@@ -135,7 +134,7 @@ Useful options:
 await cognee.remember(
     "...",
     dataset_name="research",
-    self_improvement=False,  # skip the improve() stage (faster, no triplet index)
+    self_improvement=False,  # skip the improve() stage (faster)
     run_in_background=True,  # return immediately; poll the pipeline status
     chunk_size=1024,
     custom_prompt="Extract companies, products, and partnerships.",
@@ -184,8 +183,9 @@ results = await cognee.recall(
 ### Enrich an existing graph
 
 Use `improve()` when the user wants to improve or extend an already-built graph without
-re-ingesting. Without `session_ids` it extracts and indexes triplet embeddings; with them it
-also applies feedback weights, persists session Q&A, and distills session lessons into the graph.
+re-ingesting. Without `session_ids` it runs only the graph-wide stages (opt-in conflict review
+and global context indexing); with them it also applies feedback weights, persists session Q&A,
+and distills session lessons into the graph.
 
 ```python
 await cognee.improve(dataset="research")
@@ -348,7 +348,6 @@ Completion types (an LLM writes the answer):
 - `GRAPH_COMPLETION_DECOMPOSITION`: splits the question into sub-queries first
 - `GRAPH_SUMMARY_COMPLETION`: graph context + pre-computed summaries
 - `RAG_COMPLETION`: traditional RAG over document chunks
-- `TRIPLET_COMPLETION`: subject-predicate-object style graph Q&A
 - `TEMPORAL`: time-aware graph search
 - `AGENTIC_COMPLETION`: multi-step loop that can load `skills` and call `tools`
 
@@ -362,8 +361,8 @@ Retrieval-only types (no LLM call):
 
 Other:
 
-- `CYPHER`: raw Cypher, on by default (`ALLOW_CYPHER_QUERY=false` disables it; not on the Postgres demo graph)
-- `NATURAL_LANGUAGE`: natural language to graph query
+- `CYPHER`: raw Cypher, off by default (`ALLOW_CYPHER_QUERY=true` enables it; not on the Postgres demo graph)
+- `NATURAL_LANGUAGE`: natural language to graph query, off by default (same `ALLOW_CYPHER_QUERY=true` flag)
 - `CODING_RULES`: retrieve stored coding rules
 - `GRAPH_REPORT`: graph insight report (hubs, cross-source links, suggested questions)
 - `FEELING_LUCKY`: let Cognee choose
