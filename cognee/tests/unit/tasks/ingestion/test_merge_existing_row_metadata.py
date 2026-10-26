@@ -91,12 +91,31 @@ def test_source_uri_refreshes_over_the_stored_one():
     assert stored["_cognee"] == {"source_uri": "file:///old.pdf"}, "stored copy not mutated"
 
 
-def test_no_new_source_uri_keeps_the_stored_one():
+def test_unchanged_content_without_source_uri_keeps_the_stored_one():
     stored = {"_cognee": {"source_uri": "file:///old.pdf"}}
 
     metadata, _ = merge_existing_row_metadata(stored, None, {}, None, None)
 
     assert metadata == {"_cognee": {"source_uri": "file:///old.pdf"}}
+
+
+def test_changed_content_without_source_uri_drops_the_stored_one():
+    """An upload or raw text replacing a file has no location of its own; the old
+    file's location no longer describes the row's content."""
+    stored = {"source": "audit", "_cognee": {"source_uri": "file:///old.pdf"}}
+
+    metadata, _ = merge_existing_row_metadata(stored, None, {}, None, None, content_changed=True)
+
+    assert metadata == {"source": "audit"}
+    assert stored["_cognee"] == {"source_uri": "file:///old.pdf"}, "stored copy not mutated"
+
+
+def test_changed_content_drops_only_source_uri_from_the_cognee_block():
+    stored = {"_cognee": {"source_uri": "file:///old.pdf", "other": 1}}
+
+    metadata, _ = merge_existing_row_metadata(stored, None, {}, None, None, content_changed=True)
+
+    assert metadata == {"_cognee": {"other": 1}}
 
 
 @pytest.mark.parametrize("stored", ["legacy text", ["a", "b"], 3])
@@ -128,6 +147,8 @@ def test_stored_cognee_block_that_is_not_a_dict_is_replaced():
         (json.dumps([]), None),
         ("", None),
         (json.dumps({"a": 1}), None),
+        (json.dumps([" ns1 ", "ns2"]), ["ns1", "ns2"]),
+        (("ns1", "ns2"), ["ns1", "ns2"]),
     ],
 )
 def test_stored_node_set_is_read_in_every_shape_a_row_can_hold(stored_node_set, expected):

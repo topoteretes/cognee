@@ -20,7 +20,11 @@ from cognee.modules.data.methods import (
     resolve_data_id,
 )
 from cognee.modules.data.models import Data
-from cognee.modules.engine.models.node_set import NodeSet, validate_node_set_names
+from cognee.modules.engine.models.node_set import (
+    NodeSet,
+    parse_node_set_names,
+    validate_node_set_names,
+)
 from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.modules.ingestion.identify_many import identify_many
 from cognee.modules.users.methods import get_default_user
@@ -54,26 +58,6 @@ def _display_file_name(file_metadata: dict | None, actual_file_path: str) -> str
     return f"{name}.{extension}" if extension else name
 
 
-def _stored_node_set_names(stored: Any) -> list[str] | None:
-    """The node set names a ``Data.node_set`` value holds.
-
-    Ingestion writes ``json.dumps(list)`` into the JSON column, so the value is
-    normally a string holding a list; a row written by anything else may hold
-    the list itself or a bare name (as ``visualize._parse_node_set`` also reads it).
-    """
-    if isinstance(stored, str):
-        try:
-            stored = json.loads(stored)
-        except ValueError:
-            return [stored.strip()] if stored.strip() else None
-    if isinstance(stored, str):
-        stored = [stored]
-    if not isinstance(stored, list):
-        return None
-    names = [name for name in stored if isinstance(name, str) and name.strip()]
-    return names or None
-
-
 def merge_existing_row_metadata(
     stored_metadata: dict[str, Any] | None,
     stored_node_set: str | None,
@@ -81,6 +65,7 @@ def merge_existing_row_metadata(
     item_external_metadata: dict[str, Any] | None,
     node_set: list[str] | None,
     source_uri: str | None = None,
+    content_changed: bool = False,
 ) -> tuple[dict[str, Any], list[str] | None]:
     """Resolve the metadata and node set a re-ingested row ends up with.
 
@@ -91,7 +76,9 @@ def merge_existing_row_metadata(
     ``node_set`` (``None`` keeps, ``[]`` clears, a list replaces). Content-derived
     metadata always refreshes on top, since it describes the new content:
     ``content_metadata``, and ``source_uri`` (where the new content came from) in
-    ``_cognee.source_uri``. Stored metadata or a stored ``_cognee`` that is not a
+    ``_cognee.source_uri``. New content without a ``source_uri`` (an upload, raw
+    text) drops the stored one, which described the old content; unchanged
+    content keeps it. Stored metadata or a stored ``_cognee`` that is not a
     dict, which older versions could write, counts as empty. Returns
     ``(external_metadata, node_set)`` for the row.
     """
@@ -101,14 +88,20 @@ def merge_existing_row_metadata(
     if item_external_metadata:
         metadata.update(item_external_metadata)
 
-    if source_uri:
+    if source_uri or content_changed:
         cognee_metadata = metadata.get("_cognee")
         cognee_metadata = dict(cognee_metadata) if isinstance(cognee_metadata, dict) else {}
-        cognee_metadata["source_uri"] = source_uri
-        metadata["_cognee"] = cognee_metadata
+        if source_uri:
+            cognee_metadata["source_uri"] = source_uri
+        else:
+            cognee_metadata.pop("source_uri", None)
+        if cognee_metadata:
+            metadata["_cognee"] = cognee_metadata
+        else:
+            metadata.pop("_cognee", None)
 
     if node_set is None:
-        resolved_node_set = _stored_node_set_names(stored_node_set)
+        resolved_node_set = parse_node_set_names(stored_node_set) or None
     else:
         resolved_node_set = node_set or None
 
@@ -580,6 +573,7 @@ async def ingest_data(
                     item_external_metadata,
                     requested_node_set,
                     source_uri,
+                    content_changed,
                 )
                 # System metadata is the route stamp of the CONTENT (a DLT
                 # manifest, a code file), so it follows the content: new content

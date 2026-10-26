@@ -267,7 +267,7 @@ The stages below are the Low level operations these call underneath.
 #### ADD: Data Ingestion
 `add()` → `resolve_data_directories` → `ingest_data` → `save_data_item_to_storage` → Create Dataset + Data records in relational DB
 
-Re-adding a document that already exists (same `data_id`, through `add()`, `remember()` or `update()`'s full rebuild) follows the PATCH rule described under UPDATE below: `node_set` and a `DataItem`'s `label`, `external_metadata` and `node_set` keep their stored values when not passed, clear on an explicit empty value, and are replaced by a value. Content-derived metadata, including `_cognee.source_uri`, always refreshes. Connector document rows state their full node sets, so a row with none reports `[]` and clears the stored ones on re-sync.
+Re-adding a document that already exists (same `data_id`, through `add()`, `remember()` or `update()`'s full rebuild) follows the PATCH rule described under UPDATE below: `node_set` and a `DataItem`'s `label`, `external_metadata` and `node_set` keep their stored values when not passed, clear on an explicit empty value, and are replaced by a value. Content-derived metadata always refreshes; `_cognee.source_uri` takes the new content's location, and new content without one (an upload, raw text) drops the old one. Connector document rows state their full node sets, so a row with none reports `[]` and clears the stored ones on re-sync.
 
 Key files: `cognee/api/v1/add/add.py`, `cognee/tasks/ingestion/ingest_data.py`
 
