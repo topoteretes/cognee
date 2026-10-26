@@ -329,6 +329,8 @@ def _git_env(env: dict | None = None) -> dict:
         + _git_config_entries(extra)
         + list(_NO_STORED_CREDENTIALS_CONFIG)
         + [("filter.lfs.process", ""), ("filter.lfs.smudge", ""), ("filter.lfs.required", "false")]
+        # Git for Windows must support long pack/promisor paths in hashed clone directories.
+        + [("core.longpaths", "true")]
     )
     merged = {
         name: value
@@ -446,23 +448,45 @@ _HELD_CLONE_LOCKS: WeakKeyDictionary = WeakKeyDictionary()
 
 
 @asynccontextmanager
-async def _clone_lock(target: Path):
+async def _clone_lock(target: Path, *, clones_dir: Path | None = None):
     """Serialize clone writers and readers across processes, reentrant in one task.
 
-    Child tasks must acquire the file lock themselves. Lock files remain in place
-    so another caller cannot lock a replacement inode while an old one is held.
+    Child tasks must acquire the file lock themselves. POSIX lock files remain
+    in place so another caller cannot lock a replacement inode; on Windows the
+    filelock backend manages deletion when releasing its lock.
+
+    ``target`` must be a clone directly inside the clones root (``clones_dir``, else
+    ``COGNEE_REPOS_DIR`` read now, so moving that directory invalidates manifests that
+    point into the old one) and not a symlink; this is the only place that checks it.
     """
     from filelock import FileLock, Timeout
 
-    target = Path(target).resolve()
+    root_path = os.path.realpath(clones_dir if clones_dir is not None else default_clones_dir())
+    root = Path(root_path)
+    # Cached clones are direct children of the storage root. Reject escapes and symlink
+    # aliases before checking or creating lock files.
+    resolved = os.path.realpath(target)
+    if not (resolved == root_path or resolved.startswith(root_path.rstrip(os.sep) + os.sep)) or (
+        resolved != root_path and resolved != os.path.join(root_path, os.path.basename(target))
+    ):
+        raise CodeRepositoryError(message="The repository clone path is outside its storage root.")
+    target = Path(resolved)
     task = asyncio.current_task()
-    held = _HELD_CLONE_LOCKS.setdefault(task, set())
-    if target in held:
+    held = _HELD_CLONE_LOCKS.get(task)
+    if held is not None and target in held:
         yield
         return
-    lock_dir = target.parent / ".locks"
-    lock_dir.mkdir(parents=True, exist_ok=True)
-    lock = FileLock(str(lock_dir / f"{target.name}.lock"), thread_local=False)
+    lock_root = Path(os.path.realpath(root / ".locks"))
+    if lock_root == root or not lock_root.is_relative_to(root):
+        raise CodeRepositoryError(
+            message="The repository lock directory is outside its storage root."
+        )
+    lock_root.mkdir(parents=True, exist_ok=True)
+    lock_path = Path(os.path.realpath(lock_root / f"{target.name}.lock"))
+    if lock_path.parent != lock_root:
+        raise CodeRepositoryError(message="The repository lock file is outside its lock directory.")
+    lock = FileLock(str(lock_path), thread_local=False)
+    held = _HELD_CLONE_LOCKS.setdefault(task, set())
     try:
         waited_since = time.monotonic()
         while True:
@@ -474,8 +498,7 @@ async def _clone_lock(target: Path):
                 if time.monotonic() - waited_since >= _CLONE_LOCK_LOG_SECONDS:
                     waited_since = time.monotonic()
                     logger.warning(
-                        "Still waiting for the clone lock of %s: another run is using it.",
-                        target.name,
+                        "Still waiting for a repository clone lock: another run is using it."
                     )
         held.add(target)
         try:
@@ -644,8 +667,6 @@ async def _resolve_repo_source(spec, clones_dir, credentials, branch, include_do
         git_env.update(_noninteractive_env(await _configured_ssh_command()))
     base = Path(clones_dir) if clones_dir is not None else default_clones_dir()
     target = clone_dir(clean_url, branch, base)
-    if target.is_symlink() or not target.resolve().is_relative_to(base.resolve()):
-        raise CodeRepositoryError(message="The repository clone path is outside its storage root.")
 
     def scrub(text: str) -> str:
         text = text.replace(url, clean_url)
@@ -662,7 +683,7 @@ async def _resolve_repo_source(spec, clones_dir, credentials, branch, include_do
     git_env.update(
         {"TMPDIR": str(base.resolve()), "TMP": str(base.resolve()), "TEMP": str(base.resolve())}
     )
-    async with _clone_lock(target):
+    async with _clone_lock(target, clones_dir=base):
         for leftover in target.parent.glob(f".{target.name}.tmp-*"):
             await finish_cleanup(asyncio.to_thread(_remove_clone, leftover))
         replace_full_clone = False

@@ -13,7 +13,7 @@ runner = importlib.import_module("cognee.tasks.code_graph.process")
 @pytest.mark.asyncio
 async def test_run_process_returns_output():
     result = await runner.run_process([sys.executable, "-c", "print('ok')"], timeout=5)
-    assert result == (0, b"ok\n", b"")
+    assert result == (0, b"ok" + os.linesep.encode(), b"")
 
 
 @pytest.mark.asyncio

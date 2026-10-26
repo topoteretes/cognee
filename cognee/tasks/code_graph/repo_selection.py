@@ -183,10 +183,22 @@ def check_selected_content(repo: Path, paths: list[str]) -> None:
             )
 
 
+def _snapshot_path(repo: Path, *, pending: bool = False) -> Path:
+    """Keep snapshot metadata inside the checkout, including through symlinks."""
+    from cognee.tasks.code_graph.resolve_repo import CodeRepositoryError
+
+    root = os.path.realpath(repo)
+    filename = SNAPSHOT_FILE + (".tmp" if pending else "")
+    resolved = os.path.realpath(os.path.join(root, ".git", filename))
+    if not resolved.startswith(root.rstrip(os.sep) + os.sep):
+        raise CodeRepositoryError(message="The repository snapshot is outside its checkout.")
+    return Path(resolved)
+
+
 def read_repository_snapshot(repo: Path) -> dict | None:
     from cognee.tasks.code_graph.resolve_repo import CodeRepositoryError
 
-    path = repo / ".git" / SNAPSHOT_FILE
+    path = _snapshot_path(repo)
     if not path.is_file():
         return None
     try:
@@ -203,8 +215,8 @@ def read_repository_snapshot(repo: Path) -> dict | None:
 
 def write_repository_snapshot(repo: Path, snapshot: dict) -> None:
     """Replace the record whole, so an interrupted write never leaves a truncated one."""
-    path = repo / ".git" / SNAPSHOT_FILE
-    pending = path.with_name(path.name + ".tmp")
+    path = _snapshot_path(repo)
+    pending = _snapshot_path(repo, pending=True)
     pending.write_text(json.dumps(snapshot), encoding="utf-8")
     os.replace(pending, path)
 

@@ -1,17 +1,13 @@
 import asyncio
+from uuid import uuid4
 
-import cognee
-from cognee.infrastructure.databases.relational import create_db_and_tables
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
 from cognee.modules.pipelines.tasks.task import Task
-from cognee.modules.users.methods import get_default_user
+from cognee.modules.users.models import User
 
 
 async def run_and_check_tasks():
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
-
     # task_1 and task_3 accept ctx: PipelineContext explicitly.
     # task_2 does not -- the pipeline skips injection for it.
     def task_1(num, ctx: PipelineContext = None):
@@ -23,8 +19,7 @@ async def run_and_check_tasks():
     def task_3(num, ctx: PipelineContext = None):
         return num ** len(ctx.pipeline_name)
 
-    await create_db_and_tables()
-    user = await get_default_user()
+    user = User(id=uuid4(), tenant_id=None)
 
     # pipeline_name = "testing" has length 7
     ctx = PipelineContext(pipeline_name="testing")
@@ -42,8 +37,8 @@ async def run_and_check_tasks():
 
     # task_1: 5 + 7 = 12, task_2: 12 * 2 = 24, task_3: 24 ^ 7 = 4586471424
     final_result = 4586471424
-    async for result in pipeline:
-        assert result == final_result
+    results = [result async for result in pipeline]
+    assert results == [final_result]
 
 
 def test_run_tasks():

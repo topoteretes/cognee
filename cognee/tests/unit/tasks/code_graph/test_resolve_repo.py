@@ -354,7 +354,7 @@ async def test_git_never_prompts(monkeypatch):
         )
     assert seen["GIT_SSH_COMMAND"] == "ssh -i ~/.ssh/deploy_key"
     # The caller's config entries come first; the no-stored-credentials ones follow.
-    assert (seen["GIT_CONFIG_COUNT"], seen["GIT_CONFIG_KEY_0"]) == ("6", "a.b")
+    assert (seen["GIT_CONFIG_COUNT"], seen["GIT_CONFIG_KEY_0"]) == ("7", "a.b")
 
 
 def test_a_www_prefix_never_makes_a_second_identity():

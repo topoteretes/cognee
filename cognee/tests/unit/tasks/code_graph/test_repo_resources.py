@@ -39,6 +39,8 @@ def _isolated_budget(monkeypatch, tmp_path):
     )
     monkeypatch.delenv("COGNEE_REPOS_MAX_BYTES", raising=False)
     monkeypatch.delenv("COGNEE_REPOS_MIN_FREE_BYTES", raising=False)
+    resolver = importlib.import_module("cognee.tasks.code_graph.resolve_repo")
+    monkeypatch.setattr(resolver, "default_clones_dir", lambda: tmp_path)
 
 
 @pytest.mark.parametrize("value", ["0", "-1", "abc", "1GB"])
@@ -207,6 +209,33 @@ def test_a_selected_path_missing_on_disk_is_a_repository_error(tmp_path):
     check_selected_content(tmp_path, ["present.py"])
     with pytest.raises(CodeRepositoryError, match="was not written"):
         check_selected_content(tmp_path, ["present.py", "missing/file.py"])
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Creating symlinks requires Windows privileges")
+@pytest.mark.parametrize("link", ["directory", "snapshot", "pending"])
+def test_snapshot_metadata_cannot_escape_the_checkout(tmp_path, link):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    outside = tmp_path / "repo-outside"
+    outside.mkdir()
+    original = '{"commit": "private"}'
+    secret = outside / SNAPSHOT_FILE
+    secret.write_text(original)
+    git_dir = repo / ".git"
+    if link == "directory":
+        git_dir.symlink_to(outside, target_is_directory=True)
+    else:
+        git_dir.mkdir()
+        name = SNAPSHOT_FILE + (".tmp" if link == "pending" else "")
+        (git_dir / name).symlink_to(secret)
+
+    if link != "pending":
+        with pytest.raises(CodeRepositoryError, match="outside its checkout"):
+            read_repository_snapshot(repo)
+    with pytest.raises(CodeRepositoryError, match="outside its checkout"):
+        write_repository_snapshot(repo, {"commit": "replacement"})
+    assert secret.read_text() == original
+    assert list(outside.iterdir()) == [secret]
 
 
 @pytest.mark.asyncio

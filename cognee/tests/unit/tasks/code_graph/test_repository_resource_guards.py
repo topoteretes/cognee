@@ -38,6 +38,7 @@ def _isolated_storage(monkeypatch, tmp_path):
     )
     monkeypatch.delenv("COGNEE_REPOS_MAX_BYTES", raising=False)
     monkeypatch.delenv("COGNEE_REPOS_MIN_FREE_BYTES", raising=False)
+    monkeypatch.setattr(resolve_module, "default_clones_dir", lambda: tmp_path)
 
 
 # ---- the budget
@@ -109,7 +110,8 @@ async def test_growth_during_the_run_stops_it_and_leaves_the_caller_uncancelled(
 
     # Stopped while it was still growing, not noticed only when it finished.
     assert len(list(clones.iterdir())) < 30
-    assert asyncio.current_task().cancelling() == 0
+    if sys.version_info >= (3, 11):
+        assert asyncio.current_task().cancelling() == 0
     await asyncio.sleep(0)  # an outer await still works
 
 

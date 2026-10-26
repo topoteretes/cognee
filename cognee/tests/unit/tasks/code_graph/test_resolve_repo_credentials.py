@@ -373,6 +373,7 @@ def test_git_runs_without_stored_credentials_or_askpass(monkeypatch):
         ("filter.lfs.process", ""),
         ("filter.lfs.smudge", ""),
         ("filter.lfs.required", "false"),
+        ("core.longpaths", "true"),
     ]
     assert env["GIT_CONFIG_VALUE_2"].startswith("Authorization: Basic ")
     assert (env["GIT_ASKPASS"], env["SSH_ASKPASS"], env["GIT_TERMINAL_PROMPT"]) == ("", "", "0")

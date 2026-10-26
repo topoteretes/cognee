@@ -260,7 +260,7 @@ async def test_disk_monitor_does_not_move_clone_into_another_task(origin, clones
     target = resolve_module.clone_dir(_URL, clones_dir=clones)
     # add() owns this lock before the resolver starts. The budget monitor must
     # retain that task ownership instead of waiting on its parent's lock.
-    async with resolve_module._clone_lock(target):
+    async with resolve_module._clone_lock(target, clones_dir=clones):
         assert await resolve_module.resolve_repo_source(_URL, clones_dir=clones) == target
     assert (target / "BRANCH.txt").read_text().strip() == "main-1"
 
@@ -336,7 +336,8 @@ async def test_cancelled_sparse_writer_finishes_before_clone_cleanup(
     finally:
         release.set()
         await asyncio.gather(task, return_exceptions=True)
-        await asyncio.to_thread(finished.wait, 10)
+        if entered.is_set():
+            assert finished.is_set()
     monkeypatch.setattr(selection, "write_sparse_patterns", original)
     assert await resolve_module.resolve_repo_source(_URL, clones_dir=clones) == target
     assert (target / "BRANCH.txt").read_text().strip() == "main-1"
@@ -369,7 +370,7 @@ async def test_cancelled_full_cache_retirement_publishes_valid_replacement(
     reader_entered = asyncio.Event()
 
     async def read_after_publication():
-        async with resolve_module._clone_lock(target):
+        async with resolve_module._clone_lock(target, clones_dir=clones):
             reader_entered.set()
             assert read_repository_snapshot(target)["commit"] == git_output(
                 target, "rev-parse", "HEAD"

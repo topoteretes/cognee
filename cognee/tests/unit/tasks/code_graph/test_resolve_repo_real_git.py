@@ -32,8 +32,13 @@ _IDENTITY = {
 
 
 def _git(cwd, *args):
+    # Fixture setup also writes pack files below long pytest paths on Windows.
     subprocess.run(
-        ["git", *args], cwd=cwd, env={**os.environ, **_IDENTITY}, check=True, capture_output=True
+        ["git", "-c", "core.longpaths=true", *args],
+        cwd=cwd,
+        env={**os.environ, **_IDENTITY},
+        check=True,
+        capture_output=True,
     )
 
 
@@ -134,6 +139,21 @@ def origin(tmp_path, monkeypatch):
 @pytest.fixture
 def clones(tmp_path):
     return tmp_path / "clones"
+
+
+@pytest.mark.asyncio
+async def test_git_enables_long_paths_over_inherited_configuration(tmp_path):
+    code, stdout, _stderr = await resolve_module._exec_git(
+        ["config", "--get", "core.longpaths"],
+        cwd=tmp_path,
+        env={
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "core.longpaths",
+            "GIT_CONFIG_VALUE_0": "false",
+        },
+    )
+    assert code == 0
+    assert stdout.strip() == "true"
 
 
 async def _resolve(clones, branch=None):
