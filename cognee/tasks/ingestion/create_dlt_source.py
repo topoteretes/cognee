@@ -126,8 +126,10 @@ def create_dlt_source_from_csv(csv_path: str, source_name: str | None = None):
     parent_dir = os.path.dirname(os.path.abspath(csv_path))
     filename = os.path.basename(csv_path)
 
+    # A plain local path: dlt builds the file URL itself. A hand-built
+    # f"file://{parent_dir}" is "file://C:\..." on Windows and matches no files.
     source = filesystem(
-        bucket_url=f"file://{parent_dir}",
+        bucket_url=parent_dir,
         file_glob=filename,
     ) | read_csv(sep=detect_csv_delimiter(csv_path))
     # A piped read_csv resource is otherwise always named "_read_csv", and the
