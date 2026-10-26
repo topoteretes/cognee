@@ -151,3 +151,20 @@ async def test_a_remote_instance_refuses_options_it_would_drop(monkeypatch, conf
         await add_module.add(_REPO, codegraph_config=config)
 
     client.add.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_the_repository_is_resolved_under_the_dataset_lock(executor):
+    from cognee.infrastructure.locks.dataset_lock import held_datasets
+
+    held = []
+
+    async def resolve(data, **kwargs):
+        held.append(executor.dataset.id in held_datasets.get())
+        return [_manifest()]
+
+    executor.resolver.side_effect = resolve
+
+    await add_module.add(_REPO, codegraph_config={"repo_credentials": "tok"})
+
+    assert held == [True]

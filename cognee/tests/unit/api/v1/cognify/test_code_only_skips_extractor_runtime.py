@@ -181,3 +181,17 @@ async def test_the_llm_extractor_never_reads_the_rows_to_look_for_a_runtime():
 def test_code_only_classification_uses_selected_rows_only():
     assert cognify_module._pending_items_are_code_only([CODE_REPO], DATASET.id, True)
     assert not cognify_module._pending_items_are_code_only([CODE_REPO, _item()], DATASET.id, True)
+
+
+@pytest.mark.asyncio
+async def test_the_gliner_preflight_reads_only_the_scoped_rows():
+    row = _item()
+    read_rows = AsyncMock(return_value=[row])
+    runtime = AsyncMock()
+
+    await _cognify([row], runtime=runtime, read_rows=read_rows, data_ids=[row.id])
+
+    # The preflight looked at the selected row (a document, so it asked for the
+    # runtime) and never read the dataset whole.
+    assert runtime.await_count == 2  # the preflight, then the run under the lock
+    assert all(call.kwargs.get("data_ids") for call in read_rows.await_args_list)

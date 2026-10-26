@@ -496,10 +496,6 @@ async def cognify(
 
         await run_migrations_and_block(datasets, user)
 
-        # A run whose pending items all take the code routes runs enola only: it
-        # never calls the graph extractor or the LLM, so it neither installs nor
-        # requires the GLiNER runtime (a keyless code-only remember must not pull
-        # in torch) and skips the provider probes it has no use for (SDK-795).
         scoped_dataset = scoped_data = None
         if data_ids is not None:
             scoped_dataset, scoped_data = await _resolve_scoped_data(datasets, user, data_ids)
@@ -653,17 +649,18 @@ async def cognify(
             )
 
         if resolved_extractor == GLINER_DEMO_EXTRACTOR:
-            # A code-only run needs no GLiNER runtime and no provider probe, which is
+            # A run whose pending items all take the code routes runs enola only: it never
+            # calls the graph extractor or the LLM, so a keyless code-only run must not
+            # pull in torch or probe providers (SDK-795). A code-only run needs no GLiNER
+            # runtime and no provider probe, which is
             # only known from the rows, so both are decided under the dataset lock.
             run_environment = {
                 "skip_connection_test": True,
                 "before_run": prepare_cognify_run,
             }
         else:
-            # run_pipeline derives needs_llm itself for a task list, but this call
-            # passes a resolver — so pass the union over every wired route: the
-            # tasks that can actually run are the authority on whether the LLM
-            # connection probe is needed. The probes run before the dataset lock.
+            # The union over every wired route, as above. The probes run before the
+            # dataset lock.
             run_environment = {
                 "needs_llm": pipeline_needs_llm(
                     task for route_tasks in tasks_by_route.values() for task in route_tasks

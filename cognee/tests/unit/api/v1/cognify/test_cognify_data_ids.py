@@ -123,3 +123,15 @@ async def test_a_misspelled_dataset_name_raises():
             authorized=AsyncMock(side_effect=strict_lookup),
             data_ids=[REPO_A.id],
         )
+
+
+@pytest.mark.asyncio
+async def test_data_ids_are_refused_while_connected_to_a_remote_instance():
+    remote = SimpleNamespace(cognify=AsyncMock())
+    with (
+        patch("cognee.api.v1.serve.state.get_remote_client", return_value=remote),
+        pytest.raises(ValueError, match="remote Cognee instance"),
+    ):
+        await cognify_module.cognify(datasets=["repos"], data_ids=[REPO_A.id])
+
+    remote.cognify.assert_not_awaited()

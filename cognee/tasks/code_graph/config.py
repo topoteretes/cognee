@@ -1,7 +1,7 @@
 """Per-call options for the code graph routes, passed as ``codegraph_config``.
 
-The keys and their meaning are those of ``codegraph_config`` in the stacked
-SDK-793 work, so that work extends this type instead of replacing it.
+Only the listed keys are accepted; anything else is refused by
+``validate_codegraph_config``.
 """
 
 from typing import TypedDict, cast
@@ -11,9 +11,9 @@ class CodeGraphConfig(TypedDict, total=False):
     """Options for code repositories, read by ``add()``."""
 
     # Also ingest the repository's document files (README, docs, ...) as
-    # ordinary documents, alongside its code graph. On by default, as a
-    # directory add has always done. False indexes the code graph only -- what
-    # the GitHub sync wants: no LLM extraction or embeddings for a repo's prose.
+    # ordinary documents, alongside its code graph. On by default. False
+    # indexes the code graph only: no LLM extraction or embeddings for a
+    # repo's prose.
     include_documents: bool
     # Token for cloning private GitHub/GitLab repository URLs (e.g. a GitHub App
     # installation token). It reaches git only through environment config,
