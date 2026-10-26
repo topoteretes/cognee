@@ -7,7 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi import Path as PathParam
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from cognee import __version__ as cognee_version
 from cognee import datasets
@@ -24,6 +24,12 @@ from cognee.modules.data.methods import (
 )
 from cognee.modules.data.methods.create_authorized_dataset import create_authorized_dataset
 from cognee.modules.graph.methods import get_formatted_graph_data
+from cognee.modules.graph_models import (
+    GraphSchemaMergeError,
+    GraphSchemaPatch,
+    format_validation_error,
+    merge_graph_schema,
+)
 from cognee.modules.pipelines.models import PipelineRunStatus
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
@@ -152,6 +158,55 @@ class DatasetCreationPayload(InDTO):
 class DatasetSchemaPayloadDTO(InDTO):
     graph_schema: dict[str, Any] | None = None
     custom_prompt: str | None = None
+
+
+async def _read_dataset_schema(dataset_id: UUID) -> dict[str, Any]:
+    """The GET /schema body: stored graph schema and custom prompt (both None if unset)."""
+    from sqlalchemy import select
+
+    from cognee.modules.data.models import DatasetConfiguration
+
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        config = await session.scalar(
+            select(DatasetConfiguration).where(DatasetConfiguration.dataset_id == dataset_id)
+        )
+    if not config:
+        return {"graph_schema": None, "custom_prompt": None}
+    return {
+        "graph_schema": config.graph_schema,
+        "custom_prompt": config.custom_prompt,
+    }
+
+
+async def _store_dataset_schema(
+    dataset_id: UUID,
+    graph_schema: dict[str, Any] | None,
+    custom_prompt: str | None,
+) -> None:
+    """Upsert the dataset configuration row; a None value leaves that column unchanged."""
+    from sqlalchemy import select
+
+    from cognee.modules.data.models import DatasetConfiguration
+
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        config = await session.scalar(
+            select(DatasetConfiguration).where(DatasetConfiguration.dataset_id == dataset_id)
+        )
+        if config:
+            if graph_schema is not None:
+                config.graph_schema = graph_schema
+            if custom_prompt is not None:
+                config.custom_prompt = custom_prompt
+        else:
+            config = DatasetConfiguration(
+                dataset_id=dataset_id,
+                graph_schema=graph_schema,
+                custom_prompt=custom_prompt,
+            )
+            session.add(config)
+        await session.commit()
 
 
 def get_datasets_router() -> APIRouter:
@@ -961,25 +1016,11 @@ def get_datasets_router() -> APIRouter:
         ## Path Parameters
         - **dataset_id** (UUID): UUID of the dataset (from GET /api/v1/datasets).
         """
-        from sqlalchemy import select
-
-        from cognee.modules.data.models import DatasetConfiguration
-
         dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
         if not dataset:
             return JSONResponse(status_code=404, content={"error": "Dataset not found"})
 
-        db_engine = get_relational_engine()
-        async with db_engine.get_async_session() as session:
-            config = await session.scalar(
-                select(DatasetConfiguration).where(DatasetConfiguration.dataset_id == dataset_id)
-            )
-        if not config:
-            return {"graph_schema": None, "custom_prompt": None}
-        return {
-            "graph_schema": config.graph_schema,
-            "custom_prompt": config.custom_prompt,
-        }
+        return await _read_dataset_schema(dataset_id)
 
     @router.put("/{dataset_id}/schema", response_model=dict)
     async def update_dataset_schema(
@@ -998,33 +1039,71 @@ def get_datasets_router() -> APIRouter:
         - **graphSchema** (Optional[Dict[str, Any]]): JSON graph schema to store for the
           dataset; omitting it leaves any existing schema unchanged.
         """
-        from sqlalchemy import select
-
-        from cognee.modules.data.models import DatasetConfiguration
-
         dataset = await get_authorized_existing_datasets([dataset_id], "write", user)
         if not dataset:
             return JSONResponse(status_code=404, content={"error": "Dataset not found"})
 
-        db_engine = get_relational_engine()
-        async with db_engine.get_async_session() as session:
-            config = await session.scalar(
-                select(DatasetConfiguration).where(DatasetConfiguration.dataset_id == dataset_id)
-            )
-            if config:
-                if payload.graph_schema is not None:
-                    config.graph_schema = payload.graph_schema
-                if payload.custom_prompt is not None:
-                    config.custom_prompt = payload.custom_prompt
-            else:
-                config = DatasetConfiguration(
-                    dataset_id=dataset_id,
-                    graph_schema=payload.graph_schema,
-                    custom_prompt=payload.custom_prompt,
-                )
-                session.add(config)
-            await session.commit()
+        await _store_dataset_schema(dataset_id, payload.graph_schema, payload.custom_prompt)
         return {"status": "ok"}
+
+    @router.patch(
+        "/{dataset_id}/schema",
+        response_model=dict,
+        responses={404: {"model": ErrorResponseDTO}, 422: {"model": ErrorResponseDTO}},
+    )
+    async def patch_dataset_schema(
+        dataset_id: UUID,
+        payload: GraphSchemaPatch,
+        user: User = Depends(get_authenticated_user),
+    ):
+        """Merge a partial graph-model spec into the dataset's stored graph schema.
+
+        Where PUT replaces the schema wholesale, PATCH upserts by name: each entity
+        in **entities** is added if new, otherwise its fields are upserted by field
+        name (a matching field is replaced whole, whatever its kind) and its scalars
+        (description, primaryLabelField, indexFields, identityFields) overwritten only
+        when sent. Removals apply after the upserts; **options** is shallow-merged.
+        With no stored schema the patch is applied to an empty spec, so it behaves
+        like PUT. Keys may be snake_case or camelCase.
+
+        ## Path Parameters
+        - **dataset_id** (UUID): UUID of the dataset (from GET /api/v1/datasets).
+
+        ## Request Parameters
+        - **entities** (List[EntitySpec]): Entities to add or update, keyed by name.
+        - **removeEntities** (List[str]): Entity names to drop after the upserts.
+        - **removeFields** (List[{entity, field}]): Fields to drop after the upserts.
+        - **options** (Optional[Dict]): Graph options to shallow-merge (e.g. autoTypeNodes).
+        - **root** (Optional[str]): Replace the root entity when sent.
+
+        ## Response
+        The merged document, in the shape GET /schema returns.
+
+        ## Error Codes
+        - **404 Not Found**: Dataset not found or no write permission.
+        - **422 Unprocessable Content**: The merged schema is not a valid graph-model
+          spec, a removed entity is still targeted by a relation, or a removal names an
+          entity or field that is not in the schema. The message names the item.
+        """
+        dataset = await get_authorized_existing_datasets([dataset_id], "write", user)
+        if not dataset:
+            return JSONResponse(status_code=404, content={"error": "Dataset not found"})
+
+        stored = await _read_dataset_schema(dataset_id)
+        try:
+            merged = merge_graph_schema(stored["graph_schema"], payload)
+        except GraphSchemaMergeError as error:
+            return JSONResponse(status_code=422, content={"error": str(error)})
+        except ValidationError as error:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": f"Merged graph schema is invalid: {format_validation_error(error)}"
+                },
+            )
+
+        await _store_dataset_schema(dataset_id, merged, None)
+        return await _read_dataset_schema(dataset_id)
 
     @router.get(
         "/{dataset_id}/processing-status",

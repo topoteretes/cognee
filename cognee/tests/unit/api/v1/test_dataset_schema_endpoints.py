@@ -181,3 +181,294 @@ def test_sample_text_exact_boundary():
 
     text = "X" * 100
     assert _sample_text(text, max_chars=100) == text
+
+
+# ── PATCH /datasets/{id}/schema ──────────────────────────────────────────────
+
+
+STORED_SCHEMA = {
+    "options": {"autoTypeNodes": False},
+    "entities": [
+        {
+            "name": "Person",
+            "description": "A person.",
+            "fields": [
+                {"kind": "primitive", "name": "age", "primitiveType": "number"},
+                {
+                    "kind": "relation",
+                    "name": "works_at",
+                    "relation": {"targetEntityName": "Organization", "cardinality": "one"},
+                },
+            ],
+        },
+        {"name": "Organization", "fields": []},
+    ],
+}
+
+
+class _SchemaStore:
+    """In-memory stand-in for the dataset_configurations table.
+
+    The router reads and writes through two module-level helpers shared by GET,
+    PUT and PATCH; faking those keeps the handlers under test while the SQL
+    stays identical to what PUT already ran.
+    """
+
+    def __init__(self):
+        self.rows: dict = {}
+        self.writes: list = []
+
+    async def read(self, dataset_id):
+        row = self.rows.get(dataset_id, {"graph_schema": None, "custom_prompt": None})
+        return dict(row)
+
+    async def store(self, dataset_id, graph_schema, custom_prompt):
+        self.writes.append((dataset_id, graph_schema, custom_prompt))
+        row = self.rows.setdefault(dataset_id, {"graph_schema": None, "custom_prompt": None})
+        if graph_schema is not None:
+            row["graph_schema"] = graph_schema
+        if custom_prompt is not None:
+            row["custom_prompt"] = custom_prompt
+
+
+@pytest.fixture
+def schema_api(monkeypatch):
+    """TestClient over the datasets router with auth and storage faked.
+
+    Returns ``(client, dataset_id, store)``. ``store.authorized`` controls what
+    the permission check answers: a list of datasets, ``[]`` (not found) or an
+    exception instance to raise.
+    """
+    from importlib import import_module
+    from types import SimpleNamespace
+
+    from fastapi import FastAPI
+    from fastapi.responses import JSONResponse
+    from fastapi.testclient import TestClient
+
+    from cognee.exceptions import CogneeApiError
+
+    router_module = import_module("cognee.api.v1.datasets.routers.get_datasets_router")
+    dataset_id = uuid4()
+    store = _SchemaStore()
+    store.authorized = [SimpleNamespace(id=dataset_id)]
+    store.permissions_asked = []
+
+    async def fake_authorized_datasets(dataset_ids, permission, _user):
+        store.permissions_asked.append(permission)
+        if isinstance(store.authorized, Exception):
+            raise store.authorized
+        return store.authorized
+
+    monkeypatch.setattr(router_module, "get_authorized_existing_datasets", fake_authorized_datasets)
+    monkeypatch.setattr(router_module, "_read_dataset_schema", store.read)
+    monkeypatch.setattr(router_module, "_store_dataset_schema", store.store)
+
+    app = FastAPI()
+    app.include_router(router_module.get_datasets_router(), prefix="/api/v1/datasets")
+    app.dependency_overrides[router_module.get_authenticated_user] = lambda: SimpleNamespace(
+        id=uuid4(), tenant_id=None
+    )
+
+    # Same mapping cognee/api/client.py applies: a CogneeApiError's own status code.
+    @app.exception_handler(CogneeApiError)
+    async def _cognee_error(_request, exc: CogneeApiError):
+        return JSONResponse(status_code=exc.status_code, content={"error": exc.message})
+
+    return TestClient(app), dataset_id, store
+
+
+def _entity(document, name):
+    return next(item for item in document["entities"] if item["name"] == name)
+
+
+def _field_names(document, name):
+    return [item["name"] for item in _entity(document, name)["fields"]]
+
+
+def test_patch_schema_adds_entity(schema_api):
+    client, dataset_id, store = schema_api
+    store.rows[dataset_id] = {"graph_schema": STORED_SCHEMA, "custom_prompt": "Extract."}
+
+    response = client.patch(
+        f"/api/v1/datasets/{dataset_id}/schema",
+        json={"entities": [{"name": "City", "fields": [{"kind": "primitive", "name": "zip"}]}]},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert [item["name"] for item in body["graph_schema"]["entities"]] == [
+        "Person",
+        "Organization",
+        "City",
+    ]
+    assert body["custom_prompt"] == "Extract."
+    assert store.permissions_asked == ["write"]
+
+
+def test_patch_schema_adds_field_to_existing_entity(schema_api):
+    client, dataset_id, store = schema_api
+    store.rows[dataset_id] = {"graph_schema": STORED_SCHEMA, "custom_prompt": None}
+
+    response = client.patch(
+        f"/api/v1/datasets/{dataset_id}/schema",
+        json={
+            "entities": [
+                {
+                    "name": "Person",
+                    "fields": [{"kind": "enum", "name": "mood", "enumValues": ["happy", "sad"]}],
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    merged = response.json()["graph_schema"]
+    assert _field_names(merged, "Person") == ["age", "works_at", "mood"]
+    assert _entity(merged, "Person")["description"] == "A person."
+
+
+def test_patch_schema_replaces_field_by_name(schema_api):
+    client, dataset_id, store = schema_api
+    store.rows[dataset_id] = {"graph_schema": STORED_SCHEMA, "custom_prompt": None}
+
+    response = client.patch(
+        f"/api/v1/datasets/{dataset_id}/schema",
+        json={
+            "entities": [
+                {
+                    "name": "Person",
+                    "fields": [{"kind": "primitive", "name": "age", "primitive_type": "string"}],
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    merged = response.json()["graph_schema"]
+    assert _field_names(merged, "Person") == ["age", "works_at"]
+    assert _entity(merged, "Person")["fields"][0]["primitiveType"] == "string"
+
+
+def test_patch_schema_removes_field(schema_api):
+    client, dataset_id, store = schema_api
+    store.rows[dataset_id] = {"graph_schema": STORED_SCHEMA, "custom_prompt": None}
+
+    response = client.patch(
+        f"/api/v1/datasets/{dataset_id}/schema",
+        json={"removeFields": [{"entity": "Person", "field": "age"}]},
+    )
+
+    assert response.status_code == 200, response.text
+    assert _field_names(response.json()["graph_schema"], "Person") == ["works_at"]
+
+
+def test_patch_schema_removes_entity(schema_api):
+    client, dataset_id, store = schema_api
+    store.rows[dataset_id] = {"graph_schema": STORED_SCHEMA, "custom_prompt": None}
+
+    response = client.patch(
+        f"/api/v1/datasets/{dataset_id}/schema",
+        json={
+            "remove_fields": [{"entity": "Person", "field": "works_at"}],
+            "remove_entities": ["Organization"],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert [item["name"] for item in response.json()["graph_schema"]["entities"]] == ["Person"]
+
+
+def test_patch_schema_rejects_removing_relation_target(schema_api):
+    client, dataset_id, store = schema_api
+    store.rows[dataset_id] = {"graph_schema": STORED_SCHEMA, "custom_prompt": None}
+
+    response = client.patch(
+        f"/api/v1/datasets/{dataset_id}/schema",
+        json={"removeEntities": ["Organization"]},
+    )
+
+    assert response.status_code == 422, response.text
+    assert "'Organization'" in response.json()["error"]
+    assert "Person.works_at" in response.json()["error"]
+    assert store.writes == []
+    assert store.rows[dataset_id]["graph_schema"] == STORED_SCHEMA
+
+
+def test_patch_schema_without_stored_schema_equals_put(schema_api):
+    client, dataset_id, store = schema_api
+    body = {
+        "options": {"autoTypeNodes": False},
+        "entities": [{"name": "Person", "fields": [{"kind": "primitive", "name": "age"}]}],
+    }
+
+    patched = client.patch(f"/api/v1/datasets/{dataset_id}/schema", json=body)
+    assert patched.status_code == 200, patched.text
+    via_patch = store.rows[dataset_id]["graph_schema"]
+
+    from cognee.modules.graph_models import GraphSchemaSpec
+
+    canonical = GraphSchemaSpec.model_validate(body).model_dump(by_alias=True, exclude_none=True)
+    put = client.put(f"/api/v1/datasets/{dataset_id}/schema", json={"graphSchema": canonical})
+    assert put.status_code == 200, put.text
+
+    assert via_patch == store.rows[dataset_id]["graph_schema"] == canonical
+    assert patched.json()["graph_schema"] == canonical
+
+
+def test_patch_schema_rejects_invalid_merged_spec(schema_api):
+    client, dataset_id, store = schema_api
+    store.rows[dataset_id] = {"graph_schema": STORED_SCHEMA, "custom_prompt": None}
+
+    response = client.patch(
+        f"/api/v1/datasets/{dataset_id}/schema",
+        json={"entities": [{"name": "bad-name"}]},
+    )
+
+    assert response.status_code == 422, response.text
+    assert "'bad-name'" in response.json()["error"]
+    assert "plain identifier" in response.json()["error"]
+    assert store.writes == []
+
+
+def test_patch_schema_then_get_returns_merged_document(schema_api):
+    client, dataset_id, store = schema_api
+    store.rows[dataset_id] = {"graph_schema": STORED_SCHEMA, "custom_prompt": "Extract."}
+
+    patched = client.patch(
+        f"/api/v1/datasets/{dataset_id}/schema",
+        json={"entities": [{"name": "City"}], "options": {"autoTypeNodes": True}},
+    )
+    assert patched.status_code == 200, patched.text
+
+    fetched = client.get(f"/api/v1/datasets/{dataset_id}/schema")
+    assert fetched.status_code == 200, fetched.text
+    assert fetched.json() == patched.json()
+    assert fetched.json()["graph_schema"]["options"] == {"autoTypeNodes": True}
+    assert fetched.json()["custom_prompt"] == "Extract."
+    assert [item["name"] for item in fetched.json()["graph_schema"]["entities"]] == [
+        "Person",
+        "Organization",
+        "City",
+    ]
+
+
+def test_patch_schema_unauthorized_matches_put(schema_api):
+    from cognee.modules.users.exceptions import PermissionDeniedError
+
+    client, dataset_id, store = schema_api
+    patch_body = {"entities": [{"name": "City"}]}
+    put_body = {"graphSchema": STORED_SCHEMA}
+
+    store.authorized = PermissionDeniedError("no write permission", log=False)
+    denied_patch = client.patch(f"/api/v1/datasets/{dataset_id}/schema", json=patch_body)
+    denied_put = client.put(f"/api/v1/datasets/{dataset_id}/schema", json=put_body)
+    assert denied_patch.status_code == denied_put.status_code == 403
+
+    store.authorized = []
+    missing_patch = client.patch(f"/api/v1/datasets/{dataset_id}/schema", json=patch_body)
+    missing_put = client.put(f"/api/v1/datasets/{dataset_id}/schema", json=put_body)
+    assert missing_patch.status_code == missing_put.status_code == 404
+
+    assert store.writes == []
+    assert set(store.permissions_asked) == {"write"}
