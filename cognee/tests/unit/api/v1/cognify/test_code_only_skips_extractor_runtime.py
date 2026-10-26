@@ -68,6 +68,13 @@ async def _cognify(
     with (
         patch.object(cognify_module, "resolve_extractor", return_value=extractor),
         patch.object(cognify_module, "ensure_extractor_runtime", runtime),
+        patch(
+            "cognee.tasks.graph.gliner_demo.install.gliner_runtime_installed", return_value=False
+        ),
+        patch(
+            "cognee.tasks.graph.gliner_demo.tasks.get_gliner_demo_tasks",
+            AsyncMock(return_value=[]),
+        ),
         patch.object(migrations, "run_migrations_and_block", AsyncMock()),
         patch(
             "cognee.modules.users.methods.get_default_user",
@@ -195,3 +202,15 @@ async def test_the_gliner_preflight_reads_only_the_scoped_rows():
     # runtime) and never read the dataset whole.
     assert runtime.await_count == 2  # the preflight, then the run under the lock
     assert all(call.kwargs.get("data_ids") for call in read_rows.await_args_list)
+
+
+@pytest.mark.asyncio
+async def test_a_code_only_run_without_the_runtime_builds_no_gliner_tasks():
+    """Building the GLiNER tasks imports gliner2, which a code-only run must not need."""
+    build = AsyncMock(return_value=[])
+
+    with patch("cognee.tasks.graph.gliner_demo.tasks.get_gliner_demo_tasks", build):
+        runtime, _pipeline = await _cognify([CODE_REPO])
+
+    build.assert_not_awaited()
+    runtime.assert_not_awaited()

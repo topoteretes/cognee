@@ -532,6 +532,7 @@ async def cognify(
         # added after this scan fails clearly instead of installing under the lock.
         # Only the GLiNER extractor has a runtime to install, so the LLM extractor
         # reads neither the datasets nor their rows here.
+        runtime_ensured = False
         if resolved_extractor == GLINER_DEMO_EXTRACTOR:
             from cognee.modules.data.methods import (
                 get_authorized_existing_datasets,
@@ -553,6 +554,7 @@ async def cognify(
                 )
                 if not _pending_items_are_code_only(items, dataset.id, incremental_loading):
                     await ensure_extractor_runtime(resolved_extractor, cognify_config)
+                    runtime_ensured = True
                     break
 
         if resolved_extractor == GLINER_DEMO_EXTRACTOR:
@@ -569,16 +571,23 @@ async def cognify(
                     f"{', '.join(sorted(kwargs))}"
                 )
 
+            from cognee.tasks.graph.gliner_demo.install import gliner_runtime_installed
             from cognee.tasks.graph.gliner_demo.tasks import get_gliner_demo_tasks
 
-            tasks = await get_gliner_demo_tasks(
-                chunker=chunker,
-                chunk_size=chunk_size,
-                chunks_per_batch=chunks_per_batch,
-                config=config,
-                chunk_attachment=chunk_attachment,
-                track_provenance=cognify_config.provenance_tracking,
-            )
+            if runtime_ensured or gliner_runtime_installed():
+                tasks = await get_gliner_demo_tasks(
+                    chunker=chunker,
+                    chunk_size=chunk_size,
+                    chunks_per_batch=chunks_per_batch,
+                    config=config,
+                    chunk_attachment=chunk_attachment,
+                    track_provenance=cognify_config.provenance_tracking,
+                )
+            else:
+                # Building these tasks imports gliner2, which a code-only run must not
+                # need. Nothing runs them: a document row that appears before the run
+                # fails the locked runtime check in prepare_cognify_run instead.
+                tasks = []
         else:
             tasks = await get_default_tasks(
                 user=user,
