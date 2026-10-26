@@ -96,7 +96,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
         env:
           POSTGRES_USER: cognee
-          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_PASSWORD: cognee
           POSTGRES_DB: cognee_db
         options: >-
           --health-cmd pg_isready
@@ -131,7 +131,7 @@ jobs:
           VECTOR_DB_HOST: ${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}
           VECTOR_DB_PORT: 5432
           VECTOR_DB_USERNAME: cognee
-          VECTOR_DB_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          VECTOR_DB_PASSWORD: cognee
           VECTOR_DATASET_DATABASE_HANDLER: pgvector
         shell: bash
         run: |
