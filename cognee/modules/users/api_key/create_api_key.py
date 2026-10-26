@@ -1,7 +1,6 @@
 import secrets
 from uuid import UUID
 
-from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from cognee.infrastructure.databases.relational import get_relational_engine
@@ -18,12 +17,6 @@ logger = get_logger(__name__)
 
 class ApiKeySettings(BaseSettings):
     max_user_api_keys: int = 10
-    # When a plugin agent is full, provisioning prunes just enough of its stale
-    # keys (see cognee.modules.integrations.plugin_keys): a key last used more
-    # than plugin_key_idle_days ago, or never used and older than
-    # plugin_key_unused_hours. 0 disables the rule.
-    plugin_key_idle_days: int = Field(default=30, ge=0)
-    plugin_key_unused_hours: int = Field(default=24, ge=0)
 
     model_config = SettingsConfigDict(extra="allow")
 
