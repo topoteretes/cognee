@@ -1,3 +1,5 @@
+import base64
+import struct
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -82,10 +84,18 @@ async def test_nvidia_nim_provider_inferred_from_model_prefix(monkeypatch):
 async def test_non_nvidia_provider_keeps_dimensions_and_skips_input_type(monkeypatch):
     """Sanity check: default OpenAI-style provider is unaffected."""
     monkeypatch.setenv("MOCK_EMBEDDING", "false")
+    # OpenAI's own API is the one route that defaults to base64 vectors.
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_API_BASE", raising=False)
+    monkeypatch.delenv("USE_LITELLM_PROXY", raising=False)
 
+    import cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine as mod
     from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
         LiteLLMEmbeddingEngine,
     )
+
+    monkeypatch.setattr(mod.litellm, "api_base", None)
+    monkeypatch.setattr(mod.litellm, "use_litellm_proxy", False)
 
     engine = LiteLLMEmbeddingEngine(
         model="openai/text-embedding-3-large",
@@ -97,16 +107,17 @@ async def test_non_nvidia_provider_keeps_dimensions_and_skips_input_type(monkeyp
 
     async def fake_aembedding(**kwargs):
         captured_kwargs.update(kwargs)
-        return _Resp([{"embedding": [1.0, 2.0]}])
-
-    import cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine as mod
+        # What OpenAI returns for encoding_format="base64": float32 values, base64-encoded.
+        return _Resp([{"embedding": base64.b64encode(struct.pack("<2f", 1.0, 2.0)).decode()}])
 
     monkeypatch.setattr(mod.litellm, "aembedding", fake_aembedding)
 
-    await engine.embed_text(["hello world"])
+    vectors = await engine.embed_text(["hello world"])
 
     assert captured_kwargs["dimensions"] == 3072
+    assert captured_kwargs["encoding_format"] == "base64"
     assert "input_type" not in captured_kwargs
+    assert vectors == [[1.0, 2.0]]
 
 
 @pytest.mark.asyncio

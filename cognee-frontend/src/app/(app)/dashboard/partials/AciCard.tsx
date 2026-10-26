@@ -1,11 +1,14 @@
 "use client";
 
 import React from "react";
+import { isAgentIntegrationKey } from "@/modules/agents/getAgentConnections";
+import { agentStatusText } from "@/app/(app)/dashboard/agentNodes";
 import { FONT, SANS, T } from "./redesign/mono";
 import type { AciAgentKey, AciCardConfig } from "./agentConnectionSteps";
 
 // Brand mark tucked in the card's bottom-right corner (contained, not bleeding).
 const LOGO_H = 64;
+const NO_RUNNING_AGENTS: ReadonlySet<string> = new Set();
 
 interface AciCardProps {
   card: AciCardConfig;
@@ -13,6 +16,28 @@ interface AciCardProps {
   isUploading: boolean;
   hasDocuments: boolean;
   integrationConnected: Record<string, boolean>;
+  /** Newest known activity per plugin-agent key (claude-code/codex only),
+   *  see lastSeenByAgent. Absent for a registry-only "connected" (sticky
+   *  localStorage answer, no connection or session row to date it), in
+   *  which case the card shows "Set up" with no last-seen line rather than
+   *  inventing one. */
+  lastSeenByAgent?: Partial<Record<string, string>>;
+  /** Plugin agents with a running session right now, see runningAgents. The
+   *  same answer the memory graph's "live" node reads, so this card and the
+   *  node never disagree about one agent. */
+  runningAgents?: ReadonlySet<string>;
+  /** Telemetry's first poll hasn't answered yet — an unconfirmed
+   *  "disconnected" reading downgrades to "Checking…" rather than a false
+   *  "Not connected yet". Never masks a real "Connected": the sticky
+   *  registry (already folded into `integrationConnected`) can answer
+   *  before the first poll resolves. Meaningless for the upload card, which
+   *  reads `hasDocuments` rather than telemetry. */
+  loading?: boolean;
+  /** The clock "active now" is measured against (see agentStatusText's
+   *  freshness threshold) — a real prop, not read from `new Date()` inline,
+   *  so a test can pin it against a fixed `lastSeenByAgent` instead of
+   *  racing the wall clock. */
+  now?: Date;
   onCardClick: (key: AciAgentKey) => void;
 }
 
@@ -22,11 +47,30 @@ export function AciCard({
   isUploading,
   hasDocuments,
   integrationConnected,
+  lastSeenByAgent = {},
+  runningAgents = NO_RUNNING_AGENTS,
+  loading = false,
+  now = new Date(),
   onCardClick,
 }: AciCardProps): React.ReactElement {
   const connected = card.key === "upload" ? hasDocuments : !!integrationConnected[card.key];
   const isActive = activeKey === card.key;
   const isUpload = card.key === "upload";
+  // Only claude-code/codex have a registration to distinguish "set up" from
+  // "running right now", every other card (openclaw, api-mcp, upload) keeps
+  // the plain "Connected" wording it always had.
+  const isPluginAgent = isAgentIntegrationKey(card.key);
+  const lastSeenAt = lastSeenByAgent[card.key] ?? null;
+  // Same wording function the graph's node tooltip uses (agentStatusText),
+  // fed the same running-session answer, so "Live" here and on the node
+  // mean one thing. `lastSeenAt` and `runningAgents` only ever carry
+  // plugin-agent keys, so a non-plugin card naturally gets a plain badge,
+  // no separate branch needed for that.
+  const status = agentStatusText(
+    runningAgents.has(card.key) ? "live" : connected ? "connected" : !isUpload && loading ? "unknown" : "disconnected",
+    lastSeenAt,
+    now,
+  );
 
   const logoNode = buildLogoNode(card.key, card.name);
   const ctaLabel = isUpload ? (connected ? "Add more data" : "Upload data") : "Connect";
@@ -54,15 +98,23 @@ export function AciCard({
         transition: "border-color 150ms, background 150ms",
       }}
     >
-      {/* 1. Title + status on one line */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+      {/* 1. Title, then status on its own line below it: sharing one line
+          truncated the name ("Cla...", "C...") on the narrower agent cards. */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
         <span style={{ fontFamily: SANS, fontSize: 14, fontWeight: 600, color: T.text, letterSpacing: "-0.01em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>
           {card.name}
         </span>
-        {connected && (
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
-            <span style={{ width: 6, height: 6, borderRadius: "50%", background: T.green }} />
-            <span style={{ ...FONT, fontSize: 11, fontWeight: 500, color: T.green }}>Connected</span>
+        {(connected || isPluginAgent) && (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+            {connected && <span style={{ width: 6, height: 6, borderRadius: "50%", background: T.green, flexShrink: 0 }} />}
+            <span style={{ ...FONT, fontSize: 11, fontWeight: 500, color: connected ? T.green : T.muted }}>
+              {status.badge}
+            </span>
+          </span>
+        )}
+        {status.detail && (
+          <span style={{ ...FONT, fontSize: 10, color: T.muted }}>
+            {status.detail.charAt(0).toUpperCase() + status.detail.slice(1)}
           </span>
         )}
       </div>

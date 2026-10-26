@@ -30,6 +30,7 @@ def test_defaults(monkeypatch):
     assert config.debounce_seconds == 0.0
     assert config.stages_disabled == []
     assert config.feedback_alpha == DEFAULT_FEEDBACK_ALPHA == 0.1
+    assert config.distill_max_batches_per_run == 0
 
 
 def test_env_prefix_and_csv_parsing(monkeypatch):
@@ -72,6 +73,16 @@ def test_negative_debounce_rejected():
         ImproveConfig(_env_file=None, debounce_seconds=-0.5)
 
 
+def test_negative_distill_cap_rejected():
+    with pytest.raises(ValueError, match="distill_max_batches_per_run"):
+        ImproveConfig(_env_file=None, distill_max_batches_per_run=-1)
+
+
+def test_distill_cap_reads_env(monkeypatch):
+    monkeypatch.setenv("IMPROVE_DISTILL_MAX_BATCHES_PER_RUN", "3")
+    assert ImproveConfig(_env_file=None).distill_max_batches_per_run == 3
+
+
 def test_config_declares_no_shared_knobs():
     fields = set(ImproveConfig.model_fields)
     assert fields == {
@@ -80,6 +91,11 @@ def test_config_declares_no_shared_knobs():
         "debounce_seconds",
         "stages_disabled",
         "feedback_alpha",
+        "review_conflicts",
+        "effective_date_key",
+        "trace_window_steps",
+        "trace_windows_per_run",
+        "distill_max_batches_per_run",
     }
     for shared in ("triplet_embedding", "caching", "auto_feedback", "personalization_enabled"):
         assert shared not in fields

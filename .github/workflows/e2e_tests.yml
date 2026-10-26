@@ -143,8 +143,9 @@ jobs:
       # The workflow-level skip disables the keyless rerouting as well
       # (keyless_local_defaults_apply), so it must be off here.
       COGNEE_SKIP_CONNECTION_TEST: 'false'
+      # Holds both the GLiNER and the fastembed model. FASTEMBED_CACHE_PATH is
+      # left unset so the default (Hugging Face hub cache) location is exercised.
       HF_HOME: ${{ github.workspace }}/.model-cache/huggingface
-      FASTEMBED_CACHE_PATH: ${{ github.workspace }}/.model-cache/fastembed
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -295,6 +296,11 @@ jobs:
       - name: Run incremental update suite
         run: uv run pytest cognee/tests/e2e/incremental_update/
 
+      # Same backend matrix, no LLM: the Timestamp range lookup and the anchors
+      # SearchType.TEMPORAL reranks by.
+      - name: Run temporal range lookup suite
+        run: uv run pytest cognee/tests/e2e/temporal/
+
       - name: Run incremental update stress test
         run: uv run python ./cognee/tests/test_incremental_update_stress.py
 
@@ -421,6 +427,50 @@ jobs:
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           DB_HOST: ${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}
         run: uv run python ./cognee/tests/test_deduplication.py
+
+  run-pgvector-live-tests:
+    name: PGVector Live Adapter Tests
+    runs-on: ubuntu-latest
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    defaults:
+      run:
+        shell: bash
+    services:
+      postgres:
+        image: ghcr.io/topoteretes/pgvector:pg17
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          POSTGRES_USER: cognee
+          POSTGRES_PASSWORD: cognee
+          POSTGRES_DB: cognee_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+          extra-dependencies: "postgres"
+
+      # No LLM or embedding calls: both suites stub the embedding engine.
+      - name: Run live PGVector adapter tests
+        env:
+          ENV: 'dev'
+          TEST_PGVECTOR_URL: postgresql+asyncpg://cognee:cognee@${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}:5432/cognee_db
+        run: >-
+          uv run pytest -v
+          cognee/tests/integration/test_pgvector_hnsw_live.py
+          cognee/tests/integration/test_belongs_to_set_pgvector.py
 
   run-dlt-mixed-input-test:
     name: DLT Mixed Input E2E Test
@@ -1826,8 +1876,12 @@ jobs:
           uv pip install -e ./cognee-mcp
 
           # 2. Force-install the local root to overwrite the PyPI version
-          # This replaces the PyPI 'cognee' with your current branch code
-          uv pip install --force-reinstall -e .
+          # This replaces the PyPI 'cognee' with your current branch code.
+          # --no-deps: the environment was already synced from uv.lock, and a
+          # fresh resolution here ignores the lock and upgrades dependencies
+          # one package at a time (opentelemetry-api past the locked
+          # opentelemetry-sdk, which pins the API to its exact version).
+          uv pip install --no-deps --force-reinstall -e .
 
       - name: Run api/tool usage logger
         env:

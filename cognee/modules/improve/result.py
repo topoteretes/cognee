@@ -7,11 +7,11 @@ vocabulary plus ``skipped``: ``PipelineRunCompleted`` -> ``completed``,
 (``StageResult.from_pipeline_run``) and never sets the two independently.
 
 ``ImproveResult`` holds one ``StageResult`` per stage, in registry order, and
-is what every surface hands back. The legacy memify return stays reachable as
-``.memify_run`` for one minor release (decision D4).
+is what every surface hands back.
 """
 
 import asyncio
+import warnings
 from typing import Any, Literal
 from uuid import UUID
 
@@ -29,9 +29,9 @@ logger = get_logger("improve")
 
 StageStatus = Literal["completed", "already_completed", "skipped", "errored"]
 
-# The one stage whose raw pipeline return is nested on
-# ``ImproveResult.memify_run`` for one minor release (decision D4).
-LEGACY_MEMIFY_STAGE_NAME = "triplet_enrichment"
+# Deprecated (SDK-1115): the stage that runs improve()'s custom tasks. Its raw
+# pipeline return is kept on ``ImproveResult.memify_run``.
+LEGACY_CUSTOM_TASKS_STAGE_NAME = "custom_tasks"
 
 # Gate reasons the orchestrator itself produces (stages add their own).
 REASON_LOCK_HELD = "lock_held"
@@ -58,8 +58,7 @@ class StageResult(BaseModel):
     run: PipelineRunInfo | None = None  # set when the stage is a pipeline
 
     # The untouched return of the wrapped pipeline call (``{dataset_id:
-    # PipelineRunInfo}`` in blocking mode). Kept off the schema; the
-    # orchestrator lifts stage 8's copy onto ``ImproveResult.memify_run``.
+    # PipelineRunInfo}`` in blocking mode). Kept off the schema.
     _raw_run: Any = PrivateAttr(default=None)
 
     # The exception a stage raised, when it did. A stage whose wrapped pipeline
@@ -68,7 +67,7 @@ class StageResult(BaseModel):
     _exception: BaseException | None = PrivateAttr(default=None)
 
     # ``run_info`` the stage wants stamped on the improve operation row
-    # (stage 8's enrichment watermark). The stage decides when it stamps; the
+    # (such as the conflict-review watermark). The stage decides when it stamps; the
     # orchestrator only copies this onto the row it owns. Off the schema: it
     # is row bookkeeping, not part of the reported result.
     _run_info_stamp: dict | None = PrivateAttr(default=None)
@@ -221,15 +220,17 @@ class ImproveResult(BaseModel):
     background run and returns the same, now finished, object.
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        validate_by_name=True,
+        validate_by_alias=True,
+        serialize_by_alias=True,
+    )
 
     dataset_id: UUID | None = None
     dataset_name: str | None = None
     session_ids: list[str] = Field(default_factory=list)
     stages: list[StageResult] = Field(default_factory=list)
-    # Legacy: the raw return of the memify enrichment stage, nested for one
-    # minor release (D4). ``{}`` when that stage did not run.
-    memify_run: Any = None
     background: bool = False
     finished: bool = True
     # Set when a fatal stage aborted the run (always raised in the
@@ -244,8 +245,35 @@ class ImproveResult(BaseModel):
     rerun_requested: bool = False
     rerun_passes: list[list[StageResult]] = Field(default_factory=list)
 
+    # Backs the deprecated ``memify_run`` (SDK-1115): ``{}``, the first pass's
+    # ``custom_tasks`` raw return, or an older server's legacy memify run
+    # mapping. Serialized and validated under ``memify_run`` so REST clients
+    # and remote results keep the key for the deprecation release; removed
+    # together with the property.
+    legacy_memify_run: Any = Field(
+        default_factory=dict,
+        alias="memify_run",
+        json_schema_extra={"deprecated": True},
+    )
+
     _task: asyncio.Task | None = PrivateAttr(default=None)
     _current_pass: list[StageResult] | None = PrivateAttr(default=None)
+
+    @property
+    def memify_run(self) -> Any:
+        """Deprecated (SDK-1115) and removed in the next release: read ``stages``.
+
+        It holds the raw pipeline return of the deprecated ``custom_tasks`` stage
+        when ``improve()`` was given custom tasks, the legacy memify run mapping
+        an older remote server returned, or ``{}``.
+        """
+        warnings.warn(
+            "ImproveResult.memify_run is deprecated and will be removed in the next release; "
+            "read ImproveResult.stages instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
+        return self.legacy_memify_run
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -286,14 +314,17 @@ class ImproveResult(BaseModel):
         )
 
     def record(self, stage_result: StageResult) -> None:
-        """Append one stage's outcome, nesting the legacy memify return (D4).
+        """Append one stage's outcome.
 
         Lands in the current rerun pass when one was started, else in ``stages``.
         """
         target = self._current_pass if self._current_pass is not None else self.stages
         target.append(stage_result)
-        if stage_result.stage == LEGACY_MEMIFY_STAGE_NAME:
-            self.memify_run = stage_result.raw_run if stage_result.raw_run is not None else {}
+        # First pass only, like ``stages``.
+        if stage_result.stage == LEGACY_CUSTOM_TASKS_STAGE_NAME and self._current_pass is None:
+            self.legacy_memify_run = (
+                stage_result.raw_run if stage_result.raw_run is not None else {}
+            )
 
     def stage(self, name: str) -> StageResult | None:
         for stage in self.stages:
@@ -331,8 +362,8 @@ class ImproveResult(BaseModel):
         """Rebuild a result handed back by a remote cognee server.
 
         A server running the same stages returns the serialized result; an older one
-        returns the legacy memify run mapping, which is nested as
-        ``memify_run`` with no stage detail.
+        returns a legacy memify run mapping, which carries no stage detail. That
+        mapping is kept on the deprecated ``memify_run``.
         """
         if isinstance(payload, dict) and "stages" in payload:
             try:
@@ -344,7 +375,11 @@ class ImproveResult(BaseModel):
                     exc_info=True,
                 )
 
-        return cls(session_ids=list(session_ids), stages=[], memify_run=payload)
+        logger.warning(
+            "improve: the remote server returned a legacy memify result with no stage "
+            "detail; it is kept on the deprecated ImproveResult.memify_run"
+        )
+        return cls(session_ids=list(session_ids), stages=[], legacy_memify_run=payload)
 
     @classmethod
     def all_skipped(
@@ -361,5 +396,4 @@ class ImproveResult(BaseModel):
             dataset_name=dataset_name,
             session_ids=list(session_ids or []),
             stages=[StageResult.skipped(name, reason) for name in stage_names],
-            memify_run={},
         )

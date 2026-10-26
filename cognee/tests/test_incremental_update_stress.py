@@ -26,7 +26,7 @@ deletion. After every single iteration the whole system is verified:
     whose text states it, every v2 ref points at a LIVE chunk, the document
     nodes keep their v1 refs only, and no artifact is ref-less;
   - vector rows exist for live artifacts and are gone for dead ones in every
-    collection (chunks, summaries, entities, entity types, triplets), and the
+    collection (chunks, summaries, entities, entity types), and the
     chunk_index payloads agree with the graph;
   - each genuine incremental update logs exactly one pipeline run; the
     unchanged resubmit logs none.
@@ -106,7 +106,6 @@ def _setup_environment() -> None:
         **incremental_test_backend_env(),
         CACHE_BACKEND="sqlite",
         MOCK_EMBEDDING="true",
-        TRIPLET_EMBEDDING="true",
         TELEMETRY_DISABLED="1",
         DATA_ROOT_DIRECTORY=str(root / "data"),
         SYSTEM_ROOT_DIRECTORY=str(root / "system"),
@@ -352,12 +351,6 @@ def _expected_structure(chunks_by_doc: dict):
     return nodes, edges
 
 
-def _triplet_id(source_id: str, relationship: str, target_id: str) -> str:
-    from cognee.modules.engine.utils import generate_node_id
-
-    return str(generate_node_id(source_id + relationship + target_id))
-
-
 async def _rows_present(vector, collection: str, ids) -> set:
     ids = list(ids)
     if not ids or not await vector.has_collection(collection):
@@ -593,11 +586,6 @@ async def _verify(
         "TextSummary_text": {n for n, lab in labels.items() if lab.startswith("summary:")},
         "Entity_name": {n for n, lab in labels.items() if lab.startswith("entity:")},
         "EntityType_name": {n for n, lab in labels.items() if lab.startswith("type:")},
-        "Triplet_text": {
-            _triplet_id(s, r, t)
-            for (s, t, r) in edge_props
-            if not labels.get(s, "").startswith("NodeSet")
-        },
     }
     for collection, ids in live_ids.items():
         found = await _rows_present(vector, collection, ids)
@@ -645,12 +633,9 @@ async def main():
     from cognee.api.v1.datasets import datasets as datasets_api
     from cognee.infrastructure.databases.graph import get_graph_engine
     from cognee.infrastructure.databases.vector import get_vector_engine_async
-    from cognee.modules.cognify.config import get_cognify_config
     from cognee.modules.data.methods import get_datasets
     from cognee.modules.data.methods.get_dataset_data import get_dataset_data
     from cognee.modules.users.methods import get_default_user
-
-    assert get_cognify_config().triplet_embedding, "triplet embeddings must be on for this run"
 
     raw = FIXTURE.read_text(encoding="utf-8")
     paragraphs = [p.strip() for p in raw.split("\n\n") if p.strip()][:PARAGRAPHS_USED]

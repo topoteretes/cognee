@@ -10,10 +10,11 @@ torch's intra-op pool, so running several batches at once is what uses the rest
 of the CPU. Torch releases the GIL inside its kernels, so threads run truly in
 parallel without a second copy of the model. A process-wide pool bounds the
 concurrency across every pipeline in the process, which also bounds memory:
-each in-flight batch holds its own activations. With one thread, a call runs
-its batches one after another.
+each in-flight batch holds its own activations. With one thread there is no
+pool; a lock makes calls take turns, so one batch runs at a time.
 
-Calls on the shared model need no lock. The runtime writes three things per
+Calls on the shared model need no lock for correctness (the one-thread lock
+only bounds memory). The runtime writes three things per
 call, all idempotent for inference: eval mode, ``is_training=False``, and, on
 the ``extract`` path with no ``max_len`` (the schema probe), a lazily cached
 default collator that two concurrent probes may each construct, with equivalent
@@ -122,6 +123,11 @@ CGROUP_V1_NO_LIMIT = 2**60
 _extractors: dict[str, Any] = {}
 _load_lock = threading.Lock()
 _pool_lock = threading.Lock()
+# With one thread a call runs its batches on the calling thread, outside any
+# pool, so this lock makes concurrent callers take turns on the model: without
+# it every pipeline's batch would be in flight at once, each holding its own
+# activations.
+_inference_lock = threading.Lock()
 # (requested processes, requested threads) -> (processes, threads per process)
 _resolved_concurrency: dict[tuple, tuple[int, int]] = {}
 _thread_pool_instance: ThreadPoolExecutor | None = None
@@ -333,7 +339,7 @@ def inference_threads(processes: int = 1, requested: int | None = None) -> int:
     """Threads per process: ``requested``, else GLINER_INFERENCE_THREADS; 0 means auto."""
     configured = get_cognify_config().gliner_inference_threads if requested is None else requested
     if configured < 0:
-        raise ValueError(f"GLINER_INFERENCE_THREADS must be >= 0, got {configured}")
+        raise ValueError(f"GLiNER inference threads must be >= 0, got {configured}")
     return configured or auto_inference_threads(processes)
 
 
@@ -487,7 +493,8 @@ def _run_batches(
     """Run model batches with at most ``threads`` in flight; one result list per batch.
 
     One thread means the historic behaviour: the batches run in turn on the
-    calling thread. More means the shared pool, with this call submitting only
+    calling thread, each taking turns with other callers' batches on the
+    inference lock. More means the shared pool, with this call submitting only
     ``threads`` batches at a time, so a call with a small limit never occupies
     pool threads it is not allowed to use.
     """
@@ -507,7 +514,11 @@ def _run_batches(
         )
 
     if threads <= 1:
-        return [run_batch(batch) for batch in batches]
+        results = []
+        for batch in batches:
+            with _inference_lock:
+                results.append(run_batch(batch))
+        return results
 
     pool = _thread_pool(threads)
     results: list = [None] * len(batches)
@@ -659,17 +670,18 @@ def extract_batch(
     built = build_gliner_schema(extractor, schema)
     processes, threads = _concurrency(processes, threads)
     if processes == 1 and threads <= 1:
-        return extractor.batch_extract_long(
-            list(texts),
-            built,
-            batch_size=batch_size,
-            threshold=threshold,
-            include_confidence=True,
-            include_spans=True,
-            chunk_size=window_words,
-            chunk_overlap=window_overlap_words,
-            overlap_policy=OVERLAP_POLICY,
-        )
+        with _inference_lock:
+            return extractor.batch_extract_long(
+                list(texts),
+                built,
+                batch_size=batch_size,
+                threshold=threshold,
+                include_confidence=True,
+                include_spans=True,
+                chunk_size=window_words,
+                chunk_overlap=window_overlap_words,
+                overlap_policy=OVERLAP_POLICY,
+            )
 
     process_pool = _process_pool(model_name, processes - 1) if processes > 1 else None
     broken = False
@@ -726,10 +738,11 @@ def extract_once(
 
     # Inside the same concurrency as the extraction, so a call's schema probes
     # count against the limit it asked for.
-    resolved_threads = _concurrency(processes, threads)[1]
-    if resolved_threads <= 1:
+    pool = _inference_pool(processes, threads)
+    if pool is not None:
+        return pool.submit(run).result()
+    with _inference_lock:
         return run()
-    return _thread_pool(resolved_threads).submit(run).result()
 
 
 async def extract_batch_async(

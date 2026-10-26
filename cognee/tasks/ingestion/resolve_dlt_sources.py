@@ -14,12 +14,17 @@ import os
 import shutil
 import tempfile
 from collections.abc import Callable
-from typing import Any
+from typing import Any, NoReturn
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 from uuid import UUID
 
-from cognee.modules.data.methods.get_unique_data_id import get_unique_data_id
+from cognee.modules.data.methods.get_existing_data_ids import (
+    DATA_ID_BATCH_SIZE,
+    get_existing_data_ids,
+)
+from cognee.modules.data.methods.get_unique_data_id import get_unique_data_id, get_unique_data_ids
+from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 
@@ -32,7 +37,8 @@ from .create_dlt_source import (
 )
 from .data_item import DataItem
 from .dlt_row_data import DltRowData
-from .dlt_utils import document_source_tag
+from .dlt_temporal import temporal_cells
+from .dlt_utils import NODE_SET_COLUMN, STRUCTURE_COLUMN, column_selected, document_source_tag
 from .ingest_dlt_source import ingest_dlt_source
 
 logger = get_logger("resolve_dlt_sources")
@@ -147,6 +153,7 @@ async def resolve_dlt_sources(
     query = kwargs.get("query", None)
     max_rows_per_table = kwargs.get("max_rows_per_table")
     column_value_columns = kwargs.get("column_value_columns")
+    temporal_columns = kwargs.get("temporal_columns")
 
     # Normalise to list for uniform processing
     data_list = data if isinstance(data, list) else [data]
@@ -196,13 +203,14 @@ async def resolve_dlt_sources(
 
     # --- Document-tagged sources: one text document per row -----------------
     # Document sources honour the caller's write_disposition so both sync models
-    # work: "replace" for delete-feed-less snapshot sources (Notion/Slack — each
-    # run rewrites staging with exactly the rows currently visible) and "merge"
-    # (+ a hard_delete tombstone column) for incremental sources with a real
-    # delete feed (Google Drive's Changes API). Either way the whole set is read
-    # back (max_rows_per_table=0) so orphan cleanup can forget rows that dropped
-    # out of the current corpus. write_disposition/primary_key default to
-    # "replace"/"id" (see the kwargs resolution above).
+    # work: "replace" for snapshot sources (Slack, each run rewrites staging with
+    # exactly the rows currently visible) and "merge" (+ a hard_delete tombstone
+    # column) for incremental sources that emit their own deletions (Google
+    # Drive's Changes API, Notion's re-walk against the ids it saw last run).
+    # Either way the whole set is read back (max_rows_per_table=0) so orphan
+    # cleanup can forget rows that dropped out of the current corpus.
+    # write_disposition/primary_key default to "replace"/"id" (see the kwargs
+    # resolution above).
     document_data_items: list[DataItem] = []
     document_fresh_ids: set[UUID] = set()
     document_scopes: set[tuple[str, str]] = set()
@@ -222,9 +230,12 @@ async def resolve_dlt_sources(
         # derivation would pin the same id when one source loads into two
         # datasets — a hard collision on the foreign-pin guard.
         row_ids = await _stable_row_ids(rows, user, dataset_id)
+        source_items = []
         for row, data_id in zip(rows, row_ids):
             document_fresh_ids.add(data_id)
-            document_data_items.append(_build_document_data_item(row, data_id, source_tag))
+            source_items.append(_build_document_data_item(row, data_id, source_tag))
+        await _refresh_row_structure(source_items, dataset_id)
+        document_data_items.extend(source_items)
 
     # --- Relational sources: one manifest DataItem per source -----------
     expanded_items: list[DataItem] = []
@@ -244,6 +255,7 @@ async def resolve_dlt_sources(
             dataset_name,
             user,
             column_value_columns=column_value_columns,
+            temporal_columns=temporal_columns,
         )
         if item is not None:
             if item.data_id in manifest_data_ids:
@@ -367,6 +379,7 @@ async def _build_source_manifest_item(
     dataset_name: str,
     user: User,
     column_value_columns: dict | None = None,
+    temporal_columns: dict | None = None,
 ) -> DataItem | None:
     """Build a single manifest DataItem describing a whole DLT source.
 
@@ -378,13 +391,17 @@ async def _build_source_manifest_item(
 
     ``column_value_columns`` selects cells to record for ColumnValue node
     emission ({"table": ["col", ...]}, "*" wildcards); None falls back to the
-    ``dlt_column_value_columns`` ingestion config setting.
+    ``dlt_column_value_columns`` ingestion config setting. ``temporal_columns``
+    selects the date cells that become Timestamp edges the same way (default
+    setting ``dlt_temporal_columns``: every date cell).
     """
     if not rows:
         return None
 
     if column_value_columns is None:
         column_value_columns = get_ingestion_config().dlt_column_value_columns
+    if temporal_columns is None:
+        temporal_columns = get_ingestion_config().dlt_temporal_columns
 
     dlt_db_name = rows[0].dlt_db_name
     unique_rows = _dedupe_rows(rows, source_name)
@@ -392,12 +409,14 @@ async def _build_source_manifest_item(
     # Stable per-row node ids via the shared identifier formula. FK lookup
     # maps (table, pk_value) → node_id; when multiple rows share a PK value,
     # the last one wins (best-effort).
-    # TODO: add a batch variant of get_unique_data_id (one query per source
-    # instead of one per row) after the incremental load PR reshapes it.
-    node_ids: dict[tuple[str, str, str], UUID] = {
-        key: await get_unique_data_id(_dlt_row_identifier(row), user)
-        for key, row in unique_rows.items()
-    }
+    node_ids: dict[tuple[str, str, str], UUID] = dict(
+        zip(
+            unique_rows,
+            await get_unique_data_ids(
+                [_dlt_row_identifier(row) for row in unique_rows.values()], user
+            ),
+        )
+    )
 
     fk_lookup: dict[tuple[str, str], UUID] = {}
     for key, row in unique_rows.items():
@@ -440,6 +459,9 @@ async def _build_source_manifest_item(
         column_values = _selected_column_values(row, column_value_columns)
         if column_values:
             manifest_row["column_values"] = column_values
+        timestamps = temporal_cells(row, temporal_columns)
+        if timestamps:
+            manifest_row["timestamps"] = timestamps
         manifest_rows.append(manifest_row)
 
     if missing_fk_targets:
@@ -534,10 +556,6 @@ def _selected_column_values(dlt_row: DltRowData, selection: dict | None) -> dict
     """
     if not selection:
         return {}
-    columns = selection.get(dlt_row.table_name) or selection.get("*")
-    if not columns:
-        return {}
-    take_all = "*" in columns
     max_value_length = get_ingestion_config().dlt_max_column_value_length
 
     fk_columns = {fk.get("column", "") for fk in dlt_row.foreign_keys}
@@ -545,7 +563,7 @@ def _selected_column_values(dlt_row: DltRowData, selection: dict | None) -> dict
     for column, value in dlt_row.row_data.items():
         if column == dlt_row.primary_key_column or column in fk_columns:
             continue
-        if not take_all and column not in columns:
+        if not column_selected(selection, dlt_row.table_name, column):
             continue
         if value is None:
             continue
@@ -583,24 +601,49 @@ async def _stable_row_ids(rows: list[DltRowData], user: User, dataset_id: UUID) 
     if not rows:
         return []
 
-    new_ids = [await get_unique_data_id(_dlt_row_identifier(row), user, dataset_id) for row in rows]
-    old_ids = [await get_unique_data_id(_dlt_row_identifier(row), user) for row in rows]
+    from cognee.infrastructure.databases.relational import get_relational_engine
+
+    identifiers = [_dlt_row_identifier(row) for row in rows]
+    engine = get_relational_engine()
+    async with engine.get_async_session() as session:
+        new_ids = await get_unique_data_ids(identifiers, user, dataset_id, session)
+        old_ids = await get_unique_data_ids(identifiers, user, session=session)
+        adopted = await get_existing_data_ids(session, old_ids, dataset_id)
+    return [old_id if old_id in adopted else new_id for old_id, new_id in zip(old_ids, new_ids)]
+
+
+async def _refresh_row_structure(items: list[DataItem], dataset_id: UUID) -> None:
+    """Write the tree position onto rows that are already ingested. add() skips a
+    record whose content is unchanged, so a moved row would otherwise keep its old
+    parent. Only the ``structure`` key changes, and only where it differs."""
+    wanted = {
+        item.data_id: item.system_metadata["structure"]
+        for item in items
+        if "structure" in item.system_metadata
+    }
+    if not wanted:
+        return
 
     from sqlalchemy import select
 
     from cognee.infrastructure.databases.relational import get_relational_engine
     from cognee.modules.data.models import Data
 
-    engine = get_relational_engine()
-    async with engine.get_async_session() as session:
-        adopted = set(
-            (
-                await session.execute(
-                    select(Data.id).filter(Data.id.in_(old_ids), Data.dataset_id == dataset_id)
+    ids = list(wanted)
+    async with get_relational_engine().get_async_session() as session:
+        for start in range(0, len(ids), DATA_ID_BATCH_SIZE):
+            rows = await session.execute(
+                select(Data).filter(
+                    Data.id.in_(ids[start : start + DATA_ID_BATCH_SIZE]),
+                    Data.dataset_id == dataset_id,
                 )
-            ).scalars()
-        )
-    return [old_id if old_id in adopted else new_id for old_id, new_id in zip(old_ids, new_ids)]
+            )
+            for data in rows.scalars():
+                if data.system_metadata.get("structure") != wanted[data.id]:
+                    data.system_metadata = {**data.system_metadata, "structure": wanted[data.id]}
+            # One transaction per batch: the first sync after the upgrade touches every row.
+            await session.commit()
+            session.expunge_all()
 
 
 def _build_document_data_item(row: DltRowData, data_id: UUID, source_tag: str) -> DataItem:
@@ -609,7 +652,16 @@ def _build_document_data_item(row: DltRowData, data_id: UUID, source_tag: str) -
     The row is expected to carry ``title``/``content`` columns (and optionally
     ``url``/``id``). Tagging ``system_metadata["source"] = source_tag``
     routes the document through normal cognify entity extraction rather
-    than the deterministic manifest path.
+    than the deterministic manifest path. A ``cognee_node_set`` column names
+    the row's own node sets (``_row_node_set``); they ride on the DataItem and
+    ingest_data unions them with the call-level node_set. A ``cognee_structure``
+    column says where the row sits in its source's tree (``_row_structure``);
+    it is kept in ``system_metadata["structure"]`` for the structure pass.
+
+    ``literal_text=True`` because ``content`` is provider data cognee did not
+    write: an untitled row (no "# title" prefix) whose content happens to be
+    just a URL or an existing local path must still be stored as that text,
+    not fetched or read as if the caller had passed it directly to ``add()``.
     """
     row_data = row.row_data
     title = _clean(row_data.get("title"))
@@ -625,12 +677,157 @@ def _build_document_data_item(row: DltRowData, data_id: UUID, source_tag: str) -
         system_metadata["url"] = row_data["url"]
     if row_data.get("id"):
         system_metadata["external_id"] = str(row_data["id"])
+    structure = _row_structure(row, source_tag)
+    if structure is not None:
+        if "external_id" not in system_metadata:
+            # Without an external_id the structure pass could not find this row as a parent.
+            _raise_structure_shape(row, source_tag, "a structure on a row with no id")
+        system_metadata["structure"] = structure
 
     return DataItem(
         data=text,
         label=title or str(row_data.get("id")),
         system_metadata=system_metadata,
         data_id=data_id,
+        literal_text=True,
+        node_set=_row_node_set(row, source_tag),
+    )
+
+
+def _reserved_json_column(row: DltRowData, source_tag: str, column: str, raise_shape) -> Any:
+    """The parsed value of a json-hinted reserved column, ``None`` when unset.
+
+    The column is loaded with a json type hint, so dlt moves a value that is
+    not a list or object (a bare string, a number) into a variant column such
+    as ``<column>__v_text`` and leaves the column itself NULL. Reading only the
+    column would then ingest the row without it and no sign of it, so a
+    variant raises through ``raise_shape``. The value comes back as parsed json
+    or, on SQLite, as its JSON text, which text that is not JSON also raises
+    for.
+    """
+    variants = sorted(
+        name
+        for name, value in row.row_data.items()
+        if name.startswith(f"{column}__v_") and value is not None
+    )
+    if variants:
+        raise_shape(row, source_tag, f"a value dlt stored in {', '.join(variants)}")
+    raw = row.row_data.get(column)
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            # ValueError only, no RecursionError guard: the column is loaded with a
+            # json type hint (DOCUMENT_COLUMN_HINTS) and dlt refuses a value nested
+            # deep enough to break json.loads, failing at extract before the row is
+            # stored (checked on dlt 1.28.2: 200 levels load, 1000 fail). On Postgres
+            # the value comes back already parsed. There is no input to guard against.
+            raise_shape(row, source_tag, "text that is not JSON")
+    return raw
+
+
+def _row_node_set(row: DltRowData, source_tag: str) -> list[str] | None:
+    """The node sets a document row names in its ``cognee_node_set`` column.
+
+    The column must hold a JSON list of names. It comes back as that list (a
+    json column) or as its JSON text (SQLite). Any other shape raises: the
+    column is loaded with a json type hint, so dlt moves a value that is not a
+    list or object (a bare string, a number) into a variant column such as
+    ``cognee_node_set__v_text`` and leaves this one NULL. Reading only this
+    column would then ingest the row with none of its node sets and no sign
+    of it, so the sync stops instead and names the source, table and row.
+
+    Every name is namespaced under ``source_tag`` unless it already is, so
+    provider data can never name one of cognee's own node sets (``skills``,
+    ``user_context``, ...), and deduplicated by node-set identity, so two
+    spellings of one node set (``Project A``, ``project_a``) keep the first.
+    An entry that is not a non-empty string raises too, matching what
+    ingest_data does for a node_set passed to add().
+    """
+    raw = _reserved_json_column(row, source_tag, NODE_SET_COLUMN, _raise_node_set_shape)
+    if raw is None:
+        return None
+    if not isinstance(raw, list):
+        _raise_node_set_shape(row, source_tag, f"a JSON {type(raw).__name__}")
+    # No cap on the number or length of names, on purpose. A cap would cut a
+    # row's group memberships silently: the document lands with only some of
+    # its node sets and nobody is told. If a source ever floods the graph with
+    # node sets, fail the sync loudly, naming the source, table and count.
+    # Never truncate.
+    if not all(isinstance(value, str) and value.strip() for value in raw):
+        _raise_node_set_shape(row, source_tag, "an entry that is not a non-empty string")
+    prefix = f"{source_tag}:"
+    # One entry per node set: spellings that normalize to the same id keep the first.
+    unique: dict = {}
+    for value in raw:
+        name = value.strip()
+        name = name if name.startswith(prefix) else prefix + name
+        try:
+            key = NodeSet.id_for(name)
+        except UnicodeEncodeError:
+            _raise_node_set_shape(row, source_tag, "an entry that cannot be encoded as a name")
+        unique.setdefault(key, name)
+    return list(unique.values()) or None
+
+
+_STRUCTURE_ENTRY_KEYS = {"kind", "id", "name", "document"}
+
+
+def _row_structure(row: DltRowData, source_tag: str) -> dict | None:
+    """The row's ``cognee_structure`` (``dlt_utils.STRUCTURE_COLUMN``), or ``None`` when
+    unset, which is not the empty list of a row at the top of its tree. Any other
+    shape stops the sync, naming the row, like a bad node set does."""
+    raw = _reserved_json_column(row, source_tag, STRUCTURE_COLUMN, _raise_structure_shape)
+    if raw is None:
+        return None
+    if not isinstance(raw, dict) or not isinstance(raw.get("ancestors"), list):
+        _raise_structure_shape(row, source_tag, "a value without an ancestors list")
+    # No check for text a backend cannot store: dlt refuses a lone surrogate at
+    # extract (checked on 1.28.2), and a graph write that refuses a value fails loudly.
+    for position, entry in enumerate(raw["ancestors"]):
+        if (
+            not isinstance(entry, dict)
+            or set(entry) - _STRUCTURE_ENTRY_KEYS
+            or not all(isinstance(entry.get(key), str) and entry[key] for key in ("kind", "id"))
+            or not isinstance(entry.get("name", ""), str)
+            or not isinstance(entry.get("document", False), bool)
+        ):
+            _raise_structure_shape(row, source_tag, "an ancestor that is not a valid entry")
+        if entry.get("document") and position != len(raw["ancestors"]) - 1:
+            _raise_structure_shape(row, source_tag, "an ancestor after a document ancestor")
+        if entry.get("document") and entry["id"] == str(row.row_data.get("id")):
+            _raise_structure_shape(row, source_tag, "the row itself as its parent")
+    return {"ancestors": raw["ancestors"]}
+
+
+def _raise_structure_shape(row: DltRowData, source_tag: str, found: str) -> NoReturn:
+    """Stop the sync: a row's ``cognee_structure`` is not a valid tree position."""
+    from cognee.exceptions import CogneeValidationError
+
+    raise CogneeValidationError(
+        message=(
+            f"Source '{source_tag}' table '{row.table_name}' row '{row.primary_key_value}': "
+            f"{STRUCTURE_COLUMN} must be an object with an ancestors list of "
+            '{"kind", "id", "name"?, "document"?} entries, but it holds '
+            f"{found}. Fix the source and re-sync the affected rows. "
+            "No document from this sync was stored."
+        ),
+        name="DltStructureColumnInvalid",
+    )
+
+
+def _raise_node_set_shape(row: DltRowData, source_tag: str, found: str) -> NoReturn:
+    """Stop the sync: a row's ``cognee_node_set`` is not a JSON list of names."""
+    from cognee.exceptions import CogneeValidationError
+
+    raise CogneeValidationError(
+        message=(
+            f"Source '{source_tag}' table '{row.table_name}' row '{row.primary_key_value}': "
+            f"{NODE_SET_COLUMN} must be a JSON list of names, but it holds {found}. "
+            'Emit a list, even for one name (["name"]), and re-sync the affected rows. '
+            "No document from this sync was stored."
+        ),
+        name="DltNodeSetColumnNotAList",
     )
 
 
