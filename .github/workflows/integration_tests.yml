@@ -37,7 +37,7 @@ jobs:
       EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
 
@@ -51,12 +51,12 @@ jobs:
         run: uv run pytest cognee/tests/integration/retrieval/ --splits 4 --group ${{ matrix.split-group }}
 
   integration-documents-tasks:
-    name: Integration - Documents & Tasks (${{ matrix.split-group }}/2)
+    name: Integration - Documents & Tasks (${{ matrix.split-group }}/3)
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
-        split-group: [1, 2]
+        split-group: [1, 2, 3]
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     env:
       ENV: 'dev'
@@ -71,7 +71,7 @@ jobs:
       EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
 
@@ -82,7 +82,7 @@ jobs:
           extra-dependencies: "scraping"
 
       - name: Run Document & Task Tests
-        run: uv run pytest cognee/tests/integration/documents/ cognee/tests/integration/tasks/ --splits 2 --group ${{ matrix.split-group }}
+        run: uv run pytest cognee/tests/integration/documents/ cognee/tests/integration/tasks/ --splits 3 --group ${{ matrix.split-group }}
 
   integration-infra:
     name: Integration - Infrastructure (${{ matrix.split-group }}/3)
@@ -105,7 +105,7 @@ jobs:
       EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
 
@@ -137,7 +137,7 @@ jobs:
       EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
 
@@ -178,7 +178,7 @@ jobs:
       CACHE_HOST: redis
     steps:
       - name: Check out repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
 

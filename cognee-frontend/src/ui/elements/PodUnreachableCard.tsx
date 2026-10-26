@@ -7,8 +7,13 @@ import { trackEvent } from "@/modules/analytics";
  * (podUnreachable), as opposed to still connecting. Scoped to the content
  * area — not a full-page takeover — so the app shell (nav, top bar) stays
  * visible, matching the rest of the dashboard's loading states.
+ *
+ * `wakeFailed` covers the narrower case where we know the workspace was asleep
+ * and know the restore did not take. "Trouble reaching your workspace" reads as
+ * a network problem on the user's end, which is misleading here and hides the
+ * fact that their data is fine.
  */
-export default function PodUnreachableCard({ pageName = "Dashboard" }: { pageName?: string }) {
+export default function PodUnreachableCard({ pageName = "Dashboard", wakeFailed = false, workspaceName }: { pageName?: string; wakeFailed?: boolean; workspaceName?: string }) {
   return (
     <div style={{ minHeight: "100%", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: "clamp(16px, 3vw, 32px)" }}>
       <div style={{
@@ -28,11 +33,15 @@ export default function PodUnreachableCard({ pageName = "Dashboard" }: { pageNam
           <path d="M8 1L1 14h14L8 1z" fill="rgba(245,158,11,0.25)" stroke="#F59E0B" strokeWidth="1" />
           <text x="8" y="12" textAnchor="middle" fontSize="9" fontWeight="700" fill="#FBBF24">!</text>
         </svg>
-        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#EDECEA" }}>
-          We&apos;re having trouble reaching your workspace
+        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#EDECEA", maxWidth: "100%", overflowWrap: "anywhere" }}>
+          {wakeFailed
+            ? (workspaceName ? `${workspaceName} didn't wake up` : "Your workspace didn't wake up")
+            : "We're having trouble reaching your workspace"}
         </h2>
         <p style={{ margin: 0, fontSize: 13, color: "rgba(237,236,234,0.65)", lineHeight: "20px" }}>
-          This can happen during setup or a temporary hiccup. Try again, or sign out and back in.
+          {wakeFailed
+            ? "It was asleep and we asked it to start, but it hasn't come online. Try again, or sign out and back in."
+            : "This can happen during setup or a temporary hiccup. Try again, or sign out and back in."}
         </p>
         <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
           <button

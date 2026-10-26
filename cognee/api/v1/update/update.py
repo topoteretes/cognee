@@ -1,5 +1,5 @@
 from time import perf_counter
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, Literal
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -16,6 +16,11 @@ from cognee.api.v1.update.incremental import (
 from cognee.api.v1.update.result import Fallback, UpdateError, UpdateResult
 from cognee.modules.chunking.chunk_policy import DEFAULT_CHUNK_POLICY, ChunkPolicy
 from cognee.modules.chunking.TextChunker import TextChunker
+from cognee.modules.cognify.config import (
+    ensure_extractor_runtime,
+    get_cognify_config,
+    resolve_extractor,
+)
 from cognee.modules.pipelines.models.PipelineRunInfo import get_errored_run_info
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
@@ -41,6 +46,7 @@ async def update(
     custom_prompt: str | None = None,
     chunker: type = TextChunker,
     policy: ChunkPolicy = DEFAULT_CHUNK_POLICY,
+    extractor: Literal["llm", "gliner_demo", "gliner"] | None = None,
 ) -> dict:
     """
     Update existing data in Cognee.
@@ -88,14 +94,15 @@ async def update(
         user: User object for authentication and permissions. Uses default user if None.
               Default user: "default_user@example.com" (created automatically on first use).
               Users can only access datasets they have permissions for.
-        node_set: Optional list of node identifiers for graph organization and access control.
-                 Used for grouping related data points in the knowledge graph.
-                 update() is a PATCH for document metadata: node_set, and the label and
-                 external_metadata of a DataItem, keep their stored values when not
-                 passed; an explicit empty value (node_set=[], label="",
-                 external_metadata={}) clears them; a value replaces them. Passing any
-                 of them runs the full rebuild, since the chunk-level path does not
-                 touch document metadata.
+        node_set: Optional list of node identifiers used to organize and filter data points
+                 in the knowledge graph. Not an access-control mechanism.
+                 update() is a PATCH for document metadata: node_set, and the label,
+                 external_metadata and node_set of a DataItem, keep their stored values
+                 when not passed; an explicit empty value (node_set=[], label="",
+                 external_metadata={}) clears them; a value replaces them (the call's
+                 and the item's node_set together, as on add). Passing any of them runs
+                 the full rebuild, since the chunk-level path does not touch document
+                 metadata.
         vector_db_config: Optional configuration for vector database (for custom setups).
                  Chunk-level incremental updates do not support per-call config
                  forwarding: when provided, the update runs full ingestion
@@ -118,6 +125,13 @@ async def update(
         policy: Decides which chunks exist after the edit and what happens to the old
                  ones. Replaceable without touching storage or update orchestration.
                  Chunk-level path only; not exposed on the HTTP route.
+        extractor: Which implementation extracts the graph for the replaced chunks,
+                 resolved exactly as ``cognify()`` resolves it: "llm", "gliner_demo"
+                 (no LLM call), or None for the ``GRAPH_EXTRACTOR`` setting, whose
+                 default ``auto`` picks the LLM when a usable key is configured and
+                 the GLiNER demo otherwise. Applies to both the chunk-level path and
+                 the full rebuild. Use the extractor the document was ingested with;
+                 the baseline does not record it.
 
     Returns:
         One dict on every path (schema: ``UpdateResult``), a superset of the
@@ -128,8 +142,9 @@ async def update(
               (the rebuild's cognify run errored; ``error`` says why, and the call
               can be retried).
             - ``regions``, ``deleted_chunks``, ``added_chunks``, ``reused_chunks``,
-              ``kept_chunks``, ``reindexed_chunks``, ``total_chunks``: the chunk-level
-              counters; None on a rebuild, which has no diff.
+              ``redated_chunks``, ``kept_chunks``, ``reindexed_chunks``,
+              ``total_chunks``: the chunk-level counters; None on a rebuild, which
+              has no diff.
             - ``data_id``, ``dataset_id``: the document, the handle to retry with.
             - ``duration_seconds``: wall-clock time of the update.
             - ``pipeline_run_id``: the run to inspect; None for a no-op.
@@ -156,6 +171,7 @@ async def update(
                 ("custom_prompt", custom_prompt, None),
                 ("chunker", chunker, TextChunker),
                 ("policy", policy, DEFAULT_CHUNK_POLICY),
+                ("extractor", extractor, None),
             )
             if value is not default
         ]
@@ -218,6 +234,12 @@ async def update(
     if fallback is not None:
         logger.warning("%s; running full update", fallback[1])
 
+    # One extractor decision for both paths, made the way cognify() makes it,
+    # and the runtime it needs made importable before either path starts.
+    cognify_config = get_cognify_config()
+    resolved_extractor = resolve_extractor(extractor, cognify_config)
+    await ensure_extractor_runtime(resolved_extractor, cognify_config)
+
     if fallback is None:
         # Chunk-level incremental path: diff the new text against the stored
         # processed text, replace only the affected chunks — the Data row is
@@ -237,6 +259,7 @@ async def update(
                 custom_prompt=custom_prompt,
                 chunker=chunker,
                 policy=policy,
+                extractor=resolved_extractor,
             )
         except IncrementalUpdateNotPossible as refusal:
             # The reason is a structured field, not just prose: an unsupported
@@ -256,6 +279,7 @@ async def update(
                 deleted_chunks=summary["deleted_chunks"],
                 added_chunks=summary["added_chunks"],
                 reused_chunks=summary["reused_chunks"],
+                redated_chunks=summary["redated_chunks"],
                 kept_chunks=summary["kept_chunks"],
                 reindexed_chunks=summary["reindexed_chunks"],
                 total_chunks=summary["total_chunks"],
@@ -321,6 +345,7 @@ async def update(
         data_cache=data_cache,
         graph_model=graph_model,
         custom_prompt=custom_prompt,
+        extractor=resolved_extractor,
         chunk_size=fallback_chunk_size,
         # An errored run is reported as a failed result, not raised: the
         # caller gets the document id and the error to retry this one update.
@@ -368,7 +393,7 @@ def _full_rebuild_reason(
         return RefusalReason.DISABLED, "chunk_level_diff=False was requested"
 
     data_item_changes_metadata = isinstance(data, DataItem) and (
-        data.label is not None or data.external_metadata is not None
+        data.label is not None or data.external_metadata is not None or data.node_set is not None
     )
     # node_set=[] is a request to clear the stored node set, so it counts as a change.
     if node_set is not None or data_item_changes_metadata:

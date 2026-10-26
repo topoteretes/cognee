@@ -6,7 +6,6 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi import Path as PathParam
-from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -17,6 +16,7 @@ from cognee.api.v1.datasets.dto import DataDTO
 from cognee.api.v1.exceptions import DataNotFoundError
 from cognee.exceptions import CogneeApiError
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.data.content_hash import normalize_content_hash
 from cognee.modules.data.methods import (
     get_authorized_existing_datasets,
     get_datasets_by_name,
@@ -24,6 +24,18 @@ from cognee.modules.data.methods import (
 )
 from cognee.modules.data.methods.create_authorized_dataset import create_authorized_dataset
 from cognee.modules.graph.methods import get_formatted_graph_data
+from cognee.modules.graph.rdf.sparql import (
+    DEFAULT_LIMIT as SPARQL_DEFAULT_LIMIT,
+)
+from cognee.modules.graph.rdf.sparql import (
+    MAX_LIMIT as SPARQL_MAX_LIMIT,
+)
+from cognee.modules.graph.rdf.sparql import (
+    SparqlGraphTooLargeError,
+    SparqlQueryError,
+    SparqlQueryTimeoutError,
+    query_dataset_sparql,
+)
 from cognee.modules.pipelines.models import PipelineRunStatus
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
@@ -36,6 +48,10 @@ logger = get_logger()
 
 class ErrorResponseDTO(BaseModel):
     message: str
+
+
+class DataCountDTO(OutDTO):
+    count: int
 
 
 # Shared by GET /status and GET /status/progress — both accept the same
@@ -111,7 +127,9 @@ class DatasetGraphSummaryDTO(OutDTO):
     num_nodes: int
     num_edges: int
     # None while pipeline_run_id is set means the last count attempt degraded
-    # (graph store unavailable) and wasn't cached — retried on the next poll.
+    # (graph store unavailable) and wasn't cached. The degraded result is held
+    # in process briefly (GRAPH_COUNTS_FAILED_TTL_SECONDS, default 15s), so a
+    # poll inside that window repeats it rather than recounting.
     computed_at: datetime | None = None
 
 
@@ -146,6 +164,53 @@ class DatasetCreationPayload(InDTO):
 class DatasetSchemaPayloadDTO(InDTO):
     graph_schema: dict[str, Any] | None = None
     custom_prompt: str | None = None
+
+
+class SparqlQueryPayloadDTO(InDTO):
+    query: str = Field(
+        min_length=1,
+        description="A read-only SPARQL 1.1 query: SELECT, ASK, CONSTRUCT or DESCRIBE.",
+        examples=["SELECT ?s ?name WHERE { ?s rdfs:label ?name } LIMIT 10"],
+    )
+    base_iri: str | None = Field(
+        default=None,
+        description=(
+            "Prefix for the IRIs minted for nodes without an ontology_uri and for"
+            " cognee-native predicates. Defaults to https://cognee.ai/graph/."
+        ),
+        examples=["https://example.org/memory/"],
+    )
+    limit: int = Field(
+        default=SPARQL_DEFAULT_LIMIT,
+        ge=1,
+        le=SPARQL_MAX_LIMIT,
+        description="Maximum number of SELECT rows to return; sets `truncated` when hit.",
+    )
+
+
+class SparqlResultDTO(BaseModel):
+    """One query form's result; the fields for the other forms are omitted.
+
+    Keys are deliberately snake_case (not the API's usual camelCase): they mirror
+    the SPARQL JSON results vocabulary callers already parse.
+    """
+
+    variables: list[str] | None = Field(default=None, description="SELECT: projected names")
+    rows: list[list[str | None]] | None = Field(
+        default=None,
+        description=(
+            "SELECT: one list per solution, aligned with `variables`. IRIs and literal"
+            " lexical forms as strings, blank nodes as `_:id`, unbound as null."
+        ),
+    )
+    row_count: int | None = Field(default=None, description="SELECT: len(rows)")
+    truncated: bool | None = Field(
+        default=None, description="SELECT: true when more rows existed than `limit`"
+    )
+    boolean: bool | None = Field(default=None, description="ASK: the answer")
+    turtle: str | None = Field(
+        default=None, description="CONSTRUCT / DESCRIBE: the result graph as Turtle"
+    )
 
 
 def get_datasets_router() -> APIRouter:
@@ -185,10 +250,12 @@ def get_datasets_router() -> APIRouter:
 
             return datasets
         except Exception as error:
-            logger.error(f"Error retrieving datasets: {error!s}")
+            # The exception text can carry database hosts, names or SQL; it
+            # belongs in the server log, never in a response.
+            logger.exception("Error retrieving datasets")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Error retrieving datasets: {error!s}",
+                detail="Error retrieving datasets.",
             ) from error
 
     @router.post("", response_model=DatasetDTO)
@@ -238,10 +305,11 @@ def get_datasets_router() -> APIRouter:
 
             return dataset
         except Exception as error:
-            logger.error(f"Error creating dataset: {error!s}")
+            # Same as get_datasets: diagnostics stay server-side.
+            logger.exception("Error creating dataset")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Error creating dataset: {error!s}",
+                detail="Error creating dataset.",
             ) from error
 
     @router.delete("")
@@ -379,6 +447,110 @@ def get_datasets_router() -> APIRouter:
 
         return graph_data
 
+    @router.post(
+        "/{dataset_id}/sparql",
+        response_model=SparqlResultDTO,
+        response_model_exclude_none=True,
+        responses={
+            400: {"model": ErrorResponseDTO},
+            404: {"model": ErrorResponseDTO},
+            413: {"model": ErrorResponseDTO},
+            504: {"model": ErrorResponseDTO},
+        },
+    )
+    async def query_dataset_with_sparql(
+        payload: SparqlQueryPayloadDTO,
+        dataset_id: UUID = PathParam(
+            description="Dataset UUID, the id field from GET /api/v1/datasets (not the name)",
+            examples=["b8a7c3de-4f5a-4b6c-8d9e-0f1a2b3c4d5e"],
+        ),
+        user: User = Depends(get_authenticated_user),
+    ):
+        """
+        Run a read-only SPARQL query over a dataset's knowledge graph.
+
+        The dataset graph is read in full and loaded into an in-memory RDF store
+        for the duration of the request (the same view `cognee.modules.graph.rdf`
+        exports), then the query runs there. Nodes carrying an `ontology_uri` keep
+        that IRI; other nodes get `{base_iri}node/{id}` and cognee-native edges
+        `{base_iri}prop/{relationship_name}`; `name` becomes `rdfs:label` and
+        `is_a` becomes `rdf:type` / `rdfs:subClassOf`.
+
+        ## Path Parameters
+        - **dataset_id** (UUID): The unique identifier of the dataset
+
+        ## Request Body
+        - **query** (str): SELECT, ASK, CONSTRUCT or DESCRIBE. SPARQL Update
+          (INSERT, DELETE, LOAD, CLEAR, DROP, CREATE, ADD, MOVE, COPY) is refused.
+        - **base_iri** (str, optional): prefix for minted IRIs
+        - **limit** (int, 1-10000, default 1000): cap on SELECT rows
+
+        ## Response
+        Depends on the query form:
+        - SELECT: `variables`, `rows`, `row_count`, `truncated`
+        - ASK: `boolean`
+        - CONSTRUCT / DESCRIBE: `turtle`
+
+        ## Limits
+        - Graphs with more than `SPARQL_MAX_GRAPH_NODES` nodes (default 200000)
+          are refused with 413; export the graph as RDF instead.
+        - Queries that run longer than `SPARQL_QUERY_TIMEOUT_SECONDS` (default 30)
+          are abandoned with 504. The server stops waiting; the worker thread
+          finishes on its own.
+
+        ## Error Codes
+        - **400 Bad Request**: SPARQL Update keywords, or the query does not parse
+        - **404 Not Found**: Dataset doesn't exist or user doesn't have access
+        - **413 Content Too Large**: Dataset graph exceeds the node ceiling
+        - **504 Gateway Timeout**: Query exceeded the wall-clock budget
+        """
+        send_telemetry(
+            "Datasets API Endpoint Invoked",
+            user,
+            additional_properties={
+                "endpoint": f"POST /v1/datasets/{dataset_id!s}/sparql",
+                "dataset_id": str(dataset_id),
+                "cognee_version": cognee_version,
+            },
+        )
+
+        datasets_found = await get_authorized_existing_datasets([dataset_id], "read", user)
+
+        if not datasets_found:
+            return JSONResponse(
+                status_code=404,
+                content=ErrorResponseDTO(
+                    message=f"Dataset ({dataset_id!s}) not found."
+                ).model_dump(),
+            )
+
+        dataset = datasets_found[0]
+
+        try:
+            return await query_dataset_sparql(
+                dataset.id,
+                dataset.owner_id,
+                payload.query,
+                base_iri=payload.base_iri,
+                limit=payload.limit,
+            )
+        except SparqlGraphTooLargeError as error:
+            return JSONResponse(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                content=ErrorResponseDTO(message=str(error)).model_dump(),
+            )
+        except SparqlQueryTimeoutError as error:
+            return JSONResponse(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                content=ErrorResponseDTO(message=str(error)).model_dump(),
+            )
+        except SparqlQueryError as error:
+            # Update keywords or a query rdflib cannot parse: the client's input.
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content=ErrorResponseDTO(message=str(error)).model_dump(),
+            )
+
     @router.get(
         "/{dataset_id}/data",
         response_model=list[DataDTO],
@@ -389,17 +561,56 @@ def get_datasets_router() -> APIRouter:
             description="Dataset UUID, the id field from GET /api/v1/datasets (not the name)",
             examples=["b8a7c3de-4f5a-4b6c-8d9e-0f1a2b3c4d5e"],
         ),
+        limit: int = Query(
+            100,
+            ge=1,
+            le=1000,
+            description="Maximum number of data items to return.",
+        ),
+        offset: int = Query(
+            0,
+            ge=0,
+            le=1_000_000,
+            description="Number of data items to skip before returning results.",
+        ),
+        content_hash: str | None = Query(
+            None,
+            pattern=r"^[0-9a-fA-F]{32}$",
+            description=(
+                "Return only your data items whose content_hash equals this MD5 hex digest "
+                "(the hash of the text/bytes that were added; case-insensitive). "
+                "Scoped to rows you added; limit/offset page the matches."
+            ),
+        ),
         user: User = Depends(get_authenticated_user),
     ):
         """
-        Get all data items in a dataset.
+        Get a page of data items in a dataset.
 
-        This endpoint retrieves all data items (documents, files, etc.) that belong
+        This endpoint retrieves data items (documents, files, etc.) that belong
         to a specific dataset. Each data item includes metadata such as name, type,
         creation time, and storage location.
 
+        Results are paginated. The response is capped at **limit** items (100 by
+        default), so this endpoint stays fast on datasets with many documents; page
+        through with **offset**. Use `GET /{dataset_id}/data/count` for the total.
+        That total is uncapped; offsets above 1,000,000 are rejected, so datasets
+        larger than 1,001,000 items cannot be fully traversed by this endpoint.
+        Concurrent inserts/deletes can shift offsets; this is not a snapshot.
+
         ## Path Parameters
         - **dataset_id** (UUID): The unique identifier of the dataset
+
+        ## Query Parameters
+        - **limit** (int, 1-1000, default 100): Maximum number of items to return
+        - **offset** (int, default 0): Number of items to skip
+        - **content_hash** (str, optional): Return only the items *you* added holding
+          this content (MD5 hex digest of the added text/bytes, as recorded in each
+          item's `content_hash`; case-insensitive, anything but 32 hex characters is
+          a 422). Scoped to your own rows like ingestion dedup, so another user's
+          copy in a shared dataset is not returned. `limit`/`offset` page the matches
+          exactly as they page the listing; an empty first page means you added no
+          such content.
 
         ## Response
         Returns a list of data objects containing:
@@ -414,6 +625,7 @@ def get_datasets_router() -> APIRouter:
         - **label**: Label attached to the data item at upload, if any
         - **external_metadata**: Stored metadata dict (upload-provided keys merged over
           loader-derived ones), if any
+        - **content_hash**: MD5 hex digest of the ingested payload
 
         ## Error Codes
         - **404 Not Found**: Dataset doesn't exist or user doesn't have access
@@ -429,7 +641,10 @@ def get_datasets_router() -> APIRouter:
             },
         )
 
-        from cognee.modules.data.methods import get_dataset_data
+        from cognee.modules.data.methods import (
+            get_dataset_data,
+            get_dataset_data_by_content_hash,
+        )
 
         # Verify user has permission to read dataset
         dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
@@ -444,86 +659,90 @@ def get_datasets_router() -> APIRouter:
 
         dataset_id = dataset[0].id
 
-        dataset_data = await get_dataset_data(dataset_id=dataset_id)
+        if content_hash is not None:
+            dataset_data = await get_dataset_data_by_content_hash(
+                dataset_id,
+                normalize_content_hash(content_hash),
+                user,
+                limit=limit,
+                offset=offset,
+            )
+        else:
+            dataset_data = await get_dataset_data(
+                dataset_id=dataset_id, limit=limit, offset=offset, order_by="created_at"
+            )
 
         if dataset_data is None:
             return []
 
-        # Dict literal, not dict(**data, dataset_id=...): Data now carries its
-        # own dataset_id column, and the kwarg form raises TypeError on the
-        # duplicate key. The requested dataset id still wins — the column is
-        # nullable, so the row's value cannot be relied on here.
+        # Build each DataDTO explicitly rather than jsonable_encoder(data) into
+        # a dict. The encoder walks the whole ORM row -- including the large
+        # JSON columns DataDTO does not expose (node_set, pipeline_status,
+        # system_metadata) -- and response_model=list[DataDTO] then re-validated
+        # and re-encoded the result, so every row was serialized three times and
+        # most of that work was thrown away.
+        #
+        # Naming the fields also keeps the dataset_id override safe: the row's
+        # own column is nullable, so the requested id has to win, and validating
+        # the row first would reject a NULL before we could substitute it.
         return [
-            {
-                **jsonable_encoder(data),
-                "dataset_id": dataset_id,
-            }
+            DataDTO(
+                id=data.id,
+                name=data.name,
+                created_at=data.created_at,
+                updated_at=data.updated_at,
+                extension=data.extension,
+                mime_type=data.mime_type,
+                raw_data_location=data.raw_data_location,
+                dataset_id=dataset_id,
+                label=data.label,
+                external_metadata=data.external_metadata,
+                data_size=data.data_size,
+                content_hash=data.content_hash,
+            )
             for data in dataset_data
         ]
 
     @router.get(
-        "/{dataset_id}/processing-status",
-        response_model=DatasetProcessingStatusDTO,
+        "/{dataset_id}/data/count",
+        response_model=DataCountDTO,
         responses={404: {"model": ErrorResponseDTO}},
     )
-    async def get_dataset_processing_status(
+    async def get_dataset_data_count(
         dataset_id: UUID = PathParam(
             description="Dataset UUID, the id field from GET /api/v1/datasets (not the name)",
             examples=["b8a7c3de-4f5a-4b6c-8d9e-0f1a2b3c4d5e"],
         ),
-        pipeline: str = Query(
-            "cognify_pipeline",
-            description=(
-                "Pipeline whose per-item completion to count: 'cognify_pipeline'"
-                " (default), 'add_pipeline', or 'code_graph_pipeline'."
-            ),
-            examples=["cognify_pipeline"],
-        ),
         user: User = Depends(get_authenticated_user),
     ):
         """
-        Get item-level processing status for a dataset.
+        Count the data items in a dataset.
 
-        `GET /status` reports whether a pipeline *run* is in progress or done for a
-        dataset. This endpoint answers the finer question operators need when
-        triaging incremental loads: which of the dataset's data items carry the
-        per-item completion stamp for a pipeline, and which are still pending.
+        Exists so callers that only need "how many documents" do not have to
+        fetch the items to count them. `GET /{dataset_id}/data` is paginated,
+        so its length is a page size, not a total.
 
         ## Path Parameters
         - **dataset_id** (UUID): The unique identifier of the dataset
 
-        ## Query Parameters
-        - **pipeline** (str, optional): Pipeline name to inspect. Defaults to
-          `cognify_pipeline`.
-
         ## Response
-        - **total**: Number of data items in the dataset
-        - **completed**: Items whose per-item status for the pipeline is completed
-          (both the legacy string and the dict status representation are recognised)
-        - **pending**: `total - completed`
-        - **items**: `[{id, name, completed}]`, one entry per data item, in the same
-          order as `GET /datasets/{id}/data`. `id` is the data_id accepted by
-          `DELETE /datasets/{id}/data/{data_id}` and `forget(data_id=...)`
-
-        Per-item errored state is not persisted, so it is not reported: a pending
-        item may be untouched, in progress, or failed.
+        - **count**: Number of data items in the dataset
 
         ## Error Codes
         - **404 Not Found**: Dataset doesn't exist or user doesn't have access
-        - **409 Conflict**: Error computing the status
+        - **500 Internal Server Error**: Error counting data
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
             user,
             additional_properties={
-                "endpoint": f"GET /v1/datasets/{dataset_id!s}/processing-status",
+                "endpoint": f"GET /v1/datasets/{dataset_id!s}/data/count",
                 "dataset_id": str(dataset_id),
-                "pipeline": pipeline,
                 "cognee_version": cognee_version,
             },
         )
 
-        from cognee.modules.data.methods import get_dataset_processing_status
+        from cognee.modules.data.methods import count_dataset_data
 
         # Verify user has permission to read dataset
         dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
@@ -536,16 +755,7 @@ def get_datasets_router() -> APIRouter:
                 ).model_dump(),
             )
 
-        try:
-            return await get_dataset_processing_status(dataset[0].id, pipeline_name=pipeline)
-        except CogneeApiError:
-            raise
-        except Exception:
-            logger.exception("Error retrieving dataset processing status")
-            return JSONResponse(
-                status_code=409,
-                content={"error": "Unable to retrieve dataset processing status."},
-            )
+        return DataCountDTO(count=await count_dataset_data(dataset_id=dataset[0].id))
 
     @router.get(
         "/status",
@@ -592,8 +802,8 @@ def get_datasets_router() -> APIRouter:
         this endpoint returns depending on how it's called.
 
         ## Error Codes
-        - **409 Conflict**: Error retrieving status (e.g. requesting a dataset you don't have
-          read permission for)
+        - **403 Forbidden**: The request owner cannot read every requested dataset
+        - **409 Conflict**: An unexpected error occurred while retrieving status
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
@@ -667,7 +877,7 @@ def get_datasets_router() -> APIRouter:
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "GET /v1/datasets/status/progress",
                 "datasets": [str(dataset_id) for dataset_id in datasets],
@@ -729,10 +939,14 @@ def get_datasets_router() -> APIRouter:
         - **pipelineRunId**: The dataset's latest cognify run, or null if it
           has never been cognified
         - **numNodes** / **numEdges**: Graph size for that run
-        - **computedAt**: When the count was cached, or null when it wasn't —
-          either the last attempt degraded (graph store unavailable, counts
-          are 0 and retried on the next poll) or a concurrent caller cached
-          the same run first (counts are exact)
+        - **computedAt**: When the count was cached, or null when it wasn't,
+          which happens three ways: the last attempt degraded (graph store
+          unavailable, counts are 0 and held for
+          GRAPH_COUNTS_FAILED_TTL_SECONDS, default 15s, before another
+          attempt); a concurrent caller cached the same run first (counts are
+          exact, and the next poll reports a non-null computedAt from that
+          row); or caching failed for another reason (counts are exact and
+          held for GRAPH_COUNTS_UNCACHED_TTL_SECONDS, default 60s)
 
         ## Error Codes
         - **409 Conflict**: The summary could not be built (generic message;
@@ -974,5 +1188,91 @@ def get_datasets_router() -> APIRouter:
                 session.add(config)
             await session.commit()
         return {"status": "ok"}
+
+    @router.get(
+        "/{dataset_id}/processing-status",
+        response_model=DatasetProcessingStatusDTO,
+        responses={404: {"model": ErrorResponseDTO}},
+    )
+    async def get_dataset_processing_status(
+        dataset_id: UUID = PathParam(
+            description="Dataset UUID, the id field from GET /api/v1/datasets (not the name)",
+            examples=["b8a7c3de-4f5a-4b6c-8d9e-0f1a2b3c4d5e"],
+        ),
+        pipeline: str = Query(
+            "cognify_pipeline",
+            description=(
+                "Pipeline whose per-item completion to count: 'cognify_pipeline'"
+                " (default), 'add_pipeline', or 'code_graph_pipeline'."
+            ),
+            examples=["cognify_pipeline"],
+        ),
+        user: User = Depends(get_authenticated_user),
+    ):
+        """
+        Get item-level processing status for a dataset.
+
+        `GET /status` reports whether a pipeline *run* is in progress or done for a
+        dataset. This endpoint answers the finer question operators need when
+        triaging incremental loads: which of the dataset's data items carry the
+        per-item completion stamp for a pipeline, and which are still pending.
+
+        ## Path Parameters
+        - **dataset_id** (UUID): The unique identifier of the dataset
+
+        ## Query Parameters
+        - **pipeline** (str, optional): Pipeline name to inspect. Defaults to
+          `cognify_pipeline`.
+
+        ## Response
+        - **total**: Number of data items in the dataset
+        - **completed**: Items whose per-item status for the pipeline is completed
+          (both the legacy string and the dict status representation are recognised)
+        - **pending**: `total - completed`
+        - **items**: `[{id, name, completed}]`, one entry per data item, in the same
+          order as `GET /datasets/{id}/data`. `id` is the data_id accepted by
+          `DELETE /datasets/{id}/data/{data_id}` and `forget(data_id=...)`
+
+        Per-item errored state is not persisted, so it is not reported: a pending
+        item may be untouched, in progress, or failed.
+
+        ## Error Codes
+        - **404 Not Found**: Dataset doesn't exist or user doesn't have access
+        - **409 Conflict**: Error computing the status
+        """
+        send_telemetry(
+            "Datasets API Endpoint Invoked",
+            user,
+            additional_properties={
+                "endpoint": f"GET /v1/datasets/{dataset_id!s}/processing-status",
+                "dataset_id": str(dataset_id),
+                "pipeline": pipeline,
+                "cognee_version": cognee_version,
+            },
+        )
+
+        from cognee.modules.data.methods import get_dataset_processing_status
+
+        # Verify user has permission to read dataset
+        dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
+
+        if not dataset:
+            return JSONResponse(
+                status_code=404,
+                content=ErrorResponseDTO(
+                    message=f"Dataset ({dataset_id!s}) not found."
+                ).model_dump(),
+            )
+
+        try:
+            return await get_dataset_processing_status(dataset[0].id, pipeline_name=pipeline)
+        except CogneeApiError:
+            raise
+        except Exception:
+            logger.exception("Error retrieving dataset processing status")
+            return JSONResponse(
+                status_code=409,
+                content={"error": "Unable to retrieve dataset processing status."},
+            )
 
     return router

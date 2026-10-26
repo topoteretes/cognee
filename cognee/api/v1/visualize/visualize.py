@@ -1,6 +1,8 @@
 import asyncio
 import json
 from collections import defaultdict
+from collections.abc import AsyncGenerator
+from contextlib import aclosing
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
@@ -24,6 +26,7 @@ from cognee.modules.visualization.cognee_network_visualization import (
     build_visualization_payload,
     cognee_network_visualization,
 )
+from cognee.modules.visualization.graph_stream import STREAM_CHUNK_SIZE, stream_graph_events
 from cognee.modules.visualization.preprocessor import build_node_set_colors
 from cognee.modules.visualization.session_events import collect_session_events
 from cognee.modules.visualization.subgraph_data import (
@@ -149,6 +152,42 @@ async def fetch_dataset_graph_data(
             seed_top_k=neighborhood_seed_top_k,
             max_nodes=max_nodes,
         )
+
+
+async def stream_dataset_graph(
+    dataset: Any | None,
+    *,
+    query: str | None = None,
+    seed_node_ids: list[str] | None = None,
+    neighborhood_depth: int = DEFAULT_NEIGHBORHOOD_DEPTH,
+    neighborhood_seed_top_k: int = DEFAULT_SEED_TOP_K,
+    max_nodes: int = DEFAULT_MAX_NODES,
+    chunk_size: int = STREAM_CHUNK_SIZE,
+) -> AsyncGenerator[tuple[str, dict[str, Any]], None]:
+    """The streamed graph read for one already-authorized dataset (or none).
+
+    The streaming counterpart of ``fetch_dataset_graph_data``: the same
+    dataset-scoped database context, entered here and held until the last
+    chunk, so the whole read runs in the task that iterates this generator.
+    """
+    async with set_database_global_context_variables(
+        dataset.id if dataset else None,
+        dataset.owner_id if dataset else None,
+    ):
+        graph_engine = await get_graph_engine()
+        async with aclosing(
+            stream_graph_events(
+                graph_engine,
+                query=query,
+                seed_node_ids=seed_node_ids,
+                neighborhood_depth=neighborhood_depth,
+                seed_top_k=neighborhood_seed_top_k,
+                max_nodes=max_nodes,
+                chunk_size=chunk_size,
+            )
+        ) as events:
+            async for event in events:
+                yield event
 
 
 async def visualize_graph(
@@ -436,7 +475,11 @@ async def build_brains_summary_payload(user: User | None = None) -> dict:
           ingested data, sorted; empty for data ingested without node sets.
         - ``node_count``: nodes in the dataset's graph as of its latest cognify
           run (see ``get_datasets_graph_counts``) — the whole graph, not only
-          entity nodes, and 0 for a dataset never cognified.
+          entity nodes, and 0 for a dataset never cognified. A 0 also stands in
+          for a graph that could not be read, and this payload carries nothing
+          to tell the two apart; ``GET /datasets/graph-summary`` exposes
+          ``computedAt``, which is null in the degraded case, when a caller
+          needs to distinguish them.
         - ``node_set_colors``: node set colors from the same
           ``build_node_set_colors`` rule ``/brains`` uses. Same rule and same
           input node sets give the same colors, but the two endpoints do not
@@ -478,13 +521,10 @@ async def build_brains_summary_payload(user: User | None = None) -> dict:
 
 
 def _as_naive_utc(value: datetime) -> datetime:
-    """Normalize to match the write side.
+    """Normalize cursors and event times to UTC for comparison.
 
-    ``SessionQAEntry.time`` is always ``datetime.utcnow().isoformat()`` —
-    naive, UTC. A ``since`` sent with a timezone offset compares fine against
-    another aware datetime, but not against those naive strings once parsed
-    back, so it is converted here rather than left to fail the comparison
-    below with a raised ``TypeError`` at an unexpected place.
+    Events may contain legacy naive UTC timestamps or timezone-aware ones.
+    Normalize both sides without changing the timestamp returned as the cursor.
     """
     if value.tzinfo is not None:
         return value.astimezone(timezone.utc).replace(tzinfo=None)
@@ -496,7 +536,7 @@ def _event_time(event: dict[str, Any]) -> datetime | None:
     if not raw:
         return None
     try:
-        return datetime.fromisoformat(raw)
+        return _as_naive_utc(datetime.fromisoformat(raw))
     except ValueError:
         return None
 

@@ -10,9 +10,17 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from cognee.infrastructure.databases.postgres.admin import create_pg_database_if_not_exists
 from cognee.infrastructure.databases.relational.config import get_relational_config
+from cognee.infrastructure.locks.loop_agnostic_lock import LoopAgnosticLock
 from cognee.modules.data.models import Data
 from cognee.shared.logging_utils import get_logger
-from cognee.tasks.ingestion.dlt_row_data import DltRowData
+from cognee.tasks.ingestion.dlt_row_data import DltRowData, DltRows
+from cognee.tasks.ingestion.dlt_utils import (
+    DOCUMENT_COLUMN_HINTS,
+    NODE_SET_COLUMN,
+    STRUCTURE_COLUMN,
+    document_source_tag,
+    pipeline_name_for_source,
+)
 from cognee.tasks.ingestion.exceptions.exceptions import (
     DLTIngestionError,
     InvalidDLTArgumentError,
@@ -29,7 +37,8 @@ logger = get_logger("ingest_dlt_source")
 
 # Serializes dlt staging runs: one shared pipeline name means one shared dlt
 # working directory, which concurrent runs corrupt (see the lock's use below).
-_staging_lock = asyncio.Lock()
+# Loop-agnostic: module-level, so it outlives any single event loop.
+_staging_lock = LoopAgnosticLock()
 
 # Strict identifier pattern — only allow alphanumerics, underscores, dots, and hyphens
 _SAFE_IDENT_RE = re.compile(r"^[A-Za-z0-9_.\-]+$")
@@ -41,7 +50,7 @@ async def ingest_dlt_source(
     primary_key: str | None = None,
     write_disposition: str = "replace",
     max_rows_per_table: int | None = None,
-) -> list[DltRowData]:
+) -> DltRows:
     """
     Ingests a dlt (re)source by running the dlt pipeline on it.
     Returns a list of DltRowData, one per row in the ingested tables.
@@ -100,6 +109,11 @@ async def ingest_dlt_source(
     # can auto-detect PKs from the source schema per table.
     if write_disposition == "merge" and primary_key:
         run_kwargs["primary_key"] = primary_key
+    if document_source_tag(dlt_source):
+        # Declared before the load so a list or object valued reserved column is
+        # stored as json on the row; without the hint dlt normalizes it into a
+        # child table or flattened columns.
+        run_kwargs["columns"] = DOCUMENT_COLUMN_HINTS
 
     # Every staging run shares one dlt pipeline name, and dlt's working
     # directory for a pipeline is NOT safe for concurrent runs: normalize's
@@ -108,7 +122,7 @@ async def ingest_dlt_source(
     # dlt_csv_loader in parallel), so staging must serialize here.
     async with _staging_lock:
         pipeline = dlt.pipeline(
-            pipeline_name="ingest_dlt_source",
+            pipeline_name=pipeline_name_for_source(dlt_source, original_dataset_name),
             destination=destination,
             dataset_name=dataset_name,
         )
@@ -121,13 +135,28 @@ async def ingest_dlt_source(
                 message=f"DLT pipeline execution failed for dataset '{original_dataset_name}': {e}"
             ) from e
 
+        # An incremental source can emit no rows (or only update its cursor),
+        # so its load package need not contain a table job. Its previously
+        # staged documents still need reconciling into Cognee: a failed
+        # cognify or a removed local item must be recoverable without editing
+        # the remote file. Scope by the CURRENT resource, never the pipeline's
+        # whole accumulated schema, which can also contain Gmail/other folders.
+        retained_tables: set[str] = set()
+        if document_source_tag(dlt_source):
+            resources = getattr(dlt_source, "resources", None)
+            resource_names = set(resources.selected) if resources is not None else {dlt_source.name}
+            retained_tables = {
+                name
+                for name, table in pipeline.default_schema.tables.items()
+                if table.get("resource") in resource_names and not table.get("parent")
+            }
+
     # Scope the read-back to the tables this source actually loaded. The
     # staging DB is shared per dataset, so it can still hold tables from other
     # sources ingested earlier; reading those would leak rows across sources.
-    # The package's completed jobs name exactly the tables this load wrote;
-    # the schema can't be used here — dlt persists it in pipeline state, so it
-    # accumulates tables across runs and sources.
-    loaded_tables: set = set()
+    # Completed jobs identify tables written this time; document sources also
+    # reconcile their own retained tables on a zero-change run (above).
+    loaded_tables: set = set(retained_tables)
     if load_info is not None:
         for package in load_info.load_packages:
             for job in package.jobs.get("completed_jobs", []):
@@ -176,7 +205,7 @@ async def ingest_dlt_source(
             message=f"Failed to read rows from DLT database '{dlt_db_name}': {e}"
         ) from e
 
-    return row_data_list
+    return DltRows(row_data_list, loaded_tables=filtered_schema)
 
 
 async def _extract_dlt_schema(
@@ -265,6 +294,29 @@ def _quote_identifier(name: str) -> str:
     # Escape any embedded double-quotes (defensive — regex above disallows them)
     escaped = name.replace('"', '""')
     return f'"{escaped}"'
+
+
+# What an unset reserved column reads back as: NULL, or the empty forms a
+# connector may emit for "no tags" (an empty list, or its text encodings).
+_EMPTY_RESERVED_VALUES = (None, [], "", "[]", "null")
+
+
+def _row_content_hash(row_dict: dict) -> str:
+    """Hash a row's columns (``_dlt_*`` already stripped).
+
+    The reserved node_set column is left out while it is unset, so a table
+    that merely gained the column (NULL or empty on every row) hashes exactly
+    as it did before and no existing document gets a new id. A row that sets
+    it is re-hashed like any other column change. The structure column is never
+    hashed: moving a row must not give it a new id and a new extraction.
+    """
+    hashable = {
+        key: value
+        for key, value in row_dict.items()
+        if key != STRUCTURE_COLUMN
+        and not (key == NODE_SET_COLUMN and value in _EMPTY_RESERVED_VALUES)
+    }
+    return hashlib.md5(json.dumps(hashable, sort_keys=True, default=str).encode()).hexdigest()
 
 
 def _compute_schema_hash(schema_info) -> str:
@@ -411,9 +463,7 @@ async def _read_single_table(
             if "_dlt_" in k:
                 row_dict.pop(k)
 
-        content_hash = hashlib.md5(
-            json.dumps(row_dict, sort_keys=True, default=str).encode()
-        ).hexdigest()
+        content_hash = _row_content_hash(row_dict)
 
         row_data_list.append(
             DltRowData(

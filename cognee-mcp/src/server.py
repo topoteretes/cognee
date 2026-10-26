@@ -8,6 +8,7 @@ import sys
 from collections import deque
 from contextlib import redirect_stdout
 from datetime import datetime, timezone
+from typing import Literal
 
 import fastmcp
 import uvicorn
@@ -45,9 +46,23 @@ except ImportError:
     from tool_registry import DEFAULT_TAG, MEMORY_TAG, ToolRegistry
 
 try:
-    from .server_utils import format_recall_results, parse_csv_list, validate_top_k
+    from .server_utils import (
+        RecallState,
+        format_recall_results,
+        parse_csv_list,
+        recall_items,
+        recall_marker_state,
+        validate_top_k,
+    )
 except ImportError:
-    from server_utils import format_recall_results, parse_csv_list, validate_top_k
+    from server_utils import (
+        RecallState,
+        format_recall_results,
+        parse_csv_list,
+        recall_items,
+        recall_marker_state,
+        validate_top_k,
+    )
 
 
 try:
@@ -89,6 +104,9 @@ def _tool_error_text(prefix: str, error: Exception) -> str:
 _TASK_ERROR_HISTORY = 50
 _task_errors: dict[str, deque[tuple[str, str]]] = {}
 _MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+# Total budget for empty-recall diagnostics. get_recall_state derives every hop's
+# timeout from this, so it bounds the work rather than cancelling it mid-flight.
+_RECALL_STATE_TIMEOUT_SECONDS = 5.0
 
 # Strong references to in-flight background tasks. asyncio's event loop only keeps
 # weak references to tasks, so a fire-and-forget task can be GC'd mid-execution if
@@ -96,13 +114,17 @@ _MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 # done_callback removes them on completion. See:
 # https://docs.python.org/3/library/asyncio-task.html#asyncio.create_task
 _background_tasks: set[asyncio.Task] = set()
+_background_task_datasets: dict[asyncio.Task, str] = {}
 
 
-def _track_background(coro) -> asyncio.Task:
+def _track_background(coro, *, dataset: str | None = None) -> asyncio.Task:
     """Spawn a background task and pin it so the event loop won't GC it."""
     task = asyncio.create_task(coro)
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
+    if dataset is not None:
+        _background_task_datasets[task] = dataset
+        task.add_done_callback(lambda done: _background_task_datasets.pop(done, None))
     return task
 
 
@@ -340,7 +362,9 @@ async def remember(
     session_id: str | None = None,
     custom_prompt: str | None = None,
     background: bool = False,
+    ontology_key: str | list[str] | None = None,
     self_improvement: bool = True,
+    node_set: list[str] | None = None,
 ) -> list:
     """Store data in memory.
 
@@ -351,8 +375,9 @@ async def remember(
     self-improvement loop (improve) unless self_improvement=False.
 
     With session_id (session memory): Stores the data in the session
-    cache only. Fast, no entity extraction. Omit session_id when the
-    content should be stored as permanent graph memory.
+    cache. Direct mode may also bridge it to the graph in the background;
+    API mode uses typed cache entries and does not bridge to the graph.
+    Omit session_id when the content should be stored as permanent graph memory.
 
     Pass either `data` (text) or `filename` + `content_base64` (a file
     upload, up to 10 MB), not both. File uploads are permanent-memory
@@ -373,19 +398,34 @@ async def remember(
         agent-scoped dataset (e.g. "cursor_vscode_memory"), or
         "main_dataset" if no client identity is detected.
     session_id : str, optional
-        Session ID. When set, stores in session cache only.
+        Session ID. Stores in cache; direct mode may also bridge to the graph
+        unless self_improvement is False.
     custom_prompt : str, optional
         Custom prompt for entity extraction (permanent mode only).
+    self_improvement : bool
+        False skips automatic improvement after permanent ingestion; add and
+        cognify still run. In direct session mode, False disables the background
+        session-to-graph bridge. API session entries are cache-only regardless
+        of this flag. Default True.
+    ontology_key : str or list[str], optional
+        One or more uploaded ontology keys for extraction (permanent mode only).
+        API mode uses ontologies uploaded by the authenticated API user. Local
+        mode uses the default user's ontology store. Omit to keep the configured
+        server ontology.
     background : bool
         Queue permanent ingestion as a background task and return immediately
         instead of waiting for the pipeline. Use when the caller has a request
         deadline shorter than ingestion takes. Ignored with session_id, which
         is already fast. Errors surface via cognify_status, not the return
         value.
-    self_improvement : bool
-        Run the improve loop (triplet enrichment and, with sessions, the
-        session bridge) after cognify. Permanent mode only; default True.
-        Pass False for a plain add + cognify ingestion.
+    node_set : list[str], optional
+        Node-set names to file the data under, the same names recall filters
+        on with node_name. Permanent memory tags the ingested data. With
+        session_id the first write that carries one pins it on the session;
+        later writes must repeat it or omit it, and a different set is
+        refused, so one session never spans two node sets. improve() keeps
+        the pinned set on everything it bridges from the session into the
+        graph. Used for per-project memory.
     """
     if content_base64 and data:
         return [
@@ -449,8 +489,11 @@ async def remember(
                 dataset_name=dataset_name,
                 session_id=None,
                 custom_prompt=custom_prompt,
+                ontology_key=ontology_key,
                 self_improvement=self_improvement,
-            )
+                node_set=node_set,
+            ),
+            dataset=dataset_name,
         )
         queued = f"'{filename}'" if content_base64 else "text"
         return [
@@ -474,7 +517,9 @@ async def remember(
                 dataset_name=dataset_name,
                 session_id=session_id,
                 custom_prompt=custom_prompt,
+                ontology_key=ontology_key,
                 self_improvement=self_improvement,
+                node_set=node_set,
             )
             status = result.get("status", "completed")
             if session_id:
@@ -501,6 +546,9 @@ async def recall(
     session_id: str | None = None,
     system_prompt: str | None = None,
     top_k: int = 15,
+    scope: str | None = None,
+    code_query: dict | None = None,
+    include_references: bool = False,
 ) -> list:
     """Search memory with auto-routing and session awareness.
 
@@ -520,8 +568,8 @@ async def recall(
         (answer written by an LLM): HYBRID_COMPLETION (the default when
         routing is off), GRAPH_COMPLETION, GRAPH_COMPLETION_COT,
         GRAPH_COMPLETION_CONTEXT_EXTENSION, GRAPH_COMPLETION_DECOMPOSITION,
-        GRAPH_SUMMARY_COMPLETION, RAG_COMPLETION, TRIPLET_COMPLETION,
-        TEMPORAL, AGENTIC_COMPLETION. Retrieval-only types (no LLM):
+        GRAPH_SUMMARY_COMPLETION, RAG_COMPLETION, TEMPORAL,
+        AGENTIC_COMPLETION. Retrieval-only types (no LLM):
         CHUNKS, CHUNKS_LEXICAL, SUMMARIES, SKILLS, CODE. Other: CYPHER,
         NATURAL_LANGUAGE, CODING_RULES, GRAPH_REPORT, FEELING_LUCKY.
         An unknown name is rejected with a validation error.
@@ -535,11 +583,48 @@ async def recall(
         on the server.
     top_k : int
         Maximum results to return (default: 15).
+    scope : str, optional
+        Comma-separated memory sources to include: 'graph', 'session',
+        'session_first', 'trace', 'session_context', 'tools', 'code', 'all',
+        'auto'. Defaults to 'auto' (session first when session_id is set,
+        else graph). 'tools' and 'code' are explicit opt-in only. 'code' runs
+        a deterministic code-graph query and tags results source='code'.
+    code_query : dict, optional
+        'code' scope only: structured operation and arguments for the
+        deterministic code-graph query, e.g. {"operation": "query_facts",
+        "property": "language", "limit": 500}. Supported operations:
+        query_facts, explore, traverse, find_path, impact_analysis, insights,
+        architecture, delta, capabilities, search, neighbors, subgraph, flows,
+        hubs, ask. When omitted, 'code' scope runs an 'explore' seeded with the
+        query text. Most operations take exact node names/IDs or structured
+        filters; search and ask take natural-language text.
+    include_references : bool
+        Show the ids `forget` needs to delete one stored item. Use it when
+        asked to forget something specific, then pass a data_id together
+        with its dataset_id to `forget`.
+        - The default answer cites its sources in an `Evidence:` block (each
+          with a data_id, best match first) and ends with a
+          `dataset: <name> (dataset_id=...)` line.
+        - CHUNKS, SUMMARIES, RAG and graph-completion hits instead get
+          `refs: data_id=..., dataset_id=..., document=...` lines, at most 5
+          per hit, best match first. A chunk hit names the one item its text
+          came from; a graph-completion answer lists every item in its
+          context, so prefer the default type or CHUNKS to find one fact.
+        Session hits are not stored data and get neither. With backend
+        access control off, ids are only shown when recall is scoped to a
+        single dataset.
+
+    Returns a one-line memory-hit or empty-state summary followed by the original
+    result text. Status markers do not count as hits. Empty-state checks are
+    best-effort; indexing progress is shown only when available.
     """
     with redirect_stdout(sys.stderr):
         try:
             normalized_top_k = validate_top_k(top_k)
             dataset_list = parse_csv_list(datasets)
+            scope_list = parse_csv_list(scope)
+            if code_query is not None and not isinstance(code_query, dict):
+                raise ValueError("code_query must be a JSON object (dict).")
             results = await cognee_client.recall(
                 query_text=query,
                 search_type=search_type,
@@ -547,11 +632,46 @@ async def recall(
                 session_id=session_id,
                 system_prompt=system_prompt,
                 top_k=normalized_top_k,
+                scope=scope_list or None,
+                code_query=code_query,
+                include_references=include_references,
             )
+            empty_state = recall_marker_state(results)
+            items = recall_items(results)
+            queued = any(
+                not task.done() and (not dataset_list or dataset in dataset_list)
+                for task, dataset in _background_task_datasets.items()
+            )
+            if not items and queued:
+                empty_state = RecallState("indexing")
+            elif not items and empty_state is None:
+                try:
+                    deadline = asyncio.get_running_loop().time() + _RECALL_STATE_TIMEOUT_SECONDS
+                    empty_state = await asyncio.wait_for(
+                        cognee_client.get_recall_state(dataset_list, deadline=deadline),
+                        timeout=_RECALL_STATE_TIMEOUT_SECONDS,
+                    )
+                except Exception:
+                    logger.debug("Recall empty-state diagnostics unavailable", exc_info=True)
+                    empty_state = RecallState("none")
             return [
                 types.TextContent(
                     type="text",
-                    text=format_recall_results(results, json_encoder=JSONEncoder),
+                    text=format_recall_results(
+                        results,
+                        json_encoder=JSONEncoder,
+                        items=items,
+                        empty_state=empty_state,
+                        include_references=include_references,
+                    ),
+                    _meta={
+                        "cognee/memory": {
+                            "count": len(items),
+                            "state": "found"
+                            if items
+                            else (empty_state or RecallState("none")).state,
+                        }
+                    },
                 )
             ]
         except Exception as e:
@@ -560,12 +680,84 @@ async def recall(
             return [types.TextContent(type="text", text=f"Error: {error_msg}")]
 
 
+@registry.tool(tags={DEFAULT_TAG})
+async def code_search(
+    operation: Literal[
+        "query_facts",
+        "explore",
+        "traverse",
+        "find_path",
+        "impact_analysis",
+        "insights",
+        "architecture",
+        "delta",
+        "capabilities",
+        "search",
+        "neighbors",
+        "subgraph",
+        "flows",
+        "hubs",
+        "ask",
+    ],
+    arguments: dict | None = None,
+    datasets: str | None = None,
+    query: str = "",
+    top_k: int = 15,
+) -> list:
+    """Search Cognee's indexed code graph with a structured operation.
+
+    This tool is for source-code structure, symbols, call/dependency paths,
+    impact, architecture, and index changes. It does not search conversational
+    memory. Choose an operation and pass its operation-specific fields in
+    ``arguments``. For example, use operation="query_facts" with
+    arguments={"kinds": ["module", "symbol"], "limit": 100}, or
+    operation="impact_analysis" with arguments={"seeds": ["UserService"]}.
+    For a question in plain words ("how does checkout work?"), use
+    operation="ask" with the question as ``query``: it returns matching
+    symbols, entry-point flows, their neighbourhood and file:line citations.
+
+    Parameters
+    ----------
+    operation : str
+        Code-graph operation: query_facts, explore, traverse, find_path,
+        impact_analysis, insights, architecture, delta, capabilities, search,
+        neighbors, subgraph, flows, hubs, or ask.
+    arguments : dict, optional
+        Operation-specific structured arguments. Do not include an "operation"
+        key here; select it with the operation parameter.
+    datasets : str, optional
+        Comma-separated Cognee dataset names containing indexed code.
+    query : str
+        Optional seed text, used by explore when no explicit seed is supplied
+        in arguments, and the text or question for search and ask.
+    top_k : int
+        Maximum number of results to return (default: 15).
+    """
+    code_arguments = arguments or {}
+    if "operation" in code_arguments:
+        return [
+            types.TextContent(
+                type="text",
+                text='Error: Select the operation with the "operation" parameter, not in arguments.',
+            )
+        ]
+    return await recall(
+        query=query,
+        search_type="CODE",
+        datasets=datasets,
+        top_k=top_k,
+        scope="code",
+        code_query={"operation": operation, **code_arguments},
+    )
+
+
 @registry.tool(tags={DEFAULT_TAG, MEMORY_TAG})
 async def forget(
     dataset: str | None = None,
     everything: bool = False,
     data_id: str | None = None,
     dataset_id: str | None = None,
+    clean_history: bool = False,
 ) -> list:
     """Delete data from memory.
 
@@ -581,20 +773,36 @@ async def forget(
         If true, delete ALL data across all datasets.
     data_id : str, optional
         UUID of a single data item to delete. Must be paired with `dataset`
-        or `dataset_id` so the owning dataset is unambiguous.
+        or `dataset_id` so the owning dataset is unambiguous. To find both,
+        call `recall` with include_references=true and copy them from the
+        hit to delete: from its `refs:` line, or the data_id from its
+        `Evidence:` block and the dataset_id from its `dataset:` line.
     dataset_id : str, optional
         UUID of the dataset to delete entirely, or to scope `data_id`.
+    clean_history : bool
+        If true, also delete the user's own search and recall history (in
+        every dataset) before the data is deleted; alone, with no target,
+        delete only the history. Default false: forgetting one item keeps the
+        history; forgetting a dataset or everything purges that data's
+        history regardless.
     """
     with redirect_stdout(sys.stderr):
         try:
-            if not dataset and not everything and not data_id and not dataset_id:
+            if (
+                not dataset
+                and not everything
+                and not data_id
+                and not dataset_id
+                and not clean_history
+            ):
                 return [
                     types.TextContent(
                         type="text",
                         text=(
                             "Error: Specify 'dataset' name or set 'everything' to true. "
                             "To remove a single item, pass 'data_id' with 'dataset' or "
-                            "'dataset_id'."
+                            "'dataset_id'. To delete only your search history, set "
+                            "'clean_history' to true."
                         ),
                     )
                 ]
@@ -622,10 +830,14 @@ async def forget(
                 everything=everything,
                 data_id=parsed_data_id,
                 dataset_id=parsed_dataset_id,
+                clean_history=clean_history,
             )
             status = result.get("status", "unknown") if isinstance(result, dict) else "completed"
             if everything:
                 text = f"All data deleted (status={status})."
+            elif clean_history and not dataset and not parsed_dataset_id:
+                # No target: the guards above let this through only for a history-only call.
+                text = f"Search history deleted (status={status})."
             elif parsed_data_id:
                 text = f"Data item '{data_id}' deleted (status={status})."
             else:
@@ -641,7 +853,6 @@ async def forget(
 async def improve(
     dataset_name: str | None = None,
     session_ids: str | None = None,
-    node_name: str | None = None,
     build_global_context_index: bool = False,
     build_truth_subspace: bool = False,
 ) -> list:
@@ -656,7 +867,7 @@ async def improve(
     5. distill_sessions        - gated guidance becomes entity-anchored lessons
     6. update_user_preferences - ratings fold into preference weights
     7. build_truth_subspace    - opt-in (build_truth_subspace=True)
-    8. triplet_enrichment      - triplet embeddings, when the graph changed
+    8. review_conflicts        - opt-in (IMPROVE_REVIEW_CONFLICTS=true)
     9. global_context_index    - opt-in (build_global_context_index=True)
 
     Stages 1-7 need session_ids and are skipped with `no_session_ids`
@@ -671,10 +882,8 @@ async def improve(
         detected.
     session_ids : str, optional
         Comma-separated session IDs to bridge into the permanent graph.
-    node_name : str, optional
-        Comma-separated entity names; restricts enrichment to those nodes.
     build_global_context_index : bool
-        Also build the global context index after enrichment.
+        Also build the global context index.
     build_truth_subspace : bool
         Also build the truth subspace from the sessions' distilled learnings
         (needs session_ids and a graph backend with truth state).
@@ -683,11 +892,9 @@ async def improve(
     with redirect_stdout(sys.stderr):
         try:
             session_list = parse_csv_list(session_ids)
-            node_list = parse_csv_list(node_name)
             result = await cognee_client.improve(
                 dataset_name=dataset_name,
                 session_ids=session_list,
-                node_name=node_list,
                 build_global_context_index=build_global_context_index,
                 build_truth_subspace=build_truth_subspace,
             )

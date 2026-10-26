@@ -88,6 +88,7 @@ Matching is case-insensitive.
 |---|---|---|---|
 | 1 | `quoted_phrase` | The whole query is one `"quoted phrase"` | `CHUNKS_LEXICAL` |
 | 2 | `coding_rules_intent` | `coding rules` / `coding standards` / `coding conventions`, or `code review guidelines` (and the `rules`, `standards`, `checklist`, `conventions` variants) | `CODING_RULES` |
+| 3 | `time_scoped_question` | A time preposition (`in`, `before`, `after`, `since`, `between`, `from`, `on`, `during`, `as of`, …) directly followed by an absolute date — or `for` followed by one that ends the phrase (`scheduled for 2031`, but not `for 2000 users`): a four-digit year (`in 2019`, `in early 2024`), a decade (`in the 1990s`), a month and year (`in July 1969`), a full date (`on 7 November 1867`, `on March 1, 2024`), or an ISO date (`on 2024-03-01`) | `TEMPORAL` |
 | — | `default` | Anything else | `HYBRID_COMPLETION` |
 
 `CYPHER` is **not** in the table and never will be. The Cypher retriever runs
@@ -125,10 +126,17 @@ That is why these are *not* auto-routed, even though they are valid
   `GRAPH_COMPLETION` and then makes a second LLM call to summarize the answer.
   Routing "summarize the report" there would drop HYBRID's document and
   summary lanes *and* add a round trip.
-- `TEMPORAL` needs `Timestamp` nodes that only `temporal_cognify=True` creates.
-  On a default graph it pays an interval-extraction LLM call and then degrades
-  to triplet search, so no date token — a year, a range, a decade, an ISO date,
-  or the word `timeline` — routes there.
+- `TEMPORAL` *is* routed, but only on an absolute date behind a time
+  preposition. The default pipeline extracts `Timestamp` nodes, and the
+  retriever reranks HYBRID's own candidates by the window — it never sees less
+  context than HYBRID — so the only cost of the route is the one LLM call that
+  reads the window out of the question. That call is wasted when there is no
+  window to find, which is why a bare `when`, `since monday`, `the 2019
+  report`, `ticket 2048` or `Q4 2024` stay on the default. Known limitation: a
+  four-digit quantity after a preposition (`in 2048 bytes`) reads as a year;
+  the retriever then finds no window and answers as HYBRID. With no LLM
+  configured, a routed temporal question runs as `HYBRID_COMPLETION` with
+  `only_context=True`, so it never reaches the interval extraction.
 - "Exact"/"verbatim" phrasing does not select `CHUNKS_LEXICAL`. BM25 tokenizes
   the raw query, so the trigger word itself becomes a rare, high-IDF search
   term and skews the ranking it was meant to sharpen. `quoted_phrase` has no
@@ -161,11 +169,14 @@ there is nothing left to fall back to, so the error is real.
 | REST `POST /api/v1/recall` | omit `searchType` or pass `null` (default) | pass a value |
 | CLI `cognee-cli recall` | omit `--query-type` | `--query-type X` (choices in `cognee/cli/config.py:SEARCH_TYPE_CHOICES`) |
 
-All three surfaces auto-route by default — with one exception. When no usable
-LLM key is configured, recall picks `CHUNKS` before the router is consulted,
-because nothing can write a completion answer; the router never runs and an
-explicit `query_type` is the only way to select a strategy. That branch keys
-off LLM availability, not off the extractor that built the graph.
+All three surfaces auto-route by default, also when no usable LLM key is
+configured. Then nothing can write a completion answer, so `HYBRID_COMPLETION`,
+`GRAPH_COMPLETION` and `RAG_COMPLETION` run with `only_context=True` and return
+the assembled prompt instead of an answer, whether routed or pinned. A routed
+type that needs an LLM to retrieve (`TEMPORAL`) resolves to the default,
+`HYBRID_COMPLETION` with `only_context=True`; `CHUNKS_LEXICAL` and
+`CODING_RULES` run as they are. This keys off LLM availability, not off the
+extractor that built the graph.
 
 On every surface, omitting the type also makes the session a search source
 whenever a `session_id` is given: alone it short-circuits the graph on a hit,

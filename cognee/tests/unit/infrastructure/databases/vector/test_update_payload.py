@@ -148,7 +148,7 @@ async def test_pgvector_update_payload():
 
 @pytest.mark.asyncio
 async def test_turso_update_payload():
-    pytest.importorskip("libsql", reason="libsql driver not installed")
+    pytest.importorskip("turso", reason="pyturso driver not installed")
     from cognee.infrastructure.databases.vector.turso.TursoVectorAdapter import (
         TursoVectorAdapter,
     )

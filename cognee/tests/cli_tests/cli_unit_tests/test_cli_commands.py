@@ -724,6 +724,8 @@ class TestForgetCommand:
         assert "everything" in actions
         assert "memory_only" in actions
         assert actions["memory_only"].default is False
+        assert "clean_history" in actions
+        assert actions["clean_history"].default is False
 
     @patch("cognee.cli.commands.forget_command.asyncio.run", side_effect=_mock_run)
     def test_execute_threads_memory_only_flag(self, mock_asyncio_run):
@@ -741,6 +743,7 @@ class TestForgetCommand:
                 data_id=None,
                 everything=False,
                 memory_only=True,
+                clean_history=False,
             )
             command.execute(args)
 
@@ -750,6 +753,7 @@ class TestForgetCommand:
             dataset_id=None,
             everything=False,
             memory_only=True,
+            clean_history=False,
         )
 
     def test_execute_everything_with_memory_only_errors(self):
@@ -761,7 +765,12 @@ class TestForgetCommand:
         with patch.dict(sys.modules, {"cognee": mock_cognee}):
             command = ForgetCommand()
             args = argparse.Namespace(
-                dataset=None, dataset_id=None, data_id=None, everything=True, memory_only=True
+                dataset=None,
+                dataset_id=None,
+                data_id=None,
+                everything=True,
+                memory_only=True,
+                clean_history=False,
             )
             # Should not raise, just print an error and return without calling forget().
             command.execute(args)
@@ -771,7 +780,12 @@ class TestForgetCommand:
     def test_execute_no_forget_target(self):
         command = ForgetCommand()
         args = argparse.Namespace(
-            dataset=None, dataset_id=None, data_id=None, everything=False, memory_only=False
+            dataset=None,
+            dataset_id=None,
+            data_id=None,
+            everything=False,
+            memory_only=False,
+            clean_history=False,
         )
 
         # Should not raise, just print an error and return.
@@ -788,6 +802,7 @@ class TestForgetCommand:
             data_id=None,
             everything=False,
             memory_only=False,
+            clean_history=False,
         )
 
         with pytest.raises(CliCommandException):
@@ -976,36 +991,56 @@ class TestConfigGetSetPersistence:
     def test_set_persists_across_process_boundary(self, tmp_path, monkeypatch):
         """Reproduces the originally reported bug: `config set` must survive
         past the current process, since each `cognee-cli` invocation is a
-        fresh process re-reading config from scratch."""
+        fresh process re-reading config from scratch. The fresh process is a
+        real child interpreter: settings classes read only the environment the
+        .env resolver fills at import, so nothing short of a new import
+        re-reads the file."""
+        import subprocess
+
         from cognee.infrastructure.data.chunking.config import get_chunk_config
+        from cognee.shared import env_file
 
-        # A real CHUNK_SIZE env var (e.g. leftover from `dotenv.load_dotenv`
-        # picking up a developer's own .env at cognee import time) would
-        # outrank the .env file this test writes below, since pydantic-settings
-        # prioritizes real environment variables over dotenv-file values.
-        monkeypatch.delenv("CHUNK_SIZE", raising=False)
+        # Persist writes into the .env this process loaded. Pretend none was
+        # loaded, so the write lands in tmp_path/.env and never in the
+        # developer's own .env that the test session picked up at import.
+        monkeypatch.setattr(env_file, "_loaded", True)
+        monkeypatch.setattr(env_file, "_resolved", None)
+        monkeypatch.chdir(tmp_path)
 
-        original_cwd = os.getcwd()
         original_chunk_size = get_chunk_config().chunk_size
         try:
-            os.chdir(tmp_path)
-
             result = cognee.config.set("chunk_size", "999", persist=True)
-
-            assert result["created"] is True
-            env_path = tmp_path / ".env"
-            assert env_path.exists()
-            # dotenv.set_key quotes values, e.g. CHUNK_SIZE='999'.
-            assert "CHUNK_SIZE=" in env_path.read_text()
-            assert "999" in env_path.read_text()
-
-            # Simulate a fresh process re-reading config from the persisted .env.
-            get_chunk_config.cache_clear()
-            assert get_chunk_config().chunk_size == 999
         finally:
-            os.chdir(original_cwd)
-            get_chunk_config.cache_clear()
             get_chunk_config().chunk_size = original_chunk_size
+
+        env_path = tmp_path / ".env"
+        assert result["created"] is True
+        assert result["path"] == str(env_path)
+        # dotenv.set_key quotes values, e.g. CHUNK_SIZE='999'.
+        assert "CHUNK_SIZE=" in env_path.read_text()
+        assert "999" in env_path.read_text()
+
+        # The next cognee-cli invocation: a new interpreter started in the same
+        # directory, with no CHUNK_SIZE and no pinned file inherited from here.
+        child_env = {
+            k: v for k, v in os.environ.items() if k not in ("CHUNK_SIZE", "COGNEE_ENV_FILE")
+        }
+        code = (
+            "import cognee\n"
+            "from cognee.infrastructure.data.chunking.config import get_chunk_config\n"
+            "print(get_chunk_config().chunk_size)"
+        )
+        child = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=tmp_path,
+            env=child_env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+        assert child.returncode == 0, child.stderr[-2000:]
+        assert child.stdout.strip().splitlines()[-1] == "999"
 
 
 class TestFeedbackCommand:

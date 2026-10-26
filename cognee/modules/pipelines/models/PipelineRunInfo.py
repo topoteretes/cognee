@@ -1,9 +1,32 @@
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, computed_field
 
 from cognee.modules.data.models.Data import Data
+from cognee.modules.pipelines.utils import iter_ingestion_entries
+
+
+def extract_data_ids(data_ingestion_info: Any) -> list[UUID]:
+    """Ids of the data items a run processed, read from its per-item results.
+
+    ``run_tasks`` reports one ``{"run_info": ..., "data_id": ...}`` entry per
+    data item. Entries whose item errored are skipped (they identify nothing
+    that was stored); entries reporting ``PipelineRunAlreadyCompleted`` are
+    kept — the row exists and holds the content, which is exactly what a
+    caller re-adding known content wants back. Order follows the run's
+    results; duplicates and ids that are not UUIDs are dropped.
+    """
+    data_ids: list[UUID] = []
+    seen: set[UUID] = set()
+    for status, entry_data_ids in iter_ingestion_entries(data_ingestion_info):
+        if status == "PipelineRunErrored":
+            continue
+        for data_id in entry_data_ids:
+            if data_id not in seen:
+                seen.add(data_id)
+                data_ids.append(data_id)
+    return data_ids
 
 
 class PipelineRunInfo(BaseModel):
@@ -13,6 +36,11 @@ class PipelineRunInfo(BaseModel):
     dataset_name: str
     # Data must be mentioned in typing to allow custom encoders for Data to be activated
     payload: Any | list[Data] | None = None
+    # Per-item results: one {"run_info": PipelineRunInfo, "data_id": UUID}
+    # entry per data item the run handled. Incremental runs also add
+    # "data_name", "data_location" (the caller's source; None for raw text)
+    # and "data_label", so ids can be mapped back to inputs. Read ``data_ids``
+    # for just the ids.
     data_ingestion_info: list | None = None
 
     model_config = {
@@ -21,6 +49,25 @@ class PipelineRunInfo(BaseModel):
         # Add custom encoding handler for Data ORM model
         "json_encoders": {Data: lambda d: d.to_json()},
     }
+
+    @computed_field(return_type=list[UUID] | None, exclude_if=lambda value: value is None)
+    @property
+    def data_ids(self) -> list[UUID] | None:
+        """Ids of the ``Data`` rows this run processed, in result order.
+
+        For ``add()`` this is the id of every item that was stored (or already
+        existed with the same content — dedup returns the existing row), so a
+        caller can key later ``update()`` / ``delete_data()`` / ``find_data``
+        calls on cognee's own ids instead of re-deriving them. Items that
+        errored are left out. ``None`` for run infos that carry no per-item
+        results (``PipelineRunStarted``, progress ticks, the run infos nested
+        in ``data_ingestion_info``), which serialize without the key.
+        Serialized with the model, so ``POST /api/v1/add`` responses carry it
+        too.
+        """
+        if self.data_ingestion_info is None:
+            return None
+        return extract_data_ids(self.data_ingestion_info)
 
 
 class PipelineRunStarted(PipelineRunInfo):

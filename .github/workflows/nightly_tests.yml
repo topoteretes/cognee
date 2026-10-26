@@ -118,13 +118,12 @@ jobs:
       mode: mock_llm
       label: war_and_peace_large
       runs: '3'
-      # postgres only. The file_based arm has never produced a report: ladybug's
-      # add_edges cannot land the first 2,000-edge chunk of a 100,689-node graph
-      # inside the subprocess worker's 300s per-call deadline, so cognify times
-      # out, rolls back, and three runs walk into GitHub's 6h job ceiling — red
-      # nightly plus a wasted 6h runner, every single night. Re-enable by
-      # dropping `backends` once the adapter scales (COG-6185 / CLO-594).
-      backends: postgres
+      # Both backends. The file_based arm was postgres-only while ladybug's
+      # add_edges could not land a 2,000-edge chunk of a 100,689-node graph
+      # inside the worker's 300s deadline (COG-6185 / CLO-594); #4530 and
+      # #6210 made the bulk writes index seeks and the edge lookup one read
+      # per call, so the arm is back under performance_report.yml's 120-minute
+      # cap.
       memories_key: nightly_ci_artifacts/performance_test_artifacts/war_and_peace.json
       mock_memories_key: nightly_ci_artifacts/performance_test_artifacts/mock_war_and_peace_large.json
     secrets: inherit
@@ -205,7 +204,7 @@ jobs:
       # This job runs repo scripts (the Slack block renderer, the MotherDuck
       # ETL), so it needs a working tree.
       - name: Checkout repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Determine status
         id: status
@@ -318,7 +317,7 @@ jobs:
         # Posts on scheduled and manual (workflow_dispatch) runs. There is no
         # longer a pull_request trigger, so a workflow edit surfaces its reports
         # by being dispatched on the branch rather than by opening a PR.
-        uses: slackapi/slack-github-action@b0fa283ad8fea605de13dc3f449259339835fc52  # v2.1.0
+        uses: slackapi/slack-github-action@dcb1066f776dd043e64d0e8ba94ca15cc7e1875d  # v4.0.0
         with:
           method: chat.postMessage
           token: ${{ secrets.SLACK_NIGHTLY_BOT_TOKEN }}

@@ -7,10 +7,14 @@ import SkeletonBar from "@/ui/elements/SkeletonBar";
 import EmptyDocIcon from "@/ui/elements/EmptyDocIcon";
 import type { BrainUploadStage } from "@/modules/ingestion/useBrainUpload";
 import type { UploadProgress } from "@/modules/ingestion/uploadProgress";
+import { MAX_RENDERED_ROWS } from "@/modules/datasets/maxRenderedRows";
+import type { DatasetProcessing } from "@/modules/datasets/useDatasetProcessing";
 import UploadProgressBar from "./UploadProgressBar";
+import ScrollLoader from "./ScrollLoader";
+import ProcessingSummary from "./ProcessingSummary";
 import DocumentList, { type DocRow } from "./DocumentList";
 
-// The Documents column of the brains finder: hidden file input, drag-and-drop,
+// The Documents column of the datasets finder: hidden file input, drag-and-drop,
 // header with add/paste actions, upload progress/error banners, and the doc
 // list (or the appropriate empty/loading state). Owns the file input ref, the
 // drag counter, and the drag-over highlight — all purely presentational.
@@ -20,6 +24,13 @@ export default function DocumentsPanel<T extends DocRow>({
   docsLoading,
   docsError,
   docs,
+  hasMore,
+  onLoadMore,
+  total,
+  processingCounts,
+  processingCountsError,
+  processingFailed,
+  onRefreshProcessing,
   processing,
   isUploading,
   uploadStage,
@@ -32,12 +43,28 @@ export default function DocumentsPanel<T extends DocRow>({
   onClearUploadError,
   onRetryBuild,
   onRetryDocs,
+  ownerLabel = null,
+  onShare = null,
 }: {
   selectedId: string | null;
   selectedName: string | null;
+  /** "Owned by you" / "Owned by jane@acme.io"; null when not known. */
+  ownerLabel?: string | null;
+  /** Opens the sharing dialog; null when the signed-in user may not share this dataset. */
+  onShare?: (() => void) | null;
   docsLoading: boolean;
   docsError: boolean;
   docs: T[];
+  hasMore: boolean;
+  onLoadMore: () => void;
+  // Dataset-wide count, which the loaded page cannot supply. Null or negative
+  // means not known (still loading, or a capped fallback), see Dataset.documents.
+  total: number | null | undefined;
+  processingCounts: DatasetProcessing | undefined;
+  processingCountsError: boolean;
+  /** The last pipeline run failed, which the summary reports next to the item counts. */
+  processingFailed: boolean;
+  onRefreshProcessing: () => void;
   processing: boolean;
   isUploading: boolean;
   uploadStage: BrainUploadStage;
@@ -54,6 +81,12 @@ export default function DocumentsPanel<T extends DocRow>({
   onRetryDocs: () => void;
 }): ReactElement {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const knownTotal = total != null && total >= 0 ? total : null;
+  const displayedCount = knownTotal ?? docs.length;
+  const activeUploadProgress = uploadProgress && uploadProgress.stage !== "idle" ? uploadProgress : null;
+  const showProcessingSummary = !activeUploadProgress && !isUploading
+    && (processing || processingFailed || (processingCounts?.total ?? 0) > 0 || displayedCount > 0 || docs.length > 0);
   const dragCounter = useRef(0);
   const [isDragOver, setIsDragOver] = useState(false);
 
@@ -88,9 +121,18 @@ export default function DocumentsPanel<T extends DocRow>({
               <span style={{ fontSize: 11, fontWeight: 700, color: "rgba(237,236,234,0.55)", letterSpacing: "0.08em", textTransform: "uppercase" }}>{selectedName}</span>
               <span style={{ fontSize: 11, color: "rgba(255,255,255,0.2)" }}>·</span>
               <span style={{ fontSize: 11, color: "rgba(237,236,234,0.35)", display: "inline-flex", alignItems: "center", gap: 4 }}>
-                {docsLoading ? <SkeletonBar width={36} height={8} /> : processing ? "processing" : <>{docs.length} doc{docs.length !== 1 ? "s" : ""}</>}
+                {docsLoading ? <SkeletonBar width={36} height={8} /> : <>{processingCounts?.total ?? displayedCount} imported</>}
               </span>
+              {ownerLabel && (
+                <>
+                  <span style={{ fontSize: 11, color: "rgba(255,255,255,0.2)" }}>·</span>
+                  <span style={{ fontSize: 11, color: "rgba(237,236,234,0.35)" }}>{ownerLabel}</span>
+                </>
+              )}
               <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+                {onShare && (
+                  <button onClick={onShare} className="hover:bg-white/10 cursor-pointer" style={{ background: "rgba(255,255,255,0.06)", color: "#EDECEA", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 6, padding: "3px 10px", fontSize: 11, fontWeight: 500, cursor: "pointer" }}>Share</button>
+                )}
                 <button onClick={() => fileInputRef.current?.click()} className="hover:bg-[#5A0ED6] cursor-pointer" style={{ background: "#6510F4", color: "#fff", border: "none", borderRadius: 6, padding: "3px 10px", fontSize: 11, fontWeight: 500, cursor: "pointer" }}>Add files</button>
                 <button onClick={onPaste} className="hover:bg-[#5A0ED6] cursor-pointer" style={{ background: "#6510F4", color: "#fff", border: "none", borderRadius: 6, padding: "3px 10px", fontSize: 11, fontWeight: 500, cursor: "pointer" }}>Paste text</button>
               </div>
@@ -100,11 +142,15 @@ export default function DocumentsPanel<T extends DocRow>({
           )}
         </div>
 
+        {selectedId && showProcessingSummary && (
+          <ProcessingSummary data={processingCounts} error={processingCountsError} failed={processingFailed} running={processing} onRefresh={onRefreshProcessing} />
+        )}
+
         {/* Estimate → upload → build all report through one bar (progress.stage);
             gate on the stage, not isUploading, so the estimate phase — which
             runs before the upload leg starts — shows here too. */}
-        {uploadProgress && uploadProgress.stage !== "idle" ? (
-          <UploadProgressBar progress={uploadProgress} />
+        {activeUploadProgress ? (
+          <UploadProgressBar progress={activeUploadProgress} />
         ) : isUploading ? (
           <div style={{ padding: "8px 16px", borderBottom: "1px solid rgba(255,255,255,0.07)", background: "rgba(255,255,255,0.04)", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
             <Loader size={12} color="#6510F4" />
@@ -124,13 +170,13 @@ export default function DocumentsPanel<T extends DocRow>({
         )}
 
         {/* Content */}
-        <div style={{ flex: 1, overflowY: "auto" }}>
+        <div ref={scrollRef} style={{ flex: 1, overflowY: "auto" }}>
           {!selectedId ? (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 8 }}>
               <svg width="32" height="32" viewBox="0 0 32 32" fill="none"><path d="M4 8a2 2 0 012-2h6l2 3h12a2 2 0 012 2v13a2 2 0 01-2 2H6a2 2 0 01-2-2V8z" stroke="rgba(237,236,234,0.2)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
-              <span style={{ fontSize: 13, color: "rgba(237,236,234,0.35)" }}>Select a brain</span>
+              <span style={{ fontSize: 13, color: "rgba(237,236,234,0.35)" }}>Select a dataset</span>
             </div>
-          ) : docsLoading ? (
+          ) : docsLoading && docs.length === 0 ? (
             <PageLoading name="Files" />
           ) : docsError && docs.length === 0 ? (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 10 }}>
@@ -153,6 +199,10 @@ export default function DocumentsPanel<T extends DocRow>({
             </div>
           ) : (
             <DocumentList docs={docs} onDelete={onDeleteDoc} />
+          )}
+          {selectedId && docs.length > 0 && (
+            <ScrollLoader loaded={docs.length} total={knownTotal} hasMore={hasMore} maxLoaded={MAX_RENDERED_ROWS}
+              busy={docsLoading} error={docsError} onLoadMore={onLoadMore} rootRef={scrollRef} compact />
           )}
         </div>
       </div>

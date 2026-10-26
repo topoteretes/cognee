@@ -34,6 +34,7 @@ from cognee.infrastructure.session.session_context_models import (
 )
 from cognee.infrastructure.session.session_persist_watermark import StateRowWatermark
 from cognee.modules.agent_memory.sanitization import sanitize_value
+from cognee.modules.preflight import llm_available
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("agent_context_extraction")
@@ -326,6 +327,8 @@ async def extract_pending_agent_context(
     reports ``errored``. A blanket catch-to-[] here made that stage's errored
     branch unreachable and hid every outage as "nothing pending".
     """
+    if not llm_available():
+        return []
     if min_new_traces <= 0:
         return []
     plan = await _plan_pending_extraction(

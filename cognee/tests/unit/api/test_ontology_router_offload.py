@@ -59,3 +59,25 @@ async def test_list_ontologies_route_offloads_blocking_io():
     assert to_thread_spy.called, "list route did not offload via asyncio.to_thread"
     mock_list.assert_called_once()
     assert result == sentinel
+
+
+@pytest.mark.asyncio
+async def test_export_ontology_route_offloads_blocking_io():
+    router = get_ontology_router()
+    export_route = next(r.endpoint for r in router.routes if r.path.endswith("/export"))
+    user = Mock()
+    user.id = "u1"
+
+    with (
+        patch.object(
+            OntologyService, "export_ontology", return_value=b"@prefix : <#> ."
+        ) as mock_export,
+        patch(f"{_MODULE}.send_telemetry"),
+        patch(f"{_MODULE}.asyncio.to_thread", wraps=asyncio.to_thread) as to_thread_spy,
+    ):
+        result = await export_route(ontology_key="k", format="turtle", user=user)
+
+    assert to_thread_spy.called, "export route did not offload via asyncio.to_thread"
+    mock_export.assert_called_once()
+    assert result.media_type == "text/turtle"
+    assert result.headers["content-disposition"] == 'attachment; filename="k.ttl"'

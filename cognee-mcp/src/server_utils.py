@@ -185,10 +185,87 @@ def _format_completion_results(
     )
 
 
-def format_recall_results(
-    results: Any, *, json_encoder: type[json.JSONEncoder] | None = None
+MAX_RECALL_REFS = 5
+
+
+def _evidence_rank(reference: Any) -> tuple[bool, int]:
+    rank = reference.get("rank") if isinstance(reference, dict) else None
+    if isinstance(rank, int) and not isinstance(rank, bool):
+        return (False, rank)
+    return (True, 0)
+
+
+def recall_item_dataset(item: Any) -> str | None:
+    """The dataset line for a hit whose data ids are cited in its text, not in refs.
+
+    The default hybrid answer lists its sources' data_ids in an ``Evidence:``
+    block inside the answer; ``forget`` also needs the dataset, which only the
+    hit itself carries.
+    """
+    dataset_id = _get_field(item, "dataset_id")
+    if not dataset_id:
+        return None
+    name = _get_field(item, "dataset_name")
+    if name:
+        return f"dataset: {' '.join(str(name).split())[:60]} (dataset_id={dataset_id})"
+    return f"dataset: dataset_id={dataset_id}"
+
+
+def recall_item_refs(item: Any) -> list[dict[str, str]]:
+    """Forgettable data items behind one recall hit, as (data_id, dataset_id) pairs.
+
+    Two places carry them: a chunk/summary hit names its own document in
+    ``metadata.data_id``, and a completion hit lists the segments it drew on in
+    ``metadata.evidence`` (only with ``include_references``). Graph-node, edge
+    and triplet references name no document and are skipped. A reference
+    without its own ``dataset_id`` takes the hit's, since ``forget`` needs both.
+    Evidence is taken best match first (lowest ``rank``; unranked last), so the
+    cap keeps the most relevant items.
+    """
+    metadata = _model_dump(_get_field(item, "metadata"))
+    if not isinstance(metadata, dict):
+        return []
+    hit_dataset_id = _get_field(item, "dataset_id")
+    evidence = [_model_dump(reference) for reference in metadata.get("evidence") or []]
+    evidence.sort(key=_evidence_rank)
+    candidates = [metadata, *evidence]
+
+    refs: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for candidate in candidates:
+        candidate = _model_dump(candidate)
+        if not isinstance(candidate, dict):
+            continue
+        data_id = candidate.get("data_id")
+        dataset_id = candidate.get("dataset_id") or hit_dataset_id
+        if not data_id or not dataset_id:
+            continue
+        key = (str(data_id), str(dataset_id))
+        if key in seen:
+            continue
+        seen.add(key)
+        ref = {"data_id": key[0], "dataset_id": key[1]}
+        if candidate.get("document_name"):
+            ref["document"] = " ".join(str(candidate["document_name"]).split())[:80]
+        refs.append(ref)
+        if len(refs) == MAX_RECALL_REFS:
+            break
+    return refs
+
+
+def format_recall_body(
+    results: Any,
+    *,
+    json_encoder: type[json.JSONEncoder] | None = None,
+    include_references: bool = False,
 ) -> str:
-    """Render recall results, including normalized response envelopes."""
+    """Render recall results, including normalized response envelopes.
+
+    With ``include_references``, each hit backed by stored data gets one
+    ``refs:`` line per data item, carrying the ids ``forget`` takes. A hit with
+    no structured refs (the default hybrid answer cites data_ids in its text)
+    gets one ``dataset:`` line instead, so the cited ids can be paired with it.
+    """
     results = _unwrap_results(results)
     if not results:
         return "No relevant results found."
@@ -203,6 +280,139 @@ def format_recall_results(
             json_encoder=json_encoder,
         )
         prefix = f"[{source}] " if source else ""
-        lines.append(f"{prefix}{rendered}")
+        line = f"{prefix}{rendered}"
+        if include_references:
+            refs = recall_item_refs(result)
+            for ref in refs:
+                line += "\n  refs: " + ", ".join(f"{key}={value}" for key, value in ref.items())
+            dataset = None if refs else recall_item_dataset(result)
+            if dataset:
+                line += f"\n  {dataset}"
+        lines.append(line)
 
     return "\n\n".join(lines)
+
+
+@dataclass(frozen=True)
+class RecallState:
+    state: str
+    completed: int | None = None
+    total: int | None = None
+
+
+def recall_items(results: Any) -> list[Any]:
+    """Count returned entries, not requested top_k, graph nodes, or system markers."""
+    results = _unwrap_results(results)
+    items = results if isinstance(results, list) else [results]
+    return [
+        item
+        for item in items
+        if item is not None
+        and item != ""
+        and item != {}
+        and item != []
+        and _get_field(item, "_source", "source") != "system"
+    ]
+
+
+def recall_marker_state(results: Any) -> RecallState | None:
+    results = _unwrap_results(results)
+    for item in results if isinstance(results, list) else [results]:
+        if (
+            _get_field(item, "_source", "source") == "system"
+            and _get_field(item, "status") == "build_failed"
+        ):
+            return RecallState("build_failed")
+    return None
+
+
+def classify_recall_state(progress: dict) -> RecallState:
+    """Classify authorized datasets from an existing pipeline-status response.
+
+    Three outcomes, because a consumer has three actions: retry shortly
+    (``indexing``), go look at why ingestion failed (``build_failed``), or
+    accept that there is nothing (``none``).
+
+    Earlier this also separated ``empty`` / ``not_indexed`` / ``no_match`` /
+    ``unknown``. Those four produced near-identical sentences, and telling them
+    apart was the entire reason for a ``/datasets/graph-summary`` round trip per
+    empty recall -- plus, locally, a full per-dataset graph traversal. The
+    distinction was unreliable anyway: a zero count from an unavailable graph
+    store is not proof of emptiness, so several branches fell back to
+    ``unknown`` regardless.
+    """
+    runs = []
+    for value in progress.values():
+        if "status" in value:
+            runs.append(value)
+        else:
+            runs.extend(value.values())
+    active = [
+        run
+        for run in runs
+        if run.get("status")
+        in (
+            "DATASET_PROCESSING_STARTED",
+            "DATASET_PROCESSING_INITIATED",
+        )
+    ]
+    if active:
+        tick = (active[0].get("progress") or {}) if len(active) == 1 else {}
+        completed, total = tick.get("completed_items"), tick.get("total_items")
+        if type(completed) is int and type(total) is int and 0 <= completed <= total and total > 0:
+            return RecallState("indexing", completed, total)
+        return RecallState("indexing")
+    if any(run.get("status") == "DATASET_PROCESSING_ERRORED" for run in runs):
+        return RecallState("build_failed")
+    return RecallState("none")
+
+
+def format_recall_results(
+    results: Any,
+    *,
+    json_encoder: type[json.JSONEncoder] | None = None,
+    empty_state: RecallState | None = None,
+    items: list[Any] | None = None,
+    include_references: bool = False,
+) -> str:
+    """Add one summary line; preserve the existing body beneath it.
+
+    `items` lets a caller that has already extracted them pass them in.
+    recall() computes them to decide whether to run diagnostics at all, and
+    re-deriving them here walked the same payload a second time.
+    """
+    items = recall_items(results) if items is None else items
+    count = len(items)
+    if count:
+        summary = f"{count} {'memory' if count == 1 else 'memories'} found"
+        sources: dict[str, int] = {}
+        for item in items:
+            dataset = _get_field(item, "dataset_name")
+            source = _get_field(item, "_source", "source")
+            hint = dataset or {"session": "sessions", "graph": "graph"}.get(source, source)
+            if hint:
+                # Metadata must not create another summary line or an unbounded header.
+                hint = " ".join(str(hint).split())[:60]
+                sources[hint] = sources.get(hint, 0) + 1
+        if sources:
+            hints = [f"{n} from {hint}" for hint, n in list(sources.items())[:3]]
+            summary += " (" + ", ".join(hints) + ")"
+    else:
+        state = empty_state or recall_marker_state(results) or RecallState("none")
+        summary = {
+            "indexing": "still indexing — retry shortly",
+            "build_failed": "memory indexing failed — check cognify_status",
+            "none": "no matching memories",
+        }.get(state.state, "no matching memories")
+        if state.state == "indexing" and state.total is not None:
+            summary = (
+                f"still indexing — {state.completed}/{state.total} items processed, retry shortly"
+            )
+    body = (
+        format_recall_body(
+            results, json_encoder=json_encoder, include_references=include_references
+        )
+        if _unwrap_results(results)
+        else ""
+    )
+    return f"{summary}\n{body}" if body else summary

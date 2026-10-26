@@ -39,7 +39,7 @@ async def get_dataset_processing_status(
     # publish_updated_data._completed_status for the full story).
     from cognee.modules.pipelines.models.DataItemStatus import is_data_item_completed
 
-    data_items = await get_dataset_data(dataset_id)
+    data_items = await get_dataset_data(dataset_id, order_by="created_at")
     dataset_key = str(dataset_id)
 
     items = []

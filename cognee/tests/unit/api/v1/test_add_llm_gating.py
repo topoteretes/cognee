@@ -1,47 +1,21 @@
-from io import BytesIO
-from types import SimpleNamespace
+"""The add pipeline is LLM-free by construction.
 
-import pytest
+add() stages data and never calls the LLM itself (the media loaders guard the
+one exception at the point of use -- see test_media_loaders_require_llm.py),
+so it validates the provider config with ``needs_llm=False`` and its tasks are
+declared LLM-free. Whether a run needs an LLM is decided by remember() and
+cognify() from their real task lists.
+"""
 
-from cognee.api.v1.add.add import _add_pipeline_needs_llm
-from cognee.memify_pipelines.memify_default_tasks import (
-    get_default_memify_enrichment_tasks,
-    get_default_memify_extraction_tasks,
-)
-from cognee.modules.pipelines.tasks.task import pipeline_needs_llm
-from cognee.tasks.ingestion.data_item import DataItem
+import inspect
 
-
-@pytest.mark.parametrize(
-    ("data", "preferred_loaders", "expected"),
-    [
-        ("Cognee turns documents into memory.", None, False),
-        ([DataItem("Labeled document"), "More text"], None, False),
-        ("https://example.com", None, True),
-        (BytesIO(b"stream"), None, True),
-        ("plain text", {"custom_loader": {}}, True),
-    ],
-)
-def test_add_llm_requirement(data, preferred_loaders, expected):
-    assert _add_pipeline_needs_llm(data, preferred_loaders) is expected
+from cognee.api.v1.add import add as add_module
 
 
-def test_add_file_input_keeps_llm_check(tmp_path):
-    media_path = tmp_path / "image.png"
-    media_path.write_bytes(b"not-an-image")
+def test_add_never_asks_for_the_llm():
+    """No LLM probe and no extractor resolution in add(): both belong to cognify()."""
+    source = inspect.getsource(add_module)
 
-    assert _add_pipeline_needs_llm(str(media_path), preferred_loaders=None) is True
-
-
-def test_default_memify_tasks_are_llm_free(monkeypatch):
-    monkeypatch.setattr(
-        "cognee.modules.cognify.config.get_cognify_config",
-        lambda: SimpleNamespace(triplet_embedding=True),
-    )
-
-    tasks = [
-        *get_default_memify_extraction_tasks(),
-        *get_default_memify_enrichment_tasks(),
-    ]
-
-    assert pipeline_needs_llm(tasks) is False
+    assert "validate_provider_config(needs_llm=False)" in source
+    assert "needs_llm=True" not in source
+    assert "resolve_extractor" not in source

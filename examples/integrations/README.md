@@ -1,9 +1,9 @@
 # Data-source connectors
 
 Connectors pull data from external sources (Gmail, Slack, Notion, Google Drive,
-Confluence, …) into cognee memory. They are distributed as **community packages**
-under [topoteretes/cognee-community](https://github.com/topoteretes/cognee-community)
-(`cognee-community-connector-<source>`), so core stays free of per-source SDKs.
+Google Calendar, Confluence, …) into cognee memory. **Gmail, Google Drive, Google Calendar,
+Linear, Notion, Apollo, Asana, OneNote and Obsidian ship in the SDK**; install the Google extras for their client libraries
+and DLT (Linear, Notion, Apollo, Asana, OneNote and Obsidian need none). Other connectors are distributed under [topoteretes/cognee-community](https://github.com/topoteretes/cognee-community).
 
 Every connector is built on cognee's **DLT ingestion subsystem**, so they all share
 the same guarantees instead of each reinventing ingestion:
@@ -23,21 +23,27 @@ Install from PyPI; you do **not** need to clone the community monorepo to use th
 
 | Source | Package |
 |---|---|
-| Gmail | `cognee-community-connector-gmail` |
+| Gmail | `cognee[gmail]` |
 | Slack (export) | `cognee-community-connector-slack` |
 | Confluence | `cognee-community-connector-confluence` |
-| Notion | `cognee-community-connector-notion` |
-| Google Drive | `cognee-community-connector-google-drive` |
+| Notion | bundled, no extra |
+| Google Drive | `cognee[google-drive]` |
+| Google Calendar | `cognee[google-calendar]` |
+| Linear | bundled, no extra |
+| Apollo | bundled, no extra |
+| Asana | bundled, no extra |
+| OneNote | bundled, no extra |
+| Obsidian (local vault, SDK only) | bundled, no extra |
 
 ## Quickstart (Gmail)
 
 ```bash
-pip install cognee-community-connector-gmail
+pip install "cognee[gmail]"
 ```
 
 ```python
 import cognee
-from cognee_community_connector_gmail import gmail_source
+from cognee.tasks.ingestion.connectors import gmail_source
 
 await cognee.remember(
     gmail_source(label_ids=["INBOX"], credentials_path="credentials.json"),
@@ -53,8 +59,17 @@ answer = await cognee.search(
 )
 ```
 
-See each package's `README.md` + `examples/` in the community repo for setup,
-incremental re-sync, and privacy / opt-in notes.
+The bundled connectors have a guide next to their code, with setup, incremental re-sync, and
+privacy notes: [Gmail](../../cognee/tasks/ingestion/connectors/gmail.md),
+[Google Drive](../../cognee/tasks/ingestion/connectors/google_drive.md),
+[Google Calendar](../../cognee/tasks/ingestion/connectors/google_calendar.md),
+[Linear](../../cognee/tasks/ingestion/connectors/linear.md),
+[Notion](../../cognee/tasks/ingestion/connectors/notion.md),
+[Apollo](../../cognee/tasks/ingestion/connectors/apollo.md),
+[Asana](../../cognee/tasks/ingestion/connectors/asana.md),
+[OneNote](../../cognee/tasks/ingestion/connectors/onenote.md) and
+[Obsidian](../../cognee/tasks/ingestion/connectors/obsidian.md). The other connectors are documented
+in their community packages.
 
 ## Writing a new connector
 

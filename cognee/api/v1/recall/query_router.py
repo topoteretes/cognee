@@ -8,10 +8,24 @@ HYBRID_COMPLETION.
 Auto-routing may only pick a strategy that is at least as good as the HYBRID
 default on a default-built graph and does not add LLM calls without an
 unambiguous signal. HYBRID already searches document chunks, summaries, and the
-entity neighbourhood in one LLM call, so every rule here fires on an input that
-is not a natural-language question and for which HYBRID is the wrong operation
-rather than a worse one. Question-shaped intent (summary, temporal, reasoning,
-context extension) stays reachable only through an explicit ``query_type``.
+entity neighbourhood in one LLM call, so a rule here fires either on an input
+that is not a natural-language question and for which HYBRID is the wrong
+operation rather than a worse one, or — TEMPORAL only — on a question scoped
+to an absolute date, where the target is HYBRID's own candidates reranked by
+that date and never a smaller context. Other question-shaped intent (summary,
+reasoning, context extension) stays reachable only through an explicit
+``query_type``.
+
+The rules see only the query text. What the deployment can run is applied
+afterwards, in one place, from ``RoutingConstraints``: whether an LLM is
+available and whether Cypher queries are allowed. With no LLM the router still
+routes, but only to types that can execute without one: retrieval-only types
+run as they are, completion types whose single LLM call is the final answer run
+with ``only_context=True`` (recall returns the assembled prompt, the session
+layer is read-only), and types that need an LLM during retrieval resolve to the
+fallback. A pinned ``query_type`` is not rerouted: it runs as given, except that
+with no LLM a pinned completion type also runs with ``only_context=True``
+(``pinned_route``).
 """
 
 import re
@@ -26,16 +40,94 @@ ROUTER_FALLBACK_TYPE = SearchType.HYBRID_COMPLETION
 
 
 @dataclass(frozen=True)
+class RoutingConstraints:
+    """What the deployment can run, read once per recall.
+
+    ``llm_available`` is ``llm_available()`` from the preflight: the configured
+    provider either needs no key, has one, or has a live sampling session.
+    ``cypher_allowed`` is the ``ALLOW_CYPHER_QUERY`` gate the retriever factory
+    enforces. Both default to True so callers without a deployment in hand (tests,
+    tooling) get the unconstrained router.
+    """
+
+    llm_available: bool = True
+    cypher_allowed: bool = True
+
+    @classmethod
+    def from_config(cls, llm_config=None) -> "RoutingConstraints":
+        from cognee.modules.preflight import llm_available
+        from cognee.modules.search.methods.get_search_type_retriever_instance import (
+            cypher_queries_allowed,
+        )
+
+        return cls(llm_available=llm_available(llm_config), cypher_allowed=cypher_queries_allowed())
+
+
+@dataclass(frozen=True)
 class RouteDecision:
-    """Routing decision: the chosen search type and the rule that picked it."""
+    """Routing decision: the search type, the rule that picked it, and whether the
+    search must run with ``only_context=True`` because no LLM can write the answer."""
 
     search_type: SearchType
     rule: str
+    only_context: bool = False
 
+
+# The temporal signal: a time preposition followed directly by an absolute date
+# — `in 2019`, `before 1900`, `between 1910 and 1920`, `in July 1969`,
+# `on 7 November 1867`, `on 2024-03-01`, `in the 1990s`, `in early 2024`,
+# `scheduled for 2031`. A year must be four digits and sit right after the
+# preposition (modifier allowed), so `the 2019 report`, `ticket 2048`, `Q4 2024`
+# and a bare `when` or `since monday` do not fire: the retriever's interval
+# extraction would spend an LLM call to find no window in those.
+_TIME_PREPOSITION = (
+    r"(?:in|during|before|after|since|until|till|between|from|by|on|around|circa"
+    r"|as of|prior to|through|throughout)"
+)
+_YEAR = r"(?:1[0-9]{3}|20[0-9]{2})"
+_DAY = r"\d{1,2}(?:st|nd|rd|th)?"
+_MONTH = (
+    r"(?:january|february|march|april|may|june|july|august|september|october|november"
+    r"|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\.?"
+)
+_ABSOLUTE_DATE = (
+    rf"(?:{_YEAR}-\d{{2}}-\d{{2}}"  # 2024-03-01
+    rf"|(?:{_DAY}\s+)?{_MONTH}\s+(?:{_DAY},?\s+)?{_YEAR}"  # 7 November 1867, July 1969, March 1, 2024
+    rf"|(?:(?:early|late|mid)[-\s]+)?{_YEAR}s?)"  # 1915, early 2024, 1990s
+)
+# `for` takes a quantity as readily as a date (`for 2000 users`, `for 1500
+# guests`), so after `for` a bare year must end the phrase: followed by nothing,
+# punctuation, or a conjunction joining another date — never by a noun.
+_YEAR_AS_OBJECT = rf"{_YEAR}s?(?!\s+(?!(?:and|or|to|through|until|till)\b)[a-z])"
+_FOR_DATE = (
+    rf"\bfor\s+(?:{_YEAR}-\d{{2}}-\d{{2}}"
+    rf"|(?:{_DAY}\s+)?{_MONTH}\s+(?:{_DAY},?\s+)?{_YEAR}"
+    rf"|(?:(?:early|late|mid)[-\s]+)?{_YEAR_AS_OBJECT}"
+    rf"|the\s+{_YEAR_AS_OBJECT})"
+)
+
+# Routed types that never call an LLM: with no LLM they run as they are. Any other
+# routed type that is not in COMPLETION_ONLY_TYPES resolves to the fallback, so a new
+# LLM-free rule target must be added here to keep its own type on a keyless install.
+LLM_FREE_TYPES: frozenset[SearchType] = frozenset(
+    {SearchType.CHUNKS_LEXICAL, SearchType.CODING_RULES}
+)
+# The only LLM call is the final completion: runs with only_context=True with no LLM,
+# returning the prompt the completion would have received.
+COMPLETION_ONLY_TYPES: frozenset[SearchType] = frozenset(
+    {
+        SearchType.HYBRID_COMPLETION,
+        SearchType.GRAPH_COMPLETION,
+        SearchType.RAG_COMPLETION,
+    }
+)
+# Run the query text as Cypher, directly or after an LLM writes it.
+CYPHER_TYPES: frozenset[SearchType] = frozenset({SearchType.CYPHER, SearchType.NATURAL_LANGUAGE})
 
 # (rule name, pattern, search type). Shape rules (what the input looks like) come
 # first and win: a quoted string is handled as what it is, even when its text
-# also reads as intent — `"coding rules"` is a lexical search.
+# also reads as intent — `"coding rules"` is a lexical search. The temporal rule
+# is last so an explicit coding-rules phrase keeps its route.
 # No query in the golden table depends on the order (test_no_query_matches_two_rules).
 #
 # CYPHER is deliberately NOT routable. A retriever runs the query text verbatim
@@ -59,25 +151,80 @@ _RULES: tuple[tuple[str, re.Pattern, SearchType], ...] = (
         ),
         SearchType.CODING_RULES,
     ),
+    (
+        "time_scoped_question",
+        re.compile(
+            rf"(?:\b{_TIME_PREPOSITION}\s+(?:{_ABSOLUTE_DATE}|the\s+{_YEAR}s)\b|{_FOR_DATE}\b)",
+            re.IGNORECASE,
+        ),
+        SearchType.TEMPORAL,
+    ),
 )
 
 
-def route_query(query: str) -> RouteDecision:
-    """Classify a query into a SearchType using ordered rules.
+def default_route(constraints: RoutingConstraints | None = None) -> RouteDecision:
+    """The decision for a query no rule matched, under the given constraints."""
+    return constrain(RouteDecision(search_type=ROUTER_FALLBACK_TYPE, rule="default"), constraints)
+
+
+def pinned_route(query_type: SearchType, constraints: RoutingConstraints) -> RouteDecision:
+    """The decision for a caller's explicit type: never rerouted, but with no LLM a
+    completion type runs with ``only_context=True`` instead of failing at the answer."""
+    forced = not constraints.llm_available and query_type in COMPLETION_ONLY_TYPES
+    return RouteDecision(search_type=query_type, rule="pinned", only_context=forced)
+
+
+def constrain(
+    decision: RouteDecision, constraints: RoutingConstraints | None = None
+) -> RouteDecision:
+    """Resolve a rule's pick against what the deployment can run.
+
+    Applied after the rules so the rules stay about the query text only. The
+    fallback itself is a completion type, so with no LLM it becomes
+    ``HYBRID_COMPLETION`` with ``only_context=True``.
+    """
+    if constraints is None:
+        return decision
+    search_type = decision.search_type
+
+    if not constraints.cypher_allowed and search_type in CYPHER_TYPES:
+        logger.debug(
+            "query_router: %s disabled by ALLOW_CYPHER_QUERY; using fallback", search_type.value
+        )
+        search_type = ROUTER_FALLBACK_TYPE
+
+    if constraints.llm_available:
+        return RouteDecision(search_type=search_type, rule=decision.rule)
+
+    if search_type in LLM_FREE_TYPES:
+        return RouteDecision(search_type=search_type, rule=decision.rule)
+    if search_type not in COMPLETION_ONLY_TYPES:
+        logger.debug(
+            "query_router: %s needs an LLM during retrieval and none is available; using fallback",
+            search_type.value,
+        )
+        search_type = ROUTER_FALLBACK_TYPE
+    return RouteDecision(search_type=search_type, rule=decision.rule, only_context=True)
+
+
+def route_query(query: str, constraints: RoutingConstraints | None = None) -> RouteDecision:
+    """Classify a query into a SearchType using ordered rules, then apply the constraints.
 
     Args:
         query: The user's natural-language query.
+        constraints: What the deployment can run; ``None`` means unconstrained.
 
     Returns:
-        RouteDecision with the chosen search_type and the name of the rule that
-        matched, or ``"default"`` when nothing did.
+        RouteDecision with the chosen search_type, the name of the rule that
+        matched (``"default"`` when nothing did), and whether the search must run
+        with ``only_context=True``.
     """
     stripped = query.strip()
 
     for rule, pattern, search_type in _RULES:
         if pattern.search(stripped):
             logger.debug("query_router: rule=%s routed=%s", rule, search_type.value)
-            return RouteDecision(search_type=search_type, rule=rule)
+            return constrain(RouteDecision(search_type=search_type, rule=rule), constraints)
 
     logger.debug("query_router: rule=default routed=%s", ROUTER_FALLBACK_TYPE.value)
-    return RouteDecision(search_type=ROUTER_FALLBACK_TYPE, rule="default")
+    return default_route(constraints)

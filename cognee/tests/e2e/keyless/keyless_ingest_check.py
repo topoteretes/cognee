@@ -13,14 +13,17 @@ disable the keyless rerouting (see ``keyless_local_defaults_apply``).
 
 Run: ``python cognee/tests/e2e/keyless/keyless_ingest_check.py``
 
-TODO: expand this suite — session-scoped ``remember(session_id=...)`` and the
-``improve()`` stages it triggers (SDK-691), the CLI (``cognee-cli remember`` /
-``recall``) and REST default search types once they are keyless-aware
-(SDK-690), and the smaller ``fastino/gliner2.5-small-v1`` model if it becomes
-the default.
+Session memory is covered too: ``remember(session_id=...)`` and the
+``improve()`` bridge it starts must run keyless, since none of its stages calls
+an LLM for plain Q&A entries (SDK-753).
+
+TODO: expand this suite — the CLI (``cognee-cli remember`` / ``recall``) and
+REST default search types once they are keyless-aware (SDK-690), and the
+smaller ``fastino/gliner2.5-small-v1`` model if it becomes the default.
 """
 
 import asyncio
+import logging
 import os
 import sys
 from pathlib import Path
@@ -36,7 +39,8 @@ ROOT.mkdir(exist_ok=True)
 os.chdir(ROOT)  # pydantic-settings reads a cwd-relative .env; there is none here
 os.environ["DATA_ROOT_DIRECTORY"] = str(ROOT / "data")
 os.environ["SYSTEM_ROOT_DIRECTORY"] = str(ROOT / "system")
-os.environ["AUTO_FEEDBACK"] = "false"  # the per-turn feedback analysis is an LLM call
+# AUTO_FEEDBACK stays at its default: the per-turn analysis and the LLM-only improve
+# stages skip on their own when no usable LLM is configured (SDK-753).
 os.environ["TELEMETRY_DISABLED"] = "1"
 
 import dotenv  # noqa: E402
@@ -54,6 +58,19 @@ TEXT = (
 STRUCTURAL_EDGES = {"contains", "is_part_of", "made_from"}
 
 
+class _LogCapture(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__()
+        self.messages: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.messages.append(self.format(record))
+
+
+LOG_CAPTURE = _LogCapture()
+logging.getLogger().addHandler(LOG_CAPTURE)
+
+
 async def main() -> None:
     from cognee.infrastructure.databases.graph import get_graph_engine
     from cognee.infrastructure.databases.vector.embeddings.get_embedding_engine import (
@@ -61,6 +78,8 @@ async def main() -> None:
     )
     from cognee.infrastructure.llm.config import get_llm_config
     from cognee.modules.cognify.config import get_cognify_config, resolve_extractor
+    from cognee.modules.pipelines.models import PipelineRunStatus
+    from cognee.tests.utils.get_latest_pipeline_run import get_latest_pipeline_run
 
     assert not get_llm_config().llm_api_key, "an LLM key leaked into the environment"
     extractor = resolve_extractor(None, get_cognify_config())
@@ -75,7 +94,19 @@ async def main() -> None:
     await cognee.prune.prune_system(metadata=True)
 
     await cognee.add(TEXT, dataset_name="keyless")
+    # The embedding tokenizer must not import transformers: it caches "no torch" at
+    # import, and cognify's GLiNER auto-installer adds torch only after add() (#5258).
+    assert "transformers" not in sys.modules, (
+        "transformers was imported before cognify; the GLiNER runtime install would then "
+        "fail with 'PyTorch not found' in this process"
+    )
+
     await cognee.cognify(["keyless"])
+
+    cognify_run = await get_latest_pipeline_run(
+        pipeline_name="cognify_pipeline", status=PipelineRunStatus.DATASET_PROCESSING_COMPLETED
+    )
+    assert cognify_run.embedding_tokens > 0, "cognify recorded no embedding tokens"
 
     chunks = await cognee.search(
         "Where was Marie Curie born?", query_type=SearchType.CHUNKS, datasets=["keyless"], top_k=3
@@ -84,6 +115,18 @@ async def main() -> None:
 
     graph = await get_graph_engine()
     nodes, edges = await graph.get_graph_data()
+    # The default fastembed model reads 512 tokens (2 of them the [CLS]/[SEP] it
+    # adds itself) and truncates the rest without an error (SDK-868), so the
+    # engine's limit must be the model's own and every chunk must fit inside it.
+    from cognee.infrastructure.databases.vector.embeddings.input_limit import (
+        resolve_input_limit,
+    )
+
+    assert await resolve_input_limit(engine) == 510
+    assert engine.model_input_limit == 510, engine.model_input_limit
+    chunk_sizes = [n[1]["chunk_size"] for n in nodes if n[1].get("type") == "DocumentChunk"]
+    assert chunk_sizes and max(chunk_sizes) <= engine.max_completion_tokens, chunk_sizes
+    print(f"chunks: {len(chunk_sizes)}, largest {max(chunk_sizes)} tokens (limit 510)")
     entities = sorted(
         {n[1].get("name") for n in nodes if n[1].get("type") == "Entity" and n[1].get("name")}
     )
@@ -99,6 +142,28 @@ async def main() -> None:
     await cognee.visualize_graph(str(html_path), dataset="keyless", full=True)
     assert html_path.stat().st_size > 0, "visualization is empty"
 
+    # update() takes the same extractor decision as cognify(): the chunk-level
+    # path extracts the replaced chunk with GLiNER, so an edit stays keyless.
+    from cognee.modules.data.methods import get_datasets_by_name
+    from cognee.modules.data.methods.get_dataset_data import get_dataset_data
+    from cognee.modules.users.methods import get_default_user
+
+    [dataset] = await get_datasets_by_name("keyless", (await get_default_user()).id)
+    [row] = await get_dataset_data(dataset.id)
+    updated = await cognee.update(
+        row.id, TEXT + " In 1911 she won a second Nobel Prize, in Chemistry.", dataset.id
+    )
+    assert updated["status"] == "incremental", updated
+    assert updated["added_chunks"] >= 1 and updated["data_id"] == row.id, updated
+    edited = await cognee.search(
+        "Which second prize did Marie Curie win?",
+        query_type=SearchType.CHUNKS,
+        datasets=["keyless"],
+        top_k=3,
+    )
+    assert any("Chemistry" in str(getattr(r, "result", r)) for r in edited), edited
+    print(f"update: {updated['status']}, added {updated['added_chunks']} chunk(s) with GLiNER")
+
     # remember() is the primary API: same routing, then improve() with no
     # session ids, which runs no LLM stage.
     await cognee.remember(
@@ -113,11 +178,81 @@ async def main() -> None:
     )
     assert remembered, "remember() data is not searchable"
 
-    # With no usable LLM key, recall() without a query_type answers with CHUNKS.
+    # Session memory: the entry lands in the session cache and the background
+    # improve() bridges it into the graph. Its stages build their own pipelines,
+    # which must declare no LLM need, or the setup layer's LLM probe fails the
+    # bridge before any task runs (SDK-753).
+    session_result = await cognee.remember(
+        "Niels Bohr proposed the Bohr model of the atom in 1913 in Copenhagen.",
+        dataset_name="keyless_remember",
+        session_id="keyless_session",
+    )
+    await session_result  # wait for the background bridge
+    bridge = session_result.improve
+    assert bridge is not None and bridge.status != "errored", bridge
+    by_stage = {stage.stage: stage for stage in bridge.stages}
+    assert by_stage["persist_session_qa"].status in ("completed", "already_completed"), by_stage[
+        "persist_session_qa"
+    ]
+    assert not [s for s in bridge.stages if s.status == "errored"], bridge.stages
+    bridged = await cognee.search(
+        "Who proposed the Bohr model?",
+        query_type=SearchType.CHUNKS,
+        datasets=["keyless_remember"],
+        top_k=3,
+    )
+    assert any("Bohr" in str(getattr(r, "result", r)) for r in bridged), bridged
+    # An explicit improve over the same session must not raise either.
+    explicit = await cognee.improve(dataset="keyless_remember", session_ids=["keyless_session"])
+    assert explicit.status != "errored", explicit
+
+    # Cross the periodic agent-context extraction threshold: every trace gets a
+    # deterministic summary, and the due batch declines before building an LLM
+    # client. Stage 3 then persists the traces while the LLM-only stages skip.
+    from cognee.infrastructure.session.agent_context_extraction import TRACE_EXTRACTION_INTERVAL
+    from cognee.memory.entries import TraceEntry
+
+    for step in range(TRACE_EXTRACTION_INTERVAL):
+        trace_result = await cognee.remember(
+            TraceEntry(
+                origin_function="search_docs",
+                status="success",
+                method_params={"query": "Bohr model"},
+                method_return_value={"hits": step + 1},
+                generate_feedback_with_llm=True,
+            ),
+            dataset_name="keyless_remember",
+            session_id="keyless_session",
+        )
+        await trace_result
+    traced = await cognee.improve(dataset="keyless_remember", session_ids=["keyless_session"])
+    traced_stages = {stage.stage: stage for stage in traced.stages}
+    assert traced.status != "errored", traced
+    assert not [s for s in traced.stages if s.status == "errored"], traced.stages
+    assert traced_stages["persist_agent_traces"].status in ("completed", "already_completed"), (
+        traced_stages["persist_agent_traces"]
+    )
+    for llm_stage in ("extract_agent_context", "distill_sessions"):
+        assert (traced_stages[llm_stage].status, traced_stages[llm_stage].reason) == (
+            "skipped",
+            "no_llm_configured",
+        ), traced_stages[llm_stage]
+
+    # With no usable LLM key, recall() without a query_type routes to HYBRID_COMPLETION
+    # run with only_context=True: the prompt an LLM would receive, no completion call.
     recalled = await cognee.recall("Where was Marie Curie born?", datasets=["keyless"], top_k=1)
-    assert recalled and recalled[0].search_type == "CHUNKS", [
+    assert recalled and recalled[0].search_type == "HYBRID_COMPLETION", [
         getattr(r, "search_type", None) for r in recalled
     ]
+    recall_run = await get_latest_pipeline_run(operation_name="recall")
+    assert recall_run.embedding_tokens > 0, "recall recorded no embedding tokens"
+    assert recall_run.tokens_in == 0, "recall's embedding tokens were counted as LLM tokens"
+    missing_key_logs = [
+        message for message in LOG_CAPTURE.messages if "LLMAPIKeyNotSetError" in message
+    ]
+    assert not missing_key_logs, missing_key_logs
+    assert "Where was Marie Curie born?" in recalled[0].text, recalled[0].text[:200]
+    assert recalled[0].system_prompt, "only_context items carry the system prompt"
     print("keyless e2e: PASS")
 
 

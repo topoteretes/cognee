@@ -15,6 +15,7 @@ from typing_extensions import TypedDict
 
 if TYPE_CHECKING:
     from cognee.modules.cognify.estimator import DryRunEstimate
+    from cognee.modules.data.models import Dataset
     from cognee.modules.improve import ImproveResult
     from cognee.tasks.presort.models import PresortReport
 
@@ -41,6 +42,7 @@ from cognee.modules.operations import record_operation
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
 )
+from cognee.modules.pipelines.utils import iter_ingestion_entries
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.data_item import DataItem
 
@@ -92,6 +94,7 @@ class RememberKwargs(TypedDict, total=False):
 
     graph_model: Any
     extractor: Literal["llm", "gliner_demo", "gliner"]
+    summary_method: Literal["llm", "from_extraction"]
     node_set: list[str]
     preferred_loaders: list
     incremental_loading: bool
@@ -105,8 +108,12 @@ class RememberKwargs(TypedDict, total=False):
     skill_improvement: dict[str, Any]
     index_vectors: bool
     repo_credentials: str
+    branch: str
     skills_text: str
     skill_name: str
+    # DLT options: grouped in dlt_config (preferred), or the four bare spellings
+    # below kept for compatibility — see cognee.tasks.ingestion.dlt_config.
+    dlt_config: dict
     primary_key: str
     write_disposition: str
     query: str
@@ -138,14 +145,16 @@ _ADD_ONLY = frozenset(
         "node_set",
         "preferred_loaders",
         "importance_weight",
+        "dlt_config",
         "primary_key",
         "write_disposition",
         "query",
         "max_rows_per_table",
+        "branch",
     }
 )
 _COGNIFY_ONLY = frozenset(
-    {"graph_model", "extractor", "chunks_per_batch", "config", "temporal_cognify"}
+    {"graph_model", "extractor", "summary_method", "chunks_per_batch", "config"}
 )
 _SHARED = frozenset(
     {
@@ -267,16 +276,27 @@ def _data_to_text(data) -> str:
 _SESSION_PLACEHOLDER_PREFIXES = ("[UploadFile]", "[file:", "[BinaryIO", "[SpooledTemporaryFile")
 
 
-async def _add_to_session(session_id: str, data, user):
+async def _add_to_session(session_id: str, data, user, node_set: list[str] | None = None):
     """Add a Q&A entry to the session cache.
 
     Sessions store chat-shaped content (prompts, assistant answers,
     Q&A turns). File-upload data coerces to placeholder strings like
     ``[UploadFile]`` / ``[file: name]`` — those are useless in the
     session cache and pollute recall results, so they're skipped.
+
+    ``node_set`` is the call-level ``remember(..., node_set=[...])``: it pins the
+    session's node set before the entry is written, exactly as the field on a
+    typed entry does, and raises ``SessionNodeSetConflictError`` when the
+    session already carries a different set. It is validated first, by the same
+    rule as the field, so an invalid value fails even when nothing is written.
     """
     from cognee.infrastructure.session.get_session_manager import get_session_manager
+    from cognee.infrastructure.session.session_node_set import (
+        normalize_node_set,
+        pin_session_node_set,
+    )
 
+    node_set = normalize_node_set(node_set)
     sm = get_session_manager()
     if not sm.is_available:
         logger.warning("remember: session cache not available (enable CACHING=true)")
@@ -301,6 +321,9 @@ async def _add_to_session(session_id: str, data, user):
         )
         return
 
+    if node_set:
+        await pin_session_node_set(sm, user_id, session_id, node_set)
+
     await sm.add_qa(
         user_id=user_id,
         session_id=session_id,
@@ -309,6 +332,36 @@ async def _add_to_session(session_id: str, data, user):
         answer=text,
     )
     logger.info("remember: added entry to session '%s'", session_id)
+
+
+def _entry_with_node_set(entry: "MemoryEntry", node_set) -> "MemoryEntry":
+    """Apply the call-level ``node_set`` kwarg to a typed entry.
+
+    The field on the entry and the kwarg are two spellings of one thing, and
+    both go through ``normalize_node_set``: the kwarg fills an empty field,
+    agrees with an equal one, and is an error against a different one or on an
+    entry type that cannot carry a node set. An empty kwarg means "no node set"
+    and changes nothing. The filled entry is rebuilt through validation, never
+    copied around it, so the field's rule always runs.
+    """
+    from cognee.infrastructure.session.session_node_set import normalize_node_set
+
+    requested = normalize_node_set(node_set)
+    if not requested:
+        return entry
+    if not isinstance(entry, (QAEntry, TraceEntry)):
+        raise TypeError(
+            f"node_set is not supported for {type(entry).__name__}; only QAEntry and "
+            "TraceEntry carry a session node_set"
+        )
+    if not entry.node_set:
+        return type(entry).model_validate({**entry.model_dump(), "node_set": requested})
+    if entry.node_set != requested:
+        raise ValueError(
+            f"node_set given twice with different values: entry.node_set={entry.node_set}, "
+            f"node_set={requested}; pass one of them"
+        )
+    return entry
 
 
 async def _rearm_session_improve_debounce(session_id: str, user) -> None:
@@ -375,6 +428,7 @@ async def _remember_entry(
     entry,
     *,
     dataset_name: str,
+    dataset_id: UUID | None = None,
     session_id: str | None,
     user,
     skill_improvement: dict[str, Any] | None = None,
@@ -391,6 +445,7 @@ async def _remember_entry(
         payload = await client.remember_entry(
             entry,
             dataset_name=dataset_name,
+            dataset_id=dataset_id,
             session_id=session_id,
             skill_improvement=skill_improvement,
         )
@@ -417,16 +472,66 @@ async def _remember_entry(
     return await _dispatch_session_entry(
         entry,
         dataset_name=dataset_name,
+        dataset_id=dataset_id,
         session_id=session_id,
         user=user,
         skill_improvement=skill_improvement,
     )
 
 
+async def _resolve_entry_dataset(
+    *, session_id: str, dataset_name: str, dataset_id: UUID | None, user
+) -> tuple[Any, "Dataset", bool]:
+    """Pick the writable dataset a typed entry in ``session_id`` targets.
+
+    The session's binding decides the target dataset; only an unbound session
+    addressed by name may create one. A bound or explicit id is checked only,
+    so a refused entry leaves no dataset behind. The flag is True when the
+    session was already bound, which is then always to the returned dataset.
+    """
+    from cognee.modules.session_lifecycle.metrics import get_session_row
+
+    row = await get_session_row(session_id=session_id, user_id=user.id)
+    bound_dataset_id = row.dataset_id if row is not None else None
+
+    if dataset_id is not None and bound_dataset_id not in (None, dataset_id):
+        raise ValueError(
+            f"Session {session_id!r} is bound to dataset {bound_dataset_id}, not {dataset_id}"
+        )
+
+    target_dataset_id = dataset_id or bound_dataset_id
+    if target_dataset_id is None:
+        user, datasets = await resolve_authorized_user_datasets(dataset_name, user)
+        return user, datasets[0], False
+
+    from cognee.modules.data.methods import get_authorized_dataset
+
+    # A missing dataset is refused exactly like a forbidden one, for an explicit
+    # id and for a session's binding alike: a caller who lost access must not
+    # learn from the answer whether the dataset still exists.
+    dataset = await get_authorized_dataset(user, target_dataset_id, "write")
+    # get_authorized_dataset raises for an id the user cannot write, never returns None.
+    assert dataset is not None
+
+    from cognee.modules.data.constants import DEFAULT_DATASET_NAME
+
+    # An explicit id takes precedence over the name and already matched the binding.
+    if (
+        dataset_id is None
+        and bound_dataset_id is not None
+        and dataset_name not in (DEFAULT_DATASET_NAME, dataset.name)
+    ):
+        raise ValueError(
+            f"Session {session_id!r} is bound to dataset {dataset.name!r}, not {dataset_name!r}"
+        )
+    return user, dataset, bound_dataset_id is not None
+
+
 async def _dispatch_session_entry(
     entry: "MemoryEntry",
     *,
     dataset_name: str,
+    dataset_id: UUID | None = None,
     session_id: str | None,
     user,
     skill_improvement: dict[str, Any] | None = None,
@@ -437,13 +542,46 @@ async def _dispatch_session_entry(
     graph-backed and may be recorded without a session_id. Returns a
     RememberResult with entry_id/entry_type fields populated so callers
     can chain writes.
+
+    A session is bound to one dataset by its first write (``remember`` or a
+    ``recall`` that records activity). Later entries target that dataset:
+    ``dataset_name`` only creates-or-resolves a dataset for a session that is
+    not bound yet. On a bound session an explicit ``dataset_id`` that disagrees
+    with the binding is rejected, and so is a ``dataset_name`` other than the
+    default when no ``dataset_id`` is given (an id takes precedence over the
+    name); the ``"main_dataset"`` default is accepted because it cannot be told
+    apart from no name at all.
     """
+    # RememberResult.dataset_id is a str; accept it back as the UUID it names.
+    if dataset_id is not None and not isinstance(dataset_id, UUID):
+        try:
+            dataset_id = UUID(str(dataset_id))
+        except ValueError:
+            raise ValueError(f"dataset_id must be a dataset UUID, got {dataset_id!r}") from None
+
+    from cognee.modules.engine.operations.setup import setup
+
+    await setup()
+
+    if user is None:
+        from cognee.modules.users.methods import get_default_user
+
+        user = await get_default_user()
+
     if isinstance(entry, SkillRunEntry):
         from cognee.modules.tools.skill_runs import remember_skill_run_entry
+
+        if session_id:
+            # A run recorded in a session follows the session's dataset binding.
+            user, dataset, _ = await _resolve_entry_dataset(
+                session_id=session_id, dataset_name=dataset_name, dataset_id=dataset_id, user=user
+            )
+            dataset_id = dataset.id
 
         run, dataset = await remember_skill_run_entry(
             entry,
             dataset_name=dataset_name,
+            dataset_id=dataset_id,
             session_id=session_id,
             user=user,
         )
@@ -485,19 +623,11 @@ async def _dispatch_session_entry(
         return result
 
     from cognee.infrastructure.session.get_session_manager import get_session_manager
-    from cognee.modules.engine.operations.setup import setup
 
     if not session_id:
         raise ValueError(
             f"session_id is required for typed memory entries (got {type(entry).__name__})"
         )
-
-    await setup()
-
-    if user is None:
-        from cognee.modules.users.methods import get_default_user
-
-        user = await get_default_user()
 
     user_id = str(user.id) if user and hasattr(user, "id") else None
     if not user_id:
@@ -507,38 +637,37 @@ async def _dispatch_session_entry(
     if not sm.is_available:
         raise RuntimeError("Session cache unavailable — set CACHING=true to enable session memory")
 
-    # Resolve the dataset UUID for this session so the session_records
-    # row carries dataset_id — otherwise downstream permission filtering
-    # (e.g. the dashboard listing) can't match the session via granted
-    # dataset reads. We backfill via ensure_and_touch_session, which
-    # upserts the row and only sets dataset_id when currently null.
-    try:
-        from uuid import UUID as _UUID
+    # Resolve write access before caching any content.
+    user, dataset, was_bound = await _resolve_entry_dataset(
+        session_id=session_id, dataset_name=dataset_name, dataset_id=dataset_id, user=user
+    )
 
-        from cognee.modules.data.methods.get_authorized_dataset import get_authorized_dataset
-        from cognee.modules.session_lifecycle.metrics import ensure_and_touch_session
+    from cognee.modules.session_lifecycle.metrics import (
+        ensure_and_touch_session,
+        get_session_row,
+    )
 
-        resolved_dataset = None
-        try:
-            ds = await get_authorized_dataset(user, dataset_name, "write")
-            if ds is not None:
-                resolved_dataset = ds.id
-        except Exception:
-            # Fall through with None — we still create the session row.
-            logger.debug("Ignoring exception in _dispatch_session_entry", exc_info=True)
-            resolved_dataset = None
+    # Every entry bumps the session's activity; the atomic upsert binds an unbound
+    # session and preserves an existing binding. For a session that was unbound,
+    # re-read it before caching: a concurrent writer may have bound it first.
+    await ensure_and_touch_session(session_id=session_id, user_id=user.id, dataset_id=dataset.id)
+    if not was_bound:
+        row = await get_session_row(session_id=session_id, user_id=user.id)
+        if row is None or row.dataset_id != dataset.id:
+            raise ValueError("Session is already bound to another dataset or cannot be bound")
 
-        await ensure_and_touch_session(
-            session_id=session_id,
-            user_id=_UUID(user_id),
-            dataset_id=resolved_dataset,
-        )
-    except Exception as exc:
-        logger.debug("remember: pre-upsert session_record failed (%s)", exc, exc_info=True)
+    if isinstance(entry, (QAEntry, TraceEntry)) and entry.node_set:
+        from cognee.infrastructure.session.session_node_set import pin_session_node_set
+
+        # Pins the session's node_set before anything is written, or raises
+        # SessionNodeSetConflictError (HTTP 409) when the session already carries a
+        # different set.
+        await pin_session_node_set(sm, user_id, session_id, entry.node_set)
 
     result = RememberResult(
         status="session_stored",
-        dataset_name=dataset_name,
+        dataset_name=dataset.name,
+        dataset_id=str(dataset.id),
         session_ids=[session_id],
     )
     result.elapsed_seconds = time.monotonic() - result._started_at
@@ -621,10 +750,17 @@ class RememberResult:
         improve: The ``ImproveResult`` of the automatic ``improve()`` that
             followed the remember (``self_improvement=True``), one entry per
             stage with its status. ``None`` when no improve ran — because it
-            was turned off, debounced, or is still running in the background.
+            was turned off, debounced, declined by the host (see
+            ``improve_skipped``), or is still running in the background.
         improve_error: Why the automatic improve failed, when it did. The
             remember itself succeeded in that case: ``status`` stays
             ``"completed"`` / ``"session_stored"`` and only this field is set.
+        improve_skipped: Why the automatic improve was not started, when the
+            host application's admission check declined it
+            (``cognee.modules.improve.register_auto_improve_admission``): a
+            short machine-readable reason such as ``"insufficient_credits"``.
+            The data was stored as usual and ``improve`` stays ``None``; a
+            later improve covers what this one would have. ``None`` otherwise.
 
     Example::
 
@@ -673,6 +809,8 @@ class RememberResult:
         # (A5). An improve failure never flips `status`; it lands here.
         self.improve: ImproveResult | None = None
         self.improve_error: str | None = None
+        # The reason a host admission check gave for not starting it at all.
+        self.improve_skipped: str | None = None
         self._task: asyncio.Task | None = None
         self._started_at: float = time.monotonic()
 
@@ -706,6 +844,8 @@ class RememberResult:
             parts.append(f"improve={getattr(self.improve, 'status', None)!r}")
         if self.improve_error:
             parts.append(f"improve_error={self.improve_error!r}")
+        if self.improve_skipped:
+            parts.append(f"improve_skipped={self.improve_skipped!r}")
         return f"RememberResult({', '.join(parts)})"
 
     def __str__(self):
@@ -738,10 +878,12 @@ class RememberResult:
             d["improve"] = dump(mode="json") if callable(dump) else self.improve
         if self.improve_error:
             d["improve_error"] = self.improve_error
+        if self.improve_skipped:
+            d["improve_skipped"] = self.improve_skipped
         return d
 
     def _attach_improve_payload(self, payload: dict) -> None:
-        """Rebuild ``improve`` / ``improve_error`` from a server's JSON response."""
+        """Rebuild ``improve`` / ``improve_error`` / ``improve_skipped`` from a server's JSON."""
         if not isinstance(payload, dict):
             return
         improve_payload = payload.get("improve")
@@ -755,6 +897,8 @@ class RememberResult:
                 self.improve = improve_payload  # type: ignore[assignment]
         if payload.get("improve_error"):
             self.improve_error = str(payload["improve_error"])
+        if payload.get("improve_skipped"):
+            self.improve_skipped = str(payload["improve_skipped"])
 
     def __bool__(self):
         """True if status is completed or session_stored."""
@@ -811,7 +955,7 @@ class RememberResult:
             self.dataset_name = run_dataset_name
 
         if hasattr(run_info, "status"):
-            self.status = "errored" if "Errored" in run_info.status else "completed"
+            self.status = "errored" if run_info.status == "PipelineRunErrored" else "completed"
             if hasattr(run_info, "pipeline_run_id"):
                 self.pipeline_run_id = str(run_info.pipeline_run_id)
         else:
@@ -846,15 +990,11 @@ class RememberResult:
             ingestion_info = getattr(run_info, "data_ingestion_info", None)
             if ingestion_info and isinstance(ingestion_info, list):
                 processed = 0
-                for entry in ingestion_info:
-                    if not isinstance(entry, dict):
-                        continue
-                    status = getattr(entry.get("run_info"), "status", "")
-                    if "Errored" in status:
+                for status, entry_data_ids in iter_ingestion_entries(ingestion_info):
+                    if status == "PipelineRunErrored":
                         continue
                     processed += 1
-                    if entry.get("data_id") is not None:
-                        self.items.append({"id": str(entry["data_id"])})
+                    self.items.extend({"id": str(data_id)} for data_id in entry_data_ids)
                 self.items_processed = processed
 
     def _fail(self, exc: BaseException):
@@ -898,12 +1038,6 @@ async def remember(
     **Without session_id (permanent memory):** Runs ``add()`` +
     ``cognify()`` to ingest data and build the knowledge graph.
 
-    Because the graph is built through ``cognify()``, the cognify feature
-    flags apply here too. Notably, setting ``CONTRADICTION_DETECTION=true``
-    makes every ``remember()`` call check the facts it just stored against
-    the ones already in the graph and record each conflict as a
-    ``contradicts`` edge (see ``CognifyConfig``). Off by default.
-
     **With session_id (session memory):** Stores the data in the
     session cache for fast retrieval. When ``self_improvement`` is
     True (default), also bridges the session data into the permanent
@@ -918,9 +1052,11 @@ async def remember(
         data: The data to store (text, file paths, binary streams, etc.).
         dataset_name: Target dataset. Defaults to ``"main_dataset"``.
         dataset_id: UUID of an existing dataset to target directly. Takes
-            precedence over ``dataset_name``. Not supported for
-            ``MemorySource`` imports or typed ``MemoryEntry`` payloads,
-            which are dataset-name based.
+            precedence over ``dataset_name``. Typed ``MemoryEntry`` payloads
+            accept it too and require it for shared datasets; write access is
+            checked before anything is cached, and the session is bound to
+            that dataset. Not supported for ``MemorySource`` imports, which are
+            dataset-name based.
         session_id: Optional session ID. When set, stores data in the
             session cache instead of the permanent graph.
         chunk_size: Max tokens per chunk. Auto-calculated when *None*.
@@ -928,11 +1064,13 @@ async def remember(
         custom_prompt: Custom prompt for entity extraction.
         run_in_background: If *True*, run as a background task.
         self_improvement: If *True* (default), automatically runs
-            ``improve()`` after cognify to enrich the graph with
-            triplet embeddings and indexing. The outcome lands on
+            ``improve()`` after cognify to enrich the graph. The outcome lands on
             ``RememberResult.improve`` / ``.improve_error``; a failed
             improve never marks the remember itself as errored.
-            ``IMPROVE_AUTO_ENABLED=false`` overrides this to off.
+            ``IMPROVE_AUTO_ENABLED=false`` overrides this to off, and a
+            host admission check can decline a single run before it starts
+            (``cognee.modules.improve.register_auto_improve_admission``;
+            the reason lands on ``RememberResult.improve_skipped``).
         session_ids: Session IDs handed to that ``improve()`` call so
             their Q&A, agent traces and distilled lessons are bridged
             into the permanent graph in the same run. Only used when
@@ -973,10 +1111,16 @@ async def remember(
             the call returns a ``running`` result with the dataset_id while
             cloning and graph extraction continue server-side — poll the
             dataset status for ``code_graph_pipeline`` or await the result.
+            Each repository is stored as one Data row in the dataset; its
+            ``id`` is on the repository's result item once its run has
+            finished (a background result's ``items`` fill in as its
+            repositories run), for ``forget(data_id=...)``. An item that errored after
+            its row was stored still carries the ``id``.
         skill_improvement: Internal skill-improvement control dict used with
             ``SkillRunEntry`` or ``content_type="skills"``. ``apply=True``
             requires an existing ``proposal_id``.
-        **kwargs: Additional options -- see ``RememberKwargs``.
+        **kwargs: Additional options -- see ``RememberKwargs``. ``branch`` (without
+            ``content_type``) clones that branch of a repository URL; see ``add()``.
 
     Returns:
         RememberResult or DryRunEstimate: A promise-like object for normal
@@ -1000,7 +1144,10 @@ async def remember(
         result.raw_result    # {dataset_id: PipelineRunInfo}
     """
     from cognee import __version__ as cognee_version
+    from cognee.api.v1.cognify.cognify import drop_deprecated_temporal_cognify
     from cognee.shared.utils import send_telemetry
+
+    drop_deprecated_temporal_cognify(kwargs)
 
     # Migration dispatch: a MemorySource streams COGX records from an external
     # memory system (Mem0, Zep/Graphiti, Letta, a COGX archive, ...). The
@@ -1068,13 +1215,12 @@ async def remember(
     if isinstance(data, MEMORY_ENTRY_TYPES):
         if dry_run:
             raise ValueError("dry_run is supported for add+cognify remember inputs only.")
-        if dataset_id is not None:
-            raise ValueError(
-                "dataset_id is not supported for typed memory entries; use dataset_name."
-            )
+        if kwargs.get("node_set") is not None:
+            data = _entry_with_node_set(data, kwargs["node_set"])
         return await _remember_entry(
             data,
             dataset_name=dataset_name,
+            dataset_id=dataset_id,
             session_id=session_id,
             user=kwargs.get("user"),
             skill_improvement=kwargs.get("skill_improvement"),
@@ -1220,6 +1366,7 @@ async def remember(
             GLINER_DEMO_EXTRACTOR,
             get_cognify_config,
             resolve_extractor,
+            resolve_summary_method,
         )
 
         if (
@@ -1239,7 +1386,7 @@ async def remember(
                 "Call cognee.disconnect() to estimate locally."
             )
 
-        from cognee.infrastructure.llm import get_max_chunk_tokens
+        from cognee.infrastructure.llm import resolve_chunk_size
         from cognee.modules.chunking.TextChunker import TextChunker
         from cognee.modules.cognify.estimator import estimate_remember_dry_run
         from cognee.shared.data_models import KnowledgeGraph
@@ -1247,13 +1394,21 @@ async def remember(
         return await estimate_remember_dry_run(
             data,
             chunker=chunker or TextChunker,
-            chunk_size=chunk_size or await get_max_chunk_tokens(),
+            chunk_size=await resolve_chunk_size(chunk_size),
             graph_model=kwargs.get("graph_model") or KnowledgeGraph,
             custom_prompt=custom_prompt,
+            summary_method=resolve_summary_method(
+                kwargs.get("summary_method"), get_cognify_config()
+            ),
         )
 
     if session_id is not None and kwargs.get("extractor") is not None:
         raise ValueError("extractor is not supported when session_id is provided.")
+    if session_id is not None and kwargs.get("summary_method") is not None:
+        raise ValueError("summary_method is not supported when session_id is provided.")
+    if session_id is not None and kwargs.get("branch") is not None:
+        # The session path never calls add(), so the branch would be dropped silently.
+        raise ValueError("branch is not supported when session_id is provided.")
 
     data_size = _estimate_data_size(data)
     item_count = len(data) if isinstance(data, list) else 1
@@ -1369,6 +1524,18 @@ async def _remember_inner(
                 "extractor is not supported while connected to a remote Cognee "
                 "instance. Call cognee.disconnect() to choose the extractor locally."
             )
+        if kwargs.get("summary_method") is not None:
+            # Same as extractor: client.remember() would drop it.
+            raise ValueError(
+                "summary_method is not supported while connected to a remote Cognee "
+                "instance. Call cognee.disconnect() to choose the summary method locally."
+            )
+        if kwargs.get("branch") is not None:
+            # Same as extractor: client.remember() would drop it.
+            raise ValueError(
+                "branch is not supported while connected to a remote Cognee instance. "
+                "Call cognee.disconnect() to clone the branch locally."
+            )
         if session_ids:
             # Same discipline as extractor: POST /remember carries no
             # session_ids field, so forwarding would silently drop them.
@@ -1399,6 +1566,7 @@ async def _remember_inner(
         default_pipeline_needs_llm,
         get_cognify_config,
         resolve_extractor,
+        resolve_summary_method,
     )
     from cognee.modules.preflight import validate_provider_config
 
@@ -1409,9 +1577,12 @@ async def _remember_inner(
         validate_provider_config(needs_llm=False)
     else:
         cognify_config = get_cognify_config()
+        # Like the extractor below, a misspelled summary_method raises before
+        # add() stores anything, not in cognify() after it.
+        resolve_summary_method(kwargs.get("summary_method"), cognify_config)
         validate_provider_config(
             needs_llm=default_pipeline_needs_llm(
-                resolve_extractor(kwargs.get("extractor"), cognify_config), cognify_config
+                resolve_extractor(kwargs.get("extractor"), cognify_config)
             )
         )
 
@@ -1457,6 +1628,12 @@ async def _remember_inner(
         raise ValueError("index_vectors is supported only for content_type='code'.")
     if repo_credentials is not None and content_type != "code":
         raise ValueError("repo_credentials is supported only for content_type='code'.")
+    if kwargs.get("branch") is not None and content_type is not None:
+        # Only the add() route reads it, so a content_type call would drop it silently.
+        raise ValueError(
+            "branch is supported only without content_type: pass the repository URL "
+            "to remember() directly."
+        )
     if content_type == "code" and session_id is not None:
         raise ValueError(
             "session_id is not applicable to content_type='code'; code graphs are "
@@ -1467,10 +1644,18 @@ async def _remember_inner(
         from pathlib import Path as _Path
 
         from cognee import __version__ as cognee_version
+        from cognee.infrastructure.locks.dataset_lock import dataset_lock
+        from cognee.modules.data.methods import mark_data_processed
+        from cognee.modules.integrations.sync_progress import report_sync_progress
         from cognee.modules.run_custom_pipeline import run_custom_pipeline
         from cognee.shared.utils import send_telemetry
         from cognee.tasks.code_graph import get_code_graph_tasks
-        from cognee.tasks.code_graph.resolve_repo import redact_repo_spec, resolve_repo_source
+        from cognee.tasks.code_graph.code_repo import add_code_repository
+        from cognee.tasks.code_graph.resolve_repo import (
+            is_remote_repo,
+            redact_repo_spec,
+            resolve_repo_source,
+        )
 
         repo_specs = data if isinstance(data, list) else [data]
         if not repo_specs or not all(isinstance(spec, (str, _Path)) for spec in repo_specs):
@@ -1498,8 +1683,18 @@ async def _remember_inner(
             session_ids=None,
         )
         result.items = []
-        user = kwargs.get("user")
-        dataset_ref = dataset_id or dataset_name
+
+        # Resolve (creating if needed) the dataset before any repo runs: every
+        # repository becomes a Data row in it, pinned to (user, dataset, repo),
+        # the response carries the dataset_id callers poll via
+        # GET /v1/datasets/status, and authorization errors surface here
+        # instead of mid-batch or inside the background task.
+        user, authorized_datasets = await resolve_authorized_user_datasets(
+            dataset_id or dataset_name, kwargs.get("user")
+        )
+        dataset = authorized_datasets[0]
+        result.dataset_id = str(dataset.id)
+        result.dataset_name = dataset.name
 
         def _apply_code_run_info(item: dict, pipeline_result) -> None:
             # Blocking run_custom_pipeline returns {dataset_id: PipelineRunInfo};
@@ -1517,89 +1712,120 @@ async def _remember_inner(
             if run_id is not None:
                 item["pipeline_run_id"] = str(run_id)
                 result.pipeline_run_id = str(run_id)
-            if "Errored" in getattr(run_info, "status", ""):
+            if getattr(run_info, "status", "") == "PipelineRunErrored":
                 item["status"] = "errored"
-                result.status = "errored"
-                if not result.error:
-                    result.error = f"code_graph_pipeline errored for repository '{item['source']}'"
+                item["error"] = (
+                    getattr(run_info, "error_message", None) or "code_graph_pipeline errored"
+                )
 
-        async def _run_one_repo(spec) -> dict:
+        async def _run_one_repo(spec, item: dict) -> None:
             repo_path = await resolve_repo_source(spec, credentials=repo_credentials)
-            # redact: connector-supplied URLs may carry a token in the
-            # userinfo, which must not surface in results or logs.
-            item = {
-                "kind": "code_repository",
-                "source": redact_repo_spec(spec),
-                "path": str(repo_path),
-            }
-            pipeline_result = await run_custom_pipeline(
-                tasks=get_code_graph_tasks(str(repo_path), index_vectors=bool(index_vectors)),
-                data=str(repo_path),
-                dataset=dataset_ref,
-                user=user,
-                pipeline_name="code_graph_pipeline",
+            item["path"] = str(repo_path)
+            # The Data row's stamps are read-modify-written as a whole: holding
+            # the dataset lock from the row write to the final stamp keeps a
+            # concurrent add()/cognify() of the dataset from overwriting them.
+            # The lock is re-entrant, so add() and the pipeline run inside it.
+            async with dataset_lock(dataset.id):
                 # The default (graph-only) pipeline performs no LLM or embedding
                 # calls, so it must not demand an API key on first run. With
                 # index_vectors=True embeddings are used, so the checks stay on.
-                skip_connection_test=not bool(index_vectors),
+                skip_connection_test = not bool(index_vectors)
+                # One Data row per repository gives the caller a data_id for
+                # forget() and lists the repo on the dataset. Running the pipeline
+                # over that row lets the graph writes record it as their owner, so
+                # forget(data_id=...) removes the nodes this row wrote. Code node
+                # ids are keyed on the repository name (its directory basename), so
+                # two rows whose repos share a name share nodes, and only the first
+                # writer owns the unchanged ones.
+                data = await add_code_repository(
+                    repo_path,
+                    user=user,
+                    dataset=dataset,
+                    source_url=item["source"] if is_remote_repo(spec) else None,
+                    skip_connection_test=skip_connection_test,
+                )
+                item["id"] = str(data.id)
+                pipeline_result = await run_custom_pipeline(
+                    tasks=get_code_graph_tasks(str(repo_path), index_vectors=bool(index_vectors)),
+                    data=[data],
+                    dataset=dataset.id,
+                    user=user,
+                    pipeline_name="code_graph_pipeline",
+                    skip_connection_test=skip_connection_test,
+                )
+                _apply_code_run_info(item, pipeline_result)
+                if item.get("status") != "errored":
+                    # The row's graph is built, exactly as the cognify CODE_REPO
+                    # route would build it: stamp cognify completion so a later
+                    # cognify() of the dataset does not rerun enola for it, and the
+                    # code graph pipeline's own slot for per-item status.
+                    await mark_data_processed(
+                        data.id,
+                        dataset.id,
+                        pipeline_names=("cognify_pipeline", "code_graph_pipeline"),
+                    )
+
+        async def _run_repos(isolate_failures: bool) -> None:
+            processed = failed = 0
+            # One phase for the whole batch: a per-repo phase change would reset
+            # the repository counter and its estimate.
+            await report_sync_progress(
+                phase="processing", completed=0, total=len(repo_specs), unit="repositories"
             )
-            _apply_code_run_info(item, pipeline_result)
-            return item
+            for position, spec in enumerate(repo_specs, start=1):
+                # redact: connector-supplied URLs may carry a token in the
+                # userinfo, which must not surface in results or logs. The
+                # item exists before the run so a failure after the repo's
+                # Data row was written still reports that row's id.
+                item = {"kind": "code_repository", "source": redact_repo_spec(spec)}
+                result.items.append(item)
+                try:
+                    await _run_one_repo(spec, item)
+                except Exception as exc:
+                    if not isolate_failures:
+                        raise
+                    # Isolating (background runs, and raise_on_error=False as
+                    # the HTTP router and the GitHub sync pass): one failing
+                    # repo must not abort the rest of the batch, so record the
+                    # failure per item and keep going.
+                    # Specs can embed URL credentials — never log spec-derived values.
+                    logger.exception(
+                        "Code-graph run failed for repo %d of %d", position, len(repo_specs)
+                    )
+                    item["status"] = "errored"
+                    item["error"] = str(exc)
+                if item.get("status") == "errored":
+                    failed += 1
+                else:
+                    processed += 1
+                await report_sync_progress(
+                    phase="processing",
+                    completed=position,
+                    total=len(repo_specs),
+                    unit="repositories",
+                    counts={"processed": processed, "failed": failed},
+                )
+            result.items_processed = len(
+                [item for item in result.items if item.get("status") != "errored"]
+            )
+            errored = [item for item in result.items if item.get("status") == "errored"]
+            if errored:
+                result.status = "errored"
+                result.error = "; ".join(f"{item['source']}: {item['error']}" for item in errored)
+            elif result.status == "running":
+                result.status = "completed"
+            result.elapsed_seconds = time.monotonic() - result._started_at
 
         if run_in_background:
-            # Resolve the dataset before returning so the response carries the
-            # dataset_id callers poll via GET /v1/datasets/status, and so
-            # authorization errors surface at request time instead of inside
-            # the background task.
-            user, authorized_datasets = await resolve_authorized_user_datasets(dataset_ref, user)
-            dataset = authorized_datasets[0]
-            dataset_ref = dataset.id
-            result.dataset_id = str(dataset.id)
-            result.dataset_name = dataset.name
             result.status = "running"
-
-            async def _code_graph_background():
-                # One failing repo must not abort the rest of the batch — record
-                # the failure per item and keep going.
-                errors: list = []
-                for position, spec in enumerate(repo_specs, start=1):
-                    try:
-                        item = await _run_one_repo(spec)
-                    except Exception as exc:
-                        source = redact_repo_spec(spec)
-                        # Specs can embed URL credentials — never log spec-derived values.
-                        logger.exception(
-                            "Background code-graph run failed for repo %d of %d",
-                            position,
-                            len(repo_specs),
-                        )
-                        item = {
-                            "kind": "code_repository",
-                            "source": source,
-                            "status": "errored",
-                            "error": str(exc),
-                        }
-                        errors.append(f"{source}: {exc}")
-                    result.items.append(item)
-                result.items_processed = len(
-                    [item for item in result.items if item.get("status") != "errored"]
-                )
-                if errors:
-                    result.status = "errored"
-                    result.error = "; ".join(errors)
-                elif result.status == "running":
-                    result.status = "completed"
-                result.elapsed_seconds = time.monotonic() - result._started_at
-
-            result._task = _anchor_background_task(asyncio.create_task(_code_graph_background()))
+            result._task = _anchor_background_task(
+                asyncio.create_task(_run_repos(isolate_failures=True))
+            )
             return result
 
-        for spec in repo_specs:
-            result.items.append(await _run_one_repo(spec))
-        result.items_processed = len(
-            [item for item in result.items if item.get("status") != "errored"]
-        )
-        result.elapsed_seconds = time.monotonic() - result._started_at
+        # raise_on_error=False (the HTTP router) reports a failed repo as an
+        # errored item of the result, the same as an errored pipeline run.
+        await _run_repos(isolate_failures=not raise_on_error)
         return result
 
     if content_type == "skills":
@@ -1798,10 +2024,34 @@ async def _remember_inner(
         if self_improvement and not auto_improve:
             logger.debug("remember: automatic improve disabled or unavailable")
 
+        # Host admission: the application embedding cognee may decline the
+        # automatic improve before it starts (a tenant with no LLM budget left
+        # would only fail at the first LLM call). Asked only when an improve
+        # would otherwise run, on both paths, and before the session debounce
+        # below is consulted — a bridge that never starts must not spend the
+        # debounce window. The data is stored either way; the reason is
+        # reported on the result. The helper is fail-open and never raises.
+        improve_skipped: str | None = None
+        if auto_improve:
+            from cognee.modules.improve.admission import auto_improve_skip_reason
+
+            improve_skipped = await auto_improve_skip_reason(
+                user=user,
+                dataset_id=dataset_id,
+                session_id=session_id or None,
+                session_ids=[session_id] if session_id else list(session_ids or []),
+            )
+            if improve_skipped:
+                auto_improve = False
+                logger.info(
+                    "remember: automatic improve skipped by the host admission check (%s)",
+                    improve_skipped,
+                )
+
         # Session memory: store in session cache, then optionally bridge to graph
         if session_id:
             operation_context.set_session_id(session_id)
-            await _add_to_session(session_id, data, user)
+            await _add_to_session(session_id, data, user, node_set=add_kwargs.get("node_set"))
             result = RememberResult(
                 status="session_stored",
                 dataset_name=dataset_name,
@@ -1809,6 +2059,7 @@ async def _remember_inner(
                 session_ids=[session_id],
             )
             result.elapsed_seconds = time.monotonic() - result._started_at
+            result.improve_skipped = improve_skipped
 
             # Debounce (B6): bridge only after enough new entries or enough time
             # since the last automatic improve for this session. The default
@@ -1882,6 +2133,7 @@ async def _remember_inner(
             dataset_id=str(dataset_id) if dataset_id else None,
             session_ids=session_ids,
         )
+        result.improve_skipped = improve_skipped
 
         # Permanent memory: add + cognify (+ optional improve)
         async def _run():

@@ -8,7 +8,13 @@ from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
-from cognee.modules.retrieval.hybrid.chunks import retrieve_hybrid_chunks, search_collection
+from cognee.modules.retrieval.hybrid.candidates import HybridCandidates
+from cognee.modules.retrieval.hybrid.chunks import (
+    chunk_collections,
+    dlt_rows_indexed,
+    retrieve_hybrid_chunks,
+    search_collection,
+)
 from cognee.modules.retrieval.hybrid.context import (
     extract_context_object_ids as extract_hybrid_object_ids,
 )
@@ -16,11 +22,15 @@ from cognee.modules.retrieval.hybrid.context import (
     format_hybrid_context,
     format_hybrid_context_batch,
 )
-from cognee.modules.retrieval.hybrid.entities import build_entities, search_entities
+from cognee.modules.retrieval.hybrid.entities import (
+    build_entities,
+    entity_collections,
+    search_entities,
+)
+from cognee.modules.retrieval.hybrid.external_metadata import project_external_metadata
 from cognee.modules.retrieval.hybrid.facts import (
+    FactCandidates,
     edge_rank_by_id,
-    resolve_facts_top_k,
-    select_facts_for_entities,
 )
 from cognee.modules.retrieval.hybrid.merge import merge_hybrid_results
 from cognee.modules.retrieval.hybrid.references import cite_hybrid_completions
@@ -30,6 +40,7 @@ from cognee.modules.retrieval.utils.completion import (
     generate_completion,
     generate_completion_batch,
 )
+from cognee.modules.retrieval.utils.conflict_context import attach_chunk_conflicts
 from cognee.modules.retrieval.utils.global_context import (
     format_global_context_prelude,
     load_root_text,
@@ -46,6 +57,10 @@ DEFAULT_HYBRID_LANE_TOP_K = 10
 
 class HybridRetriever(BaseRetriever):
     """Completion retriever using chunk, entity, and optional global-context channels."""
+
+    # Resolved once per retrieval and reused by the context builders; see
+    # GraphCompletionRetriever for the same pattern.
+    _unified_engine = None
 
     # Search is not an LLM gateway: when every channel comes back empty there
     # is no answer to give (SDK-270 / gh #3728).
@@ -70,6 +85,8 @@ class HybridRetriever(BaseRetriever):
         use_importance_weight: bool = True,
         use_truth_weight: bool = False,
         facts_top_k: int | None = 5,
+        include_external_metadata: bool = False,
+        external_metadata_keys: list[str] | None = None,
     ):
         self.chunks_top_k = chunks_top_k if chunks_top_k is not None else 5
         self.entities_top_k = entities_top_k if entities_top_k is not None else 5
@@ -88,6 +105,11 @@ class HybridRetriever(BaseRetriever):
         self.use_importance_weight = use_importance_weight
         self.use_truth_weight = use_truth_weight
         self.facts_top_k = facts_top_k if facts_top_k is not None else 5
+        # Opt-in: surface allowlisted keys of the document external_metadata
+        # stored on each chunk. Off by default, so returned objects and the
+        # prompt stay exactly as before.
+        self.include_external_metadata = include_external_metadata
+        self.external_metadata_keys = list(external_metadata_keys or [])
 
     def _use_session_cache(self) -> bool:
         user = session_user.get()
@@ -112,6 +134,18 @@ class HybridRetriever(BaseRetriever):
         return await self._retrieve_one(query)
 
     async def _retrieve_one(self, query: str) -> dict[str, Any]:
+        candidates = await self._fetch_candidates(query)
+        return candidates.finalize(
+            chunks_limit=self.chunks_top_k, entities_limit=self.entities_top_k
+        )
+
+    async def _fetch_candidates(self, query: str) -> HybridCandidates:
+        """Everything the lanes find for ``query``, uncut.
+
+        The cut and the fact selection happen in ``finalize``: plain hybrid cuts
+        to its own limits right away; a retriever that reorders the candidates
+        first (the temporal rerank) cuts afterwards. Nothing is kept on the
+        instance, so ``query_batch`` can run this concurrently."""
         query_embeddings = await self._unified_engine.vector.embedding_engine.embed_text([query])
         query_vector = query_embeddings[0]
 
@@ -133,7 +167,10 @@ class HybridRetriever(BaseRetriever):
         # ranking byte-identical to an un-personalized run.
         personal_weights = await load_preference_weights()
 
-        chunk_objects, (entities, facts) = await asyncio.gather(
+        # One check decides for both lanes whether the DLT collections are read.
+        include_dlt = await dlt_rows_indexed(self._unified_engine.vector)
+
+        chunk_objects, (entities, fact_candidates) = await asyncio.gather(
             retrieve_hybrid_chunks(
                 vector_engine=self._unified_engine.vector,
                 query=query,
@@ -149,14 +186,33 @@ class HybridRetriever(BaseRetriever):
                 current_truth_epoch=truth.current_truth_epoch,
                 personal_weights=personal_weights,
                 personal_influence=get_base_config().personalization_influence,
+                collections=chunk_collections(include_dlt),
             ),
-            self._retrieve_entities_and_facts(query, query_vector),
+            self._retrieve_entities_and_facts(query, query_vector, include_dlt),
         )
-        return {**chunk_objects, "entities": entities, "facts": facts}
+        project_external_metadata(
+            chunk_objects.get("chunks", []),
+            self.include_external_metadata,
+            self.external_metadata_keys,
+        )
+        await attach_chunk_conflicts(
+            chunk_objects.get("chunks", []), graph_engine=self._unified_engine.graph
+        )
+        return HybridCandidates(
+            chunks=chunk_objects["chunks"],
+            chunk_summaries=chunk_objects["chunk_summaries"],
+            entities=entities,
+            fact_candidates=fact_candidates,
+        )
 
-    async def _retrieve_entities_and_facts(self, query: str, query_vector: list[float]) -> tuple:
+    async def _retrieve_entities_and_facts(
+        self, query: str, query_vector: list[float], include_dlt: bool = False
+    ) -> tuple[list[dict], FactCandidates]:
         """Entity lane, run concurrently with the chunk lane so the graph round trip for
-        edge bullets overlaps the chunk pipeline's ranking and summary loading."""
+        edge bullets overlaps the chunk pipeline's ranking and summary loading.
+
+        Returns the entities and the fact candidates; the facts themselves are
+        selected by the caller once it knows which entities it shows."""
         max_ranked_bullets = self.entities_top_k * max(0, self.max_edges_per_entity)
         entity_hits, edge_hits = await asyncio.gather(
             search_entities(
@@ -166,6 +222,7 @@ class HybridRetriever(BaseRetriever):
                 self.node_name,
                 self.node_name_filter_operator,
                 query_vector,
+                collections=entity_collections(include_dlt),
             ),
             search_collection(
                 self._unified_engine.vector,
@@ -186,18 +243,12 @@ class HybridRetriever(BaseRetriever):
             self.node_name,
             self.node_name_filter_operator,
         )
-        node_scoped = bool(self.node_name)
-        return entities, select_facts_for_entities(
-            edge_hits,
-            entities,
-            reachable_ids,
-            resolve_facts_top_k(
-                entities,
-                node_scoped=node_scoped,
-                facts_top_k=self.facts_top_k,
-                entity_edge_budget=max_ranked_bullets,
-            ),
-            node_scoped,
+        return entities, FactCandidates(
+            edge_hits=edge_hits,
+            reachable_edge_type_ids=reachable_ids,
+            node_scoped=bool(self.node_name),
+            facts_top_k=self.facts_top_k,
+            entity_edge_budget=max_ranked_bullets,
         )
 
     async def get_context_from_objects(
@@ -218,7 +269,7 @@ class HybridRetriever(BaseRetriever):
         if not self.include_global_context_index or not query:
             return ""
 
-        if getattr(self, "_unified_engine", None) is None:
+        if self._unified_engine is None:
             self._unified_engine = await get_unified_engine()
 
         root_text, top_summaries = await asyncio.gather(

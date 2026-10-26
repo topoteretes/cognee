@@ -3,7 +3,7 @@ End-to-end integration test for conversation history feature.
 
 Covers retrievers that save conversation history (via SessionManager / cache):
   GRAPH_COMPLETION, GRAPH_COMPLETION_DECOMPOSITION, RAG_COMPLETION, GRAPH_COMPLETION_COT,
-  GRAPH_COMPLETION_CONTEXT_EXTENSION, GRAPH_SUMMARY_COMPLETION, TEMPORAL, TRIPLET_COMPLETION.
+  GRAPH_COMPLETION_CONTEXT_EXTENSION, GRAPH_SUMMARY_COMPLETION, TEMPORAL.
 Uses cache_engine.get_latest_qa for legacy assertions and cognee.session.get_session for
 session history; e2e for session SDK (get_session, add_feedback, delete_feedback) at end.
 """
@@ -11,10 +11,13 @@ session history; e2e for session SDK (get_session, add_feedback, delete_feedback
 import os
 import pathlib
 from collections import Counter
+from unittest.mock import patch
 
 import cognee
 from cognee.infrastructure.databases.cache import SessionQAEntry, get_cache_engine
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.session.session_turn import acknowledgement_for_turn, should_answer_turn
+from cognee.modules.retrieval import session_aware_completion
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
@@ -22,12 +25,9 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger()
 
 
-def _assert_used_graph_element_ids_shape(entry: SessionQAEntry, expect_none: bool = False) -> None:
-    """Assert entry has used_graph_element_ids key and valid shape (or None for Triplet)."""
+def _assert_used_graph_element_ids_shape(entry: SessionQAEntry) -> None:
+    """Assert entry has used_graph_element_ids key and valid shape (or None)."""
     ids = entry.used_graph_element_ids
-    if expect_none:
-        assert ids is None, "Triplet retriever should store used_graph_element_ids as None"
-        return
     if ids is None:
         return
     assert isinstance(ids, dict), "used_graph_element_ids must be dict or None"
@@ -78,10 +78,6 @@ async def main():
     await cognee.cognify(datasets=[dataset_name])
 
     user = await get_default_user()
-
-    from cognee.memify_pipelines.create_triplet_embeddings import create_triplet_embeddings
-
-    await create_triplet_embeddings(user=user, dataset=dataset_name)
 
     cache_engine = get_cache_engine()
     assert cache_engine is not None, "Cache engine should be available for testing"
@@ -300,23 +296,6 @@ async def main():
     assert len(our_qa_temporal) == 1, "Should find Temporal question in history"
     _assert_used_graph_element_ids_shape(our_qa_temporal[0])
 
-    session_id_triplet = "test_session_triplet"
-
-    result_triplet = await cognee.search(
-        query_type=SearchType.TRIPLET_COMPLETION,
-        query_text="What companies are mentioned?",
-        session_id=session_id_triplet,
-    )
-
-    assert isinstance(result_triplet, list) and len(result_triplet) > 0, (
-        f"TRIPLET_COMPLETION should return non-empty list, got: {result_triplet!r}"
-    )
-
-    history_triplet = await cache_engine.get_latest_qa(str(user.id), session_id_triplet, last_n=10)
-    our_qa_triplet = [h for h in history_triplet if h.question == "What companies are mentioned?"]
-    assert len(our_qa_triplet) == 1, "Should find Triplet question in history"
-    _assert_used_graph_element_ids_shape(our_qa_triplet[0], expect_none=True)
-
     # Session history via new session SDK (replaces legacy get_conversation_history)
     entries = await cognee.session.get_session(session_id=session_id_1, user=user, last_n=10)
     assert len(entries) >= 2, (
@@ -418,10 +397,25 @@ async def main():
         query_text="What is TechCorp?",
         session_id=session_id_autofeedback,
     )
-    result_autofeedback = await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION,
-        query_text="Thanks, that was really helpful!",
-        session_id=session_id_autofeedback,
+    analyses = []
+    analyze_turn = session_aware_completion.analyze_turn
+
+    async def observe_analysis(snapshot):
+        analysis = await analyze_turn(snapshot)
+        analyses.append(analysis)
+        return analysis
+
+    # Observe the real LLM analysis without changing the retrieval or cache paths.
+    with patch.object(session_aware_completion, "analyze_turn", side_effect=observe_analysis):
+        result_autofeedback = await cognee.search(
+            query_type=SearchType.GRAPH_COMPLETION,
+            query_text="Thanks, that was really helpful!",
+            session_id=session_id_autofeedback,
+        )
+    assert len(analyses) == 1, "Concurrent feedback analysis must run exactly once"
+    [feedback_analysis] = analyses
+    assert not should_answer_turn(feedback_analysis, has_previous_qa=True), (
+        "The feedback-only message should route to an acknowledgement"
     )
     assert result_autofeedback is not None, (
         "Second search (feedback-like message) should return a result"
@@ -444,12 +438,13 @@ async def main():
     assert stored_answer_autofeedback, (
         "Feedback-only turn must store an acknowledgement as the QA entry's answer"
     )
-    # Truthiness alone is not enough: before this fix the concurrent path stored the
-    # generated answer here, which is also truthy. Pin the row's SHAPE instead of the
-    # text: a no-answer turn claims no retrieval and no served guidance (its used_*
-    # fields stay None), while the answered first turn recorded its graph ids. Text
-    # bounds proved flaky — a valid acknowledgement can run long and echo the subject
-    # ("glad the TechCorp details helped").
+    # Two different contracts, and a regression could satisfy either one alone,
+    # so both are pinned.
+    #
+    # Shape (from dev): a no-answer turn claims no retrieval and no served
+    # guidance -- its used_* fields stay None -- while the answered first turn
+    # recorded its graph ids. Text bounds proved flaky here: a valid
+    # acknowledgement can run long and echo the subject.
     assert first_entry_autofeedback.used_graph_element_ids, (
         "Answered turn must record the graph elements its answer used"
     )
@@ -460,6 +455,13 @@ async def main():
     )
     assert not second_entry_autofeedback.used_session_context_ids, (
         "Feedback-only turn must not claim served guidance"
+    )
+    # Text: the stored answer IS the analysis output, not the independently
+    # generated answer that was discarded. Truthiness alone would not catch that
+    # -- the generated answer is truthy too.
+    expected_ack = acknowledgement_for_turn(feedback_analysis.response_to_user)
+    assert stored_answer_autofeedback == expected_ack, (
+        "Feedback-only turn must store the analysis acknowledgement, not the generated answer"
     )
     assert getattr(second_entry_autofeedback, "feedback_text", None) is None
     assert getattr(second_entry_autofeedback, "feedback_score", None) is None

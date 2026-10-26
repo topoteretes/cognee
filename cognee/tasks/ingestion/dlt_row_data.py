@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 
@@ -15,3 +16,16 @@ class DltRowData:
     foreign_keys: list
     dlt_db_name: str
     dataset_name: str
+
+
+class DltRows(list[DltRowData]):
+    """Rows plus the tables successfully loaded and read back, including empty ones.
+
+    An empty incremental run with no load jobs is not an empty source. Keeping
+    this evidence separate lets document cleanup distinguish it from a table
+    emptied by a successful hard-delete merge.
+    """
+
+    def __init__(self, rows: Iterable[DltRowData], *, loaded_tables: Iterable[str]):
+        super().__init__(rows)
+        self.loaded_tables = frozenset(loaded_tables)

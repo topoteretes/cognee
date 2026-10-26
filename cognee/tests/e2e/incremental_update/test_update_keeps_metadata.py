@@ -93,3 +93,17 @@ async def test_full_rebuild_keeps_clears_and_replaces_document_metadata(incremen
     # Clear label: an explicit empty string.
     await update(data_id, DataItem(data=text, label=""), dataset.id, user)
     assert await _row(data_id) == ("", {"source": "crm", "node_set": ["ns2"]}, '["ns2"]')
+
+    # The item's own node set counts as passed, unioned with the call's as on add.
+    await update(data_id, DataItem(data=text, node_set=["ns3"]), dataset.id, user)
+    assert await _row(data_id) == ("", {"source": "crm", "node_set": ["ns3"]}, '["ns3"]')
+    await update(data_id, DataItem(data=text, node_set=["ns4"]), dataset.id, user, node_set=["ns2"])
+    assert await _row(data_id) == (
+        "",
+        {"source": "crm", "node_set": ["ns2", "ns4"]},
+        '["ns2", "ns4"]',
+    )
+
+    # An explicit empty item node set clears, like node_set=[] on the call.
+    await update(data_id, DataItem(data=text, node_set=[]), dataset.id, user)
+    assert await _row(data_id) == ("", {"source": "crm"}, None)
