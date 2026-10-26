@@ -52,6 +52,23 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+SyncResourceState = Literal["queued", "running", "succeeded", "failed", "cancelled"]
+SyncResourcePhase = Literal[
+    "queued", "downloading", "processing", "finalizing", "complete", "failed", "cancelled"
+]
+
+
+class SyncResourceProgress(BaseModel):
+    """Completed processing stages for one repository, without source contents."""
+
+    source: str
+    branch: str | None = None
+    state: SyncResourceState = "queued"
+    phase: SyncResourcePhase = "queued"
+    completed: int = Field(default=0, ge=0, le=3)
+    total: Literal[3] = 3
+
+
 class SyncProgress(BaseModel):
     """Last observation plus phase-local estimates; no source text or exception messages."""
 
@@ -76,6 +93,7 @@ class SyncProgress(BaseModel):
     phase_percent: float | None = None
     phase_eta_seconds: float | None = None
     execution_active: bool | None = None
+    resources: dict[str, SyncResourceProgress] = Field(default_factory=dict)
 
 
 class SyncProgressResult(BaseModel):
@@ -95,6 +113,16 @@ ProgressSink = Callable[[SyncProgress], Awaitable[None]]
 _current: ContextVar["SyncProgressReporter | None"] = ContextVar("sync_progress", default=None)
 # Runs of this process only: track_sync adds and removes its reporter, all on one loop.
 _active: dict[UUID, "SyncProgressReporter"] = {}
+
+
+def sync_in_progress(provider: str, account_id: str) -> bool:
+    """Whether this process is running a sync of that account, tracked by ``track_sync``."""
+    return any(
+        reporter.progress.provider == provider
+        and str(reporter.account_id) == str(account_id)
+        and reporter.progress.state not in TERMINAL_STATES
+        for reporter in _active.values()
+    )
 
 
 def get_current_sync_progress() -> "SyncProgressReporter | None":
@@ -129,7 +157,7 @@ class SyncProgressReporter:
         self.sink = sink
         self._lock = asyncio.Lock()
         self._sample: tuple[int, datetime] | None = None
-        self._pending: SyncProgress | None = None
+        self._dirty = False
         self._writer: asyncio.Task[None] | None = None
         self._published: tuple[SyncPhase, SyncState] | None = None
         self._published_at = 0.0
@@ -155,6 +183,7 @@ class SyncProgressReporter:
         counts: dict[str, int] | None = None,
         state: SyncState | None = None,
         reason: SyncReason | None = None,
+        resource: SyncResourceProgress | None = None,
     ) -> None:
         """Validate input, then publish best effort. Finished runs are immutable.
 
@@ -165,7 +194,19 @@ class SyncProgressReporter:
             if self.progress.state in TERMINAL_STATES:
                 return
             now = _now()
+            if resource is not None and all(
+                value is None for value in (phase, completed, total, unit, counts, state, reason)
+            ):
+                # Repository stages arrive per repository, so rebuilding the whole
+                # model for each one would cost the square of the repository count.
+                if self.progress.resources.get(resource.source) != resource:
+                    self.progress.resources[resource.source] = resource
+                    self.progress.updated_at = now
+                    self._publish_soon()
+                return
             values = self.progress.model_dump()
+            if resource is not None:
+                values["resources"][resource.source] = resource.model_dump()
             if phase is not None and phase != self.progress.phase:
                 values.update(
                     phase=phase,
@@ -226,11 +267,15 @@ class SyncProgressReporter:
                 if candidate.state != "succeeded":
                     candidate.phase_percent = None
             self.progress = candidate
-            self._pending = self.snapshot()
             if (candidate.phase, candidate.state) != self._published:
                 self._urgent.set()
-            if self._writer is None or self._writer.done():
-                self._writer = asyncio.create_task(self._drain())
+            self._publish_soon()
+
+    def _publish_soon(self) -> None:
+        """Mark the latest state unpublished and make sure a writer is on its way."""
+        self._dirty = True
+        if self._writer is None or self._writer.done():
+            self._writer = asyncio.create_task(self._drain())
 
     async def finish(
         self,
@@ -266,7 +311,7 @@ class SyncProgressReporter:
         # Within one phase and state, writes are spaced by PUBLISH_INTERVAL_SECONDS; a
         # phase or state change (terminal ones included) is published at once.
         loop = asyncio.get_running_loop()
-        while self._pending is not None:
+        while self._dirty:
             wait = self._published_at + PUBLISH_INTERVAL_SECONDS - loop.time()
             if wait > 0 and not self._urgent.is_set():
                 try:
@@ -274,7 +319,8 @@ class SyncProgressReporter:
                 except asyncio.TimeoutError:
                     pass
             self._urgent.clear()
-            snapshot, self._pending = self._pending, None
+            self._dirty = False
+            snapshot = self.snapshot()
             self._published = (snapshot.phase, snapshot.state)
             self._published_at = loop.time()
             await self._publish(snapshot)
@@ -380,6 +426,31 @@ async def report_sync_progress(
             counts=counts,
             state=state,
             reason=reason,
+        )
+
+
+async def report_sync_resource(
+    source: str,
+    *,
+    branch: str | None = None,
+    state: SyncResourceState = "running",
+    phase: SyncResourcePhase,
+    completed: int | None = None,
+) -> None:
+    """Update one repository's real stages within the current integration run.
+
+    ``completed=None`` keeps the stages the repository had reached, so a failure or a
+    cancellation shows how far it got.
+    """
+    reporter = get_current_sync_progress()
+    if reporter is not None:
+        if completed is None:
+            known = reporter.progress.resources.get(source)
+            completed = known.completed if known is not None else 0
+        await reporter.report(
+            resource=SyncResourceProgress(
+                source=source, branch=branch, state=state, phase=phase, completed=completed
+            )
         )
 
 

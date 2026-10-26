@@ -449,3 +449,44 @@ async def test_code_sync_keeps_one_phase_so_repository_progress_survives(
         assert snapshot.counts == {"processed": 1, "failed": 1}
         await reporter.finish("partial", reason="processing_error")
     assert observations[-1].state == "partial"
+
+
+@pytest.mark.asyncio
+async def test_code_branch_is_forwarded_to_clone_and_persisted_on_the_data_row(code_remember_env):
+    await remember("https://github.com/org/repo.git", content_type="code", branch="feature/ui")
+    code_remember_env["resolve"].assert_awaited_once_with(
+        "https://github.com/org/repo.git", credentials=None, branch="feature/ui"
+    )
+    assert code_remember_env["add_repo"].await_args.kwargs["source_branch"] == "feature/ui"
+
+
+@pytest.mark.asyncio
+async def test_repository_progress_follows_actual_stages_and_preserves_batch_counters(
+    code_remember_env, monkeypatch
+):
+    from cognee.modules.integrations.sync_progress import (
+        SyncProgressReporter,
+        report_sync_resource,
+        track_sync,
+    )
+
+    monkeypatch.setattr(SyncProgressReporter, "_publish", AsyncMock())
+    credential = SimpleNamespace(
+        id=uuid4(), provider="github", user_id=uuid4(), workspace_id=None, provider_account_id="42"
+    )
+    source = "https://github.com/org/repo.git"
+    async with track_sync("github", credential) as reporter:
+        await reporter.report(phase="processing", completed=0, total=4, unit="repositories")
+        await report_sync_resource(source, state="queued", phase="queued", completed=0)
+
+        async def check_during_pipeline(**kwargs):
+            progress = reporter.snapshot()
+            assert progress.total == 4
+            assert progress.resources[source].completed == 1
+            assert progress.resources[source].state == "running"
+
+        code_remember_env["pipeline"].side_effect = check_during_pipeline
+        await remember(source, content_type="code")
+        assert reporter.snapshot().resources[source].state == "succeeded"
+        assert reporter.snapshot().resources[source].completed == 3
+        assert reporter.snapshot().total == 4

@@ -101,8 +101,8 @@ async def test_a_branch_that_would_be_dropped_is_refused(monkeypatch):
         AsyncMock(),
     )
 
-    with pytest.raises(ValueError, match="branch is supported only without content_type"):
-        await remember_module.remember(_REPO, content_type="code", branch="dev")
+    with pytest.raises(ValueError, match="branch is not supported for skills"):
+        await remember_module.remember(_REPO, content_type="skills", branch="dev")
     with pytest.raises(ValueError, match="branch is not supported when session_id"):
         await remember_module.remember(_REPO, session_id="s1", branch="dev")
 

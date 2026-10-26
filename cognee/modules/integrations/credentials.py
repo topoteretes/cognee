@@ -9,7 +9,9 @@ encrypted here and never returned in plaintext except by
 need to call the provider's API.
 """
 
+import asyncio
 import logging
+from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
@@ -383,10 +385,22 @@ async def revoke_credential_by_account(provider: str, provider_account_id: str) 
         return True
 
 
+# SQLite ignores SELECT ... FOR UPDATE, so a read-modify-write of one credential's
+# metadata is serialized here as well. This API runs one worker per process; with
+# several, only a database that honours the row lock (PostgreSQL) keeps it atomic.
+_metadata_locks: dict[tuple, asyncio.Lock] = {}
+
+
 async def update_provider_metadata(
-    provider: str, provider_account_id: str, metadata_patch: dict[str, Any]
+    provider: str,
+    provider_account_id: str,
+    metadata_patch: dict[str, Any] | Callable[[dict[str, Any]], dict[str, Any]],
 ) -> IntegrationCredential | None:
     """Merge ``metadata_patch`` into a credential's ``provider_metadata``.
+
+    A callable is given the stored metadata, read in the same transaction that
+    writes the result, and returns the patch: use it when the patch depends on
+    what is stored, so two concurrent changes do not overwrite each other.
 
     Deliberately separate from :func:`upsert_credential`: that function
     re-encrypts and replaces the whole token payload on every call (it's the
@@ -395,19 +409,26 @@ async def update_provider_metadata(
     ``None`` if no credential exists for that account — callers translate
     that into a 404, this module has no HTTP opinions of its own.
     """
+    lock = _metadata_locks.setdefault(
+        (id(asyncio.get_running_loop()), provider, str(provider_account_id)), asyncio.Lock()
+    )
     engine = get_relational_engine()
-    async with engine.get_async_session() as db:
+    async with lock, engine.get_async_session() as db:
         result = await db.execute(
-            select(IntegrationCredential).where(
+            select(IntegrationCredential)
+            .where(
                 IntegrationCredential.provider == provider,
                 IntegrationCredential.provider_account_id == provider_account_id,
             )
+            .with_for_update()
         )
         credential = result.scalar_one_or_none()
         if credential is None:
             return None
 
-        credential.provider_metadata = {**(credential.provider_metadata or {}), **metadata_patch}
+        stored = credential.provider_metadata or {}
+        patch = metadata_patch(stored) if callable(metadata_patch) else metadata_patch
+        credential.provider_metadata = {**stored, **patch}
         await db.commit()
         await db.refresh(credential)
         return credential

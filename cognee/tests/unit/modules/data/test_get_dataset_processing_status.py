@@ -21,7 +21,12 @@ COMPLETED = "DATA_ITEM_PROCESSING_COMPLETED"
 
 
 def _row(pipeline_status, name="doc.txt"):
-    return SimpleNamespace(id=uuid.uuid4(), name=name, pipeline_status=pipeline_status)
+    return SimpleNamespace(
+        id=uuid.uuid4(),
+        name=name,
+        system_metadata=None,
+        pipeline_status=pipeline_status,
+    )
 
 
 def _completed_row(dataset_id, pipeline="cognify_pipeline", value=COMPLETED, name="doc.txt"):
@@ -151,8 +156,45 @@ async def test_items_carry_data_id_and_name_in_storage_order(monkeypatch):
         "completed": 1,
         "pending": 2,
         "items": [
-            {"id": done.id, "name": "done.pdf", "completed": True},
-            {"id": fresh.id, "name": "fresh.md", "completed": False},
-            {"id": legacy_null.id, "name": "legacy.txt", "completed": False},
+            {
+                "id": done.id,
+                "name": "done.pdf",
+                "repo_url": None,
+                "repo_branch": None,
+                "completed": True,
+            },
+            {
+                "id": fresh.id,
+                "name": "fresh.md",
+                "repo_url": None,
+                "repo_branch": None,
+                "completed": False,
+            },
+            {
+                "id": legacy_null.id,
+                "name": "legacy.txt",
+                "repo_url": None,
+                "repo_branch": None,
+                "completed": False,
+            },
         ],
     }
+
+
+@pytest.mark.asyncio
+async def test_processing_status_includes_repository_and_branch_without_other_metadata(monkeypatch):
+    from cognee.api.v1.datasets.routers.get_datasets_router import DatasetProcessingStatusDTO
+
+    row = _row({})
+    row.system_metadata = {
+        "repo_url": "https://github.com/org/repo.git",
+        "repo_branch": "dev",
+        "repo_path": "/private/local/path",
+    }
+    _patch_rows(monkeypatch, [row])
+    response = DatasetProcessingStatusDTO.model_validate(
+        await get_dataset_processing_status(uuid.uuid4())
+    ).model_dump(by_alias=True)
+    assert response["items"][0]["repoUrl"] == "https://github.com/org/repo.git"
+    assert response["items"][0]["repoBranch"] == "dev"
+    assert "private/local" not in str(response)

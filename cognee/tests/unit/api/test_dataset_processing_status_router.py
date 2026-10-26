@@ -100,8 +100,20 @@ def test_processing_status_returns_counts_and_items(authenticated_client, monkey
         "completed": 1,
         "pending": 1,
         "items": [
-            {"id": str(done_id), "name": "done.pdf", "completed": True},
-            {"id": str(pending_id), "name": "fresh.md", "completed": False},
+            {
+                "id": str(done_id),
+                "name": "done.pdf",
+                "repoUrl": None,
+                "repoBranch": None,
+                "completed": True,
+            },
+            {
+                "id": str(pending_id),
+                "name": "fresh.md",
+                "repoUrl": None,
+                "repoBranch": None,
+                "completed": False,
+            },
         ],
     }
     helper.assert_awaited_once_with(dataset_id, pipeline_name="cognify_pipeline")

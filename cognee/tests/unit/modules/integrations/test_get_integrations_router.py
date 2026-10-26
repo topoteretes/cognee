@@ -365,6 +365,41 @@ def test_disconnect_with_delete_data_is_refused_without_a_dataset(client):
 # Calendar) must refuse the null at the boundary instead of storing it.
 
 
+@pytest.mark.parametrize("selection", [None, [], ["org/two"]])
+def test_github_resources_expose_and_save_the_sync_selection(client, monkeypatch, selection):
+    from types import SimpleNamespace
+
+    from cognee.modules.integrations.github import adapter
+
+    use_integration(adapter.GithubIntegration())
+    credential = SimpleNamespace(
+        provider_account_id="42", provider_metadata={"selected_repositories": selection}
+    )
+    monkeypatch.setattr(
+        _router_module, "get_active_credential_for_user", AsyncMock(return_value=credential)
+    )
+    monkeypatch.setattr(
+        adapter.app_auth, "mint_installation_token", AsyncMock(return_value=("secret", None))
+    )
+    monkeypatch.setattr(
+        adapter, "list_installation_repositories", AsyncMock(return_value=["org/one", "org/two"])
+    )
+    update = AsyncMock(return_value=credential)
+    monkeypatch.setattr(_router_module, "update_provider_metadata", update)
+
+    response = client.get("/api/v1/integrations/github/resources")
+    assert response.status_code == 200
+    assert response.json()["selected"] == selection
+    assert [resource["selected"] for resource in response.json()["resources"]] == [
+        selection is None or name in selection for name in ["org/one", "org/two"]
+    ]
+    assert "secret" not in response.text
+
+    response = client.put("/api/v1/integrations/github/resources", json={"resourceIds": selection})
+    assert response.status_code == 200
+    update.assert_awaited_once_with("github", "42", {"selected_repositories": selection})
+
+
 def put_resources(client, integration, body, *, allows_all, monkeypatch):
     update = AsyncMock(return_value=type("Cred", (), {"provider_metadata": {"picked": body}})())
     monkeypatch.setattr(integration, "resource_selection_key", "picked")
@@ -820,3 +855,53 @@ def test_a_connection_without_a_label_leaves_the_field_out(client):
         body = client.get("/api/v1/integrations/fake/connections").json()
 
     assert body == {"connections": [{"providerAccountId": "ACC1"}]}
+
+
+def test_two_manual_syncs_requested_back_to_back_start_one(client):
+    """The account is reserved when the first request is accepted, before its task has
+    run, so a second request in that window is refused."""
+    from cognee.modules.integrations import ingestion
+
+    credential = type("Cred", (), {"provider_account_id": "ACC2"})()
+    integration = supported_integrations["fake"]
+    spawned = []
+    with (
+        patch.object(
+            _router_module, "get_active_credential_for_user", new=AsyncMock(return_value=credential)
+        ),
+        patch.object(integration, "sync_now", AsyncMock()),
+        patch.object(
+            _router_module, "_spawn_background", lambda coro, **kwargs: spawned.append(coro)
+        ),
+    ):
+        first = client.post("/api/v1/integrations/fake/sync").json()
+        second = client.post("/api/v1/integrations/fake/sync").json()
+
+    assert (first, second) == ({"accepted": True}, {"accepted": False})
+    assert len(spawned) == 1
+    spawned[0].close()
+    ingestion.release_sync("fake", "ACC2")
+
+
+@pytest.mark.asyncio
+async def test_the_reservation_is_released_when_the_sync_ends(client):
+    from cognee.modules.integrations import ingestion
+
+    credential = type("Cred", (), {"provider_account_id": "ACC3"})()
+    integration = supported_integrations["fake"]
+    spawned = []
+    with (
+        patch.object(
+            _router_module, "get_active_credential_for_user", new=AsyncMock(return_value=credential)
+        ),
+        patch.object(integration, "sync_now", AsyncMock(side_effect=RuntimeError("sync failed"))),
+        patch.object(
+            _router_module, "_spawn_background", lambda coro, **kwargs: spawned.append(coro)
+        ),
+    ):
+        client.post("/api/v1/integrations/fake/sync")
+        assert ingestion.sync_is_running("fake", "ACC3")
+        with pytest.raises(RuntimeError):
+            await spawned[0]
+
+    assert not ingestion.sync_is_running("fake", "ACC3")

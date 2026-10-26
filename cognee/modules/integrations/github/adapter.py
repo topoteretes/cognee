@@ -40,7 +40,13 @@ from cognee.modules.integrations.base import (
 from cognee.modules.integrations.github import app_auth
 from cognee.modules.integrations.github.github_settings import GithubSettings, require
 from cognee.modules.integrations.github.handle_github_event import handle_github_event
-from cognee.modules.integrations.github.sync import sync_repositories
+from cognee.modules.integrations.github.sync import (
+    REPOSITORY_BRANCHES_KEY,
+    SELECTED_REPOSITORIES_KEY,
+    dataset_name_for_credential,
+    list_installation_repositories,
+    sync_repositories,
+)
 from cognee.modules.integrations.github.verify_github_signature import GithubWebhookVerifier
 from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
 
@@ -55,6 +61,19 @@ _TIMEOUT = aiohttp.ClientTimeout(total=30)
 class GithubIntegration(OAuthIntegration):
     provider = "github"
     settings_cls = GithubSettings
+    resource_selection_key = SELECTED_REPOSITORIES_KEY
+
+    async def list_resources(self, credential: IntegrationCredential) -> list[dict[str, Any]]:
+        """Offer only repositories accessible to this installation."""
+        token, _expires_at = await app_auth.mint_installation_token(
+            int(credential.provider_account_id)
+        )
+        repositories = await list_installation_repositories(token)
+        branches = (credential.provider_metadata or {}).get(REPOSITORY_BRANCHES_KEY) or {}
+        return [
+            {"id": name, "name": name, "attributes": {"branch": branches.get(name)}}
+            for name in repositories
+        ]
 
     def authorize_url(self, state: str) -> str:
         # The app-installation flow, not an OAuth consent screen: GitHub
@@ -151,6 +170,9 @@ class GithubIntegration(OAuthIntegration):
         initial sync.
         """
         await sync_repositories(credential)
+
+    def dataset_name(self, credential: IntegrationCredential) -> str:
+        return dataset_name_for_credential(credential)
 
     async def sync_now(self, credential: IntegrationCredential) -> None:
         await sync_repositories(credential)
