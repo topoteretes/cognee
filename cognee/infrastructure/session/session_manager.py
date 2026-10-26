@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from typing import Any
 
 from cognee.context_global_variables import current_dataset_id, session_user
@@ -505,6 +506,8 @@ class SessionManager:
         formatted: bool = False,
         session_id: str | None = None,
         include_context: bool = True,
+        since: datetime | None = None,
+        lead_in: int = 0,
     ) -> list[SessionQAEntry] | str:
         """
         Get session QAs by (user_id, session_id).
@@ -512,6 +515,9 @@ class SessionManager:
         Args:
             user_id: User identifier.
             last_n: If set, return only the last N entries. Otherwise return all.
+            since: If set, return only the entries stored at or after this time,
+                plus the ``lead_in`` entries just before it. Exclusive with last_n.
+            lead_in: Entries before ``since`` to include. Only with ``since``.
             formatted: If True, return prompt-formatted string; if False, return list of entry dicts.
             session_id: Session identifier. Defaults to default_session_id if None.
             include_context: When formatted=True, include CONTEXT in each entry. Default True.
@@ -523,6 +529,10 @@ class SessionManager:
         """
         session_id = self.resolve_session_id(session_id)
         self._validate_session_params(user_id=user_id, session_id=session_id, last_n=last_n)
+        if since is not None and last_n is not None:
+            raise SessionParameterValidationError(message="since and last_n are exclusive")
+        if lead_in and since is None:
+            raise SessionParameterValidationError(message="lead_in needs since")
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, returning empty session")
             return "" if formatted else []
@@ -533,6 +543,10 @@ class SessionManager:
             if last_n is not None:
                 entries = await self._cache.get_latest_qa_entries(
                     user_id, session_id, last_n=last_n
+                )
+            elif since is not None:
+                entries = await self._cache.get_qa_entries_since(
+                    user_id, session_id, since, lead_in=lead_in
                 )
             else:
                 entries = await self._cache.get_all_qa_entries(user_id, session_id)
@@ -814,13 +828,17 @@ class SessionManager:
         *,
         user_id: str,
         session_id: str | None = None,
+        raise_on_error: bool = False,
     ) -> list[dict]:
         """
         Return all stored session-context entries (both "context" and "feedback" kinds).
 
         Raises SessionParameterValidationError for invalid user_id/session_id.
         Fail-open on infrastructure errors: returns [] when the cache is
-        unavailable or the cache operation fails.
+        unavailable or the cache operation fails. ``raise_on_error=True`` keeps
+        the empty answer for an unavailable cache (nothing can be stored there)
+        but re-raises a failed read, for callers that must not mistake an
+        unreadable session for an empty one (the pinned ``node_set``).
         """
         session_id = self.resolve_session_id(session_id)
         self._validate_session_params(user_id=user_id, session_id=session_id)
@@ -833,6 +851,8 @@ class SessionManager:
             logger.warning(
                 "SessionManager: get_session_context_entries failed: %s", e, exc_info=True
             )
+            if raise_on_error:
+                raise
             return []
 
     async def update_session_context_entry(

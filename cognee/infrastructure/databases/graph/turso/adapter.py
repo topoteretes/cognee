@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+from cognee.infrastructure.databases.provenance.delete_data import EdgeIdentity
 from cognee.infrastructure.databases.turso import (
     configure_engine,
     connect_args_for_mode,
@@ -36,8 +37,6 @@ from cognee.infrastructure.databases.turso import (
     write_transaction,
 )
 from cognee.infrastructure.engine import DataPoint
-from cognee.modules.engine.models.Timestamp import Timestamp
-from cognee.modules.engine.utils.generate_timestamp_datapoint import date_to_int
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.shared.logging_utils import get_logger
 
@@ -903,67 +902,6 @@ class TursoAdapter(GraphDBInterface):
 
             return nodes, edges
 
-    # ------------------------------------------------------------------ #
-    # Temporal retrieval (SearchType.TEMPORAL), mirroring the Ladybug/Neo4j
-    # adapters: Timestamp nodes carry ``time_at`` (ms since the epoch) in their
-    # properties; Event nodes sit within two hops of their timestamps.
-    # ------------------------------------------------------------------ #
-    async def collect_time_ids(
-        self,
-        time_from: Timestamp | None = None,
-        time_to: Timestamp | None = None,
-    ) -> list[str]:
-        """Return ids of ``Timestamp`` nodes whose ``time_at`` lies in the inclusive range.
-
-        Either bound may be omitted; with neither, nothing is selected (as in the
-        Ladybug adapter). A Timestamp without a numeric ``time_at`` is skipped.
-        """
-        if not time_from and not time_to:
-            return []
-
-        conditions = ["type = 'Timestamp'", "json_extract(properties, '$.time_at') IS NOT NULL"]
-        params: dict[str, Any] = {}
-        if time_from:
-            conditions.append("CAST(json_extract(properties, '$.time_at') AS INTEGER) >= :lower")
-            params["lower"] = date_to_int(time_from)
-        if time_to:
-            conditions.append("CAST(json_extract(properties, '$.time_at') AS INTEGER) <= :upper")
-            params["upper"] = date_to_int(time_to)
-
-        async with self._session() as session:
-            result = await session.execute(
-                text(f"SELECT id FROM graph_node WHERE {' AND '.join(conditions)}"), params
-            )
-            return [row[0] for row in result.fetchall()]
-
-    async def collect_events(self, ids: list[str] | str) -> list[dict[str, Any]]:
-        """Collect the ``Event`` nodes within one or two hops of ``ids``.
-
-        Same contract as the Ladybug adapter: ``[{"events": [...]}]`` where each
-        event has ``id``, ``name``, ``description`` and, when set, ``location``.
-        ``ids`` may also be the comma-joined string form the Neo4j path produces.
-        """
-        if isinstance(ids, str):
-            ids = [uid.strip().strip("'\"") for uid in ids.split(",") if uid.strip()]
-        seeds = {str(uid) for uid in ids}
-        if not seeds:
-            return [{"events": []}]
-
-        nodes, _ = await self.get_neighborhood(sorted(seeds), depth=2)
-        events = []
-        for node_id, data in nodes:
-            if node_id in seeds or data.get("type") != "Event":
-                continue
-            event: dict[str, Any] = {
-                "id": node_id,
-                "name": data.get("name"),
-                "description": data.get("description"),
-            }
-            if data.get("location"):
-                event["location"] = data["location"]
-            events.append(event)
-        return [{"events": events}]
-
     async def delete_graph(self) -> None:
         """Delete all nodes and edges from the graph."""
         await self.initialize()
@@ -1077,3 +1015,38 @@ class TursoAdapter(GraphDBInterface):
                     await session.commit()
 
         await self._write(strip_tags)
+
+    async def delete_edge_triples(self, edges: list[EdgeIdentity]) -> None:
+        """Delete edges by (source, target, relationship); keep the endpoint nodes.
+
+        Mirrors the Postgres adapter's identity-based delete. Used by the code
+        graph's node_set retag to drop stale ``belongs_to_set`` edges without
+        touching the nodes they connect.
+        """
+        if not edges:
+            return
+        identities = sorted(
+            {
+                (str(edge.source_id), str(edge.target_id), str(edge.relationship_name))
+                for edge in edges
+            }
+        )
+
+        async def delete_rows() -> None:
+            async with self._session() as session:
+                for source_id, target_id, relationship_name in identities:
+                    await session.execute(
+                        text(
+                            "DELETE FROM graph_edge "
+                            "WHERE source_id = :source_id AND target_id = :target_id "
+                            "AND relationship_name = :relationship_name"
+                        ),
+                        {
+                            "source_id": source_id,
+                            "target_id": target_id,
+                            "relationship_name": relationship_name,
+                        },
+                    )
+                await session.commit()
+
+        await self._write(delete_rows)

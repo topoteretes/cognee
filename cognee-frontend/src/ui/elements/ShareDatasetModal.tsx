@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Loader } from "@mantine/core";
 import { useCogniInstance, useTenant } from "@/modules/tenant/TenantProvider";
 import { useFilter } from "@/ui/layout/FilterContext";
+import { agentDisplayName } from "@/modules/agents/getAgents";
 import { trackEvent } from "@/modules/analytics";
 
 type SharePermission = "read" | "write";
@@ -17,16 +18,16 @@ interface ShareDatasetModalProps {
 }
 
 /**
- * Modal for sharing a brain (dataset): with the whole workspace (grant to the
+ * Modal for sharing a dataset: with the whole workspace (grant to the
  * tenant principal — covers all current and future members) or read-only with
- * individual agents and users. Shared between the Brains list and the dataset
+ * individual agents and users. Shared between the Datasets list and the dataset
  * detail page. Sharing is optimistic — the backend has no "list existing
  * shares" endpoint yet, so the shared set is tracked only for this session.
  */
 export default function ShareDatasetModal({ datasetId, datasetName, onClose, pageName = "Brains" }: ShareDatasetModalProps) {
   const { cogniInstance } = useCogniInstance();
   const { tenant } = useTenant();
-  const { agents } = useFilter();
+  const { agents, agentsLoading, agentsError } = useFilter();
   const [sharedWith, setSharedWith] = useState<Set<string>>(new Set());
   const [sharing, setSharing] = useState<string | null>(null);
   const [workspacePermission, setWorkspacePermission] = useState<SharePermission>("write");
@@ -66,7 +67,7 @@ export default function ShareDatasetModal({ datasetId, datasetName, onClose, pag
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} style={{ background: "rgba(15,15,15,0.92)", backdropFilter: "blur(16px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 24, width: 480, maxHeight: "70vh", overflow: "auto", display: "flex", flexDirection: "column", gap: 16, boxShadow: "0 20px 60px rgba(0,0,0,0.6)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h2 style={{ fontSize: 18, fontWeight: 700, color: "#EDECEA", margin: 0 }}>Share brain</h2>
+          <h2 style={{ fontSize: 18, fontWeight: 700, color: "#EDECEA", margin: 0 }}>Share dataset</h2>
           <button onClick={onClose} className="cursor-pointer" style={{ background: "none", border: "none", color: "rgba(237,236,234,0.5)", fontSize: 18 }}>&#10005;</button>
         </div>
         <p style={{ fontSize: 13, color: "rgba(237,236,234,0.55)", margin: 0 }}>Share <strong>{datasetName}</strong> with your whole workspace, or grant read access to individual agents and users.</p>
@@ -110,14 +111,32 @@ export default function ShareDatasetModal({ datasetId, datasetName, onClose, pag
           </div>
         )}
 
-        {agents.length === 0 ? (
+        {/* An empty roster is only "nobody to share with" once the fetch has
+            actually answered. A pod image without the agents route answers
+            404, and reporting that as an empty workspace hides the reason
+            per-principal sharing is unavailable. */}
+        {/* 0.58 alpha, not the 0.35 used for decorative hints: an error and a
+            loading state are load-bearing text, and 0.35 over this panel is
+            2.7:1 against a 4.5:1 AA floor. 0.58 is 6.0:1. */}
+        {agentsLoading ? (
+          <span style={{ fontSize: 13, color: "rgba(237,236,234,0.58)", padding: "16px 0", display: "flex", alignItems: "center", gap: 8 }}>
+            <Loader size={12} color="rgba(237,236,234,0.58)" />
+            Loading agents and users...
+          </span>
+        ) : agentsError ? (
+          <span style={{ fontSize: 13, color: "rgba(237,236,234,0.58)", padding: "16px 0" }}>
+            Could not load agents and users. Workspace sharing above still works.
+          </span>
+        ) : agents.length === 0 ? (
           <span style={{ fontSize: 13, color: "rgba(237,236,234,0.35)", padding: "16px 0" }}>No agents or users found.</span>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
             {agents.map((a) => {
               const isShared = sharedWith.has(a.id);
               const isSharing = sharing === a.id;
-              const displayName = a.is_agent ? a.agent_type : a.email;
+              // agentDisplayName, so this modal spells a client exactly as the
+              // Activity log beside it does. agent_type arrives lowercase.
+              const displayName = a.is_agent ? agentDisplayName(a.agent_type) : a.email;
               const sub = a.is_agent ? a.agent_short_id : (a.email === "default_user@example.com" ? "Owner" : "User");
               return (
                 <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)" }}>

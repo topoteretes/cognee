@@ -10,6 +10,7 @@ from uuid import UUID
 from cognee import __version__ as cognee_version
 from cognee.infrastructure.databases.cache.config import get_cache_config
 from cognee.infrastructure.databases.cache.get_cache_engine import get_cache_engine
+from cognee.shared.dict_keys import unique_string_keys
 from cognee.shared.exceptions import UsageLoggerError
 from cognee.shared.logging_utils import get_logger
 
@@ -65,12 +66,17 @@ def _(value: list | tuple) -> list:
 
 @_sanitize_value.register(dict)
 def _(value: dict) -> dict:
-    """Recursively sanitize dictionary keys and values."""
-    sanitized = {}
-    for k, v in value.items():
-        key_str = k if isinstance(k, str) else _sanitize_dict_key(k)
-        sanitized[key_str] = _sanitize_value(v)
-    return sanitized
+    """Recursively sanitize dictionary keys and values.
+
+    Keys that convert to the same string keep both values: the key that already
+    was a string keeps its name, the other gets a ``_2``, ``_3``, ... suffix.
+    """
+    items = list(value.items())
+    keys = unique_string_keys(
+        [k if isinstance(k, str) else _sanitize_dict_key(k) for k, _ in items],
+        [isinstance(k, str) for k, _ in items],
+    )
+    return {key: _sanitize_value(v) for key, (_, v) in zip(keys, items, strict=True)}
 
 
 def _sanitize_dict_key(key: Any) -> str:

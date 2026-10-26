@@ -42,7 +42,7 @@ def improve_stub(monkeypatch):
     run_info = PipelineRunCompleted(
         pipeline_run_id=uuid4(), dataset_id=DATASET_ID, dataset_name="docs", status="completed"
     )
-    enrichment = StageResult.from_pipeline_run("triplet_enrichment", {DATASET_ID: run_info})
+    enrichment = StageResult.from_pipeline_run("review_conflicts", {DATASET_ID: run_info})
     result = ImproveResult(
         dataset_id=DATASET_ID,
         dataset_name="docs",
@@ -52,7 +52,6 @@ def improve_stub(monkeypatch):
             StageResult.completed("persist_session_qa", entries=3),
             enrichment,
         ],
-        memify_run={DATASET_ID: run_info},
     )
     stub = AsyncMock(return_value=result)
     monkeypatch.setattr(improve_pkg, "improve", stub)
@@ -77,7 +76,7 @@ def test_response_is_the_improve_result_with_one_entry_per_stage(client, improve
     assert [stage["stage"] for stage in body["stages"]] == [
         "feedback_weights",
         "persist_session_qa",
-        "triplet_enrichment",
+        "review_conflicts",
     ]
     assert body["stages"][0] == {
         "stage": "feedback_weights",
@@ -89,10 +88,10 @@ def test_response_is_the_improve_result_with_one_entry_per_stage(client, improve
         "run": None,
     }
     assert body["stages"][1]["counts"] == {"entries": 3}
-    # A pipeline-backed stage carries its run info, and the legacy memify
-    # return stays reachable as memify_run (D4) — UUID keys serialize as strings.
+    # A pipeline-backed stage carries its run info.
     assert body["stages"][2]["run"]["status"] == "completed"
-    assert body["memify_run"][str(DATASET_ID)]["status"] == "completed"
+    # Deprecated (SDK-1115) but still on the wire for one release.
+    assert body["memify_run"] == {}
 
 
 def test_forwards_every_option_to_improve(client, improve_stub):
@@ -101,9 +100,9 @@ def test_forwards_every_option_to_improve(client, improve_stub):
         json={
             "datasetId": str(DATASET_ID),
             "sessionIds": ["s1", "s2"],
-            "nodeName": ["Alice"],
             "buildGlobalContextIndex": True,
             "buildTruthSubspace": True,
+            "reviewConflicts": True,
             "feedbackAlpha": 0.25,
             "runInBackground": True,
         },
@@ -113,9 +112,9 @@ def test_forwards_every_option_to_improve(client, improve_stub):
     kwargs = improve_stub.call_args.kwargs
     assert kwargs["dataset"] == DATASET_ID
     assert kwargs["session_ids"] == ["s1", "s2"]
-    assert kwargs["node_name"] == ["Alice"]
     assert kwargs["build_global_context_index"] is True
     assert kwargs["build_truth_subspace"] is True
+    assert kwargs["review_conflicts"] is True
     assert kwargs["feedback_alpha"] == 0.25
     assert kwargs["run_in_background"] is True
     assert kwargs["user"] is MOCK_USER
@@ -123,17 +122,57 @@ def test_forwards_every_option_to_improve(client, improve_stub):
 
 def test_defaults_leave_feedback_alpha_to_the_server_config(client, improve_stub):
     """No feedback_alpha in the body means the kwarg is not passed, so
-    IMPROVE_FEEDBACK_ALPHA applies; data defaults to None like the memify DTO."""
+    IMPROVE_FEEDBACK_ALPHA applies."""
     resp = client.post("/improve", json={"datasetName": "docs"})
 
     assert resp.status_code == 200
     kwargs = improve_stub.call_args.kwargs
     assert "feedback_alpha" not in kwargs
-    assert kwargs["data"] is None
+    assert not {"data", "node_name", "extraction_tasks", "enrichment_tasks"} & set(kwargs)
     assert kwargs["build_global_context_index"] is False
     assert kwargs["build_truth_subspace"] is False
+    assert kwargs["review_conflicts"] is False
     assert kwargs["run_in_background"] is False
     assert kwargs["session_ids"] is None
+
+
+@pytest.mark.parametrize(
+    ("field", "kwarg"),
+    [
+        ("extractionTasks", "extraction_tasks"),
+        ("extraction_tasks", "extraction_tasks"),
+        ("enrichmentTasks", "enrichment_tasks"),
+        ("enrichment_tasks", "enrichment_tasks"),
+        ("nodeName", "node_name"),
+        ("data", "data"),
+    ],
+)
+def test_deprecated_fields_are_forwarded_to_improve(client, improve_stub, field, kwarg):
+    """Deprecated for one release (SDK-1115): improve() runs custom tasks and warns."""
+    value = "seed" if kwarg == "data" else ["extract_subgraph_chunks"]
+    resp = client.post("/improve", json={"datasetName": "docs", field: value})
+
+    assert resp.status_code == 200
+    assert improve_stub.call_args.kwargs[kwarg] == value
+
+
+def test_null_deprecated_fields_are_not_forwarded(client, improve_stub):
+    """null means "not given" for every deprecated field, as in the SDK."""
+    resp = client.post(
+        "/improve",
+        json={
+            "datasetName": "docs",
+            "extractionTasks": None,
+            "enrichmentTasks": None,
+            "nodeName": None,
+            "data": None,
+        },
+    )
+
+    assert resp.status_code == 200
+    assert not {"data", "node_name", "extraction_tasks", "enrichment_tasks"} & set(
+        improve_stub.call_args.kwargs
+    )
 
 
 @pytest.mark.parametrize("alpha", [0, -0.1, 1.5])
@@ -153,9 +192,8 @@ def test_non_fatal_stage_error_is_reported_in_the_body(client, monkeypatch):
         dataset_name="docs",
         stages=[
             StageResult.errored("persist_agent_traces", RuntimeError("boom")),
-            StageResult.completed("triplet_enrichment"),
+            StageResult.completed("global_context_index"),
         ],
-        memify_run={},
     )
     monkeypatch.setattr(improve_pkg, "improve", AsyncMock(return_value=result))
 
@@ -186,7 +224,7 @@ def test_background_run_reports_running_with_no_stages(client, monkeypatch):
 def test_lost_lock_is_every_stage_skipped(client, monkeypatch):
     improve_pkg = importlib.import_module("cognee.api.v1.improve")
     result = ImproveResult.all_skipped(
-        ["feedback_weights", "triplet_enrichment"], "lock_held", dataset_name="docs"
+        ["feedback_weights", "global_context_index"], "lock_held", dataset_name="docs"
     )
     monkeypatch.setattr(improve_pkg, "improve", AsyncMock(return_value=result))
 
@@ -235,7 +273,6 @@ def test_fatal_stage_failure_returns_409_with_the_partial_result(client, monkeyp
             StageResult.errored("persist_session_qa", RuntimeError("persist failed")),
             StageResult.skipped("persist_agent_traces", "aborted_by_fatal_stage"),
         ],
-        memify_run={},
     )
     error = CogneeSystemError(message="improve aborted: persist_session_qa failed")
     error.improve_result = partial
@@ -265,7 +302,6 @@ def test_fatal_stage_stopped_on_the_budget_returns_402_with_the_partial_result(c
             StageResult.errored("persist_session_qa", "LLM budget exhausted"),
             StageResult.skipped("persist_agent_traces", "budget_exhausted"),
         ],
-        memify_run={},
     )
     error = LLMPaymentRequiredError("LLM budget exhausted: persist_session_qa stopped")
     error.improve_result = partial

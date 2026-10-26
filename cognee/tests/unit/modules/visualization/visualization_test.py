@@ -245,9 +245,9 @@ async def test_schema_tab_renders_schema_nodes_without_explicit_schema(tmp_path)
     )
 
     assert "const schemaGraphData = " in html_output
-    assert '"type": "SchemaTable"' in html_output
+    assert '"type": "GraphNodeType"' in html_output
     assert '"name": "users"' in html_output
-    assert '"label": "foreign_key"' in html_output
+    assert '"relationship_label": "foreign_key"' in html_output
     # Phase 2 redesign — old `graphDataToSchemaGraph` model builder
     # replaced by `buildSchemaModel`; renderer still exposed as
     # `window._renderSchemaGraph` so the tab-switch handler keeps working.

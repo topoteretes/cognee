@@ -7,6 +7,7 @@ from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingCo
 from cognee.infrastructure.llm.config import LLMConfig
 from cognee.infrastructure.locks import get_dataset_lock, held_datasets
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
+from cognee.modules.data.methods.get_selected_dataset_data import get_selected_dataset_data
 from cognee.modules.data.models import Data, Dataset
 from cognee.modules.pipelines.layers import validate_pipeline_tasks
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
@@ -70,6 +71,7 @@ async def run_pipeline(
     needs_llm: bool = True,
     extras: dict | None = None,
     after_run_completed: Callable[[], Awaitable[Any]] | None = None,
+    after_items_ran: Callable[[], Awaitable[Any]] | None = None,
 ):
     """``tasks`` is either the task list every data item runs, or a callable
     mapping one item to its task list (a task resolver — see ``run_tasks``);
@@ -83,8 +85,9 @@ async def run_pipeline(
     when ``tasks`` is a resolver, whose caller must pass the union over every
     list the resolver can return.
 
-    ``after_run_completed`` is awaited after each dataset's run completes,
-    inside that dataset's database context (see ``run_tasks``)."""
+    ``after_run_completed`` is awaited after each dataset's run completes, and
+    ``after_items_ran`` also when items in the run failed, both inside that dataset's
+    database context (see ``run_tasks``)."""
     if tasks is None:
         raise ValueError(
             "run_pipeline requires tasks: a task list or a per-item task resolver callable"
@@ -118,6 +121,7 @@ async def run_pipeline(
             data_cache=data_cache,
             extras=extras,
             after_run_completed=after_run_completed,
+            after_items_ran=after_items_ran,
         )
         async with aclosing(source):
             async for run_info in source:
@@ -138,11 +142,17 @@ async def run_pipeline_per_dataset(
     data_cache=False,
     extras: dict | None = None,
     after_run_completed: Callable[[], Awaitable[Any]] | None = None,
+    after_items_ran: Callable[[], Awaitable[Any]] | None = None,
 ):
     # The actual work of a single run, factored out so it can run either under
     # the per-dataset lock (normal case) or directly (re-entrant case below).
     async def _run_body():
-        body_data = data if data else await get_dataset_data(dataset_id=dataset.id)
+        # Read under the dataset lock, so the run sees each selected row as it is now.
+        body_data = (
+            await get_selected_dataset_data(dataset.id, data)
+            if data
+            else await get_dataset_data(dataset_id=dataset.id)
+        )
 
         # The run always proceeds. Concurrent runs on one dataset are serialized
         # by the per-dataset lock, and already-processed documents are skipped
@@ -161,6 +171,7 @@ async def run_pipeline_per_dataset(
             data_cache=data_cache,
             extras=extras,
             after_run_completed=after_run_completed,
+            after_items_ran=after_items_ran,
         )
 
         async with aclosing(pipeline_run):

@@ -31,7 +31,7 @@ from cognee.infrastructure.databases.provenance.source_ref_state import (
     provenance_attach_inputs,
 )
 from cognee.infrastructure.engine import DataPoint
-from cognee.modules.engine.utils.generate_timestamp_datapoint import date_to_int
+from cognee.infrastructure.locks.loop_agnostic_lock import LoopAgnosticLock
 from cognee.modules.observability import OtelStatusCode as StatusCode
 from cognee.modules.observability import new_span
 from cognee.modules.observability.tracing import (
@@ -42,7 +42,6 @@ from cognee.modules.observability.tracing import (
 )
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.shared.logging_utils import ERROR, get_logger
-from cognee.tasks.temporal_graph.models import Timestamp
 
 from .deadlock_retry import deadlock_retry
 from .neo4j_metrics_utils import (
@@ -201,7 +200,9 @@ class Neo4jAdapter(GraphDBInterface):
         # calls so two concurrent updates to the same artifact within this
         # adapter instance cannot overwrite each other (the atomic fold path in
         # add_nodes/add_edges does not need it).
-        self._source_ref_change_lock = asyncio.Lock()
+        # Loop-agnostic: the adapter is cached across event loops, and an
+        # asyncio.Lock binds to the first loop that awaits it.
+        self._source_ref_change_lock = LoopAgnosticLock()
 
     async def close(self) -> None:
         """
@@ -325,12 +326,13 @@ class Neo4jAdapter(GraphDBInterface):
         # additive; this keeps the property consistent with them).
         query = dedent(
             f"""MERGE (node: `{BASE_LABEL}`{{id: $node_id}})
-                WITH node, apoc.coll.toSet(
+                WITH node, node.feedback_weight AS kept_feedback_weight, apoc.coll.toSet(
                     coalesce(node.belongs_to_set, [])
                     + coalesce($properties.belongs_to_set, [])
                 ) AS merged_belongs_to_set
                 SET node += $properties, node.updated_at = timestamp()
                 SET node.belongs_to_set = merged_belongs_to_set
+                SET node.feedback_weight = coalesce(kept_feedback_weight, node.feedback_weight)
                 WITH node, $node_label AS label
                 CALL apoc.create.addLabels(node, [label]) YIELD node AS labeledNode
                 RETURN ID(labeledNode) AS internal_id, labeledNode.id AS nodeId"""
@@ -381,12 +383,13 @@ class Neo4jAdapter(GraphDBInterface):
         query = f"""
         UNWIND $nodes AS node
         MERGE (n: `{BASE_LABEL}`{{id: node.node_id}})
-        WITH n, node, apoc.coll.toSet(
+        WITH n, node, n.feedback_weight AS kept_feedback_weight, apoc.coll.toSet(
             coalesce(n.belongs_to_set, [])
             + coalesce(node.properties.belongs_to_set, [])
         ) AS merged_belongs_to_set
         SET n += node.properties, n.updated_at = timestamp()
         SET n.belongs_to_set = merged_belongs_to_set
+        SET n.feedback_weight = coalesce(kept_feedback_weight, n.feedback_weight)
         {fold_clause}
         WITH n, node.label AS label
         CALL apoc.create.addLabels(n, [label]) YIELD node AS labeledNode
@@ -1155,8 +1158,9 @@ class Neo4jAdapter(GraphDBInterface):
             MATCH (from_node :`{BASE_LABEL}`{{id: $from_node}}),
                   (to_node :`{BASE_LABEL}`{{id: $to_node}})
             MERGE (from_node)-[r:`{relationship_name}`]->(to_node)
-            ON CREATE SET r += $properties, r.updated_at = timestamp()
-            ON MATCH SET r += $properties, r.updated_at = timestamp()
+            WITH r, r.feedback_weight AS kept_feedback_weight
+            SET r += $properties, r.updated_at = timestamp()
+            SET r.feedback_weight = coalesce(kept_feedback_weight, r.feedback_weight)
             RETURN r
             """
         )
@@ -1248,9 +1252,11 @@ class Neo4jAdapter(GraphDBInterface):
                 {{}},
                 to_node
             ) YIELD rel
+            WITH rel, rel.feedback_weight AS kept_feedback_weight, edge
             SET rel += edge.properties,
                 rel.updated_at = timestamp(),
                 rel.created_at = coalesce(rel.created_at, timestamp())
+            SET rel.feedback_weight = coalesce(kept_feedback_weight, rel.feedback_weight)
             {fold_clause}
             RETURN rel"""
 
@@ -2449,93 +2455,6 @@ class Neo4jAdapter(GraphDBInterface):
         result = await self.query(query)
         return [record["n"] for record in result] if result else []
 
-    async def collect_events(self, ids: list[str]) -> Any:
-        """
-        Collect all Event-type nodes reachable within 1..2 hops
-        from the given node IDs.
-
-        Args:
-            graph_engine: Object exposing an async .query(str) -> Any
-            ids: List of node IDs (strings)
-
-        Returns:
-            List of events
-        """
-
-        event_collection_cypher = """UNWIND [{quoted}] AS uid
-            MATCH (start {{id: uid}})
-            MATCH (start)-[*1..2]-(event)
-            WHERE event.type = 'Event'
-            WITH DISTINCT event
-            RETURN collect(event) AS events;
-        """
-
-        query = event_collection_cypher.format(quoted=ids)
-        return await self.query(query)
-
-    async def collect_time_ids(
-        self,
-        time_from: Timestamp | None = None,
-        time_to: Timestamp | None = None,
-    ) -> str:
-        """
-        Collect IDs of Timestamp nodes between time_from and time_to.
-
-        Args:
-            graph_engine: Object exposing an async .query(query, params) -> list[dict]
-            time_from: Lower bound int (inclusive), optional
-            time_to: Upper bound int (inclusive), optional
-
-        Returns:
-            A string of quoted IDs:  "'id1', 'id2', 'id3'"
-            (ready for use in a Cypher UNWIND clause).
-        """
-
-        ids: list[str] = []
-
-        if time_from and time_to:
-            time_from = date_to_int(time_from)
-            time_to = date_to_int(time_to)
-
-            cypher = """
-            MATCH (n)
-            WHERE n.type = 'Timestamp'
-              AND n.time_at >= $time_from
-              AND n.time_at <= $time_to
-            RETURN n.id AS id
-            """
-            params = {"time_from": time_from, "time_to": time_to}
-
-        elif time_from:
-            time_from = date_to_int(time_from)
-
-            cypher = """
-            MATCH (n)
-            WHERE n.type = 'Timestamp'
-              AND n.time_at >= $time_from
-            RETURN n.id AS id
-            """
-            params = {"time_from": time_from}
-
-        elif time_to:
-            time_to = date_to_int(time_to)
-
-            cypher = """
-            MATCH (n)
-            WHERE n.type = 'Timestamp'
-              AND n.time_at <= $time_to
-            RETURN n.id AS id
-            """
-            params = {"time_to": time_to}
-
-        else:
-            return ids
-
-        time_nodes = await self.query(cypher, params)
-        time_ids_list = [item["id"] for item in time_nodes if "id" in item]
-
-        return ", ".join(f"'{uid}'" for uid in time_ids_list)
-
     async def get_timestamps_in_range(
         self, start: int | None, end: int | None
     ) -> list[dict[str, Any]]:
@@ -2579,7 +2498,7 @@ class Neo4jAdapter(GraphDBInterface):
         chunk_list = sorted({str(node_id) for node_id in chunk_ids})
         entity_list = sorted({str(node_id) for node_id in entity_ids})
         if not chunk_list and not entity_list:
-            return temporal_anchors_from_rows([], [])
+            return temporal_anchors_from_rows([], [], [])
         conditions = ["t.type = 'Timestamp'"]
         params: dict[str, Any] = {}
         if end is not None:
@@ -2593,7 +2512,7 @@ class Neo4jAdapter(GraphDBInterface):
             f"""
             MATCH (c:`{BASE_LABEL}`)-[]->(t:`{BASE_LABEL}`)
             WHERE c.id IN $candidate_ids AND {where}
-            RETURN DISTINCT c.id AS candidate_id, c.type AS candidate_type, t.id AS timestamp_id
+            RETURN DISTINCT c.id AS candidate_id, t.id AS timestamp_id
             """,
             {**params, "candidate_ids": chunk_list + entity_list},
         )
@@ -2608,11 +2527,9 @@ class Neo4jAdapter(GraphDBInterface):
                 {**params, "chunk_ids": chunk_list},
             )
         return temporal_anchors_from_rows(
-            [
-                (row["candidate_id"], row["candidate_type"], row["timestamp_id"])
-                for row in direct_rows
-            ],
+            [(row["candidate_id"], row["timestamp_id"]) for row in direct_rows],
             [(row["chunk_id"], row["entity_id"], row["timestamp_id"]) for row in via_rows],
+            chunk_list,
         )
 
     async def get_triplets_batch(self, offset: int, limit: int) -> list[dict[str, Any]]:
