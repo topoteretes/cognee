@@ -72,11 +72,14 @@ async def run_pipeline(
     extras: dict | None = None,
     after_run_completed: Callable[[], Awaitable[Any]] | None = None,
     after_items_ran: Callable[[], Awaitable[Any]] | None = None,
+    before_run: Callable[[list, Dataset], Awaitable[None]] | None = None,
 ):
     """``tasks`` is either the task list every data item runs, or a callable
     mapping one item to its task list (a task resolver — see ``run_tasks``);
     items resolved to different lists still share one run per dataset.
     ``extras`` carries caller-resolved context into each item's PipelineContext.
+    ``before_run`` is awaited with each dataset's selected rows and the dataset, under
+    that dataset's lock, before its tasks run.
 
     Whether the run needs the LLM drives the first-use LLM connection probe
     (skipped-but-never-marked-done when not needed; embeddings are always
@@ -122,6 +125,7 @@ async def run_pipeline(
             extras=extras,
             after_run_completed=after_run_completed,
             after_items_ran=after_items_ran,
+            before_run=before_run,
         )
         async with aclosing(source):
             async for run_info in source:
@@ -143,6 +147,7 @@ async def run_pipeline_per_dataset(
     extras: dict | None = None,
     after_run_completed: Callable[[], Awaitable[Any]] | None = None,
     after_items_ran: Callable[[], Awaitable[Any]] | None = None,
+    before_run: Callable[[list, Dataset], Awaitable[None]] | None = None,
 ):
     # The actual work of a single run, factored out so it can run either under
     # the per-dataset lock (normal case) or directly (re-entrant case below).
@@ -150,9 +155,12 @@ async def run_pipeline_per_dataset(
         # Read under the dataset lock, so the run sees each selected row as it is now.
         body_data = (
             await get_selected_dataset_data(dataset.id, data)
-            if data
+            if data is not None
             else await get_dataset_data(dataset_id=dataset.id)
         )
+
+        if before_run is not None:
+            await before_run(body_data, dataset)
 
         # The run always proceeds. Concurrent runs on one dataset are serialized
         # by the per-dataset lock, and already-processed documents are skipped

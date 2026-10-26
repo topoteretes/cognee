@@ -429,3 +429,34 @@ async def test_resolve_code_repository_url_rejects_non_repository_specs():
 
     with pytest.raises(ValueError, match="not a repository URL"):
         await resolve_code_repository_url("https://github.com/org/repo/blob/main/README.md")
+
+
+@pytest.mark.asyncio
+async def test_a_repository_url_clones_with_the_credentials_and_leaves_out_documents(
+    tmp_path, monkeypatch
+):
+    import cognee.tasks.code_graph.code_repo as code_repo_module
+
+    clone = _make_repo(tmp_path)
+    seen = {}
+
+    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
+        seen.update(spec=spec, credentials=credentials, branch=branch)
+        return clone
+
+    monkeypatch.setattr(code_repo_module, "resolve_repo_source", fake_resolve_repo_source)
+    manifest, documents, _skipped = await code_repo_module.resolve_code_repository_url(
+        "https://github.com/org/repo.git",
+        credentials="tok",
+        include_documents=False,
+        branch="dev",
+    )
+
+    assert seen == {
+        "spec": "https://github.com/org/repo.git",
+        "credentials": "tok",
+        "branch": "dev",
+    }
+    assert documents == []
+    assert manifest.system_metadata["repo_url"] == "https://github.com/org/repo.git"
+    assert "tok" not in str(manifest.system_metadata)
