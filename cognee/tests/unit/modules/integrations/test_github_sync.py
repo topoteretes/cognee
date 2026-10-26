@@ -1,26 +1,32 @@
 """Unit tests for cognee.modules.integrations.github.sync.
 
-Token minting, repo listing, and remember() are mocked — what's under test
-is the orchestration: one dataset per installation, authenticated clone
-URLs handed to the code path, and the full-installation default when no
+Token minting, repo listing, add() and cognify() are mocked. What is under test is
+the orchestration: one dataset per installation, each repository added by its
+credential-free clone URL with the token in ``codegraph_config`` and built in its
+own ``cognify(data_ids=...)`` run, a failing repository logged without stopping the
+others, a fresh token before each clone, and the full-installation default when no
 explicit repo list is given.
 """
 
 import asyncio
 import importlib
+import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
+import aiohttp
 import pytest
+
+from cognee.modules.pipelines.models import PipelineRunCompleted, PipelineRunErrored
+from cognee.tasks.code_graph.resolve_repo import CodeRepositoryError
 
 sync_module = importlib.import_module("cognee.modules.integrations.github.sync")
 
-# The remember package's __init__ rebinds `remember` to the function,
-# shadowing the submodule — string-target monkeypatching resolves the
-# function and fails. Importing the submodule explicitly sidesteps it (same
-# workaround as test_get_integrations_router.py).
-_remember_module = importlib.import_module("cognee.api.v1.remember.remember")
+# The add package's __init__ shadows the submodule with the function, so
+# patch the submodule itself.
+_add_module = importlib.import_module("cognee.api.v1.add")
+_cognify_module = importlib.import_module("cognee.api.v1.cognify.cognify")
 _users_methods = importlib.import_module("cognee.modules.users.methods")
 
 _USER_ID = uuid4()
@@ -37,6 +43,17 @@ def _credential(**overrides):
         "user_id": _USER_ID,
     }
     return SimpleNamespace(**{**defaults, **overrides})
+
+
+def _added(data_ids=None):
+    return PipelineRunCompleted(
+        pipeline_run_id=uuid4(),
+        dataset_id=uuid4(),
+        dataset_name="github_acme_org",
+        data_ingestion_info=[
+            {"data_id": data_id, "run_info": None} for data_id in (data_ids or [uuid4()])
+        ],
+    )
 
 
 def test_dataset_name_is_one_per_account_and_identifier_safe():
@@ -69,15 +86,17 @@ def mocks(monkeypatch):
     mocked = SimpleNamespace(
         mint=AsyncMock(return_value=("tok123", None)),
         list_repos=AsyncMock(return_value=["acme/api", "acme/web"]),
-        remember=AsyncMock(return_value=SimpleNamespace(status="completed", error=None)),
+        add=AsyncMock(side_effect=lambda *args, **kwargs: _added()),
+        cognify=AsyncMock(return_value={}),
         get_user=AsyncMock(return_value=owner),
         owner=owner,
         observations=observations,
     )
     monkeypatch.setattr(sync_module, "mint_installation_token", mocked.mint)
     monkeypatch.setattr(sync_module, "list_installation_repositories", mocked.list_repos)
-    # Patched at their home modules: sync_repositories imports both lazily.
-    monkeypatch.setattr(_remember_module, "remember", mocked.remember)
+    # Patched at their home modules: _add_and_build imports both lazily.
+    monkeypatch.setattr(_add_module, "add", mocked.add)
+    monkeypatch.setattr(_cognify_module, "cognify", mocked.cognify)
     monkeypatch.setattr(_users_methods, "get_user", mocked.get_user)
     return mocked
 
@@ -86,19 +105,45 @@ def mocks(monkeypatch):
 async def test_default_sync_covers_every_installation_repo(mocks):
     await sync_module.sync_repositories(_credential())
 
-    mocks.mint.assert_awaited_once_with(42)
     mocks.list_repos.assert_awaited_once_with("tok123")
-    mocks.remember.assert_awaited_once_with(
-        [
-            "https://github.com/acme/api.git",
-            "https://github.com/acme/web.git",
-        ],
-        dataset_name="github_acme_org",
-        user=mocks.owner,
-        content_type="code",
-        repo_credentials="tok123",
-        raise_on_error=False,
-    )
+    assert [call.args[0] for call in mocks.add.await_args_list] == [
+        "https://github.com/acme/api.git",
+        "https://github.com/acme/web.git",
+    ]
+    for call in mocks.add.await_args_list:
+        assert call.kwargs == {
+            "dataset_name": "github_acme_org",
+            "user": mocks.owner,
+            "codegraph_config": {"repo_credentials": "tok123", "include_documents": False},
+        }
+
+
+@pytest.mark.asyncio
+async def test_each_repository_is_built_in_its_own_scoped_run(mocks):
+    added = [_added(), _added([uuid4(), uuid4()])]
+    mocks.add.side_effect = added
+
+    await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+
+    assert mocks.cognify.await_count == 2
+    for run, call in zip(added, mocks.cognify.await_args_list):
+        assert call.kwargs == {
+            "datasets": [run.dataset_id],
+            "data_ids": run.data_ids,
+            "user": mocks.owner,
+            "raise_on_error": False,
+        }
+
+
+@pytest.mark.asyncio
+async def test_a_fresh_token_is_minted_before_each_clone(mocks):
+    mocks.mint.side_effect = [("listing", None), ("first", None), ("second", None)]
+
+    await sync_module.sync_repositories(_credential())
+
+    assert [
+        call.kwargs["codegraph_config"]["repo_credentials"] for call in mocks.add.await_args_list
+    ] == ["first", "second"]
 
 
 @pytest.mark.asyncio
@@ -106,10 +151,8 @@ async def test_explicit_repo_list_skips_the_listing_call(mocks):
     await sync_module.sync_repositories(_credential(), ["acme/api"])
 
     mocks.list_repos.assert_not_awaited()
-    mocks.remember.assert_awaited_once()
-    (urls,) = mocks.remember.await_args.args
-    assert urls == ["https://github.com/acme/api.git"]
-    assert mocks.remember.await_args.kwargs["repo_credentials"] == "tok123"
+    mocks.add.assert_awaited_once()
+    assert mocks.add.await_args.args == ("https://github.com/acme/api.git",)
 
 
 @pytest.mark.asyncio
@@ -118,14 +161,15 @@ async def test_empty_installation_syncs_nothing(mocks):
 
     await sync_module.sync_repositories(_credential())
 
-    mocks.remember.assert_not_awaited()
+    mocks.add.assert_not_awaited()
+    mocks.cognify.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_account_login_falls_back_to_the_installation_id(mocks):
     await sync_module.sync_repositories(_credential(provider_metadata=None), ["acme/api"])
 
-    assert mocks.remember.await_args.kwargs["dataset_name"] == "github_42"
+    assert mocks.add.await_args.kwargs["dataset_name"] == "github_42"
 
 
 @pytest.mark.asyncio
@@ -133,12 +177,12 @@ async def test_sync_reports_live_work_without_inventing_file_progress(mocks):
     entered = asyncio.Event()
     release = asyncio.Event()
 
-    async def remember(*args, **kwargs):
+    async def add(*args, **kwargs):
         entered.set()
         await release.wait()
-        return SimpleNamespace(status="completed", items=[{}])
+        return _added()
 
-    mocks.remember.side_effect = remember
+    mocks.add.side_effect = add
     task = asyncio.create_task(sync_module.sync_repositories(_credential(), ["acme/api"]))
     await entered.wait()
     progress = mocks.observations[-1]
@@ -152,27 +196,131 @@ async def test_sync_reports_live_work_without_inventing_file_progress(mocks):
     assert mocks.observations[-1].counts == {"processed": 1, "failed": 0}
 
 
+def _errored_run(error_class="RuntimeError", message="boom"):
+    dataset_id = uuid4()
+    return {
+        dataset_id: PipelineRunErrored(
+            pipeline_run_id=uuid4(),
+            dataset_id=dataset_id,
+            dataset_name="github_acme_org",
+            error_class=error_class,
+            error_message=message,
+        )
+    }
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "items,state",
-    [
-        ([{"status": "errored"}], "failed"),
-        ([{"status": "errored"}, {}], "partial"),
-    ],
+    "failing,state",
+    [(["acme/api", "acme/web"], "failed"), (["acme/api"], "partial")],
 )
-async def test_handled_repo_failures_are_not_reported_successful(mocks, items, state):
-    mocks.remember.return_value = SimpleNamespace(status="errored", items=items, error="secret")
+async def test_handled_repo_failures_are_not_reported_successful(mocks, failing, state):
+    mocks.cognify.side_effect = [
+        _errored_run(message="secret") if name in failing else {}
+        for name in ("acme/api", "acme/web")
+    ]
+
     await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+
     progress = mocks.observations[-1]
     assert progress.state == state
-    assert progress.counts["failed"] == 1
+    assert progress.counts["failed"] == len(failing)
     assert progress.reason == "processing_error"
     assert "secret" not in progress.model_dump_json()
 
 
 @pytest.mark.asyncio
+async def test_a_repository_that_cannot_be_cloned_fails_alone(mocks, caplog):
+    mocks.add.side_effect = [CodeRepositoryError(message="Failed to clone"), _added()]
+
+    with caplog.at_level(logging.ERROR):
+        await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+
+    assert mocks.add.await_count == 2 and mocks.cognify.await_count == 1
+    assert "failed for acme/api" in caplog.text
+    assert mocks.observations[-1].state == "partial"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_add_keeps_its_cause_and_the_token_never_reaches_the_log(mocks, caplog):
+    mocks.add.side_effect = [
+        PipelineRunErrored(
+            pipeline_run_id=uuid4(),
+            dataset_id=uuid4(),
+            dataset_name="github_acme_org",
+            error_class="CodeRepositoryError",
+            error_message="Failed to clone with tok123",
+        ),
+        _added(),
+    ]
+
+    with caplog.at_level(logging.ERROR):
+        await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+
+    assert "CodeRepositoryError: Failed to clone" in caplog.text
+    assert "tok123" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_an_add_that_reports_no_rows_fails_that_repository_and_never_builds_the_dataset(
+    mocks, caplog
+):
+    """An empty id list would make the build fall back to the whole dataset."""
+    empty = PipelineRunCompleted(
+        pipeline_run_id=uuid4(),
+        dataset_id=uuid4(),
+        dataset_name="github_acme_org",
+        data_ingestion_info=[],
+    )
+    mocks.add.side_effect = [empty, _added()]
+
+    with caplog.at_level(logging.ERROR):
+        await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+
+    assert mocks.add.await_count == 2 and mocks.cognify.await_count == 1
+    assert "failed for acme/api" in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error",
+    [OSError("no space left"), asyncio.TimeoutError(), aiohttp.ClientError("connection reset")],
+    ids=["os", "timeout", "client"],
+)
+async def test_an_io_or_network_failure_fails_that_repository_alone(mocks, caplog, error):
+    mocks.add.side_effect = [error, _added()]
+
+    with caplog.at_level(logging.ERROR):
+        await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+
+    assert mocks.add.await_count == 2 and mocks.cognify.await_count == 1
+    assert "failed for acme/api" in caplog.text
+    assert mocks.observations[-1].state == "partial"
+
+
+@pytest.mark.asyncio
+async def test_programming_errors_abort_the_sync(mocks):
+    mocks.cognify.side_effect = [TypeError("a bug"), {}]
+
+    with pytest.raises(TypeError):
+        await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+
+    assert mocks.add.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_a_failed_token_mint_aborts_the_sync(mocks):
+    mocks.mint.side_effect = [("listing", None), RuntimeError("mint failed")]
+
+    with pytest.raises(RuntimeError, match="mint failed"):
+        await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+
+    mocks.add.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_cancelled_repo_sync_preserves_cancellation(mocks):
-    mocks.remember.side_effect = asyncio.CancelledError
+    mocks.add.side_effect = asyncio.CancelledError
     with pytest.raises(asyncio.CancelledError):
         await sync_module.sync_repositories(_credential(), ["acme/api"])
     assert mocks.observations[-1].state == "cancelled"
@@ -198,3 +346,33 @@ async def test_repository_discovery_reports_each_page_without_claiming_a_total(m
     assert [call.kwargs["completed"] for call in report.await_args_list] == [1, 2]
     assert all("total" not in call.kwargs for call in report.await_args_list)
     assert all("secret" not in str(call.kwargs) for call in report.await_args_list)
+
+
+@pytest.mark.asyncio
+async def test_a_token_far_from_expiry_is_reused_for_every_clone(mocks):
+    from datetime import datetime, timedelta, timezone
+
+    mocks.mint.return_value = ("tok123", datetime.now(timezone.utc) + timedelta(minutes=50))
+
+    await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web", "acme/docs"])
+
+    mocks.mint.assert_awaited_once()  # the listing token served all three clones
+    assert {
+        call.kwargs["codegraph_config"]["repo_credentials"] for call in mocks.add.await_args_list
+    } == {"tok123"}
+
+
+@pytest.mark.asyncio
+async def test_a_token_close_to_expiry_is_renewed_before_the_clone(mocks):
+    from datetime import datetime, timedelta, timezone
+
+    soon = datetime.now(timezone.utc) + timedelta(minutes=2)
+    later = datetime.now(timezone.utc) + timedelta(minutes=55)
+    mocks.mint.side_effect = [("old", soon), ("new", later)]
+
+    await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+
+    assert mocks.mint.await_count == 2
+    assert [
+        call.kwargs["codegraph_config"]["repo_credentials"] for call in mocks.add.await_args_list
+    ] == ["new", "new"]

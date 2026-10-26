@@ -5,6 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
+from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.vector.compact_vector_store import compact_vector_store
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.engine import DataPoint
@@ -20,6 +21,7 @@ from cognee.modules.cognify.config import (
 )
 from cognee.modules.cognify.rollback import cognify_rollback_handler
 from cognee.modules.cognify.routing import CognifyRoute, cognify_route_for
+from cognee.modules.data.methods.publish_updated_data import COGNIFY_PIPELINE_NAME
 from cognee.modules.observability import (
     COGNEE_PIPELINE_NAME,
     COGNEE_RESULT_SUMMARY,
@@ -131,6 +133,59 @@ def raise_if_cognify_errored(result) -> None:
         )
 
 
+_CODE_ROUTES = frozenset({CognifyRoute.CODE, CognifyRoute.CODE_REPO})
+
+
+def _pending_items_are_code_only(items, dataset_id, incremental_loading) -> bool:
+    """Classify exactly the rows selected under the dataset lock, without another read."""
+    from cognee.modules.pipelines.models import is_data_item_completed
+
+    for item in items:
+        if incremental_loading:
+            status = (item.pipeline_status or {}).get(COGNIFY_PIPELINE_NAME) or {}
+            if is_data_item_completed(status.get(str(dataset_id))):
+                continue
+        if cognify_route_for(item) not in _CODE_ROUTES:
+            return False
+    return True
+
+
+async def _resolve_scoped_data(datasets, user: User | None, data_ids) -> tuple:
+    """The one dataset ``datasets`` names and the rows of ``data_ids`` in it.
+
+    A ``data_ids`` run builds those items only, so its pipeline run (and the
+    rollback scoped to that run) cannot reach the rest of the dataset. Read with
+    the same write check the pipeline applies; the pipeline still takes the
+    dataset lock and checks permissions itself. Only the requested rows are
+    read. An id that is not a row of that dataset raises, naming it: a selection
+    must not be narrowed without a word. A dataset name that does not resolve
+    raises ``DatasetNotFoundError``.
+    """
+    from cognee.modules.data.methods import (
+        get_authorized_existing_datasets,
+        get_dataset_data,
+    )
+    from cognee.modules.users.methods import get_default_user
+
+    if user is None:
+        user = await get_default_user()
+    requested = [datasets] if isinstance(datasets, (str, UUID)) else datasets
+    if not requested or len(requested) != 1:
+        raise CogneeValidationError(
+            "cognify(data_ids=...) requires exactly one dataset in datasets."
+        )
+    target_datasets = await get_authorized_existing_datasets(requested, "write", user, strict=True)
+    wanted = {UUID(str(data_id)) for data_id in data_ids}
+    rows = await get_dataset_data(dataset_id=target_datasets[0].id, data_ids=wanted)
+    missing = wanted - {row.id for row in rows}
+    if missing:
+        raise CogneeValidationError(
+            "These data_ids are not data items of the requested dataset: "
+            + ", ".join(sorted(str(data_id) for data_id in missing))
+        )
+    return target_datasets[0], rows
+
+
 async def cognify(
     datasets: str | list[str] | list[UUID] | None = None,
     user: User = None,
@@ -154,6 +209,7 @@ async def cognify(
     extractor: Literal["llm", "gliner_demo", "gliner"] | None = None,
     ontology_file_path: str | None = None,
     summary_method: Literal["llm", "from_extraction"] | None = None,
+    data_ids: list[UUID] | None = None,
     **kwargs,
 ):
     """
@@ -260,6 +316,14 @@ async def cognify(
                  with no relations gets no summary. The explicit argument wins over
                  the SUMMARY_METHOD setting ("llm" by default). Raises while
                  connected to a remote instance.
+        data_ids: Build only these data items of the one dataset in ``datasets``
+                 in their own pipeline run,
+                 still recorded as ``cognify_pipeline`` under the dataset lock. A
+                 failure then rolls back that run only, and other pending items of
+                 the dataset are left for a later cognify. An id that is not a data
+                 item of the dataset, or an empty list, raises CogneeValidationError.
+                 Not supported with ``dry_run`` or while connected to a remote
+                 instance.
 
     Returns:
         Union[dict, list[PipelineRunInfo], DryRunEstimate]:
@@ -354,6 +418,9 @@ async def cognify(
     resolved_extractor = resolve_extractor(extractor, cognify_config)
     resolved_summary_method = resolve_summary_method(summary_method, cognify_config)
 
+    if data_ids is not None and dry_run:
+        raise CogneeValidationError("data_ids is not supported with dry_run.")
+
     if dry_run and resolved_extractor == GLINER_DEMO_EXTRACTOR:
         raise ValueError(
             "dry_run estimates the LLM extraction pipeline only; it has no cost model "
@@ -378,6 +445,11 @@ async def cognify(
 
     client = get_remote_client()
     if client is not None:
+        if data_ids is not None:
+            raise ValueError(
+                "data_ids is not supported while connected to a remote Cognee instance. "
+                "Call cognee.disconnect() to cognify locally."
+            )
         if chunk_attachment is not None:
             raise ValueError(
                 "chunk_attachment is not supported while connected to a remote Cognee "
@@ -409,11 +481,6 @@ async def cognify(
             run_in_background=run_in_background,
         )
 
-    # After the argument checks and the remote route: a cognify that raises above,
-    # or runs remotely, must not install anything locally. Awaited, so the pipeline
-    # below never starts before the GLiNER runtime is importable.
-    await ensure_extractor_runtime(resolved_extractor, cognify_config)
-
     import time as _time
 
     _cognify_start_ns = _time.monotonic_ns()
@@ -428,6 +495,16 @@ async def cognify(
         from cognee.modules.migrations.startup import run_migrations_and_block
 
         await run_migrations_and_block(datasets, user)
+
+        # A run whose pending items all take the code routes runs enola only: it
+        # never calls the graph extractor or the LLM, so it neither installs nor
+        # requires the GLiNER runtime (a keyless code-only remember must not pull
+        # in torch) and skips the provider probes it has no use for (SDK-795).
+        scoped_dataset = scoped_data = None
+        if data_ids is not None:
+            scoped_dataset, scoped_data = await _resolve_scoped_data(datasets, user, data_ids)
+            if not scoped_data:
+                raise CogneeValidationError("data_ids is empty: select data items to build.")
 
         resolved_resolver = get_configured_ontology_resolver(
             config, ontology_file_path=ontology_file_path
@@ -452,6 +529,35 @@ async def cognify(
                 custom_prompt=custom_prompt,
                 summary_method=resolved_summary_method,
             )
+
+        # Runtime installation can take minutes (torch). Complete it before
+        # entering a dataset lock so writes and other runs are not held up.
+        # The locked callback revalidates with installation disabled: a document
+        # added after this scan fails clearly instead of installing under the lock.
+        # Only the GLiNER extractor has a runtime to install, so the LLM extractor
+        # reads neither the datasets nor their rows here.
+        if resolved_extractor == GLINER_DEMO_EXTRACTOR:
+            from cognee.modules.data.methods import (
+                get_authorized_existing_datasets,
+                get_dataset_data,
+            )
+            from cognee.modules.users.methods import get_default_user
+
+            if scoped_dataset is not None:
+                preflight_datasets = [scoped_dataset]
+            else:
+                preflight_user = user if user is not None else await get_default_user()
+                requested = [datasets] if isinstance(datasets, (str, UUID)) else datasets
+                preflight_datasets = await get_authorized_existing_datasets(
+                    requested, "write", preflight_user
+                )
+            for dataset in preflight_datasets:
+                items = (
+                    scoped_data if scoped_data is not None else await get_dataset_data(dataset.id)
+                )
+                if not _pending_items_are_code_only(items, dataset.id, incremental_loading):
+                    await ensure_extractor_runtime(resolved_extractor, cognify_config)
+                    break
 
         if resolved_extractor == GLINER_DEMO_EXTRACTOR:
             if graph_model is not KnowledgeGraph:
@@ -518,26 +624,65 @@ async def cognify(
         def resolve_cognify_tasks(data_item):
             return tasks_by_route[cognify_route_for(data_item)]
 
-        # run_pipeline derives needs_llm itself for a task list, but this call
-        # passes a resolver — so pass the union over every wired route: the
-        # tasks that can actually run are the authority on whether the LLM
-        # connection probe is needed.
-        needs_llm = pipeline_needs_llm(
-            task for route_tasks in tasks_by_route.values() for task in route_tasks
-        )
+        async def prepare_cognify_run(items, dataset):
+            # Only for the GLiNER extractor. run_pipeline invokes this under its
+            # dataset lock, with the same rows it will process, revalidating the
+            # earlier preflight scan.
+            from cognee.modules.pipelines.layers.setup_and_check_environment import (
+                setup_and_check_environment,
+            )
+
+            code_only = _pending_items_are_code_only(items, dataset.id, incremental_loading)
+            if not code_only:
+                await ensure_extractor_runtime(
+                    resolved_extractor,
+                    cognify_config.model_copy(update={"gliner_auto_install": False}),
+                )
+            # run_pipeline derives needs_llm itself for a task list, but this call
+            # passes a resolver — so use the union over every wired route: the
+            # tasks that can actually run are the authority on whether the LLM
+            # connection probe is needed.
+            needs_llm = not code_only and pipeline_needs_llm(
+                task for route_tasks in tasks_by_route.values() for task in route_tasks
+            )
+            await setup_and_check_environment(
+                vector_db_config,
+                graph_db_config,
+                skip_connection_test=code_only,
+                needs_llm=needs_llm,
+            )
+
+        if resolved_extractor == GLINER_DEMO_EXTRACTOR:
+            # A code-only run needs no GLiNER runtime and no provider probe, which is
+            # only known from the rows, so both are decided under the dataset lock.
+            run_environment = {
+                "skip_connection_test": True,
+                "before_run": prepare_cognify_run,
+            }
+        else:
+            # run_pipeline derives needs_llm itself for a task list, but this call
+            # passes a resolver — so pass the union over every wired route: the
+            # tasks that can actually run are the authority on whether the LLM
+            # connection probe is needed. The probes run before the dataset lock.
+            run_environment = {
+                "needs_llm": pipeline_needs_llm(
+                    task for route_tasks in tasks_by_route.values() for task in route_tasks
+                )
+            }
 
         try:
             result = await pipeline_executor_func(
                 pipeline=run_pipeline,
                 datasets=datasets,
+                data=scoped_data,
                 tasks=resolve_cognify_tasks,
-                pipeline_name="cognify_pipeline",
+                pipeline_name=COGNIFY_PIPELINE_NAME,
                 user=user,
                 vector_db_config=vector_db_config,
                 graph_db_config=graph_db_config,
                 incremental_loading=incremental_loading,
                 data_per_batch=data_per_batch,
-                needs_llm=needs_llm,
+                **run_environment,
                 rollback_handler=cognify_rollback_handler,
                 llm_config=llm_config,
                 embedding_config=embedding_config,

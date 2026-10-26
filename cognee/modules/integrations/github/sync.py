@@ -1,24 +1,27 @@
 """Sync a GitHub installation's repositories into the code graph.
 
-Thin orchestration over the existing ``remember(content_type="code")`` path:
-mint a fresh installation token, resolve which repositories to index, and
-hand authenticated clone URLs to the code-graph pipeline. All the heavy
-lifting — clone reuse, snapshot-identity skip on unchanged repos, per-repo
-failure isolation (``raise_on_error=False``) — already lives in
-``resolve_repo_source`` and ``remember``, which is what makes re-running this
-on every webhook cheap and idempotent.
+Thin orchestration over add() and cognify(): mint a fresh installation token,
+resolve which repositories to index, and for each repository ``add()`` its clone
+URL, then ``cognify(data_ids=...)`` exactly the rows that add returned. A build
+scoped to its own repository means one that fails cannot be retried, or rolled
+back, together with another. Clone reuse and the snapshot-identity skip on
+unchanged repositories live in ``resolve_repo_source`` and the code graph tasks,
+which is what makes re-running this on every webhook cheap and idempotent.
 
-The indexed graph is searchable via ``SearchType.CODE`` (the code route
-produces no chunks or embeddings by design); ``index_vectors`` stays off.
+The token reaches git through ``codegraph_config["repo_credentials"]``, never
+the URL. The indexed graph is searchable via ``SearchType.CODE`` (the code route
+produces no chunks or embeddings by design), and the repositories' documents are
+not ingested (``include_documents`` off), so a sync makes no LLM or embedding
+calls however many repositories it covers.
 
-One dataset per installation (``github_<org>``), not per repository —
-``remember`` already accepts a list of repo specs targeting one dataset, and
-per-repo datasets would mean one isolated database per repo under backend
-access control.
+One dataset per installation (``github_<org>``), not per repository: per-repo
+datasets would mean one isolated database per repo under backend access control.
 """
 
+import asyncio
 import logging
 import re
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import aiohttp
@@ -36,6 +39,10 @@ logger = logging.getLogger(__name__)
 _TIMEOUT = aiohttp.ClientTimeout(total=30)
 
 GITHUB_DATASET_PREFIX = "github"
+
+# A token is renewed when less than this is left. A clone that starts with more left is
+# not expected to outlive it; a failure of one that does is logged for that repository.
+_TOKEN_RENEWAL = timedelta(minutes=10)
 
 
 def dataset_name_for_account(account_login: str) -> str:
@@ -81,29 +88,69 @@ async def list_installation_repositories(token: str) -> list[str]:
     return full_names
 
 
+async def _add_and_build(full_name: str, dataset_name: str, owner, token: str) -> None:
+    """Add one repository, then build exactly the rows that add returned."""
+    from cognee.api.v1.add import add
+    from cognee.api.v1.cognify.cognify import cognify, raise_if_cognify_errored
+    from cognee.modules.pipelines.exceptions import PipelineRunFailedError
+    from cognee.modules.pipelines.models import PipelineRunErrored
+
+    added = await add(
+        clone_url(full_name),
+        dataset_name=dataset_name,
+        user=owner,
+        codegraph_config={
+            "repo_credentials": token,
+            # The code graph is the point of the sync: indexing every repository's
+            # README and docs would mean LLM extraction and embeddings for an
+            # installation's whole prose, on every webhook.
+            "include_documents": False,
+        },
+    )
+    if isinstance(added, PipelineRunErrored):
+        # Git keeps the token out of every string it builds, so this is a second line of
+        # defence: the error logs itself when built, so the token goes before that.
+        raise PipelineRunFailedError(
+            message=f"GitHub repository add failed: {added.error_class}: {added.error_message}".replace(
+                token, "[secret]"
+            )
+        )
+    if not added.data_ids:
+        # Nothing was stored for this repository, and an empty list would make the build
+        # fall back to the whole dataset: this repository fails, the others go on.
+        raise PipelineRunFailedError(message="GitHub repository add returned no data to build.")
+    result = await cognify(
+        datasets=[added.dataset_id], data_ids=added.data_ids, user=owner, raise_on_error=False
+    )
+    raise_if_cognify_errored(result)
+
+
 async def sync_repositories(
     credential: IntegrationCredential,
     repo_full_names: list[str] | None = None,
 ) -> None:
     """Index ``repo_full_names`` (default: every repo the installation covers).
 
-    Runs the code-graph pipeline to completion — callers are already off the
+    Builds each repository to completion in turn — callers are already off the
     request path (the post-install hook and webhook handling both run
-    detached), so there is nothing to hand off to.
+    detached), so there is nothing to hand off to. A repository that cannot be
+    cloned or built (a cognee error, an I/O or network failure) is logged and the sync
+    moves on; a failed token mint (installation-wide) or a programming error aborts the
+    sync.
 
-    The minted token lives ~1 hour and repos are cloned sequentially as the
-    pipeline reaches them, so a very large installation can outlive the
-    token mid-batch; the affected repos surface as per-repo errors and the
-    next webhook (or manual re-sync) picks them up with a fresh token.
+    The token is renewed before a clone whenever it is close to expiring, so a very large
+    installation never starts a transfer near the end of one token's hour.
     """
     # Imported here, not at module top: this module is imported at API
     # startup (via the adapter registration), and cognee's package root is
     # heavyweight.
-    from cognee.api.v1.remember.remember import remember as cognee_remember
+    from cognee.exceptions import CogneeApiError
+    from cognee.modules.operations import scrub_error_message
     from cognee.modules.users.methods import get_user
 
     async with track_sync("github", credential) as reporter:
-        token, _expires_at = await mint_installation_token(int(credential.provider_account_id))
+        installation_id = int(credential.provider_account_id)
+        token, expires_at = await mint_installation_token(installation_id)
 
         if repo_full_names is None:
             await report_sync_progress(phase="discovering", unit="repositories")
@@ -122,42 +169,40 @@ async def sync_repositories(
         )
         owner = await get_user(credential.user_id)
 
+        dataset_name = dataset_name_for_account(account_login)
         logger.info(
             "Syncing %d GitHub repositories for %s into dataset %s",
             len(repo_full_names),
             account_login,
-            dataset_name_for_account(account_login),
+            dataset_name,
         )
-        result = await cognee_remember(
-            [clone_url(full_name) for full_name in repo_full_names],
-            dataset_name=dataset_name_for_account(account_login),
-            user=owner,
-            content_type="code",
-            repo_credentials=token,
-            # Report a repo that fails (clone, auth, pipeline) as an errored item
-            # and keep syncing the rest, instead of aborting the whole batch.
-            raise_on_error=False,
-        )
-        if getattr(result, "status", None) == "errored":
-            logger.warning(
-                "GitHub sync for %s finished with errors: %s",
-                account_login,
-                getattr(result, "error", None),
+        processed = failed = 0
+        for position, full_name in enumerate(repo_full_names, start=1):
+            if expires_at is None or expires_at - datetime.now(timezone.utc) < _TOKEN_RENEWAL:
+                token, expires_at = await mint_installation_token(installation_id)
+            try:
+                await _add_and_build(full_name, dataset_name, owner, token)
+            except (CogneeApiError, OSError, aiohttp.ClientError, asyncio.TimeoutError) as error:
+                message = scrub_error_message(str(error).replace(token, "[secret]"))
+                logger.error(
+                    "GitHub sync for %s failed for %s: %s", account_login, full_name, message
+                )
+                failed += 1
+            else:
+                processed += 1
+            await report_sync_progress(
+                phase="processing",
+                completed=position,
+                total=len(repo_full_names),
+                unit="repositories",
+                counts={"processed": processed, "failed": failed},
             )
-        items = getattr(result, "items", None) or []
-        failed = sum(item.get("status") == "errored" for item in items)
-        processed = sum(item.get("status") != "errored" for item in items)
-        if getattr(result, "status", None) == "errored":
+        if failed:
+            logger.warning(
+                "GitHub sync for %s finished with %d failed repositories", account_login, failed
+            )
             await reporter.finish(
                 "partial" if processed else "failed",
                 counts={"processed": processed, "failed": failed},
                 reason="processing_error",
-            )
-        else:
-            await report_sync_progress(
-                phase="finalizing",
-                completed=len(items),
-                total=len(repo_full_names),
-                unit="repositories",
-                counts={"processed": processed, "failed": failed},
             )
