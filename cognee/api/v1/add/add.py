@@ -146,8 +146,9 @@ async def add(
                  repository URLs in ``data``. It reaches git only through environment
                  config, never the URL or the stored rows. ``include_documents``
                  (default True): set it False to index a repository's code graph
-                 only, leaving its README and docs un-ingested. Either option
-                 requires ``data`` to hold a repository, and the repository is then
+                 only, leaving its README and docs un-ingested. ``repo_credentials``
+                 or ``include_documents=False`` requires ``data`` to hold a
+                 repository, and the repository is then
                  cloned before add() returns, also with ``run_in_background=True``.
                  Neither is supported while connected to a remote instance.
         extraction_rules: Optional dictionary of rules (e.g., CSS selectors, XPath) for extracting specific content from web pages using BeautifulSoup

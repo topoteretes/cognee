@@ -364,9 +364,8 @@ async def resolve_code_repository_url(
         dataset_id=dataset_id,
         source_url=source_url,
         include_documents=include_documents,
-        # Keyed on the default branch's clone, as every URL row was before branches:
-        # existing rows keep their ids, and branches of one URL share the row, since
-        # their code graphs share the repository's node ids.
+        # Keyed on the default branch's clone: branches of one URL share the row,
+        # since their code graphs share the repository's node ids.
         identity=clone_dir(source_url),
     )
 

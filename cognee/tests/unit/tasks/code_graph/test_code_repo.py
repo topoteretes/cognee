@@ -460,3 +460,39 @@ async def test_a_repository_url_clones_with_the_credentials_and_leaves_out_docum
     assert documents == []
     assert manifest.system_metadata["repo_url"] == "https://github.com/org/repo.git"
     assert "tok" not in str(manifest.system_metadata)
+
+
+@pytest.mark.asyncio
+async def test_resolving_a_repository_url_passes_the_options_to_the_clone(
+    tmp_path, monkeypatch, llm_key_set
+):
+    """The token reaches the clone, and include_documents=False leaves the docs out."""
+    import cognee.tasks.code_graph.code_repo as code_repo_module
+    from cognee.tasks.ingestion.resolve_data_directories import resolve_data_directories
+
+    clone = _make_repo(tmp_path)
+    seen = []
+
+    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
+        seen.append(credentials)
+        return clone
+
+    monkeypatch.setattr(code_repo_module, "resolve_repo_source", fake_resolve_repo_source)
+
+    resolved = await resolve_data_directories(
+        ["https://github.com/org/repo"], credentials="tok", include_documents=False
+    )
+
+    assert seen == ["tok"]
+    assert not [item for item in resolved if isinstance(item, str)]
+
+
+@pytest.mark.asyncio
+async def test_resolving_a_local_project_honours_include_documents(tmp_path, llm_key_set):
+    from cognee.tasks.ingestion.resolve_data_directories import resolve_data_directories
+
+    project = _make_repo(tmp_path)
+
+    resolved = await resolve_data_directories([str(project)], include_documents=False)
+
+    assert not [item for item in resolved if isinstance(item, str)]

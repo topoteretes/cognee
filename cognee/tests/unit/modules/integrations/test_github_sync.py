@@ -136,7 +136,7 @@ async def test_each_repository_is_built_in_its_own_scoped_run(mocks):
 
 
 @pytest.mark.asyncio
-async def test_a_fresh_token_is_minted_before_each_clone(mocks):
+async def test_a_token_without_an_expiry_is_minted_before_each_clone(mocks):
     mocks.mint.side_effect = [("listing", None), ("first", None), ("second", None)]
 
     await sync_module.sync_repositories(_credential())
@@ -376,3 +376,14 @@ async def test_a_token_close_to_expiry_is_renewed_before_the_clone(mocks):
     assert [
         call.kwargs["codegraph_config"]["repo_credentials"] for call in mocks.add.await_args_list
     ] == ["new", "new"]
+
+
+@pytest.mark.asyncio
+async def test_the_token_never_reaches_the_log_of_a_failed_repository(mocks, caplog):
+    mocks.add.side_effect = [OSError("write failed, token tok123 rejected"), _added()]
+
+    with caplog.at_level(logging.ERROR):
+        await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+
+    assert "failed for acme/api" in caplog.text
+    assert "tok123" not in caplog.text

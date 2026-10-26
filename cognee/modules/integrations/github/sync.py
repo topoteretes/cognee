@@ -40,8 +40,8 @@ _TIMEOUT = aiohttp.ClientTimeout(total=30)
 
 GITHUB_DATASET_PREFIX = "github"
 
-# A token is renewed when less than this is left. A clone that starts with more left is
-# not expected to outlive it; a failure of one that does is logged for that repository.
+# A token is renewed before a clone when less than this is left. A clone that outlives
+# its token fails for that repository alone.
 _TOKEN_RENEWAL = timedelta(minutes=10)
 
 
@@ -116,8 +116,8 @@ async def _add_and_build(full_name: str, dataset_name: str, owner, token: str) -
             )
         )
     if not added.data_ids:
-        # Nothing was stored for this repository, and an empty list would make the build
-        # fall back to the whole dataset: this repository fails, the others go on.
+        # Nothing was stored for this repository, so there is nothing to build: this
+        # repository fails, the others go on.
         raise PipelineRunFailedError(message="GitHub repository add returned no data to build.")
     result = await cognify(
         datasets=[added.dataset_id], data_ids=added.data_ids, user=owner, raise_on_error=False
