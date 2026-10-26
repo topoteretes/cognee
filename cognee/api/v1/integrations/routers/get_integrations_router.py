@@ -31,8 +31,9 @@ error (the query string ends up in browser history and access logs).
 The ``/plugins/{plugin_key}/…`` routes are a separate concern sharing the
 router: agent plugins (claude-code, codex, MCP clients, ...) are not OAuth
 providers but clients of cognee itself. Each connected plugin gets its own
-agent sub-user + labeled API key, so status, attribution, and revocation
-key off that identity instead of a shared tenant key. Declared before the
+agent sub-user, holding one labeled API key per machine the plugin runs on, so
+status, attribution, and revocation key off that identity instead of a shared
+tenant key. Declared before the
 generic ``{provider}`` routes so ``plugins`` is never captured as a
 provider name.
 """
@@ -80,6 +81,7 @@ from cognee.modules.integrations.oauth_flow import (
 from cognee.modules.integrations.plugin_keys import (
     PluginAgentKeyLimitError,
     add_plugin_agent_key,
+    revoke_plugin_agent_keys,
 )
 from cognee.modules.integrations.plugin_status import (
     PluginStatusRow,
@@ -344,6 +346,12 @@ async def _add_plugin_key(agent_user_id: UUID, plugin_key: str):
         )
 
 
+def _reject_agent_caller(user: User) -> None:
+    """The key routes manage an agent's keys on behalf of its human owner only."""
+    if user.parent_user_id is not None:
+        raise HTTPException(status_code=403, detail="An agent cannot manage plugin keys.")
+
+
 # The state proves an install was started by some cognee user; it does not
 # prove the browser completing it belongs to that user, because the state
 # travels in a URL anyone can be handed. This cookie is what binds the two:
@@ -577,17 +585,14 @@ def get_integrations_router():
 
         Idempotent get-or-create: the first call creates an agent sub-user
         for ``(user, plugin_key)``; every later call returns the same agent.
-        Every call adds one new key and never revokes another, so each machine
-        holds its own key. The returned key is shown once and never
-        retrievable again.
+        Every call adds one new key, so each machine holds its own. The
+        returned key is shown once and never retrievable again.
 
-        Below the per-agent cap nothing is deleted. Only when the new key would
-        not fit are stale keys of that agent pruned, just enough of them, least
-        recently used first: keys last used more than ``PLUGIN_KEY_IDLE_DAYS``
-        ago (default 30), and never-used keys older than
-        ``PLUGIN_KEY_UNUSED_HOURS`` (default 24); 0 disables a rule. A full
-        agent without enough stale keys answers 409 and nothing changes —
-        revoke an old key through ``DELETE /plugins/{plugin_key}/keys/{key_id}``.
+        Provisioning never deletes a key. An agent already holding
+        ``MAX_USER_API_KEYS`` keys (default 10) answers 409 and nothing changes:
+        free a slot through ``DELETE /plugins/{plugin_key}/keys/{key_id}``.
+        Provisioning does not revoke a leaked key either: revoke it the same
+        way, or every key through ``DELETE /plugins/{plugin_key}``.
 
         ## Path Parameters
         - **plugin_key** (str): Key of a known plugin (see GET /api/v1/integrations/status).
@@ -655,11 +660,13 @@ def get_integrations_router():
 
         Metadata only (id, name, label, created, last used); the key
         itself is never returned. Empty when the plugin was never provisioned.
+        An agent caller is a 403: only the agent's owner manages its keys.
 
         ## Path Parameters
         - **plugin_key** (str): Key of a known plugin (see GET /api/v1/integrations/status).
         """
         _plugin_or_404(plugin_key)
+        _reject_agent_caller(user)
         agent_user = await _find_plugin_agent(user, plugin_key)
         if agent_user is None:
             return PluginKeyListDTO(keys=[])
@@ -684,7 +691,8 @@ def get_integrations_router():
 
         Scoped to that plugin's agent of the authenticated user: a key of any
         other principal is a 404, exactly like an unknown id. Other machines'
-        keys stay valid; ``DELETE /plugins/{plugin_key}`` revokes them all.
+        keys stay valid; ``DELETE /plugins/{plugin_key}`` revokes them all. An
+        agent caller is a 403.
 
         ## Path Parameters
         - **plugin_key** (str): Key of a known plugin (see GET /api/v1/integrations/status).
@@ -693,6 +701,7 @@ def get_integrations_router():
         with new_span("cognee.integrations.plugins.revoke_key") as span:
             span.set_attribute("cognee.integrations.plugin", plugin_key)
             _plugin_or_404(plugin_key)
+            _reject_agent_caller(user)
             agent_user = await _find_plugin_agent(user, plugin_key)
             if agent_user is None:
                 raise HTTPException(status_code=404, detail="API key not found")
@@ -724,8 +733,7 @@ def get_integrations_router():
             if agent_user is None:
                 return DisconnectResultDTO(disconnected=False)
 
-            for api_key in await get_api_keys(agent_user):
-                await delete_api_key(agent_user, api_key.id)
+            await revoke_plugin_agent_keys(agent_user.id)
 
             connection_id = build_agent_connection_id(
                 agent_session_name=_plugin_session_name(plugin_key),
