@@ -57,6 +57,10 @@ async def save_data_item_to_storage_detailed(
     hash it. Items that are already addressable storage (an ``s3://`` URL, a
     local path) are handed through untouched and carry no metadata.
     """
+    if isinstance(data_item, StoredFile):
+        # Repository documents were copied under the clone lock.
+        return data_item
+
     if "llama_index" in str(type(data_item)):
         # Dynamic import is used because the llama_index module is optional.
         from .transform_data import get_data_from_llama_index

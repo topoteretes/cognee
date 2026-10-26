@@ -91,7 +91,7 @@ class _FakeProcess:
         pass
 
     async def wait(self):
-        pass
+        return self.returncode
 
 
 @pytest.mark.asyncio

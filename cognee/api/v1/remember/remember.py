@@ -107,7 +107,6 @@ class RememberKwargs(TypedDict, total=False):
     content_type: Literal["skills", "code"]
     skill_improvement: dict[str, Any]
     index_vectors: bool
-    repo_credentials: str
     branch: str
     skills_text: str
     skill_name: str
@@ -1626,8 +1625,12 @@ async def _remember_inner(
         )
     if index_vectors is not None and content_type != "code":
         raise ValueError("index_vectors is supported only for content_type='code'.")
-    if repo_credentials is not None and content_type != "code":
-        raise ValueError("repo_credentials is supported only for content_type='code'.")
+    if repo_credentials is not None:
+        raise ValueError(
+            "repo_credentials is not supported by remember(): ingest a private repository "
+            "with add(url, codegraph_config={'repo_credentials': ...}) and "
+            "cognify(data_ids=...)."
+        )
     if kwargs.get("branch") is not None and content_type is not None:
         # Only the add() route reads it, so a content_type call would drop it silently.
         raise ValueError(
@@ -1660,8 +1663,13 @@ async def _remember_inner(
         repo_specs = data if isinstance(data, list) else [data]
         if not repo_specs or not all(isinstance(spec, (str, _Path)) for spec in repo_specs):
             raise ValueError(
-                "content_type='code' expects a repository path or git URL "
-                "(or a list of them) as data."
+                "content_type='code' expects a local repository path (or a list of them) as data."
+            )
+        if any(is_remote_repo(spec) for spec in repo_specs):
+            raise ValueError(
+                "remember(content_type='code') reads local repositories only. Ingest a "
+                "remote repository with add(url, codegraph_config=...) and "
+                "cognify(data_ids=...)."
             )
 
         send_telemetry(
@@ -1719,7 +1727,7 @@ async def _remember_inner(
                 )
 
         async def _run_one_repo(spec, item: dict) -> None:
-            repo_path = await resolve_repo_source(spec, credentials=repo_credentials)
+            repo_path = await resolve_repo_source(spec)
             item["path"] = str(repo_path)
             # The Data row's stamps are read-modify-written as a whole: holding
             # the dataset lock from the row write to the final stamp keeps a
@@ -1741,7 +1749,6 @@ async def _remember_inner(
                     repo_path,
                     user=user,
                     dataset=dataset,
-                    source_url=item["source"] if is_remote_repo(spec) else None,
                     skip_connection_test=skip_connection_test,
                 )
                 item["id"] = str(data.id)

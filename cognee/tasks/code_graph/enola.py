@@ -24,6 +24,7 @@ from fastapi import status
 
 from cognee.exceptions import CogneeConfigurationError, CogneeSystemError
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.code_graph.process import run_process
 
 logger = get_logger("enola")
 
@@ -138,30 +139,22 @@ async def run_enola_generate(
 
     logger.info("Running enola: %s (cwd=%s)", " ".join(command), repo_path)
 
-    process = await asyncio.create_subprocess_exec(
-        *command,
-        cwd=str(repo_path),
-        env={**os.environ, **_SUBPROCESS_ENV_OVERRIDES},
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-
     try:
-        _stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        returncode, _stdout, stderr = await run_process(
+            command, cwd=repo_path, env={**os.environ, **_SUBPROCESS_ENV_OVERRIDES}, timeout=timeout
+        )
     except asyncio.TimeoutError:
-        process.kill()
-        await process.wait()
         raise EnolaSnapshotError(
             message=f"enola timed out after {timeout} seconds on '{repo_path}'."
         )
 
     stderr_text = stderr.decode(errors="replace") if stderr else ""
-    if process.returncode != 0:
+    if returncode != 0:
         # Artifacts already in .enola/ may be from an earlier run; callers
         # must not ingest them (the error propagates before parsing).
         raise EnolaSnapshotError(
             message=(
-                f"enola exited with code {process.returncode} on '{repo_path}'. "
+                f"enola exited with code {returncode} on '{repo_path}'. "
                 f"stderr tail: {stderr_text[-2000:]}"
             )
         )
