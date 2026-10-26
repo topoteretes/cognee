@@ -65,10 +65,15 @@ jobs:
         # Only variables that actually have a value: a bare `LLM_ARGS=` (empty
         # secret) reaches LLMConfig.llm_args — a dict field — as "" and kills
         # the container at import time.
-        # Without secrets nothing matches; the container then runs keyless.
         { printenv | grep -E '^(LLM_|EMBEDDING_)[A-Za-z0-9_]*=.+' || true; } > .env
-        echo "EMBEDDING_DIMENSIONS=300" >> .env
-        echo "COGNEE_SKIP_CONNECTION_TEST=true" >> .env
+        # Without secrets no LLM_/EMBEDDING_ variable has a value, so .env gets
+        # no provider settings and the container runs keyless. These two belong
+        # to the keyed setup (the skip variable also switches the keyless
+        # defaults off), so they go in only with secrets.
+        if [ "${CI_HAS_SECRETS:-true}" = "true" ]; then
+          echo "EMBEDDING_DIMENSIONS=300" >> .env
+          echo "COGNEE_SKIP_CONNECTION_TEST=true" >> .env
+        fi
         # Point the relational store at the postgres service so the e2e
         # persistence test is genuinely Postgres-backed. docker compose reads
         # the same .env for ${DB_*} interpolation in docker-compose.yml, which
