@@ -34,6 +34,7 @@ shallow clone (``resolve_code_repository_url``): the clone directory is the
 "original location" the manifest points at.
 """
 
+import asyncio
 import hashlib
 import json
 from contextlib import asynccontextmanager
@@ -265,8 +266,9 @@ class RepositoryChangedError(CodeRepositoryError):
     def __init__(self):
         super().__init__(
             message=(
-                "The repository changed after add(): its checkout is shared, so another add() "
-                "of it (any dataset) moved it. Re-add it to this dataset before cognify()."
+                "The repository checkout changed or its manifest lacks the current selection. "
+                "A shared checkout can be moved by another add() in any dataset. "
+                "Re-add it to this dataset before cognify()."
             ),
             name="RepositoryChangedError",
             status_code=status.HTTP_409_CONFLICT,
@@ -282,7 +284,13 @@ def manifest_repo_name(data_item) -> str | None:
 
 
 @asynccontextmanager
-async def repository_read(directory: Path, *, remote: bool, expected_commit: str | None = None):
+async def repository_read(
+    directory: Path,
+    *,
+    remote: bool,
+    expected_commit: str | None = None,
+    expected_selection: str | None = None,
+):
     """Serialize remote source and .enola reads with clone refreshes."""
     if not remote:
         yield None
@@ -290,6 +298,16 @@ async def repository_read(directory: Path, *, remote: bool, expected_commit: str
     async with _clone_lock(directory):
         commit = await repository_commit(directory)
         if expected_commit is not None and commit != expected_commit:
+            raise RepositoryChangedError()
+        from cognee.tasks.code_graph.repo_selection import read_repository_snapshot
+
+        snapshot = read_repository_snapshot(directory)
+        actual_selection = snapshot.get("selection_fingerprint") if snapshot else None
+        if expected_commit is not None and (
+            not isinstance(expected_selection, str)
+            or not expected_selection
+            or actual_selection != expected_selection
+        ):
             raise RepositoryChangedError()
         yield commit
 
@@ -335,7 +353,13 @@ async def resolve_code_repository(
         )
         if source_url is not None:
             manifest = json.loads(item.data)
+            from cognee.tasks.code_graph.repo_selection import read_repository_snapshot
+
+            snapshot = read_repository_snapshot(directory)
             manifest.update(commit=commit, repo_key=repo_key(source_url), identity_version=2)
+            if snapshot is not None:
+                manifest["repository_snapshot"] = snapshot
+
             item.data = json.dumps(manifest, indent=2)
             item.system_metadata["identity_version"] = 2
         return item, documents, skipped
@@ -466,12 +490,24 @@ async def resolve_code_repository_url(
             "expected https://github.com/<owner>/<repo>, a gitlab.com project, or a .git URL."
         )
     from cognee.modules.ingestion import save_data_to_file_detailed
-    from cognee.tasks.ingestion.data_item import DataItem
 
     # Refresh, manifest and document copies observe one checkout. Documents must
     # live in ingestion storage: later cognify must not read a mutable clone.
-    async with _clone_lock(clone_dir(clone_url, branch)):
-        repo_path = await resolve_repo_source(clone_url, credentials=credentials, branch=branch)
+    from cognee.tasks.code_graph.repo_resources import (
+        DocumentCopyBudget,
+        repository_disk_budget,
+        stat_disk_bytes,
+    )
+    from cognee.tasks.code_graph.resolve_repo import default_clones_dir
+    from cognee.tasks.ingestion.data_item import DataItem
+
+    async with (
+        repository_disk_budget(default_clones_dir()),
+        _clone_lock(clone_dir(clone_url, branch)),
+    ):
+        repo_path = await resolve_repo_source(
+            clone_url, credentials=credentials, branch=branch, include_documents=include_documents
+        )
         source_url = redact_repo_spec(clone_url)
         manifest_item, documents, skipped = await resolve_code_repository(
             repo_path,
@@ -481,8 +517,10 @@ async def resolve_code_repository_url(
             include_documents=include_documents,
         )
         commit = json.loads(manifest_item.data)["commit"]
+        copy_budget = await asyncio.to_thread(DocumentCopyBudget, default_clones_dir())
         stored_documents = []
         for path in documents:
+            copy_budget.admit(stat_disk_bytes(path.stat()))
             with path.open("rb") as source:
                 stored = await save_data_to_file_detailed(
                     source, filename=path.name, file_extension=path.suffix
@@ -607,7 +645,10 @@ async def extract_code_repo_graph(
         node_set = validate_node_set_names(metadata.get("node_set")) if metadata else None
 
         async with repository_read(
-            repo_path, remote=repo_name is not None, expected_commit=manifest.get("commit")
+            repo_path,
+            remote=repo_name is not None,
+            expected_commit=manifest.get("commit"),
+            expected_selection=manifest.get("repository_snapshot", {}).get("selection_fingerprint"),
         ):
             data_points = await extract_code_graph(
                 repo_path=repo_path, node_set=node_set, repo_name=repo_name, namespace=repo_name

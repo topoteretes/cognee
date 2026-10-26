@@ -45,6 +45,7 @@ class Origin:
         self.bare = root / "origin.git"
         self.work = root / "work"
         _git(root, "init", "-q", "--bare", "-b", "main", str(self.bare))
+        _git(self.bare, "config", "uploadpack.allowFilter", "true")
         _git(root, "init", "-q", "-b", "main", str(self.work))
         _git(self.work, "remote", "add", "origin", str(self.bare))
         self._commit("main-1")
@@ -110,14 +111,14 @@ def _hermetic_git(tmp_path, monkeypatch):
 @pytest.fixture
 def origin(tmp_path, monkeypatch):
     origin = Origin(tmp_path / "remote")
-    real_run_git = resolve_module._run_git
+    real_exec_git = resolve_module._exec_git
 
-    async def run_git(args, cwd=None, env=None):
+    async def exec_git(args, cwd=None, env=None):
         # A file:// URL, not a path: only then is the clone shallow, like a real remote.
         remote = origin.bare.resolve().as_uri()
-        return await real_run_git([remote if arg == _URL else arg for arg in args], cwd, env)
+        return await real_exec_git([remote if arg == _URL else arg for arg in args], cwd, env)
 
-    monkeypatch.setattr(resolve_module, "_run_git", run_git)
+    monkeypatch.setattr(resolve_module, "_exec_git", exec_git)
     real_origin_url = resolve_module._origin_url
 
     async def origin_url(clone):
@@ -489,6 +490,7 @@ async def test_private_http_clone_requires_current_callers_credentials(
                     **os.environ,
                     "GIT_PROJECT_ROOT": str(origin.bare.parent),
                     "GIT_HTTP_EXPORT_ALL": "1",
+                    "HTTP_GIT_PROTOCOL": self.headers.get("Git-Protocol", ""),
                     "REQUEST_METHOD": self.command,
                     "PATH_INFO": parts.path,
                     "QUERY_STRING": parts.query,

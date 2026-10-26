@@ -40,6 +40,7 @@ class Remote:
         self.work = root / name
         self.work.mkdir(parents=True)
         git(self.work, "init", "-q", "-b", "main")
+        git(self.work, "config", "uploadpack.allowFilter", "true")
         self.commit("original")
         # Git rewrites the transport, while origin.url keeps its hosted URL.
         git(

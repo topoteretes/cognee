@@ -17,6 +17,8 @@ import os
 import platform
 import shutil
 import sysconfig
+import tempfile
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +26,8 @@ from fastapi import status
 
 from cognee.exceptions import CogneeConfigurationError, CogneeSystemError
 from cognee.shared.logging_utils import get_logger
-from cognee.tasks.code_graph.process import run_process
+from cognee.tasks.code_graph.process import finish_cleanup, run_process
+from cognee.tasks.code_graph.repo_resources import RepositoryResourceError, repository_disk_budget
 
 logger = get_logger("enola")
 
@@ -56,7 +59,12 @@ _RELATION_TARGET_KEYS = ("target", "name", "to", "target_name")
 # runs, so enola's own release check (a GitHub API call, cached 12h under
 # ~/.enola) is pure noise here — and the run must stay offline-safe. Prompts
 # and terminal hints assume an interactive shell.
-_SUBPROCESS_ENV_OVERRIDES = {"ENOLA_NO_UPDATE_CHECK": "1", "ENOLA_NO_PROMPTS": "1"}
+# LC_ALL=C keeps enola's disk-full message in English, which run_enola_generate matches.
+_SUBPROCESS_ENV_OVERRIDES = {
+    "ENOLA_NO_UPDATE_CHECK": "1",
+    "ENOLA_NO_PROMPTS": "1",
+    "LC_ALL": "C",
+}
 
 
 class EnolaNotInstalledError(CogneeConfigurationError):
@@ -139,17 +147,56 @@ async def run_enola_generate(
 
     logger.info("Running enola: %s (cwd=%s)", " ".join(command), repo_path)
 
+    # Only a managed clone is measured, and its scratch stays inside it so the budget
+    # sees it. A local checkout is the caller's own: it is neither charged to the
+    # repository budget nor used for scratch files.
+    is_clone = (repo_path / ".git" / "cognee-snapshot.json").is_file()
+    started = False
     try:
-        returncode, _stdout, stderr = await run_process(
-            command, cwd=repo_path, env={**os.environ, **_SUBPROCESS_ENV_OVERRIDES}, timeout=timeout
-        )
+        async with repository_disk_budget(repo_path.parent) if is_clone else nullcontext():
+            # A killed run cannot clean up; the clone lock makes these leftovers ours.
+            for leftover in (repo_path / ".git").glob("cognee-enola-*") if is_clone else ():
+                await asyncio.to_thread(shutil.rmtree, leftover)
+            scratch = Path(
+                tempfile.mkdtemp(
+                    prefix="cognee-enola-", dir=repo_path / ".git" if is_clone else None
+                )
+            )
+            try:
+                started = True
+                returncode, _stdout, stderr = await run_process(
+                    command,
+                    cwd=repo_path,
+                    env={
+                        **os.environ,
+                        **_SUBPROCESS_ENV_OVERRIDES,
+                        "TMPDIR": str(scratch),
+                        "TMP": str(scratch),
+                        "TEMP": str(scratch),
+                    },
+                    timeout=timeout,
+                )
+            finally:
+                await finish_cleanup(asyncio.to_thread(shutil.rmtree, scratch))
+    except (asyncio.CancelledError, RepositoryResourceError):
+        if started and snapshot_dir.exists():
+            await finish_cleanup(asyncio.to_thread(shutil.rmtree, snapshot_dir))
+        raise
     except asyncio.TimeoutError:
+        if started and snapshot_dir.exists():
+            await finish_cleanup(asyncio.to_thread(shutil.rmtree, snapshot_dir))
         raise EnolaSnapshotError(
             message=f"enola timed out after {timeout} seconds on '{repo_path}'."
         )
 
     stderr_text = stderr.decode(errors="replace") if stderr else ""
     if returncode != 0:
+        if any(
+            message in stderr for message in (b"No space left on device", b"Disk quota exceeded")
+        ):
+            if snapshot_dir.exists():
+                await finish_cleanup(asyncio.to_thread(shutil.rmtree, snapshot_dir))
+            raise RepositoryResourceError("filesystem space or quota exhausted")
         # Artifacts already in .enola/ may be from an earlier run; callers
         # must not ingest them (the error propagates before parsing).
         raise EnolaSnapshotError(

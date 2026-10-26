@@ -52,8 +52,17 @@ async def stop_process_tree(spawning, communication) -> None:
     await communication
 
 
+class ProcessOutputError(RuntimeError):
+    """A process emitted output that requires terminating its transfer."""
+
+
 async def run_process(
-    command: list[str], *, cwd: Path | None = None, env: dict | None = None, timeout: float
+    command: list[str],
+    *,
+    cwd: Path | None = None,
+    env: dict | None = None,
+    timeout: float,
+    reject_stderr: bytes | None = None,
 ) -> tuple[int, bytes, bytes]:
     """Run a command; timeout and cancellation reap its children before raising."""
     spawning = asyncio.create_task(
@@ -67,11 +76,47 @@ async def run_process(
         )
     )
     communication = None
+    rejection = asyncio.Event()
+    rejected = None
+
+    async def read_stderr(stream, needle: bytes):
+        chunks = []
+        tail = b""
+        while chunk := await stream.read(65536):
+            chunks.append(chunk)
+            combined = tail + chunk
+            if needle in combined:
+                rejection.set()
+            tail = combined[-len(needle) :]
+        return b"".join(chunks)
+
+    async def communicate(process):
+        stdout, stderr = await asyncio.gather(
+            process.stdout.read(), read_stderr(process.stderr, reject_stderr or b"")
+        )
+        await process.wait()
+        return stdout, stderr
+
     try:
         process = await asyncio.shield(spawning)
-        communication = asyncio.create_task(process.communicate())
+        if reject_stderr is None:
+            communication = asyncio.create_task(process.communicate())
+        else:
+            communication = asyncio.create_task(communicate(process))
+            rejected = asyncio.create_task(rejection.wait())
+            done, _ = await asyncio.wait(
+                {communication, rejected}, timeout=timeout, return_when=asyncio.FIRST_COMPLETED
+            )
+            if rejection.is_set():
+                raise ProcessOutputError("The Git server ignored the partial clone filter.")
+            if not done:
+                raise asyncio.TimeoutError
         stdout, stderr = await asyncio.wait_for(asyncio.shield(communication), timeout)
-    except (asyncio.CancelledError, asyncio.TimeoutError):
+    except (asyncio.CancelledError, asyncio.TimeoutError, ProcessOutputError):
         await finish_cleanup(stop_process_tree(spawning, communication))
         raise
+    finally:
+        if rejected is not None:
+            rejected.cancel()
+            await finish_cleanup(asyncio.gather(rejected, return_exceptions=True))
     return await process.wait(), stdout, stderr

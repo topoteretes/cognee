@@ -49,6 +49,10 @@ PACKAGE_ROOT = Path(cognee.__file__).parent
 SAMPLE_ARGUMENTS = {
     "conflicts": [{"name": "report.txt", "data_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"}],
     "attribute": "sample_attribute",
+    # LegacyRepositoryError names the stored record that predates the current identity.
+    "where": "a remote manifest",
+    # RepositoryResourceError names what stopped the repository work.
+    "reason": "sample storage reason",
     # CapabilityDeniedError builds its message from the capability it refused.
     "capability": "sample_capability",
     # SessionNodeSetConflictError: the node_set pinned on the session vs the one requested.

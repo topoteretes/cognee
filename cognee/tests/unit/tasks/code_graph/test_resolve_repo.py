@@ -22,6 +22,25 @@ def _fake_clones_have_a_commit(monkeypatch):
     )
 
 
+@pytest.fixture(autouse=True)
+def _fake_tree_snapshot(monkeypatch):
+    original = resolve_module._exec_git
+
+    async def tree_command(args, cwd=None, env=None):
+        if args[0] == "rev-parse":
+            return 0, "a" * 40, ""
+        if args[0] == "ls-tree":
+            return 0, "", ""
+        return await original(args, cwd=cwd, env=env)
+
+    monkeypatch.setattr(resolve_module, "_exec_git", tree_command)
+    monkeypatch.setattr(
+        importlib.import_module("cognee.tasks.code_graph.repo_selection"),
+        "read_repository_snapshot",
+        lambda path: {"commit": "a" * 40},
+    )
+
+
 def test_is_remote_repo_detection():
     assert resolve_module.is_remote_repo("https://github.com/org/repo")
     assert resolve_module.is_remote_repo("http://gitlab.example.com/org/repo.git")
@@ -106,7 +125,7 @@ async def test_remote_is_shallow_cloned(monkeypatch, tmp_path):
     )
 
     assert resolved == resolve_module.clone_dir("https://github.com/org/repo", clones_dir=tmp_path)
-    assert len(git_calls) == 1
+    assert len(git_calls) == 6
     args, _cwd = git_calls[0]
     # core.symlinks=false is a security requirement, not incidental: without it a
     # symlink committed in the remote is materialized and later written through.
@@ -133,8 +152,23 @@ async def test_existing_clone_is_fetched_and_reset(monkeypatch, tmp_path):
 
     assert resolved == clone_dir
     assert git_calls == [
-        (["fetch", "--depth", "1", "https://github.com/org/repo", "HEAD"], clone_dir),
-        (["reset", "--hard", "FETCH_HEAD"], clone_dir),
+        (
+            [
+                "fetch",
+                "--depth",
+                "1",
+                "--filter=blob:none",
+                "--no-recurse-submodules",
+                "https://github.com/org/repo",
+                "HEAD",
+            ],
+            clone_dir,
+        ),
+        (["config", "remote.origin.promisor", "true"], clone_dir),
+        (["config", "remote.origin.partialclonefilter", "blob:none"], clone_dir),
+        (["config", "core.sparseCheckout", "true"], clone_dir),
+        (["config", "core.sparseCheckoutCone", "false"], clone_dir),
+        (["reset", "--hard", "a" * 40], clone_dir),
     ]
 
 
@@ -150,7 +184,7 @@ async def test_failed_refresh_never_returns_stale_clone(monkeypatch, tmp_path, f
 
     monkeypatch.setattr(resolve_module, "_run_git", fake_run_git)
 
-    with pytest.raises(resolve_module.CodeRepositoryError, match="Could not refresh"):
+    with pytest.raises(resolve_module.CodeRepositoryError, match="Could not (refresh|checkout)"):
         await resolve_module.resolve_repo_source("https://github.com/org/repo", clones_dir=tmp_path)
 
 
@@ -320,7 +354,7 @@ async def test_git_never_prompts(monkeypatch):
         )
     assert seen["GIT_SSH_COMMAND"] == "ssh -i ~/.ssh/deploy_key"
     # The caller's config entries come first; the no-stored-credentials ones follow.
-    assert (seen["GIT_CONFIG_COUNT"], seen["GIT_CONFIG_KEY_0"]) == ("3", "a.b")
+    assert (seen["GIT_CONFIG_COUNT"], seen["GIT_CONFIG_KEY_0"]) == ("6", "a.b")
 
 
 def test_a_www_prefix_never_makes_a_second_identity():

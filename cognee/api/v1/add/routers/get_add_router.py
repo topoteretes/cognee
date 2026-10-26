@@ -43,6 +43,7 @@ def get_add_router() -> APIRouter:
             403: {"model": ErrorResponse},
             422: {"model": ErrorResponse},
             500: {"model": ErrorResponse},
+            507: {"model": ErrorResponse},
         },
     )
     @log_usage(function_name="POST /v1/add", log_type="api_endpoint")
@@ -222,7 +223,11 @@ def get_add_router() -> APIRouter:
                 # or the model's repr.
                 detail = add_run.payload if isinstance(add_run.payload, str) else None
                 return JSONResponse(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    status_code=(
+                        status.HTTP_507_INSUFFICIENT_STORAGE
+                        if add_run is not None and add_run.error_class == "RepositoryResourceError"
+                        else status.HTTP_500_INTERNAL_SERVER_ERROR
+                    ),
                     content=ErrorResponse(
                         error="Pipeline run errored",
                         detail=detail or str(add_run),

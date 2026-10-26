@@ -130,7 +130,10 @@ async def test_failed_clone_verification_never_publishes(monkeypatch, tmp_path):
         resolve, "_origin_url", AsyncMock(return_value="https://github.com/acme/api")
     )
     monkeypatch.setattr(resolve, "_has_commit", AsyncMock(return_value=False))
-    with pytest.raises(resolve.CodeRepositoryError, match="no checked-out commit"):
+    with pytest.raises(
+        resolve.CodeRepositoryError,
+        match="(no checked-out commit|Could not resolve repository commit)",
+    ):
         await resolve.resolve_repo_source("https://github.com/acme/api", tmp_path)
     assert not resolve.clone_dir("https://github.com/acme/api", clones_dir=tmp_path).exists()
     assert not list(tmp_path.glob("*.tmp-*"))
