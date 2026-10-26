@@ -42,7 +42,19 @@ async def test_rows_that_never_set_the_column_keep_their_pre_contract_hash(stagi
         json.dumps(drive_row, sort_keys=True, default=str).encode()
     ).hexdigest()
     assert rows[0].content_hash == legacy_hash
-    assert _build_document_data_item(rows[0], None, "google_drive").node_set is None
+    # A row states its full node sets, so no column means none: [] clears what a
+    # re-sync of an existing document had stored, where None would keep it.
+    assert _build_document_data_item(rows[0], None, "google_drive").node_set == []
+
+
+@pytest.mark.asyncio
+async def test_an_empty_list_means_no_node_sets_not_unknown(staging):
+    """A page whose labels were all removed must clear them on re-sync, not keep them."""
+    rows = await staging(
+        "notion_pages", [{"id": "p1", "title": "T", "content": "C", NODE_SET_COLUMN: []}]
+    )
+
+    assert _build_document_data_item(rows[0], None, "notion").node_set == []
 
 
 @pytest.mark.asyncio
