@@ -106,6 +106,21 @@ async def test_name_is_the_document_name_not_the_content_addressed_key(storage_r
 
 
 @pytest.mark.asyncio
+async def test_caller_filename_wins_over_the_streams_own_name(storage_root, tmp_path_factory):
+    # Starlette spools an upload over 1 MiB to a temp file. On Windows that file
+    # has a real path (tmpXXXX) as its .name, which used to replace the filename
+    # the user uploaded: the key lost its suffix, so a CSV was loaded as text.
+    spooled = tmp_path_factory.mktemp("spool") / "tmp7_tkujif"
+    spooled.write_bytes(b"name,city\nalice,paris\n")
+
+    with open(spooled, "rb") as stream:
+        stored = await save_data_to_file_detailed(stream, filename="people.csv")
+
+    assert stored.file_path.endswith("/people.csv")
+    assert stored.metadata["name"] == "people"
+
+
+@pytest.mark.asyncio
 async def test_text_payloads_keep_their_text_named_key(storage_root):
     # text_<md5>.txt is constructed by hand elsewhere in cognee (the cloud
     # client asserts on it), so text stays the one naming source it always was.
