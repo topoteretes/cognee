@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from cognee import __version__ as cognee_version
 from cognee import datasets
 from cognee.api.DTO import InDTO, OutDTO
-from cognee.api.v1.datasets.dto import DataDTO
+from cognee.api.v1.datasets.dto import DataDTO, DeleteDataReceiptDTO
 from cognee.api.v1.exceptions import DataNotFoundError
 from cognee.exceptions import CogneeApiError
 from cognee.infrastructure.databases.relational import get_relational_engine
@@ -366,7 +366,7 @@ def get_datasets_router() -> APIRouter:
 
     @router.delete(
         "/{dataset_id}/data/{data_id}",
-        response_model=None,
+        response_model=DeleteDataReceiptDTO,
         responses={404: {"model": ErrorResponseDTO}},
     )
     async def delete_data(
@@ -392,15 +392,31 @@ def get_datasets_router() -> APIRouter:
         - **data_id** (UUID): The unique identifier of the data item to delete
 
         ## Response
-        No content returned on successful deletion.
+        A deletion receipt (``DeleteDataReceiptDTO``, camelCase on the wire): ``status``
+        (``"success"``, or ``"not_found"`` when neither a Data row nor a graph element
+        existed for the id — nothing removed, counts ``0``, still a 200 because deleting
+        is idempotent), ``datasetId``, ``dataId`` (the resolved id), ``dataRecordFound``
+        (a Data row for the id existed), ``deletedNodes`` / ``deletedEdges`` (graph
+        elements removed), ``dataRemaining`` (``false`` when an existence check after the
+        delete no longer finds the Data row — the verified outcome; ``null`` when no Data
+        row existed) and ``datasetDeleted`` (always ``false`` here).
+
+        Changed (SDK-1150): releases up to 1.6.x answered ``null`` (no body) on success.
+        Clients that asserted an empty 200 now receive the receipt; the ``status`` key
+        keeps its historical value.
 
         ## Error Codes
         - **401 Unauthorized**: Dataset doesn't exist or user lacks delete permission
-        - **500 Internal Server Error**: Error during deletion
+        - **500 Internal Server Error**: The Data row was still present after the delete
+          (``DataDeletionIncompleteError``; retry), or another error during deletion
 
         ## Notes
-        Deleting a data_id not tracked in the dataset is treated as a custom-graph-model
-        deletion and returns success.
+        A ``data_id`` with no Data row but with graph elements it owns is a custom-graph-
+        model deletion: those elements are removed and the receipt says
+        ``dataRecordFound: false``, ``dataRemaining: null``. A ``data_id`` that owns
+        nothing (mistyped, another dataset's, or already deleted) answers
+        ``status: "not_found"`` with zero counts — check ``status``, not just the HTTP
+        code, before treating a delete as verified.
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
@@ -413,7 +429,7 @@ def get_datasets_router() -> APIRouter:
             },
         )
 
-        await datasets.delete_data(dataset_id, data_id, user)
+        return await datasets.delete_data(dataset_id, data_id, user)
 
     @router.get("/{dataset_id}/graph", response_model=GraphDTO)
     async def get_dataset_graph(
