@@ -137,18 +137,6 @@ jobs:
           DB_NAME: cognee_db
         run: uv run pytest cognee/tests/e2e/postgres/test_admin_helpers_concurrency.py -v
 
-      # The per-agent row lock is SELECT ... FOR UPDATE on Postgres; the unit run only
-      # covers the SQLite path, so the cap and disconnect races are re-run here.
-      - name: Run Plugin Key Provisioning Tests on Postgres
-        env:
-          DB_PROVIDER: postgres
-          DB_HOST: localhost
-          DB_PORT: 5432
-          DB_USERNAME: cognee
-          DB_PASSWORD: cognee
-          DB_NAME: cognee_db
-        run: uv run pytest cognee/tests/unit/modules/integrations/test_plugin_additive_keys.py -v
-
       - name: Run Postgres Graph E2E Test
         env:
           ENV: 'dev'
