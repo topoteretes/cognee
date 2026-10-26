@@ -56,8 +56,8 @@ def clone_url(full_name: str) -> str:
 
     Deliberately carries no token: auth travels out-of-band as
     ``repo_credentials`` (injected into git via environment config by
-    ``resolve_repo_source``), so no URL-derived string — clone slugs, result
-    items, logs, git error output — can ever leak a secret.
+    ``resolve_repo_source``), so no URL-derived string — result items, logs,
+    git error output — can ever leak a secret.
     """
     return f"https://github.com/{full_name}.git"
 

@@ -60,14 +60,12 @@ def code_remember_env(monkeypatch, tmp_path):
 @pytest.mark.asyncio
 async def test_single_repo_runs_code_graph_pipeline(code_remember_env):
     result = await remember(
-        "https://github.com/org/repo",
+        "/local/org/repo",
         dataset_name="my_code",
         content_type="code",
     )
 
-    code_remember_env["resolve"].assert_awaited_once_with(
-        "https://github.com/org/repo", credentials=None
-    )
+    code_remember_env["resolve"].assert_awaited_once_with("/local/org/repo")
     code_remember_env["pipeline"].assert_awaited_once()
     call = code_remember_env["pipeline"].await_args
     assert call.kwargs["dataset"] == code_remember_env["dataset"].id
@@ -78,12 +76,12 @@ async def test_single_repo_runs_code_graph_pipeline(code_remember_env):
     assert result.status == "completed"
     assert result.items_processed == 1
     assert result.items[0]["kind"] == "code_repository"
-    assert result.items[0]["source"] == "https://github.com/org/repo"
+    assert result.items[0]["source"] == "/local/org/repo"
 
 
 @pytest.mark.asyncio
 async def test_repo_list_runs_pipeline_per_repo(code_remember_env):
-    repos = ["https://github.com/org/a", "https://github.com/org/b", "/local/c"]
+    repos = ["/local/org/a", "/local/org/b", "/local/c"]
 
     result = await remember(repos, content_type="code")
 
@@ -98,26 +96,16 @@ async def test_repo_list_runs_pipeline_per_repo(code_remember_env):
 @pytest.mark.asyncio
 async def test_each_repo_is_stored_as_a_data_row_in_the_dataset(code_remember_env):
     """SDK-783: a repository gets a Data row, so the caller has a data_id to forget."""
-    result = await remember(
-        "https://github.com/org/repo", dataset_name="my_code", content_type="code"
-    )
+    result = await remember("/local/org/repo", dataset_name="my_code", content_type="code")
 
     code_remember_env["add_repo"].assert_awaited_once_with(
         code_remember_env["repo_dir"],
         user=code_remember_env["user"],
         dataset=code_remember_env["dataset"],
-        source_url="https://github.com/org/repo",
         skip_connection_test=True,
     )
     assert result.items[0]["id"] == str(code_remember_env["data_row"].id)
     assert result.dataset_id == str(code_remember_env["dataset"].id)
-
-
-@pytest.mark.asyncio
-async def test_local_repo_row_records_no_source_url(code_remember_env):
-    await remember(str(code_remember_env["repo_dir"]), content_type="code")
-
-    assert code_remember_env["add_repo"].await_args.kwargs["source_url"] is None
 
 
 @pytest.mark.asyncio
@@ -166,7 +154,7 @@ async def test_session_id_is_rejected_for_code(code_remember_env):
 
 @pytest.mark.asyncio
 async def test_non_string_data_is_rejected(code_remember_env):
-    with pytest.raises(ValueError, match="repository path or git URL"):
+    with pytest.raises(ValueError, match="local repository path"):
         await remember([{"not": "a repo"}], content_type="code")
 
 
@@ -224,7 +212,7 @@ async def test_blocking_errored_run_marks_result_errored(code_remember_env):
 async def test_run_in_background_returns_running_then_completes(code_remember_env):
     resolved_dataset = code_remember_env["dataset"]
     result = await remember(
-        "https://github.com/org/repo",
+        "/local/org/repo",
         dataset_name="my_code",
         content_type="code",
         run_in_background=True,
@@ -248,7 +236,7 @@ async def test_background_failure_continues_batch(code_remember_env):
     code_remember_env["resolve"].side_effect = [RuntimeError("clone failed"), repo_dir]
 
     result = await remember(
-        ["https://github.com/org/bad", "https://github.com/org/good"],
+        ["/local/org/bad", "/local/org/good"],
         content_type="code",
         run_in_background=True,
     )
@@ -257,8 +245,8 @@ async def test_background_failure_continues_batch(code_remember_env):
     assert result.status == "errored"
     assert "clone failed" in result.error
     assert [item["source"] for item in result.items] == [
-        "https://github.com/org/bad",
-        "https://github.com/org/good",
+        "/local/org/bad",
+        "/local/org/good",
     ]
     assert result.items[0]["status"] == "errored"
     assert result.items[1].get("status") != "errored"
@@ -298,16 +286,14 @@ async def test_result_error_names_every_failed_repo(code_remember_env):
     }
 
     result = await remember(
-        ["https://github.com/org/a", "https://github.com/org/b"],
+        ["/local/org/a", "/local/org/b"],
         content_type="code",
         raise_on_error=False,
     )
 
     assert result.status == "errored"
     assert result.items[0]["error"] == "enola crashed"
-    assert result.error == (
-        "https://github.com/org/a: enola crashed; https://github.com/org/b: clone failed"
-    )
+    assert result.error == ("/local/org/a: enola crashed; /local/org/b: clone failed")
 
 
 @pytest.mark.asyncio
@@ -351,7 +337,7 @@ async def test_blocking_raises_a_failed_repo_by_default(code_remember_env):
     code_remember_env["resolve"].side_effect = RuntimeError("clone failed")
 
     with pytest.raises(RuntimeError, match="clone failed"):
-        await remember("https://github.com/org/bad", content_type="code")
+        await remember("/local/org/bad", content_type="code")
 
 
 @pytest.mark.asyncio
@@ -363,7 +349,7 @@ async def test_blocking_with_raise_on_error_false_reports_failed_repos(code_reme
     code_remember_env["resolve"].side_effect = [RuntimeError("clone failed"), repo_dir]
 
     result = await remember(
-        ["https://github.com/org/bad", "https://github.com/org/good"],
+        ["/local/org/bad", "/local/org/good"],
         content_type="code",
         raise_on_error=False,
     )
@@ -438,7 +424,7 @@ async def test_code_sync_keeps_one_phase_so_repository_progress_survives(
     )
     async with track_sync("github", credential) as reporter:
         result = await remember(
-            ["https://github.com/org/a", "https://github.com/org/b"],
+            ["/local/org/a", "/local/org/b"],
             content_type="code",
             raise_on_error=False,
         )
@@ -449,3 +435,20 @@ async def test_code_sync_keeps_one_phase_so_repository_progress_survives(
         assert snapshot.counts == {"processed": 1, "failed": 1}
         await reporter.finish("partial", reason="processing_error")
     assert observations[-1].state == "partial"
+
+
+@pytest.mark.asyncio
+async def test_a_remote_repository_is_refused_and_points_to_add_and_cognify(code_remember_env):
+    with pytest.raises(ValueError, match=r"add\(url, codegraph_config=.*cognify\(data_ids="):
+        await remember(["/local/a", "https://github.com/org/repo"], content_type="code")
+
+    code_remember_env["resolve"].assert_not_awaited()
+    code_remember_env["pipeline"].assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_repo_credentials_are_refused_by_remember(code_remember_env):
+    with pytest.raises(ValueError, match="repo_credentials is not supported by remember"):
+        await remember("/local/a", content_type="code", repo_credentials="tok")
+
+    code_remember_env["pipeline"].assert_not_awaited()

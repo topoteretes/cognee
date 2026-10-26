@@ -498,6 +498,9 @@ async def test_run_enola_generate_passes_the_repo_explicitly_and_stays_offline(
         class _Process:
             returncode = 0
 
+            async def wait(self):
+                return self.returncode
+
             async def communicate(self):
                 return b"", b"enola: no mcp-arch.yaml in /repo, using built-in defaults\n"
 

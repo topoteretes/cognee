@@ -81,6 +81,7 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 | [`multimedia_audio_image_processing_example.py`](guides/multimedia_audio_image_processing_example.py) | Audio + image ingestion (bundled assets) |
 | [`image_ocr_extraction.py`](guides/image_ocr_extraction.py) | Vision transcription + OCR text for an image |
 | [`code_graph_example.py`](guides/code_graph_example.py) | Code-graph pipeline + `SearchType.CODE` |
+| [`remote_code_repository.py`](guides/remote_code_repository.py) | Safe remote repository ingestion through `add` → scoped `cognify` |
 | [`gmail.py`](guides/gmail.py) | Ingest Gmail with the bundled SDK connector, incremental sync and delete propagation (needs `cognee[gmail]`) |
 | [`google_drive.py`](guides/google_drive.py) | Ingest a Drive folder with the bundled SDK connector (needs `cognee[google-drive]`) |
 | [`google_calendar.py`](guides/google_calendar.py) | Ingest a Google Calendar with the bundled SDK connector, incremental sync through Google's sync token (needs `cognee[google-calendar]`) |

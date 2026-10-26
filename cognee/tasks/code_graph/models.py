@@ -18,6 +18,8 @@ class CodeRepository(DataPoint):
 
     name: str
     path: str
+    # Canonical remote owner, including for named subrepositories. Local graphs omit it.
+    remote_repository: str | None = None
     last_snapshot_id: str | None = None
     last_mapping_version: int | None = None
     last_delta: dict | None = None
@@ -51,6 +53,7 @@ class CodeGraphEntity(DataPoint):
     line: int | None = None
     end_line: int | None = None
     repo: str | None = None
+    remote_repository: str | None = None
     enola_id: str | None = None
     description: str | None = None
     doc: str | None = None

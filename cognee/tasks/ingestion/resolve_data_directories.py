@@ -122,7 +122,7 @@ async def resolve_data_directories(
                     branch=branch,
                 )
                 resolved_data.append(manifest_item)
-                resolved_data.extend(str(path) for path in document_paths)
+                resolved_data.extend(document_paths)
                 continue
 
             local_path = _resolve_existing_local_path(item)
