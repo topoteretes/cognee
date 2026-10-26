@@ -1,16 +1,12 @@
 import asyncio
+from uuid import uuid4
 
-import cognee
-from cognee.infrastructure.databases.relational import create_db_and_tables
 from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
 from cognee.modules.pipelines.tasks.task import Task
-from cognee.modules.users.methods import get_default_user
+from cognee.modules.users.models import User
 
 
 async def run_and_check_tasks():
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
-
     def number_generator(num):
         for i in range(num):
             yield i + 1
@@ -25,8 +21,7 @@ async def run_and_check_tasks():
     async def add_one_single(nums):
         yield nums[0] + 1
 
-    await create_db_and_tables()
-    user = await get_default_user()
+    user = User(id=uuid4(), tenant_id=None)
 
     pipeline = run_tasks_base(
         [
@@ -44,6 +39,7 @@ async def run_and_check_tasks():
     async for result in pipeline:
         assert result[0] == results[index], f"at {index = }: {result = } != {results[index] = }"
         index += 1
+    assert index == len(results)
 
 
 def test_run_tasks():

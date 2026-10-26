@@ -42,7 +42,8 @@ def _make_repo(tmp_path):
 def isolated_clone_paths(tmp_path, monkeypatch):
     import cognee.tasks.code_graph.resolve_repo as resolver
 
-    monkeypatch.setattr(resolver, "default_clones_dir", lambda: tmp_path / "clones")
+    # The fake clones in these tests are built directly under tmp_path, so it is the root.
+    monkeypatch.setattr(resolver, "default_clones_dir", lambda: tmp_path)
 
 
 def _commit_fixture(tmp_path):

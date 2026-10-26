@@ -1,19 +1,15 @@
 import asyncio
 from queue import Queue
+from uuid import uuid4
 
-import cognee
-from cognee.infrastructure.databases.relational import create_db_and_tables
 from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
 from cognee.modules.pipelines.tasks.task import Task
-from cognee.modules.users.methods import get_default_user
+from cognee.modules.users.models import User
 
 
 async def pipeline(data_queue):
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
-
     async def queue_consumer():
-        while not data_queue.is_closed:
+        while not data_queue.is_closed or not data_queue.empty():
             if not data_queue.empty():
                 yield data_queue.get()
             else:
@@ -25,8 +21,7 @@ async def pipeline(data_queue):
     async def multiply_by_two(num_list):
         yield num_list[0] * 2
 
-    await create_db_and_tables()
-    user = await get_default_user()
+    user = User(id=uuid4(), tenant_id=None)
 
     tasks_run = run_tasks_base(
         [
@@ -43,6 +38,7 @@ async def pipeline(data_queue):
     async for result in tasks_run:
         assert result[0] == results[index], f"at {index = }: {result = } != {results[index] = }"
         index += 1
+    assert index == len(results)
 
 
 async def run_queue():
