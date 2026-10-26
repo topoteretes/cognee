@@ -13,7 +13,8 @@ async def create_agent(
     """Create an agent sub-user of ``parent_user``, with an API key unless told not to.
 
     ``issue_api_key=False`` returns ``(agent, None)`` for callers that mint the
-    agent's keys themselves (per-device plugin provisioning names each key).
+    agent's keys themselves (plugin provisioning adds each key through
+    ``add_plugin_agent_key``, under the agent's key cap).
     """
     # Agents are one level deep: an agent cannot create agents of its own.
     if parent_user.parent_user_id is not None:
