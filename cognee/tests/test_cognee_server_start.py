@@ -10,8 +10,7 @@ from pathlib import Path
 
 import requests
 
-from cognee.modules.preflight import llm_available
-from cognee.tests.utils.ci_search_type import completion_or_chunks
+from cognee.tests.utils.ci_search_type import ci_llm_available, completion_or_chunks
 
 DEFAULT_USER_EMAIL = "default_user@example.com"
 # The default user has no password until a server started with
@@ -92,7 +91,7 @@ class TestCogneeServerStart(unittest.TestCase):
         url = "http://127.0.0.1:8000/api/v1/add"
         # Image ingestion needs an LLM to describe the image; without a key (fork
         # PRs) the same flow runs on a text document.
-        test_file = "example.png" if llm_available() else "Natural_language_processing.txt"
+        test_file = "example.png" if ci_llm_available() else "Natural_language_processing.txt"
         file_path = Path(os.path.join(Path(__file__).parent, "test_data", test_file))
         headers = {"Authorization": auth_var}
 

@@ -23,11 +23,11 @@ import cognee
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.models import Data
 from cognee.modules.engine.operations.setup import setup
-from cognee.modules.preflight import llm_available
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.cleanup.cleanup_unused_data import cleanup_unused_data
+from cognee.tests.utils.ci_search_type import ci_llm_available
 
 logger = get_logger()
 
@@ -104,7 +104,7 @@ async def test_last_accessed_updates_on_search():
         query_text="Apple technology",
         datasets=[dataset_name],
         user=user,
-        only_context=not llm_available(),
+        only_context=not ci_llm_available(),
     )
 
     logger.info(f"Search returned {len(search_results)} results")
