@@ -49,6 +49,13 @@ class ForgetPayloadDTO(InDTO):
         "and reset pipeline status — raw files and data records are preserved. "
         "This allows re-cognifying the dataset from scratch.",
     )
+    clean_history: bool = Field(
+        default=False,
+        description="When true, also delete the caller's own search and recall history "
+        "(the rows GET /v1/search and GET /v1/recall list), in every dataset, before the "
+        "data is deleted. Dataset and everything forgets purge the deleted datasets' "
+        "history regardless of this flag.",
+    )
 
 
 def get_forget_router() -> APIRouter:
@@ -78,6 +85,8 @@ def get_forget_router() -> APIRouter:
           (graph + vector), preserving raw files so the dataset can be re-cognified.
         - Set `dataset`/`datasetId` + `dataId` + `memoryOnly: true` to clear memory
           for a single file only.
+        - Set `cleanHistory: true` alone to delete only your own search and recall
+          history, or with any target to delete it along with the data.
 
         ## Request Parameters
         - **dataId** (Optional[UUID]): UUID of a single data item to remove. Requires
@@ -88,9 +97,12 @@ def get_forget_router() -> APIRouter:
           user owns (default: false).
         - **memoryOnly** (bool): When true, delete only memory (graph + vector embeddings),
           preserving raw files and data records (default: false).
+        - **cleanHistory** (bool): When true, also delete the caller's own search and
+          recall history before the data is deleted (default: false). Forgetting a dataset
+          or everything purges that data's history regardless.
 
         Provide either `dataset` or `datasetId`, not both. Field names are shown camelCased
-        in the schema; snake_case aliases (`data_id`, `dataset_id`, `memory_only`) are also
+        in the schema; snake_case aliases (`data_id`, `dataset_id`, `memory_only`, `clean_history`) are also
         accepted.
 
         ## Response
@@ -127,6 +139,7 @@ def get_forget_router() -> APIRouter:
                 dataset_id=payload.dataset_id,
                 everything=payload.everything,
                 memory_only=payload.memory_only,
+                clean_history=payload.clean_history,
                 user=user,
             )
             return result
@@ -134,7 +147,7 @@ def get_forget_router() -> APIRouter:
             return JSONResponse(
                 status_code=422,
                 content={
-                    "error": "Invalid request parameters. Specify dataset or dataset_id, data_id+dataset, or everything=True."
+                    "error": "Invalid request parameters. Specify dataset or dataset_id, data_id+dataset, everything=True, or clean_history=True."
                 },
             )
         except CogneeApiError:

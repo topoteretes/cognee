@@ -24,6 +24,7 @@ from cognee.modules.graph.methods.deleted_graph_elements import DeletedGraphElem
 
 datasets_module = importlib.import_module("cognee.api.v1.datasets.datasets")
 data_methods_module = importlib.import_module("cognee.modules.data.methods")
+search_operations_module = importlib.import_module("cognee.modules.search.operations")
 forget_module = importlib.import_module("cognee.api.v1.forget.forget")
 
 
@@ -42,6 +43,7 @@ def _patches(
     delete_dataset=None,
     has_dataset_data=None,
     session_invalidate=None,
+    delete_history=None,
 ):
     """Patch the delete path. ``data`` is the row ``get_data`` resolves (None for
     the custom-graph-model path); ``row_remaining`` is what the post-delete
@@ -69,6 +71,11 @@ def _patches(
             has_dataset_data or AsyncMock(return_value=dataset_has_data),
         ),
         patch.object(data_methods_module, "delete_dataset", delete_dataset or AsyncMock()),
+        patch.object(
+            search_operations_module,
+            "delete_dataset_search_history",
+            delete_history or AsyncMock(),
+        ),
     )
 
 
@@ -124,8 +131,12 @@ async def test_delete_fails_when_the_row_survives_instead_of_reporting_success()
 
 @pytest.mark.asyncio
 async def test_receipt_marks_dataset_deleted_when_emptied_and_requested():
+    """The emptied dataset goes as in ``empty_dataset``: its search history first,
+    then the dataset."""
     dataset_id, data_id, user, dataset, data = _fixture()
-    delete_dataset = AsyncMock()
+    order = []
+    delete_dataset = AsyncMock(side_effect=lambda *_: order.append("dataset"))
+    delete_history = AsyncMock(side_effect=lambda *_: order.append("history"))
 
     result = await _run(
         dataset_id,
@@ -137,9 +148,12 @@ async def test_receipt_marks_dataset_deleted_when_emptied_and_requested():
         delete_dataset_if_empty=True,
         dataset_has_data=False,
         delete_dataset=delete_dataset,
+        delete_history=delete_history,
     )
 
     delete_dataset.assert_awaited_once_with(dataset)
+    delete_history.assert_awaited_once_with(dataset_id)
+    assert order == ["history", "dataset"]
     assert result["dataset_deleted"] is True
     assert result["data_remaining"] is False
 
@@ -303,8 +317,9 @@ def test_receipt_shape_is_the_dto():
 
 @pytest.mark.asyncio
 async def test_forget_data_item_returns_the_receipt_unchanged():
-    """``forget(data_id=...)`` returns exactly what ``delete_data`` produced, so the
-    resolved ``data_id`` is never overwritten with the caller's (legacy) value."""
+    """``forget(data_id=...)`` returns what ``delete_data`` produced, so the resolved
+    ``data_id`` is never overwritten with the caller's (legacy) value. The one key
+    it adds is ``search_history_removed`` (always False for one item)."""
     dataset_id, legacy_id, resolved_id = uuid4(), uuid4(), uuid4()
     user = SimpleNamespace(id=uuid4())
     receipt = {
@@ -326,7 +341,8 @@ async def test_forget_data_item_returns_the_receipt_unchanged():
     ):
         result = await forget_module._forget_data_item(legacy_id, dataset_id, user)
 
-    assert result is receipt
+    assert result == {**receipt, "search_history_removed": False}
+    assert result["data_id"] == str(resolved_id)
     delete_data.assert_awaited_once_with(
         dataset_id=dataset_id, data_id=legacy_id, user=user, delete_dataset_if_empty=False
     )
@@ -346,7 +362,7 @@ async def test_forget_data_item_logs_not_found_instead_of_deleted():
     ):
         result = await forget_module._forget_data_item(data_id, dataset_id, user)
 
-    assert result is receipt
+    assert result == {**receipt, "search_history_removed": False}
     logger.info.assert_called_once()
     message = logger.info.call_args.args[0]
     assert "nothing to delete" in message and "not found" in message

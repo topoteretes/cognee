@@ -724,6 +724,8 @@ class TestForgetCommand:
         assert "everything" in actions
         assert "memory_only" in actions
         assert actions["memory_only"].default is False
+        assert "clean_history" in actions
+        assert actions["clean_history"].default is False
 
     @patch("cognee.cli.commands.forget_command.asyncio.run", side_effect=_mock_run)
     def test_execute_threads_memory_only_flag(self, mock_asyncio_run):
@@ -741,6 +743,7 @@ class TestForgetCommand:
                 data_id=None,
                 everything=False,
                 memory_only=True,
+                clean_history=False,
             )
             command.execute(args)
 
@@ -750,6 +753,7 @@ class TestForgetCommand:
             dataset_id=None,
             everything=False,
             memory_only=True,
+            clean_history=False,
         )
 
     @patch("cognee.cli.commands.forget_command.fmt.success")
@@ -774,6 +778,7 @@ class TestForgetCommand:
                 data_id=data_id,
                 everything=False,
                 memory_only=False,
+                clean_history=False,
             )
             command.execute(args)
 
@@ -792,7 +797,12 @@ class TestForgetCommand:
         with patch.dict(sys.modules, {"cognee": mock_cognee}):
             command = ForgetCommand()
             args = argparse.Namespace(
-                dataset=None, dataset_id=None, data_id=None, everything=True, memory_only=True
+                dataset=None,
+                dataset_id=None,
+                data_id=None,
+                everything=True,
+                memory_only=True,
+                clean_history=False,
             )
             # Should not raise, just print an error and return without calling forget().
             command.execute(args)
@@ -802,7 +812,12 @@ class TestForgetCommand:
     def test_execute_no_forget_target(self):
         command = ForgetCommand()
         args = argparse.Namespace(
-            dataset=None, dataset_id=None, data_id=None, everything=False, memory_only=False
+            dataset=None,
+            dataset_id=None,
+            data_id=None,
+            everything=False,
+            memory_only=False,
+            clean_history=False,
         )
 
         # Should not raise, just print an error and return.
@@ -819,6 +834,7 @@ class TestForgetCommand:
             data_id=None,
             everything=False,
             memory_only=False,
+            clean_history=False,
         )
 
         with pytest.raises(CliCommandException):

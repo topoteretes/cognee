@@ -59,6 +59,7 @@ async def run_tasks(
     embedding_config: EmbeddingConfig | None = None,
     data_cache: bool = False,
     after_run_completed: Callable[[], Awaitable[Any]] | None = None,
+    after_items_ran: Callable[[], Awaitable[Any]] | None = None,
 ):
     """Run a pipeline over a dataset as ONE logical run.
 
@@ -75,6 +76,12 @@ async def run_tasks(
     outside the run's error handling: it cannot fail, roll back, or re-mark a
     run that already completed. An exception it raises propagates to the
     caller; the run stays recorded as completed.
+
+    ``after_items_ran`` is awaited before it, and also when items of the run failed,
+    whether they reported or raised it. Cognify reconciles the document structure
+    with it, which one failing item must not freeze. On a completed run its error
+    propagates. On a failed run the run's own error wins: a raised one goes on with
+    the hook's error as its cause, a reported one is returned and the hook's is logged.
     """
     task_resolver = tasks if callable(tasks) else None
     if not user:
@@ -88,7 +95,7 @@ async def run_tasks(
     with pipeline_run_ownership() as ownership:
         pipeline_id = generate_pipeline_id(user.id, dataset.id, pipeline_name)
         pipeline_run = await log_pipeline_run_start(
-            pipeline_id, pipeline_name, dataset.id, data, user=user, recovery_token=ownership.token
+            pipeline_id, pipeline_name, dataset.id, user=user, recovery_token=ownership.token
         )
         pipeline_run_id = pipeline_run.pipeline_run_id
         # getattr (not attribute access) because unit tests stub
@@ -109,6 +116,7 @@ async def run_tasks(
         run_usage = None
         database_ready = False
         run_finished = False
+        items_failed = False
         async with AsyncExitStack() as stack:
             try:
                 yield PipelineRunStarted(
@@ -252,12 +260,15 @@ async def run_tasks(
                 ]
                 try:
                     gathered = await asyncio.gather(*item_futures)
-                except BaseException:
+                except BaseException as gather_error:
                     # No item may still mutate the graph when rollback begins or
                     # the run releases its ownership lock.
                     for future in item_futures:
                         future.cancel()
                     await asyncio.gather(*item_futures, return_exceptions=True)
+                    # By default (RAISE_INCREMENTAL_LOADING_ERRORS) a failing item raises
+                    # its own error here; a cancellation is not an item failure.
+                    items_failed = isinstance(gather_error, Exception)
                     raise
 
                 # Separate successes from unhandled exceptions
@@ -321,7 +332,6 @@ async def run_tasks(
                     pipeline_id,
                     pipeline_name,
                     dataset.id,
-                    data,
                     user=user,
                     started_at=run_started_at,
                     tokens_in=run_usage.tokens_in if run_usage else 0,
@@ -381,7 +391,6 @@ async def run_tasks(
                     pipeline_id,
                     pipeline_name,
                     dataset.id,
-                    data,
                     root_error,
                     user=user,
                     started_at=run_started_at,
@@ -393,6 +402,7 @@ async def run_tasks(
                 ownership.closed = True
                 if isinstance(error, GeneratorExit):
                     raise
+                items_failed = items_failed or isinstance(error, PipelineRunFailedError)
 
                 yield PipelineRunErrored(
                     pipeline_run_id=pipeline_run_id,
@@ -408,10 +418,27 @@ async def run_tasks(
 
                 # In case of error during incremental loading of data just let the user know the pipeline Errored, don't raise error
                 if not isinstance(error, PipelineRunFailedError):
+                    if items_failed and after_items_ran is not None:
+                        try:
+                            await after_items_ran()
+                        except Exception as hook_error:
+                            # The run's own error is what callers map to a status, so it
+                            # is the one raised; this log is the only trace of the hook's.
+                            logger.exception("after_items_ran failed while the run was failing")
+                            raise error from hook_error
                     raise
 
             # Reached only once the completed run's event has been consumed: a
             # close at that yield re-raises above (``run_finished``), and the
             # swallowed per-item failure path leaves ``run_finished`` unset.
+            if (run_finished or items_failed) and after_items_ran is not None:
+                try:
+                    await after_items_ran()
+                except Exception:
+                    if run_finished:
+                        raise
+                    # The reported failure was already yielded and is what callers act on
+                    # (improve reads its budget error), so a broken hook must not replace it.
+                    logger.exception("after_items_ran failed after a reported item failure")
             if run_finished and after_run_completed is not None:
                 await after_run_completed()

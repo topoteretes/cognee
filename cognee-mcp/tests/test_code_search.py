@@ -40,6 +40,7 @@ async def test_code_search_forwards_a_code_scoped_structured_query(monkeypatch):
             "kinds": ["module", "symbol"],
             "limit": 100,
         },
+        "include_references": False,
     }
 
 

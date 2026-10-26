@@ -16,6 +16,7 @@ from cognee.api.v1.datasets.dto import DataDTO, DeleteDataReceiptDTO
 from cognee.api.v1.exceptions import DataNotFoundError
 from cognee.exceptions import CogneeApiError
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.data.content_hash import normalize_content_hash
 from cognee.modules.data.methods import (
     get_authorized_existing_datasets,
     get_datasets_by_name,
@@ -425,6 +426,15 @@ def get_datasets_router() -> APIRouter:
             le=1_000_000,
             description="Number of data items to skip before returning results.",
         ),
+        content_hash: str | None = Query(
+            None,
+            pattern=r"^[0-9a-fA-F]{32}$",
+            description=(
+                "Return only your data items whose content_hash equals this MD5 hex digest "
+                "(the hash of the text/bytes that were added; case-insensitive). "
+                "Scoped to rows you added; limit/offset page the matches."
+            ),
+        ),
         user: User = Depends(get_authenticated_user),
     ):
         """
@@ -447,6 +457,13 @@ def get_datasets_router() -> APIRouter:
         ## Query Parameters
         - **limit** (int, 1-1000, default 100): Maximum number of items to return
         - **offset** (int, default 0): Number of items to skip
+        - **content_hash** (str, optional): Return only the items *you* added holding
+          this content (MD5 hex digest of the added text/bytes, as recorded in each
+          item's `content_hash`; case-insensitive, anything but 32 hex characters is
+          a 422). Scoped to your own rows like ingestion dedup, so another user's
+          copy in a shared dataset is not returned. `limit`/`offset` page the matches
+          exactly as they page the listing; an empty first page means you added no
+          such content.
 
         ## Response
         Returns a list of data objects containing:
@@ -461,6 +478,7 @@ def get_datasets_router() -> APIRouter:
         - **label**: Label attached to the data item at upload, if any
         - **external_metadata**: Stored metadata dict (upload-provided keys merged over
           loader-derived ones), if any
+        - **content_hash**: MD5 hex digest of the ingested payload
 
         ## Error Codes
         - **404 Not Found**: Dataset doesn't exist or user doesn't have access
@@ -476,7 +494,10 @@ def get_datasets_router() -> APIRouter:
             },
         )
 
-        from cognee.modules.data.methods import get_dataset_data
+        from cognee.modules.data.methods import (
+            get_dataset_data,
+            get_dataset_data_by_content_hash,
+        )
 
         # Verify user has permission to read dataset
         dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
@@ -491,9 +512,18 @@ def get_datasets_router() -> APIRouter:
 
         dataset_id = dataset[0].id
 
-        dataset_data = await get_dataset_data(
-            dataset_id=dataset_id, limit=limit, offset=offset, order_by="created_at"
-        )
+        if content_hash is not None:
+            dataset_data = await get_dataset_data_by_content_hash(
+                dataset_id,
+                normalize_content_hash(content_hash),
+                user,
+                limit=limit,
+                offset=offset,
+            )
+        else:
+            dataset_data = await get_dataset_data(
+                dataset_id=dataset_id, limit=limit, offset=offset, order_by="created_at"
+            )
 
         if dataset_data is None:
             return []
@@ -521,6 +551,7 @@ def get_datasets_router() -> APIRouter:
                 label=data.label,
                 external_metadata=data.external_metadata,
                 data_size=data.data_size,
+                content_hash=data.content_hash,
             )
             for data in dataset_data
         ]
@@ -699,7 +730,7 @@ def get_datasets_router() -> APIRouter:
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "GET /v1/datasets/status/progress",
                 "datasets": [str(dataset_id) for dataset_id in datasets],

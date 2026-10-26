@@ -26,6 +26,7 @@ from cognee.infrastructure.databases.vector.pgvector.serialize_data import seria
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
 from cognee.infrastructure.files.storage import get_file_storage
+from cognee.infrastructure.locks.loop_agnostic_lock import LoopAgnosticLock
 from cognee.modules.observability import new_span
 from cognee.modules.observability.tracing import (
     COGNEE_DB_SYSTEM,
@@ -199,7 +200,9 @@ class LanceDBAdapter(VectorDBInterface):
         self.url = url
         self.api_key = api_key
         self.embedding_engine = embedding_engine
-        self.VECTOR_DB_LOCK = asyncio.Lock()
+        # Loop-agnostic: the adapter is cached across event loops, and an
+        # asyncio.Lock binds to the first loop that awaits it.
+        self.VECTOR_DB_LOCK = LoopAgnosticLock()
         # Guards lifecycle state — the ``connection``, ``_session`` and
         # ``_permanently_closed`` triple must be observed/mutated atomically
         # so a concurrent ``close()`` can't be silently overwritten by an
@@ -228,7 +231,8 @@ class LanceDBAdapter(VectorDBInterface):
         # reason compaction was turned off for good, if it was.
         self._compaction_dirty: set[str] = set()
         self._compaction_cursor = 0
-        self._compaction_lock = asyncio.Lock()
+        # Loop-agnostic like VECTOR_DB_LOCK: the adapter is cached across loops.
+        self._compaction_lock = LoopAgnosticLock()
         self._compaction_unsupported: str | None = None
         self._lance_core_checked = False
 
