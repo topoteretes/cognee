@@ -162,6 +162,7 @@ async def test_delete_data_old_graph_uses_legacy():
             "try_delete_data_by_graph_provenance",
             AsyncMock(return_value=None),
         ) as graph_delete,
+        patch.object(ddne_module, "has_data_related_nodes", AsyncMock(return_value=True)),
         patch.object(ddne_module, "backend_access_control_enabled", lambda: False),
         patch.object(ddne_module, "get_global_data_related_nodes", AsyncMock(return_value=[])),
         patch.object(
@@ -170,10 +171,12 @@ async def test_delete_data_old_graph_uses_legacy():
         patch.object(ddne_module, "delete_data_related_nodes", AsyncMock()) as del_rel_nodes,
         patch.object(ddne_module, "delete_data_related_edges", AsyncMock()),
     ):
-        await ddne_module.delete_data_nodes_and_edges(dataset_id, data_id, user_id)
+        result = await ddne_module.delete_data_nodes_and_edges(dataset_id, data_id, user_id)
 
     graph_delete.assert_awaited_once_with(dataset_id, data_id)
     del_rel_nodes.assert_awaited_once()  # legacy ledger cleanup ran
+    # Every owned node is shared, so nothing is hard-deleted, but the id owned them.
+    assert result == DeletedGraphElements(owned=True)
 
 
 async def test_api_delete_data_uses_graph_provenance_when_ledger_has_no_nodes():

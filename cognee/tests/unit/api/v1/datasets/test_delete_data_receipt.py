@@ -200,7 +200,7 @@ async def test_receipt_for_untracked_id_reports_no_data_record_and_nothing_obser
     """The custom-graph-model path (no Data row) returns a receipt whose
     ``data_remaining`` is ``None``: there was no row to verify the absence of."""
     dataset_id, data_id, user, dataset, _data = _fixture()
-    deleted = DeletedGraphElements(node_ids={"n1", "n2"}, edge_ids={"e1"})
+    deleted = DeletedGraphElements(node_ids={"n1", "n2"}, edge_ids={"e1"}, owned=True)
 
     result = await _run(dataset_id, data_id, user, dataset, None, deleted)
 
@@ -214,6 +214,30 @@ async def test_receipt_for_untracked_id_reports_no_data_record_and_nothing_obser
         "data_remaining": None,
         "dataset_deleted": False,
     }
+
+
+@pytest.mark.asyncio
+async def test_untracked_id_owning_only_shared_elements_reports_success():
+    """An id whose graph elements are all shared with other data hard-deletes
+    nothing, but its ownership was removed: ``success`` with zero counts, and no
+    session invalidation since no element left the graph."""
+    dataset_id, data_id, user, dataset, _data = _fixture()
+    session_invalidate = AsyncMock()
+
+    result = await _run(
+        dataset_id,
+        data_id,
+        user,
+        dataset,
+        None,
+        DeletedGraphElements(owned=True),
+        session_invalidate=session_invalidate,
+    )
+
+    assert result["status"] == "success"
+    assert result["deleted_nodes"] == 0
+    assert result["deleted_edges"] == 0
+    session_invalidate.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -48,9 +48,12 @@ class DataDeletionIncompleteError(CogneeSystemError):
     """``datasets.delete_data`` found the ``Data`` row still present after deleting it.
 
     The relational delete returned without raising, yet the row is still
-    there (a concurrent writer re-inserted the same content-derived id, or the
-    delete did not take effect). The receipt a caller would get must never say
-    ``success`` for that, so the delete fails instead; the caller retries.
+    there: another process re-added the same content-derived id (the dataset
+    lock is per process), or the delete did not take effect. The item's graph
+    memory is already removed by then. The receipt a caller would get must never
+    say ``success`` for that, so the delete fails instead. The caller checks the
+    item before retrying, because a retry deletes whatever row holds the id,
+    including a fresh re-add.
     """
 
     def __init__(
@@ -61,8 +64,9 @@ class DataDeletionIncompleteError(CogneeSystemError):
         status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR,
     ):
         message = (
-            f"Data '{data_id}' is still present in dataset '{dataset_id}' after the delete. "
-            "Nothing was reported as deleted; retry the delete."
+            f"Data '{data_id}' is still present in dataset '{dataset_id}' after its graph "
+            "memory was removed; another process may have re-added it. Check the item "
+            "before retrying, since a retry deletes whatever row holds this id."
         )
         super().__init__(message, name, status_code)
 

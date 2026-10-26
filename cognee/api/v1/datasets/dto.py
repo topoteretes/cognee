@@ -47,8 +47,9 @@ class DeleteDataReceiptDTO(OutDTO):
     route validating it as its ``response_model`` (camelCase on the wire).
 
     ``status`` never contradicts the outcome: ``success`` when something was
-    removed, ``not_found`` when neither a ``Data`` row nor a graph element
-    existed for the id (nothing removed, counts ``0``; deleting is idempotent,
+    removed (graph elements other data still shares lose only the id's
+    ownership, so the counts can be ``0``), ``not_found`` when neither a
+    ``Data`` row nor a graph element existed for the id (nothing removed, counts ``0``; deleting is idempotent,
     so this is a 200, and ``delete_dataset_if_empty`` is still honoured). A
     delete whose ``Data`` row is still present afterwards raises
     ``DataDeletionIncompleteError`` (500) instead of any receipt. So
@@ -88,5 +89,6 @@ class DeleteDataReceiptDTO(OutDTO):
         "fails with 500."
     )
     dataset_deleted: bool = Field(
-        description="The now-empty dataset was removed as well (never over this route)."
+        description="The now-empty dataset was removed as well (only when "
+        "delete_dataset_if_empty was requested)."
     )

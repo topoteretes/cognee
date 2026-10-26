@@ -450,14 +450,15 @@ class datasets:
 
                 if data is None:
                     # No Data row: the id can only own graph elements (custom graph
-                    # model). Removing none of those means the id is unknown here —
-                    # reported as status "not_found", never as a success.
+                    # model). Owning none of those means the id is unknown here —
+                    # reported as status "not_found", never as a success. Owned
+                    # elements that other data still shares survive; their removed
+                    # ownership is still a success.
                     async with set_database_global_context_variables(dataset_id, dataset.owner_id):
                         deleted_elements = await delete_data_nodes_and_edges(
                             dataset_id, data_id, user.id
                         )
-                        removed = bool(deleted_elements.node_ids or deleted_elements.edge_ids)
-                        if removed:
+                        if deleted_elements.node_ids or deleted_elements.edge_ids:
                             await _invalidate_sessions_for_deleted_data_nonfatal(
                                 dataset.id, deleted_elements, user.id
                             )
@@ -472,7 +473,7 @@ class datasets:
                         deleted_elements=deleted_elements,
                         data_remaining=None,
                         dataset_deleted=dataset_deleted,
-                        status="success" if removed else "not_found",
+                        status="success" if deleted_elements.owned else "not_found",
                     )
 
                 if str(data.dataset_id) != str(dataset_id):
