@@ -1,8 +1,8 @@
-"""Plugin agent keys: provisioning only ever adds one, evicting the least recently used only when full.
+"""Plugin agent keys: provisioning only ever adds one, and a full agent is a 409.
 
 ``POST /plugins/{plugin_key}/provision`` must never revoke another machine's
-key while the agent has room. Only when the new key would not fit does it delete
-that agent's least recently used keys, just enough of them. Runs
+key. An agent already holding ``MAX_USER_API_KEYS`` keys answers 409 and nothing
+changes; its owner frees a slot by revoking a key. Runs
 against a real database through the real router, because the claims are about
 rows and races: which keys still authenticate, how many rows remain, and what
 two concurrent transactions leave behind.
@@ -207,12 +207,12 @@ async def test_concurrent_first_create_recovery_adds_a_key_and_never_rotates():
 
 
 # ---------------------------------------------------------------------------
-# eviction (only when the agent is full)
+# the cap: a 409, never a deletion
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_below_the_cap_old_keys_are_never_evicted():
+async def test_provisioning_never_deletes_a_key_however_old():
     async with _client(await _parent()) as client:
         idle = await _provision(client)
         orphan = await _provision(client)
@@ -227,179 +227,78 @@ async def test_below_the_cap_old_keys_are_never_evicted():
 
 
 @pytest.mark.asyncio
-async def test_at_the_cap_the_least_recently_used_key_is_evicted_however_recent(key_settings):
+async def test_a_full_agent_answers_409_and_nothing_changes(key_settings):
     key_settings(max_user_api_keys=2)
     async with _client(await _parent()) as client:
-        older = await _provision(client)
-        newer = await _provision(client)
+        stale = await _provision(client)
+        fresh = await _provision(client)
         await _age_key(
-            older["keyId"], created_ago=timedelta(days=2), last_used_ago=timedelta(hours=2)
+            stale["keyId"], created_ago=timedelta(days=400), last_used_ago=timedelta(days=365)
         )
-        await _age_key(
-            newer["keyId"], created_ago=timedelta(days=2), last_used_ago=timedelta(hours=1)
-        )
-        new = await _provision(client)
+        full = await client.post(PROVISION)
 
-    assert await _key_ids(new["agentId"]) == {newer["keyId"], new["keyId"]}
-    assert await _resolve(older["apiKey"]) is None
-    assert await _resolve(newer["apiKey"]) is not None
+    assert full.status_code == 409
+    assert "Revoke an old machine's key" in full.json()["detail"]
+    assert await _key_ids(stale["agentId"]) == {stale["keyId"], fresh["keyId"]}
+    assert await _resolve(stale["apiKey"]) is not None
+    assert await _resolve(fresh["apiKey"]) is not None
 
 
 @pytest.mark.asyncio
-async def test_at_the_cap_only_as_many_keys_as_needed_go_least_recently_used_first(key_settings):
+async def test_re_provisioning_past_the_cap_answers_409_and_revokes_nothing(key_settings):
+    """Reinstalls, devcontainers and CI runners each mint a key; past the cap they
+    get a 409 rather than logging out a machine that holds one of the first keys."""
     key_settings(max_user_api_keys=3)
     async with _client(await _parent()) as client:
-        oldest = await _provision(client)
-        orphan = await _provision(client)
-        idle = await _provision(client)
-        await _age_key(
-            oldest["keyId"], created_ago=timedelta(days=90), last_used_ago=timedelta(days=60)
-        )
-        # Never used: ranked by when it was created.
-        await _age_key(orphan["keyId"], created_ago=timedelta(days=45), never_used=True)
-        await _age_key(
-            idle["keyId"], created_ago=timedelta(days=90), last_used_ago=timedelta(days=31)
-        )
-        new = await _provision(client)
+        responses = [await client.post(PROVISION) for _ in range(10)]
 
-    assert await _key_ids(new["agentId"]) == {orphan["keyId"], idle["keyId"], new["keyId"]}
-
-
-@pytest.mark.asyncio
-async def test_a_legacy_key_with_no_timestamps_is_evicted_first(key_settings):
-    from sqlalchemy import update
-
-    from cognee.infrastructure.databases.relational import get_relational_engine
-    from cognee.modules.users.models.UserApiKey import UserApiKey
-
-    key_settings(max_user_api_keys=2)
-    async with _client(await _parent()) as client:
-        legacy = await _provision(client)
-        used = await _provision(client)
-        async with get_relational_engine().get_async_session() as session:
-            await session.execute(
-                update(UserApiKey)
-                .where(UserApiKey.id == UUID(legacy["keyId"]))
-                .values(created_at=None, last_used_at=None)
-            )
-            await session.commit()
-        await _age_key(used["keyId"], created_ago=timedelta(days=400), never_used=True)
-        new = await _provision(client)
-
-    assert await _key_ids(new["agentId"]) == {used["keyId"], new["keyId"]}
-
-
-@pytest.mark.asyncio
-async def test_re_provisioning_past_the_cap_keeps_working_and_keeps_the_newest_keys(
-    key_settings,
-):
-    """Reinstalls, devcontainers and CI runners each mint a key that then gets used.
-
-    They must never lock the plugin out: every provision succeeds, the agent
-    stays at the cap, and the keys that survive are the newest ones.
-    """
-    key_settings(max_user_api_keys=3)
-    bodies = []
-    async with _client(await _parent()) as client:
-        for minutes_ago in range(10, 0, -1):
-            body = await _provision(client)
-            await _age_key(
-                body["keyId"],
-                created_ago=timedelta(minutes=minutes_ago),
-                last_used_ago=timedelta(minutes=minutes_ago),
-            )
-            bodies.append(body)
-
-    assert await _key_ids(bodies[0]["agentId"]) == {body["keyId"] for body in bodies[-3:]}
-    for body in bodies[-3:]:
+    assert [response.status_code for response in responses] == [200] * 3 + [409] * 7
+    kept = [response.json() for response in responses[:3]]
+    assert await _key_ids(kept[0]["agentId"]) == {body["keyId"] for body in kept}
+    for body in kept:
         assert await _resolve(body["apiKey"]) is not None
 
 
 @pytest.mark.asyncio
-async def test_eviction_never_touches_another_agents_or_the_parents_keys(key_settings):
+async def test_revoking_a_key_frees_a_slot(key_settings):
+    key_settings(max_user_api_keys=1)
+    async with _client(await _parent()) as client:
+        old = await _provision(client)
+        assert (await client.post(PROVISION)).status_code == 409
+        assert (await client.delete(f"{KEYS}/{old['keyId']}")).status_code == 200
+        new = await _provision(client)
+
+    assert await _key_ids(new["agentId"]) == {new["keyId"]}
+
+
+@pytest.mark.asyncio
+async def test_the_cap_counts_only_that_agents_keys(key_settings):
     from cognee.modules.users.api_key.create_api_key import create_api_key
 
     parent = await _parent()
     parent_key = await create_api_key(parent, "laptop")
-    await _age_key(parent_key.id, created_ago=timedelta(days=60), never_used=True)
 
     key_settings(max_user_api_keys=1)
     async with _client(parent) as client:
+        claude = await _provision(client)
+        assert (await client.post(PROVISION)).status_code == 409
         codex = await _provision(client, "/api/v1/integrations/plugins/codex/provision")
-        await _age_key(
-            codex["keyId"], created_ago=timedelta(days=60), last_used_ago=timedelta(days=31)
-        )
-        old = await _provision(client)
-        new = await _provision(client)
 
-    assert await _key_ids(new["agentId"]) == {new["keyId"]}
-    assert old["keyId"] != new["keyId"]
     assert str(parent_key.id) in await _key_ids(parent.id)
-    assert codex["keyId"] in await _key_ids(codex["agentId"])
-
-
-# ---------------------------------------------------------------------------
-# the cap
-# ---------------------------------------------------------------------------
+    assert await _key_ids(claude["agentId"]) == {claude["keyId"]}
+    assert await _key_ids(codex["agentId"]) == {codex["keyId"]}
 
 
 @pytest.mark.asyncio
-async def test_a_cap_below_one_answers_409_and_nothing_changes(key_settings):
-    async with _client(await _parent()) as client:
-        a = await _provision(client)
-        key_settings(max_user_api_keys=0)
-        full = await client.post(PROVISION)
-
-    assert full.status_code == 409
-    assert "MAX_USER_API_KEYS=0" in full.json()["detail"]
-    assert await _key_ids(a["agentId"]) == {a["keyId"]}
-    assert await _resolve(a["apiKey"]) is not None
-
-
-@pytest.mark.asyncio
-async def test_two_provisions_racing_at_the_cap_never_exceed_it(key_settings):
+async def test_provisions_racing_at_the_cap_never_exceed_it(key_settings):
     key_settings(max_user_api_keys=3)
     async with _client(await _parent()) as client:
         first = await _provision(client)
         await _provision(client)
-        await _provision(client)
-        bodies = await asyncio.gather(*(_provision(client) for _ in range(4)))
+        responses = await asyncio.gather(*(client.post(PROVISION) for _ in range(4)))
 
+    assert sorted(response.status_code for response in responses) == [200, 409, 409, 409]
     assert len(await _key_ids(first["agentId"])) == 3
-    for body in bodies:
-        assert body["keyId"]
-
-
-# ---------------------------------------------------------------------------
-# atomicity
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_a_failed_insert_rolls_back_the_eviction(key_settings):
-    from sqlalchemy.exc import IntegrityError
-
-    from cognee.modules.integrations import plugin_keys
-    from cognee.modules.users.api_key.create_api_key import build_api_key_row
-
-    key_settings(max_user_api_keys=1)  # full, so the eviction actually runs
-    async with _client(await _parent()) as client:
-        stale = await _provision(client)
-
-    # A row the database refuses (api_key is NOT NULL): the insert fails at
-    # commit, after the eviction's DELETE ran inside the same transaction.
-    def _unsavable_row(user_id, name):
-        row, raw_key = build_api_key_row(user_id, name)
-        row.api_key = None
-        return row, raw_key
-
-    with (
-        patch.object(plugin_keys, "build_api_key_row", side_effect=_unsavable_row),
-        pytest.raises(IntegrityError),
-    ):
-        await plugin_keys.add_plugin_agent_key(UUID(stale["agentId"]), "claude-code")
-
-    assert await _key_ids(stale["agentId"]) == {stale["keyId"]}
 
 
 @pytest.mark.asyncio
@@ -469,18 +368,17 @@ async def test_list_and_revoke_are_scoped_to_the_callers_own_agent():
         stranger_keys = (await stranger_client.get(KEYS)).json()["keys"]
         assert a["keyId"] not in {key["id"] for key in stranger_keys}
 
-        # Another user's key, and this user's key under another plugin, revoke nothing.
-        not_revoked = {"revoked": False}
-        assert (await stranger_client.delete(f"{KEYS}/{a['keyId']}")).json() == not_revoked
+        # Another user's key, and this user's key under another plugin, are both 404s.
+        assert (await stranger_client.delete(f"{KEYS}/{a['keyId']}")).status_code == 404
         codex_keys = "/api/v1/integrations/plugins/codex/keys"
-        assert (await owner_client.delete(f"{codex_keys}/{a['keyId']}")).json() == not_revoked
+        assert (await owner_client.delete(f"{codex_keys}/{a['keyId']}")).status_code == 404
         assert await _resolve(a["apiKey"]) is not None
 
         revoked = await owner_client.delete(f"{KEYS}/{a['keyId']}")
         assert revoked.status_code == 200 and revoked.json() == {"revoked": True}
         assert await _resolve(a["apiKey"]) is None
         assert await _resolve(b["apiKey"]) is not None
-        assert (await owner_client.delete(f"{KEYS}/{a['keyId']}")).json() == not_revoked
+        assert (await owner_client.delete(f"{KEYS}/{a['keyId']}")).status_code == 404
 
 
 @pytest.mark.asyncio
@@ -511,10 +409,9 @@ async def test_disconnect_still_revokes_every_key():
 
 
 @pytest.mark.asyncio
-async def test_disconnect_racing_a_provision_never_fails_halfway(key_settings):
-    """Disconnect and an evicting provision lock the same agent row, so neither
-    deletes a key the other already removed, and disconnect leaves no old key."""
-    key_settings(max_user_api_keys=2)
+async def test_disconnect_racing_a_provision_never_fails_halfway():
+    """Disconnect and provision lock the same agent row, so disconnect deletes one
+    consistent set of keys and leaves no old key behind."""
     async with _client(await _parent()) as client:
         a = await _provision(client)
         b = await _provision(client)
@@ -528,3 +425,21 @@ async def test_disconnect_racing_a_provision_never_fails_halfway(key_settings):
     assert await _key_ids(a["agentId"]) <= {provision.json()["keyId"]}
     assert await _resolve(a["apiKey"]) is None
     assert await _resolve(b["apiKey"]) is None
+
+
+@pytest.mark.asyncio
+async def test_delete_api_key_tells_not_found_apart_from_failures():
+    """Revoke maps only not-found to 404; a real failure must not look like one."""
+    from cognee.modules.users.api_key import delete_api_key as delete_module
+    from cognee.modules.users.api_key.exceptions import ApiKeyDeletionError, ApiKeyNotFoundError
+
+    parent = await _parent()
+    with pytest.raises(ApiKeyNotFoundError):
+        await delete_module.delete_api_key(parent, uuid4())
+
+    with (
+        patch.object(delete_module, "select", side_effect=RuntimeError("db down")),
+        pytest.raises(ApiKeyDeletionError) as failure,
+    ):
+        await delete_module.delete_api_key(parent, uuid4())
+    assert not isinstance(failure.value, ApiKeyNotFoundError)

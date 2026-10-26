@@ -81,7 +81,6 @@ from cognee.modules.integrations.oauth_flow import (
 from cognee.modules.integrations.plugin_keys import (
     PluginAgentKeyLimitError,
     add_plugin_agent_key,
-    revoke_plugin_agent_key,
     revoke_plugin_agent_keys,
 )
 from cognee.modules.integrations.plugin_status import (
@@ -97,6 +96,8 @@ from cognee.modules.integrations.plugins import KNOWN_PLUGINS, get_plugin
 from cognee.modules.integrations.registry import get_integration, supported_integrations
 from cognee.modules.observability import new_span
 from cognee.modules.session_lifecycle.visibility import visible_user_ids
+from cognee.modules.users.api_key.delete_api_key import delete_api_key
+from cognee.modules.users.api_key.exceptions import ApiKeyNotFoundError
 from cognee.modules.users.api_key.get_api_keys import get_api_keys
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.methods.get_principal_configuration import (
@@ -331,14 +332,16 @@ async def _record_plugin_on_agent(agent_user_id: UUID, plugin_key: str) -> None:
 
 
 async def _add_plugin_key(agent_user_id: UUID, plugin_key: str):
-    """Add a key for this machine; MAX_USER_API_KEYS below 1 is a 409."""
+    """Add a key for this machine; a full agent is a 409, never an eviction."""
     try:
         return await add_plugin_agent_key(agent_user_id, plugin_key)
     except PluginAgentKeyLimitError as error:
         raise HTTPException(
             status_code=409,
             detail=(
-                f"MAX_USER_API_KEYS={error.limit} leaves no room for a {plugin_key!r} agent key."
+                f"The {plugin_key!r} agent already holds the maximum of {error.limit} API "
+                "keys. Revoke an old machine's key (GET and DELETE "
+                f"/api/v1/integrations/plugins/{plugin_key}/keys) and try again."
             ),
         )
 
@@ -585,11 +588,11 @@ def get_integrations_router():
         Every call adds one new key, so each machine holds its own. The
         returned key is shown once and never retrievable again.
 
-        Below the per-agent cap (``MAX_USER_API_KEYS``, default 10) nothing is
-        deleted. At the cap, the agent's least recently used keys are evicted,
-        just enough for the new one to fit. Provisioning does not revoke a
-        leaked key: revoke it through ``DELETE /plugins/{plugin_key}/keys/{key_id}``,
-        or every key through ``DELETE /plugins/{plugin_key}``.
+        Provisioning never deletes a key. An agent already holding
+        ``MAX_USER_API_KEYS`` keys (default 10) answers 409 and nothing changes:
+        free a slot through ``DELETE /plugins/{plugin_key}/keys/{key_id}``.
+        Provisioning does not revoke a leaked key either: revoke it the same
+        way, or every key through ``DELETE /plugins/{plugin_key}``.
 
         ## Path Parameters
         - **plugin_key** (str): Key of a known plugin (see GET /api/v1/integrations/status).
@@ -687,10 +690,9 @@ def get_integrations_router():
         """Revoke one key of the caller's agent for a plugin (e.g. a retired machine).
 
         Scoped to that plugin's agent of the authenticated user: a key of any
-        other principal answers ``revoked: false``, exactly like an unknown id,
-        as disconnect answers ``disconnected: false`` when there is nothing to
-        revoke. Other machines' keys stay valid; ``DELETE /plugins/{plugin_key}``
-        revokes them all. An agent caller is a 403.
+        other principal is a 404, exactly like an unknown id. Other machines'
+        keys stay valid; ``DELETE /plugins/{plugin_key}`` revokes them all. An
+        agent caller is a 403.
 
         ## Path Parameters
         - **plugin_key** (str): Key of a known plugin (see GET /api/v1/integrations/status).
@@ -702,9 +704,12 @@ def get_integrations_router():
             _reject_agent_caller(user)
             agent_user = await _find_plugin_agent(user, plugin_key)
             if agent_user is None:
-                return PluginKeyRevokeResultDTO(revoked=False)
-            revoked = await revoke_plugin_agent_key(agent_user.id, key_id)
-            return PluginKeyRevokeResultDTO(revoked=revoked)
+                raise HTTPException(status_code=404, detail="API key not found")
+            try:
+                await delete_api_key(agent_user, key_id)
+            except ApiKeyNotFoundError:
+                raise HTTPException(status_code=404, detail="API key not found")
+            return PluginKeyRevokeResultDTO(revoked=True)
 
     @integrations_router.delete("/plugins/{plugin_key}")
     async def disconnect_plugin(

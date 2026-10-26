@@ -208,6 +208,8 @@ def test_second_provision_adds_a_key_to_the_same_agent_and_revokes_nothing(clien
                 return_value=[_fake_agent_info("codex", codex_agent_id), _fake_agent_info()]
             ),
         ),
+        patch.object(_router_module, "delete_api_key", new=AsyncMock()) as delete_key,
+        patch.object(_router_module, "revoke_plugin_agent_keys", new=AsyncMock()) as revoke_keys,
         patch.object(
             _router_module,
             "add_plugin_agent_key",
@@ -226,8 +228,10 @@ def test_second_provision_adds_a_key_to_the_same_agent_and_revokes_nothing(clien
     assert body["agentId"] == str(AGENT_ID)
     assert body["apiKey"] == "added-key"
 
-    # One key added to the claude-code agent, never the codex one.
+    # One key added to the claude-code agent (never the codex one), none revoked.
     add_key.assert_awaited_once_with(AGENT_ID, "claude-code")
+    delete_key.assert_not_awaited()
+    revoke_keys.assert_not_awaited()
 
 
 def test_provision_race_integrity_error_takes_the_add_path(client):
