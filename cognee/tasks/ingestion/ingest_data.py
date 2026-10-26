@@ -54,12 +54,33 @@ def _display_file_name(file_metadata: dict | None, actual_file_path: str) -> str
     return f"{name}.{extension}" if extension else name
 
 
+def _stored_node_set_names(stored: Any) -> list[str] | None:
+    """The node set names a ``Data.node_set`` value holds.
+
+    Ingestion writes ``json.dumps(list)`` into the JSON column, so the value is
+    normally a string holding a list; a row written by anything else may hold
+    the list itself or a bare name (as ``visualize._parse_node_set`` also reads it).
+    """
+    if isinstance(stored, str):
+        try:
+            stored = json.loads(stored)
+        except ValueError:
+            return [stored.strip()] if stored.strip() else None
+    if isinstance(stored, str):
+        stored = [stored]
+    if not isinstance(stored, list):
+        return None
+    names = [name for name in stored if isinstance(name, str) and name.strip()]
+    return names or None
+
+
 def merge_existing_row_metadata(
     stored_metadata: dict[str, Any] | None,
     stored_node_set: str | None,
     content_metadata: dict[str, Any],
     item_external_metadata: dict[str, Any] | None,
     node_set: list[str] | None,
+    source_uri: str | None = None,
 ) -> tuple[dict[str, Any], list[str] | None]:
     """Resolve the metadata and node set a re-ingested row ends up with.
 
@@ -68,16 +89,26 @@ def merge_existing_row_metadata(
     ``label`` already follows this rule in the update branch; this applies it to
     ``external_metadata`` (``None`` keeps, ``{}`` clears, a dict replaces) and to
     ``node_set`` (``None`` keeps, ``[]`` clears, a list replaces). Content-derived
-    metadata (``content_metadata``) always refreshes on top, since it describes the
-    new content. Returns ``(external_metadata, node_set)`` for the row.
+    metadata always refreshes on top, since it describes the new content:
+    ``content_metadata``, and ``source_uri`` (where the new content came from) in
+    ``_cognee.source_uri``. Stored metadata or a stored ``_cognee`` that is not a
+    dict, which older versions could write, counts as empty. Returns
+    ``(external_metadata, node_set)`` for the row.
     """
-    metadata = dict(stored_metadata or {}) if item_external_metadata is None else {}
+    kept = stored_metadata if isinstance(stored_metadata, dict) else {}
+    metadata = dict(kept) if item_external_metadata is None else {}
     metadata.update(content_metadata)
     if item_external_metadata:
         metadata.update(item_external_metadata)
 
+    if source_uri:
+        cognee_metadata = metadata.get("_cognee")
+        cognee_metadata = dict(cognee_metadata) if isinstance(cognee_metadata, dict) else {}
+        cognee_metadata["source_uri"] = source_uri
+        metadata["_cognee"] = cognee_metadata
+
     if node_set is None:
-        resolved_node_set = json.loads(stored_node_set) if stored_node_set else None
+        resolved_node_set = _stored_node_set_names(stored_node_set)
     else:
         resolved_node_set = node_set or None
 
@@ -548,11 +579,8 @@ async def ingest_data(
                     get_external_metadata_dict(data_item),
                     item_external_metadata,
                     requested_node_set,
+                    source_uri,
                 )
-                if source_uri:
-                    data_point.external_metadata.setdefault("_cognee", {}).setdefault(
-                        "source_uri", source_uri
-                    )
                 # System metadata is the route stamp of the CONTENT (a DLT
                 # manifest, a code file), so it follows the content: new content
                 # gets the stamp its own item carries, including none. Keeping

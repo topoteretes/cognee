@@ -9,6 +9,8 @@ caller did not resend.
 
 import json
 
+import pytest
+
 from cognee.tasks.ingestion.ingest_data import merge_existing_row_metadata
 
 STORED = {"source": "audit", "node_set": ["ns1"]}
@@ -75,3 +77,62 @@ def test_stored_input_is_not_mutated():
     merge_existing_row_metadata(stored, STORED_NODE_SET, {"origin": "x"}, None, [])
 
     assert stored == STORED
+
+
+def test_source_uri_refreshes_over_the_stored_one():
+    """Where the new content came from describes the new content, like content metadata."""
+    stored = {"source": "audit", "_cognee": {"source_uri": "file:///old.pdf"}}
+
+    metadata, _ = merge_existing_row_metadata(
+        stored, None, {}, None, None, source_uri="file:///new.pdf"
+    )
+
+    assert metadata == {"source": "audit", "_cognee": {"source_uri": "file:///new.pdf"}}
+    assert stored["_cognee"] == {"source_uri": "file:///old.pdf"}, "stored copy not mutated"
+
+
+def test_no_new_source_uri_keeps_the_stored_one():
+    stored = {"_cognee": {"source_uri": "file:///old.pdf"}}
+
+    metadata, _ = merge_existing_row_metadata(stored, None, {}, None, None)
+
+    assert metadata == {"_cognee": {"source_uri": "file:///old.pdf"}}
+
+
+@pytest.mark.parametrize("stored", ["legacy text", ["a", "b"], 3])
+def test_stored_metadata_that_is_not_a_dict_counts_as_empty(stored):
+    """Older versions could store any JSON here; a re-ingest must not crash on it."""
+    metadata, node_set = merge_existing_row_metadata(
+        stored, STORED_NODE_SET, {}, None, None, source_uri="file:///new.pdf"
+    )
+
+    assert metadata == {"_cognee": {"source_uri": "file:///new.pdf"}, "node_set": ["ns1"]}
+    assert node_set == ["ns1"]
+
+
+def test_stored_cognee_block_that_is_not_a_dict_is_replaced():
+    metadata, _ = merge_existing_row_metadata(
+        {"_cognee": "legacy"}, None, {}, None, None, source_uri="file:///new.pdf"
+    )
+
+    assert metadata == {"_cognee": {"source_uri": "file:///new.pdf"}}
+
+
+@pytest.mark.parametrize(
+    "stored_node_set, expected",
+    [
+        (json.dumps(["ns1", "ns2"]), ["ns1", "ns2"]),
+        (["ns1"], ["ns1"]),
+        ("ns1", ["ns1"]),
+        (json.dumps("ns1"), ["ns1"]),
+        (json.dumps([]), None),
+        ("", None),
+        (json.dumps({"a": 1}), None),
+    ],
+)
+def test_stored_node_set_is_read_in_every_shape_a_row_can_hold(stored_node_set, expected):
+    """Data.node_set is normally json.dumps(list), but a row may hold the list itself
+    or a bare name; keeping it must not crash on either."""
+    _, node_set = merge_existing_row_metadata({}, stored_node_set, {}, None, None)
+
+    assert node_set == expected
