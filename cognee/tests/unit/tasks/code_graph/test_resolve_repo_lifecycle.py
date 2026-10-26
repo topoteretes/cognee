@@ -176,6 +176,25 @@ async def test_clone_lock_rejects_a_target_outside_configured_storage(tmp_path):
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(sys.platform == "win32", reason="Creating symlinks requires Windows privileges")
+@pytest.mark.parametrize("inside_storage", [False, True])
+async def test_clone_lock_rejects_a_symlink_target(tmp_path, inside_storage):
+    root = tmp_path / "clones"
+    root.mkdir()
+    destination = (root if inside_storage else tmp_path) / "real-clone"
+    destination.mkdir()
+    target = root / "clone"
+    target.symlink_to(destination, target_is_directory=True)
+
+    with pytest.raises(resolve.CodeRepositoryError, match="outside its storage root"):
+        async with resolve._clone_lock(target, clones_dir=root):
+            pytest.fail("Symlink clone target acquired a lock")
+
+    assert not (root / ".locks").exists()
+    assert asyncio.current_task() not in resolve._HELD_CLONE_LOCKS
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform == "win32", reason="Creating symlinks requires Windows privileges")
 @pytest.mark.parametrize("link_directory", [False, True])
 async def test_clone_lock_refuses_symlinks_outside_storage(tmp_path, link_directory):
     outside = tmp_path / "outside"
@@ -195,7 +214,7 @@ async def test_clone_lock_refuses_symlinks_outside_storage(tmp_path, link_direct
 
 
 @pytest.mark.asyncio
-async def test_lock_wait_warning_names_the_clone_slug_and_no_path(tmp_path, monkeypatch):
+async def test_lock_wait_warning_carries_no_name_and_no_path(tmp_path, monkeypatch):
     from unittest.mock import Mock
 
     target = tmp_path / ("a1" * 32)
@@ -223,5 +242,5 @@ async def test_lock_wait_warning_names_the_clone_slug_and_no_path(tmp_path, monk
             waiter.cancel()
             await asyncio.gather(waiter, return_exceptions=True)
     assert warning.called
-    assert target.name in str(warning.call_args_list)
+    assert target.name not in str(warning.call_args_list)
     assert str(tmp_path) not in str(warning.call_args_list)

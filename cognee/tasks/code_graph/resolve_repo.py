@@ -424,13 +424,16 @@ async def _clone_lock(target: Path, *, clones_dir: Path | None = None):
     """
     from filelock import FileLock, Timeout
 
-    root = Path(os.path.realpath(clones_dir if clones_dir is not None else default_clones_dir()))
-    target = Path(target)
-    # The managed directories are ours: a symlink or a path that leaves the root means the
-    # repos directory was tampered with, a server-side condition, not a bad request.
-    if target.is_symlink() or not Path(os.path.realpath(target)).is_relative_to(root):
+    root_path = os.path.realpath(clones_dir if clones_dir is not None else default_clones_dir())
+    root = Path(root_path)
+    # Cached clones are direct children of the storage root. Reject escapes and symlink
+    # aliases before checking or creating lock files.
+    resolved = os.path.realpath(target)
+    if not (resolved == root_path or resolved.startswith(root_path.rstrip(os.sep) + os.sep)) or (
+        resolved != root_path and resolved != os.path.join(root_path, os.path.basename(target))
+    ):
         raise CodeRepositoryError(message="The repository clone path is outside its storage root.")
-    target = Path(os.path.realpath(target))
+    target = Path(resolved)
     task = asyncio.current_task()
     held = _HELD_CLONE_LOCKS.get(task)
     if held is not None and target in held:
@@ -457,10 +460,8 @@ async def _clone_lock(target: Path, *, clones_dir: Path | None = None):
                 await asyncio.sleep(0.05)
                 if time.monotonic() - waited_since >= _CLONE_LOCK_LOG_SECONDS:
                     waited_since = time.monotonic()
-                    # The name is the clone's sha256 slug, never a repository name or path.
                     logger.warning(
-                        "Still waiting for the clone lock of %s: another run is using it.",
-                        target.name,
+                        "Still waiting for a repository clone lock: another run is using it."
                     )
         held.add(target)
         try:
