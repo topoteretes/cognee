@@ -707,9 +707,12 @@ ONTOLOGY_RESOLVER=rdflib  # Default: uses rdflib and OWL files
 MATCHING_STRATEGY=fuzzy   # Default: fuzzy matching with 80% similarity
 ONTOLOGY_FILE_PATH=/path/to/your/ontology.owl  # Full path to ontology file
 ONTOLOGY_MODE=annotate    # Default: enrich only. strict drops entities with no ontology grounding
+ONTOLOGY_REASONING=none   # Default: asserted triples only. owl_rl expands the OWL 2 RL closure (needs `cognee[ontology]`)
 ```
 
 `ONTOLOGY_MODE=strict` keeps an entity when either its type matches an ontology class or its name matches an individual, and drops the rest (plus their edges). It prunes only the graph — chunk text stays stored/embedded, so CHUNKS/RAG_COMPLETION can still surface dropped entities. It expects an ontology covering the corpus's vocabulary (a small ontology drops most entities; an aggregate dropped/retained count is logged), and an empty/missing ontology file with strict on is a hard error. The mode can also be set per call via `config={"ontology_config": {"ontology_mode": "strict", ...}}`.
+
+`ONTOLOGY_REASONING=owl_rl` runs an OWL 2 RL deductive closure (via the optional `owlrl` package, `pip install cognee[ontology]`) over the parsed ontology before the lookup is built, so `owl:inverseOf`, `rdfs:domain`/`rdfs:range` typing, `owl:equivalentClass`, `owl:sameAs` and transitive properties are honoured by matching and subgraph extraction. It is opt-in because the closure is materialised in memory and its cost grows with ontology size. Enabling it without `owlrl` installed raises `OntologyReasoningDependencyError`. Per call: `config={"ontology_config": {"ontology_reasoning": "owl_rl", ...}}` (applies when cognee builds the resolver; a pre-built `ontology_resolver` instance keeps its own setting).
 
 Implementation: `cognee/modules/ontology/`
 
