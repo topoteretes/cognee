@@ -253,6 +253,11 @@ tracing = [
     "opentelemetry-exporter-otlp-proto-http>=1.20.0,<2",
 ]
 
+# OWL-RL reasoning over the loaded ontology (ONTOLOGY_REASONING=owl_rl). owlrl 7.6+
+# requires rdflib>=7.6, which the core rdflib pin above does not admit, so keep the
+# window on the last series that works with rdflib 7.1.x.
+ontology = ["owlrl>=7.1.4,<7.2"]
+
 # Slim docling profile: converts office/HTML/email/markdown/LaTeX documents
 # without torch or the ML layout models (~280MB installed vs multiple GB).
 # PDF/image conversion through docling needs the ML pipeline: install the

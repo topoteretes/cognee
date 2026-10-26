@@ -5,6 +5,7 @@ import pytest
 from cognee.modules.ontology.exceptions import EmptyOntologyInStrictModeError
 from cognee.modules.ontology.get_default_ontology_resolver import (
     get_configured_ontology_mode,
+    get_configured_ontology_reasoning,
     get_configured_ontology_resolver,
 )
 from cognee.modules.ontology.ontology_env_config import OntologyEnvConfig
@@ -122,3 +123,55 @@ def test_invalid_per_call_ontology_mode_falls_back_to_default(mock_env_config):
 
     config = {"ontology_config": {"ontology_resolver": None, "ontology_mode": "bogus"}}
     assert get_configured_ontology_mode(config) == "annotate"
+
+
+@patch("cognee.modules.ontology.get_default_ontology_resolver.get_ontology_env_config")
+def test_ontology_reasoning_from_config_overrides_env(mock_env_config):
+    mock_env_config.return_value.ontology_reasoning = "none"
+
+    config = {"ontology_config": {"ontology_resolver": None, "ontology_reasoning": "owl_rl"}}
+    assert get_configured_ontology_reasoning(config) == "owl_rl"
+
+
+@patch("cognee.modules.ontology.get_default_ontology_resolver.get_ontology_env_config")
+def test_ontology_reasoning_falls_back_to_env(mock_env_config):
+    mock_env_config.return_value.ontology_reasoning = "owl_rl"
+
+    assert get_configured_ontology_reasoning(None) == "owl_rl"
+    assert (
+        get_configured_ontology_reasoning({"ontology_config": {"ontology_resolver": None}})
+        == "owl_rl"
+    )
+
+
+@patch("cognee.modules.ontology.get_default_ontology_resolver.get_ontology_env_config")
+def test_invalid_per_call_ontology_reasoning_falls_back_to_none(mock_env_config):
+    mock_env_config.return_value.ontology_reasoning = "owl_rl"
+
+    config = {"ontology_config": {"ontology_resolver": None, "ontology_reasoning": "bogus"}}
+    assert get_configured_ontology_reasoning(config) == "none"
+
+
+@patch("cognee.modules.ontology.get_default_ontology_resolver.RDFLibOntologyResolver")
+def test_explicit_file_path_passes_per_call_reasoning_to_resolver(mock_resolver_class):
+    config = {"ontology_config": {"ontology_resolver": None, "ontology_reasoning": "owl_rl"}}
+
+    get_configured_ontology_resolver(config, ontology_file_path="ontology.owl")
+
+    assert mock_resolver_class.call_args.kwargs["ontology_reasoning"] == "owl_rl"
+
+
+@patch("cognee.modules.ontology.get_default_ontology_resolver.RDFLibOntologyResolver")
+@patch("cognee.modules.ontology.get_default_ontology_resolver.get_ontology_env_config")
+def test_env_reasoning_reaches_resolver(mock_env_config, mock_resolver_class):
+    mock_env_config.return_value = OntologyEnvConfig(
+        _env_file=None,
+        ontology_file_path="ontology.owl",
+        ontology_reasoning="owl_rl",
+    )
+    resolver = _mock_resolver()
+    resolver.lookup = {"classes": {"car": object()}, "individuals": {}}
+    mock_resolver_class.return_value = resolver
+
+    assert get_configured_ontology_resolver(None) is resolver
+    assert mock_resolver_class.call_args.kwargs["ontology_reasoning"] == "owl_rl"

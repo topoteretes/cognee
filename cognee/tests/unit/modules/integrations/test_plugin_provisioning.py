@@ -1,9 +1,9 @@
 """Unit tests for the /plugins/{plugin_key} routes in get_integrations_router.
 
 Agent plugins (claude-code, codex, ...) are not OAuth providers — each
-connected plugin gets its own agent sub-user + labeled API key. These tests
-exercise the router's provisioning logic (idempotent get-or-create, key
-rotation on re-provision, unknown-plugin 404, disconnect-revokes-keys) with
+connected plugin gets its own agent sub-user, with one API key per machine. These tests
+exercise the router's provisioning logic (idempotent get-or-create, one
+added key per provision, unknown-plugin 404, disconnect-revokes-keys) with
 the DB-facing collaborators mocked at module level, the same way
 test_get_integrations_router.py mocks the OAuth credential layer. The
 throttled UserApiKey.last_used_at write that provisioned keys rely on for
@@ -29,6 +29,7 @@ from cognee.modules.users.methods import get_authenticated_user
 
 USER_ID = uuid4()
 AGENT_ID = uuid4()
+KEY_ID = uuid4()
 
 # The methods package rebinds get_authenticated_user to the function; import
 # the submodule explicitly to reach the resolved auth-posture constant.
@@ -95,8 +96,13 @@ def test_provision_creates_agent_key_and_plugin_record(client):
         patch.object(
             _router_module,
             "create_agent",
-            new=AsyncMock(return_value=(agent_user, "raw-key-shown-once")),
+            new=AsyncMock(return_value=(agent_user, None)),
         ) as create_agent,
+        patch.object(
+            _router_module,
+            "add_plugin_agent_key",
+            new=AsyncMock(return_value=SimpleNamespace(id=KEY_ID, api_key="raw-key-shown-once")),
+        ) as add_key,
         patch.object(
             _router_module, "get_principal_all_configuration", new=AsyncMock(return_value=[])
         ),
@@ -114,6 +120,7 @@ def test_provision_creates_agent_key_and_plugin_record(client):
     assert body["pluginKey"] == "claude-code"
     assert body["agentId"] == str(AGENT_ID)
     assert body["apiKey"] == "raw-key-shown-once"
+    assert body["keyId"] == str(KEY_ID)
     assert body["created"] is True
 
     # Provisioned under the plugin key AND the authenticated principal — the
@@ -121,6 +128,9 @@ def test_provision_creates_agent_key_and_plugin_record(client):
     create_agent.assert_awaited_once()
     assert create_agent.await_args.args[0] == "claude-code"
     assert create_agent.await_args.args[1].id == USER_ID
+    # Every key goes through add_plugin_agent_key, on the agent, named after the plugin.
+    assert create_agent.await_args.kwargs == {"issue_api_key": False}
+    add_key.assert_awaited_once_with(AGENT_ID, "claude-code")
 
     # plugin_key recorded in the agent's principal configuration blob.
     store_config.assert_awaited_once()
@@ -160,7 +170,12 @@ def test_provision_registers_parent_tenant_id():
             _router_module,
             "create_agent",
             # Stale first-provision shape: agent object still has tenant_id=None.
-            new=AsyncMock(return_value=(_fake_agent_user(), "key")),
+            new=AsyncMock(return_value=(_fake_agent_user(), None)),
+        ),
+        patch.object(
+            _router_module,
+            "add_plugin_agent_key",
+            new=AsyncMock(return_value=SimpleNamespace(id=KEY_ID, api_key="key")),
         ),
         patch.object(
             _router_module, "get_principal_all_configuration", new=AsyncMock(return_value=[])
@@ -176,17 +191,7 @@ def test_provision_registers_parent_tenant_id():
     assert register_connection.await_args.kwargs["tenant_id"] == tenant_id
 
 
-def test_second_provision_returns_same_agent_with_rotated_key(client):
-    old_key = SimpleNamespace(id=uuid4())
-    call_order = []
-
-    async def _record_delete(*args, **kwargs):
-        call_order.append("delete")
-
-    async def _record_create(*args, **kwargs):
-        call_order.append("create")
-        return SimpleNamespace(api_key="rotated-key")
-
+def test_second_provision_adds_a_key_to_the_same_agent_and_revokes_nothing(client):
     # list_agents returns another plugin's agent first: the router must pick
     # the claude-code agent by its deterministic email, not the first child.
     codex_agent_id = uuid4()
@@ -203,13 +208,13 @@ def test_second_provision_returns_same_agent_with_rotated_key(client):
                 return_value=[_fake_agent_info("codex", codex_agent_id), _fake_agent_info()]
             ),
         ),
-        patch.object(_router_module, "get_api_keys", new=AsyncMock(return_value=[old_key])),
+        patch.object(_router_module, "delete_api_key", new=AsyncMock()) as delete_key,
+        patch.object(_router_module, "revoke_plugin_agent_keys", new=AsyncMock()) as revoke_keys,
         patch.object(
-            _router_module, "delete_api_key", new=AsyncMock(side_effect=_record_delete)
-        ) as delete_key,
-        patch.object(
-            _router_module, "create_api_key", new=AsyncMock(side_effect=_record_create)
-        ) as create_key,
+            _router_module,
+            "add_plugin_agent_key",
+            new=AsyncMock(return_value=SimpleNamespace(id=KEY_ID, api_key="added-key")),
+        ) as add_key,
         patch.object(
             _router_module, "get_principal_all_configuration", new=AsyncMock(return_value=[])
         ),
@@ -221,25 +226,18 @@ def test_second_provision_returns_same_agent_with_rotated_key(client):
     body = response.json()
     assert body["created"] is False
     assert body["agentId"] == str(AGENT_ID)
-    assert body["apiKey"] == "rotated-key"
+    assert body["apiKey"] == "added-key"
 
-    # Old key revoked, new labeled key minted — rotation is the re-provision.
-    # Both operate on the claude-code agent, never the codex one.
-    delete_key.assert_awaited_once()
-    assert delete_key.await_args.args[0].id == AGENT_ID
-    assert delete_key.await_args.args[1] == old_key.id
-    create_key.assert_awaited_once()
-    assert create_key.await_args.args[0].id == AGENT_ID
-    assert create_key.await_args.args[1] == "claude-code"
-    # Mint-before-revoke: a failure mid-rotation must never leave the plugin
-    # keyless.
-    assert call_order == ["create", "delete"]
+    # One key added to the claude-code agent (never the codex one), none revoked.
+    add_key.assert_awaited_once_with(AGENT_ID, "claude-code")
+    delete_key.assert_not_awaited()
+    revoke_keys.assert_not_awaited()
 
 
-def test_provision_race_integrity_error_takes_rotation_path(client):
+def test_provision_race_integrity_error_takes_the_add_path(client):
     """Two concurrent first provisions: the loser's insert hits the unique-email
-    constraint (IntegrityError, not UserAlreadyExists) and must recover via the
-    same get-and-rotate path instead of 500ing."""
+    constraint (IntegrityError, not UserAlreadyExists) and must recover by
+    adding a key to the existing agent instead of 500ing."""
     with (
         patch.object(
             _router_module,
@@ -251,12 +249,11 @@ def test_provision_race_integrity_error_takes_rotation_path(client):
             "list_agents",
             new=AsyncMock(return_value=[_fake_agent_info()]),
         ),
-        patch.object(_router_module, "get_api_keys", new=AsyncMock(return_value=[])),
         patch.object(
             _router_module,
-            "create_api_key",
-            new=AsyncMock(return_value=SimpleNamespace(api_key="rotated-key")),
-        ),
+            "add_plugin_agent_key",
+            new=AsyncMock(return_value=SimpleNamespace(id=KEY_ID, api_key="added-key")),
+        ) as add_key,
         patch.object(
             _router_module, "get_principal_all_configuration", new=AsyncMock(return_value=[])
         ),
@@ -268,12 +265,13 @@ def test_provision_race_integrity_error_takes_rotation_path(client):
     assert response.status_code == 200
     body = response.json()
     assert body["created"] is False
-    assert body["apiKey"] == "rotated-key"
+    assert body["apiKey"] == "added-key"
+    add_key.assert_awaited_once_with(AGENT_ID, "claude-code")
 
 
 def test_reprovision_409s_when_agent_not_resolvable(client):
     """UserAlreadyExists but the agent isn't among this user's children: the
-    router must refuse (409) rather than rotate/mint a key for another
+    router must refuse (409) rather than mint a key for another
     plugin's — or another owner's — agent."""
     with (
         patch.object(
@@ -287,15 +285,13 @@ def test_reprovision_409s_when_agent_not_resolvable(client):
             # Only a different plugin's agent exists under this user.
             new=AsyncMock(return_value=[_fake_agent_info("codex", uuid4())]),
         ),
-        patch.object(_router_module, "create_api_key", new=AsyncMock()) as create_key,
-        patch.object(_router_module, "delete_api_key", new=AsyncMock()) as delete_key,
+        patch.object(_router_module, "add_plugin_agent_key", new=AsyncMock()) as add_key,
         patch.object(_router_module, "register_agent_connection", new=AsyncMock()),
     ):
         response = client.post("/api/v1/integrations/plugins/claude-code/provision")
 
     assert response.status_code == 409
-    create_key.assert_not_awaited()
-    delete_key.assert_not_awaited()
+    add_key.assert_not_awaited()
 
 
 def test_reprovision_preserves_original_provisioned_at(client):
@@ -312,7 +308,12 @@ def test_reprovision_preserves_original_provisioned_at(client):
         patch.object(
             _router_module,
             "create_agent",
-            new=AsyncMock(return_value=(_fake_agent_user(), "key")),
+            new=AsyncMock(return_value=(_fake_agent_user(), None)),
+        ),
+        patch.object(
+            _router_module,
+            "add_plugin_agent_key",
+            new=AsyncMock(return_value=SimpleNamespace(id=KEY_ID, api_key="key")),
         ),
         patch.object(
             _router_module,
@@ -328,28 +329,28 @@ def test_reprovision_preserves_original_provisioned_at(client):
 
     assert response.status_code == 200
     configuration = store_config.await_args.kwargs["configuration"]
-    # Rotation isn't a new install: the first provisioned_at sticks, and the
+    # Another key isn't a new install: the first provisioned_at sticks, and the
     # registry's own "agents" entries in the shared blob survive the write.
     assert configuration["plugin"]["provisioned_at"] == "2026-01-01T00:00:00+00:00"
     assert configuration["agents"] == {"keep": "me"}
 
 
 def test_disconnect_revokes_keys_and_deactivates_connection(client):
-    keys = [SimpleNamespace(id=uuid4()), SimpleNamespace(id=uuid4())]
     with (
         patch.object(
             _router_module,
             "list_agents",
             new=AsyncMock(return_value=[_fake_agent_info()]),
         ),
-        patch.object(_router_module, "get_api_keys", new=AsyncMock(return_value=keys)),
-        patch.object(_router_module, "delete_api_key", new=AsyncMock()) as delete_key,
+        patch.object(
+            _router_module, "revoke_plugin_agent_keys", new=AsyncMock(return_value=2)
+        ) as revoke_keys,
         patch.object(_router_module, "deactivate_agent_connection", new=AsyncMock()) as deactivate,
     ):
         response = client.delete("/api/v1/integrations/plugins/claude-code")
 
     assert response.json() == {"disconnected": True}
-    assert delete_key.await_count == 2
+    revoke_keys.assert_awaited_once_with(AGENT_ID)
     expected_connection_id = build_agent_connection_id(
         agent_session_name="plugin:claude-code", user_id=str(AGENT_ID)
     )
