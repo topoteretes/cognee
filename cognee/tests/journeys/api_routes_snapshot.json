@@ -47,6 +47,7 @@
   "GET /api/v1/integrations/{provider}/folders",
   "GET /api/v1/integrations/{provider}/labels",
   "GET /api/v1/integrations/{provider}/resources",
+  "GET /api/v1/integrations/{provider}/sync/progress",
   "GET /api/v1/ontologies",
   "GET /api/v1/permissions/principals/{principal_id}/datasets",
   "GET /api/v1/permissions/tenants/me",

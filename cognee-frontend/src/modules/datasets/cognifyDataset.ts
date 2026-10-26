@@ -1,7 +1,17 @@
 // import getDatasetGraph from "./getDatasetGraph";
-import { Dataset } from "../ingestion/useDatasets";
 import { CogneeInstance } from "../instances/types";
 import { getPipelineSettingsFromStorage } from "../configuration/pipelineSettings";
+
+// `data`/`status` aren't read below — every caller passes placeholder values
+// (`data: []`, `status: "processing"`) since only `id`/`name` matter to the
+// request this builds. Kept loose (`unknown[]`/`string`) rather than pulling
+// in ingestion's DataFile type for fields that do nothing here.
+export interface Dataset {
+  id: string;
+  name: string;
+  data: unknown[];
+  status: string;
+}
 
 // interface GraphData {
 //   nodes: { id: string; label: string; properties?: object }[];

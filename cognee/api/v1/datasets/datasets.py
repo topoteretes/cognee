@@ -5,13 +5,16 @@ from cognee.api.v1.datasets.dto import DataDTO
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.locks import dataset_lock
+from cognee.modules.data.content_hash import compute_content_hash, normalize_content_hash
 from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
 from cognee.modules.data.methods import (
     get_authorized_dataset,
     get_authorized_existing_datasets,
     get_dataset_data,
+    get_dataset_data_by_content_hash,
     has_dataset_data,
 )
+from cognee.modules.data.models import Data
 from cognee.modules.graph.methods import (
     delete_data_nodes_and_edges,
     delete_dataset_nodes_and_edges,
@@ -102,6 +105,32 @@ async def _invalidate_sessions_for_deleted_data_nonfatal(
         )
 
 
+def _is_reference_string(text: str, *, check_local_files: bool = True) -> bool:
+    """True when ``add(text)`` would have ingested a file or page, not the text.
+
+    Mirrors the string branch of ``save_data_item_to_storage``: an ``s3://``,
+    ``http(s)://`` or ``file://`` URL is always a reference, and any other
+    string is one when it names an existing local file the ingestion
+    allowlist accepts. A ``"/"``-prefixed note that is not a file stays text
+    on both sides.
+
+    ``check_local_files=False`` skips that last probe. Under ``serve()``,
+    ``add()`` resolved the string against the server's filesystem, so a file
+    that happens to exist on this machine says nothing about how it was stored.
+    """
+    from urllib.parse import urlparse
+
+    if urlparse(text).scheme in ("s3", "http", "https", "file"):
+        return True
+
+    if not check_local_files:
+        return False
+
+    from cognee.tasks.ingestion.save_data_item_to_storage import _resolve_local_file_uri
+
+    return _resolve_local_file_uri(text) is not None
+
+
 class datasets:
     """
     Dataset management namespace for Cognee.
@@ -155,6 +184,83 @@ class datasets:
         dataset = await get_authorized_dataset(user, dataset_id)
 
         return await get_dataset_data(dataset.id, order_by="created_at")
+
+    @staticmethod
+    async def find_data(
+        dataset_id: UUID,
+        *,
+        content: str | bytes | None = None,
+        content_hash: str | None = None,
+        user: User | None = None,
+    ) -> list[Data]:
+        """Find the data items *you* added to a dataset with a given content.
+
+        Pass exactly one of ``content`` or ``content_hash``:
+
+        - ``content`` is the **literal** text or bytes that were added, hashed
+          locally with ``compute_content_hash``. It is not resolved the way
+          ``add()`` resolves a string: a path, ``file://`` URI, ``s3://`` or
+          ``http(s)://`` URL is refused with ``ValueError`` rather than hashed
+          as text (which would match nothing and read as "not present"). For
+          content that was added by reference, pass the ``content_hash`` read
+          off the ``Data`` row or the listing instead. A path- or URL-shaped
+          string that was stored as literal text (cognee does this for DLT rows
+          and session bridging) is looked up with
+          ``content_hash=compute_content_hash(text)``. Under ``serve()`` only
+          URL schemes are refused: local files say nothing about the server.
+        - ``content_hash`` is a hash computed earlier or read off another
+          ``Data`` row; case and surrounding whitespace are normalized, and a
+          value that is not a 32-character hex digest is a ``ValueError``.
+
+        A row matches on its ``content_hash`` (the ingested payload) only —
+        never on the loader-derived ``raw_content_hash``, so a PDF whose
+        extracted text equals ``content`` is not returned. Matches are scoped
+        to the caller's own rows (owner and tenant), exactly like ingestion
+        dedup: in a shared dataset another user's copy of the same content is
+        not yours to find or delete. Newest first; an empty list means you
+        added no such content to the dataset.
+
+        Routes to the remote instance when connected via ``serve()``, like
+        ``list_data``; the client re-checks every returned row's hash and
+        raises ``RuntimeError`` against a server that predates the lookup,
+        so an old server can never make the whole dataset look like a match.
+        Requires read access to the dataset.
+        """
+        if (content is None) == (content_hash is None):
+            raise ValueError("find_data takes exactly one of `content` or `content_hash`.")
+
+        from cognee.api.v1.serve.state import get_remote_client
+
+        client = get_remote_client()
+
+        if content_hash is None:
+            if isinstance(content, str) and _is_reference_string(
+                content, check_local_files=client is None
+            ):
+                raise ValueError(
+                    "find_data(content=...) takes the literal text or bytes that were added; "
+                    f"{content!r} is a path or URL that add() would have resolved to a file "
+                    "or page. For content added by reference, pass content_hash= from the "
+                    "Data row or the listing; if this exact string was stored as text, pass "
+                    "content_hash=compute_content_hash(text) "
+                    "(from cognee.modules.data.content_hash)."
+                )
+            content_hash = compute_content_hash(content)
+        else:
+            content_hash = normalize_content_hash(content_hash)
+
+        if client is not None:
+            return [
+                DataDTO.model_validate(row)
+                for row in await client.list_data(dataset_id, content_hash=content_hash)
+            ]
+
+        if not user:
+            user = await get_default_user()
+
+        dataset = await get_authorized_dataset(user, dataset_id)
+
+        return await get_dataset_data_by_content_hash(dataset.id, content_hash, user)
 
     @staticmethod
     async def has_data(dataset_id: str, user: User | None = None) -> bool:

@@ -31,6 +31,7 @@ from cognee.infrastructure.databases.provenance.source_ref_state import (
     provenance_attach_inputs,
 )
 from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.locks.loop_agnostic_lock import LoopAgnosticLock
 from cognee.modules.observability import OtelStatusCode as StatusCode
 from cognee.modules.observability import new_span
 from cognee.modules.observability.tracing import (
@@ -199,7 +200,9 @@ class Neo4jAdapter(GraphDBInterface):
         # calls so two concurrent updates to the same artifact within this
         # adapter instance cannot overwrite each other (the atomic fold path in
         # add_nodes/add_edges does not need it).
-        self._source_ref_change_lock = asyncio.Lock()
+        # Loop-agnostic: the adapter is cached across event loops, and an
+        # asyncio.Lock binds to the first loop that awaits it.
+        self._source_ref_change_lock = LoopAgnosticLock()
 
     async def close(self) -> None:
         """
