@@ -24,6 +24,18 @@ from cognee.modules.data.methods import (
 )
 from cognee.modules.data.methods.create_authorized_dataset import create_authorized_dataset
 from cognee.modules.graph.methods import get_formatted_graph_data
+from cognee.modules.graph.rdf.sparql import (
+    DEFAULT_LIMIT as SPARQL_DEFAULT_LIMIT,
+)
+from cognee.modules.graph.rdf.sparql import (
+    MAX_LIMIT as SPARQL_MAX_LIMIT,
+)
+from cognee.modules.graph.rdf.sparql import (
+    SparqlGraphTooLargeError,
+    SparqlQueryError,
+    SparqlQueryTimeoutError,
+    query_dataset_sparql,
+)
 from cognee.modules.pipelines.models import PipelineRunStatus
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
@@ -152,6 +164,53 @@ class DatasetCreationPayload(InDTO):
 class DatasetSchemaPayloadDTO(InDTO):
     graph_schema: dict[str, Any] | None = None
     custom_prompt: str | None = None
+
+
+class SparqlQueryPayloadDTO(InDTO):
+    query: str = Field(
+        min_length=1,
+        description="A read-only SPARQL 1.1 query: SELECT, ASK, CONSTRUCT or DESCRIBE.",
+        examples=["SELECT ?s ?name WHERE { ?s rdfs:label ?name } LIMIT 10"],
+    )
+    base_iri: str | None = Field(
+        default=None,
+        description=(
+            "Prefix for the IRIs minted for nodes without an ontology_uri and for"
+            " cognee-native predicates. Defaults to https://cognee.ai/graph/."
+        ),
+        examples=["https://example.org/memory/"],
+    )
+    limit: int = Field(
+        default=SPARQL_DEFAULT_LIMIT,
+        ge=1,
+        le=SPARQL_MAX_LIMIT,
+        description="Maximum number of SELECT rows to return; sets `truncated` when hit.",
+    )
+
+
+class SparqlResultDTO(BaseModel):
+    """One query form's result; the fields for the other forms are omitted.
+
+    Keys are deliberately snake_case (not the API's usual camelCase): they mirror
+    the SPARQL JSON results vocabulary callers already parse.
+    """
+
+    variables: list[str] | None = Field(default=None, description="SELECT: projected names")
+    rows: list[list[str | None]] | None = Field(
+        default=None,
+        description=(
+            "SELECT: one list per solution, aligned with `variables`. IRIs and literal"
+            " lexical forms as strings, blank nodes as `_:id`, unbound as null."
+        ),
+    )
+    row_count: int | None = Field(default=None, description="SELECT: len(rows)")
+    truncated: bool | None = Field(
+        default=None, description="SELECT: true when more rows existed than `limit`"
+    )
+    boolean: bool | None = Field(default=None, description="ASK: the answer")
+    turtle: str | None = Field(
+        default=None, description="CONSTRUCT / DESCRIBE: the result graph as Turtle"
+    )
 
 
 def get_datasets_router() -> APIRouter:
@@ -387,6 +446,110 @@ def get_datasets_router() -> APIRouter:
         graph_data = await get_formatted_graph_data(dataset_id, user)
 
         return graph_data
+
+    @router.post(
+        "/{dataset_id}/sparql",
+        response_model=SparqlResultDTO,
+        response_model_exclude_none=True,
+        responses={
+            400: {"model": ErrorResponseDTO},
+            404: {"model": ErrorResponseDTO},
+            413: {"model": ErrorResponseDTO},
+            504: {"model": ErrorResponseDTO},
+        },
+    )
+    async def query_dataset_with_sparql(
+        payload: SparqlQueryPayloadDTO,
+        dataset_id: UUID = PathParam(
+            description="Dataset UUID, the id field from GET /api/v1/datasets (not the name)",
+            examples=["b8a7c3de-4f5a-4b6c-8d9e-0f1a2b3c4d5e"],
+        ),
+        user: User = Depends(get_authenticated_user),
+    ):
+        """
+        Run a read-only SPARQL query over a dataset's knowledge graph.
+
+        The dataset graph is read in full and loaded into an in-memory RDF store
+        for the duration of the request (the same view `cognee.modules.graph.rdf`
+        exports), then the query runs there. Nodes carrying an `ontology_uri` keep
+        that IRI; other nodes get `{base_iri}node/{id}` and cognee-native edges
+        `{base_iri}prop/{relationship_name}`; `name` becomes `rdfs:label` and
+        `is_a` becomes `rdf:type` / `rdfs:subClassOf`.
+
+        ## Path Parameters
+        - **dataset_id** (UUID): The unique identifier of the dataset
+
+        ## Request Body
+        - **query** (str): SELECT, ASK, CONSTRUCT or DESCRIBE. SPARQL Update
+          (INSERT, DELETE, LOAD, CLEAR, DROP, CREATE, ADD, MOVE, COPY) is refused.
+        - **base_iri** (str, optional): prefix for minted IRIs
+        - **limit** (int, 1-10000, default 1000): cap on SELECT rows
+
+        ## Response
+        Depends on the query form:
+        - SELECT: `variables`, `rows`, `row_count`, `truncated`
+        - ASK: `boolean`
+        - CONSTRUCT / DESCRIBE: `turtle`
+
+        ## Limits
+        - Graphs with more than `SPARQL_MAX_GRAPH_NODES` nodes (default 200000)
+          are refused with 413; export the graph as RDF instead.
+        - Queries that run longer than `SPARQL_QUERY_TIMEOUT_SECONDS` (default 30)
+          are abandoned with 504. The server stops waiting; the worker thread
+          finishes on its own.
+
+        ## Error Codes
+        - **400 Bad Request**: SPARQL Update keywords, or the query does not parse
+        - **404 Not Found**: Dataset doesn't exist or user doesn't have access
+        - **413 Content Too Large**: Dataset graph exceeds the node ceiling
+        - **504 Gateway Timeout**: Query exceeded the wall-clock budget
+        """
+        send_telemetry(
+            "Datasets API Endpoint Invoked",
+            user,
+            additional_properties={
+                "endpoint": f"POST /v1/datasets/{dataset_id!s}/sparql",
+                "dataset_id": str(dataset_id),
+                "cognee_version": cognee_version,
+            },
+        )
+
+        datasets_found = await get_authorized_existing_datasets([dataset_id], "read", user)
+
+        if not datasets_found:
+            return JSONResponse(
+                status_code=404,
+                content=ErrorResponseDTO(
+                    message=f"Dataset ({dataset_id!s}) not found."
+                ).model_dump(),
+            )
+
+        dataset = datasets_found[0]
+
+        try:
+            return await query_dataset_sparql(
+                dataset.id,
+                dataset.owner_id,
+                payload.query,
+                base_iri=payload.base_iri,
+                limit=payload.limit,
+            )
+        except SparqlGraphTooLargeError as error:
+            return JSONResponse(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                content=ErrorResponseDTO(message=str(error)).model_dump(),
+            )
+        except SparqlQueryTimeoutError as error:
+            return JSONResponse(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                content=ErrorResponseDTO(message=str(error)).model_dump(),
+            )
+        except SparqlQueryError as error:
+            # Update keywords or a query rdflib cannot parse: the client's input.
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content=ErrorResponseDTO(message=str(error)).model_dump(),
+            )
 
     @router.get(
         "/{dataset_id}/data",

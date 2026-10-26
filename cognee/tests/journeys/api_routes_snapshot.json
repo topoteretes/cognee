@@ -105,6 +105,7 @@
   "POST /api/v1/cognify",
   "POST /api/v1/configuration/store_user_configuration",
   "POST /api/v1/datasets",
+  "POST /api/v1/datasets/{dataset_id}/sparql",
   "POST /api/v1/forget",
   "POST /api/v1/improve",
   "POST /api/v1/integrations/plugins/{plugin_key}/provision",
