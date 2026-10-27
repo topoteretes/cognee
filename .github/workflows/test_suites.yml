@@ -338,7 +338,10 @@ jobs:
     secrets: inherit
 
   notify:
-    name: Test Completion Status
+    # A simulate-fork dispatch posts its result under another name: on the
+    # branch's head commit it would otherwise replace the PR's required check
+    # with a pass that skipped the secret suites.
+    name: ${{ inputs.simulate-fork && 'Simulated Fork Status' || 'Test Completion Status' }}
     needs: [
       ci-context,
       pre-test,
