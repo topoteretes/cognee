@@ -9,6 +9,7 @@ from .get_dataset_data import get_dataset_data, count_dataset_data
 from .get_dataset_data_by_content_hash import get_dataset_data_by_content_hash
 from .get_selected_dataset_data import get_selected_dataset_data
 from .get_dataset_processing_status import get_dataset_processing_status
+from .get_dataset_system_prompt import get_dataset_system_prompt
 from .get_authorized_dataset import get_authorized_dataset
 from .get_authorized_dataset_by_name import get_authorized_dataset_by_name
 from .get_data import get_data

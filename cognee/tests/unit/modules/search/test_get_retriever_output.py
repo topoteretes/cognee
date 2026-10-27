@@ -762,3 +762,66 @@ async def test_hybrid_deferral_to_graph_completion_is_logged_as_a_warning(caplog
 
     assert effective is SearchType.GRAPH_COMPLETION
     assert "HYBRID_COMPLETION is not available for this search" in caplog.text
+
+
+async def _retriever_kwargs_with_stored_prompt(stored_prompt, **search_kwargs):
+    """Run a search and return the kwargs the retriever was built with."""
+    graph, factory, session = _factory_and_session_patches(_DeterministicRetriever())
+    lookup = patch.object(
+        get_retriever_output_module,
+        "get_dataset_system_prompt",
+        new_callable=AsyncMock,
+        return_value=stored_prompt,
+    )
+    with graph, factory as factory_mock, session, lookup as lookup_mock:
+        await get_retriever_output(SearchType.GRAPH_COMPLETION, "q", **search_kwargs)
+
+    return factory_mock.await_args.kwargs, lookup_mock
+
+
+@pytest.mark.asyncio
+async def test_search_without_a_system_prompt_uses_the_dataset_prompt():
+    dataset = SimpleNamespace(id=uuid4(), name="ds", tenant_id=None)
+
+    kwargs, lookup = await _retriever_kwargs_with_stored_prompt(
+        "Answer like a lawyer.", dataset=dataset
+    )
+
+    assert kwargs["system_prompt"] == "Answer like a lawyer."
+    lookup.assert_awaited_once_with(dataset.id)
+
+
+@pytest.mark.asyncio
+async def test_an_explicit_system_prompt_wins_over_the_dataset_prompt():
+    dataset = SimpleNamespace(id=uuid4(), name="ds", tenant_id=None)
+
+    kwargs, lookup = await _retriever_kwargs_with_stored_prompt(
+        "Answer like a lawyer.", dataset=dataset, system_prompt="Answer briefly."
+    )
+
+    assert kwargs["system_prompt"] == "Answer briefly."
+    lookup.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_an_explicit_system_prompt_file_wins_over_the_dataset_prompt():
+    dataset = SimpleNamespace(id=uuid4(), name="ds", tenant_id=None)
+
+    kwargs, lookup = await _retriever_kwargs_with_stored_prompt(
+        "Answer like a lawyer.", dataset=dataset, system_prompt_path="my_prompt.txt"
+    )
+
+    assert kwargs.get("system_prompt") is None
+    lookup.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_no_stored_prompt_or_no_dataset_keeps_the_default_prompt():
+    dataset = SimpleNamespace(id=uuid4(), name="ds", tenant_id=None)
+
+    kwargs, _ = await _retriever_kwargs_with_stored_prompt(None, dataset=dataset)
+    assert kwargs.get("system_prompt") is None
+
+    kwargs, lookup = await _retriever_kwargs_with_stored_prompt("Answer like a lawyer.")
+    assert kwargs.get("system_prompt") is None
+    lookup.assert_not_awaited()
