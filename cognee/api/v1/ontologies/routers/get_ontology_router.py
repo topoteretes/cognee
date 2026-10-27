@@ -15,6 +15,7 @@ from ..ontologies import (
     DuplicateOntologyKeyError,
     OntologyParseError,
     OntologyService,
+    UnsupportedOntologyFormatError,
 )
 
 logger = get_logger(__name__)
@@ -38,8 +39,13 @@ def get_ontology_router() -> APIRouter:
         ontology_file: UploadFile = File(
             ...,
             description=(
-                "Single ontology file in OWL (RDF/XML) format. The filename must end with .owl "
-                "— other extensions are rejected with 400. Exactly one file per request."
+                "Single ontology file in any RDF serialization rdflib parses: RDF/XML "
+                "(.owl, .rdf, .xml), Turtle (.ttl), N3 (.n3), JSON-LD (.jsonld), N-Triples "
+                "(.nt), N-Quads (.nq) or TriG (.trig). The format is taken from the filename "
+                "extension, or — when the extension is not one of these — from the part's "
+                "Content-Type (application/rdf+xml, text/turtle, text/n3, application/ld+json, "
+                "application/n-triples, ...). Files matching neither are rejected with 400. "
+                "Exactly one file per request."
             ),
         ),
         description: str | None = Form(
@@ -57,14 +63,14 @@ def get_ontology_router() -> APIRouter:
 
         ## Request Parameters
         - **ontology_key** (str): Unique, user-defined identifier for the ontology (plain string — values starting with '[' or '{' are rejected; duplicate keys return 400). Use this key later as the `ontology_key` parameter in /api/v1/cognify or /api/v1/remember.
-        - **ontology_file** (UploadFile): Single ontology file in OWL (RDF/XML) format; the filename must end with .owl.
+        - **ontology_file** (UploadFile): Single ontology file in any RDF serialization rdflib parses — RDF/XML (.owl, .rdf, .xml), Turtle (.ttl), N3 (.n3), JSON-LD (.jsonld), N-Triples (.nt), N-Quads (.nq), TriG (.trig). When the filename has no recognised extension the part's Content-Type decides (application/rdf+xml, text/turtle, text/n3, application/ld+json, application/n-triples, ...).
         - **description** (Optional[str]): Optional description for the ontology (plain string; values starting with '[' or '{' are rejected).
 
         ## Response
         Returns metadata about the uploaded ontology including key, filename, size, and upload timestamp.
 
         ## Error Codes
-        - **400 Bad Request**: Invalid file format, duplicate key, multiple files uploaded
+        - **400 Bad Request**: Unsupported file format (the message lists accepted extensions and content types), duplicate key, multiple files uploaded
         - **500 Internal Server Error**: File system or processing errors
         """
         send_telemetry(
@@ -114,6 +120,10 @@ def get_ontology_router() -> APIRouter:
         except DuplicateOntologyKeyError:
             logger.warning("Ontology upload rejected: ontology key already exists")
             return JSONResponse(status_code=400, content={"error": "Ontology key already exists."})
+        except UnsupportedOntologyFormatError as error:
+            # Message is composed from the static accepted-format lists only.
+            logger.warning("Ontology upload rejected: unsupported ontology format")
+            return JSONResponse(status_code=400, content={"error": str(error)})
         except ValueError as error:
             logger.warning("Ontology upload request failed: %s", error)
             return JSONResponse(status_code=400, content={"error": "Invalid ontology request."})

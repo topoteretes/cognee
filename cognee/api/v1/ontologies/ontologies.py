@@ -4,21 +4,30 @@ import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from io import BytesIO
 from pathlib import Path
 
 from fastapi import UploadFile
 from rdflib import Graph
 
 from cognee.base_config import get_base_config
+from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import (
+    detect_rdf_format,
+    normalize_content_type,
+    supported_rdf_content_types,
+    supported_rdf_extensions,
+)
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger(__name__)
 
 _ONTOLOGY_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
-# Uploads are stored as ``.owl`` regardless of their actual RDF syntax, so the
-# stored file is parsed by trying RDF/XML first and then the other rdflib
-# syntaxes until one succeeds (same order RDFLibOntologyResolver uses).
+# Uploads are stored as ``.owl`` regardless of their actual RDF syntax. Newer
+# uploads record the detected rdflib parser name under ``format`` in metadata
+# and are parsed with it directly; uploads that predate that field are parsed
+# by trying RDF/XML first and then the other rdflib syntaxes until one succeeds
+# (same order RDFLibOntologyResolver uses).
 _PARSE_FORMATS = ("xml", "turtle", "n3", "nt", "json-ld", "trig", "nquads")
 
 # Query-parameter name -> (rdflib serializer name, media type, file extension).
@@ -36,6 +45,37 @@ class DuplicateOntologyKeyError(ValueError):
     A dedicated type lets the router surface a safe, literal client message
     without echoing the exception text (avoids stack-trace exposure).
     """
+
+
+class UnsupportedOntologyFormatError(ValueError):
+    """Raised when neither the filename extension nor the content type names an RDF format.
+
+    The message is built only from the static accepted-format lists (never from
+    the upload itself), so the router can return it to the client verbatim.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Unsupported ontology format. Accepted file extensions: "
+            f"{', '.join(supported_rdf_extensions())}. "
+            "Accepted content types (for filenames without a known extension): "
+            f"{', '.join(supported_rdf_content_types())}."
+        )
+
+
+class OntologyFile(BytesIO):
+    """Stored ontology bytes plus the upload's filename and content type.
+
+    ``RDFLibOntologyResolver`` reads ``filename``/``name`` and ``content_type``
+    off the file object to pick the parser, so both must survive the round
+    trip through storage.
+    """
+
+    def __init__(self, content: bytes, filename: str, content_type: str | None) -> None:
+        super().__init__(content)
+        self.filename = filename
+        self.name = filename
+        self.content_type = content_type
 
 
 class OntologyParseError(Exception):
@@ -107,8 +147,10 @@ class OntologyService:
         if not file.filename:
             raise ValueError("File must have a filename")
         filename = Path(file.filename).name
-        if not filename.lower().endswith(".owl"):
-            raise ValueError("File must be in .owl format")
+        content_type = normalize_content_type(file.content_type)
+        rdf_format = detect_rdf_format(filename, content_type)
+        if rdf_format is None:
+            raise UnsupportedOntologyFormatError()
 
         user_dir = self._get_user_dir(str(user.id))
         metadata = self._load_metadata(user_dir)
@@ -124,6 +166,8 @@ class OntologyService:
 
         ontology_metadata = {
             "filename": filename,
+            "content_type": content_type,
+            "format": rdf_format,
             "size_bytes": len(content),
             "uploaded_at": datetime.now(timezone.utc).isoformat(),
             "description": description,
@@ -180,6 +224,28 @@ class OntologyService:
             )
         return results
 
+    def _locate_ontologies(self, ontology_key: list[str], user) -> list[tuple[Path, dict]]:
+        """Resolve each key to its stored file path and metadata entry.
+
+        Raises:
+            ValueError: If any ontology key (or its file) is not found
+        """
+        user_dir = self._get_user_dir(str(user.id))
+        metadata = self._load_metadata(user_dir)
+
+        located = []
+        for key in ontology_key:
+            key = self._validate_ontology_key(key)
+            if key not in metadata:
+                raise ValueError(f"Ontology key '{key}' not found")
+
+            file_path = self._get_ontology_path(user_dir, key)
+            if not file_path.is_file():
+                raise ValueError(f"Ontology file for key '{key}' not found")
+
+            located.append((file_path, metadata[key]))
+        return located
+
     def get_ontology_contents(self, ontology_key: list[str], user) -> list[str]:
         """
         Retrieve ontology content for one or more keys.
@@ -194,22 +260,35 @@ class OntologyService:
         Raises:
             ValueError: If any ontology key not found
         """
-        user_dir = self._get_user_dir(str(user.id))
-        metadata = self._load_metadata(user_dir)
-
         contents = []
-        for key in ontology_key:
-            key = self._validate_ontology_key(key)
-            if key not in metadata:
-                raise ValueError(f"Ontology key '{key}' not found")
-
-            file_path = self._get_ontology_path(user_dir, key)
-            if not file_path.exists():
-                raise ValueError(f"Ontology file for key '{key}' not found")
-
+        for file_path, _ in self._locate_ontologies(ontology_key, user):
             with open(file_path, "r", encoding="utf-8") as f:
                 contents.append(f.read())
         return contents
+
+    def get_ontology_files(self, ontology_key: list[str], user) -> list[OntologyFile]:
+        """
+        Retrieve ontologies as file objects ready for ``RDFLibOntologyResolver``.
+
+        Unlike :meth:`get_ontology_contents`, each returned object carries the
+        original upload filename and content type so the resolver can pick the
+        right RDF parser (Turtle, JSON-LD, ...) instead of trial-parsing.
+
+        Raises:
+            ValueError: If any ontology key not found
+        """
+        files = []
+        for file_path, entry in self._locate_ontologies(ontology_key, user):
+            with open(file_path, "rb") as f:
+                content = f.read()
+            files.append(
+                OntologyFile(
+                    content,
+                    filename=entry.get("filename") or file_path.name,
+                    content_type=entry.get("content_type"),
+                )
+            )
+        return files
 
     def delete_ontology(self, ontology_key: str, user) -> None:
         ontology_key = self._validate_ontology_key(ontology_key)
@@ -243,19 +322,19 @@ class OntologyService:
             OntologyParseError: If the stored file is not parseable RDF
         """
         ontology_key = self._validate_ontology_key(ontology_key)
-        user_dir = self._get_user_dir(str(user.id))
-        metadata = self._load_metadata(user_dir)
-
-        if ontology_key not in metadata:
-            raise ValueError(f"Ontology key '{ontology_key}' not found")
-
-        file_path = self._get_ontology_path(user_dir, ontology_key)
-        if not file_path.is_file():
-            raise ValueError(f"Ontology file for key '{ontology_key}' not found")
+        ((file_path, entry),) = self._locate_ontologies([ontology_key], user)
 
         content = file_path.read_bytes()
+        # The format recorded at upload time is tried first; uploads that
+        # predate the ``format`` field fall back to probing every syntax.
+        candidate_formats = list(_PARSE_FORMATS)
+        stored_format = entry.get("format")
+        if stored_format in candidate_formats:
+            candidate_formats.remove(stored_format)
+            candidate_formats.insert(0, stored_format)
+
         parse_errors = []
-        for rdf_format in _PARSE_FORMATS:
+        for rdf_format in candidate_formats:
             graph = Graph()
             try:
                 graph.parse(data=content, format=rdf_format)
