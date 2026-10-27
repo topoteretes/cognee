@@ -74,6 +74,21 @@ class SearchResultPayload(BaseModel):
             return _as_list(self.context)
         return _as_list(self.result_object)
 
+    def retrieved_nothing(self) -> bool:
+        """Whether this dataset's retrieval came back empty, or the dataset could not be searched.
+
+        Dataset routing's widening reads this, not ``entries()``: a completion is
+        written even over an empty context ("the context does not mention..."), and
+        a miss marker is a completion too, so only the retrieval context says whether
+        the dataset held anything. A payload with no context and no error ran no
+        retrieval (a session-turn acknowledgement) and is not a miss.
+        """
+        if self.error is not None:
+            return True
+        if self.context is None:
+            return False
+        return not any(_as_list(self.context))
+
     @field_serializer("result_object")
     def serialize_complex_types(self, v: Any):
         """

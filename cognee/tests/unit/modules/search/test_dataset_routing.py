@@ -30,15 +30,23 @@ route_module = import_module("cognee.modules.search.dataset_routing.route")
 class FakeEngine:
     """Records every call; ``scores`` maps row id -> cosine distance for score_by_ids."""
 
-    def __init__(self, scores=None, existing=None, score_error=None):
+    def __init__(self, scores=None, existing=None, score_error=None, stored_width=None):
         self.scores = scores or {}
         self.existing = existing or {}
         self.score_error = score_error
-        self.created, self.deleted, self.scored_ids = [], [], []
-        self.embedding_engine = types.SimpleNamespace(embed_text=self._embed)
+        self.stored_width = stored_width  # what the store's vector columns hold; None = empty
+        self.created, self.deleted, self.scored_ids, self.embedded = [], [], [], []
+        self.dropped = []
+        self.embedding_engine = types.SimpleNamespace(
+            embed_text=self._embed, get_vector_size=lambda: 2
+        )
 
     async def _embed(self, texts):
+        self.embedded.extend(texts)
         return [[0.1, 0.2] for _ in texts]
+
+    async def get_stored_vector_size(self):
+        return self.stored_width
 
     async def score_by_ids(self, collection_name, data_point_ids, query_vector):
         assert collection_name == DATASET_ROUTE_COLLECTION
@@ -66,6 +74,9 @@ class FakeEngine:
     async def create_data_points(self, collection_name, data_points):
         assert collection_name == DATASET_ROUTE_COLLECTION
         self.created.extend(data_points)
+
+    async def delete_collection(self, collection_name):
+        self.dropped.append(collection_name)
 
 
 def _patch(monkeypatch, engine, documents, access_control=True):
@@ -166,6 +177,39 @@ async def test_no_collection_or_no_scoring_support_leaves_every_dataset_searched
 
 
 @pytest.mark.asyncio
+async def test_a_routing_collection_of_another_width_turns_routing_off(monkeypatch, caplog):
+    """EMBEDDING_MODEL changed without a prune: the search covers every dataset, as before
+    routing, and the store is never asked to compare vectors it cannot."""
+    a, b = uuid4(), uuid4()
+    engine = FakeEngine(scores={}, stored_width=3)
+    _patch(monkeypatch, engine, {a: [], b: []})
+
+    with caplog.at_level("WARNING", logger="dataset_routing"):
+        decision = await route_datasets("q", [a, b], top_k=1)
+
+    assert decision.routed == ()
+    assert decision.unindexed == (a, b)
+    assert decision.narrowed is False
+    assert engine.embedded == [] and engine.scored_ids == []
+    assert "3-dimensional" in caplog.text and "produces 2" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_an_adapter_without_a_width_probe_is_not_checked(monkeypatch):
+    class EngineWithoutProbe(FakeEngine):
+        get_stored_vector_size = None  # Turso and community adapters have no probe
+
+    a, b = uuid4(), uuid4()
+    engine = EngineWithoutProbe(scores={})
+    _patch(monkeypatch, engine, {a: [], b: []})
+
+    decision = await route_datasets("q", [a, b], top_k=1)
+
+    assert decision.unindexed == (a, b)
+    assert engine.embedded == ["q"]
+
+
+@pytest.mark.asyncio
 async def test_top_k_below_one_is_refused(monkeypatch):
     _patch(monkeypatch, FakeEngine(), {})
     with pytest.raises(ValueError):
@@ -223,6 +267,17 @@ async def test_sync_ignores_rows_whose_ids_recall_cannot_derive(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_sync_writes_nothing_into_a_collection_of_another_width(monkeypatch):
+    dataset_id, doc = uuid4(), uuid4()
+    engine = FakeEngine(existing={}, stored_width=3)
+    _patch(monkeypatch, engine, {dataset_id: [doc]})
+    root = _summary(dataset_id, create_root_summary_id(str(dataset_id)), "root", is_root=True)
+
+    assert await sync_dataset_routes(str(dataset_id), [root]) == 0
+    assert engine.created == [] and engine.deleted == []
+
+
+@pytest.mark.asyncio
 async def test_sync_is_a_no_op_without_backend_access_control(monkeypatch):
     dataset_id = uuid4()
     (root_id,) = dataset_route_ids(dataset_id, [])
@@ -238,18 +293,111 @@ async def test_sync_is_a_no_op_without_backend_access_control(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_remove_and_prune_delete_every_derivable_row(monkeypatch):
-    from cognee.modules.search.dataset_routing import prune_dataset_routes, remove_dataset_routes
+async def test_removing_a_dataset_deletes_its_root_and_every_bucket(monkeypatch):
+    from cognee.modules.search.dataset_routing import remove_dataset_routes
 
-    a, b, doc_a = uuid4(), uuid4(), uuid4()
+    a, doc_a = uuid4(), uuid4()
     engine = FakeEngine()
-    _patch(monkeypatch, engine, {a: [doc_a], b: []})
+    _patch(monkeypatch, engine, {a: [doc_a]})
 
     await remove_dataset_routes(a, [doc_a])
+
     assert engine.deleted == [UUID(row_id) for row_id in dataset_route_ids(a, [doc_a])]
 
-    engine.deleted.clear()
+
+@pytest.mark.asyncio
+async def test_removing_documents_deletes_their_buckets_and_keeps_the_root(monkeypatch):
+    """Deletion-time removal: the bucket id derives from the Data row, so it is
+    deleted while that row still exists; the root is rewritten by the next build."""
+    from cognee.modules.search.dataset_routing import remove_document_routes
+
+    a, gone, kept = uuid4(), uuid4(), uuid4()
+    engine = FakeEngine()
+    _patch(monkeypatch, engine, {a: [gone, kept]})
+
+    await remove_document_routes(a, [gone])
+
+    root, bucket = dataset_route_ids(a, [gone])
+    assert engine.deleted == [UUID(bucket)]
+    assert UUID(root) not in engine.deleted
+
+
+@pytest.mark.asyncio
+async def test_prune_drops_the_collection_rather_than_emptying_it(monkeypatch):
+    from cognee.modules.search.dataset_routing import prune_dataset_routes
+
+    engine = FakeEngine()
+    _patch(monkeypatch, engine, {})
+
     await prune_dataset_routes()
-    assert sorted(map(str, engine.deleted)) == sorted(
-        dataset_route_ids(a, [doc_a]) + dataset_route_ids(b, [])
+
+    assert engine.dropped == [DATASET_ROUTE_COLLECTION]
+    assert engine.deleted == []
+
+
+@pytest.mark.asyncio
+async def test_prune_on_an_adapter_that_cannot_drop_warns_and_moves_on(monkeypatch, caplog):
+    from cognee.modules.search.dataset_routing import prune_dataset_routes
+
+    class EngineWithoutDrop(FakeEngine):
+        async def delete_collection(self, collection_name):
+            raise NotImplementedError
+
+    _patch(monkeypatch, EngineWithoutDrop(), {})
+
+    with caplog.at_level("WARNING", logger="dataset_routing"):
+        await prune_dataset_routes()
+
+    assert "cannot drop a collection" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_removal_is_a_no_op_without_backend_access_control(monkeypatch):
+    from cognee.modules.search.dataset_routing import (
+        prune_dataset_routes,
+        remove_dataset_routes,
+        remove_document_routes,
     )
+
+    a, doc = uuid4(), uuid4()
+    engine = FakeEngine()
+    _patch(monkeypatch, engine, {a: [doc]}, access_control=False)
+
+    await remove_dataset_routes(a, [doc])
+    await remove_document_routes(a, [doc])
+    await prune_dataset_routes()
+
+    assert engine.deleted == [] and engine.dropped == []
+
+
+# --- engine -------------------------------------------------------------------
+
+
+def test_route_engine_embeds_with_the_deployment_settings_not_a_per_call_override(monkeypatch):
+    """The engine cache keys on the store alone and bakes in the embedder of whoever
+    creates the engine: the shared routing engine must be created with the per-call
+    LLM and embedding overrides cleared, whatever context first touches it."""
+    from cognee.context_global_variables import embedding_config, llm_config
+    from cognee.modules.search.dataset_routing import get_dataset_route_engine
+
+    handle_module = import_module("cognee.infrastructure.databases.vector.get_vector_engine")
+
+    seen = []
+
+    def fake_create_vector_engine(**config):
+        seen.append((embedding_config.get(), llm_config.get()))
+        return types.SimpleNamespace(name="routing-engine")
+
+    monkeypatch.setattr(handle_module, "create_vector_engine", fake_create_vector_engine)
+    override = types.SimpleNamespace(embedding_endpoint="https://tenant-a.example")
+    embedding_token = embedding_config.set(override)
+    llm_token = llm_config.set(override)
+    try:
+        assert get_dataset_route_engine().name == "routing-engine"
+        # The caller's own context keeps its override.
+        assert embedding_config.get() is override and llm_config.get() is override
+    finally:
+        llm_config.reset(llm_token)
+        embedding_config.reset(embedding_token)
+
+    assert seen == [(None, None)]

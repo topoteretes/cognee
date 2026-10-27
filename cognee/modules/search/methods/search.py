@@ -277,10 +277,11 @@ async def authorized_search(
     if routed_datasets is None:
         return await _search(search_datasets)
 
-    # Routed: the best-scoring datasets plus every unindexed one. Finding
-    # nothing there, or only datasets without searchable memory (an unscoped
-    # search raises that only when every dataset lacks it), widens the search
-    # back to every readable dataset.
+    # Routed: the best-scoring datasets plus every unindexed one. Retrieving
+    # nothing there (judged on the retrieval context, since a completion is
+    # written even over an empty one), or only datasets without searchable
+    # memory (an unscoped search raises that only when every dataset lacks
+    # it), widens the search back to every readable dataset.
     try:
         search_results = await _search(routed_datasets)
     except NoDataError:
@@ -289,9 +290,9 @@ async def authorized_search(
             "searching every readable dataset."
         )
         return await _search(search_datasets)
-    if not any(payload.entries() for payload in search_results):
+    if all(payload.retrieved_nothing() for payload in search_results):
         logger.info(
-            "Dataset routing searched %d of %d datasets and found nothing; "
+            "Dataset routing searched %d of %d datasets and retrieved nothing; "
             "searching every readable dataset.",
             len(routed_datasets),
             len(search_datasets),

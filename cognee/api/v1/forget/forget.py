@@ -457,6 +457,11 @@ async def _forget_dataset_memory(dataset_ref: str | UUID, user: Any) -> dict:
 
             await session.commit()
 
+        # 3. The routing rows mirrored the index this dataset no longer has.
+        from cognee.modules.search.dataset_routing import remove_dataset_routes
+
+        await remove_dataset_routes(dataset_id, [record.id for record in data_records])
+
     logger.info(
         "forget: cleared memory for dataset=%s, user=%s (%d data records reset)",
         dataset_id,
@@ -534,6 +539,11 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: str | UUID, user: Any)
         from cognee.modules.provenance.edge_evidence import delete_edge_evidence
 
         await delete_edge_evidence(dataset_id, data_id)
+
+        # 1d. The routing row that mirrored this item's index bucket.
+        from cognee.modules.search.dataset_routing import remove_document_routes
+
+        await remove_document_routes(dataset_id, [data_id])
 
         # 2. Reset pipeline_status for this data record
         db_engine = get_relational_engine()

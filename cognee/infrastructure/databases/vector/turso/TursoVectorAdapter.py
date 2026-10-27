@@ -280,6 +280,11 @@ class TursoVectorAdapter(VectorDBInterface):
             )
             self._known_collections.add(collection_name)
 
+    async def delete_collection(self, collection_name: str) -> None:
+        """Drop the table for ``collection_name``; a missing table is not an error."""
+        await self._execute(f'DROP TABLE IF EXISTS "{collection_name}"', commit=True, ddl=True)
+        self._known_collections.discard(collection_name)
+
     async def _is_collection(self, table_name: str) -> bool:
         """True when ``table_name`` has the vector-collection columns."""
         rows = await self._execute(f'PRAGMA table_info("{table_name}")', fetch=True)

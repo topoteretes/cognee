@@ -38,10 +38,14 @@ dataset's global context index root and document buckets, mirrored into the depl
 default vector store by the `global_context_index` improve stage) and only the best
 `DATASET_ROUTING_TOP_K` (default 1) are searched. A dataset's score is its best row, so a
 specific question is carried by the one document that matches and a broad one by the root. A
-dataset with no index rows is always searched, a routed search that finds nothing (or only
-datasets without searchable memory) is widened to every readable dataset, and an explicit
-dataset scope is never routed. Needs backend access control (one store per dataset); off with
-`DATASET_ROUTING_ENABLED=false`.
+dataset with no index rows is always searched, a routed search that retrieves nothing (judged
+on the retrieval context, not on the completion, which is written even over an empty
+context; or only datasets without searchable memory) is widened to every readable dataset, and an explicit
+dataset scope is never routed. Needs backend access control (one store per dataset) and one
+embedding model across the deployment: the query is embedded with the `.env` model, and when
+the routing collection was built with another width (`EMBEDDING_MODEL` changed without a
+prune) routing logs a warning and steps aside, so the search covers every readable dataset.
+Off with `DATASET_ROUTING_ENABLED=false`.
 
 ## When to call search() directly
 

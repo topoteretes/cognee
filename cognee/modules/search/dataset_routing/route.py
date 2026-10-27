@@ -19,7 +19,7 @@ from cognee.modules.data.methods.get_data_ids_by_dataset import get_data_ids_by_
 from cognee.shared.logging_utils import get_logger
 
 from .index import dataset_route_ids
-from .store import DATASET_ROUTE_COLLECTION, get_dataset_route_engine
+from .store import DATASET_ROUTE_COLLECTION, get_dataset_route_engine, routing_width_matches
 
 logger = get_logger("dataset_routing")
 
@@ -49,11 +49,16 @@ async def route_datasets(
 
     A dataset without a row has never been through the global context index
     (or lost it), so routing knows nothing about it and never drops it. An
-    adapter that cannot score rows by id leaves every dataset unindexed.
+    adapter that cannot score rows by id, or a routing collection built with
+    another embedding width, leaves every dataset unindexed.
     """
     if top_k < 1:
         raise ValueError("Dataset routing needs top_k >= 1.")
     candidates = tuple(dataset_ids)
+
+    engine = get_dataset_route_engine()
+    if not await routing_width_matches(engine):
+        return DatasetRoutingDecision(candidates=candidates, routed=(), unindexed=candidates)
 
     documents = await get_data_ids_by_dataset(list(candidates))
     dataset_by_row: dict[str, UUID] = {}
@@ -61,7 +66,6 @@ async def route_datasets(
         for row_id in dataset_route_ids(dataset_id, documents.get(dataset_id, [])):
             dataset_by_row[row_id] = dataset_id
 
-    engine = get_dataset_route_engine()
     query_vector = (await engine.embedding_engine.embed_text([query_text]))[0]
     try:
         scored = await engine.score_by_ids(

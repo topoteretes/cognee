@@ -11,10 +11,16 @@ from .index import (
     dataset_route_ids,
     prune_dataset_routes,
     remove_dataset_routes,
+    remove_document_routes,
     sync_dataset_routes,
 )
 from .route import DatasetRoutingDecision, route_datasets
-from .store import DATASET_ROUTE_COLLECTION, DatasetRoute, get_dataset_route_engine
+from .store import (
+    DATASET_ROUTE_COLLECTION,
+    DatasetRoute,
+    get_dataset_route_engine,
+    routing_width_matches,
+)
 
 __all__ = [
     "DATASET_ROUTE_COLLECTION",
@@ -26,6 +32,8 @@ __all__ = [
     "get_dataset_routing_config",
     "prune_dataset_routes",
     "remove_dataset_routes",
+    "remove_document_routes",
     "route_datasets",
+    "routing_width_matches",
     "sync_dataset_routes",
 ]

@@ -69,6 +69,19 @@ class VectorDBInterface(Protocol):
         """
         raise NotImplementedError
 
+    async def delete_collection(self, collection_name: str) -> None:
+        """Drop a collection and every row in it; a collection that does not exist is not an error.
+
+        Unlike ``prune`` this leaves the rest of the store alone. The in-tree adapters
+        implement it; an adapter that does not raises ``NotImplementedError``.
+
+        Parameters:
+        -----------
+
+            - collection_name (str): The name of the collection to drop.
+        """
+        raise NotImplementedError
+
     """ Data points """
 
     @abstractmethod

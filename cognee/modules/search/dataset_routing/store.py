@@ -8,15 +8,28 @@ which stands unused while backend access control binds each operation to its
 dataset's store. The engine is built from the global config, never from the
 per-dataset ContextVar, so an upsert from inside a dataset's pipeline run and
 a read from search reach the same collection.
+
+One embedding model for the whole deployment: the collection has one vector
+width, and distances from two models cannot be ranked against each other. The
+engine therefore embeds with the ``.env`` embedding settings, never with a
+per-call ``embedding_config``, and when the collection's width no longer
+matches those settings (``EMBEDDING_MODEL`` changed without a prune) routing
+steps aside with a warning and the search covers every readable dataset, as it
+did before routing. Datasets built with different models are SDK-1316.
 """
 
 from __future__ import annotations
 
+from contextvars import copy_context
+
 from cognee.infrastructure.databases.vector import get_vectordb_config
 from cognee.infrastructure.databases.vector.get_vector_engine import _VectorEngineHandle
 from cognee.infrastructure.engine import DataPoint
+from cognee.shared.logging_utils import get_logger
 
 DATASET_ROUTE_COLLECTION = "DatasetRoute_text"
+
+logger = get_logger("dataset_routing")
 
 
 class DatasetRoute(DataPoint):
@@ -32,6 +45,36 @@ class DatasetRoute(DataPoint):
     metadata: dict = {"index_fields": ["text"]}
 
 
+class _DatasetRouteEngineHandle(_VectorEngineHandle):
+    """The default store's engine, embedding with the deployment's settings.
+
+    ``_VectorEngineHandle`` builds the adapter's embedder from the embedding
+    ContextVar at creation, and the engine cache keys on the store alone. An
+    engine first touched from inside a dataset pipeline carrying a per-call
+    ``embedding_config`` would then keep that endpoint and key for every later
+    caller of the shared collection. This handle resolves the engine in a copy
+    of the current context with the per-call LLM and embedding overrides
+    cleared, so it always carries the ``.env`` model.
+    """
+
+    __slots__ = ()
+
+    def _engine(self):
+        pinned = self._pinned
+        if pinned is not None and self._pin_is_live(pinned):
+            return pinned
+        return copy_context().run(self._resolve_with_deployment_settings)
+
+    def _resolve_with_deployment_settings(self):
+        # Imported at call time: the context module's imports lead back to the
+        # data methods package this module is reached from.
+        from cognee.context_global_variables import embedding_config, llm_config
+
+        embedding_config.set(None)
+        llm_config.set(None)
+        return _VectorEngineHandle._engine(self)
+
+
 def get_dataset_route_engine() -> _VectorEngineHandle:
     """The vector engine of the deployment's default store, outside any dataset context.
 
@@ -40,4 +83,32 @@ def get_dataset_route_engine() -> _VectorEngineHandle:
     engines from the shared cache, and a bare adapter reference would then be
     closed under them.
     """
-    return _VectorEngineHandle(get_vectordb_config().to_dict())
+    return _DatasetRouteEngineHandle(get_vectordb_config().to_dict())
+
+
+async def routing_width_matches(engine) -> bool:
+    """Whether the routing collection takes the configured model's vectors.
+
+    The collection's vector width is fixed when it is created. After an
+    ``EMBEDDING_MODEL`` change without a prune every write and query on it
+    would fail inside the store, so the width is compared first and a mismatch
+    turns routing off with a warning. An adapter that cannot report its stored
+    width (Turso, community adapters) is not checked; an empty store matches,
+    the first write creates the collection at the configured width.
+    """
+    read_stored_size = getattr(engine, "get_stored_vector_size", None)
+    if read_stored_size is None:
+        return True
+    stored = await read_stored_size()
+    configured = engine.embedding_engine.get_vector_size()
+    if stored is None or stored == configured:
+        return True
+    logger.warning(
+        "Dataset routing is off: the routing collection holds %d-dimensional vectors and "
+        "the configured embedding model produces %d. Searches cover every readable "
+        "dataset until the vector stores are pruned and rebuilt with one model "
+        "(or set DATASET_ROUTING_ENABLED=false to silence this).",
+        stored,
+        configured,
+    )
+    return False

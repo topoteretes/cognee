@@ -21,7 +21,9 @@ Without `datasets` it covers every dataset the user can read, but dataset
 routing (on by default, `DATASET_ROUTING_ENABLED`) scores those datasets
 against the query on their global context index and searches only the best
 `DATASET_ROUTING_TOP_K` (default 1), plus any dataset that has no index yet;
-a routed search that finds nothing is widened to all of them. Pass
+a routed search that finds nothing is widened to all of them. Routing assumes
+one embedding model across datasets; after an `EMBEDDING_MODEL` change it
+logs a warning and every readable dataset is searched. Pass
 `datasets=["research"]` (names) or `dataset_ids=[...]` (UUIDs, which win) to
 pin the scope yourself; an explicit scope is never routed.
 

@@ -453,6 +453,18 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         return collection_name in self._metadata.tables
 
+    async def delete_collection(self, collection_name: str) -> None:
+        """Drop the table for ``collection_name``; a missing table is not an error.
+
+        Resolved through the connection's ``search_path`` like every other
+        statement here, so a schema-pinned adapter drops its own schema's table.
+        """
+        async with self.engine.begin() as connection:
+            await connection.execute(text(f'DROP TABLE IF EXISTS "{collection_name}" CASCADE'))
+        table = self._metadata.tables.get(collection_name)
+        if table is not None:
+            self._metadata.remove(table)
+
     @retry(
         retry=retry_if_exception_type(
             (DuplicateTableError, UniqueViolationError, ProgrammingError)

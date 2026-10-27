@@ -420,6 +420,19 @@ class LanceDBAdapter(VectorDBInterface):
         collection_names = await connection.table_names()
         return collection_name in collection_names
 
+    async def delete_collection(self, collection_name: str) -> None:
+        """Drop the table for ``collection_name``; a missing table is not an error.
+
+        Same lock order as ``prune``: a compaction pass finishes before the table
+        is dropped under it.
+        """
+        connection = await self.get_connection()
+        async with self._compaction_lock:
+            async with self.VECTOR_DB_LOCK:
+                if collection_name in await connection.table_names():
+                    await connection.drop_table(collection_name)
+            self._compaction_dirty.discard(collection_name)
+
     async def get_stored_vector_size(self) -> int | None:
         """Width of the vectors already in this store, or None when nothing is stored yet.
 

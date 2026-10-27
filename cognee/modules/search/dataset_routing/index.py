@@ -5,10 +5,12 @@ from the relational database: its root (``create_root_summary_id``) and one
 bucket per document (``create_document_bucket_id``, keyed by ``Data.id``).
 ``sync_dataset_routes`` runs after every index build and reconciles that set
 against what the build computed: it writes the rows whose text is new or
-changed and deletes the rest, so a deleted document, an emptied dataset
-(``forget(memory_only=True)``) and a switch to ``method="llm"`` leave no
-stale row. ``remove_dataset_routes`` covers the one case no build follows:
-the dataset itself is deleted.
+changed and deletes the rest. It can only address rows whose document still
+has a ``Data`` row, so deletion removes rows itself, while their ids are still
+derivable: ``remove_document_routes`` when a document is deleted or its memory
+dropped, ``remove_dataset_routes`` when a dataset is deleted or its memory
+dropped, and ``prune_dataset_routes`` drops the whole collection, so a prune
+followed by an embedding model change starts from a clean table.
 
 Nothing here runs with backend access control off. Every dataset then shares
 one store, so there is nothing to route between, and the rows would land in
@@ -23,7 +25,12 @@ from uuid import UUID
 from cognee.modules.data.methods.get_data_ids_by_dataset import get_data_ids_by_dataset
 from cognee.shared.logging_utils import get_logger
 
-from .store import DATASET_ROUTE_COLLECTION, DatasetRoute, get_dataset_route_engine
+from .store import (
+    DATASET_ROUTE_COLLECTION,
+    DatasetRoute,
+    get_dataset_route_engine,
+    routing_width_matches,
+)
 
 if TYPE_CHECKING:
     from cognee.tasks.summarization.models import GlobalContextSummary
@@ -62,20 +69,23 @@ async def sync_dataset_routes(dataset_id: str, desired: list[GlobalContextSummar
     missing from the collection, for instance after an upgrade that found the
     graph index already built, is written on the next build. A summary whose id
     the read path cannot derive (an ``llm``-method bucket) is not mirrored.
+    Nothing is written while the collection's vector width differs from the
+    configured model's; the rows wait for a prune.
     """
     if not backend_access_control_enabled():
         return 0
 
-    documents = await get_data_ids_by_dataset([UUID(dataset_id)])
-    addressable = dataset_route_ids(dataset_id, documents.get(UUID(dataset_id), []))
-    wanted = {
-        str(summary.id): summary for summary in desired if str(summary.id) in set(addressable)
-    }
-
     engine = get_dataset_route_engine()
+    if not await routing_width_matches(engine):
+        return 0
+
+    documents = await get_data_ids_by_dataset([UUID(dataset_id)])
+    addressable = set(dataset_route_ids(dataset_id, documents.get(UUID(dataset_id), [])))
+    wanted = {str(summary.id): summary for summary in desired if str(summary.id) in addressable}
+
     existing = {
         str(row.id): (row.payload or {}).get("text")
-        for row in await engine.retrieve(DATASET_ROUTE_COLLECTION, addressable)
+        for row in await engine.retrieve(DATASET_ROUTE_COLLECTION, list(addressable))
     }
     stale = [UUID(row_id) for row_id in existing if row_id not in wanted]
     changed = [
@@ -99,7 +109,7 @@ async def sync_dataset_routes(dataset_id: str, desired: list[GlobalContextSummar
 
 
 async def remove_dataset_routes(dataset_id: UUID | str, document_ids: list[UUID | str]) -> None:
-    """Delete every routing row a dataset could have; for deleting the dataset itself."""
+    """Delete every routing row a dataset could have: the dataset or its memory is deleted."""
     if not backend_access_control_enabled():
         return
     await get_dataset_route_engine().delete_data_points(
@@ -108,17 +118,36 @@ async def remove_dataset_routes(dataset_id: UUID | str, document_ids: list[UUID 
     )
 
 
-async def prune_dataset_routes() -> None:
-    """Delete the routing rows of every dataset in the registry; for ``prune_system``.
+async def remove_document_routes(dataset_id: UUID | str, document_ids: list[UUID | str]) -> None:
+    """Delete the bucket rows of the given documents: they, or their memory, are deleted.
 
-    Derived from the relational tables, so it must run before they are dropped.
+    The dataset's root row stays; it names the remaining documents and is
+    rewritten by the next index build.
     """
     if not backend_access_control_enabled():
         return
-    row_ids = [
-        UUID(row_id)
-        for dataset_id, document_ids in (await get_data_ids_by_dataset(None)).items()
-        for row_id in dataset_route_ids(dataset_id, document_ids)
-    ]
-    if row_ids:
-        await get_dataset_route_engine().delete_data_points(DATASET_ROUTE_COLLECTION, row_ids)
+    _root, *buckets = dataset_route_ids(dataset_id, document_ids)
+    await get_dataset_route_engine().delete_data_points(
+        DATASET_ROUTE_COLLECTION, [UUID(row_id) for row_id in buckets]
+    )
+
+
+async def prune_dataset_routes() -> None:
+    """Drop the routing collection; for ``prune_system``.
+
+    The collection's vector width is fixed when it is created, so emptying it
+    would leave a prune followed by an ``EMBEDDING_MODEL`` change unable to
+    write; dropping it lets the next index build create it at the new width.
+    """
+    if not backend_access_control_enabled():
+        return
+    engine = get_dataset_route_engine()
+    try:
+        await engine.delete_collection(DATASET_ROUTE_COLLECTION)
+    except NotImplementedError:
+        logger.warning(
+            "The %s vector adapter cannot drop a collection; the dataset routing "
+            "collection %s was left in place.",
+            type(engine).__name__,
+            DATASET_ROUTE_COLLECTION,
+        )

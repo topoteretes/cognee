@@ -17,13 +17,14 @@ def _dataset(name):
 
 
 def _payload(dataset, hits=(), **fields):
+    """A dataset's result: ``hits`` is what retrieval found (its context and objects)."""
     return SearchResultPayload(
         result_object=list(hits),
         search_type=SearchType.CHUNKS,
         question="q",
         dataset_id=dataset.id,
         dataset_name=dataset.name,
-        **fields,
+        **{"context": list(hits), **fields},
     )
 
 
@@ -194,6 +195,51 @@ async def test_an_empty_only_context_answer_counts_as_nothing_found(lane):
 
 
 @pytest.mark.asyncio
+async def test_a_completion_over_an_empty_context_counts_as_nothing_found(lane):
+    """The LLM answers even when retrieval found nothing ("the context does not
+    mention..."); the retrieval context, not the answer, decides the widening."""
+    lane.decision = _narrowed(lane)
+    a, b = lane.readable
+    lane.responses = [
+        [_payload(b, completion="The context does not mention this.")],
+        [_payload(a, ["hit"], completion="It is X.")],
+    ]
+
+    out = await _search(lane)
+
+    assert lane.fan_out_calls == [[b.id], [a.id, b.id]]
+    assert [payload.dataset_id for payload in out] == [a.id]
+
+
+@pytest.mark.asyncio
+async def test_a_session_turn_acknowledgement_does_not_widen(lane):
+    """A turn that only set guidance ran no retrieval: no context, no error, an
+    acknowledgement as the completion. Widening would replay it on every dataset."""
+    lane.decision = _narrowed(lane)
+    _, b = lane.readable
+    lane.responses = [[_payload(b, context=None, completion=["Noted."])]]
+
+    out = await _search(lane)
+
+    assert lane.fan_out_calls == [[b.id]]
+    assert [payload.dataset_id for payload in out] == [b.id]
+
+
+@pytest.mark.asyncio
+async def test_a_dataset_that_could_not_be_searched_counts_as_nothing_found(lane):
+    lane.decision = _narrowed(lane)
+    a, b = lane.readable
+    lane.responses = [
+        [_payload(b, context=None, completion={"seed_not_found": True}, error="no seed")],
+        [_payload(a, ["hit"])],
+    ]
+
+    await _search(lane)
+
+    assert lane.fan_out_calls == [[b.id], [a.id, b.id]]
+
+
+@pytest.mark.asyncio
 async def test_routed_datasets_without_memory_widen_to_every_dataset(lane):
     lane.decision = _narrowed(lane)
     a, b = lane.readable
@@ -232,3 +278,18 @@ def test_payload_entries_follow_the_normalization_rule():
     assert _payload(dataset, only_context=True, context="").entries() == []
     assert _payload(dataset, only_context=True, context=["c"]).entries() == ["c"]
     assert _payload(dataset, only_context=True, user_prompt="p", context=["c"]).entries() == ["p"]
+
+
+def test_retrieved_nothing_reads_the_context_not_the_completion():
+    dataset = _dataset("a")
+    # Empty context: a miss, whatever the completion says.
+    assert _payload(dataset).retrieved_nothing() is True
+    assert _payload(dataset, context="").retrieved_nothing() is True
+    assert _payload(dataset, completion="I cannot tell.").retrieved_nothing() is True
+    assert _payload(dataset, completion="").retrieved_nothing() is True
+    # Any context: a hit, even with no completion.
+    assert _payload(dataset, ["x"]).retrieved_nothing() is False
+    assert _payload(dataset, context="passage").retrieved_nothing() is False
+    # No context at all: nothing was retrieved, so not a miss; an error always is.
+    assert _payload(dataset, context=None, completion=["Noted."]).retrieved_nothing() is False
+    assert _payload(dataset, context=None, error="no memory").retrieved_nothing() is True

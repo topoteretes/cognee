@@ -72,16 +72,28 @@ async def test_unscoped_recall_is_routed_to_the_dataset_holding_the_answer(
     assert results, "recall returned nothing"
     assert {entry.dataset_id for entry in results} == {str(dataset_b)}
 
-    # Dropping B removes its rows; A's stay.
+    async def stored(dataset_id, document_ids):
+        rows = await engine.retrieve(
+            DATASET_ROUTE_COLLECTION, dataset_route_ids(dataset_id, document_ids)
+        )
+        return {str(row.id) for row in rows}
+
+    # Forgetting one of B's documents removes its bucket row at once (its id can
+    # no longer be derived once the Data row is gone); B's root and the other
+    # buckets stay until the next index build rewrites the root.
+    gone, *kept = documents[dataset_b]
+    await cognee.forget(data_id=gone, dataset_id=dataset_b)
+    assert await stored(dataset_b, documents[dataset_b]) == set(dataset_route_ids(dataset_b, kept))
+
+    # Dropping A's memory alone (its files stay) removes every row of A.
+    await cognee.forget(dataset_id=dataset_a, memory_only=True)
+    assert await stored(dataset_a, documents[dataset_a]) == set()
+
+    # Deleting B removes the rest.
     await cognee.forget(dataset_id=dataset_b)
-    assert (
-        await engine.retrieve(
-            DATASET_ROUTE_COLLECTION, dataset_route_ids(dataset_b, documents[dataset_b])
-        )
-        == []
-    )
-    assert len(
-        await engine.retrieve(
-            DATASET_ROUTE_COLLECTION, dataset_route_ids(dataset_a, documents[dataset_a])
-        )
-    ) == 1 + len(first)
+    assert await stored(dataset_b, documents[dataset_b]) == set()
+
+    # And a prune drops the collection itself, so a later embedding model
+    # change starts from a table of the new width.
+    await cognee.prune.prune_system(metadata=False)
+    assert await engine.has_collection(DATASET_ROUTE_COLLECTION) is False

@@ -100,8 +100,28 @@ class _NoOpAsyncContext:
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def routing_removals(monkeypatch):
+    """Record the dataset routing rows the memory-only helpers remove (the real
+    functions would open the default vector store)."""
+    routing = importlib.import_module("cognee.modules.search.dataset_routing")
+    calls = []
+
+    async def remove_dataset_routes(dataset_id, document_ids):
+        calls.append(("dataset", dataset_id, list(document_ids)))
+
+    async def remove_document_routes(dataset_id, document_ids):
+        calls.append(("documents", dataset_id, list(document_ids)))
+
+    monkeypatch.setattr(routing, "remove_dataset_routes", remove_dataset_routes)
+    monkeypatch.setattr(routing, "remove_document_routes", remove_document_routes)
+    return calls
+
+
 @pytest.mark.asyncio
-async def test_forget_dataset_memory_clears_graph_and_resets_pipeline(monkeypatch):
+async def test_forget_dataset_memory_clears_graph_and_resets_pipeline(
+    monkeypatch, routing_removals
+):
     """memory_only=True with dataset clears graph/vector and resets pipeline_status."""
     other_dataset_id = str(uuid4())
     pipeline_status_a = {
@@ -173,6 +193,8 @@ async def test_forget_dataset_memory_clears_graph_and_resets_pipeline(monkeypatc
     assert len(data_a.pipeline_status["cognify"]) == 1
 
     assert session.committed
+    # Every routing row of the dataset goes with its memory.
+    assert routing_removals == [("dataset", DATASET_ID, [DATA_ID_A, DATA_ID_B])]
 
 
 @pytest.mark.asyncio
@@ -220,7 +242,7 @@ async def test_forget_dataset_memory_skips_records_without_pipeline_status(monke
 
 
 @pytest.mark.asyncio
-async def test_forget_data_memory_clears_graph_and_resets_pipeline(monkeypatch):
+async def test_forget_data_memory_clears_graph_and_resets_pipeline(monkeypatch, routing_removals):
     """memory_only=True with dataset+data_id clears graph/vector for the item."""
     other_dataset_id = str(uuid4())
     pipeline_status = {
@@ -273,6 +295,8 @@ async def test_forget_data_memory_clears_graph_and_resets_pipeline(monkeypatch):
     # add pipeline status should remain untouched
     assert str(DATASET_ID) in data_record.pipeline_status["add_pipeline"]
     assert session.committed
+    # The item's routing bucket goes with its memory; the dataset root stays.
+    assert routing_removals == [("documents", DATASET_ID, [DATA_ID_A])]
 
 
 @pytest.mark.asyncio

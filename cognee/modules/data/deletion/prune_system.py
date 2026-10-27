@@ -83,19 +83,12 @@ async def prune_system(graph=True, vector=True, metadata=True, cache=True):
                 )
         elif vector and backend_access_control_enabled():
             await prune_vector_databases()
-            # The dataset routing rows live in the default store, which the
-            # per-dataset handlers never touch; derived from the relational
-            # tables, so before metadata goes.
+            # The dataset routing collection lives in the default store, which
+            # the per-dataset handlers never touch; dropped, not emptied, so a
+            # model change after the prune starts from a clean table.
             from cognee.modules.search.dataset_routing import prune_dataset_routes
 
-            try:
-                await prune_dataset_routes()
-            except (OperationalError, ProgrammingError, EntityNotFoundError) as e:
-                logger.debug(
-                    "Skipping pruning of dataset routing rows. Error when accessing "
-                    "the relational tables: %s",
-                    e,
-                )
+            await prune_dataset_routes()
 
         # Graph runs after vector: a refused vector prune (shared PGVector database)
         # must raise before anything irreversible has been deleted.
