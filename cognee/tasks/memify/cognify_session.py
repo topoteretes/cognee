@@ -15,7 +15,11 @@ from cognee.infrastructure.session.session_persist_watermark import (
 )
 from cognee.modules.improve.config import get_improve_config
 from cognee.modules.improve.constants import USER_SESSIONS_NODE_SET
-from cognee.modules.pipelines.models.PipelineRunInfo import get_errored_run_info
+from cognee.modules.pipelines.exceptions import AfterRunHookError
+from cognee.modules.pipelines.models.PipelineRunInfo import (
+    get_after_run_failures,
+    get_errored_run_info,
+)
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.data_item import DataItem
@@ -70,6 +74,8 @@ async def cognify_session(
     Raises:
         CogneeValidationError: If no valid, non-empty window was provided.
         LLMPaymentRequiredError: If the LLM budget is exhausted.
+        AfterRunHookError: If the step after a window's completed cognify run
+            failed, once every window ran; those windows' watermarks moved.
         CogneeSystemError: If cognee operations fail for any other reason.
     """
     windows = data if isinstance(data, list) else [data]
@@ -82,6 +88,7 @@ async def cognify_session(
         logger.warning("No session windows provided to cognify_session task, skipping")
         raise CogneeValidationError(message="Session window cannot be empty", log=False)
 
+    hook_failures = []
     try:
         for window in valid_windows:
             logger.info(
@@ -105,6 +112,11 @@ async def cognify_session(
             cognify_result = await cognee.cognify(
                 datasets=[dataset_id], user=user, raise_on_error=False
             )
+            # A failed step after a completed run comes back on the run as
+            # ``after_run_error``. The window is stored, so its watermark still
+            # moves and the window is not rebuilt; the error is raised once every
+            # window ran.
+            hook_failures.extend(get_after_run_failures(cognify_result))
             errored_run = get_errored_run_info(cognify_result)
             if errored_run is not None:
                 logger.error(
@@ -147,3 +159,5 @@ async def cognify_session(
         raise_if_budget_exhausted(e)
         logger.exception("Error cognifying session data")
         raise CogneeSystemError(message=f"Failed to cognify session data: {e!s}", log=False)
+    if hook_failures:
+        raise AfterRunHookError(hook_failures)

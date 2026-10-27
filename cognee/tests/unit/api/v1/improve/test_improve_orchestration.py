@@ -18,6 +18,7 @@ from cognee.modules.improve import (
 )
 from cognee.modules.improve.result import StageResult
 from cognee.modules.observability import COGNEE_IMPROVE_STAGES
+from cognee.modules.pipelines.exceptions import AfterRunHookError
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunAlreadyCompleted,
     PipelineRunCompleted,
@@ -291,6 +292,27 @@ async def test_fatal_stage_reporting_errored_run_info_also_stops_run(harness):
     assert partial.stages[0].status == "errored"
     assert partial.stages[0].error == "lost"
     assert partial.stages[1].reason == REASON_ABORTED_BY_FATAL_STAGE
+
+
+@pytest.mark.asyncio
+async def test_a_failed_step_after_the_fatal_stages_cognify_does_not_stop_the_run(harness):
+    """The fatal stage's data is stored, so it is recorded as errored and the rest runs."""
+    calls = []
+    failure = AfterRunHookError([(uuid4(), "ds", "RuntimeError: compaction")])
+    harness.use_stages(
+        [
+            FakeStage("fatal_one", fatal=True, run=lambda _i: failure, calls=calls),
+            FakeStage("after", calls=calls),
+        ]
+    )
+
+    result = await harness.improve()
+
+    assert calls == ["fatal_one", "after"]
+    assert result.stages[0].status == "errored"
+    assert result.stages[0].exception is failure
+    assert result.stages[1].status == "completed"
+    assert result.status == "errored"
 
 
 @pytest.mark.asyncio

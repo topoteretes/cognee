@@ -14,7 +14,9 @@ background run defers the row close to the detached task. Second, the run
 fails open: every stage failure is recorded and the next stage still runs —
 except the one ``fatal`` stage, ``persist_session_qa``, where losing session
 Q&A would be data loss: it stops the run and raises, carrying the partial
-``ImproveResult`` on the exception (decision D2).
+``ImproveResult`` on the exception (decision D2). A failed step after its
+completed cognify (``AfterRunHookError``) lost nothing, so it does not stop
+the run.
 
 One failure is not stage-local: an exhausted LLM budget. Every later stage
 would fail on it the same way, so the run stops at the first stage that hits
@@ -66,6 +68,7 @@ from cognee.modules.observability import (
     new_span,
 )
 from cognee.modules.operations import finish_operation, record_operation
+from cognee.modules.pipelines.exceptions import AfterRunHookError
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
 )
@@ -292,7 +295,13 @@ async def improve(
                     # with the reason. Whether the run also raises is still the
                     # fatal stage's decision, below.
                     budget_exhausted = stage_result.budget_exhausted
-                    if stage.fatal and stage_result.status == "errored":
+                    # A failed step after a completed run lost nothing: the stage's
+                    # data is stored, so it stays errored without stopping the run.
+                    if (
+                        stage.fatal
+                        and stage_result.status == "errored"
+                        and not isinstance(stage_result.exception, AfterRunHookError)
+                    ):
                         raise _abort_run(
                             result,
                             remaining_stages,
