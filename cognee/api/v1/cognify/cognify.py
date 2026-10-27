@@ -20,7 +20,7 @@ from cognee.modules.cognify.config import (
     resolve_summary_method,
 )
 from cognee.modules.cognify.rollback import cognify_rollback_handler
-from cognee.modules.cognify.routing import CognifyRoute, cognify_route_for
+from cognee.modules.cognify.routing import CODE_ROUTES, CognifyRoute, cognify_route_for
 from cognee.modules.data.methods.publish_updated_data import COGNIFY_PIPELINE_NAME
 from cognee.modules.observability import (
     COGNEE_PIPELINE_NAME,
@@ -133,19 +133,21 @@ def raise_if_cognify_errored(result) -> None:
         )
 
 
-_CODE_ROUTES = frozenset({CognifyRoute.CODE, CognifyRoute.CODE_REPO})
+def _as_dataset_list(datasets) -> list:
+    """``datasets`` as the list of names or ids it denotes (a bare name or id is one)."""
+    return [datasets] if isinstance(datasets, (str, UUID)) else datasets
 
 
 def _pending_items_are_code_only(items, dataset_id, incremental_loading) -> bool:
     """Classify exactly the rows selected under the dataset lock, without another read."""
-    from cognee.modules.pipelines.models import is_data_item_completed
+    from cognee.modules.pipelines.models.DataItemStatus import is_data_item_completed_in
 
     for item in items:
-        if incremental_loading:
-            status = (item.pipeline_status or {}).get(COGNIFY_PIPELINE_NAME) or {}
-            if is_data_item_completed(status.get(str(dataset_id))):
-                continue
-        if cognify_route_for(item) not in _CODE_ROUTES:
+        if incremental_loading and is_data_item_completed_in(
+            item.pipeline_status, COGNIFY_PIPELINE_NAME, dataset_id
+        ):
+            continue
+        if cognify_route_for(item) not in CODE_ROUTES:
             return False
     return True
 
@@ -169,7 +171,7 @@ async def _resolve_scoped_data(datasets, user: User | None, data_ids) -> tuple:
 
     if user is None:
         user = await get_default_user()
-    requested = [datasets] if isinstance(datasets, (str, UUID)) else datasets
+    requested = _as_dataset_list(datasets)
     if not requested or len(requested) != 1:
         raise CogneeValidationError(
             "cognify(data_ids=...) requires exactly one dataset in datasets."
@@ -446,7 +448,7 @@ async def cognify(
     client = get_remote_client()
     if client is not None:
         if data_ids is not None:
-            raise ValueError(
+            raise CogneeValidationError(
                 "data_ids is not supported while connected to a remote Cognee instance. "
                 "Call cognee.disconnect() to cognify locally."
             )
@@ -544,7 +546,7 @@ async def cognify(
                 preflight_datasets = [scoped_dataset]
             else:
                 preflight_user = user if user is not None else await get_default_user()
-                requested = [datasets] if isinstance(datasets, (str, UUID)) else datasets
+                requested = _as_dataset_list(datasets)
                 preflight_datasets = await get_authorized_existing_datasets(
                     requested, "write", preflight_user
                 )
@@ -574,8 +576,8 @@ async def cognify(
             from cognee.tasks.graph.gliner_demo.install import gliner_runtime_installed
             from cognee.tasks.graph.gliner_demo.tasks import get_gliner_demo_tasks
 
-            if runtime_ensured or gliner_runtime_installed():
-                tasks = await get_gliner_demo_tasks(
+            async def build_gliner_tasks():
+                return await get_gliner_demo_tasks(
                     chunker=chunker,
                     chunk_size=chunk_size,
                     chunks_per_batch=chunks_per_batch,
@@ -583,11 +585,13 @@ async def cognify(
                     chunk_attachment=chunk_attachment,
                     track_provenance=cognify_config.provenance_tracking,
                 )
-            else:
-                # Building these tasks imports gliner2, which a code-only run must not
-                # need. Nothing runs them: a document row that appears before the run
-                # fails the locked runtime check in prepare_cognify_run instead.
-                tasks = []
+
+            # Building these tasks imports gliner2, which a code-only run must not need.
+            # Without the runtime the list stays empty and prepare_cognify_run fills it
+            # under the dataset lock, once a row that needs it has appeared.
+            tasks = (
+                await build_gliner_tasks() if runtime_ensured or gliner_runtime_installed() else []
+            )
         else:
             tasks = await get_default_tasks(
                 user=user,
@@ -630,9 +634,9 @@ async def cognify(
             return tasks_by_route[cognify_route_for(data_item)]
 
         async def prepare_cognify_run(items, dataset):
-            # Only for the GLiNER extractor. run_pipeline invokes this under its
-            # dataset lock, with the same rows it will process, revalidating the
-            # earlier preflight scan.
+            # For the GLiNER extractor and for a run scoped by data_ids. run_pipeline
+            # invokes this under its dataset lock, with the same rows it will process,
+            # revalidating the earlier GLiNER preflight scan.
             from cognee.modules.pipelines.layers.setup_and_check_environment import (
                 setup_and_check_environment,
             )
@@ -643,6 +647,10 @@ async def cognify(
                     resolved_extractor,
                     cognify_config.model_copy(update={"gliner_auto_install": False}),
                 )
+                if resolved_extractor == GLINER_DEMO_EXTRACTOR and not tasks:
+                    # The runtime became importable after the tasks were built empty.
+                    # The routes hold this very list, so filling it is enough.
+                    tasks.extend(await build_gliner_tasks())
             # run_pipeline derives needs_llm itself for a task list, but this call
             # passes a resolver — so use the union over every wired route: the
             # tasks that can actually run are the authority on whether the LLM
@@ -657,12 +665,12 @@ async def cognify(
                 needs_llm=needs_llm,
             )
 
-        if resolved_extractor == GLINER_DEMO_EXTRACTOR:
+        if resolved_extractor == GLINER_DEMO_EXTRACTOR or scoped_data is not None:
             # A run whose pending items all take the code routes runs enola only: it never
-            # calls the graph extractor or the LLM, so a keyless code-only run must not
-            # pull in torch or probe providers (SDK-795). A code-only run needs no GLiNER
-            # runtime and no provider probe, which is
-            # only known from the rows, so both are decided under the dataset lock.
+            # calls the graph extractor, the LLM or the embeddings, so a keyless code-only
+            # run must not pull in torch (SDK-795), and a code-only run scoped by data_ids
+            # (GitHub sync) must not probe providers whichever extractor is configured.
+            # That is only known from the rows, so it is decided under the dataset lock.
             run_environment = {
                 "skip_connection_test": True,
                 "before_run": prepare_cognify_run,

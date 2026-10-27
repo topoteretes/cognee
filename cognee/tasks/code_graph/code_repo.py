@@ -21,8 +21,9 @@ tree:
 
 The repo item's raw data is a JSON manifest (repo path + covered files +
 combined content hash), so the stored record is small. Its id is pinned, so
-``resolve_code_repository`` clears the stored row's add stamp before the
-pipeline's incremental check sees it; re-adding a changed repo then resets
+``_reset_add_stamp`` clears the stored row's add stamp (under the dataset lock, after
+the clone lock is released for a remote repository) before the pipeline's
+incremental check sees it; re-adding a changed repo then resets
 pipeline status through the normal content-change detection. The clear is
 unconditional, so an unchanged repo's small manifest is stored again on every
 add; its cognify stamps are kept and nothing is rebuilt. The
@@ -250,13 +251,29 @@ def build_repo_manifest(directory: Path, covered: list[Path]) -> str:
 
 
 class LegacyRepositoryError(CodeRepositoryError):
-    """An existing remote graph must be preserved and rebuilt in a new dataset."""
+    """An existing remote graph must be preserved and rebuilt in a new dataset.
+
+    With ``ENABLE_BACKEND_ACCESS_CONTROL=false`` every dataset shares one graph, so a new
+    dataset meets the same legacy nodes: the legacy repository has to be forgotten, and
+    the message says so only then.
+    """
 
     def __init__(self, where: str):
+        from cognee.context_global_variables import backend_access_control_enabled
+
+        message = (
+            f"This repository was stored before repository identities changed (found: {where}). "
+            "Create a new dataset, call add(repo_url, dataset_name='new_code'), then "
+            "cognify(datasets=['new_code']). The existing data and graph are unchanged."
+        )
+        if not backend_access_control_enabled():
+            message += (
+                " The graph is shared by every dataset, so a new dataset meets the same legacy "
+                "nodes: forget the legacy repository first (forget(data_id=...) for its row, or "
+                "forget(dataset=...) for the dataset that holds it)."
+            )
         super().__init__(
-            message="This dataset contains legacy repository identities. Create a new dataset, "
-            "call add(repo_url, dataset_name='new_code'), then cognify(datasets=['new_code']). "
-            f"The existing data and graph are unchanged. (found: {where})",
+            message=message,
             name="LegacyRepositoryError",
             status_code=status.HTTP_409_CONFLICT,
         )
@@ -273,6 +290,31 @@ class RepositoryChangedError(CodeRepositoryError):
             name="RepositoryChangedError",
             status_code=status.HTTP_409_CONFLICT,
         )
+
+
+async def refuse_moved_repositories(data):
+    """Raise RepositoryChangedError for a remote manifest whose checkout moved since it was built.
+
+    Runs as an ``add()`` pipeline task, under the dataset lock and right before ingestion.
+    Another add of this dataset resets the manifest row's stamp only under that lock, so
+    one that did so before this ingest has already refreshed the checkout. Storing this
+    older manifest then would mark the row as added and make that add skip its newer one,
+    leaving the graph on the old revision with no error. Raising instead lets the caller
+    add the repository again.
+    """
+    for item in data if isinstance(data, list) else [data]:
+        metadata = getattr(item, "system_metadata", None) or {}
+        if metadata.get("source") != "code_repo" or "repo_url" not in metadata:
+            continue
+        manifest = json.loads(item.data)
+        async with repository_read(
+            Path(manifest["repo_path"]),
+            remote=True,
+            expected_commit=manifest["commit"],
+            expected_selection=manifest.get("repository_snapshot", {}).get("selection_fingerprint"),
+        ):
+            pass
+    return data
 
 
 def manifest_repo_name(data_item) -> str | None:
@@ -312,32 +354,37 @@ async def repository_read(
         yield commit
 
 
-async def _reject_legacy_repo_row(source_url, dataset_id):
-    """Inspect remote provenance in this dataset, never a globally claimed name."""
+async def legacy_repository_row_ids(source_url, dataset_id) -> list:
+    """Ids of this dataset's rows for ``source_url`` written before repository identities
+    changed: a remote ``code_repo`` row without ``identity_version`` 2."""
     from sqlalchemy import select
 
     from cognee.infrastructure.databases.relational import get_relational_engine
     from cognee.modules.data.models import Data
 
     async with get_relational_engine().get_async_session() as session:
-        metadata_rows = (
-            (
-                await session.execute(
-                    select(Data.system_metadata).where(
-                        Data.dataset_id == dataset_id,
-                        Data.system_metadata["source"].as_string() == "code_repo",
-                    )
+        rows = (
+            await session.execute(
+                select(Data.id, Data.system_metadata).where(
+                    Data.dataset_id == dataset_id,
+                    Data.system_metadata["source"].as_string() == "code_repo",
                 )
             )
-            .scalars()
-            .all()
-        )
-    for metadata in metadata_rows:
+        ).all()
+    legacy = []
+    for data_id, metadata in rows:
         if isinstance(metadata, str):
             metadata = json.loads(metadata)
         url = metadata.get("repo_url")
         if url and repo_key(url) == repo_key(source_url) and metadata.get("identity_version") != 2:
-            raise LegacyRepositoryError("a remote repository row")
+            legacy.append(data_id)
+    return legacy
+
+
+async def _reject_legacy_repo_row(source_url, dataset_id):
+    """Inspect remote provenance in this dataset, never a globally claimed name."""
+    if await legacy_repository_row_ids(source_url, dataset_id):
+        raise LegacyRepositoryError("a remote repository row")
 
 
 async def resolve_code_repository(
@@ -346,7 +393,14 @@ async def resolve_code_repository(
     dataset_id=None,
     source_url: str | None = None,
     include_documents: bool = True,
+    reset_stamp: bool = True,
 ):
+    """Build the repo manifest and, with ``reset_stamp``, clear its stored add stamp.
+
+    A caller holding the clone lock passes ``reset_stamp=False`` and calls
+    ``_reset_add_stamp`` once it has released it: the dataset lock must never be taken
+    inside the clone lock, because cognify takes them in the opposite order.
+    """
     async with repository_read(directory, remote=source_url is not None) as commit:
         item, documents, skipped = await _build_code_repository(
             directory, user, dataset_id, source_url, include_documents
@@ -362,7 +416,33 @@ async def resolve_code_repository(
 
             item.data = json.dumps(manifest, indent=2)
             item.system_metadata["identity_version"] = 2
-        return item, documents, skipped
+    if reset_stamp:
+        await _reset_add_stamp(item.data_id, dataset_id)
+    return item, documents, skipped
+
+
+async def _reset_add_stamp(data_id, dataset_id) -> None:
+    """Clear the stored manifest row's add stamp, under the dataset lock.
+
+    The id is pinned, so add()'s incremental check would find the stored row already
+    added and skip it before ingestion compares content: a changed repo would keep its
+    old manifest and graph. Clearing only the add stamp lets the manifest through;
+    ingestion then clears the other stamps when the content changed, and keeps them when
+    it did not, so an unchanged repo whose later run fails is still marked as built. The
+    clear is unconditional: an unchanged repo's manifest is stored again on every add,
+    which costs one small write, not a rebuild.
+
+    The reset is a read-modify-write of the row's pipeline_status, so it takes the
+    dataset lock (a no-op when the pipeline runner already holds it). Without a user the
+    id is not pinned, and without a dataset there is no stored row: nothing to reset.
+    """
+    if data_id is None or dataset_id is None:
+        return
+    from cognee.infrastructure.locks import dataset_lock
+    from cognee.modules.data.methods import reset_data_pipeline_status
+
+    async with dataset_lock(dataset_id):
+        await reset_data_pipeline_status(data_id, dataset_id, pipeline_names=("add_pipeline",))
 
 
 async def _build_code_repository(
@@ -378,8 +458,8 @@ async def _build_code_repository(
     to the stable identity (user, dataset, repo path) — mirroring DLT source
     manifests — so re-adding the same repo updates one record instead of
     accreting new ones; without a user context the id is left content-derived.
-    With a pinned id and a dataset, the stored row's add stamp is cleared so
-    the re-add reaches ingestion's content comparison (see the reset below).
+    With a pinned id and a dataset, the caller clears the stored row's add stamp so
+    the re-add reaches ingestion's content comparison (see ``_reset_add_stamp``).
     ``source_url`` (credential-free) records where a cloned repository came
     from as ``system_metadata["repo_url"]``.
 
@@ -424,19 +504,6 @@ async def _build_code_repository(
             user,
             dataset_id,
         )
-
-    if data_id is not None and dataset_id is not None:
-        from cognee.modules.data.methods import reset_data_pipeline_status
-
-        # The id is pinned, so add()'s incremental check would find the stored
-        # row already added and skip it before ingestion compares content: a
-        # changed repo would keep its old manifest and graph. Clearing only the
-        # add stamp lets the manifest through; ingestion then clears the other
-        # stamps when the content changed, and keeps them when it did not, so
-        # an unchanged repo whose later run fails is still marked as built.
-        # The clear is unconditional: an unchanged repo's manifest is stored
-        # again on every add, which costs one small write, not a rebuild.
-        await reset_data_pipeline_status(data_id, dataset_id, pipeline_names=("add_pipeline",))
 
     system_metadata = {
         "source": "code_repo",
@@ -515,6 +582,7 @@ async def resolve_code_repository_url(
             dataset_id=dataset_id,
             source_url=source_url,
             include_documents=include_documents,
+            reset_stamp=False,
         )
         commit = json.loads(manifest_item.data)["commit"]
         copy_budget = await asyncio.to_thread(DocumentCopyBudget, default_clones_dir())
@@ -535,7 +603,8 @@ async def resolve_code_repository_url(
                     },
                 )
             )
-        return manifest_item, stored_documents, skipped
+    await _reset_add_stamp(manifest_item.data_id, dataset_id)
+    return manifest_item, stored_documents, skipped
 
 
 async def add_code_repository(

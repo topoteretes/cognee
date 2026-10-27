@@ -1,6 +1,7 @@
 from typing import Any, BinaryIO
 from uuid import UUID
 
+from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.llm.config import LLMConfig
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
@@ -25,6 +26,7 @@ from cognee.modules.pipelines.models.PipelineRunInfo import (
 )
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.code_graph.code_repo import refuse_moved_repositories
 from cognee.tasks.code_graph.config import CodeGraphConfig, validate_codegraph_config
 from cognee.tasks.ingestion import ingest_data, resolve_data_directories
 from cognee.tasks.ingestion.data_item import DataItem
@@ -262,14 +264,14 @@ async def add(
         if codegraph_config.get("repo_credentials"):
             # client.add() has no credentials field; the remote would try an
             # unauthenticated clone, so an explicit token has to raise.
-            raise ValueError(
+            raise CogneeValidationError(
                 "repo_credentials is not supported while connected to a remote Cognee "
                 "instance. Call cognee.disconnect() to clone the repository locally."
             )
         if codegraph_config.get("include_documents", True) is False:
             # client.add() sends only the data and the dataset name, so the remote
             # would ingest the repository's documents.
-            raise ValueError(
+            raise CogneeValidationError(
                 "include_documents=False is not supported while connected to a remote "
                 "Cognee instance. Call cognee.disconnect() to ingest locally."
             )
@@ -353,6 +355,8 @@ async def add(
             branch=branch,
             needs_llm=False,
         ),
+        # Under the dataset lock, right before the manifest is stored: see its docstring.
+        Task(refuse_moved_repositories, needs_llm=False),
         Task(
             ingest_data,
             dataset_name,
@@ -371,36 +375,30 @@ async def add(
     # runner and the task above then see already-resolved items and pass them through.
     include_documents = codegraph_config.get("include_documents", True)
     if codegraph_config.get("repo_credentials") or not include_documents:
-        from cognee.infrastructure.locks import dataset_lock
-
-        # Resolving a repository resets the manifest row's pipeline stamps (a
-        # read-modify-write of pipeline_status). The runner does that under the
-        # dataset lock; running it here, before the pipeline, needs the same lock
-        # or a concurrent cognify of the dataset can lose a stamp.
-        async with dataset_lock(authorized_dataset.id):
-            data = await resolve_data_directories(
-                data,
-                include_subdirectories=True,
-                user=user,
-                dataset_id=authorized_dataset.id,
-                credentials=codegraph_config.get("repo_credentials"),
-                include_documents=include_documents,
-                branch=branch,
-            )
+        data = await resolve_data_directories(
+            data,
+            include_subdirectories=True,
+            user=user,
+            dataset_id=authorized_dataset.id,
+            credentials=codegraph_config.get("repo_credentials"),
+            include_documents=include_documents,
+            branch=branch,
+        )
         repositories = [
             item
             for item in data
-            if isinstance(item, DataItem) and item.system_metadata.get("source") == "code_repo"
+            if isinstance(item, DataItem)
+            and (item.system_metadata or {}).get("source") == "code_repo"
         ]
         if not repositories:
-            raise ValueError(
+            raise CogneeValidationError(
                 "codegraph_config applies to repositories, but nothing in data is one: pass a "
                 "GitHub/GitLab repository URL or a local code project directory."
             )
         if codegraph_config.get("repo_credentials") and any(
             "repo_url" not in item.system_metadata for item in repositories
         ):
-            raise ValueError(
+            raise CogneeValidationError(
                 "repo_credentials applies to repository URLs, not to a local directory, "
                 "which is read in place."
             )

@@ -29,6 +29,9 @@ class CognifyRoute(Enum):
     CODE_REPO = "code_repo"
 
 
+# The routes that run enola only: no chunks, no LLM, no embeddings.
+CODE_ROUTES = frozenset({CognifyRoute.CODE, CognifyRoute.CODE_REPO})
+
 _ROUTE_BY_DOCUMENT_CLASS = {
     DltSourceDocument: CognifyRoute.DLT_SOURCE,
     CodeFileDocument: CognifyRoute.CODE,

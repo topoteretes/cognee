@@ -296,6 +296,10 @@ def _noninteractive_env(ssh_command: str | None = None) -> dict:
 # and repository config, which git reads before the environment's entries.
 _NO_STORED_CREDENTIALS_CONFIG = (("credential.helper", ""), ("core.askPass", ""))
 
+# A fetch can leave a detached ``maintenance`` or ``gc`` process behind that outlives the
+# clone lock and holds git lock files of its own.
+_NO_BACKGROUND_MAINTENANCE_CONFIG = (("maintenance.auto", "false"), ("gc.auto", "0"))
+
 
 def _git_config_entries(env) -> list[tuple[str, str]]:
     """The ``GIT_CONFIG_COUNT`` / ``GIT_CONFIG_KEY_<n>`` / ``GIT_CONFIG_VALUE_<n>`` entries of ``env``."""
@@ -315,7 +319,8 @@ def _is_git_config_entry(name: str) -> bool:
 
 def _git_env(env: dict | None = None) -> dict:
     """The environment git runs with: the process's, non-interactive, ``env`` on top,
-    and no stored credentials (see :data:`_NO_STORED_CREDENTIALS_CONFIG`).
+    no stored credentials (see :data:`_NO_STORED_CREDENTIALS_CONFIG`) and no background
+    maintenance (see :data:`_NO_BACKGROUND_MAINTENANCE_CONFIG`).
 
     Environment-level config entries are renumbered into one list: the process's own
     first, then ``env``'s (e.g. :func:`_credential_env`), then the hardening entries
@@ -331,6 +336,7 @@ def _git_env(env: dict | None = None) -> dict:
         + [("filter.lfs.process", ""), ("filter.lfs.smudge", ""), ("filter.lfs.required", "false")]
         # Git for Windows must support long pack/promisor paths in hashed clone directories.
         + [("core.longpaths", "true")]
+        + list(_NO_BACKGROUND_MAINTENANCE_CONFIG)
     )
     merged = {
         name: value
@@ -693,6 +699,7 @@ async def _resolve_repo_source(spec, clones_dir, credentials, branch, include_do
 
             replace_full_clone = read_repository_snapshot(target) is None
             if await _has_commit(target) and not replace_full_clone:
+                await asyncio.to_thread(_remove_stale_git_locks, target)
                 try:
                     ref = f"refs/heads/{branch}" if branch is not None else "HEAD"
                     code, stderr = await _run_git(
@@ -778,6 +785,20 @@ async def _resolve_repo_source(spec, clones_dir, credentials, branch, include_do
             if partial.exists():
                 await finish_cleanup(asyncio.to_thread(_remove_clone, partial))
         return target
+
+
+def _remove_stale_git_locks(clone: Path) -> None:
+    """Delete the lock files a killed git process left in ``clone``.
+
+    git is killed outright on cancel and timeout (as is the whole process on an OOM kill),
+    so it never removes its own ``index.lock`` or ``shallow.lock``, and every later
+    fetch or reset would fail on them. The clone lock is held and git runs without
+    background maintenance, so no git process of ours is running in this clone and every
+    lock file here is stale. Git run by hand in a managed clone is not supported.
+    """
+    git_dir = clone / ".git"
+    for lock in [*git_dir.glob("*.lock"), *(git_dir / "refs").rglob("*.lock")]:
+        lock.unlink(missing_ok=True)
 
 
 async def _verify_origin(clone: Path, expected: str) -> None:

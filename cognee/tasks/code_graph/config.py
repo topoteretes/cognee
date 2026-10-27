@@ -6,6 +6,8 @@ Only the listed keys are accepted; anything else is refused by
 
 from typing import TypedDict, cast
 
+from cognee.exceptions import CogneeValidationError
+
 
 class CodeGraphConfig(TypedDict, total=False):
     """Options for code repositories, read by ``add()``."""
@@ -33,20 +35,31 @@ def validate_codegraph_config(codegraph_config: CodeGraphConfig | None) -> CodeG
     if codegraph_config is None:
         return {}
     if not isinstance(codegraph_config, dict):
-        raise TypeError(f"codegraph_config must be a dict, got {type(codegraph_config).__name__}.")
+        raise CogneeValidationError(
+            f"codegraph_config must be a dict, got {type(codegraph_config).__name__}."
+        )
     unknown = set(codegraph_config) - CODEGRAPH_CONFIG_KEYS
     if unknown:
-        raise ValueError(
-            f"Unknown codegraph_config keys: {', '.join(sorted(unknown))}. "
+        raise CogneeValidationError(
+            f"Unknown codegraph_config keys: {', '.join(sorted(map(str, unknown)))}. "
             f"Supported: {', '.join(sorted(CODEGRAPH_CONFIG_KEYS))}."
         )
     config = {key: value for key, value in codegraph_config.items() if value is not None}
     if "include_documents" in config and not isinstance(config["include_documents"], bool):
-        raise TypeError(
+        raise CogneeValidationError(
             "codegraph_config['include_documents'] must be a bool, "
             f"got {type(config['include_documents']).__name__}."
         )
     credentials = config.get("repo_credentials")
-    if credentials is not None and (not isinstance(credentials, str) or not credentials):
-        raise TypeError("codegraph_config['repo_credentials'] must be a non-empty str.")
+    if credentials is not None:
+        if not isinstance(credentials, str):
+            raise CogneeValidationError(
+                "codegraph_config['repo_credentials'] must be a str, "
+                f"got {type(credentials).__name__}."
+            )
+        if not credentials.strip() or credentials != credentials.strip():
+            raise CogneeValidationError(
+                "codegraph_config['repo_credentials'] must be a non-blank token without "
+                "surrounding whitespace."
+            )
     return cast(CodeGraphConfig, config)
