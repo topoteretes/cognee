@@ -44,6 +44,8 @@ def test_response_search_tool_advertises_all_code_operations():
     ]
 
     assert operations == [
+        "coverage",
+        "references",
         "query_facts",
         "explore",
         "traverse",

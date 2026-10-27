@@ -116,12 +116,12 @@ BILLING_FACTS = [_module(BILLING, "."), _symbol(BILLING, "invoices.issue", "invo
 # Chunk header (its first line) -> the code node its describes edge must reach.
 EXPECTED_TARGETS = {
     "app.py:1": (SHOP, "module", "."),
-    "app.py:4": (SHOP, "symbol", "app.main"),
+    "app.py:4": (SHOP, "symbol", "app.main", "app.py"),
     "orders/checkout.py:1": (SHOP, "module", "orders"),
-    "orders/checkout.py:4": (SHOP, "symbol", "orders/checkout.Order"),
-    "orders/checkout.py:7": (SHOP, "symbol", "orders/checkout.Order.total"),
-    "orders/checkout.py:12": (SHOP, "symbol", "orders/checkout.place_order"),
-    "invoices.py:1": (BILLING, "symbol", "invoices.issue"),
+    "orders/checkout.py:4": (SHOP, "symbol", "orders/checkout.Order", "orders/checkout.py"),
+    "orders/checkout.py:7": (SHOP, "symbol", "orders/checkout.Order.total", "orders/checkout.py"),
+    "orders/checkout.py:12": (SHOP, "symbol", "orders/checkout.place_order", "orders/checkout.py"),
+    "invoices.py:1": (BILLING, "symbol", "invoices.issue", "invoices.py"),
 }
 
 
@@ -310,7 +310,7 @@ async def test_resolve_edges_to_text_renders_the_chunk_from_its_file_line_header
     nodes, edges = await _graph(engine)
 
     chunk = _chunks_by_header(data_points)["app.py:4"]
-    symbol_id = str(fact_node_id(SHOP, "symbol", "app.main"))
+    symbol_id = str(fact_node_id(SHOP, "symbol", "app.main", "app.py"))
     edge_properties = next(
         props
         for s, t, name, props in edges
@@ -371,7 +371,7 @@ async def test_rerun_change_and_removal_touch_exactly_their_chunks(
     # the shop only, so billing is not in the batch and must stay untouched.
     (repos.shop / "app.py").write_text(APP_PY_EDITED, encoding="utf-8")
     old_main = _chunks_by_header(second)["app.py:4"]
-    main_id = str(fact_node_id(SHOP, "symbol", "app.main"))
+    main_id = str(fact_node_id(SHOP, "symbol", "app.main", "app.py"))
 
     third = await _sync_code_docs(repo=SHOP)
 
@@ -400,7 +400,9 @@ async def test_rerun_change_and_removal_touch_exactly_their_chunks(
     )
     facts = [fact for fact in SHOP_FACTS if fact["name"] != "orders/checkout.place_order"]
     await _sync_code_graph(repos.shop, _write_snapshot(repos.snapshots / "shop-2", facts, "s2"))
-    place_order_id = str(fact_node_id(SHOP, "symbol", "orders/checkout.place_order"))
+    place_order_id = str(
+        fact_node_id(SHOP, "symbol", "orders/checkout.place_order", "orders/checkout.py")
+    )
     assert deleted == [place_order_id]
     deleted.clear()
     old_place_order = _chunks_by_header(third)["orders/checkout.py:12"]
@@ -419,6 +421,38 @@ async def test_rerun_change_and_removal_touch_exactly_their_chunks(
     invoice = _chunks_by_header(first)["invoices.py:1"]
     assert nodes_4[str(invoice.id)]["text"] == invoice.text
     assert nodes_4[str(code_document_id(BILLING, "invoices.py"))]["type"] == "CodeDocument"
-    assert (str(invoice.id), str(fact_node_id(BILLING, "symbol", "invoices.issue"))) in _describes(
-        edges_4
-    )
+    assert (
+        str(invoice.id),
+        str(fact_node_id(BILLING, "symbol", "invoices.issue", "invoices.py")),
+    ) in _describes(edges_4)
+
+
+@pytest.mark.asyncio
+async def test_symbol_identity_migration_and_doc_refresh_keep_chunks(engine, repos, monkeypatch):
+    """Reindex old code, then refresh docs without replacing unchanged chunks."""
+    module = importlib.import_module("cognee.tasks.code_graph.extract_code_graph")
+    current_identity = module.fact_node_id
+    with monkeypatch.context() as old:
+        old.setattr(
+            module,
+            "fact_node_id",
+            lambda repo, kind, name, file="": current_identity(repo, kind, name),
+        )
+        old.setattr(module, "CODE_GRAPH_MAPPING_VERSION", 2)
+        await _sync_both_code_graphs(repos)
+        old_docs = await _sync_code_docs()
+    old_chunk_ids = {str(point.id) for point in old_docs if isinstance(point, DocumentChunk)}
+    old_main = str(current_identity(SHOP, "symbol", "app.main"))
+    assert old_main in (await _graph(engine))[0]
+
+    await _sync_both_code_graphs(repos)
+    new_docs = await _sync_code_docs()
+    nodes, edges = await _graph(engine)
+    assert old_main not in nodes
+    assert {
+        str(point.id) for point in new_docs if isinstance(point, DocumentChunk)
+    } == old_chunk_ids
+    main_chunk = _chunks_by_header(new_docs)["app.py:4"]
+    new_main = str(current_identity(SHOP, "symbol", "app.main", "app.py"))
+    assert (str(main_chunk.id), new_main) in _describes(edges)
+    assert all(target in nodes for _, target in _describes(edges))

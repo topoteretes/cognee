@@ -36,6 +36,8 @@ DEFAULT_TOOLS = [
                         "operation": {
                             "type": "string",
                             "enum": [
+                                "coverage",
+                                "references",
                                 "query_facts",
                                 "explore",
                                 "traverse",
@@ -57,6 +59,7 @@ DEFAULT_TOOLS = [
                                 "a one-hop neighbourhood and file:line citations; search ranks "
                                 "symbols, routes and flows by name, docstring and path; "
                                 "neighbors, subgraph, flows and hubs navigate from there; "
+                                "coverage reports extraction gaps; references reads document/task links by code id; "
                                 "capabilities reports what the graph and server support"
                             ),
                         },

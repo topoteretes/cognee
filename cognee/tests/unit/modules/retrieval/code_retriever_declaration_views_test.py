@@ -138,7 +138,8 @@ async def _run(config, query="", facts=None):
 
 
 def _id(kind, name, repo=REPO):
-    return str(fact_node_id(repo, kind, name))
+    file = {MODEL: MODEL_FILE, RELATION: MODEL_FILE, SHOW: CONTROLLER_FILE}.get(name, "")
+    return str(fact_node_id(repo, kind, name, file))
 
 
 USER = _id("symbol", MODEL)

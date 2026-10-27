@@ -50,6 +50,7 @@ async def _cognify(datasets=("repos",), authorized=None, **cognify_kwargs):
     dataset_data = AsyncMock(side_effect=_fake_dataset_data)
 
     with (
+        patch("cognee.tasks.code_graph.mapping_version.warn_outdated_code_mapping", AsyncMock()),
         patch.object(cognify_module, "ensure_extractor_runtime", runtime),
         patch.object(migrations, "run_migrations_and_block", AsyncMock()),
         patch(

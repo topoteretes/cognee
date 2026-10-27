@@ -139,8 +139,8 @@ def test_build_code_graph_edges_resolves_and_skips():
 def test_edge_tuples_have_correct_source_relationship_target():
     edges, _skipped = build_code_graph_edges(_fixture_facts())
 
-    expected_source = fact_node_id("acme/shop", "symbol", "main")
-    expected_target = fact_node_id("acme/shop", "symbol", "helper")
+    expected_source = fact_node_id("acme/shop", "symbol", "main", "app/main.go")
+    expected_target = fact_node_id("acme/shop", "symbol", "helper", "utils/utils.go")
 
     calls_edges = [edge for edge in edges if edge[2] == "calls"]
     assert len(calls_edges) == 1
@@ -246,7 +246,7 @@ def test_node_and_edge_ids_agree_when_facts_have_no_repo_field():
     assert source_id == fact_node_id("myrepo", "symbol", "main")
 
 
-def test_duplicate_names_in_same_repo_resolve_to_the_single_shared_node():
+def test_duplicate_names_in_different_files_are_distinct_and_name_only_edges_skip():
     facts = [
         {"kind": "symbol", "name": "init", "file": "a.go", "repo": "r"},
         {"kind": "symbol", "name": "init", "file": "b.go", "repo": "r"},
@@ -260,9 +260,13 @@ def test_duplicate_names_in_same_repo_resolve_to_the_single_shared_node():
 
     edges, skipped = build_code_graph_edges(facts)
 
-    assert skipped == 0
-    assert len(edges) == 1
-    assert edges[0][1] == fact_node_id("r", "symbol", "init")
+    assert skipped == 1
+    assert edges == []
+    points = map_facts_to_data_points(facts)
+    symbols = [point for point in points if getattr(point, "name", None) == "init"]
+    assert len(symbols) == 2
+    assert {point.file_path for point in symbols} == {"a.go", "b.go"}
+    assert len({point.id for point in symbols}) == 2
 
 
 def test_ambiguous_target_prefers_same_repo_else_skips():
@@ -356,26 +360,23 @@ def test_build_code_graph_edges_synthesizes_module_import_bridge():
     facts = [
         {"kind": "module", "name": "internal/server", "repo": "r"},
         {"kind": "module", "name": "internal/config", "repo": "r"},
+        {"kind": "symbol", "name": "value", "file": "internal/config/value.py", "repo": "r"},
         {
             "kind": "dependency",
             "name": "config-import",
-            "file": "r/internal/server/server.go",
+            "file": "internal/server/server.py",
             "repo": "r",
-            "relations": [{"type": "imports", "target": "internal/config/value"}],
+            "props": {"source": "internal", "language": "python"},
+            "relations": [{"type": "imports", "target": "internal.config.value"}],
         },
     ]
-
     edges, skipped = build_code_graph_edges(facts)
     imports = {(edge[0], edge[1]) for edge in edges if edge[2] == "imports"}
-
-    # The literal target is unresolved, but the nearest module ancestor still
-    # produces the architectural module-to-module import edge.
-    assert skipped == 1
+    assert skipped == 0
+    target = fact_node_id("r", "module", "internal/config")
     assert imports == {
-        (
-            fact_node_id("r", "module", "internal/server"),
-            fact_node_id("r", "module", "internal/config"),
-        )
+        (fact_node_id("r", "dependency", "config-import"), target),
+        (fact_node_id("r", "module", "internal/server"), target),
     }
 
 

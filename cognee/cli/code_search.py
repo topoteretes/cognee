@@ -30,6 +30,8 @@ from cognee.cli.exceptions import CliCommandInnerException
 
 DIAGRAM_FORMAT_CHOICES = ["mermaid", "dot"]
 CODE_OPERATIONS = (
+    "coverage",
+    "references",
     "query_facts",
     "explore",
     "traverse",

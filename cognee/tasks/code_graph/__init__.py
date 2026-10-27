@@ -46,3 +46,6 @@ from .models import (
     ExternalDependency,
     StorageResource,
 )
+
+from .link_code_references import CodeReference, link_code_references
+from .symbol_migration import SymbolMigrationError

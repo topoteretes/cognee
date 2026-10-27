@@ -629,6 +629,16 @@ async def cognify(
         def resolve_cognify_tasks(data_item):
             return tasks_by_route[cognify_route_for(data_item)]
 
+        async def warn_code_mapping(items, dataset):
+            from cognee.modules.users.methods import get_default_user
+            from cognee.tasks.code_graph.mapping_version import warn_outdated_code_mapping
+
+            try:
+                await warn_outdated_code_mapping(items, dataset, user or await get_default_user())
+            except Exception:
+                # Mapping diagnostics must not change the outcome of ingestion.
+                logger.debug("Could not inspect stored code mapping versions.", exc_info=True)
+
         async def prepare_cognify_run(items, dataset):
             # Only for the GLiNER extractor. run_pipeline invokes this under its
             # dataset lock, with the same rows it will process, revalidating the
@@ -637,6 +647,7 @@ async def cognify(
                 setup_and_check_environment,
             )
 
+            await warn_code_mapping(items, dataset)
             code_only = _pending_items_are_code_only(items, dataset.id, incremental_loading)
             if not code_only:
                 await ensure_extractor_runtime(
@@ -671,9 +682,10 @@ async def cognify(
             # The union over every wired route, as above. The probes run before the
             # dataset lock.
             run_environment = {
+                "before_run": warn_code_mapping,
                 "needs_llm": pipeline_needs_llm(
                     task for route_tasks in tasks_by_route.values() for task in route_tasks
-                )
+                ),
             }
 
         try:

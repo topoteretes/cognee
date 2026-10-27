@@ -20,6 +20,7 @@ import asyncio
 import copy
 import hashlib
 import heapq
+import inspect
 import json
 import math
 import os
@@ -38,6 +39,7 @@ from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.graph.config import get_graph_context_config
 from cognee.modules.retrieval.base_retriever import BaseRetriever
+from cognee.modules.retrieval.code_coverage import repository_coverage
 from cognee.modules.retrieval.code_graph_diagram import DIAGRAM_FORMATS, render_result_diagram
 from cognee.modules.retrieval.code_search_index import CodeSearchIndex, query_terms
 
@@ -88,6 +90,8 @@ _FACT_TYPE_BY_KIND = {
 # extract_code_graph._DECLARATION_VIEW_KINDS holds the same kinds.
 _DECLARATION_VIEW_TYPES = frozenset({_TYPE_BY_KIND["storage"], _TYPE_BY_KIND["association"]})
 _OPERATIONS = {
+    "references",
+    "coverage",
     "query_facts",
     "explore",
     "traverse",
@@ -105,7 +109,15 @@ _OPERATIONS = {
     "ask",
 }
 # Results with no node/edge graph to draw: asking them for a diagram is an error.
-_UNDRAWABLE_OPERATIONS = {"capabilities", "search", "flows", "hubs", "ask"}
+_UNDRAWABLE_OPERATIONS = {
+    "references",
+    "coverage",
+    "capabilities",
+    "search",
+    "flows",
+    "hubs",
+    "ask",
+}
 # Edges that say where a fact lives rather than what it does. hubs and ask's
 # neighbourhood skip them unless relation_types names them (has_method stays:
 # a type's methods are its behaviour).
@@ -125,7 +137,7 @@ _TEST_FILE_NAME = re.compile(
 _FLOW_WALK_MAX_DEPTH = 8
 _FLOW_WALK_MAX_VISITED = 5000
 _ASK_MAX_FLOWS = 3
-_CAPABILITIES_VERSION = 1
+_CAPABILITIES_VERSION = 2
 # Defaults and caps of the navigation operations, reported verbatim by
 # capabilities so a client can size its requests.
 _LIMITS: dict[str, dict[str, Any]] = {
@@ -1395,6 +1407,8 @@ class CodeRetriever(BaseRetriever):
         snapshot = await self._snapshot()
         handler = getattr(self, f"_{self.operation}")
         result = handler(snapshot, query or "")
+        if inspect.isawaitable(result):
+            result = await result
         if self.diagram_format is not None:
             result["diagram"] = render_result_diagram(result, self.diagram_format)
         return result
@@ -1458,10 +1472,21 @@ class CodeRetriever(BaseRetriever):
         ``count``. Edges internal to one module are dropped. ``repo`` narrows
         to one repository; ``max_nodes`` (default 80) keeps the picture
         readable by keeping the best-connected nodes and reporting
-        ``truncated``.
+        ``truncated``. ``symbol_roles`` (component, hook) includes those symbols
+        in the default view, using the extractor's web_component evidence.
+        With explicit node_types it filters the selected CodeSymbol nodes.
+        Other symbols still roll up to their modules.
         """
         repo = self.config.get("repo")
-        node_types = _node_types(self.config.get("node_types")) or set(_ARCHITECTURE_DEFAULT_TYPES)
+        symbol_roles = set(_as_strings(self.config.get("symbol_roles"), "symbol_roles"))
+        if symbol_roles - {"component", "hook"}:
+            raise CodeSearchValidationError(
+                "symbol_roles accepts component and hook.", param="symbol_roles"
+            )
+        default_types = set(_ARCHITECTURE_DEFAULT_TYPES)
+        if symbol_roles:
+            default_types.add("CodeSymbol")
+        node_types = _node_types(self.config.get("node_types")) or default_types
         max_nodes = _bounded_int(
             self.config.get("max_nodes"), field="max_nodes", default=80, maximum=300
         )
@@ -1469,7 +1494,13 @@ class CodeRetriever(BaseRetriever):
 
         def in_scope(node_id: str) -> bool:
             node = graph.nodes[node_id]
-            return node.get("type") in node_types and (repo is None or node.get("repo") == repo)
+            if node.get("type") not in node_types or (
+                repo is not None and node.get("repo") != repo
+            ):
+                return False
+            if node.get("type") == "CodeSymbol" and symbol_roles:
+                return graph.properties_of(node).get("web_component") in symbol_roles
+            return True
 
         module_cache: dict[str, str | None] = {}
 
@@ -2334,6 +2365,48 @@ class CodeRetriever(BaseRetriever):
             hit["summary"] = graph.flow_summary_text(key)
             hit["enola_id"] = entity.get("enola_id")
         return hit
+
+    async def _references(self, graph: _CodeGraphSnapshot, query: str) -> dict[str, Any]:
+        """Read document/task references only on demand; keep their text out of the code cache."""
+        target = graph.resolve(
+            name=self._text_arg(query, "symbol", "name"),
+            node_id=self._identifier_arg("id"),
+            repo=self.config.get("repo"),
+        )
+        engine = await get_graph_engine()
+        nodes, edges = await engine.get_graph_data()
+        sources = {str(key): _normalize_properties(props) for key, props in nodes}
+        references = []
+        for source, destination, relation, properties in edges:
+            if str(destination) != target or relation not in {"references_code", "describes"}:
+                continue
+            references.append(
+                {
+                    "source_id": str(source),
+                    "target_id": target,
+                    "relationship": relation,
+                    "source": {
+                        key: value
+                        for key, value in sources.get(str(source), {}).items()
+                        if key
+                        in {"name", "type", "document_id", "document_name", "external_metadata"}
+                    },
+                    "evidence": _normalize_properties(properties),
+                }
+            )
+        references.sort(key=lambda item: (item["source_id"], item["relationship"]))
+        return {
+            "operation": "references",
+            "target": graph.fact(target, include_relations=False),
+            "references": references,
+        }
+
+    def _coverage(self, graph: _CodeGraphSnapshot, query: str) -> dict[str, Any]:
+        """Repository extraction and mapping diagnostics, separate from ask coverage."""
+        return {
+            "operation": "coverage",
+            **repository_coverage(graph.repositories, self.config.get("repo")),
+        }
 
     def _capabilities(self, graph: _CodeGraphSnapshot, query: str) -> dict[str, Any]:
         """What this server can do and what this dataset's code graph holds.

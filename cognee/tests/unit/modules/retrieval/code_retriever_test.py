@@ -1344,3 +1344,61 @@ async def test_architecture_respects_filters_bounds_and_opt_out():
         ).get_retrieved_objects("")
     assert other_repo["nodes"] == [] and other_repo["edges"] == []
     assert other_repo["diagram"]["source"].startswith("digraph code_graph {")
+
+
+@pytest.mark.parametrize(
+    ("roles", "node_types", "expected"),
+    [
+        (["component"], None, {"ui", "card"}),
+        (["hook"], None, {"ui", "hook"}),
+        (["component", "hook"], None, {"ui", "card", "hook"}),
+        (["component", "hook"], ["symbol"], {"card", "hook"}),
+        (["component"], ["module"], {"ui"}),
+    ],
+)
+def test_architecture_symbol_roles_use_extractor_evidence(roles, node_types, expected):
+    from cognee.modules.retrieval.code_retriever import _CodeGraphSnapshot
+
+    def symbol(name, role=None, repo="shop"):
+        return {
+            "name": name,
+            "type": "CodeSymbol",
+            "repo": repo,
+            "file_path": f"ui/{name}.tsx",
+            "fact_properties": {"web_component": role} if role else {},
+        }
+
+    graph = _CodeGraphSnapshot(
+        [
+            ("ui", {"name": "ui", "type": "CodeModule", "repo": "shop"}),
+            ("card", symbol("Card", "component")),
+            ("hook", symbol("useOrder", "hook")),
+            ("plain", symbol("useLabel")),
+            ("other", symbol("OtherCard", "component", repo="other")),
+        ],
+        [
+            ("card", "ui", "declares", {}),
+            ("hook", "ui", "declares", {}),
+            ("plain", "ui", "declares", {}),
+            ("card", "hook", "calls", {}),
+        ],
+    )
+    config = {"operation": "architecture", "symbol_roles": roles, "repo": "shop"}
+    if node_types is not None:
+        config["node_types"] = node_types
+    result = CodeRetriever(config=config)._architecture(graph, "")
+    assert {node["id"] for node in result["nodes"]} == expected
+    if {"card", "hook"} <= expected:
+        assert any(
+            (edge["source_id"], edge["target_id"], edge["type"]) == ("card", "hook", "calls")
+            for edge in result["edges"]
+        )
+
+
+@pytest.mark.parametrize("roles", [["componnet"], {"component": True}, 1])
+def test_architecture_rejects_invalid_symbol_roles(roles):
+    from cognee.modules.retrieval.code_retriever import _CodeGraphSnapshot
+
+    retriever = CodeRetriever(config={"operation": "architecture", "symbol_roles": roles})
+    with pytest.raises(CodeSearchValidationError):
+        retriever._architecture(_CodeGraphSnapshot([], []), "")

@@ -51,7 +51,11 @@ FACTS = [
 
 
 def _node_id(kind, name):
-    return str(fact_node_id(REPO, kind, name))
+    file = next(
+        (fact.get("file", "") for fact in FACTS if fact["kind"] == kind and fact["name"] == name),
+        "",
+    )
+    return str(fact_node_id(REPO, kind, name, file))
 
 
 REPO_NODE_ID = _node_id("repository", REPO)
@@ -151,7 +155,9 @@ async def test_sweep_removes_stale_nodes_and_edges_and_stamps_snapshot(tmp_path,
         (handler_id, REPO_NODE_ID, "part_of", {}),
         (handler_id, database_id, "calls", {}),
         # The dependency was removed from the code -> stale, must be swept.
-        (database_id, handler_id, "calls", {}),
+        (database_id, handler_id, "calls", {"producer": "cognee_code_graph"}),
+        # Unmarked user relationship between surviving code nodes must also survive.
+        (database_id, handler_id, "reviewed_with", {"evidence": "manual"}),
         # Edge to a non-code node -> must survive.
         (handler_id, nodeset_id, "belongs_to_set", {}),
     ]
@@ -269,3 +275,26 @@ async def test_delta_write_adds_only_missing_edges_and_stamps_delta(tmp_path, mo
     assert stamped[0].last_delta["edges_removed"] == 0
     assert stamped[0].last_delta["nodes_removed"] == 0
     assert stamped[0].last_delta["snapshot_id"] == SNAPSHOT_ID
+
+
+@pytest.mark.asyncio
+async def test_partial_prewrite_state_is_reread_before_owned_edge_cleanup(tmp_path, monkeypatch):
+    from cognee.tasks.code_graph.extract_code_graph import _CodeGraphLoadState
+    from cognee.tasks.code_graph.symbol_migration import CODE_EDGE_OWNER
+
+    _write_snapshot(tmp_path, FACTS)
+    source, target = _node_id("symbol", "app/db.Database"), _node_id("symbol", "app/api.handler")
+    nodes = [(node, {"type": "CodeSymbol", "repo": REPO}) for node in (source, target)]
+    old = (source, target, "calls", {"producer": CODE_EDGE_OWNER})
+    engine = _mock_engine(monkeypatch, nodes, [old])
+    state = _CodeGraphLoadState(["sentinel"])
+    state.existing_nodes = nodes
+    state.existing_edge_keys = {(source, target, "calls")}
+    # Full edge records are missing: the loader must not infer an empty ownership set.
+    await add_code_graph_edges(state, snapshot_dir=tmp_path, repo_path=f"/repos/{REPO}")
+    engine.get_graph_data.assert_awaited_once()
+    assert any(
+        edge.source_id == source and edge.target_id == target
+        for call in engine.delete_edge_triples.await_args_list
+        for edge in call.args[0]
+    )

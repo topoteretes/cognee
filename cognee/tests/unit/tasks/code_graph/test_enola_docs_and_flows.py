@@ -378,7 +378,15 @@ def test_flow_edges_join_each_flow_to_its_entry_stages_and_routes():
     edges, _skipped = build_code_graph_edges(facts, repo_path="/tmp/shop")
 
     def node(kind, name):
-        return fact_node_id(REPO, kind, name)
+        file = next(
+            (
+                fact.get("file", "")
+                for fact in facts
+                if fact["kind"] == kind and fact["name"] == name
+            ),
+            "",
+        )
+        return fact_node_id(REPO, kind, name, file)
 
     checkout = node("flow", "POST /checkout")
     main = node("flow", "app.main")
@@ -423,8 +431,8 @@ def test_flow_refs_resolve_by_fact_id_before_name(tmp_path):
     flow = fact_node_id(REPO, "flow", "handlers.checkout")
     assert skipped == 0
     assert {(edge[0], edge[2], edge[1]) for edge in edges} == {
-        (flow, "flow_entry", fact_node_id("web", "symbol", "handlers.checkout")),
-        (flow, "flow_stage", fact_node_id(REPO, "symbol", "orders.save")),
+        (flow, "flow_entry", fact_node_id("web", "symbol", "handlers.checkout", "b.py")),
+        (flow, "flow_stage", fact_node_id(REPO, "symbol", "orders.save", "c.py")),
     }
 
 
@@ -604,7 +612,7 @@ def test_without_repo_labels_every_flow_is_kept_in_the_facts_repository(tmp_path
     assert {name: by_key[("CodeSymbol", name)].fact_hash for name in ("main", "helper")} == (
         GOLDEN_UNLABELLED_HASHES
     )
-    assert by_key[("CodeSymbol", "main")].id == fact_node_id("myrepo", "symbol", "main")
+    assert by_key[("CodeSymbol", "main")].id == fact_node_id("myrepo", "symbol", "main", "main.go")
     assert by_key[("CodeFlow", "main")].repo == "myrepo"
     assert [type(point).__name__ for point in data_points].count("CodeRepository") == 1
 
@@ -752,7 +760,7 @@ async def test_stale_flows_are_swept_and_retagged_like_other_code_nodes(monkeypa
     checkout = str(fact_node_id(REPO, "flow", "POST /checkout"))
     removed_flow = str(fact_node_id(REPO, "flow", "GET /cart"))
     other_repo_flow = str(fact_node_id("billing", "flow", "GET /cart"))
-    serve = str(fact_node_id(REPO, "symbol", "app.serve"))
+    serve = str(fact_node_id(REPO, "symbol", "app.serve", "app.py"))
     existing_nodes = [
         (checkout, {"type": "CodeFlow", "repo": REPO, "belongs_to_set": ["old-team"]}),
         # The entry point is gone from the code -> its flow must be swept.
@@ -762,7 +770,7 @@ async def test_stale_flows_are_swept_and_retagged_like_other_code_nodes(monkeypa
         (serve, {"type": "CodeSymbol", "repo": REPO}),
     ]
     # A stage the checkout flow no longer passes through.
-    existing_edges = [(checkout, serve, "flow_stage", {})]
+    existing_edges = [(checkout, serve, "flow_stage", {"producer": "cognee_code_graph"})]
     engine = _mock_engine(monkeypatch, existing_nodes, existing_edges)
 
     await add_code_graph_edges(
@@ -787,7 +795,7 @@ async def test_stale_flows_are_swept_and_retagged_like_other_code_nodes(monkeypa
     assert checkout in tags_call.kwargs["node_ids"]
     assert other_repo_flow not in tags_call.kwargs["node_ids"]
     (added_edges,) = engine.add_edges.await_args.args
-    entry = str(fact_node_id(REPO, "symbol", "orders/checkout.place_order"))
+    entry = str(fact_node_id(REPO, "symbol", "orders/checkout.place_order", "orders/checkout.py"))
     assert (checkout, entry, "flow_entry") in {
         (str(edge[0]), str(edge[1]), edge[2]) for edge in added_edges
     }
