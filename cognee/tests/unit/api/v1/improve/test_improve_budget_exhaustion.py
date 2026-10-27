@@ -510,7 +510,7 @@ def session_bridge(harness, monkeypatch):
     async def log_start(*_args, **_kwargs):
         return SimpleNamespace(pipeline_run_id=uuid.uuid4())
 
-    async def log_error(_run_id, _pipeline_id, pipeline_name, _dataset_id, _data, error, **_kw):
+    async def log_error(_run_id, _pipeline_id, pipeline_name, _dataset_id, error, **_kw):
         run_log.errors.append((pipeline_name, error))
 
     async def log_complete(_run_id, _pipeline_id, pipeline_name, *_args, **_kwargs):

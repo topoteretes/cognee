@@ -19,6 +19,7 @@ from cognee.infrastructure.databases.relational import Base
 from cognee.infrastructure.databases.relational.create_relational_engine import (
     create_relational_engine,
 )
+from cognee.modules.graph.methods.deleted_graph_elements import DeletedGraphElements
 from cognee.modules.search.models.Query import Query
 from cognee.modules.search.models.Result import Result
 from cognee.modules.search.operations import search_history_enabled
@@ -295,10 +296,15 @@ async def test_delete_data_purges_history_when_it_deletes_the_emptied_dataset(
         patch.object(datasets_mod, "get_authorized_dataset", AsyncMock(return_value=dataset)),
         patch.object(datasets_mod, "dataset_lock", _no_op_context),
         patch.object(datasets_mod, "set_database_global_context_variables", _no_op_context),
-        patch.object(datasets_mod, "get_dataset_data", AsyncMock(return_value=[])),
-        patch.object(datasets_mod, "delete_data_nodes_and_edges", AsyncMock()),
+        # The dataset is empty after the delete (one count query, no listing).
+        patch.object(datasets_mod, "has_dataset_data", AsyncMock(return_value=False)),
+        patch.object(
+            datasets_mod,
+            "delete_data_nodes_and_edges",
+            AsyncMock(return_value=DeletedGraphElements()),
+        ),
         patch.object(datasets_mod, "_invalidate_sessions_for_deleted_data_nonfatal", AsyncMock()),
-        patch("cognee.modules.data.methods.resolve_data_id", AsyncMock(return_value=None)),
+        patch("cognee.modules.data.methods.get_data", AsyncMock(return_value=None)),
         patch("cognee.modules.data.methods.delete_dataset", delete_dataset),
     ):
         await datasets_mod.datasets.delete_data(
@@ -337,6 +343,7 @@ async def test_forget_everything_purges_the_users_own_history_first():
     assert result == {
         "datasets_removed": 2,
         "search_history_removed": True,
+        "history_cleaned": True,
         "status": "success",
     }
     delete_user_history.assert_awaited_once_with(user.id)
@@ -348,7 +355,10 @@ async def test_forget_data_item_reports_history_kept():
     """History is attributed per dataset, so a document forget cannot purge it."""
     user = SimpleNamespace(id=uuid4())
     dataset_id, data_id = uuid4(), uuid4()
-    fake_datasets = SimpleNamespace(delete_data=AsyncMock())
+    # delete_data's receipt (DeleteDataReceiptDTO); forget passes it through and
+    # adds the history flag.
+    receipt = {"status": "success", "dataset_id": str(dataset_id), "data_id": str(data_id)}
+    fake_datasets = SimpleNamespace(delete_data=AsyncMock(return_value=receipt))
 
     with (
         patch.object(datasets_mod, "datasets", fake_datasets),
