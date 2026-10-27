@@ -12,7 +12,9 @@ from cognee.infrastructure.databases.exceptions.exceptions import CacheConnectio
 
 
 @pytest.fixture
-def cache_root():
+def adapter():
+    """An adapter on a temporary data root, closed before the directory is removed
+    (Windows cannot delete the SQLite file while diskcache holds it open)."""
     with (
         tempfile.TemporaryDirectory() as tmpdir,
         patch(
@@ -20,16 +22,13 @@ def cache_root():
             return_value={"data_root_directory": tmpdir},
         ),
     ):
-        yield tmpdir
-
-
-def _adapter() -> FSCacheAdapter:
-    return FSCacheAdapter()
+        inst = FSCacheAdapter()
+        yield inst
+        inst.cache.close()
 
 
 @pytest.mark.asyncio
-async def test_string_values_round_trip_without_pickle(cache_root):
-    adapter = _adapter()
+async def test_string_values_round_trip_without_pickle(adapter):
     await adapter.set_value("k", '{"a": 1}')
     assert await adapter.get_value("k") == '{"a": 1}'
 
@@ -39,8 +38,7 @@ async def test_string_values_round_trip_without_pickle(cache_root):
 
 
 @pytest.mark.asyncio
-async def test_pickled_value_planted_in_cache_directory_is_refused(cache_root):
-    adapter = _adapter()
+async def test_pickled_value_planted_in_cache_directory_is_refused(adapter):
     # Something else writes a pickled row into the same directory with diskcache's
     # default serializer, as an attacker with write access to the directory could.
     foreign = dc.Cache(directory=adapter.cache_directory)
@@ -52,8 +50,7 @@ async def test_pickled_value_planted_in_cache_directory_is_refused(cache_root):
 
 
 @pytest.mark.asyncio
-async def test_pickled_key_planted_in_cache_directory_is_refused(cache_root):
-    adapter = _adapter()
+async def test_pickled_key_planted_in_cache_directory_is_refused(adapter):
     foreign = dc.Cache(directory=adapter.cache_directory)
     foreign.set(("tuple", "key"), "text")
     foreign.close()
@@ -64,7 +61,6 @@ async def test_pickled_key_planted_in_cache_directory_is_refused(cache_root):
 
 
 @pytest.mark.asyncio
-async def test_non_string_value_is_refused_at_write_time(cache_root):
-    adapter = _adapter()
+async def test_non_string_value_is_refused_at_write_time(adapter):
     with pytest.raises(CacheConnectionError, match="must be str"):
         await adapter.set_value("k", pickle.dumps({"a": 1}))  # bytes, not str
