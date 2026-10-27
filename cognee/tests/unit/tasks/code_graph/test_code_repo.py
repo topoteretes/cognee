@@ -636,3 +636,56 @@ def test_the_legacy_error_names_the_shared_graph_only_when_there_is_one(
     assert "Create a new dataset" in message
     assert "(found: a remote repository row)" in message
     assert ("forget the legacy repository first" in message) is shared_graph
+
+
+@pytest.mark.asyncio
+async def test_every_document_copy_is_admitted_against_the_budget(tmp_path, monkeypatch):
+    """The document copies of a remote repository are checked one by one before they are
+    written: the budget is only effective if this call site asks it."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, Mock
+    from uuid import uuid4
+
+    import cognee.tasks.code_graph.code_repo as code_repo_module
+
+    resolve = importlib.import_module("cognee.tasks.code_graph.resolve_repo")
+    resources = importlib.import_module("cognee.tasks.code_graph.repo_resources")
+    monkeypatch.setattr(resolve, "default_clones_dir", lambda: tmp_path)
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    documents = [clone / "a.md", clone / "b.md"]
+    for document in documents:
+        document.write_text("# doc\n")
+    admitted = []
+
+    class RecordingBudget:
+        def __init__(self, clone_root):
+            pass
+
+        def admit(self, size):
+            admitted.append(size)
+
+    async def fake_resolve_repo_source(spec, **kwargs):
+        return clone
+
+    async def fake_resolve_code_repository(directory, **kwargs):
+        return SimpleNamespace(data='{"commit": "c1"}', data_id=uuid4()), documents, 0
+
+    async def fake_store(source, filename, file_extension):
+        return SimpleNamespace(file_path=filename)
+
+    monkeypatch.setattr(resources, "DocumentCopyBudget", RecordingBudget)
+    monkeypatch.setattr(code_repo_module, "resolve_repo_source", fake_resolve_repo_source)
+    monkeypatch.setattr(code_repo_module, "resolve_code_repository", fake_resolve_code_repository)
+    monkeypatch.setattr(code_repo_module, "_reset_add_stamp", AsyncMock())
+    monkeypatch.setattr(
+        importlib.import_module("cognee.modules.ingestion"),
+        "save_data_to_file_detailed",
+        fake_store,
+    )
+
+    await code_repo_module.resolve_code_repository_url(
+        "https://github.com/org/repo", user=Mock(), dataset_id=uuid4()
+    )
+
+    assert len(admitted) == 2 and all(size > 0 for size in admitted)

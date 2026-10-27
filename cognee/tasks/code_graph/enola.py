@@ -27,7 +27,11 @@ from fastapi import status
 from cognee.exceptions import CogneeConfigurationError, CogneeSystemError
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.code_graph.process import finish_cleanup, run_process
-from cognee.tasks.code_graph.repo_resources import RepositoryResourceError, repository_disk_budget
+from cognee.tasks.code_graph.repo_resources import (
+    RepositoryResourceError,
+    reports_disk_full,
+    repository_disk_budget,
+)
 
 logger = get_logger("enola")
 
@@ -59,7 +63,8 @@ _RELATION_TARGET_KEYS = ("target", "name", "to", "target_name")
 # runs, so enola's own release check (a GitHub API call, cached 12h under
 # ~/.enola) is pure noise here — and the run must stay offline-safe. Prompts
 # and terminal hints assume an interactive shell.
-# LC_ALL=C keeps enola's disk-full message in English, which run_enola_generate matches.
+# LC_ALL=C keeps the messages of the git commands enola runs in English. enola's own
+# disk-full message is Go's, always English, and run_enola_generate matches it in any case.
 _SUBPROCESS_ENV_OVERRIDES = {
     "ENOLA_NO_UPDATE_CHECK": "1",
     "ENOLA_NO_PROMPTS": "1",
@@ -191,9 +196,7 @@ async def run_enola_generate(
 
     stderr_text = stderr.decode(errors="replace") if stderr else ""
     if returncode != 0:
-        if any(
-            message in stderr for message in (b"No space left on device", b"Disk quota exceeded")
-        ):
+        if reports_disk_full(stderr or b""):
             if snapshot_dir.exists():
                 await finish_cleanup(asyncio.to_thread(shutil.rmtree, snapshot_dir))
             raise RepositoryResourceError("filesystem space or quota exhausted")

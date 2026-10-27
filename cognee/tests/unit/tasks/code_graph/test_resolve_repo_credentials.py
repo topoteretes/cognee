@@ -374,6 +374,7 @@ def test_git_runs_without_stored_credentials_or_askpass(monkeypatch):
         ("filter.lfs.smudge", ""),
         ("filter.lfs.required", "false"),
         ("core.longpaths", "true"),
+        ("core.ignorecase", "false"),
         ("maintenance.auto", "false"),
         ("gc.auto", "0"),
     ]

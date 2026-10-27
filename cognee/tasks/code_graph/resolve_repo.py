@@ -9,6 +9,7 @@ import base64
 import hashlib
 import os
 import re
+import secrets
 import shutil
 import stat
 import tempfile
@@ -336,6 +337,9 @@ def _git_env(env: dict | None = None) -> dict:
         + [("filter.lfs.process", ""), ("filter.lfs.smudge", ""), ("filter.lfs.required", "false")]
         # Git for Windows must support long pack/promisor paths in hashed clone directories.
         + [("core.longpaths", "true")]
+        # Match sparse patterns exactly on case-insensitive filesystems too, so an excluded
+        # path is never checked out in place of a selected one that differs only by case.
+        + [("core.ignorecase", "false")]
         + list(_NO_BACKGROUND_MAINTENANCE_CONFIG)
     )
     merged = {
@@ -378,10 +382,21 @@ def _remove_clone(path: Path) -> None:
 
 
 def _publish_clone(partial: Path, target: Path, replace_full_clone: bool) -> None:
-    """Retire an old cache and publish its validated replacement without yielding."""
+    """Retire an old cache and publish its validated replacement without yielding.
+
+    The old clone is renamed aside before it is deleted, so a process killed while it is
+    removed leaves a retired directory the next run sweeps, never a half-deleted target.
+    """
+    retired = None
     if replace_full_clone:
-        _remove_clone(target)
+        retired = target.with_name(f".{target.name}.old-{secrets.token_hex(4)}")
+        os.replace(target, retired)
     os.replace(partial, target)
+    if retired is not None:
+        try:
+            _remove_clone(retired)
+        except OSError as error:
+            logger.warning("Could not remove a retired clone (%s); the next run sweeps it.", error)
 
 
 async def _exec_git(args, cwd: Path | None = None, env: dict | None = None) -> tuple:
@@ -402,11 +417,9 @@ async def _exec_git(args, cwd: Path | None = None, env: dict | None = None) -> t
         raise CodeRepositoryError(message=str(error)) from error
     except asyncio.TimeoutError:
         raise CodeRepositoryError(message=f"git {args[0]} timed out after {_GIT_TIMEOUT_SECONDS}s.")
-    if returncode and any(
-        message in stderr for message in (b"No space left on device", b"Disk quota exceeded")
-    ):
-        from cognee.tasks.code_graph.repo_resources import RepositoryResourceError
+    from cognee.tasks.code_graph.repo_resources import RepositoryResourceError, reports_disk_full
 
+    if returncode and reports_disk_full(stderr):
         raise RepositoryResourceError("filesystem space or quota exhausted")
     return returncode, stdout.decode(errors="surrogateescape"), stderr.decode(errors="replace")
 
@@ -690,7 +703,10 @@ async def _resolve_repo_source(spec, clones_dir, credentials, branch, include_do
         {"TMPDIR": str(base.resolve()), "TMP": str(base.resolve()), "TEMP": str(base.resolve())}
     )
     async with _clone_lock(target, clones_dir=base):
-        for leftover in target.parent.glob(f".{target.name}.tmp-*"):
+        for leftover in (
+            *target.parent.glob(f".{target.name}.tmp-*"),
+            *target.parent.glob(f".{target.name}.old-*"),
+        ):
             await finish_cleanup(asyncio.to_thread(_remove_clone, leftover))
         replace_full_clone = False
         if (target / ".git").is_dir():
@@ -733,7 +749,10 @@ async def _resolve_repo_source(spec, clones_dir, credentials, branch, include_do
                         target, "FETCH_HEAD", include_documents, git_env, scrub
                     )
                     return target
-                except (asyncio.CancelledError, RepositoryResourceError):
+                except RepositoryResourceError:
+                    # Free the space the refresh could not use. A cancelled refresh keeps
+                    # the clone: it was untouched, or its snapshot record is already gone
+                    # and the next run replaces it.
                     await finish_cleanup(asyncio.to_thread(_remove_clone, target))
                     raise
             if not replace_full_clone:
@@ -819,7 +838,8 @@ async def _checkout_snapshot(
         repository_storage_roots,
     )
     from cognee.tasks.code_graph.repo_selection import (
-        check_selected_content,
+        remove_lfs_pointers,
+        remove_unselected_files,
         select_tree,
         selection_fingerprint,
         write_repository_snapshot,
@@ -832,13 +852,13 @@ async def _checkout_snapshot(
     commit = commit.strip()
     if code or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", commit):
         raise CodeRepositoryError(
-            message=f"Could not resolve repository commit: {scrub(stderr[-500:])}"
+            message=f"Could not resolve repository commit: {scrub(stderr)[-500:]}"
         )
     code, tree, stderr = await _exec_git(
         ["ls-tree", "-rz", "--full-tree", commit], cwd=repo, env=env
     )
     if code:
-        raise CodeRepositoryError(message=f"Could not list repository tree: {scrub(stderr[-500:])}")
+        raise CodeRepositoryError(message=f"Could not list repository tree: {scrub(stderr)[-500:]}")
     paths, skipped = select_tree(tree, include_documents)
     # A cancelled to_thread await does not stop its writer. Keep the lock until
     # it finishes so it cannot recreate a directory after clone cleanup.
@@ -853,9 +873,10 @@ async def _checkout_snapshot(
         code, stderr = await _run_git(args, cwd=repo, env=env)
         if code:
             raise CodeRepositoryError(
-                message=f"Could not checkout repository: {scrub(stderr[-500:])}"
+                message=f"Could not checkout repository: {scrub(stderr)[-500:]}"
             )
-    await asyncio.to_thread(check_selected_content, repo, paths)
+    await asyncio.to_thread(remove_unselected_files, repo, paths)
+    skipped["lfs_pointer"] = await asyncio.to_thread(remove_lfs_pointers, repo, paths)
     snapshot = {
         "commit": commit,
         "selection_fingerprint": selection_fingerprint(paths, include_documents),

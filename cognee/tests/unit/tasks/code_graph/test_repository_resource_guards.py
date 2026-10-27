@@ -6,6 +6,7 @@ import json
 import os
 import sys
 from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -315,3 +316,156 @@ async def test_scratch_left_by_a_killed_run_is_removed_by_the_next_one(tmp_path,
     await enola_module.run_enola_generate(repo)
 
     assert not leftover.exists()
+
+
+# ---- review follow-ups
+
+
+@pytest.mark.parametrize("value", ["", "   "])
+@pytest.mark.parametrize("name", ["COGNEE_REPOS_MAX_BYTES", "COGNEE_REPOS_MIN_FREE_BYTES"])
+def test_an_empty_variable_means_no_limit(monkeypatch, name, value):
+    """.env.template shows both variables empty: uncommented as shown they must not fail."""
+    monkeypatch.setenv(name, value)
+
+    config = resources.repository_disk_config()
+
+    assert (config.max_bytes, config.min_free_bytes) == (None, None)
+
+
+def test_the_507_message_names_the_setting_to_change():
+    budget = RepositoryResourceError("budget exceeded", 100, used_bytes=150)
+    free = RepositoryResourceError("insufficient free disk space", 100, free_bytes=40)
+    physical = RepositoryResourceError("filesystem space or quota exhausted")
+
+    assert "COGNEE_REPOS_MAX_BYTES" in budget.message
+    assert "COGNEE_REPOS_MIN_FREE_BYTES" in free.message
+    assert "COGNEE_REPOS_" not in physical.message
+    assert {error.status_code for error in (budget, free, physical)} == {507}
+
+
+@pytest.mark.parametrize(
+    "stderr, full",
+    [
+        (b"fatal: No space left on device", True),
+        (b"mkdir /r/.enola: no space left on device", True),  # Go prints it in lowercase
+        (b"write /r/x: Disk quota exceeded", True),
+        (b"write /r/x: disk quota exceeded", True),
+        (b"fatal: repository not found", False),
+    ],
+)
+def test_disk_full_is_recognised_in_any_letter_case(stderr, full):
+    assert resources.reports_disk_full(stderr) is full
+
+
+@pytest.mark.asyncio
+async def test_a_lowercase_disk_full_of_enola_is_a_resource_error(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setattr(enola_module, "find_enola_binary", lambda: "/bin/enola")
+    monkeypatch.setattr(
+        enola_module,
+        "run_process",
+        AsyncMock(return_value=(1, b"", b"mkdir /r/.enola: no space left on device\n")),
+    )
+
+    with pytest.raises(RepositoryResourceError) as raised:
+        await enola_module.run_enola_generate(repo)
+
+    assert raised.value.status_code == 507
+
+
+@pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0, reason="needs a POSIX non-root user")
+def test_an_unreadable_directory_does_not_fail_the_scan(tmp_path):
+    (tmp_path / "file").write_bytes(b"x" * 8192)
+    locked = tmp_path / "lost+found"
+    locked.mkdir()
+    locked.chmod(0)
+    try:
+        assert disk_usage_bytes(tmp_path) >= 8192
+    finally:
+        locked.chmod(0o700)
+
+
+@pytest.mark.skipif(sys.version_info < (3, 11), reason="Task.uncancel needs Python 3.11")
+@pytest.mark.asyncio
+async def test_an_outer_cancellation_that_meets_the_guard_is_not_swallowed(tmp_path, monkeypatch):
+    """The guard cancels the owner to stop it. If the owner is also cancelled from outside
+    at that moment, the cancellation must still arrive."""
+    monkeypatch.setenv("COGNEE_REPOS_MIN_FREE_BYTES", "1")
+    owner = None
+
+    def fires_and_gets_cancelled(roots, config):
+        owner.cancel()  # the outer cancellation, arriving as the guard trips
+        raise RepositoryResourceError("insufficient free disk space", 1, free_bytes=0)
+
+    monkeypatch.setattr(resources, "_check_repository_free_space", fires_and_gets_cancelled)
+    # Only the guard's own checks are replaced: the entry check must pass.
+    real_check = resources.check_repository_disk
+    entered = asyncio.Event()
+
+    async def run():
+        async with repository_disk_budget(tmp_path):
+            entered.set()
+            await asyncio.sleep(10)
+
+    monkeypatch.setattr(resources, "check_repository_disk", lambda roots, config: None)
+    owner = asyncio.create_task(run())
+    with pytest.raises(asyncio.CancelledError):
+        await owner
+    assert owner.cancelled()
+    monkeypatch.setattr(resources, "check_repository_disk", real_check)
+
+
+# ---- selection
+
+
+def _tree(*paths):
+    entries = []
+    for path in paths:
+        entries.append(f"100644 blob {'a' * 40}\t{path}")
+    return "\0".join(entries) + "\0"
+
+
+def test_directories_named_like_artefacts_are_skipped_at_any_depth_and_in_any_case():
+    selected, skipped = select_tree(
+        _tree(
+            "src/app.py",
+            "src/build/tasks.py",
+            "pkg/DIST/a.py",
+            ".ENOLA/facts.jsonl",
+            "Build/b.py",
+            "node_modules/x/y.js",
+        ),
+        include_documents=False,
+    )
+
+    assert selected == ["src/app.py"]
+    assert skipped["ignored_path"] == 5
+
+
+def test_a_file_that_merely_has_the_name_of_an_artefact_directory_is_kept():
+    selected, skipped = select_tree(
+        _tree("scripts/build", "tools/target", "venv", "coverage"), include_documents=False
+    )
+
+    assert selected == ["scripts/build", "tools/target", "venv", "coverage"]
+    assert skipped["ignored_path"] == 0
+
+
+def test_a_newline_in_a_selected_path_is_a_bad_request(tmp_path):
+    with pytest.raises(CodeRepositoryError) as raised:
+        write_sparse_patterns(tmp_path, ["a\nb.py"])
+
+    assert raised.value.status_code == 400
+
+
+def test_free_space_equal_to_the_reserve_is_insufficient(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(resources.shutil, "disk_usage", lambda _: SimpleNamespace(free=1024))
+    config = RepositoryDiskConfig(min_free_bytes=1024)
+
+    with pytest.raises(RepositoryResourceError):
+        resources._check_free_space(tmp_path, config)
+    monkeypatch.setattr(resources.shutil, "disk_usage", lambda _: SimpleNamespace(free=1025))
+    resources._check_free_space(tmp_path, config)

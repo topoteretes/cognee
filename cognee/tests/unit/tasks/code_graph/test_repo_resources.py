@@ -21,8 +21,9 @@ from cognee.tasks.code_graph.repo_resources import (
 )
 from cognee.tasks.code_graph.repo_selection import (
     SNAPSHOT_FILE,
-    check_selected_content,
     read_repository_snapshot,
+    remove_lfs_pointers,
+    remove_unselected_files,
     select_tree,
     write_repository_snapshot,
 )
@@ -209,9 +210,20 @@ def test_a_corrupt_snapshot_record_is_a_repository_error(tmp_path):
 def test_a_selected_path_missing_on_disk_is_a_repository_error(tmp_path):
     (tmp_path / "present.py").write_text("x = 1\n")
 
-    check_selected_content(tmp_path, ["present.py"])
+    assert remove_lfs_pointers(tmp_path, ["present.py"]) == 0
     with pytest.raises(CodeRepositoryError, match="was not written"):
-        check_selected_content(tmp_path, ["present.py", "missing/file.py"])
+        remove_lfs_pointers(tmp_path, ["present.py", "missing/file.py"])
+
+
+def test_lfs_pointers_are_removed_and_counted_and_real_files_are_kept(tmp_path):
+    pointer = "version https://git-lfs.github.com/spec/v1\noid sha256:" + "a" * 64 + "\nsize 9\n"
+    (tmp_path / "data.csv").write_text(pointer)
+    (tmp_path / "keep.py").write_text("x = 1\n")
+
+    assert remove_lfs_pointers(tmp_path, ["data.csv", "keep.py"]) == 1
+
+    assert not (tmp_path / "data.csv").exists()
+    assert (tmp_path / "keep.py").read_text() == "x = 1\n"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Creating symlinks requires Windows privileges")
@@ -505,3 +517,27 @@ async def test_free_space_is_checked_even_when_every_executor_thread_is_busy(tmp
     finally:
         release.set()
         pool.shutdown(wait=True)
+
+
+def test_files_outside_the_selection_are_removed_from_the_work_tree(tmp_path):
+    """A path that stops being a file (a file replaced by a submodule) keeps its old content
+    in the work tree: the checkout must contain exactly the selection."""
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "config").write_text("kept")
+    (tmp_path / "keep.py").write_text("x = 1\n")
+    (tmp_path / "stale.py").write_text("old\n")
+    (tmp_path / "gone").mkdir()
+    (tmp_path / "gone" / "old.py").write_text("old\n")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "keep.py").write_text("y = 2\n")
+
+    assert remove_unselected_files(tmp_path, ["keep.py", "sub/keep.py"]) == 2
+
+    assert sorted(
+        p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*") if p.is_file()
+    ) == [
+        ".git/config",
+        "keep.py",
+        "sub/keep.py",
+    ]
+    assert not (tmp_path / "gone").exists()
