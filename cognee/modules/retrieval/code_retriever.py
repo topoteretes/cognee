@@ -293,7 +293,7 @@ def _normalize_value(value: Any) -> Any:
         if stripped.startswith(("{", "[")):
             try:
                 return _normalize_value(json.loads(stripped))
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, RecursionError):
                 pass
     return value
 
@@ -2371,15 +2371,23 @@ class CodeRetriever(BaseRetriever):
         target = graph.resolve(
             name=self._text_arg(query, "symbol", "name"),
             node_id=self._identifier_arg("id"),
-            repo=self.config.get("repo"),
+            repo=self._identifier_arg("repo"),
         )
         engine = await get_graph_engine()
-        nodes, edges = await engine.get_graph_data()
-        sources = {str(key): _normalize_properties(props) for key, props in nodes}
+        read_edges_of = getattr(engine, "get_id_filtered_graph_data", None)
+        # The edges touching the target, with their endpoints; Neptune has no such read.
+        nodes, edges = await (read_edges_of([target]) if read_edges_of else engine.get_graph_data())
+        matching = [
+            edge
+            for edge in edges
+            if str(edge[1]) == target and edge[2] in {"references_code", "describes"}
+        ]
+        wanted = {str(edge[0]) for edge in matching}
+        sources = {
+            str(key): _normalize_properties(props) for key, props in nodes if str(key) in wanted
+        }
         references = []
-        for source, destination, relation, properties in edges:
-            if str(destination) != target or relation not in {"references_code", "describes"}:
-                continue
+        for source, _destination, relation, properties in matching:
             references.append(
                 {
                     "source_id": str(source),
@@ -2405,7 +2413,7 @@ class CodeRetriever(BaseRetriever):
         """Repository extraction and mapping diagnostics, separate from ask coverage."""
         return {
             "operation": "coverage",
-            **repository_coverage(graph.repositories, self.config.get("repo")),
+            **repository_coverage(graph.repositories, self._identifier_arg("repo")),
         }
 
     def _capabilities(self, graph: _CodeGraphSnapshot, query: str) -> dict[str, Any]:

@@ -1,16 +1,19 @@
 """Explicit, evidence-backed links from ingested documents/tasks to code."""
 
+from collections import defaultdict
 from typing import TYPE_CHECKING
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from cognee.context_global_variables import current_dataset_id
+from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.provenance import data_item_id
 from cognee.infrastructure.databases.provenance.delete_data import EdgeIdentity
 from cognee.infrastructure.databases.provenance.markers import stores_provenance_in_graph
 from cognee.infrastructure.databases.provenance.source_refs import parse_source_ref_key
 from cognee.tasks.code_graph.extract_code_graph import _invalidate_code_graph_snapshot
+from cognee.tasks.code_graph.symbol_migration import CODE_REFERENCE_OWNER
 
 if TYPE_CHECKING:
     from cognee.modules.pipelines.models import PipelineContext
@@ -25,7 +28,7 @@ class CodeReference(BaseModel):
     file: str = Field(min_length=1)
     symbol: str = Field(min_length=1)
     evidence: str = Field(min_length=1)
-    source_url: str = Field(min_length=1)
+    source_url: str = Field(min_length=1, pattern=r"^https?://")
     external_id: str | None = None
 
 
@@ -43,31 +46,37 @@ async def link_code_references(references: list[CodeReference], ctx: "PipelineCo
     dataset = getattr(ctx, "dataset", None)
     user = getattr(ctx, "user", None)
     if source_data_id is None or dataset is None or user is None or ctx.pipeline_run_id is None:
-        raise ValueError("Code references require a pipeline context for the ingested source data.")
+        raise CogneeValidationError(
+            message="Code references require a pipeline context for the ingested source data.",
+            name="CodeReferenceError",
+        )
     if current_dataset_id.get() != dataset.id:
-        raise ValueError("Code references must run in their source dataset context.")
+        raise CogneeValidationError(
+            message="Code references must run in their source dataset context.",
+            name="CodeReferenceError",
+        )
     if not references:
         return {"linked": [], "unresolved": []}
     graph = await get_graph_engine()
-    nodes, _ = await graph.get_graph_data()
-    nodes = {str(key): props for key, props in nodes}
     sources = {str(ref.source_node_id) for ref in references}
-    if not sources <= nodes.keys():
-        raise ValueError("A reference source is absent from the current dataset.")
+    found, _ = await graph.get_filtered_graph_data([{"id": sorted(sources)}])
+    present = {str(key) for key, _ in found}
+    if not sources <= present:
+        raise CogneeValidationError(
+            message="A reference source is absent from the current dataset.",
+            name="CodeReferenceError",
+        )
     graph_provenance = await stores_provenance_in_graph(graph)
     ownership = await _validate_sources(
         graph, graph_provenance, sources, dataset.id, source_data_id
     )
+    symbols, _ = await graph.get_filtered_graph_data([{"type": ["CodeSymbol"]}])
+    by_identity = defaultdict(list)
+    for key, props in symbols:
+        by_identity[(props.get("repo"), props.get("file_path"), props.get("name"))].append(str(key))
     edges, unresolved = {}, []
     for ref in references:
-        candidates = sorted(
-            key
-            for key, props in nodes.items()
-            if props.get("type") == "CodeSymbol"
-            and props.get("repo") == ref.repo
-            and props.get("file_path") == ref.file
-            and props.get("name") == ref.symbol
-        )
+        candidates = sorted(by_identity.get((ref.repo, ref.file, ref.symbol), ()))
         if len(candidates) != 1:
             unresolved.append(
                 {
@@ -79,11 +88,13 @@ async def link_code_references(references: list[CodeReference], ctx: "PipelineCo
             continue
         source, target = str(ref.source_node_id), candidates[0]
         props = ref.model_dump(mode="json", exclude={"source_node_id"})
-        props.update(producer="cognee_code_references", edge_text="references code")
+        props.update(producer=CODE_REFERENCE_OWNER, edge_text="references code")
         key = (source, target, "references_code")
         if key in edges and edges[key][3] != props:
-            raise ValueError(
-                "Conflicting evidence for the same source and code symbol; use distinct source chunks."
+            raise CogneeValidationError(
+                message="Conflicting evidence for the same source and code symbol.",
+                name="CodeReferenceError",
+                remediation="Use distinct source chunks for distinct evidence.",
             )
         edges[key] = (*key, props)
     try:
@@ -143,5 +154,8 @@ async def _validate_sources(graph, graph_provenance, sources, dataset_id, data_i
             )
             owned = {str(key) for key in rows.scalars()}
     if not sources <= owned:
-        raise ValueError("Reference sources must belong to the pipeline's source data item.")
+        raise CogneeValidationError(
+            message="Reference sources must belong to the pipeline's source data item.",
+            name="CodeReferenceError",
+        )
     return ownership if graph_provenance else {}

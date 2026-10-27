@@ -153,7 +153,7 @@ def test_coverage_unknown_partial_and_no_observed_gaps_are_distinct_and_copied()
     repo = {
         "name": "r",
         "last_receipt": {"quality": quality},
-        "last_delta": {"mapping": {"relations_skipped": 0}},
+        "last_delta": {"mapping": {"relations_skipped": 0, "by_reason": {}}},
     }
 
     def report():
@@ -162,7 +162,14 @@ def test_coverage_unknown_partial_and_no_observed_gaps_are_distinct_and_copied()
     assert report()["status"] == "observed_no_gaps"
     report()["extraction"]["files_parsed"] = 999
     assert quality["files_parsed"] == 1
-    repo["last_delta"]["mapping"]["relations_skipped"] = 1
+    repo["last_delta"]["mapping"] = {
+        "relations_skipped": 3,
+        "by_reason": {"external_dependency": 3},
+    }
+    assert report()["status"] == "observed_no_gaps"
+    quality["files_skipped"] = 4  # Files the extractor ignores are not gaps.
+    assert report()["status"] == "observed_no_gaps"
+    repo["last_delta"]["mapping"]["by_reason"]["ambiguous"] = 1
     assert report()["status"] == "partial"
     repo.pop("last_delta")
     assert report()["status"] == "unknown"
@@ -298,3 +305,166 @@ def test_code_tool_enums_match_retriever_operations():
             == _OPERATIONS
         )
     assert set(CODE_OPERATIONS) == _OPERATIONS
+
+
+def test_migration_treats_the_legacy_mappers_code_to_code_edges_as_regenerated():
+    """A legacy graph's own declares/calls edges are not references and must not block the rebuild."""
+    old = fact_node_id("repo", "symbol", "save")
+    caller = fact_node_id("repo", "symbol", "run")
+    module = fact_node_id("repo", "module", "src")
+    nodes = [
+        (old, {"type": "CodeSymbol", "repo": "repo", "name": "save"}),
+        (caller, {"type": "CodeSymbol", "repo": "repo", "name": "run"}),
+        (module, {"type": "CodeModule", "repo": "repo", "name": "src"}),
+    ]
+    points = [
+        CodeSymbol(
+            id=fact_node_id("repo", "symbol", "save", file),
+            name="save",
+            kind="symbol",
+            repo="repo",
+            file_path=file,
+        )
+        for file in ("a.ts", "b.ts")
+    ]
+    edges = [
+        (caller, old, "calls", {}),
+        (module, old, "declares", {}),
+        (uuid4(), old, "describes", {"evidence": "manual link"}),
+    ]
+    with pytest.raises(SymbolMigrationError) as caught:
+        plan_symbol_migration(nodes, edges, points)
+    assert [issue["relationship"] for issue in caught.value.issues] == ["describes"]
+
+
+def test_external_dependencies_are_counted_but_not_listed_as_unresolved():
+    facts = [
+        {
+            "kind": "dependency",
+            "repo": "r",
+            "name": "react",
+            "file": "src/a.ts",
+            "props": {"source": "external", "language": "typescript"},
+            "relations": [{"kind": "imports", "target": "react"}],
+        }
+    ]
+    diagnostics = []
+    build_code_graph_edges(facts, diagnostics=diagnostics)
+    assert [item["reason"] for item in diagnostics] == ["external_dependency"]
+
+
+def test_esm_js_import_resolves_the_typescript_file():
+    facts = [
+        {"kind": "module", "repo": "r", "name": "src"},
+        {"kind": "symbol", "repo": "r", "name": "foo.run", "file": "src/foo.ts"},
+        {
+            "kind": "dependency",
+            "repo": "r",
+            "name": "import",
+            "file": "src/a.ts",
+            "props": {"source": "internal", "language": "typescript"},
+            "relations": [{"kind": "imports", "target": "./foo.js"}],
+        },
+    ]
+    edges, skipped = build_code_graph_edges(facts)
+    assert skipped == 0
+    assert any(relation == "imports" for _s, _t, relation, _p in edges)
+
+
+def test_import_index_only_resolves_internal_imports():
+    from cognee.tasks.code_graph.imports import ImportIndex
+
+    facts = [
+        {"kind": "module", "repo": "r", "name": "react"},
+        {"kind": "symbol", "repo": "r", "name": "react.render", "file": "react/index.js"},
+    ]
+    index = ImportIndex(facts, "r")
+    dependency = {
+        "kind": "dependency",
+        "file": "src/a.ts",
+        "props": {"source": "external", "language": "typescript"},
+    }
+    assert index.resolve(dependency, "react", "r") is None
+    dependency["props"]["source"] = "internal"
+    assert index.resolve(dependency, "react", "r")["name"] == "react"
+
+
+def test_client_route_caller_with_several_same_named_symbols_is_not_guessed():
+    facts = [
+        {"kind": "symbol", "repo": "r", "name": "handler", "file": "a.ts"},
+        {"kind": "symbol", "repo": "r", "name": "handler", "file": "b.ts"},
+        {
+            "kind": "route",
+            "repo": "r",
+            "name": "GET /x",
+            "file": "c.ts",
+            "props": {"role": "client", "caller": "handler"},
+        },
+    ]
+    diagnostics = []
+    edges, _ = build_code_graph_edges(facts, diagnostics=diagnostics)
+    assert not any(relation == "makes_request" for _s, _t, relation, _p in edges)
+    assert [item["reason"] for item in diagnostics] == ["unresolved_caller"]
+
+
+def test_migration_skips_edges_the_snapshot_owns():
+    old = fact_node_id("repo", "symbol", "save")
+    nodes = [(old, {"type": "CodeSymbol", "repo": "repo", "name": "save"})]
+    points = [
+        CodeSymbol(
+            id=fact_node_id("repo", "symbol", "save", file),
+            name="save",
+            kind="symbol",
+            repo="repo",
+            file_path=file,
+        )
+        for file in ("a.py", "b.py")
+    ]
+    owned = (uuid4(), old, "describes", {"producer": "cognee_code_graph"})
+    assert plan_symbol_migration(nodes, [owned], points).edges == []
+
+
+def test_esm_js_rule_applies_to_javascript_family_languages_only():
+    from cognee.tasks.code_graph.imports import ImportIndex
+
+    facts = [
+        {"kind": "module", "repo": "r", "name": "src"},
+        {"kind": "symbol", "repo": "r", "name": "foo.run", "file": "src/foo.ts"},
+    ]
+    index = ImportIndex(facts, "r")
+    dependency = {"kind": "dependency", "file": "src/a.go", "props": {"source": "internal"}}
+    for language, resolves in (("typescript", True), ("javascript", True), ("go", False)):
+        dependency["props"]["language"] = language
+        assert (index.resolve(dependency, "./foo.js", "r") is not None) is resolves
+
+
+def test_a_short_name_matching_several_facts_is_ambiguous_not_unresolved():
+    facts = [
+        {"kind": "symbol", "repo": "r", "name": "pkg.a.Database", "file": "pkg/a.py"},
+        {"kind": "symbol", "repo": "r", "name": "pkg.b.Database", "file": "pkg/b.py"},
+        {
+            "kind": "symbol",
+            "repo": "r",
+            "name": "run",
+            "file": "run.py",
+            "relations": [{"kind": "calls", "target": "Database"}],
+        },
+    ]
+    diagnostics = []
+    build_code_graph_edges(facts, diagnostics=diagnostics)
+    assert [item["reason"] for item in diagnostics] == ["ambiguous"]
+
+
+def test_go_module_path_prefixes_are_found_longest_first_at_separators():
+    from cognee.tasks.code_graph.imports import ImportIndex
+
+    facts = [
+        {"kind": "module", "repo": "a", "name": "a", "props": {"modulePath": "ex.com/lib"}},
+        {"kind": "module", "repo": "b", "name": "b", "props": {"modulePath": "ex.com/lib/sub"}},
+    ]
+    index = ImportIndex(facts, "a")
+    assert list(index.module_path_prefixes("ex.com/lib/sub.Run", "/.")) == [
+        "ex.com/lib/sub",
+        "ex.com/lib",
+    ]
+    assert list(index.module_path_prefixes("ex.com/library.Run", "/.")) == []

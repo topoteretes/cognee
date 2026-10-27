@@ -26,9 +26,11 @@ async def warn_outdated_code_mapping(items, dataset, user):
     ]
     if outdated:
         logger.warning(
-            "Dataset %s has code repositories %s on an older graph mapping. "
-            "Reindex with cognify(datasets=[%r], incremental_loading=False, data_cache=False). "
-            "Historical unmarked edges between surviving nodes are preserved; their ownership is unknown.",
+            "Dataset %s has code repositories %s on an older graph mapping. Reindex them with "
+            "cognify(datasets=[%r], data_ids=[<repository data id>], incremental_loading=False, "
+            "data_cache=False); a remote repository must be added again first if its cached "
+            "checkout is gone. Unmarked edges of the old mapping that the snapshot still derives "
+            "are marked by that run.",
             dataset.id,
             outdated,
             str(dataset.id),

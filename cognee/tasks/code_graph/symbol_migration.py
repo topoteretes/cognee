@@ -5,18 +5,32 @@ from collections import defaultdict
 from dataclasses import dataclass
 from uuid import UUID
 
+from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.provenance.delete_data import EdgeIdentity
 
 CODE_EDGE_OWNER = "cognee_code_graph"
+CODE_REFERENCE_OWNER = "cognee_code_references"
+_LEDGER_CHUNK_PAIRS = 2000
 
 
-class SymbolMigrationError(ValueError):
+class SymbolMigrationError(CogneeValidationError):
     """Unowned references cannot safely choose among a legacy symbol's successors."""
 
     def __init__(self, issues):
         self.issues = issues
         super().__init__(
-            "Code symbol migration needs explicit reference resolution: " + json.dumps(issues)
+            message=(
+                f"{len(issues)} reference(s) point at a legacy code symbol that now has several "
+                "file-scoped successors, and the old symbol's file does not say which one was "
+                "meant: " + json.dumps(issues)
+            ),
+            name="SymbolMigrationError",
+            remediation=(
+                "Delete the listed references, reindex the dataset, then restore them: link "
+                "document references again with link_code_references, and refresh docstring "
+                "links by running the code-docs pipeline. The graph is unchanged by this failed "
+                "run."
+            ),
         )
 
 
@@ -27,7 +41,12 @@ class SymbolMigration:
 
 
 def plan_symbol_migration(existing_nodes, existing_edges, data_points):
-    from .extract_code_graph import fact_node_id
+    """Plan the transfer of references from legacy symbol ids to their file-scoped successors.
+
+    An edge between two code-graph nodes is the snapshot's own relation: the legacy mapper
+    wrote only those (unmarked) and the rebuild regenerates them, so they are not references.
+    """
+    from .extract_code_graph import _code_graph_node_types, fact_node_id
 
     candidates = defaultdict(list)
     for point in data_points:
@@ -49,12 +68,14 @@ def plan_symbol_migration(existing_nodes, existing_edges, data_points):
     node_types = {
         str(key): props.get("type") for key, props in existing_nodes if isinstance(props, dict)
     }
+    code_types = _code_graph_node_types()
     transfers, issues, replacements = [], [], {}
     for source, target, relation, properties in existing_edges:
         source, target = str(source), str(target)
         properties = properties if isinstance(properties, dict) else {}
         if (
             properties.get("producer") == CODE_EDGE_OWNER
+            or (node_types.get(source) in code_types and node_types.get(target) in code_types)
             or (relation == "part_of" and node_types.get(target) == "CodeRepository")
             or (relation == "belongs_to_set" and node_types.get(target) == "NodeSet")
         ):
@@ -119,6 +140,8 @@ async def transfer_symbol_references(graph, migration, existing_edges, ctx=None)
     )
     await graph.add_edges(migration.edges)
     if graph_provenance:
+        # Edges that share a source ref (and run) are attached in one call, not one per edge.
+        by_run, by_ref = defaultdict(list), defaultdict(list)
         for old, new in pairs:
             stored = ownership.get(old)
             if stored is None:
@@ -126,15 +149,14 @@ async def transfer_symbol_references(graph, migration, existing_edges, ctx=None)
             attached = set()
             for run_ref in stored.source_run_refs:
                 ref = get_source_ref_key_from_source_run_ref(run_ref)
-                await graph.attach_edge_source_refs(
-                    [new],
-                    [ref],
-                    pipeline_run_id=str(get_pipeline_run_id_from_source_run_ref(run_ref)),
-                )
+                by_run[(ref, str(get_pipeline_run_id_from_source_run_ref(run_ref)))].append(new)
                 attached.add(ref)
-            remaining = sorted(set(stored.source_ref_keys) - attached)
-            if remaining:
-                await graph.attach_edge_source_refs([new], remaining)
+            for ref in set(stored.source_ref_keys) - attached:
+                by_ref[ref].append(new)
+        for (ref, run_id), identities in by_run.items():
+            await graph.attach_edge_source_refs(identities, [ref], pipeline_run_id=run_id)
+        for ref, identities in by_ref.items():
+            await graph.attach_edge_source_refs(identities, [ref])
     elif ctx is not None and getattr(ctx, "dataset", None) is not None:
         await _transfer_ledger(pairs, ctx.dataset.id)
 
@@ -149,44 +171,55 @@ async def _transfer_ledger(pairs, dataset_id):
     from cognee.modules.users.models import User
 
     mapping = {(old.source_id, old.target_id, old.relationship_name): new for old, new in pairs}
-    conditions = [
-        and_(Edge.source_node_id == UUID(s), Edge.destination_node_id == UUID(t), Edge.label == r)
-        for s, t, r in mapping
-    ]
-    if not conditions:
+    if not mapping:
         return
+    keys = list(mapping)
     async with get_relational_engine().get_async_session() as session:
-        rows = (
-            (
-                await session.execute(
-                    select(Edge).where(Edge.dataset_id == dataset_id, or_(*conditions))
+        # Each edge adds three bind parameters to the lookup; a chunk stays below the
+        # 32767-parameter limit of asyncpg.
+        for start in range(0, len(keys), _LEDGER_CHUNK_PAIRS):
+            conditions = [
+                and_(
+                    Edge.source_node_id == UUID(s),
+                    Edge.destination_node_id == UUID(t),
+                    Edge.label == r,
                 )
+                for s, t, r in keys[start : start + _LEDGER_CHUNK_PAIRS]
+            ]
+            rows = (
+                (
+                    await session.execute(
+                        select(Edge).where(Edge.dataset_id == dataset_id, or_(*conditions))
+                    )
+                )
+                .scalars()
+                .all()
             )
-            .scalars()
-            .all()
-        )
-        for row in rows:
-            new = mapping[(str(row.source_node_id), str(row.destination_node_id), row.label)]
-            user = await session.get(User, row.user_id)
-            if user is None:
-                raise ValueError("Cannot migrate an edge whose original owner is missing.")
-            attributes = dict(row.attributes or {})
-            for key, value in (
-                ("source_node_id", new.source_id),
-                ("target_node_id", new.target_id),
-            ):
-                if key in attributes:
-                    attributes[key] = value
-            await upsert_edges(
-                [(UUID(new.source_id), UUID(new.target_id), new.relationship_name, attributes)],
-                tenant_id=user.tenant_id,
-                user_id=row.user_id,
-                data_id=row.data_id,
-                dataset_id=row.dataset_id,
-                pipeline_run_id=row.pipeline_run_id,
-                session=session,
-            )
-            await session.execute(
-                delete(Edge).where(Edge.id == row.id, Edge.dataset_id == dataset_id)
-            )
+            for row in rows:
+                new = mapping[(str(row.source_node_id), str(row.destination_node_id), row.label)]
+                user = await session.get(User, row.user_id)
+                if user is None:
+                    raise CogneeValidationError(
+                        message="Cannot migrate an edge whose original owner is missing.",
+                        name="SymbolMigrationError",
+                    )
+                attributes = dict(row.attributes or {})
+                for key, value in (
+                    ("source_node_id", new.source_id),
+                    ("target_node_id", new.target_id),
+                ):
+                    if key in attributes:
+                        attributes[key] = value
+                await upsert_edges(
+                    [(UUID(new.source_id), UUID(new.target_id), new.relationship_name, attributes)],
+                    tenant_id=user.tenant_id,
+                    user_id=row.user_id,
+                    data_id=row.data_id,
+                    dataset_id=row.dataset_id,
+                    pipeline_run_id=row.pipeline_run_id,
+                    session=session,
+                )
+                await session.execute(
+                    delete(Edge).where(Edge.id == row.id, Edge.dataset_id == dataset_id)
+                )
         await session.commit()

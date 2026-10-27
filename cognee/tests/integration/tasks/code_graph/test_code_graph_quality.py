@@ -4,6 +4,7 @@ import pytest
 
 import cognee
 from cognee.context_global_variables import set_database_global_context_variables
+from cognee.exceptions import CogneeValidationError
 from cognee.modules.pipelines.models.PipelineRunInfo import get_errored_run_info
 from cognee.modules.retrieval.code_retriever import CodeRetriever
 
@@ -152,7 +153,7 @@ async def test_same_named_symbols_migrate_in_existing_dataset(code_environment):
     # An old merged symbol cannot safely choose which file a manual link meant.
     from cognee.infrastructure.databases.provenance.delete_data import EdgeIdentity
     from cognee.infrastructure.engine.models.DataPoint import DataPoint
-    from cognee.modules.pipelines.exceptions.exceptions import CognifyFailedError
+    from cognee.tasks.code_graph.symbol_migration import SymbolMigrationError
 
     class ReviewNote(DataPoint):
         text: str
@@ -164,8 +165,15 @@ async def test_same_named_symbols_migrate_in_existing_dataset(code_environment):
         await graph.add_edges(
             [(str(note.id), str(legacy_id), "describes", {"evidence": note.text})]
         )
+        # The earlier mapper's own edges carry no producer; they are not references.
+        module_id = next(
+            key
+            for key, props in (await graph.get_graph_data())[0]
+            if props.get("type") == "CodeModule"
+        )
+        await graph.add_edges([(str(module_id), str(legacy_id), "declares", {})])
         before_nodes, before_edges = await graph.get_graph_data()
-    with pytest.raises(CognifyFailedError, match="explicit reference resolution"):
+    with pytest.raises(SymbolMigrationError, match="several file-scoped successors"):
         await cognify()
     async with set_database_global_context_variables(added.dataset_id, env.user.id):
         graph = await get_graph_engine()
@@ -184,6 +192,11 @@ async def test_same_named_symbols_migrate_in_existing_dataset(code_environment):
         assert str(legacy_id) not in {str(key) for key, _ in nodes}
         assert all(
             any(str(a) == key and kind == "declares" for a, _, kind, _ in edges) for key in migrated
+        )
+        assert all(
+            props.get("producer") == "cognee_code_graph"
+            for _, _, kind, props in edges
+            if kind == "declares"
         )
     await cognify()  # Retry keeps the split identities and edge count stable.
     async with set_database_global_context_variables(added.dataset_id, env.user.id):
@@ -293,13 +306,16 @@ async def test_external_references_survive_symbol_migration_and_retry(
         assert (await link_code_references([missing], ctx))["unresolved"][0][
             "reason"
         ] == "not_found"
+        absent = reference.model_copy(update={"source_node_id": uuid4()})
+        with pytest.raises(CogneeValidationError, match="absent"):
+            await link_code_references([absent], ctx)
         wrong_ctx = PipelineContext(
             user=env.user,
             dataset=ctx.dataset,
             data_item=SimpleNamespace(id=uuid4()),
             pipeline_run_id=uuid4(),
         )
-        with pytest.raises(ValueError, match="belong"):
+        with pytest.raises(CogneeValidationError, match="belong"):
             await link_code_references([reference], wrong_ctx)
         read = await CodeRetriever(
             config={"operation": "references", "id": new_id}
@@ -488,6 +504,50 @@ async def test_relational_migration_preserves_owner_and_other_dataset(code_envir
         )
         assert migrated.attributes == {"evidence": "manual", "target_node_id": str(new)}
         assert by_dataset[other_dataset].destination_node_id == old
+
+
+@pytest.mark.asyncio
+async def test_relational_migration_transfers_every_chunk(code_environment, monkeypatch):
+    """A migration with more edges than one lookup chunk moves all of them."""
+    from uuid import uuid4
+
+    from sqlalchemy import select
+
+    from cognee.infrastructure.databases.provenance.delete_data import EdgeIdentity
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.graph.methods.upsert_edges import upsert_edges
+    from cognee.modules.graph.models.Edge import Edge
+    from cognee.tasks.code_graph import symbol_migration
+
+    monkeypatch.setattr(symbol_migration, "_LEDGER_CHUNK_PAIRS", 1)
+    user = code_environment.user
+    dataset, data, run = uuid4(), uuid4(), uuid4()
+    old, new = uuid4(), uuid4()
+    sources = [uuid4() for _ in range(3)]
+    for source in sources:
+        await upsert_edges(
+            [(source, old, "describes", {})],
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            data_id=data,
+            dataset_id=dataset,
+            pipeline_run_id=run,
+        )
+    pairs = [
+        (
+            EdgeIdentity(str(source), str(old), "describes"),
+            EdgeIdentity(str(source), str(new), "describes"),
+        )
+        for source in sources
+    ]
+    await symbol_migration._transfer_ledger(pairs, dataset)
+    async with get_relational_engine().get_async_session() as session:
+        rows = (
+            (await session.execute(select(Edge).where(Edge.source_node_id.in_(sources))))
+            .scalars()
+            .all()
+        )
+    assert len(rows) == 3 and {row.destination_node_id for row in rows} == {new}
 
 
 @pytest.mark.asyncio

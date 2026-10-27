@@ -1,4 +1,8 @@
-"""Expose observed extraction/mapping gaps without claiming exhaustive analysis."""
+"""Expose observed extraction/mapping gaps without claiming exhaustive analysis.
+
+A repository is ``partial`` when the extractor reported parse errors, or the
+mapping could not resolve a relation to a fact (anything but an external dependency).
+"""
 
 from copy import deepcopy
 
@@ -17,28 +21,24 @@ def repository_coverage(repositories, repo=None):
             and isinstance(mapping, dict)
             and all(
                 type(quality.get(key)) is int
-                for key in (
-                    "files_seen",
-                    "files_parsed",
-                    "files_skipped",
-                    "dirs_skipped",
-                    "parse_errors",
-                )
+                for key in ("files_seen", "files_parsed", "files_skipped", "parse_errors")
             )
-            and type(mapping.get("relations_skipped")) is int
+            and isinstance(mapping.get("by_reason"), dict)
         )
-        gaps = isinstance(mapping, dict) and bool(mapping.get("relations_skipped"))
+        # Observed gaps only. Files and directories the extractor ignores (its
+        # ``files_skipped`` is the ignore-glob count), files a manifest claims and external
+        # dependencies are expected and stay visible in the counters below; they do not make a
+        # repository partial.
+        gaps = False
         if isinstance(quality, dict):
-            gaps |= any(
-                isinstance(quality.get(key), (int, float)) and quality[key] > 0
-                for key in ("parse_errors", "files_skipped", "dirs_skipped")
+            gaps |= isinstance(quality.get("parse_errors"), (int, float)) and (
+                quality["parse_errors"] > 0
             )
-            census = quality.get("census")
-            if isinstance(census, dict):
-                gaps |= any(
-                    isinstance(census.get(key), (int, float)) and census[key] > 0
-                    for key in ("excluded_by_ignore", "excluded_by_kind", "skipped_with_cause")
-                )
+        if isinstance(mapping, dict) and isinstance(mapping.get("by_reason"), dict):
+            gaps |= any(
+                reason != "external_dependency" and count
+                for reason, count in mapping["by_reason"].items()
+            )
         reports.append(
             {
                 "repo": repository.get("name"),

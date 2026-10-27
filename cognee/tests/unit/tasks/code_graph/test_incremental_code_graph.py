@@ -243,7 +243,9 @@ async def test_delta_write_skips_unchanged_facts(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_delta_write_adds_only_missing_edges_and_stamps_delta(tmp_path, monkeypatch):
-    """Edges already in the graph are not re-added; last_delta lands on the repo node."""
+    """Marked edges already in the graph are not re-added; last_delta lands on the repo node."""
+    from cognee.tasks.code_graph.symbol_migration import CODE_EDGE_OWNER
+
     _write_snapshot(tmp_path, FACTS)
     handler_id = _node_id("symbol", "app/api.handler")
     database_id = _node_id("symbol", "app/db.Database")
@@ -256,8 +258,8 @@ async def test_delta_write_adds_only_missing_edges_and_stamps_delta(tmp_path, mo
     existing_edges = [
         (database_id, REPO_NODE_ID, "part_of", {}),
         (handler_id, REPO_NODE_ID, "part_of", {}),
-        # The calls edge already exists -> must NOT be re-added.
-        (handler_id, database_id, "calls", {}),
+        # The calls edge already exists with its marker -> must NOT be re-added.
+        (handler_id, database_id, "calls", {"producer": CODE_EDGE_OWNER}),
     ]
     engine = _mock_engine(monkeypatch, existing_nodes, existing_edges)
     monkeypatch.setattr(
@@ -275,6 +277,32 @@ async def test_delta_write_adds_only_missing_edges_and_stamps_delta(tmp_path, mo
     assert stamped[0].last_delta["edges_removed"] == 0
     assert stamped[0].last_delta["nodes_removed"] == 0
     assert stamped[0].last_delta["snapshot_id"] == SNAPSHOT_ID
+
+
+@pytest.mark.asyncio
+async def test_unmarked_edge_the_snapshot_regenerates_is_rewritten_with_the_marker(
+    tmp_path, monkeypatch
+):
+    """An edge from an earlier mapping has no producer, so the sweep could never remove it."""
+    from cognee.tasks.code_graph.symbol_migration import CODE_EDGE_OWNER
+
+    _write_snapshot(tmp_path, FACTS)
+    handler_id = _node_id("symbol", "app/api.handler")
+    database_id = _node_id("symbol", "app/db.Database")
+    nodes = [
+        (REPO_NODE_ID, {"type": "CodeRepository", "name": REPO}),
+        (database_id, {"type": "CodeSymbol", "repo": REPO}),
+        (handler_id, {"type": "CodeSymbol", "repo": REPO}),
+    ]
+    engine = _mock_engine(monkeypatch, nodes, [(handler_id, database_id, "calls", {})])
+    monkeypatch.setattr(
+        code_retriever_module, "invalidate_code_graph_snapshot_cache", lambda **kwargs: None
+    )
+
+    await add_code_graph_edges(["sentinel"], repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path)
+
+    written = engine.add_edges.await_args.args[0]
+    assert [(edge[2], edge[3]["producer"]) for edge in written] == [("calls", CODE_EDGE_OWNER)]
 
 
 @pytest.mark.asyncio

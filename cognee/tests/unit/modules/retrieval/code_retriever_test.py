@@ -1402,3 +1402,23 @@ def test_architecture_rejects_invalid_symbol_roles(roles):
     retriever = CodeRetriever(config={"operation": "architecture", "symbol_roles": roles})
     with pytest.raises(CodeSearchValidationError):
         retriever._architecture(_CodeGraphSnapshot([], []), "")
+
+
+def test_a_hostile_node_text_is_returned_as_text_not_parsed():
+    from cognee.modules.retrieval.code_retriever import _normalize_properties
+
+    assert _normalize_properties({"text": "[" * 100000}) == {"text": "[" * 100000}
+
+
+@pytest.mark.parametrize("repo", [5, ["a"]])
+@pytest.mark.asyncio
+async def test_a_repo_of_the_wrong_type_is_an_invalid_argument(repo):
+    graph = MagicMock()
+    with pytest.raises(CodeSearchValidationError) as error:
+        CodeRetriever(config={"operation": "coverage", "repo": repo})._coverage(graph, "")
+    assert (error.value.error_code, error.value.error_param) == ("invalid_argument", "repo")
+    with pytest.raises(CodeSearchValidationError) as error:
+        await CodeRetriever(
+            config={"operation": "references", "repo": repo, "symbol": "x"}
+        )._references(graph, "")
+    assert (error.value.error_code, error.value.error_param) == ("invalid_argument", "repo")

@@ -3,7 +3,6 @@
 import asyncio
 import hashlib
 import json
-import posixpath
 from collections import Counter
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -100,8 +99,8 @@ _SWEEP_CHUNK_SIZE = 2000
 # Bump it whenever that mapping changes, so a repository whose snapshot did not
 # change is still loaded again by the new mapping instead of being skipped.
 # 1: doc fields, CodeFlow nodes and declaration-view resolution (SDK-1119).
-# 3: source-file symbol identity and authoritative target_id resolution.
-# 4: internal import resolution, edge ownership and mapping diagnostics.
+# 4: source-file symbol identity, authoritative target_id resolution, internal import
+#    resolution, edge ownership and mapping diagnostics.
 CODE_GRAPH_MAPPING_VERSION = 4
 
 
@@ -566,8 +565,6 @@ def build_code_graph_edges(
     enola_id_index: dict[str, tuple[str, str, str, str]] = {}
     fact_index: dict[tuple[str, str, str, str], dict] = {}
     external_index: dict[tuple[str, str], set] = {}
-    module_index: dict[tuple[str, str], dict] = {}
-    module_path_repos: dict[str, set[str]] = {}
     for fact in facts:
         kind = fact.get("kind")
         name = fact.get("name")
@@ -592,17 +589,47 @@ def build_code_graph_edges(
             package = props.get("package_name")
             if isinstance(package, str):
                 external_index.setdefault((repo, package), set()).add(_fact_key(fact, repo))
-        if kind == "module":
-            module_index.setdefault((repo, name), fact)
-            props = fact.get("props")
-            module_path = props.get("modulePath") if isinstance(props, dict) else None
-            if isinstance(module_path, str) and module_path:
-                module_path_repos.setdefault(module_path, set()).add(repo)
 
     imports = ImportIndex(facts, fallback_repo)
     edges: list[tuple] = []
     seen_edges = set()
     skipped = 0
+
+    candidate_views: dict[tuple, tuple[set, dict, dict]] = {}
+
+    def _candidate_view(target_name: str, allowed_repos: set[str] | None):
+        """The candidates for a name, grouped by repo and by symbol file, built once per name.
+
+        A hot name (``get``, ``run``) is looked up by every caller, so grouping per lookup
+        would cost callers times definitions.
+        """
+        view_key = (target_name, None if allowed_repos is None else frozenset(allowed_repos))
+        view = candidate_views.get(view_key)
+        if view is None:
+            candidates = set(name_index.get(target_name, ()))
+            if not candidates:
+                # No fact carries this exact name; fall back to unambiguous
+                # suffix matches so bare-name targets (e.g. 'Database' for
+                # 'app/db.Database') still resolve.
+                candidates = set(short_name_index.get(target_name, ()))
+            if allowed_repos is not None:
+                candidates = {
+                    candidate for candidate in candidates if candidate[0] in allowed_repos
+                }
+            # A framework extractor may describe one declaration twice under one
+            # name: the class or method as a ``symbol`` and what it stands for (an
+            # ORM model as ``storage``, a relation method as ``association``). The
+            # writer then withholds ``target_id`` (two identities), but the two are
+            # not rival targets: a reference to the name means the declaration.
+            candidates = _without_declaration_views(candidates, fact_index)
+            by_repo: dict[str, set] = {}
+            by_file: dict[tuple[str, str | None], set] = {}
+            for candidate in candidates:
+                by_repo.setdefault(candidate[0], set()).add(candidate)
+                if candidate[1] == "symbol":
+                    by_file.setdefault((candidate[0], candidate[3]), set()).add(candidate)
+            view = candidate_views[view_key] = (candidates, by_repo, by_file)
+        return view
 
     def _resolve_target(
         target_name: str,
@@ -610,28 +637,11 @@ def build_code_graph_edges(
         allowed_repos: set[str] | None = None,
         source_file: str | None = None,
     ) -> tuple[str, str, str, str] | None:
-        candidates = set(name_index.get(target_name, ()))
-        if not candidates:
-            # No fact carries this exact name; fall back to unambiguous
-            # suffix matches so bare-name targets (e.g. 'Database' for
-            # 'app/db.Database') still resolve.
-            candidates = set(short_name_index.get(target_name, ()))
-        if allowed_repos is not None:
-            candidates = {candidate for candidate in candidates if candidate[0] in allowed_repos}
-        # A framework extractor may describe one declaration twice under one
-        # name: the class or method as a ``symbol`` and what it stands for (an
-        # ORM model as ``storage``, a relation method as ``association``). The
-        # writer then withholds ``target_id`` (two identities), but the two are
-        # not rival targets: a reference to the name means the declaration.
-        candidates = _without_declaration_views(candidates, fact_index)
-        same_repo = {candidate for candidate in candidates if candidate[0] == source_repo}
-        same_file = {
-            candidate
-            for candidate in same_repo
-            if candidate[1] == "symbol" and candidate[3] == source_file
-        }
+        candidates, by_repo, by_file = _candidate_view(target_name, allowed_repos)
+        same_file = by_file.get((source_repo, source_file), ())
         if len(same_file) == 1:
             return next(iter(same_file))
+        same_repo = by_repo.get(source_repo, ())
         if len(same_repo) == 1:
             return next(iter(same_repo))
         if len(candidates) == 1:
@@ -717,21 +727,12 @@ def build_code_graph_edges(
                 and relationship_name == "calls"
                 and not name_index.get(target_name)
             ):
-                for module_path in sorted(
-                    module_path_repos, key=lambda value: (-len(value), value)
-                ):
-                    if not target_name.startswith(module_path):
-                        continue
-                    provider_repos = module_path_repos[module_path]
+                for module_path in imports.module_path_prefixes(target_name, "/."):
+                    provider_repos = imports.module_path_repos[module_path]
                     if len(provider_repos) != 1:
                         continue
                     suffix = target_name[len(module_path) :]
-                    if suffix.startswith("/"):
-                        normalized_target = suffix[1:]
-                    elif suffix.startswith("."):
-                        normalized_target = "." + suffix
-                    else:
-                        continue
+                    normalized_target = suffix[1:] if suffix.startswith("/") else "." + suffix
                     if normalized_target:
                         target = _resolve_target(
                             normalized_target,
@@ -751,7 +752,7 @@ def build_code_graph_edges(
                     else "unresolved_internal_import"
                     if internal_import
                     else "ambiguous"
-                    if name_index.get(target_name)
+                    if name_index.get(target_name) or short_name_index.get(target_name)
                     else "unresolved"
                 )
                 if diagnostics is not None:
@@ -807,7 +808,7 @@ def build_code_graph_edges(
                 target_repo = source_repo
                 target_module = imports.resolve(fact, normalized[1], source_repo)
                 if target_module is None and not (fact.get("props") or {}).get("source"):
-                    target_module = module_index.get((source_repo, normalized[1]))
+                    target_module = imports.modules.get((source_repo, normalized[1]))
             if target_module is None or (
                 source_repo == target_repo and source_module["name"] == target_module["name"]
             ):
@@ -1210,15 +1211,19 @@ async def add_code_graph_edges(
             if isinstance(properties, dict) and properties.get("producer") == CODE_EDGE_OWNER
         }
 
-        # Delta writes: only edges the graph does not already have.
+        # Delta writes: every edge the graph does not hold as a marked one. An unmarked edge
+        # a snapshot regenerates (written by an earlier mapping) is rewritten once to carry
+        # the producer marker, so the sweep can remove it when its relation disappears.
         new_edges = [
-            edge
-            for edge in edges
-            if (str(edge[0]), str(edge[1]), edge[2]) not in existing_edge_keys
+            edge for edge in edges if (str(edge[0]), str(edge[1]), edge[2]) not in owned_edge_keys
         ]
+        edges_added = sum(
+            (str(edge[0]), str(edge[1]), edge[2]) not in existing_edge_keys for edge in new_edges
+        )
         logger.info(
-            "Code graph edge delta: %d new, %d already present.",
-            len(new_edges),
+            "Code graph edge delta: %d new, %d marked, %d already present.",
+            edges_added,
+            len(new_edges) - edges_added,
             len(edges) - len(new_edges),
         )
         if new_edges:
@@ -1280,14 +1285,23 @@ async def add_code_graph_edges(
         node_delta = getattr(data_points, "node_delta", None) or {}
         delta = {
             **node_delta,
-            "edges_added": len(new_edges),
+            "edges_added": edges_added,
+            "edges_marked": len(new_edges) - edges_added,
             "edges_removed": edges_removed,
             "nodes_removed": nodes_removed,
             "samples_removed": samples_removed,
             "node_set_detagged": detagged,
             "snapshot_id": snapshot_id,
             "references_migrated": len(migration.edges),
-            "mapping": {"relations_skipped": skipped, "unresolved": diagnostics},
+            "mapping": {
+                "relations_skipped": skipped,
+                "by_reason": dict(Counter(item["reason"] for item in diagnostics)),
+                # An external dependency is not a gap and is by far the most common skip, so
+                # it is counted above and not listed.
+                "unresolved": [
+                    item for item in diagnostics if item["reason"] != "external_dependency"
+                ],
+            },
             "loaded_at": datetime.now(timezone.utc).isoformat(),
         }
 
