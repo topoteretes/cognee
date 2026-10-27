@@ -25,12 +25,14 @@ What leaves, and what does not
 - Metadata payloads as they are: ids, counts, hashes, scores, provider and
   model names — a model setting that is a filesystem path reduced to
   ``local_path`` exactly like telemetry does (``telemetry_model_label``).
-- The content kinds — ``extraction.chunk_graph`` (entity names, descriptions,
-  relationships verbatim) and ``extraction.fuzzy_match`` (the names looked
-  up) — leave as counts and type histograms (``metadata_only_payload``). The
-  full payload leaves only with ``COGNEE_CAPTURE_PROXY_CONTENT=true``, and
-  every record says which form it is (``content_included``), so the proxy can
-  enforce its own policy on what it accepts.
+- The content kinds (``CONTENT_KINDS``: chunk graphs, dropped duplicate ids,
+  ontology lookups, retrieval candidates) leave as join keys, counts, scores
+  and type histograms built from an allowlist (``metadata_only_payload``);
+  the extracted strings — names, descriptions, relationship labels, matched
+  terms — never do. The full payload leaves only with
+  ``COGNEE_CAPTURE_PROXY_CONTENT=true``, and every record says which form it
+  is (``content_included``), so the proxy can enforce its own policy on what
+  it accepts.
 
 Delivery follows the flusher's contract: a failed POST drops the batch and
 counts it on the run (``events_dropped``); a POST cut off by a drain budget is
@@ -56,7 +58,12 @@ from typing import TYPE_CHECKING, Any
 
 from cognee.shared.logging_utils import get_logger
 
-from .events import KIND_EXTRACTION_CHUNK_GRAPH, KIND_EXTRACTION_FUZZY_MATCH
+from .events import (
+    KIND_EXTRACTION_CHUNK_GRAPH,
+    KIND_EXTRACTION_DROPPED_DUPLICATES,
+    KIND_EXTRACTION_FUZZY_MATCH,
+    KIND_RETRIEVAL_CANDIDATES,
+)
 from .sinks import run_off_loop
 
 if TYPE_CHECKING:
@@ -70,8 +77,37 @@ CAPTURE_ROUTE = "/capture"
 MAX_BATCH_BYTES = 3 * 1024 * 1024
 # Firehose rejects a record past 1,000 KiB; the proxy drops those too.
 MAX_RECORD_BYTES = 900 * 1024
-# The kinds whose payload is derived user content.
-CONTENT_KINDS = frozenset({KIND_EXTRACTION_CHUNK_GRAPH, KIND_EXTRACTION_FUZZY_MATCH})
+# The kinds whose payload carries derived user content: something the LLM
+# extracted from the user's documents. Chunk graphs (entity names, descriptions
+# and relationship labels verbatim); the graph-local ids of dropped duplicate
+# nodes (the extraction prompt asks for human-readable ids, so they are entity
+# names); the names looked up against the ontology; and the relationship label
+# on each entry of a retrieval cut. Every other kind is ids, hashes, counts,
+# scores, provider and model names by construction — ``test_capture_proxy_sink``
+# serializes one record of every kind with content off and checks that.
+CONTENT_KINDS = frozenset(
+    {
+        KIND_EXTRACTION_CHUNK_GRAPH,
+        KIND_EXTRACTION_DROPPED_DUPLICATES,
+        KIND_EXTRACTION_FUZZY_MATCH,
+        KIND_RETRIEVAL_CANDIDATES,
+    }
+)
+# What survives of a content kind's payload with content off: an ALLOWLIST of
+# join keys, counts and flags per kind, plus the histograms and reduced entries
+# ``metadata_only_payload`` derives. A payload key not listed here never leaves,
+# which is the right default for a key added to an emit point later.
+METADATA_KEYS: dict[str, tuple[str, ...]] = {
+    KIND_EXTRACTION_CHUNK_GRAPH: ("chunk_id", "chunk_index", "chunk_size_chars"),
+    KIND_EXTRACTION_DROPPED_DUPLICATES: ("chunk_id", "chunk_index", "count"),
+    KIND_EXTRACTION_FUZZY_MATCH: ("chunk_id", "chunk_index", "lookups", "count"),
+    KIND_RETRIEVAL_CANDIDATES: ("query_index", "pool_size", "pool_truncated", "cut_size"),
+}
+# A retrieval pool entry: a vector-row id, its collection (a schema name such as
+# ``Entity_name``) and the distance. A cut entry: the two node ids and the
+# summed distance — never ``rel``, the relationship label.
+POOL_ENTRY_KEYS = ("id", "collection", "score")
+CUT_ENTRY_KEYS = ("source", "target", "score")
 # Payload keys that hold a model setting; masked like telemetry's model labels.
 MODEL_KEYS = frozenset(
     {"model", "llm.model", "embedding.model", "extraction.model", "summarization.model"}
@@ -144,18 +180,22 @@ def mask_model_labels(value: Any, key: str | None = None) -> Any:
 
 
 def metadata_only_payload(kind: str, payload: Any) -> dict[str, Any]:
-    """The content-free form of a content kind's payload: join keys, counts, histograms.
+    """The content-free form of a content kind's payload: join keys, counts, scores, histograms.
 
+    Built from the allowlists above, never by removing keys from the input.
     ``extraction.chunk_graph`` keeps the chunk join keys and becomes node and
-    edge counts plus a node-type histogram; ``extraction.fuzzy_match`` keeps the
-    lookup and match counts plus a per-category histogram. Names, descriptions,
+    edge counts plus a node-type histogram (the type labels are the
+    extraction's categories — ``Person``, ``Organization`` — not document
+    text); ``extraction.dropped_duplicates`` keeps the chunk join keys and the
+    count, the dropped ids being entity names; ``extraction.fuzzy_match`` keeps
+    the lookup and match counts plus a per-category histogram;
+    ``retrieval.candidates`` keeps the pool as vector-row ids, collection names
+    and scores and the cut as node ids and scores. Names, descriptions,
     relationship labels and matched terms never appear.
     """
     if not isinstance(payload, dict):
         return {}
-    reduced: dict[str, Any] = {
-        key: payload.get(key) for key in ("chunk_id", "chunk_index", "chunk_size_chars")
-    }
+    reduced: dict[str, Any] = {key: payload.get(key) for key in METADATA_KEYS.get(kind, ())}
     if kind == KIND_EXTRACTION_CHUNK_GRAPH:
         graph = payload.get("graph")
         nodes = graph.get("nodes") if isinstance(graph, dict) else None
@@ -167,23 +207,31 @@ def metadata_only_payload(kind: str, payload: Any) -> dict[str, Any]:
             if isinstance(nodes, list)
             else None
         )
-        return reduced
-
-    reduced.pop("chunk_size_chars", None)
-    reduced["lookups"] = payload.get("lookups")
-    reduced["count"] = payload.get("count")
-    categories: dict[str, dict[str, int]] = {}
-    matches = payload.get("matches")
-    if isinstance(matches, list):
-        for match in matches:
-            if not isinstance(match, dict):
-                continue
-            entry = categories.setdefault(str(match.get("category")), {"lookups": 0, "matched": 0})
-            entry["lookups"] += 1
-            if match.get("matched"):
-                entry["matched"] += 1
-    reduced["categories"] = categories
+    elif kind == KIND_EXTRACTION_FUZZY_MATCH:
+        categories: dict[str, dict[str, int]] = {}
+        matches = payload.get("matches")
+        if isinstance(matches, list):
+            for match in matches:
+                if not isinstance(match, dict):
+                    continue
+                entry = categories.setdefault(
+                    str(match.get("category")), {"lookups": 0, "matched": 0}
+                )
+                entry["lookups"] += 1
+                if match.get("matched"):
+                    entry["matched"] += 1
+        reduced["categories"] = categories
+    elif kind == KIND_RETRIEVAL_CANDIDATES:
+        reduced["pool"] = _entries(payload.get("pool"), POOL_ENTRY_KEYS)
+        reduced["top_k"] = _entries(payload.get("top_k"), CUT_ENTRY_KEYS)
     return reduced
+
+
+def _entries(value: Any, keys: tuple[str, ...]) -> list[dict[str, Any]] | None:
+    """The dict entries of a list reduced to ``keys``; ``None`` when ``value`` is no list."""
+    if not isinstance(value, list):
+        return None
+    return [{key: entry.get(key) for key in keys} for entry in value if isinstance(entry, dict)]
 
 
 def prepare_record(record: dict, *, include_content: bool) -> dict:

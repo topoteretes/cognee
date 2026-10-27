@@ -44,11 +44,11 @@ class CaptureConfig(BaseSettings):
     ``COGNEE_CAPTURE_SINK`` picks where records go. ``storage`` (the default)
     keeps everything on the machine. ``proxy`` ships them through the analytics
     proxy product telemetry uses, metadata only: the content kinds leave as
-    counts and type histograms, model settings that are paths as
-    ``local_path``, ids as they are — unless ``COGNEE_CAPTURE_PROXY_CONTENT``
-    is set, which sends the raw chunk graphs and ontology lookups too (derived
-    user content leaving the machine; the proxy must be configured to accept
-    it). The proxy sink also obeys the telemetry kill switches
+    counts, type histograms and ids (``proxy_sink.CONTENT_KINDS``), model
+    settings that are paths as ``local_path``, ids as they are — unless
+    ``COGNEE_CAPTURE_PROXY_CONTENT`` is set, which sends the content kinds in
+    full (derived user content leaving the machine; the proxy must be
+    configured to accept it). The proxy sink also obeys the telemetry kill switches
     (``TELEMETRY_DISABLED``, ``ENV=test|dev``).
     """
 

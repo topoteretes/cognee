@@ -13,7 +13,9 @@ import pytest
 from cognee.modules.observability import capture
 from cognee.modules.observability.capture import (
     KIND_EXTRACTION_CHUNK_GRAPH,
+    KIND_EXTRACTION_DROPPED_DUPLICATES,
     KIND_EXTRACTION_FUZZY_MATCH,
+    KIND_RETRIEVAL_CANDIDATES,
     KIND_RUN_MANIFEST,
     KIND_SETUP_CHANGED,
     KIND_STORAGE_DELTA,
@@ -24,8 +26,10 @@ from cognee.modules.observability.capture import (
     StorageSink,
     hook,
 )
+from cognee.modules.observability.capture import events as events_module
 from cognee.modules.observability.capture import proxy_sink as proxy_sink_module
 from cognee.modules.observability.capture.proxy_sink import (
+    CONTENT_KINDS,
     default_proxy_url,
     prepare_record,
     proxy_sink_blocked,
@@ -90,6 +94,134 @@ FUZZY_MATCH = {
             "matched": False,
         },
     ],
+}
+
+DROPPED_DUPLICATES = {
+    "chunk_id": "chunk-1",
+    "chunk_index": 0,
+    # Graph-local node ids: the extraction prompt asks for human-readable ones.
+    "dropped_node_ids": ["Albert Einstein", "Acme"],
+    "count": 2,
+}
+
+RETRIEVAL_CANDIDATES = {
+    "query_index": 0,
+    "pool": [
+        {"id": "node-1", "collection": "Entity_name", "score": 0.12},
+        {"id": "node-2", "collection": "Entity_name", "score": 0.3},
+        {"id": "edge-1", "collection": "EdgeType_relationship_name", "score": 0.2},
+    ],
+    "top_k": [{"source": "node-1", "target": "node-2", "rel": "founded", "score": 0.62}],
+    "pool_size": 3,
+    "pool_truncated": False,
+    "cut_size": 1,
+}
+
+# Sentinels standing in for what the LLM extracted: a leak is a substring match.
+EXTRACTED = ("Albert Einstein", "founded", "a physicist", "Acme", "onto.test")
+
+# One payload per kind, shaped like its emit point builds it, every extracted
+# string a sentinel. A metadata kind's sample carries none by construction —
+# ids, hashes, counts, scores, model names — which is what the test checks.
+SAMPLES = {
+    KIND_EXTRACTION_CHUNK_GRAPH: {
+        "chunk_id": "chunk-1",
+        "chunk_index": 0,
+        "chunk_size_chars": 42,
+        "graph": {
+            "nodes": [
+                {
+                    "id": "Albert Einstein",
+                    "name": "Albert Einstein",
+                    "type": "Person",
+                    "description": "a physicist",
+                },
+                {
+                    "id": "Acme",
+                    "name": "Acme",
+                    "type": "Organization",
+                    "description": "a physicist",
+                },
+            ],
+            "edges": [
+                {
+                    "source_node_id": "Albert Einstein",
+                    "target_node_id": "Acme",
+                    "relationship_name": "founded",
+                }
+            ],
+        },
+    },
+    KIND_EXTRACTION_DROPPED_DUPLICATES: DROPPED_DUPLICATES,
+    KIND_EXTRACTION_FUZZY_MATCH: {
+        "chunk_id": "chunk-1",
+        "chunk_index": 0,
+        "lookups": 1,
+        "count": 1,
+        "matches": [
+            {
+                "category": "Person",
+                "extracted": "Albert Einstein",
+                "normalized": "albert einstein",
+                "canonical": "Albert Einstein",
+                "uri": "https://onto.test/Einstein",
+                "matched": True,
+            }
+        ],
+    },
+    KIND_RETRIEVAL_CANDIDATES: RETRIEVAL_CANDIDATES,
+    KIND_STORAGE_DELTA: {
+        "node_count": 2,
+        "edge_count": 1,
+        "custom_edge_count": 0,
+        "node_types": {"Entity": 2},
+        "node_ids": [str(uuid4()), str(uuid4())],
+        "pipeline_run_id": str(uuid4()),
+    },
+    KIND_SUMMARY_GENERATED: {
+        "chunk_id": str(uuid4()),
+        "summary_id": str(uuid4()),
+        "model": "openai/gpt-5-mini",
+        "prompt_fingerprint": "sha256:9c1f",
+        "source_text_hash": "sha256:77ab",
+        "summary_chars": 120,
+    },
+    KIND_RUN_MANIFEST: {
+        "run_id": str(uuid4()),
+        "parent_run_id": None,
+        "dataset_id": str(uuid4()),
+        "kind": "pipeline",
+        "pipeline_name": "cognify_pipeline",
+        "outcome": "succeeded",
+        "error_class": None,
+        "sampled": True,
+        "setup": {
+            "llm.provider": "openai",
+            "llm.model": "openai/gpt-5-mini",
+            "graph_extractor": "llm",
+        },
+        "setup_fingerprint": "sha256:4e1d",
+        "extraction.extractor": "llm",
+        "extraction.model": "openai/gpt-5-mini",
+        "extraction.prompt_fingerprint": "sha256:0a2c",
+        "chunking.chunker": "TextChunker",
+        "ontology.mode": "annotate",
+        "started_at": 1.0,
+        "ended_at": 2.0,
+        "duration_s": 1.0,
+        "counters": {"extraction.chunks": 3},
+        "events_emitted": 4,
+        "events_dropped": 0,
+        "events_delivered": 4,
+        "capture_complete": True,
+    },
+    KIND_SETUP_CHANGED: {
+        "run_kind": "pipeline",
+        "previous_fingerprint": "sha256:b9f3",
+        "fingerprint": "sha256:4e1d",
+        "changed": {"llm.model": {"from": "openai/gpt-5.6-luna", "to": "openai/gpt-5-mini"}},
+        "setup": {"llm.model": "openai/gpt-5-mini"},
+    },
 }
 
 
@@ -165,6 +297,53 @@ def test_content_kinds_leave_as_counts_and_histograms_by_default():
     }
     assert fuzzy["content_included"] is False
     assert "Alice" not in json.dumps(fuzzy) and "onto.test" not in json.dumps(fuzzy)
+
+
+def test_dropped_duplicate_ids_and_relationship_labels_never_leave_by_default():
+    dropped = prepare_record(
+        _record(KIND_EXTRACTION_DROPPED_DUPLICATES, DROPPED_DUPLICATES), include_content=False
+    )
+    assert dropped["payload"] == {"chunk_id": "chunk-1", "chunk_index": 0, "count": 2}
+    assert dropped["content_included"] is False
+
+    candidates = prepare_record(
+        _record(KIND_RETRIEVAL_CANDIDATES, RETRIEVAL_CANDIDATES), include_content=False
+    )
+    assert candidates["payload"] == {
+        "query_index": 0,
+        "pool_size": 3,
+        "pool_truncated": False,
+        "cut_size": 1,
+        "pool": RETRIEVAL_CANDIDATES["pool"],
+        "top_k": [{"source": "node-1", "target": "node-2", "score": 0.62}],
+    }
+    assert candidates["content_included"] is False
+    assert "founded" not in json.dumps(candidates)
+
+    # The switch sends both verbatim and flagged, like the other content kinds.
+    for kind, payload in (
+        (KIND_EXTRACTION_DROPPED_DUPLICATES, DROPPED_DUPLICATES),
+        (KIND_RETRIEVAL_CANDIDATES, RETRIEVAL_CANDIDATES),
+    ):
+        full = prepare_record(_record(kind, payload), include_content=True)
+        assert full["payload"] == payload
+        assert full["content_included"] is True
+
+
+def test_every_kind_is_classified_and_no_extracted_string_leaves_with_content_off():
+    every_kind = {value for name, value in vars(events_module).items() if name.startswith("KIND_")}
+    # A new kind has to say what it carries: a sample here, and a place in
+    # CONTENT_KINDS when its payload holds anything the LLM extracted.
+    assert set(SAMPLES) == every_kind
+
+    for kind, payload in SAMPLES.items():
+        out = prepare_record(_record(kind, payload), include_content=False)
+        wire = json.dumps(out)
+        assert out["content_included"] is False
+        leaked = [sentinel for sentinel in EXTRACTED if sentinel in wire]
+        assert not leaked, (kind, leaked)
+        if kind not in CONTENT_KINDS:
+            assert out["payload"] == payload
 
 
 def test_a_graph_that_failed_to_dump_still_reduces_to_a_record():

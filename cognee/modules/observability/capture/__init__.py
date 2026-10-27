@@ -48,9 +48,12 @@ What lands on disk, and who may read it
 Capture writes derived user content, not just metrics. ``extraction.chunk_graph``
 carries the raw per-chunk graph verbatim - entity names, types, descriptions and
 relationship labels the LLM extracted from the user's documents; ``extraction.
-fuzzy_match`` carries the extracted names it looked up; ``retrieval.candidates``
-carries candidate ids and scores (not the query text, which ``record_operation``
-already logs elsewhere); ``summary.generated`` carries hashes and sizes only.
+dropped_duplicates`` the graph-local ids of the nodes it dropped (entity names,
+the way the extraction prompt asks for ids); ``extraction.fuzzy_match`` the
+extracted names it looked up; ``retrieval.candidates`` candidate ids and scores
+plus the relationship label of each returned triplet (not the query text, which
+``record_operation`` already logs elsewhere); ``summary.generated`` carries
+hashes and sizes only.
 Everything is filed under ``<COGNEE_CAPTURE_DIR>/<dataset_id>/<run_id>/`` so it can
 be retained, exported or deleted per dataset, and inherits the permissions of
 that directory (``<DATA_ROOT_DIRECTORY>/capture`` by default: the same protection
