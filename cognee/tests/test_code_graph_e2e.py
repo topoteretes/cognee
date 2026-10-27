@@ -63,7 +63,7 @@ COGNIFY_DATASET = "code_graph_e2e_cognify"
 
 # --- Known answers, pinned to the fixture + ENOLA_PINNED_VERSION ------------
 # If enola is bumped and these change, update them deliberately. Last
-# re-verified against enola 0.4.19: it emits the README as document/section
+# re-verified against enola 0.4.30: it emits the README as document/section
 # symbols, an `extraction` coverage fact, the pyproject's declared package as
 # `pkg:pypi/requests`, and (since 0.4.14) a module-level `module-edge:` dependency
 # fact per resolved package import. File-level import facts such as

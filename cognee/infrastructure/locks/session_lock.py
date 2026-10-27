@@ -1,4 +1,4 @@
-"""Per-session lock primitives — in-process asyncio registry.
+"""Per-session lock primitives — in-process, event-loop-agnostic registry.
 
 Three primitives:
 
@@ -16,31 +16,38 @@ Three primitives:
   per-dataset lock. It waits: improves sharing a session queue one after
   another instead of skipping.
 
+The registries hand out :class:`LoopAgnosticLock` objects and are guarded
+by ``threading.Lock`` (held only for dict/set ops): cached locks outlive
+any single event loop, and an ``asyncio.Lock`` binds to the first loop that
+awaits it (see ``loop_agnostic_lock.py`` for the failure modes).
+
 Scope: single-worker FastAPI. For multi-worker deployments, layer a
 row-level SQL advisory lock or Redis SETNX on top — the call sites
 are factored so that's a local change.
 """
 
-import asyncio
+import threading
 from collections.abc import AsyncGenerator, Iterable
 from contextlib import asynccontextmanager
 from typing import Any
 
 from cognee.shared.logging_utils import get_logger
 
+from .loop_agnostic_lock import LoopAgnosticLock
+
 logger = get_logger("session_lock")
 
 
-_locks: dict[tuple[str, str], asyncio.Lock] = {}
-_registry_lock = asyncio.Lock()
+_locks: dict[tuple[str, str], LoopAgnosticLock] = {}
+_registry_lock = threading.Lock()
 
 
-async def _get_lock(session_id: str, op: str) -> asyncio.Lock:
+async def _get_lock(session_id: str, op: str) -> LoopAgnosticLock:
     key = (session_id, op)
-    async with _registry_lock:
+    with _registry_lock:
         lock = _locks.get(key)
         if lock is None:
-            lock = asyncio.Lock()
+            lock = LoopAgnosticLock()
             _locks[key] = lock
         return lock
 
@@ -63,24 +70,23 @@ async def session_lock(session_id: str, op: str = "write") -> AsyncGenerator[Non
         yield
 
 
-# Turn locks are registered per event loop, unlike ``_locks`` above: an ``asyncio.Lock``
-# is bound to the loop that awaited it, so reusing one from a different loop raises
-# RuntimeError. Keying by loop means a fresh loop always gets its own empty table, so a
-# lock is never reused across loops. Like ``_locks``, entries are never expired — that's
-# the same trade-off the registry above already makes.
-_turn_lock_registries: dict[asyncio.AbstractEventLoop, dict[tuple[str, str], asyncio.Lock]] = {}
-_turn_registry_guard = asyncio.Lock()
+# Turn locks used to be registered per event loop as a workaround for
+# asyncio.Lock's loop binding, which meant two turns on different loops were
+# NOT serialized. LoopAgnosticLock removes the constraint: one registry, and
+# turns on the same identity serialize regardless of which loop runs them.
+# Like ``_locks``, entries are never expired — the same trade-off the registry
+# above already makes.
+_turn_locks: dict[tuple[str, str], LoopAgnosticLock] = {}
+_turn_registry_guard = threading.Lock()
 
 
-async def _get_turn_lock(user_id: Any, session_id: Any) -> asyncio.Lock:
-    loop = asyncio.get_running_loop()
+async def _get_turn_lock(user_id: Any, session_id: Any) -> LoopAgnosticLock:
     key = (str(user_id), str(session_id))
-    async with _turn_registry_guard:
-        registry = _turn_lock_registries.setdefault(loop, {})
-        lock = registry.get(key)
+    with _turn_registry_guard:
+        lock = _turn_locks.get(key)
         if lock is None:
-            lock = asyncio.Lock()
-            registry[key] = lock
+            lock = LoopAgnosticLock()
+            _turn_locks[key] = lock
         return lock
 
 
@@ -98,16 +104,20 @@ async def session_turn_lock(user_id: Any, session_id: Any) -> AsyncGenerator[Non
 
 # ----- Improve claim ---------------------------------------------------------
 #
-# One asyncio.Lock per claim key. A run takes all of its keys in sorted order,
-# so two runs that share any key queue one after the other and can never hold
-# one key each while waiting for the other's. Registered per event loop for the
-# same reason as the turn locks above.
-_improve_lock_registries: dict[asyncio.AbstractEventLoop, dict[str, asyncio.Lock]] = {}
+# One LoopAgnosticLock per claim key. A run takes all of its keys in sorted
+# order, so two runs that share any key queue one after the other and can never
+# hold one key each while waiting for the other's. One registry for every loop,
+# like the turn locks above: runs on different loops queue on the same claim.
+_improve_locks_registry: dict[str, LoopAgnosticLock] = {}
+_improve_registry_guard = threading.Lock()
 
 
-def _improve_locks(keys: Iterable[str]) -> list[asyncio.Lock]:
-    registry = _improve_lock_registries.setdefault(asyncio.get_running_loop(), {})
-    return [registry.setdefault(key, asyncio.Lock()) for key in sorted({k for k in keys if k})]
+def _improve_locks(keys: Iterable[str]) -> list[LoopAgnosticLock]:
+    with _improve_registry_guard:
+        return [
+            _improve_locks_registry.setdefault(key, LoopAgnosticLock())
+            for key in sorted({k for k in keys if k})
+        ]
 
 
 async def acquire_improve_lock_many(keys: Iterable[str]) -> None:
@@ -118,7 +128,7 @@ async def acquire_improve_lock_many(keys: Iterable[str]) -> None:
     with ``release_improve_lock_many``. If the wait is cancelled, the keys
     already taken are released before the cancellation propagates.
     """
-    acquired: list[asyncio.Lock] = []
+    acquired: list[LoopAgnosticLock] = []
     try:
         for lock in _improve_locks(keys):
             await lock.acquire()

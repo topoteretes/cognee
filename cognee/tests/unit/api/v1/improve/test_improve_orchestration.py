@@ -72,6 +72,11 @@ async def _waits_while_held(harness, *, sessions=(), dataset=False, **improve_kw
     return await asyncio.wait_for(task, 1)
 
 
+def _memify_shim():
+    # The package re-exports the memify() function under the submodule's name.
+    return importlib.import_module("cognee.api.v1.memify.memify")
+
+
 def _run_info(cls, dataset_id, **extra):
     return cls(pipeline_run_id=uuid4(), dataset_id=dataset_id, dataset_name="docs", **extra)
 
@@ -321,13 +326,9 @@ async def test_stage_status_is_derived_from_pipeline_run_info(harness):
     completed = _run_info(PipelineRunCompleted, ds)
     already = _run_info(PipelineRunAlreadyCompleted, ds)
     errored = _run_info(PipelineRunErrored, ds, error_message="bad")
-    memify_return = {ds: completed}
     harness.use_stages(
         [
-            FakeStage(
-                "triplet_enrichment",
-                run=lambda _i: StageResult.from_pipeline_run("triplet_enrichment", memify_return),
-            ),
+            FakeStage("a", run=lambda _i: StageResult.from_pipeline_run("a", {ds: completed})),
             FakeStage("b", run=lambda _i: StageResult.from_pipeline_run("b", {ds: already})),
             FakeStage("c", run=lambda _i: StageResult.from_pipeline_run("c", errored)),
         ]
@@ -338,8 +339,6 @@ async def test_stage_status_is_derived_from_pipeline_run_info(harness):
     assert [s.status for s in result.stages] == ["completed", "already_completed", "errored"]
     assert result.stages[0].run is completed
     assert result.stages[2].error == "bad"
-    # Legacy return shape stays reachable, nested (D4).
-    assert result.memify_run is memify_return
     assert result.stages[0].duration_ms >= 0
 
 
@@ -545,7 +544,6 @@ async def test_remote_client_passthrough_forwards_every_option(harness, monkeypa
 
     result = await harness.improve_mod.improve(
         "docs",
-        node_name=["Carlos"],
         session_ids=["s1"],
         build_global_context_index=True,
         build_truth_subspace=True,
@@ -556,14 +554,13 @@ async def test_remote_client_passthrough_forwards_every_option(harness, monkeypa
     client.improve.assert_awaited_once()
     args, kwargs = client.improve.await_args
     assert args == ("docs",)
-    assert kwargs["node_name"] == ["Carlos"]
     assert kwargs["session_ids"] == ["s1"]
     assert kwargs["build_global_context_index"] is True
     assert kwargs["build_truth_subspace"] is True
     assert kwargs["review_conflicts"] is True
     assert kwargs["run_in_background"] is True
     assert isinstance(result, ImproveResult)
-    assert result.memify_run == {"legacy": "run"}
+    assert result.stages == []
     assert harness.resolve_calls == []
 
 
@@ -575,7 +572,6 @@ async def test_remote_result_stamps_the_span(harness, monkeypatch):
 
     payload = ImproveResult(
         stages=[StageResult.completed("a"), StageResult.skipped("b", "opt_in_disabled")],
-        memify_run={},
     ).model_dump(mode="json")
     client = type("Client", (), {})()
     client.improve = AsyncMock(return_value=payload)
@@ -600,15 +596,148 @@ async def test_feedback_alpha_kwarg_overrides_config(harness):
     assert stage.seen_inputs[1].feedback_alpha == 0.7
 
 
-def test_memify_passthrough_keys_are_declared_on_improve_kwargs():
-    """The forwarded memify surface is spelled twice — MEMIFY_PASSTHROUGH_KEYS
-    (what _resolve_inputs forwards) and ImproveKwargs (what type checkers let a
-    caller pass). A key added to one and not the other is silently either
-    rejected by type checkers or never forwarded; this pins the two together."""
-    from cognee.api.v1.improve.improve import ImproveKwargs
-    from cognee.modules.improve import MEMIFY_PASSTHROUGH_KEYS
+@pytest.mark.asyncio
+async def test_deprecated_custom_tasks_run_last_and_fill_memify_run(harness, monkeypatch):
+    """Deprecated for one release (SDK-1115): custom tasks still run, after the
+    stages, scoped by node_name / data, and their raw return is memify_run."""
+    from unittest.mock import AsyncMock
 
-    assert set(MEMIFY_PASSTHROUGH_KEYS) <= set(ImproveKwargs.__annotations__)
+    from cognee.modules.pipelines.tasks.task import Task
+
+    async def extract(data):
+        return data
+
+    calls = []
+    harness.use_stages([FakeStage("a", calls=calls)])
+    raw = {harness.dataset.id: _run_info(PipelineRunCompleted, harness.dataset.id)}
+    run_legacy = AsyncMock(return_value=raw)
+    monkeypatch.setattr(_memify_shim(), "run_legacy_memify", run_legacy)
+    task = Task(extract)
+
+    with pytest.warns(FutureWarning, match="run_custom_pipeline"):
+        result = await harness.improve(
+            extraction_tasks=[task], enrichment_tasks=[], node_name=["n"], data="x"
+        )
+
+    assert calls == ["a"]
+    assert [s.stage for s in result.stages] == ["a", "custom_tasks"]
+    assert result.stage("custom_tasks").status == "completed"
+    with pytest.warns(FutureWarning, match="memify_run"):
+        assert result.memify_run == raw
+    kwargs = run_legacy.await_args.kwargs
+    assert kwargs["extraction_tasks"] == [task]
+    assert "enrichment_tasks" not in kwargs  # an empty list counts as not given
+    assert kwargs["node_name"] == ["n"]
+    assert kwargs["data"] == "x"
+    assert kwargs["dataset"] == harness.dataset.id
+    assert kwargs["user"] is harness.user
+
+
+@pytest.mark.asyncio
+async def test_custom_tasks_memify_run_is_serialized_for_rest_clients(harness, monkeypatch):
+    """The deprecated memify_run stays in the JSON body (and so in the REST
+    response) for the deprecation release, and a remote result keeps it."""
+    from unittest.mock import AsyncMock
+
+    harness.use_stages([FakeStage("a")])
+    monkeypatch.setattr(_memify_shim(), "run_legacy_memify", AsyncMock(return_value={"raw": "run"}))
+
+    with pytest.warns(FutureWarning):
+        result = await harness.improve(extraction_tasks=["extract_subgraph"])
+
+    body = result.model_dump(mode="json")
+    assert body["memify_run"] == {"raw": "run"}
+    assert "legacy_memify_run" not in body
+    remote = ImproveResult.from_remote_payload(body, [])
+    with pytest.warns(FutureWarning, match="memify_run"):
+        assert remote.memify_run == {"raw": "run"}
+
+
+@pytest.mark.asyncio
+async def test_a_queued_run_waits_then_runs_its_custom_tasks_once(harness, monkeypatch):
+    """Custom tasks have no watermark; a run queued behind another runs them
+    once, after its stages, instead of dropping them."""
+    from unittest.mock import AsyncMock
+
+    harness.use_stages([FakeStage("a")])
+    run_legacy = AsyncMock(return_value={"raw": "run"})
+    monkeypatch.setattr(_memify_shim(), "run_legacy_memify", run_legacy)
+
+    with pytest.warns(FutureWarning):
+        result = await _waits_while_held(
+            harness, dataset=True, extraction_tasks=["extract_subgraph"]
+        )
+
+    assert [(s.stage, s.status) for s in result.stages] == [
+        ("a", "completed"),
+        ("custom_tasks", "completed"),
+    ]
+    run_legacy.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_failing_custom_task_is_recorded_not_raised(harness, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    harness.use_stages([FakeStage("a")])
+    monkeypatch.setattr(
+        _memify_shim(), "run_legacy_memify", AsyncMock(side_effect=RuntimeError("boom"))
+    )
+
+    with pytest.warns(FutureWarning):
+        result = await harness.improve(extraction_tasks=["extract_subgraph"])
+
+    assert result.stage("custom_tasks").status == "errored"
+    assert result.stage("a").status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_unknown_custom_task_name_fails_before_any_stage(harness):
+    from cognee.exceptions import CogneeValidationError
+
+    stage = FakeStage("a")
+    harness.use_stages([stage])
+
+    with pytest.warns(FutureWarning), pytest.raises(CogneeValidationError):
+        await harness.improve(enrichment_tasks=["get_triplet_datapoints"])
+    assert stage.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("empty", [None, []])
+async def test_empty_custom_task_options_count_as_absent(harness, recwarn, empty):
+    """None and [] mean "no custom tasks", silently — the same rule as REST null."""
+    harness.use_stages([FakeStage("a")])
+
+    result = await harness.improve(extraction_tasks=empty, enrichment_tasks=empty)
+
+    assert [s.stage for s in result.stages] == ["a"]
+    assert not [w for w in recwarn if issubclass(w.category, FutureWarning)]
+
+
+@pytest.mark.asyncio
+async def test_deprecated_options_warn_and_are_not_forwarded(harness, monkeypatch):
+    """Without custom tasks, node_name and the old memify passthrough only scoped
+    the removed triplet-enrichment stage; they warn and never reach a stage or
+    the server."""
+    from unittest.mock import AsyncMock
+
+    stage = FakeStage("a")
+    harness.use_stages([stage])
+    with pytest.warns(FutureWarning, match="node_name, data, node_type"):
+        result = await harness.improve(node_name=["n"], data="x", node_type=object)
+    assert result.status == "completed"
+    assert not hasattr(stage.seen_inputs[0], "node_name")
+
+    client = type("Client", (), {})()
+    client.improve = AsyncMock(return_value={})
+    monkeypatch.setattr(harness.improve_mod, "get_remote_client", lambda: client)
+    with pytest.warns(FutureWarning, match="vector_db_config, graph_db_config"):
+        await harness.improve_mod.improve(
+            "docs", node_name=["n"], vector_db_config={}, graph_db_config={}
+        )
+    forwarded = client.improve.await_args.kwargs
+    assert not {"node_name", "vector_db_config", "graph_db_config"} & set(forwarded)
 
 
 @pytest.mark.asyncio

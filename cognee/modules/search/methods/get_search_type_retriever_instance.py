@@ -7,6 +7,13 @@ from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.retrieval.agentic_retriever import AgenticRetriever
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.bm25_retriever import BM25ChunksRetriever
+from cognee.modules.retrieval.broad_retriever import (
+    BROAD_BATCH_MB,
+    BROAD_CONTEXT_TOKENS,
+    BROAD_READING_TOKENS,
+    BROAD_STORE_MB,
+    BroadRetriever,
+)
 
 # Retrievers
 from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
@@ -32,10 +39,35 @@ from cognee.modules.retrieval.natural_language_retriever import NaturalLanguageR
 from cognee.modules.retrieval.skills_retriever import SkillsRetriever
 from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
 from cognee.modules.retrieval.temporal_hybrid_retriever import TemporalHybridRetriever
-from cognee.modules.retrieval.triplet_retriever import TripletRetriever
-from cognee.modules.search.exceptions import UnsupportedSearchTypeError
+from cognee.modules.search.exceptions import SearchTypeDisabledError, UnsupportedSearchTypeError
 from cognee.modules.search.operations import select_search_type
 from cognee.modules.search.types import SearchType
+from cognee.modules.search.types.SearchType import DEPRECATED_SEARCH_TYPES
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
+
+CYPHER_SEARCH_TYPES = (SearchType.CYPHER, SearchType.NATURAL_LANGUAGE)
+
+# Returned to the caller: says what to change, without detailing the risk.
+CYPHER_DISABLED_MESSAGE = "{search_type} search is disabled by default for security reasons."
+CYPHER_DISABLED_REMEDIATION = (
+    "Set the environment variable ALLOW_CYPHER_QUERY=true, and only do so when every user "
+    "of this deployment is trusted."
+)
+
+# Logged on the server only.
+CYPHER_DISABLED_LOG_MESSAGE = (
+    "Rejected a {search_type} search because ALLOW_CYPHER_QUERY is not enabled. Raw Cypher "
+    "lets any user with read access to a dataset run arbitrary queries against the graph "
+    "database, up to remote code execution on the server. Set ALLOW_CYPHER_QUERY=true only "
+    "when every user of this deployment is trusted."
+)
+
+
+def cypher_queries_allowed() -> bool:
+    """Raw Cypher (CYPHER, NATURAL_LANGUAGE) is opt-in through ALLOW_CYPHER_QUERY=true."""
+    return os.getenv("ALLOW_CYPHER_QUERY", "false").strip().lower() in ("true", "1", "yes")
 
 
 def _hybrid_lane_top_k(config: dict, key: str, search_top_k: int | None) -> int | None:
@@ -68,6 +100,9 @@ async def get_search_type_retriever_instance(
     Returns:
 
     """
+    # A deprecated type is resolved, with its warning, by search() / recall();
+    # this covers callers that reach the factory directly.
+    query_type = DEPRECATED_SEARCH_TYPES.get(query_type, query_type)
     # Transform retriever specific config if empty to avoid None checks later
     retriever_specific_config = kwargs.get("retriever_specific_config")
     if retriever_specific_config is None:
@@ -118,6 +153,24 @@ async def get_search_type_retriever_instance(
                 "node_name_filter_operator": node_name_filter_operator,
             },
         ),
+        # No top_k: BROAD reads the whole dataset (SDK-324).
+        SearchType.BROAD: (
+            BroadRetriever,
+            {
+                "system_prompt_path": "broad_answer.txt",
+                "system_prompt": system_prompt,
+                "session_id": session_id,
+                "response_model": retriever_specific_config.get("response_model", str),
+                "context_tokens": retriever_specific_config.get(
+                    "context_tokens", BROAD_CONTEXT_TOKENS
+                ),
+                "reading_tokens": retriever_specific_config.get(
+                    "reading_tokens", BROAD_READING_TOKENS
+                ),
+                "batch_mb": retriever_specific_config.get("batch_mb", BROAD_BATCH_MB),
+                "store_mb": retriever_specific_config.get("store_mb", BROAD_STORE_MB),
+            },
+        ),
         SearchType.RAG_COMPLETION: (
             CompletionRetriever,
             {
@@ -165,19 +218,6 @@ async def get_search_type_retriever_instance(
                     "include_external_metadata", False
                 ),
                 "external_metadata_keys": retriever_specific_config.get("external_metadata_keys"),
-            },
-        ),
-        SearchType.TRIPLET_COMPLETION: (
-            TripletRetriever,
-            {
-                "system_prompt_path": system_prompt_path,
-                "top_k": top_k,
-                "system_prompt": system_prompt,
-                "session_id": session_id,
-                "response_model": retriever_specific_config.get("response_model", str),
-                "include_references": include_references,
-                "node_name": node_name,
-                "node_name_filter_operator": node_name_filter_operator,
             },
         ),
         SearchType.GRAPH_COMPLETION: (
@@ -409,11 +449,14 @@ async def get_search_type_retriever_instance(
     if query_type is SearchType.FEELING_LUCKY:
         query_type = await select_search_type(query_text)
 
-    if (
-        query_type in [SearchType.CYPHER, SearchType.NATURAL_LANGUAGE]
-        and os.getenv("ALLOW_CYPHER_QUERY", "true").lower() == "false"
-    ):
-        raise UnsupportedSearchTypeError("Cypher query search types are disabled.")
+    if query_type in CYPHER_SEARCH_TYPES and not cypher_queries_allowed():
+        logger.warning(CYPHER_DISABLED_LOG_MESSAGE.format(search_type=query_type.value))
+        raise SearchTypeDisabledError(
+            query_type.value,
+            message=CYPHER_DISABLED_MESSAGE.format(search_type=query_type.value),
+            remediation=CYPHER_DISABLED_REMEDIATION,
+            log=False,
+        )
 
     from cognee.modules.retrieval.registered_community_retrievers import (
         registered_community_retrievers,

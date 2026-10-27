@@ -28,11 +28,15 @@ source_module = importlib.import_module("cognee.tasks.ingestion.connectors.linea
 _forget_module = importlib.import_module("cognee.api.v1.forget.forget")
 
 _USER_ID = uuid4()
+_CREDENTIAL_ID = uuid4()
 _DATASET = "linear_acme_co"
 
 
 def _credential(**metadata):
     return SimpleNamespace(
+        id=_CREDENTIAL_ID,
+        provider="linear",
+        workspace_id=None,
         status="active",
         provider_account_id="org-1",
         provider_metadata={"organization_url_key": "Acme-Co", **metadata},

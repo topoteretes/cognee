@@ -2,6 +2,7 @@
 pipeline runs on the per-dataset lock."""
 
 import asyncio
+import threading
 
 import pytest
 
@@ -115,3 +116,38 @@ def test_the_claim_can_be_used_from_more_than_one_event_loop():
 
     asyncio.run(contended())
     asyncio.run(contended())
+
+
+def test_a_claim_held_on_one_loop_blocks_a_run_on_another():
+    """One registry for every loop: a run on another loop (another thread's
+    asyncio.run) queues behind the holder instead of getting its own lock."""
+    held = threading.Event()
+    let_go = threading.Event()
+
+    def holder():
+        async def hold():
+            await acquire_improve_lock_many(["session:u:x"])
+            held.set()
+            while not let_go.is_set():
+                await asyncio.sleep(0.01)
+            await release_improve_lock_many(["session:u:x"])
+
+        asyncio.run(hold())
+
+    thread = threading.Thread(target=holder)
+    thread.start()
+    assert held.wait(5)
+
+    async def contend():
+        waiter = asyncio.create_task(acquire_improve_lock_many(["session:u:x"]))
+        await asyncio.sleep(0.2)
+        assert not waiter.done()
+        let_go.set()
+        await asyncio.wait_for(waiter, 5)
+        await release_improve_lock_many(["session:u:x"])
+
+    try:
+        asyncio.run(contend())
+    finally:
+        let_go.set()
+        thread.join(5)

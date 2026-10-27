@@ -1393,7 +1393,6 @@ async def test_update_global_context_index_graph_rebuild_rejects_missing_made_fr
 @pytest.mark.asyncio
 async def test_persist_context_index_edges_stamps_dataset_ref_on_graph_provenance(monkeypatch):
     from cognee.infrastructure.databases.provenance import make_source_ref_key
-    from cognee.tasks.memify.global_context_index.models import BucketAssignment
     from cognee.tasks.memify.global_context_index.persist import persist_context_index_edges
 
     dataset_id = uuid4()
@@ -1402,13 +1401,13 @@ async def test_persist_context_index_edges_stamps_dataset_ref_on_graph_provenanc
 
     monkeypatch.setattr(persist_module, "stores_provenance_in_graph", AsyncMock(return_value=True))
 
-    assignments = [BucketAssignment(child_id=str(uuid4()), parent_id=str(uuid4()))]
+    pairs = [(str(uuid4()), str(uuid4()))]
     ctx = PipelineContext(
         dataset=SimpleNamespace(id=dataset_id),
         pipeline_run_id=run_id,
     )
 
-    await persist_context_index_edges(assignments, unified_engine, ctx=ctx)
+    await persist_context_index_edges({"summarized_in": pairs}, unified_engine, ctx=ctx)
 
     # Dataset-level ref reuses the same sentinel data id as the context summaries.
     sentinel_data_id = uuid5(NAMESPACE_URL, f"cognee:global-context-index:{dataset_id}")
@@ -1422,16 +1421,15 @@ async def test_persist_context_index_edges_stamps_dataset_ref_on_graph_provenanc
 
 @pytest.mark.asyncio
 async def test_persist_context_index_edges_unstamped_on_ledger_graph(monkeypatch):
-    from cognee.tasks.memify.global_context_index.models import BucketAssignment
     from cognee.tasks.memify.global_context_index.persist import persist_context_index_edges
 
     unified_engine = SimpleNamespace(graph=SimpleNamespace(add_edges=AsyncMock()))
     monkeypatch.setattr(persist_module, "stores_provenance_in_graph", AsyncMock(return_value=False))
 
-    assignments = [BucketAssignment(child_id=str(uuid4()), parent_id=str(uuid4()))]
+    pairs = [(str(uuid4()), str(uuid4()))]
     ctx = PipelineContext(dataset=SimpleNamespace(id=uuid4()), pipeline_run_id=uuid4())
 
-    await persist_context_index_edges(assignments, unified_engine, ctx=ctx)
+    await persist_context_index_edges({"summarized_in": pairs}, unified_engine, ctx=ctx)
 
     kwargs = unified_engine.graph.add_edges.await_args.kwargs
     assert kwargs["source_ref_key"] is None

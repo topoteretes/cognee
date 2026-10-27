@@ -1,4 +1,4 @@
-from .dataset_lock import dataset_lock, get_dataset_lock, held_datasets
+from .dataset_lock import DatasetLock, dataset_lock, get_dataset_lock, held_datasets
 from .session_lock import (
     acquire_improve_lock_many,
     release_improve_lock_many,
@@ -7,6 +7,7 @@ from .session_lock import (
 )
 
 __all__ = [
+    "DatasetLock",
     "acquire_improve_lock_many",
     "dataset_lock",
     "get_dataset_lock",

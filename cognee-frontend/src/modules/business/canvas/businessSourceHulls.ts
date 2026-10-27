@@ -2,6 +2,7 @@ import { mean } from "d3-array";
 import { polygonHull } from "d3-polygon";
 import { color as d3color } from "d3-color";
 import type { BusinessEntity } from "../sceneTypes";
+import type { ColorEncoding } from "../colorEncoding";
 import { setsOf, sourceLabel } from "../computeBrainState";
 import { truncate } from "../textUtils";
 
@@ -16,15 +17,25 @@ export function drawSourceHulls(
   ctx: CanvasRenderingContext2D,
   entities: BusinessEntity[],
   sourceNames: string[],
-  setColor: Record<string, string>,
+  encoding: ColorEncoding,
   focusSets: Set<string> | null,
+  focusTypes: Set<string> | null,
+  entityType: Record<string, string>,
   dimmed: number,
   transformK: number,
 ): void {
   ctx.textAlign = "center";
   const names = focusSets ? [...focusSets] : sourceNames;
   names.forEach((name) => {
-    const members = entities.filter((n) => setsOf(n).includes(name) && n.x != null && n.y != null);
+    // A type lens narrows hull membership the same way a source lens
+    // narrows which sources get a hull at all — left unfiltered, a hull
+    // still spanned the source's FULL entity set while a type lens hid most
+    // of them, reading as territory reaching into now-empty regions.
+    const members = entities.filter((n) =>
+      setsOf(n).includes(name)
+      && (!focusTypes || focusTypes.has(entityType[n.id] || "other"))
+      && n.x != null && n.y != null,
+    );
     if (members.length < 2) return;
     const pad = 34;
     const pts: [number, number][] = [];
@@ -38,7 +49,7 @@ export function drawSourceHulls(
     });
     const hull = polygonHull(pts);
     if (!hull) return;
-    const col = d3color(setColor[name] || "#888");
+    const col = d3color(encoding.sourceColor(name));
     if (!col) return;
     const rgb = col.rgb();
     // Smooths the hull into an organic blob instead of a jagged polygon:

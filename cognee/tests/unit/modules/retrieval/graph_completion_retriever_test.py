@@ -536,14 +536,12 @@ def test_empty_context_skip_flag_contract():
         GraphSummaryCompletionRetriever,
     )
     from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
-    from cognee.modules.retrieval.triplet_retriever import TripletRetriever
 
     assert GraphCompletionRetriever.skip_completion_on_empty_context is True
     assert GraphCompletionCotRetriever.skip_completion_on_empty_context is True
     assert GraphSummaryCompletionRetriever.skip_completion_on_empty_context is True
     assert CompletionRetriever.skip_completion_on_empty_context is True
     assert HybridRetriever.skip_completion_on_empty_context is True
-    assert TripletRetriever.skip_completion_on_empty_context is True
     assert AgenticRetriever.skip_completion_on_empty_context is False
 
 
@@ -553,7 +551,6 @@ def test_empty_context_skip_flag_contract():
     [
         ("completion_retriever", "CompletionRetriever"),
         ("hybrid_retriever", "HybridRetriever"),
-        ("triplet_retriever", "TripletRetriever"),
     ],
 )
 async def test_empty_context_skips_llm_across_completion_retrievers(

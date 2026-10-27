@@ -1,10 +1,8 @@
 import {
   OPENCLAW_PROMPT,
-  CLAUDE_MARKETPLACE_ADD, CLAUDE_PLUGIN_INSTALL,
-  CODEX_HOOKS_ENABLE, CODEX_MARKETPLACE_ADD, CODEX_PLUGIN_INSTALL,
   MCP_STDIO_CONFIG, HERMES_MCP_CONFIG, genericSkillInstall, fillTemplate,
-  UPLOAD_MEMORY_PROMPT, UPLOAD_SAMPLE_PROMPT, RECALL_SAMPLE_PROMPT,
 } from "@/data/prompts";
+import { agentSetupSteps } from "./agentSetupSteps";
 import type { SetupConnectorCfg } from "./types";
 import {
   imgIcon, credStep, ApiIcon,
@@ -18,37 +16,9 @@ export const AGENT_CARDS: SetupConnectorCfg[] = [
     cta: "Connect via plugin",
     description: "Give Claude Code persistent memory across sessions.",
     icon: imgIcon("/visuals/logos/claude.svg", "Claude Code"),
-    buildSteps: (baseUrl, apiKey, loading) => [
-      credStep(baseUrl, apiKey, loading),
-      {
-        title: "Install the Cognee plugin",
-        description: "Run these in your terminal one at a time — register the Cognee marketplace, then install the memory plugin.",
-        codeBlocks: [
-          { code: CLAUDE_MARKETPLACE_ADD },
-          { code: CLAUDE_PLUGIN_INSTALL },
-        ],
-      },
-      {
-        title: "Upload something to Cognee",
-        description: "Pick one and paste it into Claude Code — it stores the content in your Cognee memory so you can recall it next.",
-        codeBlocks: [
-          { label: "Option A · Your existing memory", code: UPLOAD_MEMORY_PROMPT },
-          { label: "Option B · Try it with a sample", code: UPLOAD_SAMPLE_PROMPT },
-        ],
-      },
-      {
-        title: "Recall it from Cognee",
-        description: "First run /exit to close the session — that syncs it into Cognee Cloud — then reopen Claude Code and ask the question below. Answering from a fresh session proves it's recalling from your cloud memory.",
-        codeBlocks: [
-          { code: "/exit" },
-          { code: RECALL_SAMPLE_PROMPT },
-        ],
-      },
-      {
-        title: "You're all set",
-        description: "The Cognee plugin hooks into Claude Code's lifecycle — no curl or manual API calls — and captures your session as you work. When a session ends (e.g. /exit), it consolidates that session into your Cognee Cloud knowledge graph, and every new session automatically recalls it back. Sessions are disposable; your memory isn't.",
-      },
-    ],
+    osAware: true,
+    buildSteps: (baseUrl, apiKey, loading, os) =>
+      agentSetupSteps("claude-code", { os, baseUrl, apiKey, loading }),
   },
   {
     key: "codex",
@@ -56,38 +26,9 @@ export const AGENT_CARDS: SetupConnectorCfg[] = [
     cta: "Connect via plugin",
     description: "Give Codex persistent memory across sessions.",
     icon: imgIcon("/visuals/logos/codex.svg", "Codex"),
-    buildSteps: (baseUrl, apiKey, loading) => [
-      credStep(baseUrl, apiKey, loading),
-      {
-        title: "Install the Cognee plugin",
-        description: "Run these in your terminal one at a time — enable Codex hooks, register the Cognee marketplace, then install the memory plugin.",
-        codeBlocks: [
-          { code: CODEX_HOOKS_ENABLE },
-          { code: CODEX_MARKETPLACE_ADD },
-          { code: CODEX_PLUGIN_INSTALL },
-        ],
-      },
-      {
-        title: "Upload something to Cognee",
-        description: "Pick one and paste it into Codex — it stores the content in your Cognee memory so you can recall it next.",
-        codeBlocks: [
-          { label: "Option A · Your existing memory", code: UPLOAD_MEMORY_PROMPT },
-          { label: "Option B · Try it with a sample", code: UPLOAD_SAMPLE_PROMPT },
-        ],
-      },
-      {
-        title: "Recall it from Cognee",
-        description: "First run /exit to close the session — that syncs it into Cognee Cloud — then reopen Codex and ask the question below. Answering from a fresh session proves it's recalling from your cloud memory.",
-        codeBlocks: [
-          { code: "/exit" },
-          { code: RECALL_SAMPLE_PROMPT },
-        ],
-      },
-      {
-        title: "You're all set",
-        description: "The Cognee plugin hooks into Codex's lifecycle — no curl or manual API calls — and captures your session as you work. When a session ends (e.g. /exit), it consolidates that session into your Cognee Cloud knowledge graph, and every new session automatically recalls it back. Sessions are disposable; your memory isn't.",
-      },
-    ],
+    osAware: true,
+    buildSteps: (baseUrl, apiKey, loading, os) =>
+      agentSetupSteps("codex", { os, baseUrl, apiKey, loading }),
   },
   {
     key: "openclaw",
@@ -95,11 +36,12 @@ export const AGENT_CARDS: SetupConnectorCfg[] = [
     cta: "Connect via prompts",
     description: "Recall your Cognee memory in every OpenClaw conversation.",
     icon: imgIcon("/visuals/logos/openclaw.svg", "OpenClaw"),
-    buildSteps: (baseUrl, apiKey, loading) => [
-      credStep(baseUrl, apiKey, loading),
+    osAware: true,
+    buildSteps: (baseUrl, apiKey, loading, os) => [
+      credStep(baseUrl, apiKey, loading, os),
       // OpenClaw only loads AGENTS.md from its workspace directory, not the project root.
       { title: "Create the workspace AGENTS.md", description: "Run this command to add the Cognee memory instructions to OpenClaw's workspace. An existing AGENTS.md is backed up to AGENTS.md.bak — merge it manually afterwards.", code: "~/.openclaw/workspace/AGENTS.md", codeToCopy: `mkdir -p ~/.openclaw/workspace && [ -f ~/.openclaw/workspace/AGENTS.md ] && cp ~/.openclaw/workspace/AGENTS.md ~/.openclaw/workspace/AGENTS.md.bak; cat > ~/.openclaw/workspace/AGENTS.md << 'COGNEE_EOF'\n${OPENCLAW_PROMPT}\nCOGNEE_EOF` },
-      { title: "Test the connection", description: `Open OpenClaw and ask: "What do you know from cognee?" — if it responds with knowledge from your brain, you're connected.` },
+      { title: "Test the connection", description: `Open OpenClaw and ask: "What do you know from cognee?" — if it responds with knowledge from your dataset, you're connected.` },
     ],
   },
   {
@@ -203,7 +145,7 @@ export const AGENT_CARDS: SetupConnectorCfg[] = [
     icon: imgIcon("/visuals/logos/hermes.svg", "Hermes Agent"),
     buildSteps: (baseUrl, apiKey, loading) => [
       { title: "Configure Hermes Agent", description: "Hermes reads YAML — add this block under mcp_servers in ~/.hermes/config.yaml and restart the agent. Cognee runs via uvx (requires uv) — no separate install.", code: "~/.hermes/config.yaml", codeToCopy: fillTemplate(HERMES_MCP_CONFIG, baseUrl, apiKey), loading },
-      { title: "Test the connection", description: "Ask Hermes: \"What do you know from cognee?\" — it should use the Cognee memory tool and return a response from your brain." },
+      { title: "Test the connection", description: "Ask Hermes: \"What do you know from cognee?\" — it should use the Cognee memory tool and return a response from your dataset." },
     ],
   },
   {
@@ -242,7 +184,7 @@ export const AGENT_CARDS: SetupConnectorCfg[] = [
             {"\n"}• <strong style={{ color: "#EDECEA" }}>Cognee: Ask My Project Memory</strong> — ask a question; answers come with clickable citations.
             {"\n"}• <strong style={{ color: "#EDECEA" }}>Cognee: Index Workspace</strong> — bulk-ingest the whole repo at once.
             {"\n\n"}
-            <a href="https://docs.cognee.ai/cognee-cloud/agent-integrations/vscode" target="_blank" rel="noopener noreferrer" style={{ color: "#6510F4", textDecoration: "underline" }}>See all commands and settings →</a>
+            <a href="https://docs.cognee.ai/cognee-cloud/agent-integrations/vscode" target="_blank" rel="noopener noreferrer" style={{ color: "var(--color-cognee-lavender)", textDecoration: "underline" }}>See all commands and settings →</a>
           </>
         ),
       },
@@ -308,7 +250,7 @@ export const AGENT_CARDS: SetupConnectorCfg[] = [
     icon: imgIcon("/visuals/logos/cline.svg", "Cline"),
     buildSteps: (baseUrl, apiKey, loading) => [
       { title: "Configure Cline", description: "In VS Code, open the Cline sidebar → MCP Servers → Configure MCP Servers — paste this JSON block and save. Cognee runs via uvx (requires uv) — no separate install.", code: '{ "mcpServers": { "cognee": … } }', codeToCopy: fillTemplate(MCP_STDIO_CONFIG, baseUrl, apiKey), loading },
-      { title: "Test the connection", description: "Ask Cline: \"What do you know from cognee?\" — it should use the Cognee memory tool and return a response from your brain." },
+      { title: "Test the connection", description: "Ask Cline: \"What do you know from cognee?\" — it should use the Cognee memory tool and return a response from your dataset." },
     ],
   },
   {
@@ -317,8 +259,9 @@ export const AGENT_CARDS: SetupConnectorCfg[] = [
     cta: "Connect via API or MCP",
     description: "Call Cognee directly from any HTTP client or custom agent.",
     icon: <ApiIcon />,
-    buildSteps: (baseUrl, apiKey, loading) => [
-      credStep(baseUrl, apiKey, loading),
+    osAware: true,
+    buildSteps: (baseUrl, apiKey, loading, os) => [
+      credStep(baseUrl, apiKey, loading, os),
       {
         title: "Query the REST API",
         description: "Send a recall query to your Cognee endpoint from any HTTP client or language.",
@@ -335,7 +278,7 @@ export const AGENT_CARDS: SetupConnectorCfg[] = [
         code: "skills/cognee/SKILL.md",
         codeToCopy: genericSkillInstall("mac"),
       },
-      { title: "Test the connection", description: "Ask your agent: \"What do you know from cognee?\" — Cognee's memory tool should respond with knowledge from your brain." },
+      { title: "Test the connection", description: "Ask your agent: \"What do you know from cognee?\" — Cognee's memory tool should respond with knowledge from your dataset." },
     ],
   },
 ];

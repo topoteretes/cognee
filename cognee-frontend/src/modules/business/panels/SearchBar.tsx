@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { CogneeInstance } from "@/modules/instances/types";
 import searchDataset from "@/modules/datasets/searchDataset";
 import type { BusinessEntity } from "../sceneTypes";
+import { codeDisplayName } from "../codeGraph";
 import { truncate } from "../textUtils";
 import { captureException } from "@/utils/monitoring";
 
@@ -77,7 +78,7 @@ export default function SearchBar({ cogniInstance, activeDatasetId, onAnswer, en
     // operators' workspace card: both sit under a 10px-offset label with a
     // leading-[15px] line box and a 4px gap (10+15+4 — see BusinessView's
     // brain label comment).
-    <div className="absolute left-1/2 top-[29px] z-10 w-[360px] -translate-x-1/2">
+    <div className="absolute left-1/2 top-[29px] z-20 w-[360px] -translate-x-1/2">
       <div className="flex items-center gap-1.5 rounded-[10px] border border-[#2A3652] bg-[#1A2438] px-2.5 py-1.5">
         <input
           value={query}
@@ -114,16 +115,28 @@ export default function SearchBar({ cogniInstance, activeDatasetId, onAnswer, en
       )}
       {needle && !isSearching && (
         <div className="mt-1 overflow-hidden rounded-[10px] border border-[#2A3652] bg-[#1A2438]">
-          {matches.map((e) => (
-            <button
-              key={e.id}
-              type="button"
-              onClick={() => pickEntity(e)}
-              className="block w-full truncate px-2.5 py-1.5 text-left text-[#E9EEF6] hover:bg-[#141D33]"
-            >
-              ⌖ {String(e.name)}
-            </button>
-          ))}
+          {matches.map((e) => {
+            const fullName = String(e.name ?? "");
+            const displayName = codeDisplayName(e);
+            // Same signal the canvas/tooltip/panel use: a code entity's name
+            // shortens, a plain entity's never does, so this is genuinely
+            // "is there a full path worth showing" rather than a type check.
+            const showFullName = displayName !== fullName;
+            return (
+              <button
+                key={e.id}
+                type="button"
+                onClick={() => pickEntity(e)}
+                title={showFullName ? fullName : undefined}
+                className="block w-full truncate px-2.5 py-1.5 text-left text-[#E9EEF6] hover:bg-[#141D33]"
+              >
+                <div className="truncate">⌖ {displayName}</div>
+                {showFullName && (
+                  <div className="truncate text-[10px] text-[#7E8CA6]">{fullName}</div>
+                )}
+              </button>
+            );
+          })}
           <button
             type="button"
             onClick={() => void ask()}
