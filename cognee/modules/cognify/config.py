@@ -16,10 +16,10 @@ class CognifyConfig(BaseSettings):
     classification_model: object = DefaultContentPrediction
     summarization_model: object = SummarizedContent
     # How each chunk's TextSummary is written (env: SUMMARY_METHOD, or
-    # cognify(summary_method=...)). "llm" (default): one LLM call per chunk.
-    # "from_extraction": one "Type: name, name" line per extracted type, then
-    # the chunk's relation texts, one per line, no LLM call.
-    summary_method: Literal["llm", "from_extraction"] = "llm"
+    # cognify(summary_method=...)). "from_extraction" (default): one
+    # "Type: name, name" line per extracted type, then the chunk's relation
+    # texts, one per line, no LLM call. "llm": one LLM call per chunk.
+    summary_method: Literal["llm", "from_extraction"] = "from_extraction"
     chunks_per_batch: int | None = None
     # Opt-in audit-grade provenance ledger (env: PROVENANCE_TRACKING). Default
     # OFF so the standard cognify pipeline is unchanged.
