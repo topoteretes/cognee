@@ -263,13 +263,17 @@ async def _require_extraction_completed(data_id: UUID, dataset_id: UUID) -> None
         )
 
 
-async def _require_chunk_writers_completed(delete_data: dict) -> None:
-    """Refuse a baseline whose chunks were written by a run that never finished.
+async def _require_chunk_writers_completed(
+    delete_data: dict, data_id: UUID, dataset_id: UUID
+) -> None:
+    """Refuse a baseline whose chunks were written by a run that never finished them.
 
     The indexing pipeline stores a document's chunks in a run of its own
     (SDK-397). A run killed mid-way leaves a partial chunk set; one that ended
-    in an error is swept by rollback, so a run with no terminal row is the case
-    this guards. Chunks that carry no run ids (older graphs, adapters without
+    in an error rolls back per item, so it keeps the documents it completed.
+    Completion is therefore checked per document: a writer run that did not
+    complete is accepted when it stamped this document complete, and refused
+    otherwise. Chunks that carry no run ids (older graphs, adapters without
     run stamping) keep the previous behaviour.
     """
     run_ids: set[str] = set()
@@ -281,14 +285,16 @@ async def _require_chunk_writers_completed(delete_data: dict) -> None:
         except ValueError:
             continue
         run = await get_latest_pipeline_run(run_uuid)
-        if run is None:
+        if run is None or run.status == PipelineRunStatus.DATASET_PROCESSING_COMPLETED:
             continue
-        if run.status != PipelineRunStatus.DATASET_PROCESSING_COMPLETED:
-            raise IncrementalUpdateNotPossible(
-                f"stored chunks were written by pipeline run {run_id}, which did not "
-                f"complete ({getattr(run.status, 'value', run.status)})",
-                RefusalReason.NO_BASELINE,
-            )
+        pipeline_name = getattr(run, "pipeline_name", None)
+        if pipeline_name and await is_data_processed(data_id, dataset_id, pipeline_name):
+            continue
+        raise IncrementalUpdateNotPossible(
+            f"stored chunks were written by pipeline run {run_id}, which did not "
+            f"complete ({getattr(run.status, 'value', run.status)})",
+            RefusalReason.NO_BASELINE,
+        )
 
 
 async def recorded_chunk_budget(data_id: UUID, dataset_id: UUID, user: User) -> int | None:
@@ -875,7 +881,7 @@ async def _stage_and_plan(
     stored_chunks = await _get_stored_chunks(data_id)
     delete_data = await _require_chunk_scoped_ownership(stored_chunks, dataset_id, data_id)
     _require_stored_chunks_tile(stored_chunks, old_text)
-    await _require_chunk_writers_completed(delete_data)
+    await _require_chunk_writers_completed(delete_data, data_id, dataset_id)
     await _require_extraction_completed(data_id, dataset_id)
 
     # Stage the new content through ingestion's own loader machinery. The Data

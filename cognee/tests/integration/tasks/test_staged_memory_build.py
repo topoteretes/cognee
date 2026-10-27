@@ -341,3 +341,65 @@ async def test_a_background_build_hands_back_the_cognify_run(staged_env):
 
     run = await get_latest_pipeline_run(run_info.pipeline_run_id)
     assert run.pipeline_name == "cognify_pipeline"
+
+
+@pytest.mark.asyncio
+async def test_a_partly_failed_indexing_run_keeps_its_completed_documents(
+    staged_env, monkeypatch
+):
+    """One document fails indexing, the other is kept (per-item rollback); then
+    extraction fails. The kept chunks must still count as searchable, recall must
+    answer from them, and once the build succeeds the kept document must be a
+    baseline for update(), not a full rebuild."""
+    import cognee
+    from cognee.modules.data.methods import get_dataset_data
+    from cognee.modules.search.types import SearchType
+
+    cognify_module = importlib.import_module("cognee.api.v1.cognify.cognify")
+    dataset = "staged_partial_indexing"
+    # Larger first: the run processes items largest first, one at a time here.
+    kept_text = " ".join(["The orchard cooperative pressed cider every October."] * 20)
+    await cognee.add(kept_text, dataset_name=dataset)
+    await cognee.add("FAILINDEX: the bakery opens at six.", dataset_name=dataset)
+
+    original_index = cognify_module.index_chunks_for_search
+
+    async def failing_index(data_chunks, ctx=None):
+        if any("FAILINDEX" in chunk.text for chunk in data_chunks):
+            raise RuntimeError("injected indexing outage")
+        return await original_index(data_chunks, ctx=ctx)
+
+    async def failing_extract(*args, **kwargs):
+        raise RuntimeError("injected extraction outage")
+
+    original_extract = cognify_module.extract_graph_and_summarize
+    monkeypatch.setattr(cognify_module, "index_chunks_for_search", failing_index)
+    monkeypatch.setattr(cognify_module, "extract_graph_and_summarize", failing_extract)
+    with pytest.raises(Exception, match="injected extraction outage"):
+        await cognee.cognify(datasets=[dataset], data_per_batch=1)
+
+    dataset_id = next(d.id for d in await cognee.datasets.list_datasets() if d.name == dataset)
+    statuses = await cognee.datasets.get_status([dataset_id], ["indexing_pipeline"])
+    indexing = statuses[str(dataset_id)]
+    assert str(getattr(indexing, "value", indexing)) == "DATASET_PROCESSING_ERRORED"
+    status = (await cognee.datasets.get_memory_status([dataset_id]))[str(dataset_id)]
+    assert (status.state, status.search_level) == ("extraction_failed", "chunks"), status
+
+    recalled = await cognee.recall(
+        "orchard cider", query_type=SearchType.CHUNKS_LEXICAL, datasets=[dataset], top_k=3
+    )
+    markers = [entry for entry in recalled if getattr(entry, "source", None) == "system"]
+    assert [marker.status for marker in markers] == ["memory_extraction_failed"], recalled
+    assert "orchard" in json.dumps([e.model_dump() for e in recalled], default=str)
+
+    monkeypatch.setattr(cognify_module, "index_chunks_for_search", original_index)
+    monkeypatch.setattr(cognify_module, "extract_graph_and_summarize", original_extract)
+    await cognee.cognify(datasets=[dataset])
+    status = (await cognee.datasets.get_memory_status([dataset_id]))[str(dataset_id)]
+    assert status.state == "ready", status
+
+    kept = next(
+        item for item in await get_dataset_data(dataset_id) if "FAILINDEX" not in item.name
+    )
+    result = await cognee.update(data_id=kept.id, data=kept_text, dataset_id=dataset_id)
+    assert result["status"] == "unchanged", result

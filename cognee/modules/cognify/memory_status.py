@@ -203,9 +203,11 @@ def derive_memory_status(
 
     ``latest_runs`` maps a pipeline name to that pipeline's newest run row
     (anything with ``status``, ``created_at``, ``error_class``,
-    ``error_message``). ``completed_pipelines`` names the pipelines an older
-    run of which completed: a failed re-run of a built dataset keeps what the
-    earlier run built.
+    ``error_message``). ``completed_pipelines`` names the pipelines whose
+    work stands even if their latest run failed: an older run of which
+    completed (a failed re-run of a built dataset keeps what the earlier run
+    built), or, for the indexing pipeline, items a failed run completed (it
+    rolls back per item, so their chunks stay searchable).
     """
     completed = set(completed_pipelines or ())
     latest_runs = {
@@ -260,6 +262,27 @@ def derive_memory_status(
     )
 
 
+async def _datasets_with_indexed_items(dataset_ids: list[UUID]) -> set[UUID]:
+    """The datasets among ``dataset_ids`` with an item the indexing pipeline completed."""
+    if not dataset_ids:
+        return set()
+    # Deferred like the data package's own readers of this stamp: the pipeline
+    # layer imports the data package at module scope.
+    from cognee.modules.data.models import Data
+    from cognee.modules.pipelines.models.DataItemStatus import is_data_item_completed
+
+    query = select(Data.dataset_id, Data.pipeline_status).filter(Data.dataset_id.in_(dataset_ids))
+    found: set[UUID] = set()
+    async with get_relational_engine().get_async_session() as session:
+        for dataset_id, pipeline_status in (await session.execute(query)).all():
+            if dataset_id in found:
+                continue
+            stamps = (pipeline_status or {}).get(INDEXING_PIPELINE_NAME) or {}
+            if is_data_item_completed(stamps.get(str(dataset_id))):
+                found.add(dataset_id)
+    return found
+
+
 async def get_memory_status(dataset_ids: list[UUID]) -> dict[str, MemoryStatus]:
     """The memory state of each dataset, keyed by dataset id as a string.
 
@@ -267,6 +290,8 @@ async def get_memory_status(dataset_ids: list[UUID]) -> dict[str, MemoryStatus]:
     on it), unlike ``get_pipeline_status`` which omits datasets without runs.
     Two queries for any number of datasets: the newest row per (dataset,
     pipeline) and the set of (dataset, pipeline) pairs that ever completed.
+    A third reads the items' completion stamps, only for datasets whose
+    indexing runs all failed, since such a run keeps the items it completed.
     Callers check the user's access to the datasets first.
     """
     if not dataset_ids:
@@ -309,6 +334,15 @@ async def get_memory_status(dataset_ids: list[UUID]) -> dict[str, MemoryStatus]:
     completed_by_dataset: dict[UUID, set[str]] = {}
     for dataset_id, pipeline_name in completed_rows:
         completed_by_dataset.setdefault(dataset_id, set()).add(pipeline_name)
+
+    partly_indexed = [
+        dataset_id
+        for dataset_id, runs in latest_by_dataset.items()
+        if INDEXING_PIPELINE_NAME in runs
+        and INDEXING_PIPELINE_NAME not in completed_by_dataset.get(dataset_id, set())
+    ]
+    for dataset_id in await _datasets_with_indexed_items(partly_indexed):
+        completed_by_dataset.setdefault(dataset_id, set()).add(INDEXING_PIPELINE_NAME)
 
     return {
         str(dataset_id): derive_memory_status(
