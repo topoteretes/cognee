@@ -267,6 +267,8 @@ The stages below are the Low level operations these call underneath.
 #### ADD: Data Ingestion
 `add()` → `resolve_data_directories` → `ingest_data` → `save_data_item_to_storage` → Create Dataset + Data records in relational DB
 
+Re-adding a document that already exists (same `data_id`, through `add()`, `remember()` or `update()`'s full rebuild) follows the PATCH rule described under UPDATE below: `node_set` and a `DataItem`'s `label`, `external_metadata` and `node_set` keep their stored values when not passed, clear on an explicit empty value, and are replaced by a value. Content-derived metadata always refreshes; `_cognee.source_uri` takes the new content's location, and new content without one (an upload, raw text) drops the old one. Connector document rows state their full node sets, so a row with none reports `[]` and clears the stored ones on re-sync.
+
 Key files: `cognee/api/v1/add/add.py`, `cognee/tasks/ingestion/ingest_data.py`
 
 #### COGNIFY: Knowledge Graph Construction
@@ -287,7 +289,7 @@ A document-mode row (Notion today) may carry a `cognee_structure` json column, `
 #### UPDATE: Chunk-Level Incremental Updates
 `update(data_id, data, dataset_id)` diffs the new content against the stored processed text (`Data.raw_data_location`) and replaces only the chunks the edits touched: a paragraph-anchored multi-region diff (near-linear for any change shape, including repeated-line-heavy content) finds every disjoint changed span (so edits at the top, middle, and end of a document are three small regions, not one giant one), each span is expanded to chunk boundaries and re-chunked with the standard TextChunker (same boundary semantics as pipeline chunks, cut against the token budget recorded on the chunks it replaces — every chunk stores `max_chunk_tokens`, so documents stay self-consistent across config changes; legacy chunks without the field fall back to the current config; only a region's last chunk may be under-filled), replaced chunks (plus their summaries, chunk-orphaned entities, and legacy triplet embeddings) are deleted, and only the new chunks run through LLM extraction. Chunks between regions are kept without being re-chunked, so their boundaries and ids cannot drift. Unaffected chunks keep their node ids, entities, summaries, and embeddings; surviving chunks are renumbered so `chunk_index` stays contiguous. Chunk identity is content-derived (`uuid5(doc : sha256(text) : occurrence)`, see `cognee/modules/chunking/chunk_id.py`), so unchanged content keeps its identity across edits. Both incremental and full fallback paths preserve `data_id`.
 
-Runs under the per-dataset lock with the dataset-scoped database context (multi-tenant-safe). Falls back to the full delete + re-add + cognify flow when preconditions fail (first ingestion, non-text content, pre-v2 chunk ownership, or an unverified graph adapter — verified: Kuzu/Ladybug, Neo4j and the Postgres demo adapter; Neptune falls back); disable with `update(..., chunk_level_diff=False)` or the same query param on `PATCH /update`.
+Runs under the per-dataset lock with the dataset-scoped database context (multi-tenant-safe). Falls back to the full delete + re-add + cognify flow when preconditions fail (first ingestion, non-text content, pre-v2 chunk ownership, or an unverified graph adapter — verified: Kuzu/Ladybug, Neo4j and the Postgres demo adapter; Neptune falls back); disable with `update(..., chunk_level_diff=False)` or the same query param on `PATCH /update`. Document metadata follows a PATCH rule on either path: `node_set`, and a `DataItem`'s `label`, `external_metadata` and `node_set`, keep their stored values when not passed, an explicit empty value (`node_set=[]`, `label=""`, `external_metadata={}`) clears them, and a value replaces them (`merge_existing_row_metadata` in `cognee/tasks/ingestion/ingest_data.py`; the call's and the item's node sets count together, as their union). Passing any of them forces the full rebuild, since the chunk-level path never touches the row.
 
 Key files:
 - `cognee/api/v1/update/update.py` / `cognee/api/v1/update/incremental.py`
@@ -707,9 +709,12 @@ ONTOLOGY_RESOLVER=rdflib  # Default: uses rdflib and OWL files
 MATCHING_STRATEGY=fuzzy   # Default: fuzzy matching with 80% similarity
 ONTOLOGY_FILE_PATH=/path/to/your/ontology.owl  # Full path to ontology file
 ONTOLOGY_MODE=annotate    # Default: enrich only. strict drops entities with no ontology grounding
+ONTOLOGY_REASONING=none   # Default: asserted triples only. owl_rl expands the OWL 2 RL closure (needs `cognee[ontology]`)
 ```
 
 `ONTOLOGY_MODE=strict` keeps an entity when either its type matches an ontology class or its name matches an individual, and drops the rest (plus their edges). It prunes only the graph — chunk text stays stored/embedded, so CHUNKS/RAG_COMPLETION can still surface dropped entities. It expects an ontology covering the corpus's vocabulary (a small ontology drops most entities; an aggregate dropped/retained count is logged), and an empty/missing ontology file with strict on is a hard error. The mode can also be set per call via `config={"ontology_config": {"ontology_mode": "strict", ...}}`.
+
+`ONTOLOGY_REASONING=owl_rl` runs an OWL 2 RL deductive closure (via the optional `owlrl` package, `pip install cognee[ontology]`) over the parsed ontology before the lookup is built, so `owl:inverseOf`, `rdfs:domain`/`rdfs:range` typing, `owl:equivalentClass`, `owl:sameAs` and transitive properties are honoured by matching and subgraph extraction. It is opt-in because the closure is materialised in memory and its cost grows with ontology size. Enabling it without `owlrl` installed raises `OntologyReasoningDependencyError`. Per call: `config={"ontology_config": {"ontology_reasoning": "owl_rl", ...}}` (applies when cognee builds the resolver; a pre-built `ontology_resolver` instance keeps its own setting).
 
 Implementation: `cognee/modules/ontology/`
 

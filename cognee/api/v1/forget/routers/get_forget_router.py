@@ -105,6 +105,15 @@ def get_forget_router() -> APIRouter:
         in the schema; snake_case aliases (`data_id`, `dataset_id`, `memory_only`, `clean_history`) are also
         accepted.
 
+        ## Response
+        A snake_case JSON object whose keys depend on the target (this route answers a
+        union of shapes, so it is not bound to one response model). For a `dataId` delete
+        it is the deletion receipt — the fields of `DeleteDataReceiptDTO` in snake_case
+        (`status`, `dataset_id`, `data_id`, `data_record_found`, `deleted_nodes`,
+        `deleted_edges`, `data_remaining`, `dataset_deleted`); `status` is `"success"`,
+        or `"not_found"` when nothing existed for the id. The two dataset-data DELETE
+        routes return the same receipt camelCased.
+
         ## Error Codes
         - **404 Not Found**: Dataset name does not exist or is not accessible
         - **403 Forbidden**: Caller lacks delete permission on the dataset
